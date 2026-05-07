@@ -202,6 +202,57 @@ describe("useProviderInventory", () => {
     ]);
   });
 
+  it("applies the provider allowlist to custom providers", () => {
+    useDistroStore.setState({
+      loaded: true,
+      manifest: { present: true, providerAllowlist: "databricks" },
+    });
+    useProviderCatalogStore.getState().setEntries([
+      {
+        id: "databricks",
+        displayName: "Databricks",
+        category: "model",
+        description: "Databricks Foundation Models",
+        setupMethod: "host_with_oauth_fallback",
+        group: "default",
+      },
+    ]);
+    useProviderInventoryStore.getState().setEntries([
+      providerEntry({
+        providerId: "databricks",
+        providerName: "Databricks",
+        providerType: "Preferred",
+        models: [{ id: "databricks-gpt-5", name: "Databricks GPT-5" }],
+      }),
+      providerEntry({
+        providerId: "custom_acme_openai",
+        providerName: "Acme OpenAI",
+        providerType: "Custom",
+        models: [{ id: "acme-gpt-5", name: "Acme GPT-5" }],
+      }),
+    ]);
+
+    const { result } = renderHook(() => useProviderInventory());
+
+    expect(
+      result.current.configuredModelProviderEntries.map(
+        (entry) => entry.providerId,
+      ),
+    ).toEqual(["databricks"]);
+    expect(result.current.getModelsForAgent("goose")).toEqual([
+      {
+        id: "databricks-gpt-5",
+        name: "Databricks GPT-5",
+        displayName: "Databricks GPT-5",
+        provider: undefined,
+        providerId: "databricks",
+        providerName: "Databricks",
+        contextLimit: undefined,
+        recommended: false,
+      },
+    ]);
+  });
+
   it("aggregates custom provider models under Goose", () => {
     useProviderInventoryStore.getState().setEntries([
       providerEntry({

@@ -1,5 +1,6 @@
 {
   "featureToggles": {
     "costTracking": true
-  }
+  },
+  "providerAllowlist": "databricks"
 }

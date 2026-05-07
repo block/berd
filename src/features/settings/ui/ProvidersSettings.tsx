@@ -20,7 +20,11 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useCredentials } from "@/features/providers/hooks/useCredentials";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
-import { filterModelProvidersForDistro } from "@/features/providers/distroProviderConstraints";
+import {
+  filterModelProvidersForDistro,
+  isProviderAllowedByAllowlist,
+  parseProviderAllowlist,
+} from "@/features/providers/distroProviderConstraints";
 import { useCustomProviders } from "@/features/providers/hooks/useCustomProviders";
 import {
   CustomProviderChoice,
@@ -160,6 +164,10 @@ export function ProvidersSettings() {
       ),
     [configuredIds, distro, catalogEntries],
   );
+  const providerAllowlist = useMemo(
+    () => parseProviderAllowlist(distro),
+    [distro],
+  );
 
   const sortedModels = useMemo(() => {
     return [...allModels].sort((a, b) => {
@@ -213,9 +221,12 @@ export function ProvidersSettings() {
     () =>
       [...inventoryEntries.values()]
         .filter(isCustomProviderEntry)
+        .filter((entry) =>
+          isProviderAllowedByAllowlist(entry.providerId, providerAllowlist),
+        )
         .map(toCustomProviderChoiceInfo)
         .sort((a, b) => a.displayName.localeCompare(b.displayName)),
-    [inventoryEntries],
+    [inventoryEntries, providerAllowlist],
   );
 
   async function loadTemplates() {

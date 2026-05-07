@@ -4,6 +4,7 @@ import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { ProvidersSettings } from "../ProvidersSettings";
 
@@ -81,6 +82,7 @@ describe("ProvidersSettings", () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     useProviderCatalogStore.getState().setEntries(providerCatalog);
+    useDistroStore.setState({ loaded: false, manifest: { present: false } });
     useProviderInventoryStore.getState().setEntries([]);
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
@@ -218,6 +220,26 @@ describe("ProvidersSettings", () => {
     expect(
       screen.getByRole("button", { name: /delete acme models/i }),
     ).toBeInTheDocument();
+  });
+
+  it("hides non-allowlisted model and custom providers for a distro", () => {
+    useDistroStore.setState({
+      loaded: true,
+      manifest: { present: true, providerAllowlist: "databricks" },
+    });
+    useProviderInventoryStore.getState().setEntries([
+      providerEntry({
+        providerId: "custom_acme",
+        providerName: "Acme Models",
+      }),
+    ]);
+
+    render(<ProvidersSettings />);
+
+    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
+    expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
   });
 
   it("confirms before deleting a custom provider", async () => {

@@ -28,12 +28,16 @@ function isConfiguredGooseModelProvider(
     return false;
   }
 
+  if (!isProviderAllowedByAllowlist(entry.providerId, providerAllowlist)) {
+    return false;
+  }
+
   if (entry.providerType === "Custom") {
     return entry.providerId.startsWith("custom_");
   }
 
   if (!catalogLoaded) {
-    return isProviderAllowedByAllowlist(entry.providerId, providerAllowlist);
+    return true;
   }
 
   return modelProviderIds.has(entry.providerId);
