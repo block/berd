@@ -1,0 +1,23 @@
+env:
+  CI: "true"
+  FORCE_COLOR: "1"
+
+steps:
+  - label: ":typescript: JS, SDK, and unit tests"
+    key: "js"
+    command: "scripts/buildkite/js-checks.sh"
+    artifact_paths:
+      - "coverage/**/*"
+      - "test-results/**/*"
+
+  - label: ":rust: Tauri Rust checks"
+    key: "rust"
+    command: "scripts/buildkite/rust-checks.sh"
+
+  - label: ":package: Frontend build smoke"
+    key: "build"
+    command: "scripts/buildkite/build-smoke.sh"
+    depends_on:
+      - "js"
+    artifact_paths:
+      - "dist/**/*"

@@ -1,0 +1,7 @@
+{
+  "identifier": "com.squareup.bloose.dev",
+  "productName": "Bloose",
+  "bundle": {
+    "externalBin": []
+  }
+}
