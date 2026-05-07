@@ -1,16 +1,16 @@
 [package]
-name = "bloose"
+name = "goose-internal"
 version = "0.1.0"
-description = "Bloose desktop app"
+description = "Goose Internal desktop app"
 authors = ["Block, Inc."]
 edition = "2021"
 
 [[bin]]
-name = "bloose-tauri"
+name = "goose-internal-tauri"
 path = "src/main.rs"
 
 [lib]
-name = "bloose_lib"
+name = "goose_internal_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

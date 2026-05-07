@@ -1,8 +1,8 @@
 # AGENTS.md
 
-Guidelines for agents working on Bloose.
+Guidelines for agents working on Goose Internal.
 
-Bloose is a standalone Tauri 2 + React 19 desktop app copied from Goose 2. The
+Goose Internal is a standalone Tauri 2 + React 19 desktop app copied from Goose 2. The
 frontend remains a thin client: UI code talks to Goose through `@aaif/goose-sdk`
 and the ACP WebSocket served by `goose serve`. Do not add new Tauri commands or
 renderer-side business logic for data/secrets/providers/sessions; those belong

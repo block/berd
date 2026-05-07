@@ -8,7 +8,7 @@ default:
 
 # ── Dev Environment ──────────────────────────────────────────
 
-# Sync and build the managed local goose checkout used for Bloose development.
+# Sync and build the managed local goose checkout used for Goose Internal development.
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 

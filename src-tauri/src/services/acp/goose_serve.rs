@@ -57,7 +57,7 @@ impl GooseServeProcess {
 
     async fn spawn(app_handle: tauri::AppHandle) -> Result<GooseServeProcess, String> {
         let port = reserve_free_port()?;
-        let secret_key = format!("bloose-{}", uuid::Uuid::new_v4().simple());
+        let secret_key = format!("goose-internal-{}", uuid::Uuid::new_v4().simple());
 
         // Use a stable working directory for the long-lived server process.
         // Individual sessions will set their own cwd via the ACP protocol.

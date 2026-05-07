@@ -5,7 +5,7 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/ensure-local-goose.sh [--print-bin | --check-bin]
 
-Syncs and builds a dedicated local goose checkout for Bloose development.
+Syncs and builds a dedicated local goose checkout for Goose Internal development.
 
 Environment variables:
   GOOSE_DEV_MODE             auto|required (default: auto)
@@ -52,7 +52,7 @@ preferred_branch="${GOOSE_DEV_BRANCH:-main}"
 fallback_branch="${GOOSE_DEV_FALLBACK_BRANCH:-main}"
 allow_dirty="${GOOSE_DEV_ALLOW_DIRTY:-0}"
 
-log() { echo "[bloose-goose-dev] $*" >&2; }
+log() { echo "[goose-internal-goose-dev] $*" >&2; }
 
 fail_or_skip() {
   local message="$1"
@@ -69,12 +69,12 @@ fail_or_skip() {
 
 default_goose_dev_root() {
   if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
-    printf '%s/bloose-dev\n' "$XDG_CACHE_HOME"
+    printf '%s/goose-internal-dev\n' "$XDG_CACHE_HOME"
     return
   fi
   case "$(uname -s)" in
-    Darwin) printf '%s/Library/Caches/bloose-dev\n' "$HOME" ;;
-    *) printf '%s/.cache/bloose-dev\n' "$HOME" ;;
+    Darwin) printf '%s/Library/Caches/goose-internal-dev\n' "$HOME" ;;
+    *) printf '%s/.cache/goose-internal-dev\n' "$HOME" ;;
   esac
 }
 

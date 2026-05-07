@@ -447,7 +447,7 @@ describe("McpAppView nested tool calls", () => {
           },
           locale: navigator.language,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-          userAgent: expect.stringMatching(/^bloose\//),
+          userAgent: expect.stringMatching(/^goose-internal\//),
           platform: "desktop",
           deviceCapabilities: {
             touch: false,
