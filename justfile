@@ -99,7 +99,7 @@ dev:
         echo "Using distro dir: ${GOOSE_DISTRO_DIR}"
     fi
 
-    EXTRA_CONFIG_ARGS=(--config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\".\",\"wait\":false}}}")
+    EXTRA_CONFIG_ARGS=(--config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
 
     if git rev-parse --is-inside-work-tree &>/dev/null; then
         GIT_DIR=$(git rev-parse --git-dir)

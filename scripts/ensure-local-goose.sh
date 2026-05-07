@@ -141,31 +141,31 @@ if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]
   fail_or_skip "Managed goose checkout at $goose_repo is dirty. Use a dedicated checkout or set GOOSE_DEV_ALLOW_DIRTY=1."
 fi
 
+if [[ "$action" == "check" ]]; then
+  [[ -f "$stamp_file" ]] || fail_or_skip "No local goose build stamp found. Rerun just setup."
+  # shellcheck disable=SC1090
+  source "$stamp_file"
+  [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || fail_or_skip "Managed goose checkout changed. Rerun just setup."
+  if [[ "${STAMP_BRANCH:-}" != "$preferred_branch" && "${STAMP_BRANCH:-}" != "$fallback_branch" ]]; then
+    fail_or_skip "Managed goose branch changed to $preferred_branch. Rerun just setup."
+  fi
+  [[ -x "${STAMP_BIN:-}" ]] || fail_or_skip "Local goose binary not found at ${STAMP_BIN:-unknown}. Rerun just setup."
+  local_head="$(git -C "$goose_repo" rev-parse HEAD)"
+  [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || fail_or_skip "Managed goose checkout changed after last build. Rerun just setup."
+  [[ "$print_bin" == "1" ]] && printf '%s\n' "$STAMP_BIN"
+  exit 0
+fi
+
 if resolve_branch; then
   branch="$RESOLVED_BRANCH"
-  remote_head="$RESOLVED_REMOTE_HEAD"
 else
   status=$?
   [[ $status -eq 2 ]] && exit 0
   exit "$status"
 fi
 
-if [[ "$action" == "check" ]]; then
-  [[ -f "$stamp_file" ]] || fail_or_skip "No local goose build stamp found. Rerun just setup."
-  # shellcheck disable=SC1090
-  source "$stamp_file"
-  [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || fail_or_skip "Managed goose checkout changed. Rerun just setup."
-  [[ "${STAMP_BRANCH:-}" == "$branch" ]] || fail_or_skip "Managed goose branch changed to $branch. Rerun just setup."
-  [[ -x "${STAMP_BIN:-}" ]] || fail_or_skip "Local goose binary not found at ${STAMP_BIN:-unknown}. Rerun just setup."
-  local_head="$(git -C "$goose_repo" rev-parse HEAD)"
-  [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || fail_or_skip "Managed goose checkout changed after last build. Rerun just setup."
-  [[ "${STAMP_COMMIT:-}" == "$remote_head" ]] || fail_or_skip "Managed goose checkout is behind $remote/$branch. Rerun just setup."
-  [[ "$print_bin" == "1" ]] && printf '%s\n' "$STAMP_BIN"
-  exit 0
-fi
-
-git -C "$goose_repo" fetch "$remote" "$branch" >/dev/null 2>&1
 remote_ref="refs/remotes/${remote}/${branch}"
+git -C "$goose_repo" fetch "$remote" "+refs/heads/${branch}:${remote_ref}" >/dev/null 2>&1
 if ! git -C "$goose_repo" show-ref --verify --quiet "$remote_ref"; then
   fail_or_skip "Fetched $remote/$branch, but $remote_ref is not available in $goose_repo."
 fi
@@ -185,4 +185,6 @@ fi
 [[ -x "$bin_path" ]] || { echo "Expected goose binary at $bin_path, but it was not built." >&2; exit 1; }
 write_stamp "$branch" "$(git -C "$goose_repo" rev-parse HEAD)"
 log "Local goose binary ready at $bin_path."
-[[ "$print_bin" == "1" ]] && printf '%s\n' "$bin_path"
+if [[ "$print_bin" == "1" ]]; then
+  printf '%s\n' "$bin_path"
+fi
