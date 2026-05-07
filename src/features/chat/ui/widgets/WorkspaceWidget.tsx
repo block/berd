@@ -12,6 +12,7 @@ interface WorkspaceWidgetProps {
   projectName?: string;
   projectColor?: string;
   projectWorkingDirs: string[];
+  sessionWorkingDir?: string | null;
   gitState: GitState | undefined;
   isLoading: boolean;
   isFetching: boolean;
@@ -42,6 +43,7 @@ export function WorkspaceWidget({
   projectName,
   projectColor,
   projectWorkingDirs,
+  sessionWorkingDir,
   gitState,
   isLoading,
   isFetching,
@@ -58,7 +60,8 @@ export function WorkspaceWidget({
   onRefresh,
 }: WorkspaceWidgetProps) {
   const { t } = useTranslation("chat");
-  const primaryWorkspaceRoot = projectWorkingDirs[0] ?? null;
+  const primaryWorkspaceRoot =
+    activeContext?.path ?? sessionWorkingDir ?? projectWorkingDirs[0] ?? null;
 
   const gitErrorMessage =
     error instanceof Error ? error.message : t("contextPanel.errors.gitRead");

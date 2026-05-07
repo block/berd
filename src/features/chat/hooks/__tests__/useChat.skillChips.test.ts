@@ -38,7 +38,7 @@ describe("useChat skill chips", () => {
       sessions: [],
       activeSessionId: null,
       isLoading: false,
-      contextPanelOpenBySession: {},
+      isContextPanelOpen: false,
       activeWorkspaceBySession: {},
     });
     useAgentStore.setState({

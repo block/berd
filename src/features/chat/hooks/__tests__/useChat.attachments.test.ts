@@ -31,7 +31,7 @@ describe("useChat attachments", () => {
       sessions: [],
       activeSessionId: null,
       isLoading: false,
-      contextPanelOpenBySession: {},
+      isContextPanelOpen: false,
       activeWorkspaceBySession: {},
     });
     useAgentStore.setState({

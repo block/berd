@@ -48,6 +48,7 @@ import { useProviderInventoryStore } from "@/features/providers/stores/providerI
 import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
+import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
 import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingGate } from "@/features/onboarding/hooks/useOnboardingGate";
 import { Spinner } from "@/shared/ui/spinner";
@@ -163,6 +164,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
   const createSession = useChatSessionStore((s) => s.createSession);
   const patchSession = useChatSessionStore((s) => s.patchSession);
+  const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
   const archiveSession = useChatSessionStore((s) => s.archiveSession);
   const selectedProvider = useAgentStore(selectSelectedProvider);
@@ -203,7 +205,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             .getState()
             .projects.find((p) => p.id === session.projectId) ?? null)
         : null;
-      const workingDir = await resolveSessionCwd(project);
+      const activeWorkspace =
+        session?.id != null
+          ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
+          : undefined;
+      const workingDir = await resolveSessionCwd(
+        project,
+        activeWorkspace?.path ?? session?.workingDir,
+      );
       await acpLoadSession(sessionId, workingDir);
       const tFlush = performance.now();
       useChatStore.getState().setSessionLoading(sessionId, false);
@@ -412,6 +421,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         );
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
+      const inheritedWorkspace = resolveInheritedProjectWorkspace({
+        projectId: project?.id,
+        sessions: sessionState.sessions,
+        activeSessionId: sessionState.activeSessionId,
+        activeWorkspaceBySession: sessionState.activeWorkspaceBySession,
+      });
       const existingDraft = findExistingDraft({
         sessions: sessionState.sessions,
         activeSessionId: sessionState.activeSessionId,
@@ -424,6 +439,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       });
 
       if (existingDraft) {
+        if (inheritedWorkspace) {
+          setActiveWorkspace(existingDraft.id, inheritedWorkspace);
+          patchSession(existingDraft.id, {
+            workingDir: inheritedWorkspace.path,
+          });
+        }
         clearSettingsSectionUrl();
         setActiveSession(existingDraft.id);
         setActiveView("chat");
@@ -434,7 +455,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         return existingDraft;
       }
 
-      const workingDir = await resolveSessionCwd(project);
+      const workingDir = await resolveSessionCwd(
+        project,
+        inheritedWorkspace?.path,
+      );
       const session = await createSession({
         title,
         projectId: project?.id,
@@ -443,6 +467,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         modelId: sessionModelPreference.modelId,
         modelName: sessionModelPreference.modelName,
       });
+      if (inheritedWorkspace) {
+        setActiveWorkspace(session.id, inheritedWorkspace);
+      }
       clearSettingsSectionUrl();
       setActiveSession(session.id);
       setActiveView("chat");
@@ -455,7 +482,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [
       selectedProvider,
       createSession,
+      patchSession,
       providerInventoryEntries,
+      setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
     ],
@@ -640,6 +669,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           workingDir,
           modelId: session.modelId,
         });
+        patchSession(sessionId, { workingDir });
       })().catch((error) => {
         console.error(
           "Failed to update ACP session project working directory:",
@@ -647,7 +677,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         );
       });
     },
-    [selectedProvider],
+    [patchSession, selectedProvider],
   );
 
   const handleRenameChat = useCallback(

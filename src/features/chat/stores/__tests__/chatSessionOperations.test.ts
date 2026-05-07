@@ -20,7 +20,6 @@ function resetStore() {
     activeSessionId: null,
     isLoading: false,
     hasHydratedSessions: false,
-    contextPanelOpenBySession: {},
     activeWorkspaceBySession: {},
   });
 }

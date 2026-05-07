@@ -177,11 +177,16 @@ export function useChatSessionController({
         workingDir,
         modelId: modelSelection?.id,
       });
-      if (!result.applied || !modelSelection?.id) {
+      if (!result.applied) {
         return result.applied;
       }
 
       const sessionStore = useChatSessionStore.getState();
+      sessionStore.patchSession(sessionId, { workingDir });
+      if (!modelSelection?.id) {
+        return true;
+      }
+
       const liveSession = sessionStore.getSession(sessionId);
       const modelAlreadyApplied =
         liveSession?.modelId === modelSelection.id &&

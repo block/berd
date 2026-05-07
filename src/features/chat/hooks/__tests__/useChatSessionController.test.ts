@@ -186,7 +186,7 @@ describe("useChatSessionController", () => {
       activeSessionId: null,
       isLoading: false,
       hasHydratedSessions: true,
-      contextPanelOpenBySession: {},
+      isContextPanelOpen: false,
       activeWorkspaceBySession: {},
     });
   });
