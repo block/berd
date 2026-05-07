@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Bloose",
+  "productName": "Goose Internal",
   "version": "0.1.0",
-  "identifier": "com.squareup.bloose",
+  "identifier": "com.squareup.goose-internal",
   "build": {
     "beforeDevCommand": {
       "script": "exec ./node_modules/.bin/vite",
@@ -16,7 +16,7 @@
   "app": {
     "windows": [
       {
-        "title": "Bloose",
+        "title": "Goose Internal",
         "width": 800,
         "height": 600,
         "minWidth": 608,
