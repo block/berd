@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Sidebar } from "../Sidebar";
@@ -44,6 +44,37 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
 }));
 
 describe("Sidebar", () => {
+  it("shows an empty state when there are no projects or chats", async () => {
+    const user = userEvent.setup();
+    const onCreateProject = vi.fn();
+    const onNewChat = vi.fn();
+
+    mockSessions.splice(0, mockSessions.length);
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onNavigate={vi.fn()}
+        onCreateProject={onCreateProject}
+        onNewChat={onNewChat}
+        projects={[]}
+      />,
+    );
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    expect(within(mainNavigation).getByText("Projects")).toBeInTheDocument();
+    expect(within(mainNavigation).getByText("Chats")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Create a project" }));
+    await user.click(screen.getByRole("button", { name: "Start a chat" }));
+
+    expect(onCreateProject).toHaveBeenCalledOnce();
+    expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
   it("shows sessions in recents when their project is not loaded", () => {
     mockSessions.splice(0, mockSessions.length, {
       id: "session-1",

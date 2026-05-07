@@ -462,6 +462,7 @@ export function Sidebar({
                   <SidebarProjectsSection
                     projects={projects}
                     projectSessions={projectSessions}
+                    hasVisibleChats={activeSessions.length > 0}
                     expandedProjects={expandedProjects}
                     toggleProject={toggleProject}
                     collapsed={collapsed}
