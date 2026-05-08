@@ -31,6 +31,10 @@ Example:
   "featureToggles": {
     "costTracking": false
   },
+  "kgoose": {
+    "baseUrl": "https://kgoose.sqprod.co/",
+    "path": "cash-app/goose"
+  },
   "providerAllowlist": "databricks"
 }
 ```
@@ -56,6 +60,12 @@ Example:
   - comma-separated extension ids
   - reserved for future UI suggestions
 
+- `kgoose?: { baseUrl?: string, path?: string }`
+  - default kgoose endpoint used by the Automations panel
+  - `baseUrl` must use `http` or `https`
+  - environment variables `GOOSE_INTERNAL_KGOOSE_BASE_URL` and
+    `GOOSE_INTERNAL_KGOOSE_PATH` override these values for local testing
+
 ## Runtime effects
 
 When a distro bundle is present, Goose Internal does two kinds of things with it.
@@ -79,6 +89,7 @@ When the Tauri shell launches the long-lived `goose serve` process, it applies t
 - prepends `distro/bin` to `PATH` when present
 - adds `distro/config.yaml` to `GOOSE_ADDITIONAL_CONFIG_FILES` when present
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
+- uses `kgoose` as the default endpoint for the Automations panel
 
 This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
 

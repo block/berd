@@ -17,6 +17,7 @@
   },
   "navigation": {
     "agents": "Agents",
+    "automations": "Automations",
     "extensions": "Extensions",
     "home": "Home",
     "main": "Main navigation",

@@ -5,6 +5,7 @@ import ts from "typescript";
 const CHECKED_PATHS = [
   "src/app/ui",
   "src/features/agents",
+  "src/features/automations",
   "src/features/chat/ui",
   "src/features/home",
   "src/features/projects",

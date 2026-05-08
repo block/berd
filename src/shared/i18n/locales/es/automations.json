@@ -1,0 +1,57 @@
+{
+  "actions": {
+    "refresh": "Actualizar automatizaciones"
+  },
+  "details": {
+    "connections": "Conexiones",
+    "instructions": "Instrucciones",
+    "lastSuccessfulRun": "Ultima ejecucion exitosa",
+    "latestOutput": "Salida mas reciente",
+    "latestRun": "Ejecucion mas reciente",
+    "noInstructions": "kgoose no devolvio instrucciones.",
+    "notifications": "Notificaciones",
+    "notificationsDisabled": "Desactivadas",
+    "notificationsEnabled": "Activadas",
+    "schedule": "Programacion",
+    "selectBody": "Los detalles y el historial de ejecuciones apareceran aqui.",
+    "selectTitle": "Selecciona una automatizacion",
+    "stale": "Detalle desactualizado",
+    "status": "Estado",
+    "subscribedLabels": "Etiquetas suscritas",
+    "timeZone": "Zona horaria",
+    "tools": "Herramientas"
+  },
+  "fallbacks": {
+    "never": "Nunca",
+    "none": "Ninguna",
+    "notSet": "Sin configurar",
+    "unknown": "Desconocido",
+    "untitledAutomation": "Automatizacion sin titulo"
+  },
+  "history": {
+    "emptyBody": "kgoose no devolvio ejecuciones historicas para esta automatizacion.",
+    "emptyTitle": "Aun no hay ejecuciones",
+    "loadErrorTitle": "No se pudo cargar el historial",
+    "noOutputData": "Esta ejecucion no devolvio datos de salida.",
+    "noSessionId": "Sin id de sesion",
+    "runOutput": "Salida de ejecucion",
+    "unavailableBody": "kgoose no devolvio un id de automatizacion.",
+    "unavailableTitle": "Historial no disponible"
+  },
+  "list": {
+    "emptyBody": "kgoose no devolvio automatizaciones para el usuario actual.",
+    "emptyTitle": "No hay automatizaciones",
+    "loadErrorTitle": "No se pudieron cargar las automatizaciones"
+  },
+  "schedule": {
+    "none": "Sin programacion",
+    "paused": "Pausada",
+    "pausedWithReason": "Pausada: {{reason}}"
+  },
+  "subtitle": "Automatizaciones de kgoose de solo lectura",
+  "tabs": {
+    "details": "Detalles",
+    "history": "Historial"
+  },
+  "title": "Automatizaciones"
+}

@@ -230,6 +230,24 @@ describe("Sidebar", () => {
     expect(onNavigate).toHaveBeenCalledWith("home");
   });
 
+  it("renders an automations button in main navigation", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onNavigate={onNavigate}
+        projects={[]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /automations/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith("automations");
+  });
+
   it("keeps the home button visible when the sidebar is collapsed", () => {
     render(
       <Sidebar

@@ -56,6 +56,7 @@ import { Spinner } from "@/shared/ui/spinner";
 export type AppView =
   | "home"
   | "chat"
+  | "automations"
   | "skills"
   | "extensions"
   | "agents"

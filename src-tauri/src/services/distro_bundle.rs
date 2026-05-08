@@ -15,7 +15,15 @@ pub struct DistroManifest {
     pub app_version: Option<String>,
     pub feature_toggles: Option<HashMap<String, bool>>,
     pub extension_allowlist: Option<String>,
+    pub kgoose: Option<KgooseDistroConfig>,
     pub provider_allowlist: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KgooseDistroConfig {
+    pub base_url: Option<String>,
+    pub path: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,6 +33,7 @@ pub struct DistroBundleInfo {
     pub app_version: Option<String>,
     pub feature_toggles: Option<HashMap<String, bool>>,
     pub extension_allowlist: Option<String>,
+    pub kgoose: Option<KgooseDistroConfig>,
     pub provider_allowlist: Option<String>,
 }
 
@@ -60,6 +69,7 @@ impl DistroBundleState {
                 app_version: None,
                 feature_toggles: None,
                 extension_allowlist: None,
+                kgoose: None,
                 provider_allowlist: None,
             };
         };
@@ -69,12 +79,19 @@ impl DistroBundleState {
             app_version: bundle.manifest.app_version.clone(),
             feature_toggles: bundle.manifest.feature_toggles.clone(),
             extension_allowlist: bundle.manifest.extension_allowlist.clone(),
+            kgoose: bundle.manifest.kgoose.clone(),
             provider_allowlist: bundle.manifest.provider_allowlist.clone(),
         }
     }
 
     pub fn bundle(&self) -> Option<&DistroBundle> {
         self.bundle.as_ref()
+    }
+
+    pub fn kgoose_config(&self) -> Option<&KgooseDistroConfig> {
+        self.bundle
+            .as_ref()
+            .and_then(|bundle| bundle.manifest.kgoose.as_ref())
     }
 }
 
@@ -146,12 +163,23 @@ mod tests {
         let manifest = serde_json::from_str::<DistroManifest>(
             r#"{
                 "appVersion": "development",
-                "featureToggles": {"foo": true}
+                "featureToggles": {"foo": true},
+                "kgoose": {
+                    "baseUrl": "https://kgoose.sqprod.co/",
+                    "path": "cash-app/goose"
+                }
             }"#,
         )
         .expect("manifest should parse");
 
+        let kgoose = manifest.kgoose.as_ref().expect("kgoose should parse");
+
         assert_eq!(manifest.app_version.as_deref(), Some("development"));
+        assert_eq!(
+            kgoose.base_url.as_deref(),
+            Some("https://kgoose.sqprod.co/")
+        );
+        assert_eq!(kgoose.path.as_deref(), Some("cash-app/goose"));
         assert_eq!(
             manifest
                 .feature_toggles

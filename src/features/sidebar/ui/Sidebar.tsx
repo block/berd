@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  IconBolt,
   IconHistory,
   IconHome,
   IconLayoutSidebar,
@@ -158,6 +159,7 @@ export function Sidebar({
       label: t("navigation.extensions"),
       icon: IconApps,
     },
+    { id: "automations", label: t("navigation.automations"), icon: IconBolt },
     {
       id: "session-history",
       label: t("navigation.sessionHistory"),

@@ -1,0 +1,57 @@
+{
+  "actions": {
+    "refresh": "Refresh automations"
+  },
+  "details": {
+    "connections": "Connections",
+    "instructions": "Instructions",
+    "lastSuccessfulRun": "Last successful run",
+    "latestOutput": "Latest output",
+    "latestRun": "Latest run",
+    "noInstructions": "No instructions returned by kgoose.",
+    "notifications": "Notifications",
+    "notificationsDisabled": "Disabled",
+    "notificationsEnabled": "Enabled",
+    "schedule": "Schedule",
+    "selectBody": "Automation details and run history appear here.",
+    "selectTitle": "Select an automation",
+    "stale": "Detail stale",
+    "status": "Status",
+    "subscribedLabels": "Subscribed labels",
+    "timeZone": "Time zone",
+    "tools": "Tools"
+  },
+  "fallbacks": {
+    "never": "Never",
+    "none": "None",
+    "notSet": "Not set",
+    "unknown": "Unknown",
+    "untitledAutomation": "Untitled automation"
+  },
+  "history": {
+    "emptyBody": "kgoose returned no historical runs for this automation.",
+    "emptyTitle": "No runs yet",
+    "loadErrorTitle": "History failed to load",
+    "noOutputData": "This run did not return output data.",
+    "noSessionId": "No session id",
+    "runOutput": "Run output",
+    "unavailableBody": "kgoose did not return an automation id.",
+    "unavailableTitle": "History unavailable"
+  },
+  "list": {
+    "emptyBody": "kgoose returned no current-user automations.",
+    "emptyTitle": "No automations",
+    "loadErrorTitle": "Automations failed to load"
+  },
+  "schedule": {
+    "none": "No schedule",
+    "paused": "Paused",
+    "pausedWithReason": "Paused: {{reason}}"
+  },
+  "subtitle": "Read-only kgoose automations",
+  "tabs": {
+    "details": "Details",
+    "history": "History"
+  },
+  "title": "Automations"
+}

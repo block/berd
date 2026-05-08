@@ -3,6 +3,7 @@ export const SUPPORTED_LOCALES = ["en", "es"] as const;
 export const DEFAULT_NAMESPACE = "common";
 export const TRANSLATION_NAMESPACES = [
   "agents",
+  "automations",
   "common",
   "chat",
   "home",
