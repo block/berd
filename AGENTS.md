@@ -43,6 +43,7 @@ in Goose core and should be exposed through typed ACP methods.
 
 For repo work, default Linear issues to project `Goose [Internal]`
 (`babe53a5-3fba-4ae3-97e5-3bc49f20ab51`) on team `BOT`.
+Write issue descriptions around the user need/story; avoid prescribing the implementation unless asked.
 
 ## Sidecar rule
 
