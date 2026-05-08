@@ -1,5 +1,5 @@
-import { Loader2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
+import { Spinner } from "@/shared/ui/spinner";
 
 interface SessionActivityIndicatorProps {
   isRunning?: boolean;
@@ -25,10 +25,7 @@ export function SessionActivityIndicator({
             className,
           )}
         >
-          <Loader2
-            aria-hidden="true"
-            className="h-2.5 w-2.5 animate-spin text-text-info"
-          />
+          <Spinner decorative className="h-2.5 w-2.5 text-text-info" />
         </span>
       );
     }
@@ -42,10 +39,7 @@ export function SessionActivityIndicator({
           className,
         )}
       >
-        <Loader2
-          aria-hidden="true"
-          className="h-3 w-3 animate-spin text-text-info"
-        />
+        <Spinner decorative className="h-3 w-3 text-text-info" />
       </span>
     );
   }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { Spinner } from "@/shared/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 import {
@@ -84,7 +84,7 @@ export function GooseAutoCompactSettings() {
         </p>
         <div className="flex items-center gap-1.5 text-xs text-foreground">
           {isSavingThreshold ? (
-            <Loader2 className="size-3 animate-spin text-muted-foreground" />
+            <Spinner className="size-3 text-muted-foreground" />
           ) : null}
           <span className="shrink-0 font-medium">{autoCompactValueLabel}</span>
         </div>

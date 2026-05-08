@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { AsyncButton } from "@/shared/ui/async-button";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
-import { IconLoader2 } from "@tabler/icons-react";
+import { Spinner } from "@/shared/ui/spinner";
 import type {
   ProviderField,
   ProviderFieldValue,
@@ -33,7 +33,7 @@ export function InventorySyncMessage({
         role="status"
         className="flex items-center gap-2 text-xs text-muted-foreground"
       >
-        <IconLoader2 className="size-3 animate-spin text-brand" />
+        <Spinner className="size-3 text-brand" />
         <span>{t("providers.loadingModels")}</span>
       </p>
     );
@@ -159,9 +159,7 @@ export function ConnectedFieldsPanel({
                   disabled={saving || !(draftValues[field.key]?.trim() ?? "")}
                   className="h-8"
                 >
-                  {saving ? (
-                    <IconLoader2 className="size-3 animate-spin" />
-                  ) : null}
+                  {saving ? <Spinner className="size-3" /> : null}
                   {t("common:actions.save")}
                 </Button>
                 <Button
@@ -194,7 +192,7 @@ export function ConnectedFieldsPanel({
           disabled={saving}
           className="text-danger hover:text-danger"
         >
-          {saving ? <IconLoader2 className="size-3 animate-spin" /> : null}
+          {saving ? <Spinner className="size-3" /> : null}
           {t("providers.disconnect")}
         </Button>
       </div>

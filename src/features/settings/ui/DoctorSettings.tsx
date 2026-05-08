@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { RefreshCw, ClipboardCopy, Check, Loader2 } from "lucide-react";
+import { RefreshCw, ClipboardCopy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/shared/ui/button";
+import { Spinner } from "@/shared/ui/spinner";
 import {
   runDoctor,
   type DoctorCheck,
@@ -129,7 +130,7 @@ export function DoctorSettings() {
     >
       {loading ? (
         <div className="flex min-h-[160px] items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Loader2 className="h-5 w-5 animate-spin" />
+          <Spinner className="h-5 w-5" />
           {t("doctor.running")}
         </div>
       ) : report ? (

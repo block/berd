@@ -5,11 +5,11 @@ import {
   XCircle,
   ExternalLink,
   Wrench,
-  Loader2,
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { Spinner } from "@/shared/ui/spinner";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -137,7 +137,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
               {t("common:actions.cancel")}
             </AlertDialogCancel>
             <Button disabled={fixing} onClick={confirmFix}>
-              {fixing && <Loader2 className="h-3 w-3 animate-spin" />}
+              {fixing && <Spinner className="h-3 w-3" />}
               {fixing
                 ? t("common:actions.running")
                 : fixError

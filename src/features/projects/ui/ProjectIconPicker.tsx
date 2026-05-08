@@ -1,4 +1,5 @@
-import { IconLoader2, IconUpload } from "@tabler/icons-react";
+import { IconUpload } from "@tabler/icons-react";
+import { Spinner } from "@/shared/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import type { ProjectIconCandidate } from "../api/projects";
@@ -35,7 +36,7 @@ export function ProjectIconPicker({
         </span>
         {iconScanPending && (
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            <IconLoader2 className="size-3 animate-spin" />
+            <Spinner className="size-3" />
             {t("dialog.scanningIcons")}
           </span>
         )}
