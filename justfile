@@ -20,31 +20,59 @@ setup:
 
 # ── Build & Check ────────────────────────────────────────────
 
-check:
-    pnpm check
+# Run the frontend non-test checks: formatting, lint, i18n, and TypeScript.
+check: frontend-fmt-check lint i18n-check typecheck
+
+# Format frontend and Tauri/Rust files.
+fmt:
+    just frontend-fmt
+    just tauri-fmt
+
+# Check frontend and Tauri/Rust formatting.
+fmt-check: frontend-fmt-check tauri-fmt-check
+
+# Format frontend files with Biome.
+frontend-fmt:
+    pnpm format
+
+# Check frontend formatting with Biome.
+frontend-fmt-check:
+    pnpm exec biome format .
+
+# Lint frontend files with Biome.
+lint:
+    pnpm lint
+
+# Check frontend i18n string conventions.
+i18n-check:
+    pnpm check:i18n
+
+# Type-check frontend TypeScript.
+typecheck:
     pnpm typecheck
 
-fmt:
-    pnpm format
+# Format Tauri/Rust files.
+tauri-fmt:
     cd src-tauri && cargo fmt
 
-fmt-check:
-    pnpm exec biome format .
-    cd src-tauri && cargo fmt --check
-
-clippy:
-    cd src-tauri && TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
-
-build:
-    pnpm build
-
+# Check Tauri/Rust formatting.
 tauri-fmt-check:
     cd src-tauri && cargo fmt --check
 
+# Run Rust clippy with warnings denied.
+clippy:
+    cd src-tauri && TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
+
+# Build the frontend.
+build:
+    pnpm build
+
+# Check the Tauri/Rust crate with external sidecars disabled.
 tauri-check:
     cd src-tauri && TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
 
-ci: check clippy test build tauri-check
+# Run the local CI gate.
+ci: check tauri-fmt-check tauri-check clippy test build
 
 # Stage GOOSE_BIN into src-tauri/binaries/goose-<target> and build bundles.
 bundle:

@@ -21,11 +21,23 @@ in Goose core and should be exposed through typed ACP methods.
 
 - `just setup` — install pnpm deps, build SDK, build managed local Goose
 - `just dev` — run the Tauri app in dev mode
-- `just check` — Biome/i18n/type checks
+- `just fmt` — format frontend and Tauri/Rust files
+- `just fmt-check` — check frontend and Tauri/Rust formatting
+- `just lint` — Biome lint checks
+- `just typecheck` — TypeScript type checks
+- `just check` — frontend formatting/lint/i18n/type checks
 - `just test` — Vitest suite
 - `just tauri-check` — Rust check with external sidecars disabled
 - `just clippy` — Rust clippy with warnings denied
+- `just ci` — local validation gate: frontend checks, Tauri/Rust checks, clippy, tests, build
 - `just bundle` — stage `GOOSE_BIN` and run `pnpm tauri build`
+
+## When to validate
+
+- Frontend changes: `just check`
+- Vitest-covered behavior: `just test`
+- `src-tauri/`, Tauri config, sidecars, or Rust: `just tauri-check`
+- Broad/release/packaging changes: `just ci`
 
 ## Sidecar rule
 

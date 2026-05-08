@@ -1,12 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { readFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { describe, it, expect, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import globalsCss from "../styles/globals.css?raw";
 import { ThemeProvider, useTheme } from "./ThemeProvider";
-
-const testDirname = dirname(fileURLToPath(import.meta.url));
 
 function rootCssVariable(name: string) {
   return getComputedStyle(document.documentElement)
@@ -310,17 +306,14 @@ describe("ThemeProvider", () => {
   });
 
   it("keeps density spacing values in CSS", () => {
-    const css = readFileSync(
-      resolve(testDirname, "../styles/globals.css"),
-      "utf8",
+    expect(globalsCss).toContain('[data-density="compact"]');
+    expect(globalsCss).toContain("--density-spacing: 0.75;");
+    expect(globalsCss).toContain("--spacing: 0.1875rem;");
+    expect(globalsCss).toContain('[data-density="spacious"]');
+    expect(globalsCss).toContain("--density-spacing: 1.25;");
+    expect(globalsCss).toContain("--spacing: 0.3125rem;");
+    expect(globalsCss).toContain(
+      "padding: calc(0.5rem * var(--density-spacing));",
     );
-
-    expect(css).toContain('[data-density="compact"]');
-    expect(css).toContain("--density-spacing: 0.75;");
-    expect(css).toContain("--spacing: 0.1875rem;");
-    expect(css).toContain('[data-density="spacious"]');
-    expect(css).toContain("--density-spacing: 1.25;");
-    expect(css).toContain("--spacing: 0.3125rem;");
-    expect(css).toContain("padding: calc(0.5rem * var(--density-spacing));");
   });
 });
