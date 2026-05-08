@@ -26,6 +26,8 @@ export function SidebarRecentsSection({
   onSelectSession,
   onArchiveChat,
   onRenameChat,
+  onMarkChatRead,
+  onMarkChatUnread,
   onMoveToProject,
 }: {
   sessions: TabInfo[];
@@ -38,6 +40,8 @@ export function SidebarRecentsSection({
   onSelectSession?: (sessionId: string) => void;
   onArchiveChat?: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onMarkChatRead?: (sessionId: string) => void;
+  onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
@@ -186,6 +190,8 @@ export function SidebarRecentsSection({
                 hasUnread={session.hasUnread ?? false}
                 onSelect={onSelectSession}
                 onRename={onRenameChat}
+                onMarkRead={onMarkChatRead}
+                onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}
               />
             );

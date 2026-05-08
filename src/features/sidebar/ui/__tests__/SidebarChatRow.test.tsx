@@ -139,6 +139,49 @@ describe("SidebarChatRow", () => {
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
   });
 
+  it("can mark an idle chat unread from the menu", async () => {
+    const user = userEvent.setup();
+    const onMarkUnread = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        onMarkUnread={onMarkUnread}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for idle chat/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: /mark unread/i }));
+
+    expect(onMarkUnread).toHaveBeenCalledWith("session-1");
+  });
+
+  it("can mark an unread chat read from the menu", async () => {
+    const user = userEvent.setup();
+    const onMarkRead = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Unread Chat"
+        isActive={false}
+        hasUnread
+        onMarkRead={onMarkRead}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for unread chat/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: /mark read/i }));
+
+    expect(onMarkRead).toHaveBeenCalledWith("session-1");
+  });
+
   it("keeps the localized default title in rename mode without persisting it", async () => {
     const user = userEvent.setup();
     const onRename = vi.fn();

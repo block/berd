@@ -6,6 +6,8 @@
     "newChat": "New chat",
     "newChatInProject": "New chat in project",
     "newProject": "New project",
+    "markRead": "Mark read",
+    "markUnread": "Mark unread",
     "renameHint": "Double-click to rename"
   },
   "menu": {

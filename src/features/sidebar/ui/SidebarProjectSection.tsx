@@ -38,6 +38,8 @@ export function SidebarProjectSection({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onMarkChatRead,
+  onMarkChatUnread,
   onMoveToProject,
 }: {
   project: ProjectInfo;
@@ -52,6 +54,8 @@ export function SidebarProjectSection({
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onMarkChatRead?: (sessionId: string) => void;
+  onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
@@ -176,6 +180,8 @@ export function SidebarProjectSection({
                 nested
                 onSelect={onSelectSession}
                 onRename={onRenameChat}
+                onMarkRead={onMarkChatRead}
+                onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}
               />
             );

@@ -6,6 +6,8 @@
     "newChat": "Nuevo chat",
     "newChatInProject": "Nuevo chat en el proyecto",
     "newProject": "Nuevo proyecto",
+    "markRead": "Marcar como leído",
+    "markUnread": "Marcar como no leído",
     "renameHint": "Haz doble clic para renombrar"
   },
   "menu": {

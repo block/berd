@@ -59,6 +59,8 @@ interface SidebarProps {
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onMarkChatRead?: (sessionId: string) => void;
+  onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   onReorderProject?: (fromId: string, toId: string) => void;
   onNavigate?: (view: AppView) => void;
@@ -92,6 +94,8 @@ export function Sidebar({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onMarkChatRead,
+  onMarkChatUnread,
   onMoveToProject,
   onReorderProject,
   onNavigate,
@@ -480,6 +484,8 @@ export function Sidebar({
                     onArchiveProject={onArchiveProject}
                     onArchiveChat={onArchiveChat}
                     onRenameChat={onRenameChat}
+                    onMarkChatRead={onMarkChatRead}
+                    onMarkChatUnread={onMarkChatUnread}
                     onMoveToProject={onMoveToProject}
                     onReorderProject={onReorderProject}
                   />

@@ -36,6 +36,8 @@ interface SidebarProjectsSectionProps {
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onMarkChatRead?: (sessionId: string) => void;
+  onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   onReorderProject?: (fromId: string, toId: string) => void;
 }
@@ -59,6 +61,8 @@ export function SidebarProjectsSection({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onMarkChatRead,
+  onMarkChatUnread,
   onMoveToProject,
   onReorderProject,
 }: SidebarProjectsSectionProps) {
@@ -129,6 +133,8 @@ export function SidebarProjectsSection({
         onArchiveProject={onArchiveProject}
         onArchiveChat={onArchiveChat}
         onRenameChat={onRenameChat}
+        onMarkChatRead={onMarkChatRead}
+        onMarkChatUnread={onMarkChatUnread}
         onMoveToProject={onMoveToProject}
         onReorderProject={onReorderProject}
       />
@@ -222,6 +228,8 @@ export function SidebarProjectsSection({
           onSelectSession={onSelectSession}
           onArchiveChat={onArchiveChat}
           onRenameChat={onRenameChat}
+          onMarkChatRead={onMarkChatRead}
+          onMarkChatUnread={onMarkChatUnread}
           onMoveToProject={onMoveToProject}
         />
       )}

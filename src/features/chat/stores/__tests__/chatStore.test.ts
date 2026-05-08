@@ -1,7 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INITIAL_TOKEN_STATE } from "@/shared/types/chat";
 import type { Message } from "@/shared/types/messages";
 import { useChatStore } from "../chatStore";
+import { loadCachedUnreadSessionIds } from "../unreadPersistence";
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
   return {
@@ -20,6 +21,7 @@ function getRuntime(sessionId: string) {
 
 describe("chatStore", () => {
   beforeEach(() => {
+    window.localStorage.removeItem("goose:unread-sessions");
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -27,6 +29,7 @@ describe("chatStore", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      isViewingActiveSession: false,
       isConnected: false,
     });
   });
@@ -96,16 +99,136 @@ describe("chatStore", () => {
     expect(getRuntime("s2").error).toBeNull();
   });
 
+  it("marks visible assistant messages unread unless the session is actively viewed", () => {
+    const store = useChatStore.getState();
+
+    store.setActiveSession("s1");
+    store.setActiveSessionViewing(false);
+    store.addMessage(
+      "s1",
+      makeMessage({ id: "assistant-away", role: "assistant" }),
+    );
+
+    expect(getRuntime("s1").hasUnread).toBe(true);
+
+    store.markSessionRead("s1");
+    store.setActiveSessionViewing(true);
+    store.addMessage(
+      "s1",
+      makeMessage({ id: "assistant-active", role: "assistant" }),
+    );
+
+    expect(getRuntime("s1").hasUnread).toBe(false);
+
+    store.setActiveSession("s2");
+    store.setActiveSessionViewing(true);
+    store.addMessage("s1", makeMessage({ id: "assistant-inactive" }));
+
+    expect(getRuntime("s1").hasUnread).toBe(true);
+  });
+
+  it("marks streamed assistant output unread for inactive sessions", () => {
+    const store = useChatStore.getState();
+
+    store.setActiveSession("s2");
+    store.setActiveSessionViewing(true);
+    store.addMessage(
+      "s1",
+      makeMessage({
+        id: "assistant-1",
+        content: [],
+        metadata: { userVisible: true, completionStatus: "inProgress" },
+      }),
+    );
+    store.markSessionRead("s1");
+    store.setStreamingMessageId("s1", "assistant-1");
+
+    store.updateStreamingText("s1", "Done");
+
+    expect(getRuntime("s1").hasUnread).toBe(true);
+
+    store.markSessionRead("s1");
+    store.appendToStreamingMessage("s1", {
+      type: "toolRequest",
+      id: "tool-1",
+      name: "read_file",
+      arguments: {},
+      status: "in_progress",
+    });
+
+    expect(getRuntime("s1").hasUnread).toBe(true);
+  });
+
+  it("does not mark streamed assistant output unread for the actively viewed session", () => {
+    const store = useChatStore.getState();
+
+    store.setActiveSession("s1");
+    store.setActiveSessionViewing(true);
+    store.addMessage(
+      "s1",
+      makeMessage({
+        id: "assistant-1",
+        content: [],
+        metadata: { userVisible: true, completionStatus: "inProgress" },
+      }),
+    );
+    store.setStreamingMessageId("s1", "assistant-1");
+
+    store.updateStreamingText("s1", "Visible here");
+
+    expect(getRuntime("s1").hasUnread).toBe(false);
+  });
+
+  it("does not mark user, hidden, or replayed historical messages unread", () => {
+    const store = useChatStore.getState();
+
+    store.setActiveSession("s2");
+    store.setActiveSessionViewing(true);
+
+    store.addMessage("s1", makeMessage({ id: "user", role: "user" }));
+    store.addMessage(
+      "s1",
+      makeMessage({
+        id: "hidden-assistant",
+        role: "assistant",
+        metadata: { userVisible: false },
+      }),
+    );
+    store.setMessages("s3", [makeMessage({ id: "historical-assistant" })]);
+
+    expect(getRuntime("s1").hasUnread).toBe(false);
+    expect(getRuntime("s3").hasUnread).toBe(false);
+  });
+
   it("tracks unread state per session and clears it idempotently", () => {
     const store = useChatStore.getState();
 
     store.markSessionUnread("s1");
     expect(getRuntime("s1").hasUnread).toBe(true);
     expect(getRuntime("s2").hasUnread).toBe(false);
+    expect(loadCachedUnreadSessionIds()).toEqual(["s1"]);
 
     store.markSessionRead("s1");
     store.markSessionRead("s1");
     expect(getRuntime("s1").hasUnread).toBe(false);
+    expect(loadCachedUnreadSessionIds()).toEqual([]);
+  });
+
+  it("hydrates persisted unread sessions on store initialization", async () => {
+    window.localStorage.setItem(
+      "goose:unread-sessions",
+      JSON.stringify(["s1", "s2"]),
+    );
+
+    vi.resetModules();
+    const { useChatStore: freshChatStore } = await import("../chatStore");
+
+    expect(freshChatStore.getState().getSessionRuntime("s1").hasUnread).toBe(
+      true,
+    );
+    expect(freshChatStore.getState().getSessionRuntime("s2").hasUnread).toBe(
+      true,
+    );
   });
 
   it("clears messages and runtime state for a single session", () => {
@@ -119,6 +242,7 @@ describe("chatStore", () => {
     expect(getRuntime("s1").chatState).toBe("idle");
     expect(getRuntime("s1").streamingMessageId).toBeNull();
     expect(getRuntime("s1").hasUnread).toBe(false);
+    expect(loadCachedUnreadSessionIds()).toEqual([]);
   });
 
   it("enqueues and dismisses messages per session", () => {
@@ -165,6 +289,8 @@ describe("chatStore", () => {
     store.enqueueMessage("s1", { text: "queued" });
     store.setDraft("s1", "draft text");
     store.setSkillDrafts("s1", [{ id: "skill-1", name: "code-review" }]);
+    store.markSessionUnread("s1");
+    store.markSessionUnread("s2");
     store.setActiveSession("s1");
     store.cleanupSession("s1");
 
@@ -174,6 +300,7 @@ describe("chatStore", () => {
     expect(store.draftsBySession.s1).toBeUndefined();
     expect(useChatStore.getState().skillDraftsBySession.s1).toBeUndefined();
     expect(store.activeSessionId).toBeNull();
+    expect(loadCachedUnreadSessionIds()).toEqual(["s2"]);
   });
 
   it("stores and clears scroll targets per session", () => {
@@ -204,6 +331,7 @@ describe("chatStore draft localStorage persistence", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      isViewingActiveSession: false,
       isConnected: false,
     });
   });
@@ -263,6 +391,7 @@ describe("chatStore session loading state", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      isViewingActiveSession: false,
       isConnected: false,
       loadingSessionIds: new Set<string>(),
     });

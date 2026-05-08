@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import { Mail, MailOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
@@ -33,6 +33,8 @@ interface SidebarChatRowProps {
   onSelect?: (id: string) => void;
   onRename?: (id: string, nextTitle: string) => void;
   onArchive?: (id: string) => void;
+  onMarkRead?: (id: string) => void;
+  onMarkUnread?: (id: string) => void;
 }
 
 export function SidebarChatRow({
@@ -46,6 +48,8 @@ export function SidebarChatRow({
   onSelect,
   onRename,
   onArchive,
+  onMarkRead,
+  onMarkUnread,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -214,6 +218,25 @@ export function SidebarChatRow({
             <Pencil className="size-3.5" />
             {t("common:actions.rename")}
           </DropdownMenuItem>
+          {hasUnread ? (
+            <DropdownMenuItem
+              onClick={() => {
+                onMarkRead?.(id);
+              }}
+            >
+              <MailOpen className="size-3.5" />
+              {t("actions.markRead")}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={() => {
+                onMarkUnread?.(id);
+              }}
+            >
+              <Mail className="size-3.5" />
+              {t("actions.markUnread")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onClick={() => {
               onArchive?.(id);

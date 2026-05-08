@@ -28,6 +28,8 @@ export function SidebarProjectList({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onMarkChatRead,
+  onMarkChatUnread,
   onMoveToProject,
   onReorderProject,
 }: {
@@ -44,6 +46,8 @@ export function SidebarProjectList({
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onMarkChatRead?: (sessionId: string) => void;
+  onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
   onReorderProject?: (fromId: string, toId: string) => void;
 }) {
@@ -141,6 +145,8 @@ export function SidebarProjectList({
             onArchiveProject={onArchiveProject}
             onArchiveChat={onArchiveChat}
             onRenameChat={onRenameChat}
+            onMarkChatRead={onMarkChatRead}
+            onMarkChatUnread={onMarkChatUnread}
             onMoveToProject={onMoveToProject}
           />
         </div>

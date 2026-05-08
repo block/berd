@@ -158,6 +158,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const setChatActiveSession = useChatStore((s) => s.setActiveSession);
+  const setChatActiveSessionViewing = useChatStore(
+    (s) => s.setActiveSessionViewing,
+  );
   const cleanupChatSession = useChatStore((s) => s.cleanupSession);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
@@ -242,10 +245,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [fetchProjects]);
 
   useEffect(() => {
-    if (activeView === "chat" && activeSessionId) {
+    const isViewingChat = activeView === "chat" && Boolean(activeSessionId);
+    setChatActiveSessionViewing(isViewingChat);
+
+    if (isViewingChat && activeSessionId) {
       useChatStore.getState().markSessionRead(activeSessionId);
     }
-  }, [activeSessionId, activeView]);
+  }, [activeSessionId, activeView, setChatActiveSessionViewing]);
 
   useEffect(() => {
     if (activeView !== "settings") {
@@ -691,6 +697,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [t],
   );
 
+  const handleMarkChatRead = useCallback((sessionId: string) => {
+    useChatStore.getState().markSessionRead(sessionId);
+  }, []);
+
+  const handleMarkChatUnread = useCallback((sessionId: string) => {
+    useChatStore.getState().markSessionUnread(sessionId);
+  }, []);
+
   const openCreateProjectDialog = useCallback(
     (options?: {
       initialWorkingDir?: string | null;
@@ -952,6 +966,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onArchiveProject={handleArchiveProject}
             onArchiveChat={handleArchiveChat}
             onRenameChat={handleRenameChat}
+            onMarkChatRead={handleMarkChatRead}
+            onMarkChatUnread={handleMarkChatUnread}
             onMoveToProject={handleMoveToProject}
             onReorderProject={reorderProjects}
             onSelectSession={handleSelectSession}

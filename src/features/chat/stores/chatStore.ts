@@ -16,12 +16,71 @@ import {
 } from "@/shared/types/chat";
 import type { ChatSendOptions, ChatSkillDraft } from "../types";
 import { loadCachedDrafts, persistDrafts } from "./draftPersistence";
+import {
+  loadCachedUnreadSessionIds,
+  persistUnreadSessionIds,
+} from "./unreadPersistence";
 
 function createInitialSessionRuntime(): SessionChatRuntime {
   return {
     ...INITIAL_SESSION_CHAT_RUNTIME,
     tokenState: { ...INITIAL_TOKEN_STATE },
   };
+}
+
+function isSessionActivelyViewed(
+  state: ChatStoreState,
+  sessionId: string,
+): boolean {
+  return state.activeSessionId === sessionId && state.isViewingActiveSession;
+}
+
+function shouldMarkSessionUnread(
+  state: ChatStoreState,
+  sessionId: string,
+  message: Message,
+): boolean {
+  return (
+    message.role === "assistant" &&
+    message.metadata?.userVisible !== false &&
+    !isSessionActivelyViewed(state, sessionId)
+  );
+}
+
+function buildInitialSessionStateById(): Record<string, SessionChatRuntime> {
+  return Object.fromEntries(
+    loadCachedUnreadSessionIds().map((sessionId) => [
+      sessionId,
+      {
+        ...createInitialSessionRuntime(),
+        hasUnread: true,
+      },
+    ]),
+  );
+}
+
+function getUnreadSessionIds(
+  sessionStateById: Record<string, SessionChatRuntime>,
+): string[] {
+  return Object.entries(sessionStateById)
+    .filter(([, runtime]) => runtime.hasUnread)
+    .map(([sessionId]) => sessionId);
+}
+
+function areSessionIdListsEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  const bIds = new Set(b);
+  return a.every((id) => bIds.has(id));
+}
+
+function persistUnreadStateIfChanged(
+  previousSessionStateById: Record<string, SessionChatRuntime>,
+  nextSessionStateById: Record<string, SessionChatRuntime>,
+): void {
+  const previousUnreadIds = getUnreadSessionIds(previousSessionStateById);
+  const nextUnreadIds = getUnreadSessionIds(nextSessionStateById);
+  if (areSessionIdListsEqual(previousUnreadIds, nextUnreadIds)) return;
+  persistUnreadSessionIds(nextUnreadIds);
 }
 
 export interface QueuedMessage {
@@ -43,6 +102,7 @@ interface ChatStoreState {
   draftsBySession: Record<string, string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
   activeSessionId: string | null;
+  isViewingActiveSession: boolean;
   isConnected: boolean;
   loadingSessionIds: Set<string>;
   scrollTargetMessageBySession: Record<string, ScrollTargetMessage | null>;
@@ -50,6 +110,7 @@ interface ChatStoreState {
 
 interface ChatStoreActions {
   setActiveSession: (sessionId: string) => void;
+  setActiveSessionViewing: (isViewing: boolean) => void;
   addMessage: (sessionId: string, message: Message) => void;
   updateMessage: (
     sessionId: string,
@@ -104,11 +165,12 @@ export type ChatStore = ChatStoreState & ChatStoreActions;
 export const useChatStore = create<ChatStore>((set, get) => ({
   // State
   messagesBySession: {},
-  sessionStateById: {},
+  sessionStateById: buildInitialSessionStateById(),
   queuedMessageBySession: {},
   draftsBySession: loadCachedDrafts(),
   skillDraftsBySession: {},
   activeSessionId: null,
+  isViewingActiveSession: false,
   isConnected: false,
   loadingSessionIds: new Set<string>(),
   scrollTargetMessageBySession: {},
@@ -125,28 +187,88 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           },
     })),
 
-  // Message management
-  addMessage: (sessionId, message) =>
-    set((state) => ({
-      messagesBySession: {
-        ...state.messagesBySession,
-        [sessionId]: [...(state.messagesBySession[sessionId] ?? []), message],
-      },
-    })),
+  setActiveSessionViewing: (isViewingActiveSession) =>
+    set({ isViewingActiveSession }),
 
-  updateMessage: (sessionId, messageId, updater) =>
+  // Message management
+  addMessage: (sessionId, message) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
-      const messages = state.messagesBySession[sessionId];
-      if (!messages) return state;
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const shouldMarkUnread = shouldMarkSessionUnread(
+        state,
+        sessionId,
+        message,
+      );
+
       return {
         messagesBySession: {
           ...state.messagesBySession,
-          [sessionId]: messages.map((m) =>
-            m.id === messageId ? updater(m) : m,
-          ),
+          [sessionId]: [...(state.messagesBySession[sessionId] ?? []), message],
         },
+        ...(shouldMarkUnread
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  hasUnread: true,
+                },
+              },
+            }
+          : {}),
       };
-    }),
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
+
+  updateMessage: (sessionId, messageId, updater) => {
+    const previousSessionStateById = get().sessionStateById;
+    set((state) => {
+      const messages = state.messagesBySession[sessionId];
+      if (!messages) return state;
+
+      let shouldMarkUnread = false;
+      const updatedMessages = messages.map((message) => {
+        if (message.id !== messageId) return message;
+
+        const updated = updater(message);
+        shouldMarkUnread =
+          updated !== message &&
+          shouldMarkSessionUnread(state, sessionId, updated);
+        return updated;
+      });
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: updatedMessages,
+        },
+        ...(shouldMarkUnread
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  hasUnread: true,
+                },
+              },
+            }
+          : {}),
+      };
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
   removeMessage: (sessionId, messageId) =>
     set((state) => {
@@ -168,7 +290,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       },
     })),
 
-  clearMessages: (sessionId) =>
+  clearMessages: (sessionId) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => ({
       messagesBySession: {
         ...state.messagesBySession,
@@ -178,7 +301,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         ...state.sessionStateById,
         [sessionId]: createInitialSessionRuntime(),
       },
-    })),
+    }));
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
   // Active session helpers
   getActiveMessages: () => {
@@ -216,56 +344,107 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       },
     })),
 
-  appendToStreamingMessage: (sessionId, content) =>
+  appendToStreamingMessage: (sessionId, content) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const streamingMessageId =
         state.sessionStateById[sessionId]?.streamingMessageId ?? null;
       if (!streamingMessageId) return state;
       const messages = state.messagesBySession[sessionId];
       if (!messages) return state;
-      return {
-        messagesBySession: {
-          ...state.messagesBySession,
-          [sessionId]: messages.map((m) =>
-            m.id === streamingMessageId
-              ? { ...m, content: [...m.content, content] }
-              : m,
-          ),
-        },
-      };
-    }),
 
-  updateStreamingText: (sessionId, text) =>
+      let shouldMarkUnread = false;
+      const updatedMessages = messages.map((message) => {
+        if (message.id !== streamingMessageId) return message;
+
+        shouldMarkUnread = shouldMarkSessionUnread(state, sessionId, message);
+        return { ...message, content: [...message.content, content] };
+      });
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: updatedMessages,
+        },
+        ...(shouldMarkUnread
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  hasUnread: true,
+                },
+              },
+            }
+          : {}),
+      };
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
+
+  updateStreamingText: (sessionId, text) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const streamingMessageId =
         state.sessionStateById[sessionId]?.streamingMessageId ?? null;
       if (!streamingMessageId) return state;
       const messages = state.messagesBySession[sessionId];
       if (!messages) return state;
+
+      let shouldMarkUnread = false;
+      const updatedMessages = messages.map((message) => {
+        if (message.id !== streamingMessageId) return message;
+
+        shouldMarkUnread = shouldMarkSessionUnread(state, sessionId, message);
+        const lastContent = message.content[message.content.length - 1];
+        if (lastContent?.type !== "text") {
+          // Start a new text segment after non-text content so
+          // streamed tool calls stay inline between text blocks.
+          return {
+            ...message,
+            content: [...message.content, { type: "text" as const, text }],
+          };
+        }
+        const newContent = [...message.content];
+        newContent[newContent.length - 1] = {
+          type: "text" as const,
+          text: lastContent.text + text,
+        };
+        return { ...message, content: newContent };
+      });
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+
       return {
         messagesBySession: {
           ...state.messagesBySession,
-          [sessionId]: messages.map((m) => {
-            if (m.id !== streamingMessageId) return m;
-            const lastContent = m.content[m.content.length - 1];
-            if (lastContent?.type !== "text") {
-              // Start a new text segment after non-text content so
-              // streamed tool calls stay inline between text blocks.
-              return {
-                ...m,
-                content: [...m.content, { type: "text" as const, text }],
-              };
-            }
-            const newContent = [...m.content];
-            newContent[newContent.length - 1] = {
-              type: "text" as const,
-              text: lastContent.text + text,
-            };
-            return { ...m, content: newContent };
-          }),
+          [sessionId]: updatedMessages,
         },
+        ...(shouldMarkUnread
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  hasUnread: true,
+                },
+              },
+            }
+          : {}),
       };
-    }),
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
   // State
   setChatState: (sessionId, chatState) =>
@@ -298,7 +477,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   setConnected: (isConnected) => set({ isConnected }),
 
-  markSessionRead: (sessionId) =>
+  markSessionRead: (sessionId) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
@@ -314,9 +494,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           },
         },
       };
-    }),
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
-  markSessionUnread: (sessionId) =>
+  markSessionUnread: (sessionId) => {
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
@@ -332,7 +518,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           },
         },
       };
-    }),
+    });
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
   // Token tracking
   updateTokenState: (sessionId, partial) =>
@@ -486,6 +677,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   cleanupSession: (sessionId) => {
     // Discard any orphaned replay buffer so module-level Map doesn't leak.
     clearReplayBuffer(sessionId);
+    const previousSessionStateById = get().sessionStateById;
     set((state) => {
       const { [sessionId]: _, ...rest } = state.messagesBySession;
       const { [sessionId]: __, ...remainingSessionState } =
@@ -508,8 +700,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         scrollTargetMessageBySession: remainingTargets,
         activeSessionId:
           state.activeSessionId === sessionId ? null : state.activeSessionId,
+        isViewingActiveSession:
+          state.activeSessionId === sessionId
+            ? false
+            : state.isViewingActiveSession,
       };
     });
     persistDrafts(get().draftsBySession);
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
   },
 }));
