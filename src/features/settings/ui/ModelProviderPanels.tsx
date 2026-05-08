@@ -285,9 +285,9 @@ export function SetupFieldsPanel({
         <AsyncButton
           type="button"
           state={saving ? "pending" : showSavedState ? "success" : "idle"}
-          idleLabel="Save"
-          pendingLabel="Saving..."
-          successLabel="Saved"
+          idleLabel={t("common:actions.save")}
+          pendingLabel={t("providers.saving")}
+          successLabel={t("providers.saved")}
           pendingVisual="text"
           pendingDelayMs={250}
           size="sm"

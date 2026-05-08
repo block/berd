@@ -78,15 +78,15 @@ describe("VoiceInputSettings", () => {
       expect(screen.getByText("Provider credentials")).toBeInTheDocument(),
     );
     expect(
-      screen.getByText(
-        "This transcription provider uses the credentials from its model provider setup.",
-      ),
+      screen.getByText("Uses credentials from your model provider setup."),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Add API key" }),
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Open Providers" }));
+    await user.click(
+      screen.getByRole("button", { name: "Configure provider" }),
+    );
 
     expect(openSettingsListener).toHaveBeenCalledTimes(1);
     expect(openSettingsListener.mock.calls[0][0]).toMatchObject({

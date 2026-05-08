@@ -28,11 +28,11 @@
         "purple": "Purple",
         "red": "Red"
       },
-      "description": "Choose your accent color",
+      "description": "Used for highlights, focus rings, and active states.",
       "label": "Accent color"
     },
     "density": {
-      "description": "Adjust the spacing of UI elements",
+      "description": "Adjust spacing throughout the app.",
       "label": "Interface density",
       "options": {
         "comfortable": "Comfortable",
@@ -41,7 +41,7 @@
       }
     },
     "theme": {
-      "description": "Choose your preferred color scheme",
+      "description": "Choose your color scheme.",
       "label": "Theme",
       "options": {
         "dark": "Dark",
@@ -52,7 +52,7 @@
     "title": "Appearance"
   },
   "chats": {
-    "empty": "No archived chats.",
+    "empty": "Archived chats will show here.",
     "messageCount_one": "{{displayCount}} message",
     "messageCount_other": "{{displayCount}} messages",
     "sectionTitle": "Archived chats",
@@ -65,20 +65,20 @@
   "compaction": {
     "goose": {
       "autoCompact": {
-        "helper": "Set to 100% to turn auto-compaction off.",
+        "helper": "Set to 100% to turn off auto-compact.",
         "label": "Auto-compact threshold",
         "loading": "Loading...",
         "off": "Off",
-        "saveError": "Failed to save auto-compaction setting."
+        "saveError": "Couldn't save your auto-compact setting. Try again."
       },
       "builtIn": "Built in",
       "description": "Choose when the Goose agent compacts older context during sessions. This applies to all goose chats.",
-      "label": "Goose (Agent)"
+      "label": "Goose agent"
     },
     "title": "Compaction"
   },
   "deleteProject": {
-    "description": "This project and all its data will be permanently removed.",
+    "description": "Removes the project and all its data. You can't undo this.",
     "title": "Delete \"{{name}}\" permanently?"
   },
   "extensions": {
@@ -88,12 +88,12 @@
     "empty": "No extensions configured.",
     "noResults": "No extensions match your search.",
     "addExtension": "Add extension",
-    "editExtension": "Edit Extension",
-    "deleteExtension": "Delete Extension",
+    "editExtension": "Edit extension",
+    "deleteExtension": "Delete extension",
     "deleteConfirmation": {
       "title": "Delete \"{{name}}\" permanently?",
       "description": "This will permanently remove this extension and all of its settings.",
-      "confirm": "Delete Extension",
+      "confirm": "Delete extension",
       "deleting": "Deleting..."
     },
     "configure": "Configure {{name}}",
@@ -112,7 +112,7 @@
       "description": "Description",
       "descriptionPlaceholder": "What does this extension do?",
       "timeout": "Timeout (seconds)",
-      "envVars": "Environment Variables",
+      "envVars": "Environment variables",
       "envKeyPlaceholder": "KEY",
       "envValuePlaceholder": "value",
       "addEnvVar": "Add variable",
@@ -127,7 +127,7 @@
       "all": "All"
     },
     "categories": {
-      "appsServices": "Apps & services",
+      "appsServices": "Apps and services",
       "gooseCapabilities": "Goose capabilities"
     },
     "sections": {
@@ -137,70 +137,69 @@
     "showGooseCapabilities": "Show {{count}} built-in Goose capabilities",
     "hideGooseCapabilities": "Hide built-in Goose capabilities",
     "errors": {
-      "saveFailed": "Failed to save extension. Please try again.",
-      "deleteFailed": "Failed to delete extension. Please try again.",
+      "saveFailed": "Couldn't save the extension. Try again.",
+      "deleteFailed": "Couldn't delete the extension. Try again.",
       "nameConflict": "An extension named \"{{name}}\" already exists."
     }
   },
   "doctor": {
     "agents": "Agents",
     "copied": "Copied",
-    "copyDetails": "Copy details",
-    "empty": "No checks are available yet.",
-    "rerun": "Try again",
+    "copyDetails": "Copy report",
+    "empty": "Couldn't load checks. Try again.",
+    "rerun": "Run again",
     "runFix": "Run fix command?",
-    "runFixDescription": "This will run the following command:",
+    "runFixDescription": "Goose will run:",
     "running": "Running checks...",
     "title": "Doctor",
     "tools": "Tools"
   },
   "general": {
     "language": {
-      "description": "Choose how Goose formats and displays the interface.",
+      "description": "Sets the language Goose uses across menus, buttons, and messages.",
       "english": "English",
       "label": "Language",
       "spanish": "Spanish",
       "system": "System default ({{language}})"
     },
     "onboarding": {
-      "description": "Show setup again the next time Goose opens.",
+      "description": "Shows onboarding again the next time Goose opens.",
       "label": "Onboarding",
       "reset": "Reset onboarding",
-      "resetDescription": "Onboarding will appear the next time Goose opens."
+      "resetDescription": "Done. Onboarding will appear the next time Goose opens."
     },
     "title": "General",
     "voiceInput": {
       "label": "Voice input",
-      "providerLabel": "Transcription Provider",
+      "providerLabel": "Transcription provider",
       "disabled": "Disabled",
       "notConfiguredSuffix": "(not configured)",
       "placeholder": "Select a provider",
       "modelLabel": "Model",
-      "apiKeyLabel": "API Key",
-      "apiKeyDescription": "Enter your API key for this provider.",
+      "apiKeyLabel": "API key",
+      "apiKeyDescription": "Used to authenticate requests to this provider.",
       "apiKeyPlaceholder": "sk-...",
       "apiKeyConfigured": "API key configured",
       "addApiKey": "Add API key",
       "updateApiKey": "Update API key",
       "removeApiKey": "Remove API key",
       "providerConfigLabel": "Provider credentials",
-      "providerConfigDescription": "This transcription provider uses the credentials from its model provider setup.",
-      "openProviders": "Open Providers",
-      "localModelLabel": "Local Whisper Model",
-      "localModelDescription": "Download a Whisper model to run transcription locally. Selecting a model sets it as your active local transcription model.",
-      "noLocalModels": "No local Whisper models available.",
+      "providerConfigDescription": "Uses credentials from your model provider setup.",
+      "openProviders": "Configure provider",
+      "localModelLabel": "Local Whisper model",
+      "localModelDescription": "Download and select a Whisper model to run transcription locally.",
+      "noLocalModels": "No local Whisper models yet.",
       "download": "Download",
-      "selectModel": "Select",
+      "selectModel": "Select model",
       "selectedModel": "Selected",
       "deleteModel": "Delete",
       "microphoneLabel": "Microphone",
-      "microphoneDescription": "Choose which microphone to use for voice input.",
-      "microphoneUnavailable": "Microphone access is not available in this environment.",
-      "microphoneAccessPrompt": "Click \"Grant access\" to allow microphone use.",
+      "microphoneDescription": "Manage microphone access for voice input.",
+      "microphoneUnavailable": "Microphone access isn't available.",
       "grantMicrophone": "Grant access",
       "systemMicrophone": "System default",
       "unknownMicrophone": "Unknown microphone",
-      "autoSubmitLabel": "Auto-submit Phrases",
+      "autoSubmitLabel": "Auto-submit phrases",
       "autoSubmitDescription": "Comma-separated words that trigger automatic send (e.g. \"submit\").",
       "providers": {
         "openai": "OpenAI Whisper",
@@ -209,9 +208,9 @@
         "local": "Local Whisper"
       },
       "downloadProgress": "Downloading... {{percent}}%",
-      "loadError": "Failed to load voice settings.",
-      "saveError": "Failed to save.",
-      "deleteError": "Failed to delete."
+      "loadError": "Couldn't load voice settings.",
+      "saveError": "Couldn't save your changes. Try again.",
+      "deleteError": "Couldn't delete. Try again."
     }
   },
   "nav": {
@@ -226,15 +225,15 @@
     "voice": "Voice"
   },
   "projects": {
-    "empty": "No archived projects.",
+    "empty": "Archived projects will show here.",
     "sectionTitle": "Archived projects",
     "title": "Projects"
   },
   "providers": {
     "agents": {
-      "description": "Goose is built in to your workspace. Install others to extend your setup.",
+      "description": "Goose is built into your workspace. Install others to add new agents.",
       "errors": {
-        "installVerificationFailed": "Install finished but the CLI was not found on PATH. You may need to restart your terminal."
+        "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal."
       },
       "installLabel": "Install {{name}}",
       "progress": {
@@ -270,7 +269,7 @@
       },
       "addButton": "Add custom provider",
       "addTitle": "Add custom provider",
-      "confirmDelete": "This removes {{name}} and any API key owned by it.",
+      "confirmDelete": "This removes {{name}} and its saved API key.",
       "confirmDeleteTitle": "Delete {{name}}?",
       "description": "Connect an OpenAI-compatible, Anthropic-compatible, or local model endpoint.",
       "editTitle": "Edit custom provider",
@@ -282,10 +281,10 @@
         "openai_compatible": "OpenAI-compatible"
       },
       "errors": {
-        "deleteFailed": "Failed to delete custom provider.",
-        "loadFailed": "Failed to load custom provider.",
-        "saveFailed": "Failed to save custom provider.",
-        "templatesFailed": "Failed to load provider templates."
+        "deleteFailed": "Couldn't delete the custom provider.",
+        "loadFailed": "Couldn't load the custom provider.",
+        "saveFailed": "Couldn't save the custom provider.",
+        "templatesFailed": "Couldn't load provider templates."
       },
       "fields": {
         "apiKey": "API key",
@@ -354,15 +353,15 @@
           "oauthDeviceCode": "Connected through Goose device-code sign-in."
         },
         "fieldDescription": {
-          "cloudCredentials": "Add the required details to use this provider.",
-          "configFields": "Add the required details to use this provider.",
-          "hostWithOauthFallback": "Add the required details to use this provider.",
+          "cloudCredentials": "Add your cloud credentials to use this provider.",
+          "configFields": "Fill in the required fields to use this provider.",
+          "hostWithOauthFallback": "Add your host details to use this provider.",
           "singleApiKey": "Add your API key to use this provider."
         },
-        "hostWithOauthFallbackTerminal": "Leave Access Token blank, save your host URL, then run `goose configure` in your terminal to sign in.",
+        "hostWithOauthFallbackTerminal": "Leave **access token** blank, save your host URL, then run `goose configure` in your terminal to sign in.",
         "nativeConnectDescription": "Sign in with your existing account.",
         "pending": {
-          "cloudCredentials": "Configure your cloud credentials in your terminal environment before using this provider.",
+          "cloudCredentials": "Configure your cloud credentials in your terminal before using this provider.",
           "local": "This provider runs locally and doesn't need saved settings.",
           "oauthGuided": "Goose will guide you through sign-in.",
           "oauthTerminal": "Run `goose configure` in your terminal to finish sign-in."
@@ -374,6 +373,7 @@
     "loadingModels": "Loading models...",
     "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
     "saved": "Saved",
+    "saving": "Saving...",
     "showFewer": "Show fewer",
     "showMore": "Show {{count}} more providers",
     "title": "Providers",

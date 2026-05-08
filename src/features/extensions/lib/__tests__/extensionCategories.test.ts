@@ -24,7 +24,7 @@ function extension(
 }
 
 const labelForCategory = (category: string) =>
-  category === "gooseCapabilities" ? "Goose capabilities" : "Apps & services";
+  category === "gooseCapabilities" ? "Goose capabilities" : "Apps and services";
 
 describe("extension categories", () => {
   it("classifies built-in and platform extensions as Goose capabilities", () => {

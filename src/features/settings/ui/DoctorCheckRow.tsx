@@ -87,31 +87,35 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
         </div>
 
         {check.fixType && check.status !== "pass" && (
-          <button
+          <Button
             type="button"
+            variant="outline"
+            size="xs"
+            leftIcon={<Wrench />}
             onClick={() => {
               setFixError(null);
               setFixing(false);
               setShowFixDialog(true);
             }}
-            className="flex flex-shrink-0 items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex-shrink-0"
           >
-            <Wrench className="h-3.5 w-3.5" />
             {t("common:actions.fix")}
-          </button>
+          </Button>
         )}
 
         {check.fixUrl && check.status !== "pass" && (
-          <button
+          <Button
             type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={t("common:buttons.openFixUrl")}
             onClick={() => {
               if (check.fixUrl) void openUrl(check.fixUrl);
             }}
-            aria-label={t("common:buttons.openFixUrl")}
-            className="flex flex-shrink-0 items-center justify-center rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex-shrink-0"
           >
-            <ExternalLink className="h-3.5 w-3.5" />
-          </button>
+            <ExternalLink />
+          </Button>
         )}
       </div>
 

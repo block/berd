@@ -114,7 +114,7 @@ export function ModelProviderRow({
         setError(
           nextError instanceof Error
             ? nextError.message
-            : "Failed to load provider settings",
+            : "Couldn't load provider settings",
         );
       } finally {
         if (showSkeleton) {
@@ -185,7 +185,7 @@ export function ModelProviderRow({
       setSetupError(
         nextError instanceof Error
           ? nextError.message
-          : "Failed to complete sign-in",
+          : "Couldn't complete sign-in",
       );
     } finally {
       unlisten();
@@ -244,7 +244,7 @@ export function ModelProviderRow({
       setShowSavedState(true);
     } catch (nextError) {
       setError(
-        nextError instanceof Error ? nextError.message : "Failed to save",
+        nextError instanceof Error ? nextError.message : "Couldn't save",
       );
     }
   }
@@ -299,7 +299,7 @@ export function ModelProviderRow({
       setShowSavedState(false);
     } catch (nextError) {
       setError(
-        nextError instanceof Error ? nextError.message : "Failed to save",
+        nextError instanceof Error ? nextError.message : "Couldn't save",
       );
     }
   }
@@ -314,7 +314,7 @@ export function ModelProviderRow({
       setShowSavedState(false);
     } catch (nextError) {
       setError(
-        nextError instanceof Error ? nextError.message : "Failed to remove",
+        nextError instanceof Error ? nextError.message : "Couldn't remove",
       );
     }
   }

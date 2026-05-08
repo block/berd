@@ -136,19 +136,34 @@ export function getFieldSetupDescription(
 }
 
 export function renderInlineCodeMessage(message: string) {
-  const command = "`goose configure`";
-  if (!message.includes(command)) {
-    return <p className="text-xs text-muted-foreground">{message}</p>;
-  }
-
-  const [before, after] = message.split(command);
+  const tokens = message.split(/(`[^`]+`|\*\*[^*]+\*\*)/);
   return (
     <p className="text-xs text-muted-foreground">
-      {before}
-      <code className="rounded bg-muted px-1 py-0.5 text-xxs">
-        goose configure
-      </code>
-      {after}
+      {tokens.map((token, index) => {
+        if (token.startsWith("`") && token.endsWith("`")) {
+          return (
+            <code
+              // biome-ignore lint/suspicious/noArrayIndexKey: tokens come from a deterministic split of a static message
+              key={`code-${index}`}
+              className="rounded bg-muted px-1 py-0.5 text-xxs"
+            >
+              {token.slice(1, -1)}
+            </code>
+          );
+        }
+        if (token.startsWith("**") && token.endsWith("**")) {
+          return (
+            <strong
+              // biome-ignore lint/suspicious/noArrayIndexKey: tokens come from a deterministic split of a static message
+              key={`bold-${index}`}
+              className="font-medium"
+            >
+              {token.slice(2, -2)}
+            </strong>
+          );
+        }
+        return token;
+      })}
     </p>
   );
 }

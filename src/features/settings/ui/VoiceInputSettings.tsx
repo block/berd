@@ -60,7 +60,6 @@ export function VoiceInputSettings() {
   } = useAudioDevices();
   const isMicrophoneSupported =
     typeof navigator !== "undefined" && !!navigator.mediaDevices;
-  const permissionStatus = hasPermission ? "authorized" : "not_determined";
   const requestPermission = loadDevices;
 
   const refreshConfig = useCallback(async () => {
@@ -284,14 +283,6 @@ export function VoiceInputSettings() {
             </Button>
           ) : null}
         </div>
-
-        {!devicesError &&
-        !hasPermission &&
-        permissionStatus === "not_determined" ? (
-          <p className="text-xs text-muted-foreground">
-            {t("general.voiceInput.microphoneAccessPrompt")}
-          </p>
-        ) : null}
 
         {devicesError ? (
           <p className="text-xs text-muted-foreground">{devicesError}</p>

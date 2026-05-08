@@ -28,7 +28,7 @@ describe("ExtensionModal", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Delete Extension" }));
+    await user.click(screen.getByRole("button", { name: "Delete extension" }));
 
     expect(handleDelete).not.toHaveBeenCalled();
     const confirmation = screen.getByRole("dialog", {
@@ -39,7 +39,7 @@ describe("ExtensionModal", () => {
     ).toBeInTheDocument();
 
     await user.click(
-      within(confirmation).getByRole("button", { name: "Delete Extension" }),
+      within(confirmation).getByRole("button", { name: "Delete extension" }),
     );
 
     expect(handleDelete).toHaveBeenCalledWith("github");
@@ -59,7 +59,7 @@ describe("ExtensionModal", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Delete Extension" }));
+    await user.click(screen.getByRole("button", { name: "Delete extension" }));
     expect(
       screen.getByRole("dialog", {
         name: 'Delete "github" permanently?',
@@ -81,7 +81,7 @@ describe("ExtensionModal", () => {
     expect(handleDelete).not.toHaveBeenCalled();
     expect(handleClose).not.toHaveBeenCalled();
     expect(
-      screen.getByRole("dialog", { name: "Edit Extension" }),
+      screen.getByRole("dialog", { name: "Edit extension" }),
     ).toBeInTheDocument();
   });
 });
