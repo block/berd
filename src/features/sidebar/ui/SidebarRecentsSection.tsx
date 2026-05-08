@@ -20,6 +20,7 @@ export function SidebarRecentsSection({
   collapsed,
   labelTransition,
   labelVisible,
+  showEmptyState = false,
   activeSessionId,
   onNewChat,
   onSelectSession,
@@ -31,6 +32,7 @@ export function SidebarRecentsSection({
   collapsed: boolean;
   labelTransition: string;
   labelVisible: boolean;
+  showEmptyState?: boolean;
   activeSessionId?: string | null;
   onNewChat?: () => void;
   onSelectSession?: (sessionId: string) => void;
@@ -92,7 +94,7 @@ export function SidebarRecentsSection({
         >
           {t("sections.recents")}
         </span>
-        {!collapsed && onNewChat && (
+        {!collapsed && onNewChat && !showEmptyState && (
           <Button
             type="button"
             variant="ghost"
@@ -114,56 +116,82 @@ export function SidebarRecentsSection({
         )}
       </div>
 
-      {sessions.length > 0 &&
-        (collapsed ? (
-          <div className="flex flex-col items-center gap-1">
-            {sessions.map((session) => (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
+      {showEmptyState && collapsed ? (
+        <div className="flex flex-col items-center gap-1">
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            onClick={onNewChat}
+            aria-label={t("empty.startChat")}
+            title={t("empty.startChat")}
+            className="rounded-lg"
+          >
+            <IconEdit className="size-4" />
+          </Button>
+        </div>
+      ) : showEmptyState ? (
+        <div className="space-y-0.5">
+          <Button
+            type="button"
+            variant="quiet"
+            size="xs"
+            onClick={onNewChat}
+            className="h-8 w-full justify-start px-3 text-[13px] text-muted-foreground"
+            leftIcon={<IconEdit className="size-3.5" />}
+          >
+            {t("empty.startChat")}
+          </Button>
+        </div>
+      ) : sessions.length > 0 && collapsed ? (
+        <div className="flex flex-col items-center gap-1">
+          {sessions.map((session) => (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              key={session.id}
+              title={getDisplaySessionTitle(
+                session.title,
+                t("common:session.defaultTitle"),
+              )}
+              onClick={() => onSelectSession?.(session.id)}
+              className={cn(
+                "relative rounded-lg",
+                activeSessionId === session.id
+                  ? "bg-transparent text-foreground hover:bg-transparent"
+                  : "text-foreground hover:text-foreground",
+              )}
+            >
+              <IconMessage className="size-4" />
+              <SessionActivityIndicator
+                isRunning={session.isRunning}
+                hasUnread={session.hasUnread}
+                variant="overlay"
+              />
+            </Button>
+          ))}
+        </div>
+      ) : sessions.length > 0 ? (
+        <div className="space-y-0.5">
+          {sessions.map((session) => {
+            const isActive = activeSessionId === session.id;
+            return (
+              <SidebarChatRow
                 key={session.id}
-                title={getDisplaySessionTitle(
-                  session.title,
-                  t("common:session.defaultTitle"),
-                )}
-                onClick={() => onSelectSession?.(session.id)}
-                className={cn(
-                  "relative rounded-lg",
-                  activeSessionId === session.id
-                    ? "bg-transparent text-foreground hover:bg-transparent"
-                    : "text-foreground hover:text-foreground",
-                )}
-              >
-                <IconMessage className="size-4" />
-                <SessionActivityIndicator
-                  isRunning={session.isRunning}
-                  hasUnread={session.hasUnread}
-                  variant="overlay"
-                />
-              </Button>
-            ))}
-          </div>
-        ) : (
-          <div className="space-y-0.5">
-            {sessions.map((session) => {
-              const isActive = activeSessionId === session.id;
-              return (
-                <SidebarChatRow
-                  key={session.id}
-                  id={session.id}
-                  title={session.title}
-                  isActive={isActive}
-                  isRunning={session.isRunning ?? false}
-                  hasUnread={session.hasUnread ?? false}
-                  onSelect={onSelectSession}
-                  onRename={onRenameChat}
-                  onArchive={onArchiveChat}
-                />
-              );
-            })}
-          </div>
-        ))}
+                id={session.id}
+                title={session.title}
+                isActive={isActive}
+                isRunning={session.isRunning ?? false}
+                hasUnread={session.hasUnread ?? false}
+                onSelect={onSelectSession}
+                onRename={onRenameChat}
+                onArchive={onArchiveChat}
+              />
+            );
+          })}
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -63,7 +63,9 @@ export function SidebarProjectsSection({
   onReorderProject,
 }: SidebarProjectsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const showEmptyState = projects.length === 0 && !hasVisibleChats;
+  const showProjectsEmptyState = projects.length === 0;
+  const showChatsEmptyState = projectSessions.standalone.length === 0;
+  const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const emptyActionClasses =
     "h-8 w-full justify-start px-3 text-[13px] text-muted-foreground";
 
@@ -96,7 +98,7 @@ export function SidebarProjectsSection({
         >
           {t("sections.projects")}
         </span>
-        {!collapsed && !showEmptyState && (
+        {!collapsed && !showProjectsEmptyState && (
           <Button
             type="button"
             variant="ghost"
@@ -131,33 +133,22 @@ export function SidebarProjectsSection({
         onReorderProject={onReorderProject}
       />
 
-      {showEmptyState && collapsed ? (
-        <div className="flex flex-col items-center gap-1">
-          <Button
-            type="button"
-            variant="quiet"
-            size="icon-xs"
-            onClick={onCreateProject}
-            aria-label={t("empty.createProject")}
-            title={t("empty.createProject")}
-            className="rounded-lg"
-          >
-            <IconFolderPlus className="size-4" />
-          </Button>
-          <Button
-            type="button"
-            variant="quiet"
-            size="icon-xs"
-            onClick={onNewChat}
-            aria-label={t("empty.startChat")}
-            title={t("empty.startChat")}
-            className="rounded-lg"
-          >
-            <IconEdit className="size-4" />
-          </Button>
-        </div>
-      ) : showEmptyState ? (
-        <>
+      {showProjectsEmptyState &&
+        (collapsed ? (
+          <div className="flex flex-col items-center gap-1">
+            <Button
+              type="button"
+              variant="quiet"
+              size="icon-xs"
+              onClick={onCreateProject}
+              aria-label={t("empty.createProject")}
+              title={t("empty.createProject")}
+              className="rounded-lg"
+            >
+              <IconFolderPlus className="size-4" />
+            </Button>
+          </div>
+        ) : (
           <div className="space-y-0.5">
             <Button
               type="button"
@@ -170,6 +161,24 @@ export function SidebarProjectsSection({
               {t("empty.createProject")}
             </Button>
           </div>
+        ))}
+
+      {showCombinedEmptyState && collapsed ? (
+        <div className="flex flex-col items-center gap-1">
+          <Button
+            type="button"
+            variant="quiet"
+            size="icon-xs"
+            onClick={onNewChat}
+            aria-label={t("empty.startChat")}
+            title={t("empty.startChat")}
+            className="rounded-lg"
+          >
+            <IconEdit className="size-4" />
+          </Button>
+        </div>
+      ) : showCombinedEmptyState ? (
+        <>
           <div
             className={cn(
               "relative flex items-center transition-all duration-300",
@@ -207,6 +216,7 @@ export function SidebarProjectsSection({
           collapsed={collapsed}
           labelTransition={labelTransition}
           labelVisible={labelVisible}
+          showEmptyState={showChatsEmptyState}
           activeSessionId={activeSessionId}
           onNewChat={onNewChat}
           onSelectSession={onSelectSession}

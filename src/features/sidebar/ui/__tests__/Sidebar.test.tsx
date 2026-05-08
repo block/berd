@@ -1,6 +1,7 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import type { ProjectInfo } from "@/features/projects/api/projects";
 import { Sidebar } from "../Sidebar";
 
 const mockSessions: Array<{
@@ -11,6 +12,25 @@ const mockSessions: Array<{
   projectId?: string;
   archivedAt?: string;
 }> = [];
+
+function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
+  return {
+    id: "project-1",
+    path: "/tmp/project-1",
+    name: "Project One",
+    description: "",
+    prompt: "",
+    icon: "",
+    color: "",
+    preferredProvider: null,
+    preferredModel: null,
+    workingDirs: [],
+    useWorktrees: false,
+    order: 0,
+    archivedAt: null,
+    ...overrides,
+  };
+}
 
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: (selector: (state: unknown) => unknown) =>
@@ -73,6 +93,65 @@ describe("Sidebar", () => {
 
     expect(onCreateProject).toHaveBeenCalledOnce();
     expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("shows the projects empty state when chats exist", () => {
+    mockSessions.splice(0, mockSessions.length, {
+      id: "session-1",
+      title: "Agents page UI redesign",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Create a project" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Agents page UI redesign")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Start a chat" }),
+    ).not.toBeInTheDocument();
+
+    mockSessions.splice(0, mockSessions.length);
+  });
+
+  it("shows the chats empty state when only project chats exist", () => {
+    mockSessions.splice(0, mockSessions.length, {
+      id: "session-1",
+      title: "Project Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[mockProject()]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "Create a project" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start a chat" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Project One")).toBeInTheDocument();
+
+    mockSessions.splice(0, mockSessions.length);
   });
 
   it("shows sessions in recents when their project is not loaded", () => {
