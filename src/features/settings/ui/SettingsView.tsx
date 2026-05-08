@@ -1,9 +1,8 @@
+import { ArchiveSettings } from "./ArchiveSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { VoiceInputSettings } from "./VoiceInputSettings";
 import { GeneralSettings } from "./GeneralSettings";
-import { ProjectsSettings } from "./ProjectsSettings";
-import { ChatsSettings } from "./ChatsSettings";
 import type { SectionId } from "./settingsSections";
 import { PageShell } from "@/shared/ui/page-shell";
 
@@ -18,8 +17,7 @@ export function SettingsView({ activeSection }: SettingsViewProps) {
       {activeSection === "voice" && <VoiceInputSettings />}
       {activeSection === "doctor" && <DoctorSettings />}
       {activeSection === "general" && <GeneralSettings />}
-      {activeSection === "projects" && <ProjectsSettings />}
-      {activeSection === "chats" && <ChatsSettings />}
+      {activeSection === "archive" && <ArchiveSettings />}
     </PageShell>
   );
 }

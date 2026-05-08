@@ -7,7 +7,7 @@ import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import {
   DEFAULT_SETTINGS_SECTION,
-  isSettingsSection,
+  resolveSettingsSection,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
@@ -86,8 +86,7 @@ function getInitialSettingsSection(): SectionId | null {
   if (typeof window === "undefined") return null;
   if (window.location.pathname !== "/settings") return null;
   const section = new URLSearchParams(window.location.search).get("section");
-  if (!section) return DEFAULT_SETTINGS_SECTION;
-  return isSettingsSection(section) ? section : DEFAULT_SETTINGS_SECTION;
+  return resolveSettingsSection(section);
 }
 
 function setSettingsSectionUrl(section: SectionId) {
@@ -596,12 +595,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     const handleOpenSettingsEvent = (event: Event) => {
       const section = (event as CustomEvent<{ section?: string }>).detail
         ?.section;
-      if (section && isSettingsSection(section)) {
-        openSettings(section);
-        return;
-      }
-
-      openSettings();
+      openSettings(resolveSettingsSection(section ?? null));
     };
 
     window.addEventListener(

@@ -56,11 +56,7 @@
     "messageCount_one": "{{displayCount}} mensaje",
     "messageCount_other": "{{displayCount}} mensajes",
     "sectionTitle": "Chats archivados",
-    "title": "Chats",
-    "types": {
-      "project": "Chat del proyecto",
-      "standalone": "Chat independiente"
-    }
+    "title": "Chats"
   },
   "compaction": {
     "goose": {
@@ -213,14 +209,16 @@
       "deleteError": "Error al eliminar."
     }
   },
+  "archive": {
+    "title": "Archivo"
+  },
   "nav": {
     "about": "Acerca de",
     "appearance": "Apariencia",
-    "chats": "Chats",
+    "archive": "Archivo",
     "compaction": "Compactación",
     "doctor": "Diagnóstico",
     "general": "General",
-    "projects": "Proyectos",
     "providers": "Proveedores",
     "voice": "Voz"
   },
