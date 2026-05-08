@@ -8,7 +8,7 @@ default:
 
 # ── Dev Environment ──────────────────────────────────────────
 
-# Sync and build the managed local goose checkout used for Goose Internal development.
+# Sync and build the pinned managed local Goose checkout used for Goose Internal development.
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
@@ -74,7 +74,7 @@ tauri-check:
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check clippy test build
 
-# Stage GOOSE_BIN into src-tauri/binaries/goose-<target> and build bundles.
+# Stage the pinned Goose backend into src-tauri/binaries/goose-<target> and build bundles.
 bundle:
     ./scripts/prepare-goose-sidecar.sh
     pnpm tauri build
@@ -150,6 +150,10 @@ dev-debug: dev
 
 dev-frontend:
     pnpm dev
+
+# Resolve a Goose ref/tag/sha and update goose-backend.lock.json.
+bump-goose ref="main":
+    ./scripts/update-goose-backend-lock.sh "{{ ref }}"
 
 # ── Utilities ────────────────────────────────────────────────
 

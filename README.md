@@ -12,41 +12,35 @@ just dev
 ```
 
 `just setup` installs pnpm dependencies, builds the vendored `@aaif/goose-sdk`,
-and prepares a managed local Goose checkout in your platform cache directory.
-If you already have a Goose binary you want to use, set `GOOSE_BIN=/path/to/goose`
-before running `just dev`.
+and prepares the Goose backend pinned by `goose-backend.lock.json` in your
+platform cache directory. `just dev` reuses that stamped pinned binary and fails
+if the lockfile commit no longer matches the cached build.
 
-The managed Goose workflow is:
+If you already have a Goose binary you want to test, set `GOOSE_BIN=/path/to/goose`
+before running `just dev`; that is an explicit local override and bypasses the
+managed pinned checkout.
 
-```bash
-just setup # fetch and build the configured Goose branch
-just dev   # reuse the stamped local Goose binary
-```
-
-`just dev` does not update Goose or track live `origin/main`; it only verifies
-that the previously built checkout still matches its local build stamp. To pick
-up a newer Goose commit, run `just goose-sync` or `just setup` again.
-
-To build and run against a specific Goose branch, pass the same branch to both
-commands:
+To bump the default Goose backend, update the lockfile in a PR:
 
 ```bash
-GOOSE_DEV_BRANCH=my-branch just setup
-GOOSE_DEV_BRANCH=my-branch just dev
+scripts/update-goose-backend-lock.sh main # or a tag/branch/sha
+just goose-sync                          # fetch/build the new pinned commit
 ```
 
 ## Bundling
 
-Tauri bundles Goose as an external sidecar. Before a release bundle, stage the
-binary with:
+Tauri bundles Goose as an external sidecar. By default `just bundle` stages the
+pinned managed Goose binary from `goose-backend.lock.json` and then runs
+`pnpm tauri build`:
 
 ```bash
-GOOSE_BIN=/path/to/goose just stage-sidecar
-pnpm tauri build
+just bundle
 ```
 
-This creates `src-tauri/binaries/goose-<rust-host-triple>`, matching the
-`"externalBin": ["binaries/goose"]` entry in `src-tauri/tauri.conf.json`.
+You can still stage an explicit local binary with `GOOSE_BIN=/path/to/goose just
+stage-sidecar`. Staging creates `src-tauri/binaries/goose-<rust-host-triple>`,
+matching the `"externalBin": ["binaries/goose"]` entry in
+`src-tauri/tauri.conf.json`.
 
 ## Useful commands
 
@@ -54,4 +48,4 @@ This creates `src-tauri/binaries/goose-<rust-host-triple>`, matching the
 - `just test` — unit/component tests
 - `just tauri-check` — Rust type check with sidecars disabled
 - `just clippy` — Rust lint with warnings denied
-- `just bundle` — stage `GOOSE_BIN` and run `pnpm tauri build`
+- `just bundle` — stage the pinned Goose backend and run `pnpm tauri build`

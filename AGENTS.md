@@ -14,8 +14,10 @@ in Goose core and should be exposed through typed ACP methods.
 - `src-tauri/` — Tauri shell that starts or resolves `goose serve`
 - `sdk/` — vendored `@aaif/goose-sdk` package and generated ACP types
 - `distro/` — packaged distribution config/resources
+- `goose-backend.lock.json` — pinned upstream Goose backend used by dev and bundles
 - `scripts/ensure-local-goose.sh` — managed local Goose checkout for dev
-- `scripts/prepare-goose-sidecar.sh` — stages a Goose binary for Tauri bundling
+- `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling
+- `scripts/update-goose-backend-lock.sh` — resolves and records a new Goose backend pin
 
 ## Common commands
 
@@ -30,7 +32,7 @@ in Goose core and should be exposed through typed ACP methods.
 - `just tauri-check` — Rust check with external sidecars disabled
 - `just clippy` — Rust clippy with warnings denied
 - `just ci` — local validation gate: frontend checks, Tauri/Rust checks, clippy, tests, build
-- `just bundle` — stage `GOOSE_BIN` and run `pnpm tauri build`
+- `just bundle` — stage the pinned Goose backend and run `pnpm tauri build`
 
 ## When to validate
 
@@ -47,15 +49,17 @@ Write issue descriptions around the user need/story; avoid prescribing the imple
 
 ## Sidecar rule
 
-Release builds should stage Goose as a Tauri external binary:
+Release builds should use the Goose backend pinned in `goose-backend.lock.json`:
 
 ```bash
-GOOSE_BIN=/path/to/goose ./scripts/prepare-goose-sidecar.sh
+just setup
+just bundle
 ```
 
-The Tauri config uses `"externalBin": ["binaries/goose"]`; the script copies to
-`src-tauri/binaries/goose-$(rustc -vV | sed -n 's|host: ||p')`, which is the
-filename Tauri expects.
+The Tauri config uses `"externalBin": ["binaries/goose"]`; the staging script
+copies to `src-tauri/binaries/goose-$(rustc -vV | sed -n 's|host: ||p')`, which
+is the filename Tauri expects. Use `GOOSE_BIN=/path/to/goose` only as an explicit
+local override.
 
 ## Conventions
 

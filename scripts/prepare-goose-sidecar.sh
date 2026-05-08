@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage a goose binary for Tauri's externalBin bundling.
+# Stage a Goose binary for Tauri's externalBin bundling.
 #
 # Tauri expects external binaries to be present at build time with the host
 # target triple appended to the configured stem. For config
@@ -13,8 +13,10 @@ usage() {
   cat <<'USAGE'
 Usage: scripts/prepare-goose-sidecar.sh [path/to/goose]
 
-If no path is passed, GOOSE_BIN is used. The binary is copied into
-src-tauri/binaries with the host target triple suffix required by Tauri.
+If no path is passed, GOOSE_BIN is used. If GOOSE_BIN is unset, the script uses
+the pinned managed Goose binary from scripts/ensure-local-goose.sh --check-bin.
+The binary is copied into src-tauri/binaries with the host target triple suffix
+required by Tauri.
 USAGE
 }
 
@@ -25,9 +27,15 @@ fi
 
 GOOSE_SOURCE="${1:-${GOOSE_BIN:-}}"
 if [[ -z "$GOOSE_SOURCE" ]]; then
-  echo "Missing goose binary path. Pass one or set GOOSE_BIN." >&2
-  usage >&2
-  exit 1
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  GOOSE_SOURCE="$("$script_dir/ensure-local-goose.sh" --check-bin)" || {
+    rc=$?
+    if [[ $rc -eq 2 ]]; then
+      echo "Pinned Goose binary is not ready. Run 'just setup' or 'just goose-sync' first." >&2
+      exit 1
+    fi
+    exit "$rc"
+  }
 fi
 
 if [[ ! -x "$GOOSE_SOURCE" ]]; then
@@ -46,4 +54,4 @@ OUT="$OUT_DIR/goose-$TARGET"
 mkdir -p "$OUT_DIR"
 cp "$GOOSE_SOURCE" "$OUT"
 chmod +x "$OUT"
-echo "Staged goose sidecar: $OUT"
+echo "Staged Goose sidecar: $OUT"
