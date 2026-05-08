@@ -13,7 +13,7 @@ import {
 } from "@/shared/ui/alert-dialog";
 import { Separator } from "@/shared/ui/separator";
 import { Spinner } from "@/shared/ui/spinner";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import {
   getAgentProvidersFromEntries,
   getModelProvidersFromEntries,
@@ -111,9 +111,6 @@ export function ProvidersSettings() {
   const [showAllModels, setShowAllModels] = useState(false);
   const [modelOrder, setModelOrder] = useState<string[] | null>(null);
   const [customDialogOpen, setCustomDialogOpen] = useState(false);
-  const [customDialogMode, setCustomDialogMode] = useState<"create" | "edit">(
-    "create",
-  );
   const [customProviderDraft, setCustomProviderDraft] =
     useState<CustomProviderFormValues | null>(null);
   const [customProviderTemplates, setCustomProviderTemplates] = useState<
@@ -255,15 +252,6 @@ export function ProvidersSettings() {
     }
   }
 
-  async function openCreateCustomProvider() {
-    setCustomProviderError("");
-    setCustomProviderDeleteError("");
-    setCustomDialogMode("create");
-    setCustomProviderDraft(null);
-    setCustomDialogOpen(true);
-    await loadTemplates();
-  }
-
   async function openEditCustomProvider(providerId: string) {
     setCustomProviderError("");
     setCustomProviderDeleteError("");
@@ -271,7 +259,6 @@ export function ProvidersSettings() {
       const provider = readResponseToFormValue(
         await customProvidersApi.read(providerId),
       );
-      setCustomDialogMode("edit");
       setCustomProviderDraft(provider);
       setCustomDialogOpen(true);
       await loadTemplates();
@@ -338,21 +325,7 @@ export function ProvidersSettings() {
   }
 
   return (
-    <SettingsPage
-      title={t("providers.title")}
-      actions={
-        <Button
-          type="button"
-          variant="outline"
-          size="xxs"
-          onClick={() => void openCreateCustomProvider()}
-          leftIcon={<IconPlus />}
-          className="shrink-0"
-        >
-          {t("providers.custom.addButton")}
-        </Button>
-      }
-    >
+    <SettingsPage title={t("providers.title")}>
       {catalogError && (
         <div
           role="alert"
@@ -498,7 +471,7 @@ export function ProvidersSettings() {
 
       <CustomProviderDialog
         open={customDialogOpen}
-        mode={customDialogMode}
+        mode="edit"
         provider={customProviderDraft}
         templates={customProviderTemplates}
         onOpenChange={setCustomDialogOpen}

@@ -181,19 +181,12 @@ describe("ProvidersSettings", () => {
     ).toBeTruthy();
   });
 
-  it("shows the custom provider entry point near model providers", async () => {
-    const user = userEvent.setup();
+  it("does not show the custom provider creation entry point", () => {
     render(<ProvidersSettings />);
 
-    await user.click(
-      screen.getByRole("button", { name: /add custom provider/i }),
-    );
-
     expect(
-      screen.getByRole("dialog", { name: /add custom provider/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/fully custom/i)).toBeInTheDocument();
-    expect(screen.getByText(/use a template/i)).toBeInTheDocument();
+      screen.queryByRole("button", { name: /add custom provider/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows custom inventory providers with edit and delete actions", () => {
