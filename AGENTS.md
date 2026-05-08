@@ -39,6 +39,11 @@ in Goose core and should be exposed through typed ACP methods.
 - `src-tauri/`, Tauri config, sidecars, or Rust: `just tauri-check`
 - Broad/release/packaging changes: `just ci`
 
+## Linear
+
+For repo work, default Linear issues to project `Goose [Internal]`
+(`babe53a5-3fba-4ae3-97e5-3bc49f20ab51`) on team `BOT`.
+
 ## Sidecar rule
 
 Release builds should stage Goose as a Tauri external binary:
