@@ -5,6 +5,7 @@ import { Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button, buttonVariants } from "@/shared/ui/button";
+import { PageHeader, PageShell } from "@/shared/ui/page-shell";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -20,6 +21,7 @@ import {
   selectPersonas,
   selectPersonasLoading,
 } from "@/features/agents/stores/agentSelectors";
+import { AgentDetailPage } from "@/features/agents/ui/AgentDetailPage";
 import { PersonaGallery } from "@/features/agents/ui/PersonaGallery";
 import { PersonaEditor } from "@/features/agents/ui/PersonaEditor";
 import {
@@ -44,6 +46,7 @@ export function AgentsView() {
   const { t } = useTranslation(["agents", "common"]);
   const [search, setSearch] = useState("");
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
+  const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
 
   const personas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
@@ -61,6 +64,8 @@ export function AgentsView() {
   } = usePersonas();
 
   const lowerSearch = search.toLowerCase();
+  const activePersona =
+    personas.find((persona) => persona.id === activePersonaId) ?? null;
 
   const filteredPersonas = useMemo(
     () =>
@@ -130,12 +135,22 @@ export function AgentsView() {
       if (editingPersona?.id === deletingPersona.id) {
         closePersonaEditor();
       }
+      if (activePersonaId === deletingPersona.id) {
+        setActivePersonaId(null);
+      }
       toast.success(t("view.deleted", { name: deletingPersona.displayName }));
     } catch (err) {
       toast.error(formatAgentError(err, t("view.deleteFailed")));
     }
     setDeletingPersona(null);
-  }, [closePersonaEditor, deletingPersona, deletePersona, editingPersona, t]);
+  }, [
+    activePersonaId,
+    closePersonaEditor,
+    deletingPersona,
+    deletePersona,
+    editingPersona,
+    t,
+  ]);
 
   const handleExportPersona = useCallback(
     async (persona: Persona) => {
@@ -222,69 +237,8 @@ export function AgentsView() {
     }
   }, [handleImportFileBytes, t, validateImportFile]);
 
-  return (
-    <div className="flex flex-1 flex-col h-full min-h-0">
-      <div className="flex-1 overflow-y-auto min-h-0">
-        <div className="max-w-5xl mx-auto w-full px-6 py-8 space-y-5 page-transition">
-          {/* Header */}
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="text-lg font-semibold font-display tracking-tight">
-                {t("view.title")}
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                {t("view.description")}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="outline-flat"
-                size="sm"
-                onClick={() => void handleImportPicker()}
-              >
-                <Upload className="w-3.5 h-3.5" />
-                {t("common:actions.import")}
-              </Button>
-              <Button
-                type="button"
-                variant="outline-flat"
-                size="sm"
-                onClick={() => openPersonaEditor()}
-              >
-                <Plus className="w-3.5 h-3.5" />
-                {t("view.newPersona")}
-              </Button>
-            </div>
-          </div>
-
-          {/* Search */}
-          <SearchBar
-            value={search}
-            onChange={setSearch}
-            placeholder={t("view.searchPlaceholder")}
-          />
-
-          {/* Personas section */}
-          <section aria-labelledby="personas-heading">
-            <PersonaGallery
-              personas={filteredPersonas}
-              onSelectPersona={(p) => openPersonaEditor(p, "details")}
-              onEditPersona={(p) => openPersonaEditor(p, "edit")}
-              onDuplicatePersona={handleDuplicatePersona}
-              onDeletePersona={handleDeletePersona}
-              onExportPersona={handleExportPersona}
-              onCreatePersona={() => openPersonaEditor()}
-              onImportFile={handleImportFileBytes}
-              validateImportFile={validateImportFile}
-              onImportError={handleImportError}
-              isLoading={personasLoading}
-            />
-          </section>
-        </div>
-      </div>
-
-      {/* Persona editor modal */}
+  const dialogs = (
+    <>
       <PersonaEditor
         persona={editingPersona ?? undefined}
         isOpen={personaEditorOpen}
@@ -296,7 +250,6 @@ export function AgentsView() {
         onDelete={handleDeletePersona}
       />
 
-      {/* Delete confirmation dialog */}
       <AlertDialog
         open={!!deletingPersona}
         onOpenChange={(open) => !open && setDeletingPersona(null)}
@@ -325,6 +278,80 @@ export function AgentsView() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
+  );
+
+  if (activePersona) {
+    return (
+      <>
+        <AgentDetailPage
+          persona={activePersona}
+          onBack={() => setActivePersonaId(null)}
+          onEdit={(persona) => openPersonaEditor(persona, "edit")}
+          onDuplicate={handleDuplicatePersona}
+          onDelete={handleDeletePersona}
+          onExport={handleExportPersona}
+        />
+        {dialogs}
+      </>
+    );
+  }
+
+  return (
+    <PageShell>
+      <PageHeader
+        title={t("view.title")}
+        description={t("view.description")}
+        titleClassName="font-normal text-foreground"
+        actions={
+          <>
+            <Button
+              type="button"
+              variant="outline-flat"
+              size="xs"
+              onClick={() => void handleImportPicker()}
+            >
+              <Upload className="size-3.5" />
+              {t("common:actions.import")}
+            </Button>
+            <Button
+              type="button"
+              variant="outline-flat"
+              size="xs"
+              onClick={() => openPersonaEditor()}
+            >
+              <Plus className="size-3.5" />
+              {t("view.newPersona")}
+            </Button>
+          </>
+        }
+      />
+
+      <SearchBar
+        value={search}
+        onChange={setSearch}
+        placeholder={t("view.searchPlaceholder")}
+        aria-label={t("view.searchPlaceholder")}
+      />
+
+      <section aria-labelledby="personas-heading">
+        <PersonaGallery
+          personas={filteredPersonas}
+          hasAnyPersonas={personas.length > 0}
+          onSelectPersona={(p) => setActivePersonaId(p.id)}
+          onEditPersona={(p) => openPersonaEditor(p, "edit")}
+          onDuplicatePersona={handleDuplicatePersona}
+          onDeletePersona={handleDeletePersona}
+          onExportPersona={handleExportPersona}
+          onCreatePersona={() => openPersonaEditor()}
+          onImportFile={handleImportFileBytes}
+          validateImportFile={validateImportFile}
+          onImportError={handleImportError}
+          isLoading={personasLoading}
+        />
+      </section>
+
+      {dialogs}
+    </PageShell>
   );
 }

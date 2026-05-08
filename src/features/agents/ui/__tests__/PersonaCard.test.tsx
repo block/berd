@@ -22,14 +22,32 @@ describe("PersonaCard", () => {
     expect(screen.getByText("Coder")).toBeInTheDocument();
   });
 
-  it("shows built-in badge", () => {
-    render(<PersonaCard persona={makePersona({ isBuiltin: true })} />);
-    expect(screen.getByText("Built-in")).toBeInTheDocument();
+  it("does not show source tags", () => {
+    render(
+      <>
+        <PersonaCard
+          persona={makePersona({ id: "builtin", isBuiltin: true })}
+        />
+        <PersonaCard persona={makePersona({ id: "file", isFromDisk: true })} />
+      </>,
+    );
+    expect(screen.queryByText("Built-in")).not.toBeInTheDocument();
+    expect(screen.queryByText("File-backed")).not.toBeInTheDocument();
   });
 
-  it("does not show built-in badge for custom personas", () => {
-    render(<PersonaCard persona={makePersona({ isBuiltin: false })} />);
-    expect(screen.queryByText("Built-in")).not.toBeInTheDocument();
+  it("does not show provider or model metadata", () => {
+    render(
+      <PersonaCard
+        persona={makePersona({
+          displayName: "Agent One",
+          provider: "goose",
+          model: "claude-sonnet-4-20250514",
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(/goose/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/claude-sonnet/i)).not.toBeInTheDocument();
   });
 
   it("shows avatar with initial", () => {

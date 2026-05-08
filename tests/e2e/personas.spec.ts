@@ -25,13 +25,13 @@ test.describe("Agents view", () => {
     await expect(page.getByLabel("Agent: Code Reviewer")).toBeVisible();
   });
 
-  test("shows Built-in badge on built-in agents", async ({
+  test("does not show source badges on agent cards", async ({
     tauriMocked: page,
   }) => {
     await navigateToAgents(page);
 
     const soloCard = page.getByLabel("Agent: Solo");
-    await expect(soloCard.getByText("Built-in")).toBeVisible();
+    await expect(soloCard.getByText("Built-in")).not.toBeVisible();
 
     const reviewerCard = page.getByLabel("Agent: Code Reviewer");
     await expect(reviewerCard.getByText("Built-in")).not.toBeVisible();
@@ -119,16 +119,17 @@ test.describe("Agents view", () => {
     await navigateToAgents(page);
     await page.getByLabel("Agent: Code Reviewer").click();
 
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
     await expect(
-      dialog.locator("[data-slot='dialog-title']").filter({
-        hasText: "Code Reviewer",
-      }),
+      page.getByRole("button", { name: "Back to agents" }),
     ).toBeVisible();
-    await expect(dialog.getByText(/^Provider$/)).toBeVisible();
-    await expect(dialog.getByText("claude-sonnet-4-20250514")).toBeVisible();
-    await expect(dialog.getByRole("button", { name: "Edit" })).toBeVisible();
+    await expect(
+      page.locator("h1", { hasText: "Code Reviewer" }),
+    ).toBeVisible();
+    await expect(page.getByText(/^Source$/)).toBeVisible();
+    await expect(page.getByText("Custom")).toBeVisible();
+    await expect(page.getByText(/^Provider$/)).toBeVisible();
+    await expect(page.getByText("claude-sonnet-4-20250514")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
   });
 
   test("built-in agent opens read-only details with Duplicate button", async ({
@@ -137,24 +138,19 @@ test.describe("Agents view", () => {
     await navigateToAgents(page);
     await page.getByLabel("Agent: Solo").click();
 
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
     await expect(
-      dialog.locator("[data-slot='dialog-title']").filter({
-        hasText: "Solo",
-      }),
+      page.getByRole("button", { name: "Back to agents" }),
     ).toBeVisible();
+    await expect(page.locator("h1", { hasText: "Solo" })).toBeVisible();
+    await expect(page.getByText(/^Source$/)).toBeVisible();
+    await expect(page.getByText("Built-in")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Duplicate/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit" })).not.toBeVisible();
     await expect(
-      dialog.getByRole("button", { name: /Duplicate/ }),
-    ).toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Edit" }),
+      page.getByRole("button", { name: "Create" }),
     ).not.toBeVisible();
     await expect(
-      dialog.getByRole("button", { name: "Create" }),
-    ).not.toBeVisible();
-    await expect(
-      dialog.getByRole("button", { name: "Save Changes" }),
+      page.getByRole("button", { name: "Save Changes" }),
     ).not.toBeVisible();
   });
 
@@ -242,13 +238,13 @@ test.describe("Agents view", () => {
 
   test("search filters agents", async ({ tauriMocked: page }) => {
     await navigateToAgents(page);
-    await page.getByPlaceholder("Search agents...").fill("Solo");
+    await page.getByPlaceholder("Search agents").fill("Solo");
 
     await expect(page.getByLabel("Agent: Solo")).toBeVisible();
     await expect(page.getByLabel("Agent: Scout")).not.toBeVisible();
     await expect(page.getByLabel("Agent: Code Reviewer")).not.toBeVisible();
 
-    await page.getByPlaceholder("Search agents...").clear();
+    await page.getByPlaceholder("Search agents").clear();
     await expect(page.getByLabel("Agent: Solo")).toBeVisible();
     await expect(page.getByLabel("Agent: Scout")).toBeVisible();
     await expect(page.getByLabel("Agent: Code Reviewer")).toBeVisible();

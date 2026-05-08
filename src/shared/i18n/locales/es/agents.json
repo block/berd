@@ -57,7 +57,9 @@
     "createAria": "Crear nuevo agente",
     "dropFile": "o suelta un archivo",
     "loading": "Cargando agentes",
-    "new": "Nuevo agente"
+    "new": "Nuevo agente",
+    "noResults": "No se encontraron agentes",
+    "noResultsDescription": "Intenta ajustar tu búsqueda."
   },
   "statuses": {
     "error": "Error",
@@ -83,7 +85,12 @@
     "imported_other": "Se importaron {{count}} agentes.",
     "newPersona": "Nuevo agente",
     "optionsAria": "Opciones de {{name}}",
-    "searchPlaceholder": "Buscar agentes...",
-    "title": "Agentes"
+    "searchPlaceholder": "Buscar agentes",
+    "title": "Agentes",
+    "backToAgents": "Volver a agentes",
+    "created": "Creado",
+    "more": "Más",
+    "source": "Origen",
+    "updated": "Actualizado"
   }
 }

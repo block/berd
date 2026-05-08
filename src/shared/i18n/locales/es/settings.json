@@ -84,7 +84,7 @@
   "extensions": {
     "title": "Extensiones",
     "description": "Conecta Goose con apps, servicios y capacidades integradas.",
-    "search": "Buscar extensiones...",
+    "search": "Buscar extensiones",
     "empty": "No hay extensiones configuradas.",
     "noResults": "Ninguna extensión coincide con tu búsqueda.",
     "addExtension": "Agregar extensión",

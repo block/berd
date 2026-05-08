@@ -57,7 +57,9 @@
     "createAria": "Create new agent",
     "dropFile": "or drop a file",
     "loading": "Loading agents",
-    "new": "New Agent"
+    "new": "New Agent",
+    "noResults": "No agents found",
+    "noResultsDescription": "Try adjusting your search."
   },
   "statuses": {
     "error": "Error",
@@ -83,7 +85,12 @@
     "imported_other": "Imported {{count}} agents.",
     "newPersona": "New Agent",
     "optionsAria": "Options for {{name}}",
-    "searchPlaceholder": "Search agents...",
-    "title": "Agents"
+    "searchPlaceholder": "Search agents",
+    "title": "Agents",
+    "backToAgents": "Back to agents",
+    "created": "Created",
+    "more": "More",
+    "source": "Source",
+    "updated": "Updated"
   }
 }

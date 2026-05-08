@@ -21,18 +21,28 @@ interface PersonaGalleryProps {
   validateImportFile?: (file: Pick<File, "name" | "type">) => string | null;
   onImportError?: (message: string) => void;
   isLoading?: boolean;
+  hasAnyPersonas?: boolean;
 }
 
 function SkeletonCard() {
   return (
     <div
       aria-hidden="true"
-      className="flex flex-col items-center gap-3 rounded-xl border border-border p-5"
+      className="flex flex-col rounded-2xl border border-border-soft bg-background p-5"
     >
-      <Skeleton className="h-12 w-12 rounded-full" />
-      <Skeleton className="h-4 w-24" />
-      <Skeleton className="h-3 w-full" />
-      <Skeleton className="h-3 w-3/4" />
+      <div className="flex items-start justify-between gap-3">
+        <Skeleton className="h-12 w-12 rounded-full" />
+        <Skeleton className="h-6 w-6 rounded-md" />
+      </div>
+      <div className="mt-3 min-w-0 space-y-1.5">
+        <Skeleton className="h-4 w-28" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-5/6" />
+      </div>
+      <div aria-hidden="true" className="h-7 shrink-0" />
+      <div>
+        <Skeleton className="h-3 w-3/4" />
+      </div>
     </div>
   );
 }
@@ -50,6 +60,7 @@ export function PersonaGallery({
   validateImportFile,
   onImportError,
   isLoading = false,
+  hasAnyPersonas = personas.length > 0,
 }: PersonaGalleryProps) {
   const { t } = useTranslation("agents");
   const { fileInputRef, isDragOver, dropHandlers, handleFileChange } =
@@ -73,7 +84,7 @@ export function PersonaGallery({
       <div
         role="status"
         aria-label={t("gallery.loading")}
-        className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4"
+        className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
       >
         <SkeletonCard />
         <SkeletonCard />
@@ -83,8 +94,54 @@ export function PersonaGallery({
     );
   }
 
+  if (personas.length === 0) {
+    return (
+      <div
+        {...dropHandlers}
+        className={cn(
+          "flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed border-border-soft bg-muted/10 px-6 text-center",
+          isDragOver && "border-border bg-muted/30",
+        )}
+      >
+        <p className="text-sm font-medium text-foreground">
+          {hasAnyPersonas ? t("gallery.noResults") : t("view.emptyAgentsTitle")}
+        </p>
+        <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
+          {hasAnyPersonas
+            ? t("gallery.noResultsDescription")
+            : t("view.emptyAgentsDescription")}
+        </p>
+        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            aria-label={t("gallery.createAria")}
+            onClick={onCreatePersona}
+          >
+            <Plus className="size-3.5" />
+            {t("gallery.new")}
+          </Button>
+        </div>
+        {onImportFile && (
+          <>
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              {t("gallery.dropFile")}
+            </p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-4">
+    <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
       {sorted.map((persona) => (
         <PersonaCard
           key={persona.id}
@@ -98,7 +155,6 @@ export function PersonaGallery({
         />
       ))}
 
-      {/* Create new card */}
       <Button
         type="button"
         variant="ghost"
@@ -106,15 +162,15 @@ export function PersonaGallery({
         aria-label={t("gallery.createAria")}
         {...dropHandlers}
         className={cn(
-          "flex h-auto flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed p-5",
-          "text-muted-foreground",
-          "hover:border-border hover:text-muted-foreground hover:bg-accent/50",
+          "flex h-full min-h-48 w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed p-5",
+          "text-muted-foreground transition-colors",
+          "hover:border-border hover:text-foreground hover:bg-muted/20",
           isDragOver
             ? "border-border bg-muted/50 text-muted-foreground"
-            : "border-border",
+            : "border-border-soft",
         )}
       >
-        <Plus className="size-8" />
+        <Plus className="size-6" />
         <span className="text-sm font-medium">{t("gallery.new")}</span>
         {onImportFile && (
           <span className="text-[11px] text-muted-foreground">
