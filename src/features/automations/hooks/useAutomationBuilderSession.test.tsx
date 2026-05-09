@@ -386,7 +386,8 @@ describe("useAutomationBuilderSession", () => {
                     value: {
                       name: "tile__render_tile",
                       arguments: JSON.stringify({
-                        tile_type: "automation",
+                        render_type: "automation",
+                        tile_type: "summary",
                         title: "Daily sales",
                         instructions: ["Send a daily sales digest."],
                       }),

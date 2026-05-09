@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   filterAutomationTiles,
+  isBuilderBotAutomationTile,
+  isGenericAutomationTile,
   normalizeKgooseJson,
 } from "./kgooseAutomations";
 
@@ -23,13 +25,36 @@ describe("kgoose automations api helpers", () => {
     });
   });
 
-  it("keeps only tiles without a space id as automations", () => {
+  it("keeps only generic tiles without a space id as automations", () => {
     expect(
       filterAutomationTiles([
         { id: "automation-1" },
         { id: "automation-2", spaceId: null },
+        { id: "builderbot-1", type: 18 },
+        { id: "builderbot-2", type: "18" },
+        {
+          id: "builderbot-3",
+          type: "TILE_TYPE_BUILDERBOT_AUTOMATION",
+        },
+        { id: "builderbot-4", type: "builderbot_automation" },
         { id: "tile-1", spaceId: "space-1" },
       ]),
     ).toEqual([{ id: "automation-1" }, { id: "automation-2", spaceId: null }]);
+  });
+
+  it("classifies builderbot and generic automations", () => {
+    expect(isBuilderBotAutomationTile({ id: "builderbot", type: 18 })).toBe(
+      true,
+    );
+    expect(
+      isGenericAutomationTile({
+        id: "builderbot",
+        type: "TILE_TYPE_BUILDERBOT_AUTOMATION",
+      }),
+    ).toBe(false);
+    expect(isGenericAutomationTile({ id: "automation", type: 10 })).toBe(true);
+    expect(
+      isGenericAutomationTile({ id: "tile", type: 10, spaceId: "space-1" }),
+    ).toBe(false);
   });
 });

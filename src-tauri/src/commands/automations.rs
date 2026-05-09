@@ -27,6 +27,9 @@ const PUSH_MESSAGES_ENDPOINT: &str = "v3/push-messages";
 const CANCEL_LAST_USER_MESSAGE_ENDPOINT: &str = "v3/cancel-last-user-message";
 const GET_MESSAGES_SSE_ENDPOINT: &str = "v3/get-messages-sse";
 pub const AUTOMATION_BUILDER_STREAM_EVENT: &str = "automation-builder-stream";
+const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
+const DELETE_TILE_ENDPOINT: &str = "v3/delete-tile";
+const GENERATE_CRON_SCHEDULE_ENDPOINT: &str = "v3/generate-cron-schedule";
 const MAX_ERROR_BODY_CHARS: usize = 500;
 const KGOOSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -244,6 +247,72 @@ pub async fn stop_automation_builder_stream(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn update_automation_tile(
+    state: State<'_, DistroBundleState>,
+    request: Value,
+) -> Result<Value, String> {
+    let request = sanitize_update_automation_request(request)?;
+    let id = request
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "automation id must not be empty".to_string())?
+        .to_string();
+    ensure_generic_automation_tile(state.inner(), &id).await?;
+    post_kgoose_json(state.inner(), UPDATE_TILE_ENDPOINT, request).await
+}
+
+#[tauri::command]
+pub async fn delete_automation_tile(
+    state: State<'_, DistroBundleState>,
+    id: String,
+) -> Result<Value, String> {
+    let id = validate_id(id, "automation id")?;
+    ensure_generic_automation_tile(state.inner(), &id).await?;
+    post_kgoose_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
+}
+
+#[tauri::command]
+pub async fn generate_automation_schedule(
+    state: State<'_, DistroBundleState>,
+    schedule_description: String,
+    time_zone: Option<String>,
+) -> Result<Value, String> {
+    let schedule_description = validate_id(schedule_description, "schedule description")?;
+    let mut body = json!({ "scheduleDescription": schedule_description });
+    if let Some(time_zone) = time_zone.as_deref().and_then(trim_non_empty) {
+        body["timeZone"] = Value::String(time_zone);
+    }
+    post_kgoose_json(state.inner(), GENERATE_CRON_SCHEDULE_ENDPOINT, body).await
+}
+
+async fn ensure_generic_automation_tile(
+    distro_state: &DistroBundleState,
+    id: &str,
+) -> Result<(), String> {
+    let response = post_kgoose_json(distro_state, GET_TILE_ENDPOINT, json!({ "id": id })).await?;
+    let tile = response
+        .get("tileInfo")
+        .or_else(|| response.get("tile_info"))
+        .and_then(Value::as_object)
+        .ok_or_else(|| "kgoose did not return tileInfo for automation".to_string())?;
+
+    let space_id = tile.get("spaceId").or_else(|| tile.get("space_id"));
+    if !matches!(space_id, None | Some(Value::Null)) {
+        return Err("Refusing to mutate a space-scoped tile as an automation".to_string());
+    }
+
+    let tile_type = tile
+        .get("type")
+        .and_then(type_as_string)
+        .unwrap_or_default();
+    if is_builderbot_automation_type(&tile_type) {
+        return Err("Refusing to mutate builderbot automations in goose-internal".to_string());
+    }
+
+    Ok(())
+}
+
 async fn post_kgoose_json(
     distro_state: &DistroBundleState,
     endpoint: &str,
@@ -423,6 +492,109 @@ fn validate_last_event_id(value: Option<String>) -> Result<Option<HeaderValue>, 
         .transpose()
 }
 
+fn sanitize_update_automation_request(request: Value) -> Result<Value, String> {
+    let object = request
+        .as_object()
+        .ok_or_else(|| "update automation request must be an object".to_string())?;
+    let id = object
+        .get("id")
+        .and_then(Value::as_str)
+        .and_then(trim_non_empty)
+        .ok_or_else(|| "automation id must not be empty".to_string())?;
+
+    let mut sanitized = Map::new();
+    sanitized.insert("id".to_string(), Value::String(id));
+
+    if let Some(title) = trimmed_string_field(object, "title") {
+        sanitized.insert("title".to_string(), Value::String(title));
+    }
+
+    if bool_value(object.get("updateSchedule")) {
+        sanitized.insert("updateSchedule".to_string(), Value::Bool(true));
+        if let Some(schedule) = non_empty_string_field(object, "schedule") {
+            sanitized.insert("schedule".to_string(), Value::String(schedule));
+        }
+        if let Some(time_zone) = non_empty_string_field(object, "timeZone") {
+            sanitized.insert("timeZone".to_string(), Value::String(time_zone));
+        }
+    }
+
+    if bool_value(object.get("updateInstructions")) {
+        let instructions = object
+            .get("instructions")
+            .and_then(Value::as_array)
+            .ok_or_else(|| {
+                "instructions must be an array when updateInstructions is true".to_string()
+            })?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .and_then(trim_non_empty)
+                    .ok_or_else(|| "instructions must contain only non-empty strings".to_string())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        if instructions.is_empty() {
+            return Err(
+                "instructions must not be empty when updateInstructions is true".to_string(),
+            );
+        }
+
+        sanitized.insert("updateInstructions".to_string(), Value::Bool(true));
+        sanitized.insert(
+            "instructions".to_string(),
+            Value::Array(instructions.into_iter().map(Value::String).collect()),
+        );
+    }
+
+    if let Some(enable_notifications) = object.get("enableNotifications").and_then(Value::as_bool) {
+        sanitized.insert(
+            "enableNotifications".to_string(),
+            Value::Bool(enable_notifications),
+        );
+    }
+
+    if sanitized.len() == 1 {
+        return Err("At least one automation field must be provided for update".to_string());
+    }
+
+    Ok(Value::Object(sanitized))
+}
+
+fn trimmed_string_field(object: &Map<String, Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .map(str::to_string)
+}
+
+fn non_empty_string_field(object: &Map<String, Value>, key: &str) -> Option<String> {
+    object
+        .get(key)
+        .and_then(Value::as_str)
+        .and_then(trim_non_empty)
+}
+
+fn bool_value(value: Option<&Value>) -> bool {
+    matches!(value, Some(Value::Bool(true)))
+}
+
+fn type_as_string(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(value.to_lowercase()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn is_builderbot_automation_type(value: &str) -> bool {
+    matches!(
+        value,
+        "18" | "builderbot_automation" | "tile_type_builderbot_automation"
+    )
+}
+
 fn build_kgoose_url(
     endpoint: &str,
     distro_config: Option<&KgooseDistroConfig>,
@@ -518,10 +690,7 @@ fn sanitize_create_automation_tile_request(mut request: Value) -> Result<Value, 
 fn is_supported_automation_summary_type(value: &Value) -> bool {
     match value {
         Value::Number(value) => matches!(value.as_i64(), Some(4)),
-        Value::String(value) => matches!(
-            value.as_str(),
-            "TILE_TYPE_SUMMARY" | "4" | "summary"
-        ),
+        Value::String(value) => matches!(value.as_str(), "TILE_TYPE_SUMMARY" | "4" | "summary"),
         _ => false,
     }
 }
@@ -611,9 +780,7 @@ fn sanitize_builder_profile_config(value: &Value) -> Result<Value, String> {
     let preferred_model = user_profile
         .get("preferredModel")
         .and_then(Value::as_object)
-        .ok_or_else(|| {
-            "automation builder userProfile must include preferredModel".to_string()
-        })?;
+        .ok_or_else(|| "automation builder userProfile must include preferredModel".to_string())?;
     reject_unknown_keys(
         preferred_model,
         &["name", "provider"],
@@ -935,11 +1102,11 @@ fn parse_sse_event_data(event: &str, data: &str) -> Result<Option<Value>, String
 #[cfg(test)]
 mod tests {
     use super::{
-        build_kgoose_sse_url, build_kgoose_url, drain_sse_messages, parse_sse_data,
-        parse_sse_event_data, sanitize_create_automation_tile_request,
-        sanitize_push_automation_builder_messages_request, truncate_error_body,
-        validate_last_event_id, KgooseDistroConfig, SseDecoder, KGOOSE_AUTOMATIONS_BASE_URL_ENV,
-        KGOOSE_AUTOMATIONS_PATH_ENV,
+        build_kgoose_sse_url, build_kgoose_url, drain_sse_messages, is_builderbot_automation_type,
+        parse_sse_data, parse_sse_event_data, sanitize_create_automation_tile_request,
+        sanitize_push_automation_builder_messages_request, sanitize_update_automation_request,
+        truncate_error_body, validate_last_event_id, KgooseDistroConfig, SseDecoder,
+        KGOOSE_AUTOMATIONS_BASE_URL_ENV, KGOOSE_AUTOMATIONS_PATH_ENV,
     };
     use serde_json::json;
     use std::env;
@@ -1261,6 +1428,68 @@ mod tests {
                 }
             },
             "messages": [{"messageContents": [{"type": "MESSAGE_TYPE_TEXT", "text": { "text": "hello" }}]}]
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn recognizes_builderbot_automation_types() {
+        assert!(is_builderbot_automation_type("18"));
+        assert!(is_builderbot_automation_type("builderbot_automation"));
+        assert!(is_builderbot_automation_type(
+            "tile_type_builderbot_automation"
+        ));
+        assert!(!is_builderbot_automation_type("10"));
+        assert!(!is_builderbot_automation_type("tile_type_automation"));
+    }
+
+    #[test]
+    fn sanitizes_update_automation_requests() {
+        let request = sanitize_update_automation_request(json!({
+            "id": " automation-1 ",
+            "title": " Revenue digest ",
+            "schedule": "0 9 * * *",
+            "updateSchedule": true,
+            "timeZone": "America/Los_Angeles",
+            "instructions": ["Pull revenue"],
+            "updateInstructions": true,
+            "enableNotifications": true,
+            "spaceId": "must-not-forward",
+            "type": 18,
+            "latestRenderedData": {"summary": "must-not-forward"}
+        }))
+        .unwrap();
+
+        assert_eq!(
+            request,
+            json!({
+                "id": "automation-1",
+                "title": "Revenue digest",
+                "schedule": "0 9 * * *",
+                "updateSchedule": true,
+                "timeZone": "America/Los_Angeles",
+                "instructions": ["Pull revenue"],
+                "updateInstructions": true,
+                "enableNotifications": true
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_empty_update_automation_requests() {
+        assert!(sanitize_update_automation_request(json!({
+            "id": "automation-1",
+            "spaceId": null
+        }))
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_empty_instruction_updates() {
+        assert!(sanitize_update_automation_request(json!({
+            "id": "automation-1",
+            "instructions": [],
+            "updateInstructions": true
         }))
         .is_err());
     }

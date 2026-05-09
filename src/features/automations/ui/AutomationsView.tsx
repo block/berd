@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
@@ -7,24 +7,34 @@ import {
   IconCheck,
   IconClock,
   IconPlus,
+  IconPencil,
   IconPlayerPause,
   IconRefresh,
+  IconTrash,
   IconX,
 } from "@tabler/icons-react";
 import {
   type AutomationTile,
   type AutomationTileResult,
+  type UpdateAutomationTileRequest,
+  deleteAutomationTile,
+  generateAutomationSchedule,
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
+  updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import { AutomationBuilderPanel } from "@/features/automations/ui/AutomationBuilderPanel";
 import { getStableInstructionItems } from "@/features/automations/lib/stableInstructionItems";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { Input } from "@/shared/ui/input";
 import { Separator } from "@/shared/ui/separator";
 import { Spinner } from "@/shared/ui/spinner";
+import { Switch } from "@/shared/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Textarea } from "@/shared/ui/textarea";
 import { cn } from "@/shared/lib/cn";
 
 const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
@@ -331,6 +341,255 @@ function AutomationDetails({ tile }: { tile: AutomationTile }) {
   );
 }
 
+function instructionsToText(tile: AutomationTile) {
+  return (tile.instructions ?? tile.humanReadableInstructions ?? []).join("\n");
+}
+
+function textToInstructions(value: string) {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+function defaultTimeZone() {
+  return typeof Intl !== "undefined"
+    ? Intl.DateTimeFormat().resolvedOptions().timeZone
+    : "UTC";
+}
+
+function automationTimeZone(tile: AutomationTile) {
+  return tile.timeZone ?? defaultTimeZone();
+}
+
+function AutomationEditForm({
+  tile,
+  onCancel,
+  onSave,
+  isSaving,
+  saveError,
+}: {
+  tile: AutomationTile;
+  onCancel: () => void;
+  onSave: (request: UpdateAutomationTileRequest) => void;
+  isSaving: boolean;
+  saveError: string | null;
+}) {
+  const { t } = useTranslation("automations");
+  const [title, setTitle] = useState(tile.title ?? "");
+  const [schedule, setSchedule] = useState(tile.schedule ?? "");
+  const [timeZone, setTimeZone] = useState(automationTimeZone(tile));
+  const [instructions, setInstructions] = useState(instructionsToText(tile));
+  const [enableNotifications, setEnableNotifications] = useState(
+    tile.enableNotifications ?? false,
+  );
+  const [formError, setFormError] = useState<string | null>(null);
+
+  const scheduleMutation = useMutation({
+    mutationFn: () => generateAutomationSchedule(schedule, timeZone),
+    onSuccess: (response) => {
+      if (response.success === false) {
+        setFormError(response.errorMsg ?? t("edit.generateError"));
+        return;
+      }
+      if (!response.cronExpression) {
+        setFormError(t("edit.generateError"));
+        return;
+      }
+      setSchedule(response.cronExpression);
+      setFormError(null);
+    },
+    onError: (error) => {
+      setFormError(
+        error instanceof Error ? error.message : t("edit.generateError"),
+      );
+    },
+  });
+
+  useEffect(() => {
+    setTitle(tile.title ?? "");
+    setSchedule(tile.schedule ?? "");
+    setTimeZone(automationTimeZone(tile));
+    setInstructions(instructionsToText(tile));
+    setEnableNotifications(tile.enableNotifications ?? false);
+    setFormError(null);
+  }, [tile]);
+
+  const handleSave = () => {
+    if (!tile.id) return;
+
+    const nextInstructions = textToInstructions(instructions);
+    const trimmedTitle = title.trim();
+    const trimmedSchedule = schedule.trim();
+    const trimmedTimeZone = timeZone.trim();
+    const originalInstructions = instructionsToText(tile).trim();
+    const scheduleChanged = trimmedSchedule !== (tile.schedule ?? "");
+    const timeZoneChanged =
+      Boolean(trimmedTimeZone) && trimmedTimeZone !== (tile.timeZone ?? "");
+    const request: UpdateAutomationTileRequest = { id: tile.id };
+
+    if (trimmedTitle !== (tile.title ?? "")) {
+      request.title = trimmedTitle;
+    }
+
+    if (scheduleChanged || timeZoneChanged) {
+      request.updateSchedule = true;
+      if (trimmedSchedule) {
+        request.schedule = trimmedSchedule;
+      }
+      if (timeZoneChanged) {
+        request.timeZone = trimmedTimeZone;
+      }
+    }
+
+    if (instructions.trim() !== originalInstructions) {
+      if (!nextInstructions.length) {
+        setFormError(t("edit.instructionsRequired"));
+        return;
+      }
+      request.updateInstructions = true;
+      request.instructions = nextInstructions;
+    }
+
+    if (enableNotifications !== (tile.enableNotifications ?? false)) {
+      request.enableNotifications = enableNotifications;
+    }
+
+    if (Object.keys(request).length === 1) {
+      onCancel();
+      return;
+    }
+
+    setFormError(null);
+    onSave(request);
+  };
+
+  const currentError = formError ?? saveError;
+
+  return (
+    <section className="space-y-5 rounded-lg border border-border bg-background p-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-medium text-foreground">
+            {t("edit.title")}
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t("edit.description")}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={onCancel}
+            disabled={isSaving}
+          >
+            {t("actions.cancel")}
+          </Button>
+          <Button type="button" onClick={handleSave} disabled={isSaving}>
+            {isSaving ? t("actions.saving") : t("actions.save")}
+          </Button>
+        </div>
+      </div>
+
+      {currentError && (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {currentError}
+        </div>
+      )}
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <label className="grid gap-2 text-sm" htmlFor="automation-title">
+          <span className="font-medium text-foreground">
+            {t("edit.fields.title")}
+          </span>
+          <Input
+            id="automation-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            disabled={isSaving}
+          />
+        </label>
+        <label className="grid gap-2 text-sm" htmlFor="automation-timezone">
+          <span className="font-medium text-foreground">
+            {t("edit.fields.timeZone")}
+          </span>
+          <Input
+            id="automation-timezone"
+            value={timeZone}
+            onChange={(event) => setTimeZone(event.target.value)}
+            disabled={isSaving}
+          />
+        </label>
+      </div>
+
+      <label className="grid gap-2 text-sm" htmlFor="automation-schedule">
+        <span className="font-medium text-foreground">
+          {t("edit.fields.schedule")}
+        </span>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Input
+            id="automation-schedule"
+            value={schedule}
+            onChange={(event) => setSchedule(event.target.value)}
+            placeholder={t("edit.fields.schedulePlaceholder")}
+            disabled={isSaving}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => scheduleMutation.mutate()}
+            disabled={
+              isSaving || scheduleMutation.isPending || !schedule.trim()
+            }
+          >
+            {scheduleMutation.isPending
+              ? t("actions.generating")
+              : t("actions.generateCron")}
+          </Button>
+        </div>
+        <span className="text-xs text-muted-foreground">
+          {t("edit.fields.scheduleHelp")}
+        </span>
+      </label>
+
+      <label className="grid gap-2 text-sm" htmlFor="automation-instructions">
+        <span className="font-medium text-foreground">
+          {t("edit.fields.instructions")}
+        </span>
+        <Textarea
+          id="automation-instructions"
+          value={instructions}
+          onChange={(event) => setInstructions(event.target.value)}
+          className="min-h-36"
+          disabled={isSaving}
+        />
+      </label>
+
+      <label
+        className="flex items-center justify-between gap-3 rounded-lg border border-border px-3 py-2"
+        htmlFor="automation-notifications"
+      >
+        <span>
+          <span className="block text-sm font-medium text-foreground">
+            {t("edit.fields.notifications")}
+          </span>
+          <span className="block text-xs text-muted-foreground">
+            {t("edit.fields.notificationsHelp")}
+          </span>
+        </span>
+        <Switch
+          id="automation-notifications"
+          checked={enableNotifications}
+          onCheckedChange={setEnableNotifications}
+          disabled={isSaving}
+          aria-label={t("edit.fields.notifications")}
+        />
+      </label>
+    </section>
+  );
+}
+
 function TagGroup({
   title,
   values,
@@ -506,6 +765,7 @@ function RunOutput({ result }: { result: AutomationTileResult }) {
 
 export function AutomationsView() {
   const { t } = useTranslation("automations");
+  const queryClient = useQueryClient();
   const [selectedAutomationId, setSelectedAutomationId] = useState<
     string | null
   >(null);
@@ -517,6 +777,13 @@ export function AutomationsView() {
   const delayedRefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const [editingAutomationId, setEditingAutomationId] = useState<string | null>(
+    null,
+  );
+  const [deleteAutomationId, setDeleteAutomationId] = useState<string | null>(
+    null,
+  );
+  const [mutationError, setMutationError] = useState<string | null>(null);
   const scheduleLabels = {
     noSchedule: t("schedule.none"),
     paused: t("schedule.paused"),
@@ -563,6 +830,9 @@ export function AutomationsView() {
   const selectedAutomation = automations.find(
     (tile) => tile.id === selectedAutomationId,
   );
+  const deleteAutomation = automations.find(
+    (tile) => tile.id === deleteAutomationId,
+  );
 
   const detailQuery = useQuery({
     queryKey: ["automationTile", selectedAutomationId],
@@ -572,6 +842,63 @@ export function AutomationsView() {
   });
 
   const detailTile = detailQuery.data?.tileInfo ?? selectedAutomation;
+  const detailTileId = detailTile?.id;
+  const isEditing = Boolean(
+    detailTileId && detailTileId === editingAutomationId,
+  );
+  const deleteAutomationName = deleteAutomation
+    ? automationTitle(deleteAutomation, t("fallbacks.untitledAutomation"))
+    : t("fallbacks.untitledAutomation");
+
+  const invalidateAutomationQueries = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["automationTiles"] }),
+      queryClient.invalidateQueries({ queryKey: ["automationTile"] }),
+      queryClient.invalidateQueries({ queryKey: ["automationTileResults"] }),
+    ]);
+  };
+
+  const updateMutation = useMutation({
+    mutationFn: updateAutomationTile,
+    onSuccess: async (response) => {
+      if (response.success === false) {
+        setMutationError(response.errorMsg ?? t("edit.saveError"));
+        return;
+      }
+      setMutationError(null);
+      setEditingAutomationId(null);
+      await invalidateAutomationQueries();
+    },
+    onError: (error) => {
+      setMutationError(
+        error instanceof Error ? error.message : t("edit.saveError"),
+      );
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteAutomationTile,
+    onSuccess: async (response) => {
+      if (response.success === false) {
+        setMutationError(response.errorMsg ?? t("delete.error"));
+        return;
+      }
+      const nextAutomation = automations.find(
+        (tile) => tile.id && tile.id !== deleteAutomationId,
+      );
+      setMutationError(null);
+      setDeleteAutomationId(null);
+      setEditingAutomationId(null);
+      setSelectedAutomationId(nextAutomation?.id ?? null);
+      setSelectedRunKey(null);
+      await invalidateAutomationQueries();
+    },
+    onError: (error) => {
+      setMutationError(
+        error instanceof Error ? error.message : t("delete.error"),
+      );
+    },
+  });
 
   useEffect(() => {
     return () => {
@@ -647,6 +974,9 @@ export function AutomationsView() {
                       onSelect={() => {
                         if (!tile.id) return;
                         setBuilderOpen(false);
+                        setEditingAutomationId(null);
+                        setDeleteAutomationId(null);
+                        setMutationError(null);
                         setSelectedAutomationId(tile.id);
                         setSelectedRunKey(null);
                       }}
@@ -734,9 +1064,45 @@ export function AutomationsView() {
                         {t("details.stale")}
                       </Badge>
                     )}
+                    {detailTileId && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setMutationError(null);
+                            setEditingAutomationId(detailTileId);
+                          }}
+                          disabled={updateMutation.isPending}
+                        >
+                          <IconPencil aria-hidden="true" />
+                          {t("actions.edit")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          onClick={() => {
+                            setMutationError(null);
+                            setDeleteAutomationId(detailTileId);
+                          }}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <IconTrash aria-hidden="true" />
+                          {t("actions.delete")}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
               </header>
+
+              {mutationError && !isEditing && (
+                <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {mutationError}
+                </div>
+              )}
 
               <Tabs defaultValue="details" className="mt-6">
                 <TabsList variant="buttons">
@@ -748,7 +1114,20 @@ export function AutomationsView() {
                   </TabsTrigger>
                 </TabsList>
                 <TabsContent value="details" className="mt-5">
-                  <AutomationDetails tile={detailTile} />
+                  {isEditing ? (
+                    <AutomationEditForm
+                      tile={detailTile}
+                      isSaving={updateMutation.isPending}
+                      saveError={mutationError}
+                      onCancel={() => {
+                        setMutationError(null);
+                        setEditingAutomationId(null);
+                      }}
+                      onSave={(request) => updateMutation.mutate(request)}
+                    />
+                  ) : (
+                    <AutomationDetails tile={detailTile} />
+                  )}
                 </TabsContent>
                 <TabsContent value="history" className="mt-5">
                   {detailTile.id ? (
@@ -769,6 +1148,27 @@ export function AutomationsView() {
           )}
         </main>
       </div>
+      <ConfirmDialog
+        open={Boolean(deleteAutomationId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteAutomationId(null);
+          }
+        }}
+        title={t("delete.title")}
+        description={t("delete.description", {
+          name: deleteAutomationName,
+        })}
+        cancelLabel={t("actions.cancel")}
+        confirmLabel={t("actions.delete")}
+        loadingLabel={t("actions.deleting")}
+        isLoading={deleteMutation.isPending}
+        onConfirm={() => {
+          if (deleteAutomationId) {
+            deleteMutation.mutate(deleteAutomationId);
+          }
+        }}
+      />
     </div>
   );
 }

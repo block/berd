@@ -3,9 +3,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  deleteAutomationTile,
+  generateAutomationSchedule,
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
+  updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import { AutomationsView } from "./AutomationsView";
 
@@ -13,6 +16,9 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: vi.fn(),
   getAutomationTile: vi.fn(),
   getAutomationTileResults: vi.fn(),
+  updateAutomationTile: vi.fn(),
+  deleteAutomationTile: vi.fn(),
+  generateAutomationSchedule: vi.fn(),
 }));
 
 vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
@@ -97,6 +103,12 @@ describe("AutomationsView", () => {
           tileData: { summary: "Run completed." },
         },
       ],
+    });
+    vi.mocked(updateAutomationTile).mockResolvedValue({ success: true });
+    vi.mocked(deleteAutomationTile).mockResolvedValue({ success: true });
+    vi.mocked(generateAutomationSchedule).mockResolvedValue({
+      success: true,
+      cronExpression: "0 9 * * 1-5",
     });
   });
 
@@ -261,5 +273,55 @@ describe("AutomationsView", () => {
     expect(
       screen.getByText("kgoose returned no current-user automations."),
     ).toBeInTheDocument();
+  });
+
+  it("edits a generic automation", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await screen.findByText("Daily revenue digest");
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    await user.clear(screen.getByLabelText("Title"));
+    await user.type(screen.getByLabelText("Title"), "Revenue digest v2");
+    const scheduleInput = screen.getByPlaceholderText(
+      "0 9 * * * or every weekday at 9am",
+    );
+    await user.clear(scheduleInput);
+    await user.type(scheduleInput, "every weekday at 9am");
+    await user.click(screen.getByRole("button", { name: "Generate cron" }));
+
+    expect(await screen.findByDisplayValue("0 9 * * 1-5")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateAutomationTile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "automation-1",
+        title: "Revenue digest v2",
+        schedule: "0 9 * * 1-5",
+        updateSchedule: true,
+      }),
+      expect.anything(),
+    );
+  });
+
+  it("deletes a generic automation after confirmation", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await screen.findByText("Daily revenue digest");
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+
+    expect(
+      screen.getByText(/Delete "Daily revenue digest"/),
+    ).toBeInTheDocument();
+
+    const dialog = screen.getByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }));
+
+    expect(deleteAutomationTile).toHaveBeenCalledWith(
+      "automation-1",
+      expect.anything(),
+    );
   });
 });

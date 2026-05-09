@@ -39,6 +39,33 @@ export interface AutomationTile {
   };
 }
 
+export interface UpdateAutomationTileRequest {
+  id: string;
+  title?: string;
+  schedule?: string;
+  updateSchedule?: boolean;
+  timeZone?: string;
+  instructions?: string[];
+  updateInstructions?: boolean;
+  enableNotifications?: boolean;
+}
+
+export interface UpdateAutomationTileResponse {
+  success?: boolean;
+  errorMsg?: string;
+}
+
+export interface DeleteAutomationTileResponse {
+  success?: boolean;
+  errorMsg?: string;
+}
+
+export interface GenerateAutomationScheduleResponse {
+  cronExpression?: string;
+  success?: boolean;
+  errorMsg?: string;
+}
+
 export interface AutomationTileResult {
   sessionId?: string;
   tileId?: string;
@@ -71,6 +98,12 @@ const PRESERVE_NESTED_KEYS = new Set([
   "latestRenderedData",
   "tile_data",
   "tileData",
+]);
+
+const BUILDERBOT_AUTOMATION_TYPES = new Set([
+  "18",
+  "builderbot_automation",
+  "tile_type_builderbot_automation",
 ]);
 
 function snakeToCamel(value: string): string {
@@ -146,10 +179,46 @@ function asAutomationTileResultsResponse(
   };
 }
 
+function asUpdateAutomationTileResponse(
+  value: unknown,
+): UpdateAutomationTileResponse {
+  const normalized = normalizeKgooseJson(value);
+  return isRecord(normalized)
+    ? (normalized as UpdateAutomationTileResponse)
+    : {};
+}
+
+function asDeleteAutomationTileResponse(
+  value: unknown,
+): DeleteAutomationTileResponse {
+  const normalized = normalizeKgooseJson(value);
+  return isRecord(normalized)
+    ? (normalized as DeleteAutomationTileResponse)
+    : {};
+}
+
+function asGenerateAutomationScheduleResponse(
+  value: unknown,
+): GenerateAutomationScheduleResponse {
+  const normalized = normalizeKgooseJson(value);
+  return isRecord(normalized)
+    ? (normalized as GenerateAutomationScheduleResponse)
+    : {};
+}
+
+export function isBuilderBotAutomationTile(tile: AutomationTile): boolean {
+  const normalizedType = String(tile.type ?? "").toLowerCase();
+  return BUILDERBOT_AUTOMATION_TYPES.has(normalizedType);
+}
+
+export function isGenericAutomationTile(tile: AutomationTile): boolean {
+  return !tile.spaceId && !isBuilderBotAutomationTile(tile);
+}
+
 export function filterAutomationTiles(
   tiles: AutomationTile[],
 ): AutomationTile[] {
-  return tiles.filter((tile) => !tile.spaceId);
+  return tiles.filter(isGenericAutomationTile);
 }
 
 export async function getAutomationTiles(): Promise<GetAutomationTilesResponse> {
@@ -162,7 +231,11 @@ export async function getAutomationTile(
   id: string,
 ): Promise<GetAutomationTileResponse> {
   const response = await invoke<unknown>("get_automation_tile", { id });
-  return asAutomationTileResponse(response);
+  const parsed = asAutomationTileResponse(response);
+  if (parsed.tileInfo && !isGenericAutomationTile(parsed.tileInfo)) {
+    return {};
+  }
+  return parsed;
 }
 
 export async function getAutomationTileResults(
@@ -172,4 +245,29 @@ export async function getAutomationTileResults(
     tileId,
   });
   return asAutomationTileResultsResponse(response);
+}
+
+export async function updateAutomationTile(
+  request: UpdateAutomationTileRequest,
+): Promise<UpdateAutomationTileResponse> {
+  const response = await invoke<unknown>("update_automation_tile", { request });
+  return asUpdateAutomationTileResponse(response);
+}
+
+export async function deleteAutomationTile(
+  id: string,
+): Promise<DeleteAutomationTileResponse> {
+  const response = await invoke<unknown>("delete_automation_tile", { id });
+  return asDeleteAutomationTileResponse(response);
+}
+
+export async function generateAutomationSchedule(
+  scheduleDescription: string,
+  timeZone?: string,
+): Promise<GenerateAutomationScheduleResponse> {
+  const response = await invoke<unknown>("generate_automation_schedule", {
+    scheduleDescription,
+    timeZone,
+  });
+  return asGenerateAutomationScheduleResponse(response);
 }

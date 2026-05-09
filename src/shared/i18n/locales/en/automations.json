@@ -2,8 +2,21 @@
   "actions": {
     "add": "Add automation",
     "addShort": "Add",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "deleting": "Deleting...",
+    "edit": "Edit",
+    "generateCron": "Generate cron",
+    "generating": "Generating...",
     "refresh": "Refresh automations",
-    "refreshShort": "Refresh"
+    "refreshShort": "Refresh",
+    "save": "Save",
+    "saving": "Saving..."
+  },
+  "delete": {
+    "description": "Delete \"{{name}}\"? This action cannot be undone.",
+    "error": "Failed to delete automation.",
+    "title": "Delete automation"
   },
   "builder": {
     "blockedBody": "kgoose returned a tile-shaped preview that is not an automation. This builder will not approve it.",
@@ -53,6 +66,23 @@
     "subscribedLabels": "Subscribed labels",
     "timeZone": "Time zone",
     "tools": "Tools"
+  },
+  "edit": {
+    "description": "Update the generic automation settings stored in kgoose.",
+    "fields": {
+      "instructions": "Instructions",
+      "notifications": "Slack notifications",
+      "notificationsHelp": "Receive notifications when this automation succeeds, fails, or needs input.",
+      "schedule": "Schedule",
+      "scheduleHelp": "Enter a cron expression directly, or write a natural-language schedule and generate cron before saving.",
+      "schedulePlaceholder": "0 9 * * * or every weekday at 9am",
+      "timeZone": "Time zone",
+      "title": "Title"
+    },
+    "generateError": "Failed to generate a cron schedule.",
+    "instructionsRequired": "Instructions cannot be empty.",
+    "saveError": "Failed to save automation.",
+    "title": "Edit automation"
   },
   "fallbacks": {
     "never": "Never",

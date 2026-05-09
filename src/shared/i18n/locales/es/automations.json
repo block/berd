@@ -2,8 +2,21 @@
   "actions": {
     "add": "Agregar automatizacion",
     "addShort": "Agregar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "deleting": "Eliminando...",
+    "edit": "Editar",
+    "generateCron": "Generar cron",
+    "generating": "Generando...",
+    "refresh": "Actualizar automatizaciones",
     "refreshShort": "Actualizar",
-    "refresh": "Actualizar automatizaciones"
+    "save": "Guardar",
+    "saving": "Guardando..."
+  },
+  "delete": {
+    "description": "Eliminar \"{{name}}\"? Esta accion no se puede deshacer.",
+    "error": "No se pudo eliminar la automatizacion.",
+    "title": "Eliminar automatizacion"
   },
   "builder": {
     "blockedBody": "kgoose devolvio una vista previa de mosaico que no es una automatizacion. Este creador no la aprobara.",
@@ -53,6 +66,23 @@
     "subscribedLabels": "Etiquetas suscritas",
     "timeZone": "Zona horaria",
     "tools": "Herramientas"
+  },
+  "edit": {
+    "description": "Actualiza la configuracion de la automatizacion generica almacenada en kgoose.",
+    "fields": {
+      "instructions": "Instrucciones",
+      "notifications": "Notificaciones de Slack",
+      "notificationsHelp": "Recibe notificaciones cuando esta automatizacion tenga exito, falle o necesite entrada.",
+      "schedule": "Programacion",
+      "scheduleHelp": "Ingresa una expresion cron directamente, o escribe una programacion natural y genera cron antes de guardar.",
+      "schedulePlaceholder": "0 9 * * * o cada dia habil a las 9am",
+      "timeZone": "Zona horaria",
+      "title": "Titulo"
+    },
+    "generateError": "No se pudo generar una programacion cron.",
+    "instructionsRequired": "Las instrucciones no pueden estar vacias.",
+    "saveError": "No se pudo guardar la automatizacion.",
+    "title": "Editar automatizacion"
   },
   "fallbacks": {
     "never": "Nunca",
