@@ -1,6 +1,39 @@
 {
   "actions": {
+    "add": "Agregar automatizacion",
+    "addShort": "Agregar",
+    "refreshShort": "Actualizar",
     "refresh": "Actualizar automatizaciones"
+  },
+  "builder": {
+    "blockedBody": "kgoose devolvio una vista previa de mosaico que no es una automatizacion. Este creador no la aprobara.",
+    "blockedTitle": "Automatizacion rechazada",
+    "chatAriaLabel": "Chat del creador de automatizaciones",
+    "close": "Cerrar creador",
+    "create": "Crear automatizacion",
+    "created": "Creada",
+    "creating": "Creando",
+    "draft": "Borrador",
+    "emptyBody": "Describe la automatizacion que quieres que kgoose cree. El creador solo aprobara resultados con forma de automatizacion.",
+    "emptyTitle": "Describe la automatizacion",
+    "failed": "Fallida",
+    "previewAriaLabel": "Vista previa del borrador de automatizacion",
+    "previewEmptyBody": "Aparecera un borrador aqui cuando kgoose proponga una automatizacion.",
+    "previewEmptyTitle": "Aun no hay borrador",
+    "previewEyebrow": "Borrador de automatizacion",
+    "processing": "Procesando",
+    "sessionId": "Id de sesion",
+    "status": {
+      "cancelling": "Cancelando",
+      "idle": "Inactiva",
+      "needClientInput": "Necesita aprobacion",
+      "processing": "Pensando",
+      "ready": "Lista"
+    },
+    "subscriptionStatuses": "Estados de suscripcion",
+    "subtitle": "Creacion de automatizaciones con kgoose solo por texto",
+    "thinking": "Creando automatizacion",
+    "title": "Agregar automatizacion"
   },
   "details": {
     "connections": "Conexiones",
@@ -39,6 +72,7 @@
     "unavailableTitle": "Historial no disponible"
   },
   "list": {
+    "ariaLabel": "Lista de automatizaciones",
     "emptyBody": "kgoose no devolvio automatizaciones para el usuario actual.",
     "emptyTitle": "No hay automatizaciones",
     "loadErrorTitle": "No se pudieron cargar las automatizaciones"

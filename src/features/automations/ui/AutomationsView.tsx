@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import {
@@ -6,6 +6,7 @@ import {
   IconBolt,
   IconCheck,
   IconClock,
+  IconPlus,
   IconPlayerPause,
   IconRefresh,
   IconX,
@@ -17,6 +18,8 @@ import {
   getAutomationTileResults,
   getAutomationTiles,
 } from "@/features/automations/api/kgooseAutomations";
+import { AutomationBuilderPanel } from "@/features/automations/ui/AutomationBuilderPanel";
+import { getStableInstructionItems } from "@/features/automations/lib/stableInstructionItems";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Separator } from "@/shared/ui/separator";
@@ -122,19 +125,6 @@ function getRunKey(result: AutomationTileResult, index: number) {
   ]
     .map((value) => (value == null ? "" : String(value)))
     .join("|");
-}
-
-function getStableInstructionItems(instructions: string[]) {
-  const occurrences = new Map<string, number>();
-  return instructions.map((instruction) => {
-    const occurrence = occurrences.get(instruction) ?? 0;
-    occurrences.set(instruction, occurrence + 1);
-    return {
-      instruction,
-      key:
-        occurrence === 0 ? instruction : `${instruction} (${occurrence + 1})`,
-    };
-  });
 }
 
 function getOutputSummary(data: Record<string, unknown> | undefined) {
@@ -520,6 +510,13 @@ export function AutomationsView() {
     string | null
   >(null);
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [builderOpen, setBuilderOpen] = useState(false);
+  const [pendingCreatedAutomationId, setPendingCreatedAutomationId] = useState<
+    string | null
+  >(null);
+  const delayedRefetchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
   const scheduleLabels = {
     noSchedule: t("schedule.none"),
     paused: t("schedule.paused"),
@@ -548,11 +545,20 @@ export function AutomationsView() {
       selectedAutomationId &&
       automations.some((tile) => tile.id === selectedAutomationId)
     ) {
+      if (selectedAutomationId === pendingCreatedAutomationId) {
+        setPendingCreatedAutomationId(null);
+      }
+      return;
+    }
+    if (
+      selectedAutomationId &&
+      selectedAutomationId === pendingCreatedAutomationId
+    ) {
       return;
     }
     setSelectedAutomationId(automations[0]?.id ?? null);
     setSelectedRunKey(null);
-  }, [automations, selectedAutomationId]);
+  }, [automations, pendingCreatedAutomationId, selectedAutomationId]);
 
   const selectedAutomation = automations.find(
     (tile) => tile.id === selectedAutomationId,
@@ -567,13 +573,24 @@ export function AutomationsView() {
 
   const detailTile = detailQuery.data?.tileInfo ?? selectedAutomation;
 
+  useEffect(() => {
+    return () => {
+      if (delayedRefetchTimeoutRef.current) {
+        clearTimeout(delayedRefetchTimeoutRef.current);
+      }
+    };
+  }, []);
+
   return (
     <div className="h-full overflow-hidden bg-background">
       <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[360px_1fr]">
-        <aside className="min-h-0 border-b border-border lg:border-r lg:border-b-0">
+        <aside
+          className="min-h-0 border-b border-border lg:border-r lg:border-b-0"
+          aria-label={t("list.ariaLabel")}
+        >
           <div className="flex h-full min-h-0 flex-col">
             <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-              <div>
+              <div className="min-w-0">
                 <h1 className="text-xl font-medium text-foreground">
                   {t("title")}
                 </h1>
@@ -581,16 +598,30 @@ export function AutomationsView() {
                   {t("subtitle")}
                 </p>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => automationsQuery.refetch()}
-                aria-label={t("actions.refresh")}
-                title={t("actions.refresh")}
-              >
-                <IconRefresh aria-hidden="true" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBuilderOpen(true)}
+                  aria-label={t("actions.add")}
+                  title={t("actions.add")}
+                  leftIcon={<IconPlus aria-hidden="true" />}
+                >
+                  {t("actions.addShort")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => automationsQuery.refetch()}
+                  aria-label={t("actions.refresh")}
+                  title={t("actions.refresh")}
+                  leftIcon={<IconRefresh aria-hidden="true" />}
+                >
+                  {t("actions.refreshShort")}
+                </Button>
+              </div>
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -615,6 +646,7 @@ export function AutomationsView() {
                       selected={tile.id === selectedAutomationId}
                       onSelect={() => {
                         if (!tile.id) return;
+                        setBuilderOpen(false);
                         setSelectedAutomationId(tile.id);
                         setSelectedRunKey(null);
                       }}
@@ -632,7 +664,33 @@ export function AutomationsView() {
         </aside>
 
         <main className="min-h-0 overflow-y-auto">
-          {!detailTile ? (
+          {builderOpen ? (
+            <AutomationBuilderPanel
+              onClose={() => setBuilderOpen(false)}
+              onAutomationCreated={(automationId) => {
+                if (automationId) {
+                  setPendingCreatedAutomationId(automationId);
+                  setSelectedAutomationId(automationId);
+                  setSelectedRunKey(null);
+                  setBuilderOpen(false);
+                }
+                void automationsQuery.refetch().then(() => {
+                  if (!automationId) {
+                    return;
+                  }
+                  if (delayedRefetchTimeoutRef.current) {
+                    clearTimeout(delayedRefetchTimeoutRef.current);
+                  }
+                  // kgoose list propagation can lag tile creation, so refetch
+                  // once more after the immediate refresh.
+                  delayedRefetchTimeoutRef.current = setTimeout(() => {
+                    void automationsQuery.refetch();
+                    delayedRefetchTimeoutRef.current = null;
+                  }, 1_500);
+                });
+              }}
+            />
+          ) : !detailTile ? (
             <div className="flex h-full items-center justify-center p-6">
               <EmptyState
                 title={t("details.selectTitle")}

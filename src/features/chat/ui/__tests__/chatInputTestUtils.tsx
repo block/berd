@@ -47,6 +47,7 @@ export function ChatInput({
   modelStatusMessage,
   onModelChange,
   onPickerOpen,
+  enabled: projectPickerEnabled,
   selectedProjectId,
   availableProjects,
   onProjectChange,
@@ -91,6 +92,7 @@ export function ChatInput({
         onPickerOpen,
       }}
       projectPicker={{
+        enabled: projectPickerEnabled,
         selectedProjectId,
         availableProjects,
         onProjectChange,

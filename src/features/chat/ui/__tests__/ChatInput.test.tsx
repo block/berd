@@ -139,6 +139,21 @@ describe("ChatInput", () => {
     expect(input).toHaveValue("hello");
   });
 
+  it("does not send while IME composition is active", async () => {
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={onSend} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "hello");
+    fireEvent.keyDown(input, {
+      key: "Enter",
+      isComposing: true,
+    });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it("shows current model name in model picker", () => {
     render(
       <ChatInput
@@ -262,6 +277,58 @@ describe("ChatInput", () => {
   it("shows no project in the toolbar when no project is selected", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(screen.getByText("No project")).toBeInTheDocument();
+  });
+
+  it("can hide the project selector for scoped chat surfaces", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        enabled={false}
+        providers={[{ id: "kgoose", label: "kgoose" }]}
+        selectedProvider="kgoose"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    ).toHaveTextContent("kgoose");
+    expect(screen.queryByText("No project")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /select project/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("can hide scoped controls and opt out of autofocus", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        controls={{
+          agentModelPicker: false,
+          attachments: false,
+          autoFocus: false,
+          fileMentions: false,
+          projectPicker: false,
+          skills: false,
+          voice: false,
+        }}
+        providers={[{ id: "kgoose", label: "kgoose" }]}
+        selectedProvider="kgoose"
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /choose agent and model/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /select project/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /attach/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /voice dictation/i }),
+    ).toBeDisabled();
+    expect(screen.getByRole("textbox")).not.toHaveFocus();
   });
 
   it("shows the selected project name in the toolbar", () => {

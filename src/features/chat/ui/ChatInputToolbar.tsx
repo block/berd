@@ -50,6 +50,7 @@ interface ChatInputToolbarComposerActions {
   onStop?: () => void;
   onAttachFiles?: () => void;
   onAttachFolders?: () => void;
+  attachmentsEnabled?: boolean;
   disabled?: boolean;
   voiceEnabled?: boolean;
   voiceRecording?: boolean;
@@ -59,7 +60,7 @@ interface ChatInputToolbarComposerActions {
 
 interface ChatInputToolbarProps {
   personaPicker: Pick<ChatInputPersonaPicker, "selectedPersonaId">;
-  agentModelPicker: ChatInputAgentModelPicker;
+  agentModelPicker: ChatInputAgentModelPicker & { enabled?: boolean };
   projectPicker: ChatInputProjectPicker;
   contextUsage: ChatInputContextUsage;
   composerActions: ChatInputToolbarComposerActions;
@@ -92,8 +93,10 @@ export function ChatInputToolbar({
     modelStatusMessage = null,
     onModelChange,
     onPickerOpen,
+    enabled: agentModelPickerEnabled = true,
   } = agentModelPicker;
   const {
+    enabled: projectPickerEnabled = true,
     selectedProjectId = null,
     availableProjects = [],
     onProjectChange,
@@ -116,6 +119,7 @@ export function ChatInputToolbar({
     onStop,
     onAttachFiles,
     onAttachFolders,
+    attachmentsEnabled = true,
     disabled = false,
     voiceEnabled = false,
     voiceRecording = false,
@@ -218,72 +222,75 @@ export function ChatInputToolbar({
           isCompact && "flex-1",
         )}
       >
-        {(agentProviders.length > 0 || providersLoading) && (
-          <AgentModelPicker
-            agents={agentProviders}
-            selectedAgentId={selectedProvider}
-            onAgentChange={(providerId) => onProviderChange?.(providerId)}
-            currentModelId={currentModelId}
-            currentModelProviderId={currentModelProviderId}
-            currentModelName={currentModel ?? null}
-            availableModels={availableModels}
-            modelsLoading={modelsLoading}
-            modelStatusMessage={modelStatusMessage}
-            onModelChange={onModelChange}
-            onOpen={onPickerOpen}
-            loading={providersLoading}
-            isCompact={isCompact}
-            showSelectedModelInTrigger={selectedPersonaId === null}
-          />
-        )}
+        {agentModelPickerEnabled &&
+          (agentProviders.length > 0 || providersLoading) && (
+            <AgentModelPicker
+              agents={agentProviders}
+              selectedAgentId={selectedProvider}
+              onAgentChange={(providerId) => onProviderChange?.(providerId)}
+              currentModelId={currentModelId}
+              currentModelProviderId={currentModelProviderId}
+              currentModelName={currentModel ?? null}
+              availableModels={availableModels}
+              modelsLoading={modelsLoading}
+              modelStatusMessage={modelStatusMessage}
+              onModelChange={onModelChange}
+              onOpen={onPickerOpen}
+              loading={providersLoading}
+              isCompact={isCompact}
+              showSelectedModelInTrigger={selectedPersonaId === null}
+            />
+          )}
 
-        <ChatInputSelector
-          ariaLabel={t("toolbar.selectProject")}
-          value={selectedProjectId ?? NO_PROJECT_VALUE}
-          triggerLabel={projectLabel}
-          triggerTitle={projectTitle}
-          icon={<ProjectSelectorIcon icon={selectedProject?.icon} />}
-          triggerVariant="toolbar"
-          triggerSize="sm"
-          menuLabel={t("toolbar.chooseProject")}
-          contentWidth="wide"
-          sections={[
-            {
-              items: [
-                {
-                  value: NO_PROJECT_VALUE,
-                  label: t("toolbar.noProject"),
-                  description: t("toolbar.generalChatWithoutProject"),
-                  icon: <ProjectSelectorIcon />,
-                },
-                ...availableProjects.map((project) => ({
-                  value: project.id,
-                  label: project.name,
-                  description: project.workingDirs.length
-                    ? project.workingDirs.join(", ")
-                    : undefined,
-                  icon: <ProjectSelectorIcon icon={project.icon} />,
-                })),
-              ],
-            },
-            {
-              items: [
-                ...(onCreateProject
-                  ? [
-                      {
-                        value: CREATE_PROJECT_VALUE,
-                        label: t("toolbar.createProject"),
-                        icon: (
-                          <IconLibraryPlusFilled className="size-4 text-foreground" />
-                        ),
-                      },
-                    ]
-                  : []),
-              ],
-            },
-          ].filter((section) => section.items.length > 0)}
-          onValueChange={handleProjectValueChange}
-        />
+        {projectPickerEnabled ? (
+          <ChatInputSelector
+            ariaLabel={t("toolbar.selectProject")}
+            value={selectedProjectId ?? NO_PROJECT_VALUE}
+            triggerLabel={projectLabel}
+            triggerTitle={projectTitle}
+            icon={<ProjectSelectorIcon icon={selectedProject?.icon} />}
+            triggerVariant="toolbar"
+            triggerSize="sm"
+            menuLabel={t("toolbar.chooseProject")}
+            contentWidth="wide"
+            sections={[
+              {
+                items: [
+                  {
+                    value: NO_PROJECT_VALUE,
+                    label: t("toolbar.noProject"),
+                    description: t("toolbar.generalChatWithoutProject"),
+                    icon: <ProjectSelectorIcon />,
+                  },
+                  ...availableProjects.map((project) => ({
+                    value: project.id,
+                    label: project.name,
+                    description: project.workingDirs.length
+                      ? project.workingDirs.join(", ")
+                      : undefined,
+                    icon: <ProjectSelectorIcon icon={project.icon} />,
+                  })),
+                ],
+              },
+              {
+                items: [
+                  ...(onCreateProject
+                    ? [
+                        {
+                          value: CREATE_PROJECT_VALUE,
+                          label: t("toolbar.createProject"),
+                          icon: (
+                            <IconLibraryPlusFilled className="size-4 text-foreground" />
+                          ),
+                        },
+                      ]
+                    : []),
+                ],
+              },
+            ].filter((section) => section.items.length > 0)}
+            onValueChange={handleProjectValueChange}
+          />
+        ) : null}
       </div>
 
       {/* Right side: actions */}
@@ -371,36 +378,38 @@ export function ChatInputToolbar({
             </Popover>
           )}
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={disabled}
-                aria-label={t("toolbar.attach")}
-                title={t("toolbar.attach")}
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem
-                onSelect={() => onAttachFiles?.()}
-                disabled={disabled}
-              >
-                <File className="mr-2 h-4 w-4" />
-                {t("toolbar.attachFile")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onSelect={() => onAttachFolders?.()}
-                disabled={disabled}
-              >
-                <FolderOpen className="mr-2 h-4 w-4" />
-                {t("toolbar.attachFolder")}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {attachmentsEnabled && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  disabled={disabled}
+                  aria-label={t("toolbar.attach")}
+                  title={t("toolbar.attach")}
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => onAttachFiles?.()}
+                  disabled={disabled}
+                >
+                  <File className="mr-2 h-4 w-4" />
+                  {t("toolbar.attachFile")}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => onAttachFolders?.()}
+                  disabled={disabled}
+                >
+                  <FolderOpen className="mr-2 h-4 w-4" />
+                  {t("toolbar.attachFolder")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
 
           <Tooltip>
             <TooltipTrigger asChild>

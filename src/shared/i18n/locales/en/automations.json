@@ -1,6 +1,39 @@
 {
   "actions": {
-    "refresh": "Refresh automations"
+    "add": "Add automation",
+    "addShort": "Add",
+    "refresh": "Refresh automations",
+    "refreshShort": "Refresh"
+  },
+  "builder": {
+    "blockedBody": "kgoose returned a tile-shaped preview that is not an automation. This builder will not approve it.",
+    "blockedTitle": "Automation rejected",
+    "chatAriaLabel": "Automation builder chat",
+    "close": "Close builder",
+    "create": "Create automation",
+    "created": "Created",
+    "creating": "Creating",
+    "draft": "Draft",
+    "emptyBody": "Describe the automation you want kgoose to build. The builder will only approve automation-shaped tool output.",
+    "emptyTitle": "Describe the automation",
+    "failed": "Failed",
+    "previewEmptyBody": "A draft appears here after kgoose proposes an automation.",
+    "previewEmptyTitle": "No draft yet",
+    "previewEyebrow": "Automation draft",
+    "processing": "Processing",
+    "previewAriaLabel": "Automation draft preview",
+    "subscriptionStatuses": "Subscription statuses",
+    "sessionId": "Session id",
+    "status": {
+      "cancelling": "Cancelling",
+      "idle": "Idle",
+      "needClientInput": "Needs approval",
+      "processing": "Thinking",
+      "ready": "Ready"
+    },
+    "subtitle": "Text-only kgoose automation creation",
+    "thinking": "Building automation",
+    "title": "Add automation"
   },
   "details": {
     "connections": "Connections",
@@ -39,6 +72,7 @@
     "unavailableTitle": "History unavailable"
   },
   "list": {
+    "ariaLabel": "Automation list",
     "emptyBody": "kgoose returned no current-user automations.",
     "emptyTitle": "No automations",
     "loadErrorTitle": "Automations failed to load"
@@ -48,7 +82,7 @@
     "paused": "Paused",
     "pausedWithReason": "Paused: {{reason}}"
   },
-  "subtitle": "Read-only kgoose automations",
+  "subtitle": "Remote automations",
   "tabs": {
     "details": "Details",
     "history": "History"

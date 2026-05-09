@@ -33,11 +33,13 @@ export function ChatInput({
   onDraftChange,
   selectedSkills: selectedSkillsProp,
   onSkillsChange,
+  attachmentsEnabled = true,
   className,
   personaPicker,
   agentModelPicker,
   projectPicker,
   contextUsage,
+  controls,
 }: ChatInputProps) {
   const {
     onSend,
@@ -82,12 +84,24 @@ export function ChatInput({
     supportsCompactionControls,
   } = contextUsage ?? {};
   const { t } = useTranslation("chat");
+  const scopedControls = {
+    agentModelPicker: controls?.agentModelPicker ?? true,
+    attachments: controls?.attachments ?? attachmentsEnabled,
+    autoFocus: controls?.autoFocus ?? true,
+    fileMentions: controls?.fileMentions ?? true,
+    projectPicker: controls?.projectPicker ?? true,
+    skills: controls?.skills ?? true,
+    voice: controls?.voice ?? true,
+  };
   const [text, setTextRaw] = useState(initialValue);
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);
   const selectedSkills = selectedSkillsProp ?? internalSelectedSkills;
-  const setSelectedSkills = onSkillsChange ?? setInternalSelectedSkills;
+  const visibleSelectedSkills = scopedControls.skills ? selectedSkills : [];
+  const setSelectedSkills = scopedControls.skills
+    ? (onSkillsChange ?? setInternalSelectedSkills)
+    : () => {};
   const textRef = useRef(initialValue);
   useEffect(() => {
     setTextRaw(initialValue);
@@ -114,7 +128,7 @@ export function ChatInput({
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const selectedSkillsRef = useRef(selectedSkills);
-  selectedSkillsRef.current = selectedSkills;
+  selectedSkillsRef.current = visibleSelectedSkills;
 
   const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
@@ -138,8 +152,8 @@ export function ChatInput({
 
   const canSend =
     (text.trim().length > 0 ||
-      attachments.length > 0 ||
-      selectedSkills.length > 0) &&
+      (scopedControls.attachments && attachments.length > 0) ||
+      visibleSelectedSkills.length > 0) &&
     !hasQueuedMessage &&
     !disabled;
 
@@ -173,6 +187,8 @@ export function ChatInput({
   } = useMentionHandlers({
     personas,
     projectWorkingDirs: selectedProject?.workingDirs,
+    skillsEnabled: scopedControls.skills,
+    fileMentionsEnabled: scopedControls.fileMentions,
     text,
     setText,
     textareaRef,
@@ -195,7 +211,11 @@ export function ChatInput({
     return () => observer.disconnect();
   }, []);
 
-  useEffect(() => textareaRef.current?.focus(), []);
+  useEffect(() => {
+    if (scopedControls.autoFocus) {
+      textareaRef.current?.focus();
+    }
+  }, [scopedControls.autoFocus]);
 
   const { submitChatInputMessage, handleVoiceAutoSubmit } = useChatInputSubmit({
     attachmentsRef,
@@ -226,16 +246,17 @@ export function ChatInput({
     // Stop without flushing so Send uses the text already in the composer.
     // This also cancels an in-flight microphone startup.
     if (
-      dictation.isRecording ||
-      dictation.isTranscribing ||
-      dictation.isStarting()
+      scopedControls.voice &&
+      (dictation.isRecording ||
+        dictation.isTranscribing ||
+        dictation.isStarting())
     ) {
       dictation.stopRecording({ flushPending: false });
     }
 
     const submittedText = text;
-    const submittedSkills = selectedSkills;
-    const submittedAttachments = attachments;
+    const submittedSkills = visibleSelectedSkills;
+    const submittedAttachments = scopedControls.attachments ? attachments : [];
     const accepted = await submitChatInputMessage(
       submittedText,
       submittedAttachments,
@@ -262,11 +283,13 @@ export function ChatInput({
     canSend,
     clearAttachments,
     dictation,
-    selectedSkills,
+    scopedControls.attachments,
+    scopedControls.voice,
     setSelectedSkills,
     setText,
     submitChatInputMessage,
     text,
+    visibleSelectedSkills,
   ]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
@@ -290,7 +313,13 @@ export function ChatInput({
         }
       }
     }
-    if (event.key === "Enter" && !event.shiftKey && !event.altKey) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.nativeEvent.isComposing &&
+      event.nativeEvent.keyCode !== 229
+    ) {
       event.preventDefault();
       void handleSend();
     }
@@ -308,6 +337,9 @@ export function ChatInput({
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      if (!scopedControls.attachments) {
+        return;
+      }
       const files = Array.from(event.clipboardData.items)
         .filter(
           (item) => item.kind === "file" && item.type.startsWith("image/"),
@@ -322,7 +354,7 @@ export function ChatInput({
       event.preventDefault();
       void addBrowserFiles(files);
     },
-    [addBrowserFiles],
+    [addBrowserFiles, scopedControls.attachments],
   );
 
   const {
@@ -332,7 +364,7 @@ export function ChatInput({
     handleDragLeave,
     handleDrop,
   } = useAttachmentDropTarget({
-    disabled,
+    disabled: disabled || !scopedControls.attachments,
     isStreaming,
     targetRef: containerRef,
     onDropFiles: (files) => {
@@ -343,7 +375,7 @@ export function ChatInput({
     },
   });
   const { handleAttachFiles, handleAttachFolders } = useChatInputFilePicker({
-    disabled,
+    disabled: disabled || !scopedControls.attachments,
     addPathAttachments,
   });
 
@@ -367,8 +399,8 @@ export function ChatInput({
   const inputPlaceholder = getChatInputPlaceholder(
     t,
     agentDisplayName,
-    dictation.isRecording,
-    dictation.isTranscribing,
+    scopedControls.voice && dictation.isRecording,
+    scopedControls.voice && dictation.isTranscribing,
   );
 
   const handleClearStickyPersona = useCallback(() => {
@@ -428,13 +460,13 @@ export function ChatInput({
               />
 
               <ChatInputAttachments
-                attachments={attachments}
+                attachments={scopedControls.attachments ? attachments : []}
                 onRemove={removeAttachment}
               />
 
               <ChatInputSelectionChips
                 persona={stickyPersona}
-                skills={selectedSkills}
+                skills={visibleSelectedSkills}
                 onClearPersona={handleClearStickyPersona}
                 onRemoveSkill={handleRemoveSkill}
               />
@@ -473,6 +505,7 @@ export function ChatInput({
               <ChatInputToolbar
                 personaPicker={{ selectedPersonaId }}
                 agentModelPicker={{
+                  enabled: scopedControls.agentModelPicker,
                   providers,
                   providersLoading,
                   selectedProvider,
@@ -487,6 +520,8 @@ export function ChatInput({
                   onPickerOpen,
                 }}
                 projectPicker={{
+                  enabled:
+                    scopedControls.projectPicker && projectPicker?.enabled,
                   selectedProjectId,
                   availableProjects,
                   onProjectChange,
@@ -505,15 +540,19 @@ export function ChatInput({
                   canSend,
                   isStreaming,
                   hasQueuedMessage,
+                  attachmentsEnabled: scopedControls.attachments,
                   onAttachFiles: handleAttachFiles,
                   onAttachFolders: handleAttachFolders,
                   disabled,
                   onSend: handleSend,
                   onStop,
-                  voiceEnabled: dictation.isEnabled,
-                  voiceRecording: dictation.isRecording,
-                  voiceTranscribing: dictation.isTranscribing,
-                  onVoiceToggle: dictation.toggleRecording,
+                  voiceEnabled: scopedControls.voice && dictation.isEnabled,
+                  voiceRecording: scopedControls.voice && dictation.isRecording,
+                  voiceTranscribing:
+                    scopedControls.voice && dictation.isTranscribing,
+                  onVoiceToggle: scopedControls.voice
+                    ? dictation.toggleRecording
+                    : undefined,
                 }}
                 isCompact={isCompact}
               />

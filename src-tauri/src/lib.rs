@@ -4,7 +4,7 @@ mod types;
 
 use services::distro_bundle::DistroBundleState;
 use services::personas::PersonaStore;
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -13,7 +13,8 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::new()
-                .level(log::LevelFilter::Debug)
+                .level(log::LevelFilter::Info)
+                .level_for("perf", log::LevelFilter::Debug)
                 .targets([tauri_plugin_log::Target::new(
                     tauri_plugin_log::TargetKind::Stdout,
                 )])
@@ -34,6 +35,7 @@ pub fn run() {
     builder
         .setup(|app| {
             app.manage(DistroBundleState::new(app.handle()));
+            app.manage(commands::automations::AutomationStreamState::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -51,6 +53,11 @@ pub fn run() {
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,
             commands::automations::get_automation_tile_results,
+            commands::automations::create_automation_tile,
+            commands::automations::push_automation_builder_messages,
+            commands::automations::cancel_automation_builder_message,
+            commands::automations::start_automation_builder_stream,
+            commands::automations::stop_automation_builder_stream,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,
             commands::project_icons::scan_project_icons,
@@ -83,5 +90,10 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|_app, _event| {});
+        .run(|app, event| {
+            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+                app.state::<commands::automations::AutomationStreamState>()
+                    .abort_all();
+            }
+        });
 }

@@ -17,6 +17,8 @@ import { useArtifactPolicyContext } from "./ArtifactPolicyContext";
 interface MentionHandlersOptions {
   personas: Persona[];
   projectWorkingDirs?: string[] | undefined;
+  skillsEnabled?: boolean;
+  fileMentionsEnabled?: boolean;
   text: string;
   setText: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -68,6 +70,8 @@ function sameStringArray(a: string[], b: string[]): boolean {
 export function useMentionHandlers({
   personas,
   projectWorkingDirs,
+  skillsEnabled = true,
+  fileMentionsEnabled = true,
   text,
   setText,
   textareaRef,
@@ -91,6 +95,11 @@ export function useMentionHandlers({
   useEffect(() => {
     let cancelled = false;
 
+    if (!skillsEnabled) {
+      setSkillMentionItems([]);
+      return;
+    }
+
     void listSkills(normalizedProjectRoots)
       .then((skills) => {
         if (cancelled) return;
@@ -112,14 +121,14 @@ export function useMentionHandlers({
     return () => {
       cancelled = true;
     };
-  }, [normalizedProjectRoots]);
+  }, [normalizedProjectRoots, skillsEnabled]);
 
   useEffect(() => {
     // Clear stale results immediately so users never see files from the
     // previous project while the new scan is in flight.
     setProjectFilePaths([]);
 
-    if (!rootsKey) {
+    if (!fileMentionsEnabled || !rootsKey) {
       return;
     }
 
@@ -141,10 +150,14 @@ export function useMentionHandlers({
     return () => {
       cancelled = true;
     };
-  }, [rootsKey, normalizedProjectRoots]);
+  }, [rootsKey, normalizedProjectRoots, fileMentionsEnabled]);
 
   const fileMentionItems: FileMentionItem[] = useMemo(() => {
     const dedup = new Map<string, FileMentionItem>();
+
+    if (!fileMentionsEnabled) {
+      return [];
+    }
 
     for (const artifact of getAllSessionArtifacts()) {
       const key = artifact.resolvedPath.trim().toLowerCase();
@@ -169,7 +182,12 @@ export function useMentionHandlers({
     }
 
     return Array.from(dedup.values());
-  }, [getAllSessionArtifacts, projectFilePaths, normalizedProjectRoots]);
+  }, [
+    fileMentionsEnabled,
+    getAllSessionArtifacts,
+    projectFilePaths,
+    normalizedProjectRoots,
+  ]);
 
   const {
     mentionOpen,
@@ -288,9 +306,13 @@ export function useMentionHandlers({
     filteredSkills,
     filteredFiles,
     expandSkillSlashCommand: (message: string) =>
-      expandSkillSlashCommand(message, skillMentionItems),
+      skillsEnabled
+        ? expandSkillSlashCommand(message, skillMentionItems)
+        : null,
     resolveSkillSlashCommand: (message: string) =>
-      resolveSkillSlashCommand(message, skillMentionItems),
+      skillsEnabled
+        ? resolveSkillSlashCommand(message, skillMentionItems)
+        : null,
     detectMention,
     closeMention,
     navigateMention,

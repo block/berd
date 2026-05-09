@@ -15,6 +15,29 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTileResults: vi.fn(),
 }));
 
+vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
+  AutomationBuilderPanel: ({
+    onClose,
+    onAutomationCreated,
+  }: {
+    onClose: () => void;
+    onAutomationCreated?: (automationId?: string) => void;
+  }) => (
+    <section>
+      <h2>Add automation</h2>
+      <button
+        type="button"
+        onClick={() => onAutomationCreated?.("automation-3")}
+      >
+        Finish automation
+      </button>
+      <button type="button" onClick={onClose}>
+        Close builder
+      </button>
+    </section>
+  ),
+}));
+
 function renderAutomationsView() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -31,6 +54,7 @@ function renderAutomationsView() {
 
 describe("AutomationsView", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     vi.mocked(getAutomationTiles).mockResolvedValue({
       tiles: [
         {
@@ -165,6 +189,67 @@ describe("AutomationsView", () => {
       await within(main).findByText("instructions for automation-2"),
     ).toBeInTheDocument();
     expect(getAutomationTile).toHaveBeenCalledWith("automation-2");
+  });
+
+  it("opens the add automation builder inside the automations panel", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add automation" }),
+    );
+
+    expect(
+      screen.getByRole("heading", { name: "Add automation" }),
+    ).toBeInTheDocument();
+  });
+
+  it("selects an automation created by the builder", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getAutomationTiles)
+      .mockResolvedValueOnce({
+        tiles: [
+          {
+            id: "automation-1",
+            title: "Daily revenue digest",
+            latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          },
+        ],
+      })
+      .mockResolvedValue({
+        tiles: [
+          {
+            id: "automation-3",
+            title: "New automation",
+            latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          },
+        ],
+      });
+    vi.mocked(getAutomationTile).mockImplementation(async (id) => ({
+      tileInfo: {
+        id,
+        title:
+          id === "automation-3" ? "New automation" : "Daily revenue digest",
+        latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+        instructions: [`instructions for ${id}`],
+      },
+    }));
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Add automation" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Finish automation" }));
+
+    expect(await screen.findAllByText("New automation")).not.toHaveLength(0);
+    expect(
+      screen.queryByRole("heading", { name: "Add automation" }),
+    ).toBeNull();
+    expect(
+      await within(screen.getByRole("main")).findByText(
+        "instructions for automation-3",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders an empty state when no automations are returned", async () => {

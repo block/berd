@@ -73,6 +73,7 @@ export interface ChatInputAgentModelPicker {
 }
 
 export interface ChatInputProjectPicker {
+  enabled?: boolean;
   selectedProjectId?: string | null;
   availableProjects?: ProjectOption[];
   onProjectChange?: (projectId: string | null) => void;
@@ -91,15 +92,27 @@ export interface ChatInputContextUsage {
   supportsCompactionControls?: boolean;
 }
 
+export interface ChatInputControls {
+  agentModelPicker?: boolean;
+  attachments?: boolean;
+  autoFocus?: boolean;
+  fileMentions?: boolean;
+  projectPicker?: boolean;
+  skills?: boolean;
+  voice?: boolean;
+}
+
 export interface ChatInputProps {
   composerActions: ChatInputComposerActions;
   initialValue?: string;
   onDraftChange?: (text: string) => void;
   selectedSkills?: ChatSkillDraft[];
   onSkillsChange?: (skills: ChatSkillDraft[]) => void;
+  attachmentsEnabled?: boolean;
   className?: string;
   personaPicker?: ChatInputPersonaPicker;
   agentModelPicker?: ChatInputAgentModelPicker;
   projectPicker?: ChatInputProjectPicker;
   contextUsage?: ChatInputContextUsage;
+  controls?: ChatInputControls;
 }
