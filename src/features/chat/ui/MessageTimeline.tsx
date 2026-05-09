@@ -110,10 +110,15 @@ export function MessageTimeline({
       return;
     }
 
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior,
-    });
+    if (typeof container.scrollTo === "function") {
+      container.scrollTo({
+        top: container.scrollHeight,
+        behavior,
+      });
+      return;
+    }
+
+    container.scrollTop = container.scrollHeight;
   }, []);
 
   const scrollToBottomIfNearBottom = useCallback(

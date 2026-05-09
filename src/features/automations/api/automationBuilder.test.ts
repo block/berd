@@ -153,6 +153,86 @@ describe("automation builder api helpers", () => {
     );
   });
 
+  it("merges historical tool responses into matching requests and preserves payloads", () => {
+    const response = asStreamResponse({
+      get_messages_response: {
+        status: "CHAT_SESSION_STATUS_IDLE",
+        messages: [
+          {
+            id: "message-1",
+            role: "ROLE_ASSISTANT",
+            created: "1714568400000",
+            content: [
+              {
+                type: "MESSAGE_TYPE_TOOL_REQUEST",
+                tool_request: {
+                  id: "tool-1",
+                  status: "success",
+                  value: {
+                    name: "linear__search",
+                    arguments: JSON.stringify({ query: "revenue" }),
+                  },
+                },
+              },
+            ],
+          },
+          {
+            id: "message-2",
+            role: "ROLE_ASSISTANT",
+            created: "1714568401000",
+            content: [
+              {
+                type: "MESSAGE_TYPE_TOOL_RESPONSE",
+                tool_response: {
+                  id: "tool-1",
+                  status: "success",
+                  extension_name: "linear",
+                  results: [
+                    { text: { text: "Found 2 issues." } },
+                    {
+                      structured_content: {
+                        issues: [{ identifier: "ENG-1" }],
+                      },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(response?.type).toBe("messages");
+    if (response?.type !== "messages") return;
+
+    expect(response.response.messages).toHaveLength(1);
+    expect(response.response.messages[0].content).toMatchObject([
+      {
+        type: "toolRequest",
+        id: "tool-1",
+        name: "linear__search",
+        status: "completed",
+        arguments: { query: "revenue" },
+      },
+      {
+        type: "toolResponse",
+        id: "tool-1",
+        name: "linear",
+        result: "Found 2 issues.",
+        structuredContent: {
+          id: "tool-1",
+          status: "success",
+          extensionName: "linear",
+          results: [
+            { text: { text: "Found 2 issues." } },
+            { structuredContent: { issues: [{ identifier: "ENG-1" }] } },
+          ],
+        },
+      },
+    ]);
+  });
+
   it("appends streaming text deltas into one assistant message", () => {
     const first = applyAutomationBuilderDelta([], {
       streamingMessageId: "stream-1",
@@ -226,6 +306,31 @@ describe("automation builder api helpers", () => {
     expect(response?.type === "messages" && response.response.messages).toEqual(
       [],
     );
+  });
+
+  it("maps redacted thinking before generic thinking content", () => {
+    const response = asStreamResponse({
+      get_messages_response: {
+        status: "CHAT_SESSION_STATUS_IDLE",
+        messages: [
+          {
+            id: "message-1",
+            role: "ROLE_ASSISTANT",
+            content: [
+              {
+                type: "MESSAGE_TYPE_REDACTED_THINKING",
+                redacted_thinking: { data: "redacted" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    expect(response?.type).toBe("messages");
+    expect(
+      response?.type === "messages" && response.response.messages[0].content,
+    ).toEqual([{ type: "redactedThinking" }]);
   });
 
   it("accepts automation-rendered summary previews and blocks dashboard tiles", () => {

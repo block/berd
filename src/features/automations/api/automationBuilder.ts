@@ -3,10 +3,16 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import {
   createSystemNotificationMessage,
   type Message,
-  type MessageContent,
-  type MessageRole,
 } from "@/shared/types/messages";
-import { normalizeKgooseJson, type KgooseJson } from "./kgooseAutomations";
+import { normalizeKgooseJson, type KgooseJson } from "./kgooseJson";
+import {
+  applyKgooseMessageDelta,
+  asKgooseMessagesResponse,
+  asKgooseStreamResponse,
+  type KgooseMessageDelta,
+  type KgooseMessagesResponse,
+  type KgooseSessionStatus,
+} from "./kgooseSessionMessages";
 
 export const AUTOMATION_BUILDER_STREAM_EVENT = "automation-builder-stream";
 export const AUTOMATION_APPROVAL_TOOL_NAME = "tile__preview_automation";
@@ -26,15 +32,7 @@ const AUTOMATION_BUILDER_MODEL = {
 const AUTOMATION_PREFERENCE_PROMPT =
   "The user came from the Create Automation UI. Only create an automation; dashboard tiles and builderbot automations are not supported in this app. For previews, use tile__render_tile with render_type='automation' and tile_type='summary'. Before calling render_tile, always call tile__describe_tile('summary') FIRST and shape the data argument to that schema exactly. render_type='automation' does not change the summary schema: data must be exactly { title: string, summary: string, details: string }, with details as a markdown string. Do not use any other tile_type. Do not set space_id or spaceId; external systems persist the accepted summary preview as an automation outside the dashboard. The automation instructions you generate must end with a step that explicitly says to call tile__render_tile with render_type='automation', tile_type='summary', schema-valid summary data, and schedule.";
 
-export type AutomationBuilderStatus =
-  | "initialized"
-  | "idle"
-  | "processing"
-  | "needClientInput"
-  | "terminated"
-  | "cancelling"
-  | "waitingForPermission"
-  | "unknown";
+export type AutomationBuilderStatus = KgooseSessionStatus;
 
 export interface AutomationBuilderStreamEvent {
   streamId: string;
@@ -68,58 +66,9 @@ export interface CreateAutomationTileResponse {
   errorMsg?: string;
 }
 
-interface KgooseMessageContent {
-  type?: string | number;
-  text?: { text?: string };
-  toolRequest?: {
-    id?: string;
-    status?: string;
-    value?: {
-      name?: string;
-      arguments?: string;
-      needsApproval?: boolean;
-    };
-    error?: string;
-    tooltip?: string;
-    tooltipCategory?: string;
-  };
-  toolResponse?: {
-    id?: string;
-    status?: string;
-    results?: Array<{ text?: { text?: string } }>;
-    error?: string;
-    extensionName?: string;
-  };
-  thinking?: { thinking?: string };
-  redactedThinking?: { data?: string };
-}
+export type AutomationBuilderMessagesResponse = KgooseMessagesResponse;
 
-interface KgooseMessage {
-  id?: string;
-  role?: string | number;
-  created?: string | number;
-  content?: KgooseMessageContent[];
-  messageContents?: KgooseMessageContent[];
-  deleted?: boolean;
-  llmCallErrorInfo?: {
-    isError?: boolean;
-    cause?: string;
-  };
-}
-
-export interface AutomationBuilderMessagesResponse {
-  messages: Message[];
-  nextCursor?: string;
-  status: AutomationBuilderStatus;
-  sessionName?: string;
-}
-
-export interface AutomationBuilderDelta {
-  streamingMessageId?: string;
-  messageContent?: KgooseMessageContent;
-  isFinal?: boolean;
-  isStart?: boolean;
-}
+export type AutomationBuilderDelta = KgooseMessageDelta;
 
 export interface AutomationDraft {
   toolRequestId: string;
@@ -151,25 +100,10 @@ function asRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {};
 }
 
-function recordArray(value: unknown): Record<string, unknown>[] {
-  return Array.isArray(value) ? value.filter(isRecord) : [];
-}
-
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
     : [];
-}
-
-function parseArguments(value: unknown): Record<string, unknown> {
-  if (isRecord(value)) return value;
-  if (typeof value !== "string" || !value.trim()) return {};
-  try {
-    const parsed = JSON.parse(value);
-    return asRecord(normalizeKgooseJson(parsed));
-  } catch {
-    return {};
-  }
 }
 
 function enumLabel(value: string | number | undefined): string {
@@ -195,144 +129,10 @@ function hasSummaryTileType(args: Record<string, unknown>): boolean {
   );
 }
 
-function isErrorStatus(value: string | number | undefined): boolean {
-  return enumLabel(value).toLowerCase().includes("error");
-}
-
-function mapRole(value: string | number | undefined): MessageRole {
-  const normalized = enumLabel(value).toLowerCase();
-  if (normalized.includes("user") || value === 1) return "user";
-  if (normalized.includes("system") || value === 3) return "system";
-  return "assistant";
-}
-
-function mapTimestamp(value: string | number | undefined): number {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) && numeric > 0 ? numeric : Date.now();
-}
-
-function mapContent(
-  content: KgooseMessageContent,
-  index: number,
-): MessageContent | null {
-  const type = enumLabel(content.type);
-  if (content.text || type.includes("TEXT")) {
-    return {
-      type: "text",
-      text: content.text?.text ?? "",
-    };
-  }
-
-  if (content.toolRequest || type.includes("TOOL_REQUEST")) {
-    const request = content.toolRequest ?? {};
-    const tool = request.value ?? {};
-    const argumentsObject = parseArguments(tool.arguments);
-    return {
-      type: "toolRequest",
-      id: request.id ?? `tool-request-${index}`,
-      name: tool.name ?? "tool request",
-      toolName: tool.name,
-      extensionName: tool.name?.split("__")[0],
-      arguments: argumentsObject,
-      status: request.status === "error" ? "failed" : "pending",
-    };
-  }
-
-  if (content.toolResponse || type.includes("TOOL_RESPONSE")) {
-    const response = content.toolResponse ?? {};
-    const isError = isErrorStatus(response.status) || Boolean(response.error);
-    return {
-      type: "toolResponse",
-      id: response.id ?? `tool-response-${index}`,
-      name: response.extensionName ?? "tool response",
-      result:
-        response.error ??
-        response.results
-          ?.map((result) => result.text?.text)
-          .filter(Boolean)
-          .join("\n") ??
-        "",
-      isError,
-    };
-  }
-
-  if (content.thinking || type.includes("THINKING")) {
-    return {
-      type: "thinking",
-      text: content.thinking?.thinking ?? "",
-    };
-  }
-
-  if (content.redactedThinking || type.includes("REDACTED_THINKING")) {
-    return { type: "redactedThinking" };
-  }
-
-  return null;
-}
-
-function mapKgooseMessage(message: KgooseMessage): Message | null {
-  if (message.deleted) return null;
-  const contents = message.content ?? message.messageContents ?? [];
-  const mappedContent = contents
-    .map(mapContent)
-    .filter((content): content is MessageContent => Boolean(content))
-    .filter((content) => {
-      return content.type !== "text" || content.text.trim().length > 0;
-    });
-  if (message.llmCallErrorInfo?.isError && message.llmCallErrorInfo.cause) {
-    mappedContent.push({
-      type: "systemNotification",
-      notificationType: "error",
-      text: message.llmCallErrorInfo.cause,
-    });
-  }
-  if (!mappedContent.length) return null;
-
-  return {
-    id: message.id ?? crypto.randomUUID(),
-    role: mapRole(message.role),
-    created: mapTimestamp(message.created),
-    content: mappedContent,
-    metadata: {
-      userVisible: true,
-      agentVisible: true,
-    },
-  };
-}
-
-function statusFromKgoose(
-  value: string | number | undefined,
-): AutomationBuilderStatus {
-  const normalized = enumLabel(value).toLowerCase();
-  if (normalized.includes("initialized") || value === 1) return "initialized";
-  if (normalized.includes("idle") || value === 2) return "idle";
-  if (normalized.includes("processing") || value === 3) return "processing";
-  if (normalized.includes("need_client_input") || value === 4) {
-    return "needClientInput";
-  }
-  if (normalized.includes("terminated") || value === 5) return "terminated";
-  if (normalized.includes("cancelling") || value === 6) return "cancelling";
-  if (normalized.includes("waiting_for_permission") || value === 7) {
-    return "waitingForPermission";
-  }
-  return "unknown";
-}
-
 export function asMessagesResponse(
   value: unknown,
 ): AutomationBuilderMessagesResponse {
-  const normalized = normalizeKgooseJson(value);
-  const record = asRecord(normalized);
-  return {
-    messages: recordArray(record.messages)
-      .map((message) => mapKgooseMessage(message as KgooseMessage))
-      .filter((message): message is Message => Boolean(message)),
-    nextCursor:
-      typeof record.nextCursor === "string" ? record.nextCursor : undefined,
-    status: statusFromKgoose(record.status as string | number | undefined),
-    sessionName:
-      typeof record.sessionName === "string" ? record.sessionName : undefined,
-  };
+  return asKgooseMessagesResponse(value);
 }
 
 export function asStreamResponse(
@@ -341,103 +141,14 @@ export function asStreamResponse(
   | { type: "messages"; response: AutomationBuilderMessagesResponse }
   | { type: "delta"; delta: AutomationBuilderDelta }
   | null {
-  const normalized = normalizeKgooseJson(value);
-  const record = asRecord(normalized);
-  if (record.getMessagesResponse) {
-    return {
-      type: "messages",
-      response: asMessagesResponse(record.getMessagesResponse),
-    };
-  }
-  if (record.deltaMessageContent) {
-    const deltaRecord = asRecord(record.deltaMessageContent);
-    const messageContent = asRecord(deltaRecord.messageContent);
-    if (
-      typeof deltaRecord.streamingMessageId !== "string" ||
-      !deltaRecord.streamingMessageId.trim() ||
-      !Object.keys(messageContent).length
-    ) {
-      return null;
-    }
-    return {
-      type: "delta",
-      delta: {
-        streamingMessageId: deltaRecord.streamingMessageId,
-        messageContent: messageContent as KgooseMessageContent,
-        isFinal:
-          typeof deltaRecord.isFinal === "boolean"
-            ? deltaRecord.isFinal
-            : undefined,
-        isStart:
-          typeof deltaRecord.isStart === "boolean"
-            ? deltaRecord.isStart
-            : undefined,
-      },
-    };
-  }
-  return null;
+  return asKgooseStreamResponse(value);
 }
 
 export function applyAutomationBuilderDelta(
   messages: Message[],
   delta: AutomationBuilderDelta,
 ): Message[] {
-  const messageId = delta.streamingMessageId;
-  if (!messageId || !delta.messageContent) return messages;
-  const mappedContent = mapContent(delta.messageContent, 0);
-  if (!mappedContent || mappedContent.type !== "text") return messages;
-  const text = mappedContent.text;
-
-  const existingIndex = messages.findIndex(
-    (message) => message.id === messageId,
-  );
-  if (existingIndex === -1) {
-    return [
-      ...messages,
-      {
-        id: messageId,
-        role: "assistant",
-        created: Date.now(),
-        content: [{ type: "text", text }],
-        metadata: {
-          userVisible: true,
-          agentVisible: true,
-          completionStatus: delta.isFinal ? "completed" : "inProgress",
-        },
-      },
-    ];
-  }
-
-  return messages.map((message, index) => {
-    if (index !== existingIndex) return message;
-    const content = [...message.content];
-    const lastTextIndex = content.findLastIndex((item) => item.type === "text");
-    if (lastTextIndex === -1) {
-      content.push({ type: "text", text });
-    } else if (delta.isStart) {
-      const existingText = content[lastTextIndex];
-      if (existingText.type === "text" && existingText.text === text) {
-        return message;
-      }
-      content.push({ type: "text", text });
-    } else {
-      const existingText = content[lastTextIndex];
-      if (existingText.type === "text") {
-        content[lastTextIndex] = {
-          ...existingText,
-          text: `${existingText.text}${text}`,
-        };
-      }
-    }
-    return {
-      ...message,
-      content,
-      metadata: {
-        ...message.metadata,
-        completionStatus: delta.isFinal ? "completed" : "inProgress",
-      },
-    };
-  });
+  return applyKgooseMessageDelta(messages, delta);
 }
 
 export function findAutomationDraftState(

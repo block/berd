@@ -114,45 +114,50 @@ describe("AutomationsView", () => {
     });
     vi.mocked(getAutomationSessionMessages).mockResolvedValue({
       sessionName: "Daily revenue digest run",
-      status: "CHAT_SESSION_STATUS_IDLE",
+      status: "idle",
       messages: [
         {
           id: "message-1",
-          role: "ROLE_USER",
-          created: "1714568300000",
-          content: [{ type: "MESSAGE_TYPE_TEXT", text: { text: "Run now" } }],
+          role: "user",
+          created: 1714568300000,
+          content: [{ type: "text", text: "Run now" }],
         },
         {
           id: "message-2",
-          role: "ROLE_ASSISTANT",
-          created: "1714568400000",
+          role: "assistant",
+          created: 1714568400000,
           content: [
             {
-              type: "MESSAGE_TYPE_TOOL_RESPONSE",
-              toolResponse: {
-                id: "tool-response-1",
+              type: "toolRequest",
+              id: "tool-1",
+              name: "slack",
+              toolName: "slack",
+              arguments: { channel: "revenue" },
+              status: "completed",
+            },
+            {
+              type: "toolResponse",
+              id: "tool-1",
+              name: "slack",
+              result: "Fetched 3 Slack messages from #revenue.",
+              structuredContent: {
+                id: "tool-1",
                 status: "success",
                 extensionName: "slack",
                 results: [
-                  {
-                    text: {
-                      text: "Fetched 3 Slack messages from #revenue.",
-                    },
-                  },
+                  { text: { text: "Fetched 3 Slack messages from #revenue." } },
                   {
                     structuredContent: {
-                      data: {
-                        channel: "revenue",
-                        count: 3,
-                      },
+                      data: { channel: "revenue", count: 3 },
                     },
                   },
                 ],
               },
+              isError: false,
             },
             {
-              type: "MESSAGE_TYPE_TEXT",
-              text: { text: "The automation finished." },
+              type: "text",
+              text: "The automation finished.",
             },
           ],
         },
@@ -187,9 +192,9 @@ describe("AutomationsView", () => {
     expect(
       screen.getByText("Fetched 3 Slack messages from #revenue."),
     ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: /Tool response · slack · success/i }),
-    );
+    const slackToolButton = screen.getByText("slack").closest("button");
+    expect(slackToolButton).not.toBeNull();
+    await user.click(slackToolButton as HTMLButtonElement);
     expect(screen.getByText(/"channel": "revenue"/)).toBeInTheDocument();
     expect(screen.getByText("The automation finished.")).toBeInTheDocument();
     expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");

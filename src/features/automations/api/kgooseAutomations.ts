@@ -1,14 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
+import { normalizeKgooseJson } from "./kgooseJson";
+import {
+  asKgooseMessagesResponse,
+  type KgooseMessagesResponse,
+} from "./kgooseSessionMessages";
 
-export type KgooseJson =
-  | null
-  | boolean
-  | number
-  | string
-  | KgooseJson[]
-  | {
-      [key: string]: KgooseJson;
-    };
+export { normalizeKgooseJson, type KgooseJson } from "./kgooseJson";
 
 export interface AutomationTile {
   id?: string;
@@ -78,43 +75,6 @@ export interface AutomationTileResult {
   tileSchemaVersion?: number;
 }
 
-export interface AutomationSessionMessageContent {
-  type?: string | number;
-  text?: { text?: string } | string;
-  toolRequest?: {
-    id?: string;
-    status?: string;
-    value?: {
-      name?: string;
-      arguments?: unknown;
-      tooltip?: string;
-      needsApproval?: boolean;
-    };
-    name?: string;
-    arguments?: unknown;
-    tooltip?: string;
-    error?: string;
-  };
-  toolResponse?: {
-    id?: string;
-    status?: string;
-    results?: unknown[];
-    error?: string;
-    extensionName?: string;
-  };
-  thinking?: { text?: string } | string;
-  summary?: { text?: string } | string;
-}
-
-export interface AutomationSessionMessage {
-  id?: string;
-  role?: string | number;
-  created?: string;
-  content?: AutomationSessionMessageContent[];
-  deleted?: boolean;
-  hidden?: boolean;
-}
-
 export interface GetAutomationTilesResponse {
   tiles: AutomationTile[];
 }
@@ -130,55 +90,13 @@ export interface GetAutomationTileResultsResponse {
   costLastUpdated?: string;
 }
 
-export interface GetAutomationSessionMessagesResponse {
-  messages: AutomationSessionMessage[];
-  sessionName?: string;
-  status?: string | number;
-}
-
-const PRESERVE_NESTED_KEYS = new Set([
-  "latest_rendered_data",
-  "latestRenderedData",
-  "tile_data",
-  "tileData",
-]);
+export type GetAutomationSessionMessagesResponse = KgooseMessagesResponse;
 
 const BUILDERBOT_AUTOMATION_TYPES = new Set([
   "18",
   "builderbot_automation",
   "tile_type_builderbot_automation",
 ]);
-
-function snakeToCamel(value: string): string {
-  return value.replace(/_([a-z])/g, (_, letter: string) =>
-    letter.toUpperCase(),
-  );
-}
-
-export function normalizeKgooseJson(value: unknown): unknown {
-  if (value === null || value === undefined) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return value.map(normalizeKgooseJson);
-  }
-
-  if (typeof value !== "object") {
-    return value;
-  }
-
-  const normalized: Record<string, unknown> = {};
-  for (const [key, nestedValue] of Object.entries(
-    value as Record<string, unknown>,
-  )) {
-    const camelKey = snakeToCamel(key);
-    normalized[camelKey] = PRESERVE_NESTED_KEYS.has(key)
-      ? nestedValue
-      : normalizeKgooseJson(nestedValue);
-  }
-  return normalized;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -258,24 +176,6 @@ export function isGenericAutomationTile(tile: AutomationTile): boolean {
   return !tile.spaceId && !isBuilderBotAutomationTile(tile);
 }
 
-function asAutomationSessionMessagesResponse(
-  value: unknown,
-): GetAutomationSessionMessagesResponse {
-  const normalized = normalizeKgooseJson(value);
-  if (!isRecord(normalized)) {
-    return { messages: [] };
-  }
-
-  const response = isRecord(normalized.getMessagesResponse)
-    ? normalized.getMessagesResponse
-    : normalized;
-
-  return {
-    ...(response as Omit<GetAutomationSessionMessagesResponse, "messages">),
-    messages: recordArray<AutomationSessionMessage>(response.messages),
-  };
-}
-
 export function filterAutomationTiles(
   tiles: AutomationTile[],
 ): AutomationTile[] {
@@ -339,5 +239,12 @@ export async function getAutomationSessionMessages(
   const response = await invoke<unknown>("get_automation_session_messages", {
     sessionId,
   });
-  return asAutomationSessionMessagesResponse(response);
+  if (isRecord(response)) {
+    const messagesResponse =
+      response.get_messages_response ?? response.getMessagesResponse;
+    if (isRecord(messagesResponse)) {
+      return asKgooseMessagesResponse(messagesResponse);
+    }
+  }
+  return asKgooseMessagesResponse(response);
 }

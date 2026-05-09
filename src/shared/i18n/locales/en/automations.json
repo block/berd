@@ -92,25 +92,12 @@
     "untitledAutomation": "Untitled automation"
   },
   "history": {
-    "content": {
-      "summary": "Summary",
-      "thinking": "Thinking",
-      "toolRequest": "Tool request",
-      "toolResponse": "Tool response",
-      "unknown": "No displayable message content."
-    },
     "emptyBody": "kgoose returned no historical runs for this automation.",
     "emptyTitle": "No runs yet",
     "loadErrorTitle": "History failed to load",
     "noSessionMessages": "No chat messages were returned for this run.",
     "noOutputData": "This run did not return output data.",
     "noSessionId": "No session id",
-    "roles": {
-      "assistant": "Assistant",
-      "system": "System",
-      "unknown": "Unknown",
-      "user": "User"
-    },
     "runOutput": "Run output",
     "sessionHistory": "Session history",
     "sessionLoadErrorTitle": "Session history failed to load",
