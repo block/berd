@@ -78,6 +78,43 @@ export interface AutomationTileResult {
   tileSchemaVersion?: number;
 }
 
+export interface AutomationSessionMessageContent {
+  type?: string | number;
+  text?: { text?: string } | string;
+  toolRequest?: {
+    id?: string;
+    status?: string;
+    value?: {
+      name?: string;
+      arguments?: unknown;
+      tooltip?: string;
+      needsApproval?: boolean;
+    };
+    name?: string;
+    arguments?: unknown;
+    tooltip?: string;
+    error?: string;
+  };
+  toolResponse?: {
+    id?: string;
+    status?: string;
+    results?: unknown[];
+    error?: string;
+    extensionName?: string;
+  };
+  thinking?: { text?: string } | string;
+  summary?: { text?: string } | string;
+}
+
+export interface AutomationSessionMessage {
+  id?: string;
+  role?: string | number;
+  created?: string;
+  content?: AutomationSessionMessageContent[];
+  deleted?: boolean;
+  hidden?: boolean;
+}
+
 export interface GetAutomationTilesResponse {
   tiles: AutomationTile[];
 }
@@ -91,6 +128,12 @@ export interface GetAutomationTileResultsResponse {
   historicalLastSevenDaysAvgCost?: number;
   totalLastSevenDaysTokenUsage?: number;
   costLastUpdated?: string;
+}
+
+export interface GetAutomationSessionMessagesResponse {
+  messages: AutomationSessionMessage[];
+  sessionName?: string;
+  status?: string | number;
 }
 
 const PRESERVE_NESTED_KEYS = new Set([
@@ -215,6 +258,24 @@ export function isGenericAutomationTile(tile: AutomationTile): boolean {
   return !tile.spaceId && !isBuilderBotAutomationTile(tile);
 }
 
+function asAutomationSessionMessagesResponse(
+  value: unknown,
+): GetAutomationSessionMessagesResponse {
+  const normalized = normalizeKgooseJson(value);
+  if (!isRecord(normalized)) {
+    return { messages: [] };
+  }
+
+  const response = isRecord(normalized.getMessagesResponse)
+    ? normalized.getMessagesResponse
+    : normalized;
+
+  return {
+    ...(response as Omit<GetAutomationSessionMessagesResponse, "messages">),
+    messages: recordArray<AutomationSessionMessage>(response.messages),
+  };
+}
+
 export function filterAutomationTiles(
   tiles: AutomationTile[],
 ): AutomationTile[] {
@@ -270,4 +331,13 @@ export async function generateAutomationSchedule(
     timeZone,
   });
   return asGenerateAutomationScheduleResponse(response);
+}
+
+export async function getAutomationSessionMessages(
+  sessionId: string,
+): Promise<GetAutomationSessionMessagesResponse> {
+  const response = await invoke<unknown>("get_automation_session_messages", {
+    sessionId,
+  });
+  return asAutomationSessionMessagesResponse(response);
 }

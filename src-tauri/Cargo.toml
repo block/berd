@@ -24,7 +24,8 @@ doctor = { git = "https://github.com/block/builderbot", rev = "8e1c3ec145edc0df5
 ignore = "0.4.25"
 log = "0.4.29"
 mime_guess = "2"
-reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls"] }
+futures-util = "0.3"
+reqwest = { version = "0.13.3", default-features = false, features = ["json", "rustls", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"

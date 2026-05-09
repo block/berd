@@ -92,12 +92,29 @@
     "untitledAutomation": "Automatizacion sin titulo"
   },
   "history": {
+    "content": {
+      "summary": "Resumen",
+      "thinking": "Razonamiento",
+      "toolRequest": "Solicitud de herramienta",
+      "toolResponse": "Respuesta de herramienta",
+      "unknown": "No hay contenido de mensaje para mostrar."
+    },
     "emptyBody": "kgoose no devolvio ejecuciones historicas para esta automatizacion.",
     "emptyTitle": "Aun no hay ejecuciones",
     "loadErrorTitle": "No se pudo cargar el historial",
+    "noSessionMessages": "No se devolvieron mensajes de chat para esta ejecucion.",
     "noOutputData": "Esta ejecucion no devolvio datos de salida.",
     "noSessionId": "Sin id de sesion",
+    "roles": {
+      "assistant": "Asistente",
+      "system": "Sistema",
+      "unknown": "Desconocido",
+      "user": "Usuario"
+    },
     "runOutput": "Salida de ejecucion",
+    "sessionHistory": "Historial de sesion",
+    "sessionLoadErrorTitle": "No se pudo cargar el historial de sesion",
+    "sessionUnavailable": "Esta ejecucion no tiene id de sesion de chat.",
     "unavailableBody": "kgoose no devolvio un id de automatizacion.",
     "unavailableTitle": "Historial no disponible"
   },

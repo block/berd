@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   deleteAutomationTile,
   generateAutomationSchedule,
+  getAutomationSessionMessages,
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
@@ -16,6 +17,7 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: vi.fn(),
   getAutomationTile: vi.fn(),
   getAutomationTileResults: vi.fn(),
+  getAutomationSessionMessages: vi.fn(),
   updateAutomationTile: vi.fn(),
   deleteAutomationTile: vi.fn(),
   generateAutomationSchedule: vi.fn(),
@@ -110,6 +112,52 @@ describe("AutomationsView", () => {
       success: true,
       cronExpression: "0 9 * * 1-5",
     });
+    vi.mocked(getAutomationSessionMessages).mockResolvedValue({
+      sessionName: "Daily revenue digest run",
+      status: "CHAT_SESSION_STATUS_IDLE",
+      messages: [
+        {
+          id: "message-1",
+          role: "ROLE_USER",
+          created: "1714568300000",
+          content: [{ type: "MESSAGE_TYPE_TEXT", text: { text: "Run now" } }],
+        },
+        {
+          id: "message-2",
+          role: "ROLE_ASSISTANT",
+          created: "1714568400000",
+          content: [
+            {
+              type: "MESSAGE_TYPE_TOOL_RESPONSE",
+              toolResponse: {
+                id: "tool-response-1",
+                status: "success",
+                extensionName: "slack",
+                results: [
+                  {
+                    text: {
+                      text: "Fetched 3 Slack messages from #revenue.",
+                    },
+                  },
+                  {
+                    structuredContent: {
+                      data: {
+                        channel: "revenue",
+                        count: 3,
+                      },
+                    },
+                  },
+                ],
+              },
+            },
+            {
+              type: "MESSAGE_TYPE_TEXT",
+              text: { text: "The automation finished." },
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it("loads automations and shows selected automation details", async () => {
@@ -132,10 +180,20 @@ describe("AutomationsView", () => {
     await screen.findByText("Daily revenue digest");
     await user.click(screen.getByRole("tab", { name: "History" }));
 
-    expect(await screen.findByText("Run output")).toBeInTheDocument();
+    expect(await screen.findByText("Session history")).toBeInTheDocument();
     expect(screen.getAllByText("session-1").length).toBeGreaterThan(0);
     expect(screen.getByText("Run completed.")).toBeInTheDocument();
+    expect(screen.getByText("Run now")).toBeInTheDocument();
+    expect(
+      screen.getByText("Fetched 3 Slack messages from #revenue."),
+    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /Tool response · slack · success/i }),
+    );
+    expect(screen.getByText(/"channel": "revenue"/)).toBeInTheDocument();
+    expect(screen.getByText("The automation finished.")).toBeInTheDocument();
     expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");
+    expect(getAutomationSessionMessages).toHaveBeenCalledWith("session-1");
   });
 
   it("selects the clicked run when session ids repeat", async () => {

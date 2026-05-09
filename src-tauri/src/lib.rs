@@ -61,6 +61,7 @@ pub fn run() {
             commands::automations::update_automation_tile,
             commands::automations::delete_automation_tile,
             commands::automations::generate_automation_schedule,
+            commands::automations::get_automation_session_messages,
             commands::acp::get_goose_serve_url,
             commands::acp::get_goose_serve_host_info,
             commands::project_icons::scan_project_icons,

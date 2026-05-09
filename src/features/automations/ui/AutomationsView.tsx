@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
   IconBolt,
+  IconChevronRight,
   IconCheck,
   IconClock,
   IconPlus,
@@ -14,11 +15,14 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import {
+  type AutomationSessionMessage,
+  type AutomationSessionMessageContent,
   type AutomationTile,
   type AutomationTileResult,
   type UpdateAutomationTileRequest,
   deleteAutomationTile,
   generateAutomationSchedule,
+  getAutomationSessionMessages,
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
@@ -29,6 +33,11 @@ import { getStableInstructionItems } from "@/features/automations/lib/stableInst
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/shared/ui/collapsible";
 import { Input } from "@/shared/ui/input";
 import { Separator } from "@/shared/ui/separator";
 import { Spinner } from "@/shared/ui/spinner";
@@ -148,6 +157,223 @@ function getOutputSummary(data: Record<string, unknown> | undefined) {
     return text;
   }
   return null;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringifyContent(value: unknown) {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  return JSON.stringify(value, null, 2);
+}
+
+function formatExpandablePayload(value: unknown) {
+  if (typeof value !== "string") {
+    return stringifyContent(value);
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  try {
+    return JSON.stringify(JSON.parse(trimmed), null, 2);
+  } catch {
+    return value;
+  }
+}
+
+type SessionRole = "user" | "assistant" | "system" | "unknown";
+
+function getSessionRole(role: AutomationSessionMessage["role"]): SessionRole {
+  const normalized = String(role ?? "").toLowerCase();
+  if (role === 1 || normalized === "role_user" || normalized === "user") {
+    return "user";
+  }
+  if (
+    role === 2 ||
+    normalized === "role_assistant" ||
+    normalized === "assistant"
+  ) {
+    return "assistant";
+  }
+  if (role === 3 || normalized === "role_system" || normalized === "system") {
+    return "system";
+  }
+  return "unknown";
+}
+
+function sessionRoleLabel(
+  role: AutomationSessionMessage["role"],
+  labels: {
+    user: string;
+    assistant: string;
+    system: string;
+    unknown: string;
+  },
+) {
+  return labels[getSessionRole(role)];
+}
+
+function sessionRoleClassName(role: AutomationSessionMessage["role"]) {
+  switch (getSessionRole(role)) {
+    case "user":
+      return "border-brand/30 bg-brand/5";
+    case "assistant":
+      return "border-border bg-background";
+    default:
+      return "border-dashed border-border bg-muted/20";
+  }
+}
+
+function getTextBlockText(text: AutomationSessionMessageContent["text"]) {
+  if (typeof text === "string") return text;
+  return text?.text ?? "";
+}
+
+function getNestedText(value: unknown) {
+  if (typeof value === "string") return value;
+  if (isRecord(value) && typeof value.text === "string") return value.text;
+  return "";
+}
+
+function formatToolPayload(value: unknown) {
+  const text = stringifyContent(value);
+  return text === "{}" ? "" : text;
+}
+
+type SessionMessageBlock =
+  | {
+      kind: "text";
+      text: string;
+      key: string;
+    }
+  | {
+      kind: "expandable";
+      title: string;
+      payload: string;
+      preview?: string;
+      key: string;
+    };
+
+function getToolResponsePreview(
+  toolResponse: NonNullable<AutomationSessionMessageContent["toolResponse"]>,
+) {
+  if (toolResponse.error?.trim()) return toolResponse.error;
+
+  for (const result of toolResponse.results ?? []) {
+    const text = getNestedText(isRecord(result) ? result.text : result);
+    if (text.trim()) {
+      return text;
+    }
+  }
+
+  return undefined;
+}
+
+function toolResponsePayload(
+  toolResponse: NonNullable<AutomationSessionMessageContent["toolResponse"]>,
+) {
+  return {
+    id: toolResponse.id,
+    status: toolResponse.status,
+    extensionName: toolResponse.extensionName,
+    error: toolResponse.error,
+    results: toolResponse.results ?? [],
+  };
+}
+
+function getSessionMessageContentBlocks(
+  message: AutomationSessionMessage,
+  labels: {
+    toolRequest: string;
+    toolResponse: string;
+    thinking: string;
+    summary: string;
+    unknownContent: string;
+  },
+) {
+  const content = message.content ?? [];
+  const blocks = content
+    .map((item, index): SessionMessageBlock | null => {
+      const text = getTextBlockText(item.text);
+      if (text.trim()) {
+        return {
+          kind: "text",
+          text,
+          key: `text-${index}-${text}`,
+        };
+      }
+
+      const toolRequest = item.toolRequest?.value ?? item.toolRequest;
+      if (toolRequest) {
+        const name = toolRequest.name ?? labels.toolRequest;
+        const args = formatToolPayload(toolRequest.arguments);
+        return {
+          kind: "expandable",
+          title: `${labels.toolRequest}: ${name}`,
+          preview: toolRequest.tooltip,
+          payload: args || formatExpandablePayload(item.toolRequest),
+          key: `tool-request-${index}-${name}`,
+        };
+      }
+
+      const toolResponse = item.toolResponse;
+      if (toolResponse) {
+        const titleParts = [
+          labels.toolResponse,
+          toolResponse.extensionName,
+          toolResponse.status,
+        ].filter(Boolean);
+        const title = titleParts.join(" · ");
+        return {
+          kind: "expandable",
+          title,
+          preview: getToolResponsePreview(toolResponse),
+          payload: formatExpandablePayload(toolResponsePayload(toolResponse)),
+          key: `tool-response-${index}-${toolResponse.id ?? title}`,
+        };
+      }
+
+      const thinking = getNestedText(item.thinking);
+      if (thinking.trim()) {
+        return {
+          kind: "text",
+          text: `${labels.thinking}: ${thinking}`,
+          key: `thinking-${index}-${thinking}`,
+        };
+      }
+
+      const summary = getNestedText(item.summary);
+      if (summary.trim()) {
+        return {
+          kind: "text",
+          text: `${labels.summary}: ${summary}`,
+          key: `summary-${index}-${summary}`,
+        };
+      }
+
+      const fallback = stringifyContent(item);
+      return fallback && fallback !== "{}"
+        ? {
+            kind: "expandable",
+            title: labels.unknownContent,
+            payload: formatExpandablePayload(item),
+            key: `unknown-${index}-${fallback}`,
+          }
+        : null;
+    })
+    .filter((block): block is SessionMessageBlock => block !== null);
+
+  return blocks.length
+    ? blocks
+    : [
+        {
+          kind: "text",
+          text: labels.unknownContent,
+          key: "empty-content",
+        } satisfies SessionMessageBlock,
+      ];
 }
 
 function JsonPreview({ value }: { value: unknown }) {
@@ -731,13 +957,21 @@ function HistoryItem({
 function RunOutput({ result }: { result: AutomationTileResult }) {
   const { t } = useTranslation("automations");
   const summary = getOutputSummary(result.tileData);
+  const sessionQuery = useQuery({
+    queryKey: ["automationSessionMessages", result.sessionId],
+    queryFn: () => getAutomationSessionMessages(result.sessionId ?? ""),
+    enabled: Boolean(result.sessionId),
+  });
+  const messages = sessionQuery.data?.messages.filter(
+    (message) => !message.deleted && !message.hidden,
+  );
 
   return (
-    <section className="min-w-0 rounded-lg border border-border bg-background p-4">
+    <section className="min-w-0 space-y-5 rounded-lg border border-border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h3 className="text-sm font-medium text-foreground">
-            {t("history.runOutput")}
+            {t("history.sessionHistory")}
           </h3>
           <p className="mt-1 text-xs text-muted-foreground">
             {result.sessionId ?? t("history.noSessionId")}
@@ -747,19 +981,135 @@ function RunOutput({ result }: { result: AutomationTileResult }) {
           {formatStatus(result.runStatus, t("fallbacks.unknown"))}
         </Badge>
       </div>
-      <Separator className="my-4" />
-      {summary ? (
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-          {summary}
+
+      {(summary || result.tileData) && (
+        <>
+          <Separator />
+          <section className="space-y-3">
+            <h4 className="text-sm font-medium text-foreground">
+              {t("history.runOutput")}
+            </h4>
+            {summary ? (
+              <p className="whitespace-pre-wrap rounded-md border border-border bg-muted/30 p-3 text-sm leading-relaxed text-foreground">
+                {summary}
+              </p>
+            ) : (
+              <JsonPreview value={result.tileData} />
+            )}
+          </section>
+        </>
+      )}
+
+      <Separator />
+
+      {!result.sessionId ? (
+        <p className="text-sm text-muted-foreground">
+          {t("history.sessionUnavailable")}
         </p>
-      ) : result.tileData ? (
-        <JsonPreview value={result.tileData} />
+      ) : sessionQuery.isLoading ? (
+        <div className="flex min-h-32 items-center justify-center">
+          <Spinner className="size-5 text-brand" />
+        </div>
+      ) : sessionQuery.error ? (
+        <EmptyState
+          title={t("history.sessionLoadErrorTitle")}
+          body={sessionQuery.error.message}
+        />
+      ) : messages?.length ? (
+        <div
+          className="space-y-3"
+          role="log"
+          aria-label={t("history.sessionHistory")}
+        >
+          {messages.map((message, index) => (
+            <SessionMessageCard
+              key={message.id ?? `${result.sessionId}-${index}`}
+              message={message}
+            />
+          ))}
+        </div>
       ) : (
         <p className="text-sm text-muted-foreground">
-          {t("history.noOutputData")}
+          {t("history.noSessionMessages")}
         </p>
       )}
     </section>
+  );
+}
+
+function SessionMessageCard({
+  message,
+}: {
+  message: AutomationSessionMessage;
+}) {
+  const { t } = useTranslation("automations");
+  const roleLabel = sessionRoleLabel(message.role, {
+    user: t("history.roles.user"),
+    assistant: t("history.roles.assistant"),
+    system: t("history.roles.system"),
+    unknown: t("history.roles.unknown"),
+  });
+  const blocks = getSessionMessageContentBlocks(message, {
+    toolRequest: t("history.content.toolRequest"),
+    toolResponse: t("history.content.toolResponse"),
+    thinking: t("history.content.thinking"),
+    summary: t("history.content.summary"),
+    unknownContent: t("history.content.unknown"),
+  });
+
+  return (
+    <article
+      className={cn(
+        "rounded-lg border p-3",
+        sessionRoleClassName(message.role),
+      )}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Badge variant="outline">{roleLabel}</Badge>
+        <span className="text-xs text-muted-foreground">
+          {formatTimestamp(message.created, t("fallbacks.unknown"))}
+        </span>
+      </div>
+      <div className="mt-3 space-y-3">
+        {blocks.map((block) => (
+          <SessionMessageBlockView key={block.key} block={block} />
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function SessionMessageBlockView({ block }: { block: SessionMessageBlock }) {
+  if (block.kind === "text") {
+    return (
+      <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground">
+        {block.text}
+      </p>
+    );
+  }
+
+  return (
+    <Collapsible className="rounded-md border border-border bg-muted/20">
+      <CollapsibleTrigger className="group flex w-full items-start gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-muted/40">
+        <IconChevronRight
+          className="mt-0.5 size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90"
+          aria-hidden="true"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block font-medium">{block.title}</span>
+          {block.preview && (
+            <span className="mt-1 line-clamp-2 block text-xs leading-relaxed text-muted-foreground">
+              {block.preview}
+            </span>
+          )}
+        </span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t border-border p-3">
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words text-xs leading-relaxed text-muted-foreground">
+          {block.payload || "{}"}
+        </pre>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

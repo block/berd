@@ -9,11 +9,13 @@ use std::{
 };
 
 use crate::services::distro_bundle::{DistroBundleState, KgooseDistroConfig};
+use futures_util::StreamExt;
 use reqwest::header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
 use serde::Serialize;
 use serde_json::{json, Map, Value};
 use tauri::{AppHandle, Emitter, Manager, State, Window};
 use tokio::task::JoinHandle;
+use tokio::time::timeout;
 
 const KGOOSE_AUTOMATIONS_BASE_URL_ENV: &str = "GOOSE_INTERNAL_KGOOSE_BASE_URL";
 const KGOOSE_AUTOMATIONS_PATH_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PATH";
@@ -34,6 +36,7 @@ const MAX_ERROR_BODY_CHARS: usize = 500;
 const KGOOSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const KGOOSE_SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Default)]
 pub struct AutomationStreamState {
@@ -313,6 +316,15 @@ async fn ensure_generic_automation_tile(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn get_automation_session_messages(
+    state: State<'_, DistroBundleState>,
+    session_id: String,
+) -> Result<Value, String> {
+    let session_id = validate_id(session_id, "session id")?;
+    get_kgoose_messages_snapshot(state.inner(), &session_id).await
+}
+
 async fn post_kgoose_json(
     distro_state: &DistroBundleState,
     endpoint: &str,
@@ -472,6 +484,60 @@ fn kgoose_client() -> &'static reqwest::Client {
             .build()
             .expect("failed to build kgoose HTTP client")
     })
+}
+
+async fn get_kgoose_messages_snapshot(
+    distro_state: &DistroBundleState,
+    session_id: &str,
+) -> Result<Value, String> {
+    let mut url = build_kgoose_url(GET_MESSAGES_SSE_ENDPOINT, distro_state.kgoose_config())?;
+    url.query_pairs_mut()
+        .append_pair("session_id", session_id)
+        .append_pair("update_last_read_at", "false");
+
+    let response = reqwest::Client::new()
+        .get(url.clone())
+        .header(ACCEPT, "text/event-stream")
+        .header(CACHE_CONTROL, "no-cache")
+        .send()
+        .await
+        .map_err(|error| format!("Failed to call kgoose at {}: {error}", url.as_str()))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        let response_body = response.text().await.map_err(|error| {
+            format!(
+                "Failed to read kgoose response from {}: {error}",
+                url.as_str()
+            )
+        })?;
+        return Err(format!(
+            "kgoose request to {} failed with {}: {}",
+            url.as_str(),
+            status,
+            truncate_error_body(&response_body)
+        ));
+    }
+
+    timeout(KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT, async {
+        let mut stream = response.bytes_stream();
+        let mut buffer = Vec::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk =
+                chunk.map_err(|error| format!("Failed to read kgoose SSE stream: {error}"))?;
+            buffer.extend_from_slice(&chunk);
+
+            while let Some(event) = take_next_sse_event(&mut buffer)? {
+                if let Some(payload) = messages_payload_from_sse_event(&event)? {
+                    return Ok(payload);
+                }
+            }
+        }
+
+        Err("kgoose messages stream ended before returning session messages".to_string())
+    })
+    .await
+    .map_err(|_| "Timed out waiting for kgoose session messages".to_string())?
 }
 
 fn validate_id(value: String, label: &str) -> Result<String, String> {
@@ -643,6 +709,73 @@ fn env_value(name: &str) -> Option<String> {
 fn trim_non_empty(value: &str) -> Option<String> {
     let trimmed = value.trim();
     (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn take_next_sse_event(buffer: &mut Vec<u8>) -> Result<Option<String>, String> {
+    let lf_index = find_bytes(buffer, b"\n\n").map(|index| (index, 2));
+    let crlf_index = find_bytes(buffer, b"\r\n\r\n").map(|index| (index, 4));
+    let (index, separator_len) = match (lf_index, crlf_index) {
+        (Some(lf), Some(crlf)) => {
+            if lf.0 < crlf.0 {
+                lf
+            } else {
+                crlf
+            }
+        }
+        (Some(lf), None) => lf,
+        (None, Some(crlf)) => crlf,
+        (None, None) => return Ok(None),
+    };
+
+    let event = String::from_utf8(buffer[..index].to_vec())
+        .map_err(|error| format!("Failed to decode kgoose SSE event: {error}"))?;
+    buffer.drain(..index + separator_len);
+    Ok(Some(event))
+}
+
+fn find_bytes(buffer: &[u8], pattern: &[u8]) -> Option<usize> {
+    buffer
+        .windows(pattern.len())
+        .position(|window| window == pattern)
+}
+
+fn messages_payload_from_sse_event(event: &str) -> Result<Option<Value>, String> {
+    let mut event_name = "message";
+    let mut data_lines = Vec::new();
+
+    for raw_line in event.lines() {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() || line.starts_with(':') {
+            continue;
+        }
+
+        let (field, value) = line
+            .split_once(':')
+            .map(|(field, value)| (field, value.strip_prefix(' ').unwrap_or(value)))
+            .unwrap_or((line, ""));
+
+        match field {
+            "event" => event_name = value,
+            "data" => data_lines.push(value),
+            _ => {}
+        }
+    }
+
+    if event_name != "messages" || data_lines.is_empty() {
+        return Ok(None);
+    }
+
+    let data = data_lines.join("\n");
+    let payload: Value = serde_json::from_str(&data)
+        .map_err(|error| format!("Failed to parse kgoose SSE event: {error}"))?;
+
+    if payload.get("get_messages_response").is_some()
+        || payload.get("getMessagesResponse").is_some()
+    {
+        Ok(Some(payload))
+    } else {
+        Ok(None)
+    }
 }
 
 fn ensure_trailing_slash(value: &str) -> String {
@@ -1103,10 +1236,11 @@ fn parse_sse_event_data(event: &str, data: &str) -> Result<Option<Value>, String
 mod tests {
     use super::{
         build_kgoose_sse_url, build_kgoose_url, drain_sse_messages, is_builderbot_automation_type,
-        parse_sse_data, parse_sse_event_data, sanitize_create_automation_tile_request,
-        sanitize_push_automation_builder_messages_request, sanitize_update_automation_request,
-        truncate_error_body, validate_last_event_id, KgooseDistroConfig, SseDecoder,
-        KGOOSE_AUTOMATIONS_BASE_URL_ENV, KGOOSE_AUTOMATIONS_PATH_ENV,
+        messages_payload_from_sse_event, parse_sse_data, parse_sse_event_data,
+        sanitize_create_automation_tile_request, sanitize_push_automation_builder_messages_request,
+        sanitize_update_automation_request, take_next_sse_event, truncate_error_body,
+        validate_last_event_id, KgooseDistroConfig, SseDecoder, KGOOSE_AUTOMATIONS_BASE_URL_ENV,
+        KGOOSE_AUTOMATIONS_PATH_ENV,
     };
     use serde_json::json;
     use std::env;
@@ -1188,7 +1322,6 @@ mod tests {
         assert_eq!(truncated.chars().count(), 503);
         assert!(truncated.ends_with("..."));
     }
-
     #[test]
     fn builds_sse_url_with_encoded_session_id() {
         let _guard = ENV_LOCK.lock().unwrap();
@@ -1492,5 +1625,55 @@ mod tests {
             "updateInstructions": true
         }))
         .is_err());
+    }
+    #[test]
+    fn takes_sse_events_from_lf_and_crlf_buffers() {
+        let mut buffer =
+            b"event: connected\ndata: {}\n\nevent: heartbeat\r\ndata: {}\r\n\r\n".to_vec();
+
+        assert_eq!(
+            take_next_sse_event(&mut buffer).unwrap().unwrap(),
+            "event: connected\ndata: {}"
+        );
+        assert_eq!(
+            take_next_sse_event(&mut buffer).unwrap().unwrap(),
+            "event: heartbeat\r\ndata: {}"
+        );
+        assert!(take_next_sse_event(&mut buffer).unwrap().is_none());
+    }
+
+    #[test]
+    fn decodes_sse_events_after_split_utf8_characters() {
+        let event = "event: messages\ndata: {\"text\":\"café\"}\n\n".as_bytes();
+        let split_index = event
+            .iter()
+            .position(|byte| *byte == 0xc3)
+            .map(|index| index + 1)
+            .unwrap();
+        let mut buffer = event[..split_index].to_vec();
+
+        assert!(take_next_sse_event(&mut buffer).unwrap().is_none());
+
+        buffer.extend_from_slice(&event[split_index..]);
+        assert_eq!(
+            take_next_sse_event(&mut buffer).unwrap().unwrap(),
+            "event: messages\ndata: {\"text\":\"café\"}"
+        );
+    }
+
+    #[test]
+    fn extracts_only_full_messages_sse_payloads() {
+        let delta = "event: messages\ndata: {\"delta_message_content\":{\"streaming_message_id\":\"msg-1\"}}";
+        assert!(messages_payload_from_sse_event(delta).unwrap().is_none());
+
+        let snapshot = "event: messages\ndata: {\"get_messages_response\":{\"messages\":[{\"id\":\"msg-1\"}]}}";
+        assert_eq!(
+            messages_payload_from_sse_event(snapshot).unwrap(),
+            Some(json!({
+                "get_messages_response": {
+                    "messages": [{ "id": "msg-1" }]
+                }
+            }))
+        );
     }
 }
