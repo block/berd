@@ -8,7 +8,11 @@ source scripts/buildkite/lib.sh
 section "Rust format check"
 cd src-tauri
 cargo fmt --check
+cd ..
 
+install_linux_tauri_deps
+
+cd src-tauri
 section "Tauri cargo check without external sidecars"
 with_tauri_sidecars_disabled cargo check
 

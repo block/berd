@@ -38,14 +38,6 @@ tauri-plugin-window-state = "2"
 tokio = { version = "1.50.0", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 
-[target.'cfg(target_os = "macos")'.dependencies]
-keyring = { version = "3", features = ["apple-native"] }
-
-[target.'cfg(target_os = "windows")'.dependencies]
-keyring = { version = "3", features = ["windows-native"] }
-
-[target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["linux-native-sync-persistent", "crypto-rust"] }
 
 [features]
 app-test-driver = []

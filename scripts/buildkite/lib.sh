@@ -41,6 +41,37 @@ build_sdk() {
   pnpm --filter @aaif/goose-sdk build
 }
 
+install_linux_tauri_deps() {
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    return
+  fi
+
+  if command -v pkg-config >/dev/null 2>&1 \
+    && pkg-config --exists gobject-2.0 glib-2.0 gtk+-3.0 webkit2gtk-4.1; then
+    return
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    echo "Linux Tauri checks require pkg-config and WebKitGTK development packages." >&2
+    echo "Install pkg-config and libwebkit2gtk-4.1-dev, or add support for this distro to scripts/buildkite/lib.sh." >&2
+    exit 1
+  fi
+
+  local -a sudo_cmd=()
+  if [[ "${EUID}" -ne 0 ]]; then
+    sudo_cmd=(sudo)
+  fi
+
+  section "Install Linux Tauri native dependencies"
+  "${sudo_cmd[@]}" apt-get update
+  "${sudo_cmd[@]}" apt-get install -y --no-install-recommends \
+    pkg-config \
+    libwebkit2gtk-4.1-dev \
+    libgtk-3-dev \
+    libayatana-appindicator3-dev \
+    librsvg2-dev
+}
+
 with_tauri_sidecars_disabled() {
   TAURI_CONFIG='{"bundle":{"externalBin":[]}}' "$@"
 }
