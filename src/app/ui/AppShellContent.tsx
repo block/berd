@@ -18,6 +18,7 @@ interface AppShellContentProps {
   activeSettingsSection: SectionId;
   activeSession?: ChatSession;
   homeSessionId: string | null;
+  isContextPanelOpen: boolean;
   onCreatePersona: () => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
@@ -41,6 +42,7 @@ export function AppShellContent({
   activeSettingsSection,
   activeSession,
   homeSessionId,
+  isContextPanelOpen,
   onCreatePersona,
   onArchiveChat,
   onCreateProject,
@@ -78,6 +80,7 @@ export function AppShellContent({
         <ChatView
           key={activeSession.id}
           sessionId={activeSession.id}
+          isContextPanelOpen={isContextPanelOpen}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
         />

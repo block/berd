@@ -74,7 +74,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onCreateProject={onCreateProject}
         onNewChat={onNewChat}
@@ -106,7 +105,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSelectSession={vi.fn()}
         projects={[]}
@@ -136,7 +134,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSelectSession={vi.fn()}
         projects={[mockProject()]}
@@ -166,7 +163,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSelectSession={vi.fn()}
         projects={[]}
@@ -199,7 +195,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSelectSession={vi.fn()}
         projects={[]}
@@ -216,14 +211,7 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onCollapse={vi.fn()}
-        onNavigate={onNavigate}
-        projects={[]}
-      />,
-    );
+    render(<Sidebar collapsed={false} onNavigate={onNavigate} projects={[]} />);
 
     await user.click(screen.getByRole("button", { name: /home/i }));
 
@@ -234,14 +222,7 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onCollapse={vi.fn()}
-        onNavigate={onNavigate}
-        projects={[]}
-      />,
-    );
+    render(<Sidebar collapsed={false} onNavigate={onNavigate} projects={[]} />);
 
     await user.click(screen.getByRole("button", { name: /automations/i }));
 
@@ -249,14 +230,7 @@ describe("Sidebar", () => {
   });
 
   it("keeps the home button visible when the sidebar is collapsed", () => {
-    render(
-      <Sidebar
-        collapsed
-        onCollapse={vi.fn()}
-        onNavigate={vi.fn()}
-        projects={[]}
-      />,
-    );
+    render(<Sidebar collapsed onNavigate={vi.fn()} projects={[]} />);
 
     expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
   });
@@ -271,7 +245,6 @@ describe("Sidebar", () => {
         collapsed={false}
         activeView="settings"
         activeSettingsSection="providers"
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSettingsBack={onSettingsBack}
         onSettingsSectionChange={onSettingsSectionChange}
@@ -297,16 +270,12 @@ describe("Sidebar", () => {
     expect(onSettingsSectionChange).toHaveBeenCalledWith("general");
   });
 
-  it("shows an expand control in collapsed settings navigation", async () => {
-    const user = userEvent.setup();
-    const onCollapse = vi.fn();
-
+  it("does not render an in-panel expand control in collapsed settings navigation", () => {
     render(
       <Sidebar
         collapsed
         activeView="settings"
         activeSettingsSection="general"
-        onCollapse={onCollapse}
         onNavigate={vi.fn()}
         onSettingsBack={vi.fn()}
         onSettingsSectionChange={vi.fn()}
@@ -314,8 +283,8 @@ describe("Sidebar", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /expand sidebar/i }));
-
-    expect(onCollapse).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: /expand sidebar/i }),
+    ).not.toBeInTheDocument();
   });
 });

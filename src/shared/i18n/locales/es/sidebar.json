@@ -1,8 +1,10 @@
 {
   "actions": {
     "backToMainNavigation": "Atrás",
+    "back": "Atrás",
     "collapse": "Contraer barra lateral",
     "expand": "Expandir barra lateral",
+    "forward": "Adelante",
     "newChat": "Nuevo chat",
     "newChatInProject": "Nuevo chat en el proyecto",
     "newProject": "Nuevo proyecto",

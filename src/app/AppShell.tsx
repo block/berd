@@ -64,11 +64,24 @@ export type AppView =
   | "session-history"
   | "settings";
 
+type AppNavigationLocation = {
+  view: AppView;
+  sessionId: string | null;
+  settingsSection: SectionId;
+};
+
+type AppNavigationHistory = {
+  entries: AppNavigationLocation[];
+  index: number;
+  isApplying: boolean;
+};
+
 const SIDEBAR_DEFAULT_WIDTH = 240;
 const SIDEBAR_MIN_WIDTH = 180;
 const SIDEBAR_MAX_WIDTH = 380;
 const SIDEBAR_SNAP_COLLAPSE_THRESHOLD = 100;
 const SIDEBAR_COLLAPSED_WIDTH = 48;
+const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const APP_SHELL_HORIZONTAL_CHROME_WIDTH = 28;
 const MIN_MAIN_CONTENT_WIDTH = 532;
 const MIN_WINDOW_HEIGHT = 600;
@@ -105,6 +118,29 @@ function clearSettingsSectionUrl() {
   }
   url.searchParams.delete("section");
   window.history.replaceState(window.history.state, "", url);
+}
+
+function getAppNavigationLocation(
+  view: AppView,
+  sessionId: string | null,
+  settingsSection: SectionId,
+): AppNavigationLocation {
+  return {
+    view,
+    sessionId: view === "chat" ? sessionId : null,
+    settingsSection,
+  };
+}
+
+function areAppNavigationLocationsEqual(
+  a: AppNavigationLocation | undefined,
+  b: AppNavigationLocation,
+) {
+  return (
+    a?.view === b.view &&
+    a.sessionId === b.sessionId &&
+    a.settingsSection === b.settingsSection
+  );
 }
 
 async function ensureWindowWidth(minWidth: number) {
@@ -154,6 +190,21 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
+  const navigationHistoryRef = useRef<AppNavigationHistory>({
+    entries: [
+      getAppNavigationLocation(
+        initialSettingsSection ? "settings" : "home",
+        null,
+        initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
+      ),
+    ],
+    index: 0,
+    isApplying: false,
+  });
+  const [navigationAvailability, setNavigationAvailability] = useState({
+    canGoBack: false,
+    canGoForward: false,
+  });
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const setChatActiveSession = useChatStore((s) => s.setActiveSession);
@@ -161,6 +212,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     (s) => s.setActiveSessionViewing,
   );
   const cleanupChatSession = useChatStore((s) => s.cleanupSession);
+  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
@@ -169,6 +221,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
+  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const archiveSession = useChatSessionStore((s) => s.archiveSession);
   const selectedProvider = useAgentStore(selectSelectedProvider);
   const projects = useProjectStore(selectProjects);
@@ -264,6 +317,65 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const homeSession = homeSessionId
     ? sessions.find((session) => session.id === homeSessionId)
     : undefined;
+  const contextPanelLabel = isContextPanelOpen
+    ? t("context.closePanel")
+    : t("context.openPanel");
+
+  const updateNavigationAvailability = useCallback(() => {
+    const history = navigationHistoryRef.current;
+    const nextAvailability = {
+      canGoBack: history.index > 0,
+      canGoForward: history.index < history.entries.length - 1,
+    };
+
+    setNavigationAvailability((current) =>
+      current.canGoBack === nextAvailability.canGoBack &&
+      current.canGoForward === nextAvailability.canGoForward
+        ? current
+        : nextAvailability,
+    );
+  }, []);
+
+  useEffect(() => {
+    const history = navigationHistoryRef.current;
+    const location = getAppNavigationLocation(
+      activeView,
+      activeSessionId,
+      activeSettingsSection,
+    );
+    const currentLocation = history.entries[history.index];
+
+    if (history.isApplying) {
+      history.isApplying = false;
+      if (!areAppNavigationLocationsEqual(currentLocation, location)) {
+        history.entries[history.index] = location;
+      }
+      updateNavigationAvailability();
+      return;
+    }
+
+    if (areAppNavigationLocationsEqual(currentLocation, location)) {
+      updateNavigationAvailability();
+      return;
+    }
+
+    let nextEntries = history.entries.slice(0, history.index + 1);
+    nextEntries.push(location);
+    if (nextEntries.length > APP_NAVIGATION_HISTORY_LIMIT) {
+      nextEntries = nextEntries.slice(
+        nextEntries.length - APP_NAVIGATION_HISTORY_LIMIT,
+      );
+    }
+
+    history.entries = nextEntries;
+    history.index = nextEntries.length - 1;
+    updateNavigationAvailability();
+  }, [
+    activeSessionId,
+    activeSettingsSection,
+    activeView,
+    updateNavigationAvailability,
+  ]);
 
   useHomeSessionStateSync({
     homeSessionId,
@@ -782,6 +894,79 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     collapseSidebar();
   }, [collapseSidebar, expandSidebar, sidebarCollapsed]);
 
+  const applyNavigationLocation = useCallback(
+    (location: AppNavigationLocation) => {
+      navigationHistoryRef.current.isApplying = true;
+
+      if (location.view === "settings") {
+        setActiveSettingsSection(location.settingsSection);
+        setSettingsSectionUrl(location.settingsSection);
+        setActiveView("settings");
+        if (sidebarCollapsed) {
+          void expandSidebar();
+        }
+        return;
+      }
+
+      clearSettingsSectionUrl();
+
+      if (location.view === "chat" && location.sessionId) {
+        const session = useChatSessionStore
+          .getState()
+          .getSession(location.sessionId);
+
+        if (session && !session.archivedAt) {
+          setActiveSession(location.sessionId);
+          setActiveView("chat");
+          setChatActiveSession(location.sessionId);
+          useChatStore.getState().markSessionRead(location.sessionId);
+          void loadSessionMessages(location.sessionId);
+          return;
+        }
+      }
+
+      setActiveSession(null);
+      setActiveView(location.view === "chat" ? "home" : location.view);
+    },
+    [
+      expandSidebar,
+      loadSessionMessages,
+      setActiveSession,
+      setChatActiveSession,
+      sidebarCollapsed,
+    ],
+  );
+
+  const goBack = useCallback(() => {
+    const history = navigationHistoryRef.current;
+    if (history.index <= 0) {
+      return;
+    }
+
+    history.index -= 1;
+    applyNavigationLocation(history.entries[history.index]);
+    updateNavigationAvailability();
+  }, [applyNavigationLocation, updateNavigationAvailability]);
+
+  const goForward = useCallback(() => {
+    const history = navigationHistoryRef.current;
+    if (history.index >= history.entries.length - 1) {
+      return;
+    }
+
+    history.index += 1;
+    applyNavigationLocation(history.entries[history.index]);
+    updateNavigationAvailability();
+  }, [applyNavigationLocation, updateNavigationAvailability]);
+
+  const toggleContextPanel = useCallback(() => {
+    if (!activeSessionId) {
+      return;
+    }
+
+    setContextPanelOpen(activeSessionId, !isContextPanelOpen);
+  }, [activeSessionId, isContextPanelOpen, setContextPanelOpen]);
+
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -928,11 +1113,24 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <TopBar />
+      <TopBar
+        sidebarCollapsed={sidebarCollapsed}
+        canGoBack={navigationAvailability.canGoBack}
+        canGoForward={navigationAvailability.canGoForward}
+        onToggleSidebar={toggleSidebar}
+        onGoBack={goBack}
+        onGoForward={goForward}
+        showContextPanelToggle={
+          activeView === "chat" && Boolean(activeSessionId)
+        }
+        contextPanelOpen={isContextPanelOpen}
+        contextPanelLabel={contextPanelLabel}
+        onToggleContextPanel={toggleContextPanel}
+      />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">
         <div
-          className="flex-shrink-0 h-full py-3 pl-3"
+          className="flex-shrink-0 h-full pt-2 pb-3 pl-3"
           style={{
             width: sidebarCollapsed
               ? SIDEBAR_COLLAPSED_WIDTH + 12
@@ -944,7 +1142,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             collapsed={sidebarCollapsed}
             width={sidebarWidth}
             isResizing={isResizing}
-            onCollapse={toggleSidebar}
             onSettingsClick={() => openSettings()}
             onSettingsBack={leaveSettings}
             onSettingsSectionChange={selectSettingsSection}
@@ -990,6 +1187,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               activeSettingsSection={activeSettingsSection}
               activeSession={activeSession}
               homeSessionId={homeSessionId}
+              isContextPanelOpen={isContextPanelOpen}
               onCreatePersona={handleCreatePersona}
               onArchiveChat={handleArchiveChat}
               onCreateProject={openCreateProjectDialog}
