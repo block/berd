@@ -32,6 +32,13 @@ import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { Input } from "@/shared/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select";
 import { Separator } from "@/shared/ui/separator";
 import { Spinner } from "@/shared/ui/spinner";
 import { Switch } from "@/shared/ui/switch";
@@ -40,6 +47,26 @@ import { Textarea } from "@/shared/ui/textarea";
 import { cn } from "@/shared/lib/cn";
 
 const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
+type TimeZoneOption = { value: string; label: string };
+
+const TIME_ZONE_OPTIONS = [
+  { value: "America/New_York", label: "Eastern Time (ET)" },
+  { value: "America/Chicago", label: "Central Time (CT)" },
+  { value: "America/Denver", label: "Mountain Time (MT)" },
+  { value: "America/Los_Angeles", label: "Pacific Time (PT)" },
+  { value: "America/Anchorage", label: "Alaska Time (AKT)" },
+  { value: "Pacific/Honolulu", label: "Hawaii Time (HST)" },
+  { value: "Europe/London", label: "London (GMT/BST)" },
+  { value: "Europe/Paris", label: "Paris (CET/CEST)" },
+  { value: "Europe/Berlin", label: "Berlin (CET/CEST)" },
+  { value: "Asia/Tokyo", label: "Tokyo (JST)" },
+  { value: "Asia/Shanghai", label: "Shanghai (CST)" },
+  { value: "Asia/Singapore", label: "Singapore (SGT)" },
+  { value: "Asia/Dubai", label: "Dubai (GST)" },
+  { value: "Asia/Kolkata", label: "India (IST)" },
+  { value: "Australia/Sydney", label: "Sydney (AEDT/AEST)" },
+  { value: "UTC", label: "UTC" },
+] satisfies TimeZoneOption[];
 
 function formatStatus(
   value: string | number | undefined,
@@ -360,6 +387,18 @@ function defaultTimeZone() {
     : "UTC";
 }
 
+function timeZoneOptionLabel(value: string) {
+  return value.replace(/_/g, " ");
+}
+
+function timeZoneOptionsFor(value: string) {
+  if (!value || TIME_ZONE_OPTIONS.some((option) => option.value === value)) {
+    return TIME_ZONE_OPTIONS;
+  }
+
+  return [{ value, label: timeZoneOptionLabel(value) }, ...TIME_ZONE_OPTIONS];
+}
+
 function automationTimeZone(tile: AutomationTile) {
   return tile.timeZone ?? defaultTimeZone();
 }
@@ -386,6 +425,10 @@ function AutomationEditForm({
     tile.enableNotifications ?? false,
   );
   const [formError, setFormError] = useState<string | null>(null);
+  const timeZoneOptions = useMemo(
+    () => timeZoneOptionsFor(timeZone),
+    [timeZone],
+  );
 
   const scheduleMutation = useMutation({
     mutationFn: () => generateAutomationSchedule(schedule, timeZone),
@@ -466,6 +509,10 @@ function AutomationEditForm({
     onSave(request);
   };
 
+  const handleGenerateSchedule = () => {
+    scheduleMutation.mutate();
+  };
+
   const currentError = formError ?? saveError;
 
   return (
@@ -512,23 +559,39 @@ function AutomationEditForm({
             disabled={isSaving}
           />
         </label>
-        <label className="grid gap-2 text-sm" htmlFor="automation-timezone">
-          <span className="font-medium text-foreground">
+        <div className="grid gap-2 text-sm">
+          <label
+            className="font-medium text-foreground"
+            htmlFor="automation-timezone"
+          >
             {t("edit.fields.timeZone")}
-          </span>
-          <Input
-            id="automation-timezone"
+          </label>
+          <Select
             value={timeZone}
-            onChange={(event) => setTimeZone(event.target.value)}
+            onValueChange={setTimeZone}
             disabled={isSaving}
-          />
-        </label>
+          >
+            <SelectTrigger id="automation-timezone" className="w-full">
+              <SelectValue placeholder={t("edit.fields.timeZone")} />
+            </SelectTrigger>
+            <SelectContent>
+              {timeZoneOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
-      <label className="grid gap-2 text-sm" htmlFor="automation-schedule">
-        <span className="font-medium text-foreground">
+      <div className="grid gap-2 text-sm">
+        <label
+          className="font-medium text-foreground"
+          htmlFor="automation-schedule"
+        >
           {t("edit.fields.schedule")}
-        </span>
+        </label>
         <div className="flex flex-col gap-2 sm:flex-row">
           <Input
             id="automation-schedule"
@@ -540,7 +603,7 @@ function AutomationEditForm({
           <Button
             type="button"
             variant="outline"
-            onClick={() => scheduleMutation.mutate()}
+            onClick={handleGenerateSchedule}
             disabled={
               isSaving || scheduleMutation.isPending || !schedule.trim()
             }
@@ -553,7 +616,7 @@ function AutomationEditForm({
         <span className="text-xs text-muted-foreground">
           {t("edit.fields.scheduleHelp")}
         </span>
-      </label>
+      </div>
 
       <label className="grid gap-2 text-sm" htmlFor="automation-instructions">
         <span className="font-medium text-foreground">
@@ -1115,7 +1178,7 @@ export function AutomationsView() {
                           }}
                           disabled={updateMutation.isPending}
                         >
-                          <IconPencil aria-hidden="true" />
+                          <IconPencil className="size-3" aria-hidden="true" />
                           {t("actions.edit")}
                         </Button>
                         <Button
@@ -1128,7 +1191,7 @@ export function AutomationsView() {
                           }}
                           disabled={deleteMutation.isPending}
                         >
-                          <IconTrash aria-hidden="true" />
+                          <IconTrash className="size-3" aria-hidden="true" />
                           {t("actions.delete")}
                         </Button>
                       </>

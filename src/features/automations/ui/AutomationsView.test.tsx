@@ -46,6 +46,9 @@ vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
   ),
 }));
 
+HTMLElement.prototype.hasPointerCapture ??= () => false;
+HTMLElement.prototype.scrollIntoView ??= () => {};
+
 function renderAutomationsView() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -344,6 +347,7 @@ describe("AutomationsView", () => {
 
     await screen.findByText("Daily revenue digest");
     await user.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.getByText("Pacific Time (PT)")).toBeInTheDocument();
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Revenue digest v2");
     const scheduleInput = screen.getByPlaceholderText(
@@ -351,8 +355,18 @@ describe("AutomationsView", () => {
     );
     await user.clear(scheduleInput);
     await user.type(scheduleInput, "every weekday at 9am");
+    await user.click(screen.getByRole("combobox", { name: "Time zone" }));
+    await user.click(
+      screen.getByRole("option", {
+        name: "Eastern Time (ET)",
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Generate cron" }));
 
+    expect(generateAutomationSchedule).toHaveBeenCalledWith(
+      "every weekday at 9am",
+      "America/New_York",
+    );
     expect(await screen.findByDisplayValue("0 9 * * 1-5")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -362,6 +376,7 @@ describe("AutomationsView", () => {
         id: "automation-1",
         title: "Revenue digest v2",
         schedule: "0 9 * * 1-5",
+        timeZone: "America/New_York",
         updateSchedule: true,
       }),
       expect.anything(),
