@@ -1,4 +1,9 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  defaultRangeExtractor,
+  type Range,
+  useVirtualizer,
+} from "@tanstack/react-virtual";
 import { History, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -10,6 +15,7 @@ import { groupSessionsByDate } from "../lib/groupSessionsByDate";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   getVisibleSessions,
+  type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { selectSessions } from "@/features/chat/stores/chatSessionSelectors";
@@ -25,6 +31,14 @@ import {
 import { saveExportedSessionFile } from "@/shared/api/system";
 import { defaultExportFilename, downloadJson } from "../lib/exportSession";
 import { useSessionSearch } from "../hooks/useSessionSearch";
+import {
+  flattenFlatSessionRows,
+  flattenGroupedSessionRows,
+  type FlatSessionRow,
+  type GroupedSessionRow,
+} from "../lib/flattenSessionRows";
+import { useGridColumnCount } from "../hooks/useGridColumnCount";
+import type { SessionSearchDisplayResult } from "../lib/buildSessionSearchResults";
 
 interface SessionHistoryViewProps {
   onSelectSession?: (sessionId: string) => void;
@@ -44,6 +58,13 @@ export function SessionHistoryView({
   onArchiveChat,
 }: SessionHistoryViewProps) {
   const { t, i18n } = useTranslation(["sessions", "common"]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const pageContentRef = useRef<HTMLDivElement>(null);
+  const columnProbeRef = useRef<HTMLDivElement>(null);
+  const virtualListRef = useRef<HTMLDivElement>(null);
+  const [virtualListElement, setVirtualListElementState] =
+    useState<HTMLDivElement | null>(null);
+  const [listScrollMargin, setListScrollMargin] = useState(0);
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
@@ -87,10 +108,131 @@ export function SessionHistoryView({
     getDisplayTitle: (session) =>
       getDisplaySessionTitle(session.title, t("common:session.defaultTitle")),
   });
-  const dateGroups = groupSessionsByDate(activeSessions, {
-    locale: i18n.resolvedLanguage,
-    todayLabel: t("dateGroups.today"),
-    yesterdayLabel: t("dateGroups.yesterday"),
+  const getVirtualListScrollMargin = useCallback(
+    (node: HTMLDivElement | null = virtualListRef.current) => {
+      const scrollElement = scrollRef.current;
+      if (!node || !scrollElement) {
+        return 0;
+      }
+
+      return (
+        node.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top +
+        scrollElement.scrollTop
+      );
+    },
+    [],
+  );
+  const updateListScrollMargin = useCallback(() => {
+    setListScrollMargin(getVirtualListScrollMargin());
+  }, [getVirtualListScrollMargin]);
+  const setVirtualListElement = useCallback(
+    (node: HTMLDivElement | null) => {
+      virtualListRef.current = node;
+      setVirtualListElementState(node);
+      setListScrollMargin(getVirtualListScrollMargin(node));
+    },
+    [getVirtualListScrollMargin],
+  );
+
+  useEffect(() => {
+    updateListScrollMargin();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateListScrollMargin);
+      return () => window.removeEventListener("resize", updateListScrollMargin);
+    }
+
+    const observer = new ResizeObserver(updateListScrollMargin);
+    const scrollElement = scrollRef.current;
+    const pageContentElement = pageContentRef.current;
+
+    if (scrollElement) observer.observe(scrollElement);
+    if (pageContentElement) observer.observe(pageContentElement);
+    if (virtualListElement) observer.observe(virtualListElement);
+
+    window.addEventListener("resize", updateListScrollMargin);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", updateListScrollMargin);
+    };
+  }, [updateListScrollMargin, virtualListElement]);
+
+  const dateGroups = useMemo(
+    () =>
+      groupSessionsByDate(activeSessions, {
+        locale: i18n.resolvedLanguage,
+        todayLabel: t("dateGroups.today"),
+        yesterdayLabel: t("dateGroups.yesterday"),
+      }),
+    [activeSessions, i18n.resolvedLanguage, t],
+  );
+  const columns = useGridColumnCount(columnProbeRef);
+  const groupedRows = useMemo(
+    () => flattenGroupedSessionRows(dateGroups, columns),
+    [columns, dateGroups],
+  );
+  const groupedHeaderIndexes = useMemo(
+    () =>
+      groupedRows.flatMap((row, index) =>
+        row.kind === "header" ? [index] : [],
+      ),
+    [groupedRows],
+  );
+  const groupedRangeExtractor = useCallback(
+    (range: Range) => {
+      const activeHeaderIndex =
+        groupedHeaderIndexes.findLast((index) => index <= range.startIndex) ??
+        null;
+
+      const baseRange = defaultRangeExtractor(range);
+      if (activeHeaderIndex == null || baseRange.includes(activeHeaderIndex)) {
+        return baseRange;
+      }
+
+      return [activeHeaderIndex, ...baseRange];
+    },
+    [groupedHeaderIndexes],
+  );
+  const groupedVirtualizer = useVirtualizer({
+    count: groupedRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: (index) => (groupedRows[index]?.kind === "header" ? 32 : 96),
+    getItemKey: (index) => groupedRows[index]?.key ?? index,
+    measureElement:
+      typeof window !== "undefined" &&
+      navigator.userAgent.indexOf("Firefox") === -1
+        ? (element) => element?.getBoundingClientRect().height
+        : undefined,
+    overscan: 5,
+    rangeExtractor: groupedRangeExtractor,
+    scrollMargin: listScrollMargin,
+  });
+  const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
+  const firstGroupedVirtualIndex = groupedVirtualItems[0]?.index ?? 0;
+  const activeGroupedHeaderIndex = useMemo(
+    () =>
+      groupedHeaderIndexes.findLast(
+        (index) => index <= firstGroupedVirtualIndex,
+      ) ?? null,
+    [firstGroupedVirtualIndex, groupedHeaderIndexes],
+  );
+  const searchRows = useMemo(
+    () => flattenFlatSessionRows(search.results, columns),
+    [columns, search.results],
+  );
+  const searchVirtualizer = useVirtualizer({
+    count: searchRows.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 128,
+    getItemKey: (index) => searchRows[index]?.key ?? index,
+    measureElement:
+      typeof window !== "undefined" &&
+      navigator.userAgent.indexOf("Firefox") === -1
+        ? (element) => element?.getBoundingClientRect().height
+        : undefined,
+    overscan: 5,
+    scrollMargin: listScrollMargin,
   });
 
   const handleArchive = useCallback(
@@ -186,10 +328,101 @@ export function SessionHistoryView({
     [onSelectSearchResult, onSelectSession, search.submittedQuery],
   );
 
+  const renderSessionCard = useCallback(
+    (
+      session: ChatSession,
+      options: {
+        snippet?: string;
+        matchCount?: number;
+        messageId?: string;
+      } = {},
+    ) => (
+      <SessionCard
+        key={session.id}
+        id={session.id}
+        title={session.title}
+        updatedAt={session.updatedAt}
+        personaName={
+          session.personaId ? getPersonaName(session.personaId) : undefined
+        }
+        projectName={
+          session.projectId ? getProjectName(session.projectId) : undefined
+        }
+        projectColor={
+          session.projectId ? getProjectColor(session.projectId) : undefined
+        }
+        workingDir={
+          session.projectId ? getWorkingDir(session.projectId) : undefined
+        }
+        archivedAt={session.archivedAt}
+        snippet={options.snippet}
+        matchCount={options.matchCount}
+        onSelect={
+          options.messageId
+            ? () => handleSelectResult(session.id, options.messageId)
+            : onSelectSession
+        }
+        onRename={onRenameChat}
+        onArchive={handleArchive}
+        onExport={handleExport}
+        onDuplicate={handleDuplicate}
+      />
+    ),
+    [
+      getPersonaName,
+      getProjectColor,
+      getProjectName,
+      getWorkingDir,
+      handleArchive,
+      handleDuplicate,
+      handleExport,
+      handleSelectResult,
+      onRenameChat,
+      onSelectSession,
+    ],
+  );
+
+  const renderGroupedRow = useCallback(
+    (row: GroupedSessionRow) => {
+      if (row.kind === "header") {
+        return (
+          <h2 className="bg-background py-1 text-sm font-medium text-muted-foreground">
+            {row.label}
+          </h2>
+        );
+      }
+
+      return (
+        <div className="grid grid-cols-1 gap-3 pb-3 pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {row.sessions.map((session) => renderSessionCard(session))}
+        </div>
+      );
+    },
+    [renderSessionCard],
+  );
+
+  const renderSearchRow = useCallback(
+    (row: FlatSessionRow<SessionSearchDisplayResult>) => (
+      <div className="grid grid-cols-1 gap-3 pb-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {row.items.map((result) =>
+          renderSessionCard(result.session, {
+            snippet: result.snippet,
+            matchCount: result.matchCount,
+            messageId: result.messageId,
+          }),
+        )}
+      </div>
+    ),
+    [renderSessionCard],
+  );
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-8">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          ref={pageContentRef}
+          className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-8"
+        >
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div>
               <h1 className="font-display text-lg font-semibold tracking-tight">
@@ -226,47 +459,39 @@ export function SessionHistoryView({
             <p className="text-xs text-danger">{t("history.searchError")}</p>
           )}
 
+          <div
+            ref={columnProbeRef}
+            aria-hidden="true"
+            className="pointer-events-none invisible grid h-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+          />
+
           {search.submittedQuery ? (
             search.results.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {search.results.map((result) => (
-                  <SessionCard
-                    key={result.session.id}
-                    id={result.session.id}
-                    title={result.session.title}
-                    updatedAt={result.session.updatedAt}
-                    personaName={
-                      result.session.personaId
-                        ? getPersonaName(result.session.personaId)
-                        : undefined
-                    }
-                    projectName={
-                      result.session.projectId
-                        ? getProjectName(result.session.projectId)
-                        : undefined
-                    }
-                    projectColor={
-                      result.session.projectId
-                        ? getProjectColor(result.session.projectId)
-                        : undefined
-                    }
-                    workingDir={
-                      result.session.projectId
-                        ? getWorkingDir(result.session.projectId)
-                        : undefined
-                    }
-                    archivedAt={result.session.archivedAt}
-                    snippet={result.snippet}
-                    matchCount={result.matchCount}
-                    onSelect={() =>
-                      handleSelectResult(result.session.id, result.messageId)
-                    }
-                    onRename={onRenameChat}
-                    onArchive={handleArchive}
-                    onExport={handleExport}
-                    onDuplicate={handleDuplicate}
-                  />
-                ))}
+              <div
+                ref={setVirtualListElement}
+                className="relative w-full"
+                style={{ height: `${searchVirtualizer.getTotalSize()}px` }}
+              >
+                {searchVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const row = searchRows[virtualRow.index];
+                  if (!row) return null;
+
+                  return (
+                    <div
+                      key={virtualRow.key}
+                      data-index={virtualRow.index}
+                      ref={searchVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full"
+                      style={{
+                        transform: `translateY(${
+                          virtualRow.start - listScrollMargin
+                        }px)`,
+                      }}
+                    >
+                      {renderSearchRow(row)}
+                    </div>
+                  );
+                })}
               </div>
             ) : (
               <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
@@ -286,49 +511,45 @@ export function SessionHistoryView({
               </div>
             )
           ) : dateGroups.length > 0 ? (
-            dateGroups.map((group) => (
-              <div key={group.label} className="space-y-2">
-                <h2 className="sticky top-0 z-10 bg-background py-1 text-sm font-medium text-muted-foreground">
-                  {group.label}
-                </h2>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {group.sessions.map((session) => (
-                    <SessionCard
-                      key={session.id}
-                      id={session.id}
-                      title={session.title}
-                      updatedAt={session.updatedAt}
-                      personaName={
-                        session.personaId
-                          ? getPersonaName(session.personaId)
-                          : undefined
-                      }
-                      projectName={
-                        session.projectId
-                          ? getProjectName(session.projectId)
-                          : undefined
-                      }
-                      projectColor={
-                        session.projectId
-                          ? getProjectColor(session.projectId)
-                          : undefined
-                      }
-                      workingDir={
-                        session.projectId
-                          ? getWorkingDir(session.projectId)
-                          : undefined
-                      }
-                      archivedAt={session.archivedAt}
-                      onSelect={onSelectSession}
-                      onRename={onRenameChat}
-                      onArchive={handleArchive}
-                      onExport={handleExport}
-                      onDuplicate={handleDuplicate}
-                    />
-                  ))}
-                </div>
-              </div>
-            ))
+            <div
+              ref={setVirtualListElement}
+              className="relative w-full"
+              style={{ height: `${groupedVirtualizer.getTotalSize()}px` }}
+            >
+              {groupedVirtualItems.map((virtualRow) => {
+                const row = groupedRows[virtualRow.index];
+                if (!row) return null;
+
+                const isActiveHeader =
+                  row.kind === "header" &&
+                  virtualRow.index === activeGroupedHeaderIndex;
+
+                return (
+                  <div
+                    key={virtualRow.key}
+                    data-index={virtualRow.index}
+                    ref={groupedVirtualizer.measureElement}
+                    className="left-0 top-0 w-full"
+                    style={
+                      isActiveHeader
+                        ? {
+                            position: "sticky",
+                            top: 0,
+                            zIndex: 20,
+                          }
+                        : {
+                            position: "absolute",
+                            transform: `translateY(${
+                              virtualRow.start - listScrollMargin
+                            }px)`,
+                          }
+                    }
+                  >
+                    {renderGroupedRow(row)}
+                  </div>
+                );
+              })}
+            </div>
           ) : (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
               <History className="h-10 w-10 opacity-30" />
