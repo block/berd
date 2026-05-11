@@ -14,16 +14,11 @@ function getStored(): number {
   return Number.isNaN(v) ? 1.0 : adjust(v);
 }
 
-async function applyZoom(level: number) {
-  if (!window.__TAURI_INTERNALS__) return;
-  try {
-    const { getCurrentWebviewWindow } = await import(
-      "@tauri-apps/api/webviewWindow"
-    );
-    await getCurrentWebviewWindow().setZoom(level);
-  } catch {
-    // non-Tauri environment
-  }
+function applyZoom(level: number) {
+  document.documentElement.style.setProperty(
+    "--goose-content-zoom",
+    String(level),
+  );
 }
 
 export function useZoom() {

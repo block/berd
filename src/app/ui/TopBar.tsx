@@ -50,6 +50,7 @@ export function TopBar({
   const ContextPanelIcon = contextPanelOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
+  const toolbarIconClassName = "size-[18px]";
 
   return (
     <header
@@ -58,8 +59,8 @@ export function TopBar({
         className,
       )}
     >
-      <div className="h-full w-24 shrink-0" data-tauri-drag-region />
-      <div className="flex translate-y-0.5 items-center gap-1">
+      <div className="h-full w-28 shrink-0" data-tauri-drag-region />
+      <div className="flex translate-y-0.5 items-center gap-0.5">
         <Button
           type="button"
           variant="ghost"
@@ -68,7 +69,7 @@ export function TopBar({
           aria-label={sidebarLabel}
           title={sidebarLabel}
         >
-          <SidebarIcon aria-hidden="true" className="size-[18px]" />
+          <SidebarIcon aria-hidden="true" className={toolbarIconClassName} />
         </Button>
         <Button
           type="button"
@@ -79,7 +80,7 @@ export function TopBar({
           aria-label={t("actions.back")}
           title={t("actions.back")}
         >
-          <IconArrowLeft aria-hidden="true" className="size-[18px]" />
+          <IconArrowLeft aria-hidden="true" className={toolbarIconClassName} />
         </Button>
         <Button
           type="button"
@@ -90,7 +91,7 @@ export function TopBar({
           aria-label={t("actions.forward")}
           title={t("actions.forward")}
         >
-          <IconArrowRight aria-hidden="true" className="size-[18px]" />
+          <IconArrowRight aria-hidden="true" className={toolbarIconClassName} />
         </Button>
       </div>
       <div
@@ -106,7 +107,10 @@ export function TopBar({
         aria-label={t("feedback:title")}
         title={t("feedback:title")}
       >
-        <IconMessageReport aria-hidden="true" className="size-[18px]" />
+        <IconMessageReport
+          aria-hidden="true"
+          className={toolbarIconClassName}
+        />
       </Button>
       {showContextPanelToggle && (
         <Button
@@ -118,7 +122,10 @@ export function TopBar({
           aria-label={contextPanelLabel}
           title={contextPanelLabel}
         >
-          <ContextPanelIcon aria-hidden="true" className="size-[18px]" />
+          <ContextPanelIcon
+            aria-hidden="true"
+            className={toolbarIconClassName}
+          />
         </Button>
       )}
     </header>

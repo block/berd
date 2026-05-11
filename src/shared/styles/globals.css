@@ -737,6 +737,10 @@ body,
     font-variation-settings: normal;
   }
 
+  .goose-zoom-scope {
+    zoom: var(--goose-content-zoom, 1);
+  }
+
   body {
     @apply bg-background text-foreground;
     font-feature-settings:

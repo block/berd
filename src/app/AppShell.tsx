@@ -1145,7 +1145,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onFeedbackClick={handleFeedbackClick}
       />
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">
         <div
           className="flex-shrink-0 h-full pt-2 pb-3 pl-3"
           style={{
