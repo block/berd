@@ -2,6 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Sidebar } from "@/features/sidebar/ui/Sidebar";
+import { getVersion } from "@tauri-apps/api/app";
+import { openFeedbackForm } from "@/shared/api/feedback";
+import { getPlatform } from "@/shared/lib/platform";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -967,6 +970,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setContextPanelOpen(activeSessionId, !isContextPanelOpen);
   }, [activeSessionId, isContextPanelOpen, setContextPanelOpen]);
 
+  const handleFeedbackClick = useCallback(async () => {
+    let version: string;
+    try {
+      version = await getVersion();
+    } catch {
+      version = "unknown";
+    }
+    await openFeedbackForm({
+      version,
+      platform: getPlatform(),
+    });
+  }, []);
+
   const handleResizeStart = useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
@@ -1126,6 +1142,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         contextPanelOpen={isContextPanelOpen}
         contextPanelLabel={contextPanelLabel}
         onToggleContextPanel={toggleContextPanel}
+        onFeedbackClick={handleFeedbackClick}
       />
 
       <div className="flex flex-1 min-h-0 overflow-hidden">

@@ -6,6 +6,7 @@ export const TRANSLATION_NAMESPACES = [
   "automations",
   "common",
   "chat",
+  "feedback",
   "home",
   "onboarding",
   "projects",

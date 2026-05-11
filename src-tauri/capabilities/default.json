@@ -13,6 +13,14 @@
     "core:window:allow-set-min-size",
     "opener:default",
     {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "linear://*"
+        }
+      ]
+    },
+    {
       "identifier": "opener:allow-open-path",
       "allow": [
         {

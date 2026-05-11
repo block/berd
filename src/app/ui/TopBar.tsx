@@ -5,6 +5,7 @@ import {
   IconLayoutSidebarFilled,
   IconLayoutSidebarRight,
   IconLayoutSidebarRightFilled,
+  IconMessageReport,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
@@ -22,6 +23,7 @@ interface TopBarProps {
   onGoForward?: () => void;
   onToggleContextPanel?: () => void;
   onToggleSidebar?: () => void;
+  onFeedbackClick: () => void;
 }
 
 export function TopBar({
@@ -36,8 +38,9 @@ export function TopBar({
   onGoForward,
   onToggleContextPanel,
   onToggleSidebar,
+  onFeedbackClick,
 }: TopBarProps) {
-  const { t } = useTranslation("sidebar");
+  const { t } = useTranslation(["sidebar", "feedback"]);
   const sidebarLabel = sidebarCollapsed
     ? t("actions.expand")
     : t("actions.collapse");
@@ -94,6 +97,17 @@ export function TopBar({
         className="ml-2 min-w-0 flex-1 self-stretch"
         data-tauri-drag-region
       />
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon-sm"
+        className="translate-y-0.5"
+        onClick={onFeedbackClick}
+        aria-label={t("feedback:title")}
+        title={t("feedback:title")}
+      >
+        <IconMessageReport aria-hidden="true" className="size-[18px]" />
+      </Button>
       {showContextPanelToggle && (
         <Button
           type="button"
