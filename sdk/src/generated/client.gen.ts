@@ -95,7 +95,7 @@ import type {
   UpdateSourceRequest,
   UpdateSourceResponse,
   UpdateWorkingDirRequest,
-} from "./types.gen.js";
+} from './types.gen.js';
 import {
   zCreateSourceResponse,
   zCustomProviderCreateResponse,
@@ -129,7 +129,7 @@ import {
   zReadResourceResponse,
   zRefreshProviderInventoryResponse,
   zUpdateSourceResponse,
-} from "./zod.gen.js";
+} from './zod.gen.js';
 
 export class GooseExtClient {
   constructor(private conn: ExtMethodProvider) {}
