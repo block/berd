@@ -43,7 +43,7 @@ just setup
 # Mirrors `just bundle`, but with an explicit --target.
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
-pnpm tauri build --target aarch64-apple-darwin
+pnpm tauri build --no-sign --target aarch64-apple-darwin
 
 UNSIGNED_APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/${APP_BUNDLE_NAME}.app"
 [[ -d "$UNSIGNED_APP" ]] || { echo "Missing $UNSIGNED_APP" >&2; exit 1; }
