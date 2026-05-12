@@ -168,8 +168,7 @@ export function AgentsView() {
     async (persona: Persona) => {
       try {
         const result = await exportPersona(persona.id);
-        // Trigger a browser download with the JSON content
-        const blob = new Blob([result.json], { type: "application/json" });
+        const blob = new Blob([result.contents], { type: result.mimeType });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
@@ -231,8 +230,8 @@ export function AgentsView() {
         title: t("common:actions.import"),
         filters: [
           {
-            name: "JSON",
-            extensions: ["json"],
+            name: "Agent",
+            extensions: ["md", "json"],
           },
         ],
       });

@@ -2,6 +2,7 @@ use serde::Serialize;
 use std::path::PathBuf;
 
 const MAX_PERSONA_IMPORT_BYTES: u64 = 4 * 1024 * 1024;
+const PERSONA_MARKDOWN_SUFFIX: &str = ".persona.md";
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,12 +40,13 @@ fn validate_import_persona_path(source_path: &str) -> Result<PathBuf, String> {
         )
     })?;
 
-    let extension = canonical_path
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .ok_or_else(|| "Unsupported file type. Expected a .json file.".to_string())?;
-    if !extension.eq_ignore_ascii_case("json") {
-        return Err("Unsupported file type. Expected a .json file.".to_string());
+    let file_name = canonical_path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| "Selected file is missing a valid filename".to_string())?;
+    let lower_name = file_name.to_ascii_lowercase();
+    if !lower_name.ends_with(".json") && !lower_name.ends_with(PERSONA_MARKDOWN_SUFFIX) {
+        return Err("Unsupported file type. Expected a .persona.md or .json file.".to_string());
     }
     if metadata.len() > MAX_PERSONA_IMPORT_BYTES {
         return Err(format!(
@@ -81,7 +83,7 @@ mod tests {
     use tempfile::{tempdir, Builder};
 
     #[test]
-    fn validate_import_persona_path_rejects_non_json_files() {
+    fn validate_import_persona_path_rejects_unsupported_files() {
         let file = Builder::new()
             .prefix("persona-import-")
             .suffix(".txt")
@@ -103,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn validate_import_persona_path_accepts_json_files() {
+    fn validate_import_persona_path_accepts_json_and_persona_markdown_files() {
         let file = Builder::new()
             .prefix("persona-import-")
             .suffix(".json")
@@ -114,6 +116,30 @@ mod tests {
         let validated = validate_import_persona_path(file.path().to_str().unwrap()).unwrap();
 
         assert_eq!(validated, file.path().canonicalize().unwrap());
+
+        let file = Builder::new()
+            .prefix("persona-import-")
+            .suffix(".persona.md")
+            .tempfile()
+            .unwrap();
+        std::fs::write(file.path(), b"---\nname: scout\n---").unwrap();
+
+        let validated = validate_import_persona_path(file.path().to_str().unwrap()).unwrap();
+
+        assert_eq!(validated, file.path().canonicalize().unwrap());
+    }
+
+    #[test]
+    fn validate_import_persona_path_rejects_plain_markdown_files() {
+        let file = Builder::new()
+            .prefix("persona-import-")
+            .suffix(".md")
+            .tempfile()
+            .unwrap();
+
+        let result = validate_import_persona_path(file.path().to_str().unwrap());
+
+        assert!(result.is_err());
     }
 
     #[test]

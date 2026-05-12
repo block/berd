@@ -5,6 +5,12 @@ const JSON_MIME_TYPES = new Set([
   "text/json",
   "text/plain",
 ]);
+const MARKDOWN_MIME_TYPES = new Set([
+  "",
+  "text/markdown",
+  "text/plain",
+  "application/octet-stream",
+]);
 
 export const MAX_PERSONA_IMPORT_BYTES = 4 * 1024 * 1024;
 
@@ -26,13 +32,18 @@ export function validatePersonaImportFile(
   file: Pick<File, "name" | "type"> & { size?: number },
 ): ImportMessageDescriptor | null {
   const lowerName = file.name.toLowerCase();
-  if (!lowerName.endsWith(".json")) {
+  const isJson = lowerName.endsWith(".json");
+  const isPersonaMarkdown = lowerName.endsWith(".persona.md");
+  if (!isJson && !isPersonaMarkdown) {
     return {
       key: "view.importInvalidExtension",
     } satisfies ImportMessageDescriptor;
   }
 
-  if (!JSON_MIME_TYPES.has(file.type)) {
+  const allowedMimeTypes = isPersonaMarkdown
+    ? MARKDOWN_MIME_TYPES
+    : JSON_MIME_TYPES;
+  if (!allowedMimeTypes.has(file.type)) {
     return {
       key: "view.importInvalidMimeType",
     } satisfies ImportMessageDescriptor;

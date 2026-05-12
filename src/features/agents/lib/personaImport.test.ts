@@ -5,6 +5,32 @@ import {
 } from "./personaImport";
 
 describe("validatePersonaImportFile", () => {
+  it("accepts persona markdown and JSON imports", () => {
+    expect(
+      validatePersonaImportFile({
+        name: "scout.persona.md",
+        type: "text/markdown",
+      }),
+    ).toBeNull();
+    expect(
+      validatePersonaImportFile({
+        name: "scout.persona.json",
+        type: "application/json",
+      }),
+    ).toBeNull();
+  });
+
+  it("rejects plain markdown imports", () => {
+    expect(
+      validatePersonaImportFile({
+        name: "scout.md",
+        type: "text/markdown",
+      }),
+    ).toEqual({
+      key: "view.importInvalidExtension",
+    });
+  });
+
   it("rejects persona imports larger than the configured cap", () => {
     expect(
       validatePersonaImportFile({

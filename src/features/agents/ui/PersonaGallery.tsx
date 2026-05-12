@@ -138,7 +138,7 @@ export function PersonaGallery({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".json,application/json"
+              accept=".persona.md,.json,text/markdown,text/plain,application/json"
               className="hidden"
               onChange={handleFileChange}
             />
@@ -190,7 +190,7 @@ export function PersonaGallery({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".json,application/json"
+          accept=".persona.md,.json,text/markdown,text/plain,application/json"
           className="hidden"
           onChange={handleFileChange}
         />

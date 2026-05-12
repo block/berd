@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { SourceEntry } from "@aaif/goose-sdk";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getClient } from "@/shared/api/acpConnection";
 import type {
   Persona,
@@ -11,6 +12,14 @@ import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
 
 const AGENT_SOURCE_TYPE = "agent" as const;
 const AGENT_DESCRIPTION = "Agent";
+const PERSONA_MD_EXTENSION = ".persona.md";
+const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
+  "name",
+  "display_name",
+  "description",
+  "model",
+  "avatar",
+]);
 
 type AgentSourceProperties = {
   [key: string]: unknown;
@@ -45,6 +54,13 @@ function propertyToAvatar(value: unknown): Avatar | null {
 
 function propertyToString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function propertyToRecord(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  return value as Record<string, unknown>;
 }
 
 function personaProperties(
@@ -90,10 +106,9 @@ function mergedPersonaProperties(
   return properties;
 }
 function isSupportedImportFile(fileName: string): boolean {
+  const lowerName = fileName.toLowerCase();
   return (
-    fileName.endsWith(".agent.json") ||
-    fileName.endsWith(".persona.json") ||
-    fileName.endsWith(".json")
+    lowerName.endsWith(PERSONA_MD_EXTENSION) || lowerName.endsWith(".json")
   );
 }
 
@@ -112,11 +127,190 @@ function legacyAvatarToProperty(value: unknown): string | undefined {
   return undefined;
 }
 
-function readImportJson(raw: string): {
-  parsed: Record<string, unknown>;
+function isPersonaMarkdownFile(fileName: string): boolean {
+  return fileName.toLowerCase().endsWith(PERSONA_MD_EXTENSION);
+}
+
+function slugifyPersonaName(value: string): string {
+  const slug = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64)
+    .replace(/-+$/g, "");
+
+  return slug.length > 0 ? slug : "agent";
+}
+
+function fileStem(path: string): string | undefined {
+  const baseName = path.split(/[\\/]/).pop();
+  if (!baseName) {
+    return undefined;
+  }
+  const lowerName = baseName.toLowerCase();
+  if (lowerName.endsWith(PERSONA_MD_EXTENSION)) {
+    return baseName.slice(0, -PERSONA_MD_EXTENSION.length);
+  }
+  return lowerName.endsWith(".md") ? baseName.slice(0, -3) : baseName;
+}
+
+function sproutNameFromProperties(
+  properties: AgentSourceProperties | undefined,
+): string | undefined {
+  const sprout = propertyToRecord(properties?.sprout);
+  return propertyToString(sprout?.name);
+}
+
+function personaExportName(source: AgentSourceEntry): string {
+  return (
+    sproutNameFromProperties(source.properties) ??
+    fileStem(source.path) ??
+    slugifyPersonaName(source.name)
+  );
+}
+
+function personaModelProperty(
+  properties: AgentSourceProperties | undefined,
+): string | undefined {
+  const model = propertyToString(properties?.model);
+  if (!model) {
+    return undefined;
+  }
+
+  const provider = propertyToString(properties?.provider);
+  return provider ? `${provider}:${model}` : model;
+}
+
+function sproutFrontmatterFromProperties(
+  properties: AgentSourceProperties | undefined,
+): Record<string, unknown> {
+  const sprout = propertyToRecord(properties?.sprout);
+  return propertyToRecord(sprout?.frontmatter) ?? {};
+}
+
+function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
+  const properties = source.properties;
+  const name = personaExportName(source);
+  const description =
+    source.description.trim().length > 0
+      ? source.description
+      : "Imported Goose agent";
+  const frontmatter: Record<string, unknown> = {
+    name,
+    display_name: source.name,
+    description,
+  };
+
+  const model = personaModelProperty(properties);
+  if (model) {
+    frontmatter.model = model;
+  }
+
+  const avatar = propertyToString(properties?.avatar);
+  if (avatar) {
+    frontmatter.avatar = avatar;
+  }
+
+  Object.assign(
+    frontmatter,
+    unsupportedSproutFrontmatter(sproutFrontmatterFromProperties(properties)),
+  );
+
+  return {
+    contents: [
+      "---",
+      stringifyYaml(frontmatter, { lineWidth: 0 }).trimEnd(),
+      "---",
+      "",
+      source.content.trimEnd(),
+      "",
+    ].join("\n"),
+    filename: `${slugifyPersonaName(name)}${PERSONA_MD_EXTENSION}`,
+    mimeType: "text/markdown",
+  };
+}
+
+function splitPersonaMarkdown(raw: string): {
+  frontmatter: string;
+  body: string;
 } {
+  const normalized = raw.replace(/^\uFEFF/, "");
+  const lines = normalized.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") {
+    throw new Error("Invalid persona markdown: missing frontmatter");
+  }
+
+  const endIndex = lines.findIndex(
+    (line, index) => index > 0 && line.trim() === "---",
+  );
+  if (endIndex === -1) {
+    throw new Error("Invalid persona markdown: missing closing frontmatter");
+  }
+
+  return {
+    frontmatter: lines.slice(1, endIndex).join("\n"),
+    body: lines
+      .slice(endIndex + 1)
+      .join("\n")
+      .trim(),
+  };
+}
+
+function parsePersonaFrontmatter(text: string): Record<string, unknown> {
+  let parsed: unknown;
   try {
-    return { parsed: JSON.parse(raw) as Record<string, unknown> };
+    parsed = parseYaml(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Invalid persona markdown frontmatter: ${message}`);
+  }
+
+  const frontmatter = propertyToRecord(parsed);
+  if (!frontmatter) {
+    throw new Error("Invalid persona markdown frontmatter: expected a map");
+  }
+  return frontmatter;
+}
+
+function requiredFrontmatterString(
+  frontmatter: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = propertyToString(frontmatter[key])?.trim();
+  return value || undefined;
+}
+
+function splitPersonaModel(model: string): {
+  provider?: string;
+  model: string;
+} {
+  const separatorIndex = model.indexOf(":");
+  if (separatorIndex === -1) {
+    return { model };
+  }
+
+  const provider = model.slice(0, separatorIndex).trim();
+  const modelId = model.slice(separatorIndex + 1).trim();
+  return provider ? { provider, model: modelId } : { model: modelId };
+}
+
+function unsupportedSproutFrontmatter(
+  frontmatter: Record<string, unknown>,
+): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(frontmatter).filter(
+      ([key]) => !PORTABLE_SPROUT_FRONTMATTER_KEYS.has(key),
+    ),
+  );
+}
+
+function hasEntries(value: Record<string, unknown>): boolean {
+  return Object.keys(value).length > 0;
+}
+
+function readImportJson(raw: string): Record<string, unknown> {
+  try {
+    return JSON.parse(raw) as Record<string, unknown>;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`Invalid persona JSON: ${message}`);
@@ -152,7 +346,8 @@ function legacyPersonaProperties(
   applyOptionalProperty(
     properties,
     "avatar",
-    legacyAvatarToProperty(parsed.avatar),
+    legacyAvatarToProperty(parsed.avatar) ??
+      legacyAvatarToProperty(parsed.avatarUrl),
   );
   return properties;
 }
@@ -167,6 +362,63 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
     content: parsed.systemPrompt as string,
     global: true,
     properties: legacyPersonaProperties(parsed),
+  };
+}
+
+function personaMarkdownProperties(
+  parsed: Record<string, unknown>,
+): AgentSourceProperties {
+  const properties: AgentSourceProperties = {};
+  const model = propertyToString(parsed.model);
+  if (model) {
+    const split = splitPersonaModel(model);
+    applyOptionalProperty(properties, "provider", split.provider);
+    applyOptionalProperty(properties, "model", split.model);
+  }
+  applyOptionalProperty(
+    properties,
+    "avatar",
+    legacyAvatarToProperty(parsed.avatar),
+  );
+
+  const sprout: Record<string, unknown> = {};
+  const sproutName = propertyToString(parsed.name);
+  if (sproutName) {
+    sprout.name = sproutName;
+  }
+  const unsupported = unsupportedSproutFrontmatter(parsed);
+  if (hasEntries(unsupported)) {
+    sprout.frontmatter = unsupported;
+  }
+  if (hasEntries(sprout)) {
+    properties.sprout = sprout;
+  }
+
+  return properties;
+}
+
+function personaMarkdownToCreateRequest(fileContents: string) {
+  const { frontmatter, body } = splitPersonaMarkdown(fileContents);
+  const parsed = parsePersonaFrontmatter(frontmatter);
+  const displayName =
+    requiredFrontmatterString(parsed, "display_name") ??
+    requiredFrontmatterString(parsed, "name");
+
+  if (!displayName) {
+    throw new Error("Persona display_name cannot be empty");
+  }
+  if (!body) {
+    throw new Error("Persona markdown body cannot be empty");
+  }
+
+  return {
+    type: AGENT_SOURCE_TYPE,
+    name: displayName,
+    description:
+      requiredFrontmatterString(parsed, "description") ?? AGENT_DESCRIPTION,
+    content: body,
+    global: true,
+    properties: personaMarkdownProperties(parsed),
   };
 }
 
@@ -254,17 +506,20 @@ export async function refreshPersonas(): Promise<Persona[]> {
 }
 
 export interface ExportResult {
-  json: string;
+  contents: string;
   filename: string;
+  mimeType: string;
 }
 
 export async function exportPersona(id: string): Promise<ExportResult> {
-  const client = await getClient();
-  const response = await client.goose.GooseSourcesExport({
-    type: AGENT_SOURCE_TYPE,
-    path: id,
-  });
-  return { json: response.json, filename: response.filename };
+  const source = (await listAgentSources()).find(
+    (source) => source.path === id,
+  );
+  if (!source) {
+    throw new Error(`Persona ${id} not found`);
+  }
+
+  return serializePersonaMarkdown(source);
 }
 
 export async function importPersonas(
@@ -273,12 +528,25 @@ export async function importPersonas(
 ): Promise<Persona[]> {
   if (!isSupportedImportFile(fileName)) {
     throw new Error(
-      "File must have a .agent.json, .persona.json, or .json extension",
+      "File must have a .persona.md, .agent.json, .persona.json, or .json extension",
     );
   }
 
-  const { parsed } = readImportJson(fileContents);
   const client = await getClient();
+
+  if (isPersonaMarkdownFile(fileName)) {
+    const response = await client.goose.GooseSourcesCreate(
+      personaMarkdownToCreateRequest(fileContents),
+    );
+    if (!isAgentSource(response.source)) {
+      throw new Error(
+        `Unexpected source type returned: ${response.source.type}`,
+      );
+    }
+    return [toPersona(response.source)];
+  }
+
+  const parsed = readImportJson(fileContents);
 
   if (parsed.type === AGENT_SOURCE_TYPE) {
     const response = await client.goose.GooseSourcesImport({

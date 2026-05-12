@@ -308,23 +308,56 @@ describe("agents API", () => {
     });
   });
 
-  it("exports personas through ACP source export", async () => {
-    mockGooseSourcesExport.mockResolvedValue({
-      json: '{"type":"agent"}',
-      filename: "scout.agent.json",
+  it("exports personas as Sprout-compatible persona markdown", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [agentSource],
     });
 
     const { exportPersona } = await import("../agents");
     const result = await exportPersona(agentSource.path);
 
-    expect(mockGooseSourcesList).not.toHaveBeenCalled();
-    expect(mockGooseSourcesExport).toHaveBeenCalledWith({
-      type: "agent",
-      path: agentSource.path,
-    });
+    expect(mockGooseSourcesList).toHaveBeenCalledWith({ type: "agent" });
+    expect(mockGooseSourcesExport).not.toHaveBeenCalled();
     expect(result).toEqual({
-      json: '{"type":"agent"}',
-      filename: "scout.agent.json",
+      contents:
+        "---\nname: scout\ndisplay_name: Scout\ndescription: Agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\n---\n\nResearch carefully.\n",
+      filename: "scout.persona.md",
+      mimeType: "text/markdown",
+    });
+  });
+
+  it("exports preserved Sprout frontmatter from imported persona markdown", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          path: "/Users/test/.agents/agents/scout.persona.md",
+          properties: {
+            ...agentSource.properties,
+            sprout: {
+              frontmatter: {
+                subscribe: ["#agents"],
+                tags: ["research", "support"],
+                tools: {
+                  web: true,
+                },
+              },
+            },
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(
+      "/Users/test/.agents/agents/scout.persona.md",
+    );
+
+    expect(result).toEqual({
+      contents:
+        '---\nname: scout\ndisplay_name: Scout\ndescription: Agent\nmodel: openai:gpt-4.1\navatar: https://example.test/scout.png\nsubscribe:\n  - "#agents"\ntags:\n  - research\n  - support\ntools:\n  web: true\n---\n\nResearch carefully.\n',
+      filename: "scout.persona.md",
+      mimeType: "text/markdown",
     });
   });
 
@@ -357,6 +390,106 @@ describe("agents API", () => {
     });
     expect(mockGooseSourcesImport).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
+  });
+
+  it("imports Sprout persona markdown through ACP source create", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = `---
+name: scout
+display_name: "Scout"
+description: "Agent"
+model: "openai:gpt-4.1"
+avatar: "https://example.test/scout.png"
+subscribe:
+  - "#agents"
+tags: [research, support]
+tools:
+  web: true
+---
+
+Research carefully.
+`;
+
+    const result = await importPersonas(raw, "scout.persona.md");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      global: true,
+      properties: {
+        provider: "openai",
+        model: "gpt-4.1",
+        avatar: "https://example.test/scout.png",
+        sprout: {
+          name: "scout",
+          frontmatter: {
+            subscribe: ["#agents"],
+            tags: ["research", "support"],
+            tools: {
+              web: true,
+            },
+          },
+        },
+      },
+    });
+    expect(mockGooseSourcesImport).not.toHaveBeenCalled();
+    expect(result).toHaveLength(1);
+  });
+
+  it("preserves model ids with colons when importing persona markdown", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = `---
+name: scout
+model: bedrock:anthropic.claude:v1
+---
+
+Research carefully.
+`;
+
+    await importPersonas(raw, "scout.persona.md");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: {
+          provider: "bedrock",
+          model: "anthropic.claude:v1",
+          sprout: {
+            name: "scout",
+          },
+        },
+      }),
+    );
+  });
+
+  it("imports legacy Sprout avatarUrl JSON through ACP source create", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = JSON.stringify({
+      version: 1,
+      displayName: "Scout",
+      systemPrompt: "Research carefully.",
+      avatarUrl: "https://example.test/scout.png",
+    });
+
+    await importPersonas(raw, "scout.persona.json");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      global: true,
+      properties: {
+        avatar: "https://example.test/scout.png",
+      },
+    });
   });
 
   it("drops local and unknown legacy avatar shapes without warnings", async () => {
