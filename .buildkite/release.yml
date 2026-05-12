@@ -1,0 +1,61 @@
+agents:
+  xcode: "26.3.0"
+
+# The macos-environment plugin activates Xcode and sets up RVM/bundler so the
+# upload-mobile-release plugin's pre-command can find `fastlane` if it ever
+# needs to. Goose Internal only builds macOS, but the plugin's signing/upload
+# helpers still rely on the environment it primes.
+common:
+  - macos_env: &macos_env
+      squareup/macos-environment#v2:
+        ruby_version: "3.3.9"
+        xcode_version: "26.3.0"
+
+steps:
+  - input: ":mac: Cut a Goose Internal release"
+    key: "release-input"
+    fields:
+      - text: "version"
+        key: "version"
+        hint: "Semver for this release (e.g. 0.2.0). Becomes the v<version> tag on this repo."
+        required: true
+
+  - label: ":mac: Build & sign macOS"
+    key: "build-macos"
+    depends_on: "release-input"
+    command: ./scripts/buildkite/release/build-macos.sh
+    artifact_paths:
+      - "release/macos/Goose Internal.app.zip"
+      - "release/macos/Goose Internal.dmg"
+    plugins:
+      - *macos_env
+      - squareup/apple-codesign#v1:
+          identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
+          artifacts:
+            - path: "release/macos/Goose Internal.app"
+              entitlements: src-tauri/entitlements.plist
+            - path: "release/macos/Goose Internal.app.zip"
+              package:
+                from: "release/macos/Goose Internal.app"
+              sign: false
+              notarize: false
+              staple: false
+            - path: "release/macos/Goose Internal.dmg"
+              package:
+                from: "release/macos/Goose Internal.app"
+                volname: "Goose Internal"
+      - squareup/upload-mobile-release#v2:
+          team_ids:
+            - "EYF346PHUG"
+          mobile_releases:
+            - id: "goose2-macos"
+              project: "goose2"
+              platform: "mac_zip"
+              variant: "release"
+              file: "release/macos/Goose Internal.app.zip"
+              version: "scripts/buildkite/release/release-version.sh"
+
+  - label: ":github: Publish GitHub release"
+    key: "publish"
+    depends_on: "build-macos"
+    command: ./scripts/buildkite/release/publish-release.sh
