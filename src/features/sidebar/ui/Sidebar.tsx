@@ -336,7 +336,7 @@ export function Sidebar({
       <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-background">
         <div
           className={cn(
-            "flex-shrink-0 pt-3",
+            "flex-shrink-0 pt-[8px]",
             collapsed ? "px-1.5 pb-1.5" : "px-3 pb-1",
           )}
         >

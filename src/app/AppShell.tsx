@@ -1150,7 +1150,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
       <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">
         <div
-          className="flex-shrink-0 h-full pt-2 pb-3 pl-3"
+          className="flex-shrink-0 h-full pt-0 pb-3 pl-3"
           style={{
             width: sidebarCollapsed
               ? SIDEBAR_COLLAPSED_WIDTH + SIDEBAR_OUTER_GUTTER_WIDTH

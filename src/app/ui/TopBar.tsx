@@ -50,21 +50,29 @@ export function TopBar({
   const ContextPanelIcon = contextPanelOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
+  const toolbarButtonClassName = "size-[24px]";
+  const toolbarButtonOffsetClassName = "translate-y-px";
   const toolbarIconClassName = "size-[18px]";
 
   return (
     <header
       className={cn(
-        "flex h-10 items-center bg-background/80 pr-5 backdrop-blur-sm",
+        "flex h-[30px] items-center bg-background/80 pr-[15px] backdrop-blur-sm",
         className,
       )}
     >
-      <div className="h-full w-28 shrink-0" data-tauri-drag-region />
-      <div className="flex translate-y-0.5 items-center gap-0.5">
+      <div className="h-full w-[84px] shrink-0" data-tauri-drag-region />
+      <div
+        className={cn(
+          "flex items-center gap-[1.5px]",
+          toolbarButtonOffsetClassName,
+        )}
+      >
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
+          className={toolbarButtonClassName}
           onClick={onToggleSidebar}
           aria-label={sidebarLabel}
           title={sidebarLabel}
@@ -75,6 +83,7 @@ export function TopBar({
           type="button"
           variant="ghost"
           size="icon-sm"
+          className={toolbarButtonClassName}
           onClick={onGoBack}
           disabled={!canGoBack}
           aria-label={t("actions.back")}
@@ -86,6 +95,7 @@ export function TopBar({
           type="button"
           variant="ghost"
           size="icon-sm"
+          className={toolbarButtonClassName}
           onClick={onGoForward}
           disabled={!canGoForward}
           aria-label={t("actions.forward")}
@@ -95,14 +105,14 @@ export function TopBar({
         </Button>
       </div>
       <div
-        className="ml-2 min-w-0 flex-1 self-stretch"
+        className="ml-[6px] min-w-0 flex-1 self-stretch"
         data-tauri-drag-region
       />
       <Button
         type="button"
         variant="ghost"
         size="icon-sm"
-        className="translate-y-0.5"
+        className={cn(toolbarButtonClassName, toolbarButtonOffsetClassName)}
         onClick={onFeedbackClick}
         aria-label={t("feedback:title")}
         title={t("feedback:title")}
@@ -117,7 +127,7 @@ export function TopBar({
           type="button"
           variant="ghost"
           size="icon-sm"
-          className="translate-y-0.5"
+          className={cn(toolbarButtonClassName, toolbarButtonOffsetClassName)}
           onClick={onToggleContextPanel}
           aria-label={contextPanelLabel}
           title={contextPanelLabel}
