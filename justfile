@@ -17,6 +17,7 @@ setup:
     pnpm install
     cd sdk && pnpm build
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
+    lefthook install
 
 # ── Build & Check ────────────────────────────────────────────
 
