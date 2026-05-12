@@ -151,6 +151,10 @@
     "tools": "Herramientas"
   },
   "general": {
+    "agentToolsTips": {
+      "description": "Goose mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
+      "label": "Consejos de chat"
+    },
     "language": {
       "description": "Elige cómo Goose formatea y muestra la interfaz.",
       "english": "Inglés",

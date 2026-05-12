@@ -151,6 +151,10 @@
     "tools": "Tools"
   },
   "general": {
+    "agentToolsTips": {
+      "description": "Goose will show tips in chat for relevant tools, skills, or workflows.",
+      "label": "Chat tips"
+    },
     "language": {
       "description": "Sets the language Goose uses across menus, buttons, and messages.",
       "english": "English",

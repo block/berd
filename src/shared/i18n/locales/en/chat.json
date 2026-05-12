@@ -8,6 +8,11 @@
     "remove": "Remove attachment",
     "view": "View attachment {{index}}"
   },
+  "agentToolsTip": {
+    "available": "{{tool}} is available through sq agent tools",
+    "dismiss": "Dismiss tip",
+    "turnOff": "Turn off"
+  },
   "context": {
     "closePanel": "Close context panel",
     "openPanel": "Open context panel",

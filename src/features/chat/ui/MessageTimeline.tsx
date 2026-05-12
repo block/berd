@@ -321,7 +321,10 @@ export function MessageTimeline({
     <div
       ref={containerRef}
       onScroll={handleScroll}
-      className={cn("flex-1 overflow-y-auto", className)}
+      className={cn(
+        "flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]",
+        className,
+      )}
       role="log"
       aria-label={t("timeline.ariaLabel")}
       aria-live="polite"

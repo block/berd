@@ -8,6 +8,11 @@
     "remove": "Eliminar adjunto",
     "view": "Ver adjunto {{index}}"
   },
+  "agentToolsTip": {
+    "available": "{{tool}} está disponible a través de sq agent tools",
+    "dismiss": "Descartar consejo",
+    "turnOff": "Desactivar"
+  },
   "context": {
     "closePanel": "Cerrar panel de contexto",
     "openPanel": "Abrir panel de contexto",

@@ -39,4 +39,30 @@ describe("GeneralSettings appearance section", () => {
     });
     expect(compact).toHaveAttribute("data-state", "on");
   });
+
+  it("restores Agent Tools composer tips", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("goose:agent-tools-tips-enabled", "false");
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Chat tips",
+    });
+
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose:agent-tools-tips-enabled")).toBe(
+        "true",
+      );
+    });
+    expect(switchControl).toBeChecked();
+  });
 });

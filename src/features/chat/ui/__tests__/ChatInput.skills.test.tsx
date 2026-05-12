@@ -51,6 +51,7 @@ vi.mock("@/features/skills/api/skills", () => ({
 
 describe("ChatInput skill mentions", () => {
   beforeEach(() => {
+    localStorage.clear();
     mockListSkills.mockClear();
     mockListSkills.mockResolvedValue([]);
     lastVoiceDictationOptions = null;
@@ -86,6 +87,66 @@ describe("ChatInput skill mentions", () => {
 
     expect(input).toHaveValue("");
     expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
+  it("shows and dismisses Agent Tools availability tips", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to slack");
+
+    expect(
+      await screen.findByText("Slack is available through sq agent tools"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Dismiss tip" }));
+
+    expect(
+      screen.queryByText("Slack is available through sq agent tools"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("turns off Agent Tools availability tips from the composer", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to slack");
+    await user.click(await screen.findByRole("button", { name: "Turn off" }));
+
+    expect(localStorage.getItem("goose:agent-tools-tips-enabled")).toBe(
+      "false",
+    );
+    expect(
+      screen.queryByText("Slack is available through sq agent tools"),
+    ).not.toBeInTheDocument();
   });
 
   it("expands selected skill chips before sending", async () => {

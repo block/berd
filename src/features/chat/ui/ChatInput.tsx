@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { X } from "lucide-react";
+import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   attachmentSnapshotsMatch,
@@ -25,7 +26,10 @@ import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
+import { resolveAgentToolsCapabilityTip } from "../lib/agentToolsCapabilities";
+import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
 import type { ChatInputProps, ChatSkillDraft } from "../types";
+import { ContextualTip } from "@/shared/ui/contextual-tip";
 
 export function ChatInput({
   composerActions,
@@ -94,6 +98,10 @@ export function ChatInput({
     voice: controls?.voice ?? true,
   };
   const [text, setTextRaw] = useState(initialValue);
+  const [dismissedAgentToolsTipId, setDismissedAgentToolsTipId] = useState<
+    string | null
+  >(null);
+  const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);
@@ -184,6 +192,7 @@ export function ChatInput({
     handleSkillMentionSelect,
     handleFileMentionSelect,
     handleMentionConfirm,
+    skillMentionItems,
   } = useMentionHandlers({
     personas,
     projectWorkingDirs: selectedProject?.workingDirs,
@@ -402,6 +411,24 @@ export function ChatInput({
     scopedControls.voice && dictation.isRecording,
     scopedControls.voice && dictation.isTranscribing,
   );
+  const agentToolsTip = useMemo(
+    () =>
+      scopedControls.skills
+        ? resolveAgentToolsCapabilityTip(text, skillMentionItems)
+        : null,
+    [scopedControls.skills, skillMentionItems, text],
+  );
+  const showAgentToolsTip =
+    agentToolsTipsPreference.enabled &&
+    !mentionOpen &&
+    agentToolsTip !== null &&
+    dismissedAgentToolsTipId !== agentToolsTip.id;
+
+  useEffect(() => {
+    if (!agentToolsTip) {
+      setDismissedAgentToolsTipId(null);
+    }
+  }, [agentToolsTip]);
 
   const handleClearStickyPersona = useCallback(() => {
     onPersonaChange?.(null);
@@ -422,6 +449,23 @@ export function ChatInput({
           className,
         )}
       >
+        {showAgentToolsTip && agentToolsTip ? (
+          <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center px-2 pb-3 sm:px-4">
+            <div className="max-w-3xl">
+              <ContextualTip
+                className="pointer-events-auto"
+                actionLabel={t("agentToolsTip.turnOff")}
+                dismissLabel={t("agentToolsTip.dismiss")}
+                icon={<IconCheck className="size-4" />}
+                iconClassName="bg-transparent text-text-success"
+                onAction={() => agentToolsTipsPreference.setEnabled(false)}
+                onDismiss={() => setDismissedAgentToolsTipId(agentToolsTip.id)}
+              >
+                {t("agentToolsTip.available", { tool: agentToolsTip.label })}
+              </ContextualTip>
+            </div>
+          </div>
+        ) : null}
         <div className="mx-auto max-w-3xl">
           <Popover open={mentionOpen}>
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}

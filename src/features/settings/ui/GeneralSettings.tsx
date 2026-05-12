@@ -18,6 +18,8 @@ import { Moon, Monitor, Sun, Check } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
+import { Switch } from "@/shared/ui/switch";
+import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 
 const THEME_OPTIONS = [
   { value: "light", icon: Sun },
@@ -110,6 +112,7 @@ export function GeneralSettings() {
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [onboardingReset, setOnboardingReset] = useState(false);
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
+  const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const {
     theme,
     setTheme,
@@ -211,6 +214,17 @@ export function GeneralSettings() {
           >
             {t("general.onboarding.reset")}
           </Button>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.agentToolsTips.label")}
+          description={t("general.agentToolsTips.description")}
+        >
+          <Switch
+            checked={agentToolsTipsPreference.enabled}
+            onCheckedChange={agentToolsTipsPreference.setEnabled}
+            aria-label={t("general.agentToolsTips.label")}
+          />
         </SettingRow>
       </SettingsSection>
 
