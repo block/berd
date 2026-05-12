@@ -34,16 +34,14 @@ steps:
           artifacts:
             - path: "release/macos/Goose.app"
               entitlements: src-tauri/entitlements.plist
-            - path: "release/macos/Goose.app.zip"
-              package:
-                from: "release/macos/Goose.app"
-              sign: false
-              notarize: false
-              staple: false
-            - path: "release/macos/Goose.dmg"
-              package:
-                from: "release/macos/Goose.app"
-                volname: "Goose"
+
+  - label: ":rocket: Upload to mobile-releases"
+    key: "upload-release"
+    depends_on: "build-macos"
+    command: |
+      buildkite-agent artifact download "release/macos/Goose.app.zip" .
+    plugins:
+      - *macos_env
       - squareup/upload-mobile-release#v2:
           team_ids:
             - "EYF346PHUG"
@@ -57,5 +55,7 @@ steps:
 
   - label: ":github: Publish GitHub release"
     key: "publish"
-    depends_on: "build-macos"
+    depends_on:
+      - "build-macos"
+      - "upload-release"
     command: ./scripts/buildkite/release/publish-release.sh
