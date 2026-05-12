@@ -1,6 +1,6 @@
-# Goose Internal
+# Goose
 
-Goose Internal is the standalone internal desktop packaging of the Goose 2 Tauri app.
+Goose is the standalone internal desktop packaging of the Goose 2 Tauri app.
 It is a Tauri 2 + React 19 app that talks to Goose through the ACP WebSocket
 served by a `goose serve` sidecar.
 

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Goose Internal",
+  "productName": "Goose",
   "version": "0.1.0",
   "identifier": "com.squareup.goose-internal",
   "build": {
@@ -16,7 +16,7 @@
   "app": {
     "windows": [
       {
-        "title": "Goose Internal",
+        "title": "Goose",
         "width": 800,
         "height": 600,
         "minWidth": 608,

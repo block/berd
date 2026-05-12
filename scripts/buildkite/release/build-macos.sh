@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the Goose Internal macOS Tauri bundle for release. Leaves an unsigned
+# Build the Goose macOS Tauri bundle for release. Leaves an unsigned
 # .app at release/macos/ for the squareup/apple-codesign plugin to sign,
 # notarize, staple, and package in its post-command hook.
 #

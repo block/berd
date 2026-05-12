@@ -3,6 +3,36 @@
 version = 4
 
 [[package]]
+name = "Goose"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "dirs",
+ "doctor",
+ "futures-util",
+ "ignore",
+ "log",
+ "mime_guess",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-app-test-driver",
+ "tauri-plugin-dialog",
+ "tauri-plugin-log",
+ "tauri-plugin-opener",
+ "tauri-plugin-shell",
+ "tauri-plugin-window-state",
+ "tempfile",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1613,36 +1643,6 @@ dependencies = [
  "glib-sys",
  "libc",
  "system-deps",
-]
-
-[[package]]
-name = "goose-internal"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "bytes",
- "chrono",
- "dirs",
- "doctor",
- "futures-util",
- "ignore",
- "log",
- "mime_guess",
- "reqwest",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-app-test-driver",
- "tauri-plugin-dialog",
- "tauri-plugin-log",
- "tauri-plugin-opener",
- "tauri-plugin-shell",
- "tauri-plugin-window-state",
- "tempfile",
- "tokio",
- "uuid",
 ]
 
 [[package]]

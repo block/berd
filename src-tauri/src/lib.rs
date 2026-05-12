@@ -4,6 +4,8 @@ mod types;
 
 use services::distro_bundle::DistroBundleState;
 use services::personas::PersonaStore;
+#[cfg(target_os = "macos")]
+use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
 use tauri_plugin_window_state::StateFlags;
 
@@ -36,6 +38,48 @@ pub fn run() {
         .setup(|app| {
             app.manage(DistroBundleState::new(app.handle()));
             app.manage(commands::automations::AutomationStreamState::default());
+
+            // Build a custom macOS application menu so that the app submenu,
+            // "About" item, and "Quit" item use the capitalised product name
+            // "Goose" instead of the lowercase Cargo binary name "goose".
+            #[cfg(target_os = "macos")]
+            {
+                let app_menu = SubmenuBuilder::new(app, "Goose")
+                    .about(Some(
+                        AboutMetadataBuilder::new().name(Some("Goose")).build(),
+                    ))
+                    .separator()
+                    .services()
+                    .separator()
+                    .hide()
+                    .hide_others()
+                    .show_all()
+                    .separator()
+                    .quit_with_text("Quit Goose")
+                    .build()?;
+                let edit_menu = SubmenuBuilder::new(app, "Edit")
+                    .undo()
+                    .redo()
+                    .separator()
+                    .cut()
+                    .copy()
+                    .paste()
+                    .select_all()
+                    .build()?;
+                let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
+                let window_menu = SubmenuBuilder::new(app, "Window")
+                    .minimize()
+                    .close_window()
+                    .build()?;
+                let menu = MenuBuilder::new(app)
+                    .item(&app_menu)
+                    .item(&edit_menu)
+                    .item(&view_menu)
+                    .item(&window_menu)
+                    .build()?;
+                app.set_menu(menu)?;
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

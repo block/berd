@@ -1,13 +1,10 @@
 [package]
-name = "goose-internal"
+name = "Goose"
 version = "0.1.0"
-description = "Goose Internal desktop app"
+description = "Goose desktop app"
 authors = ["Block, Inc."]
 edition = "2021"
-
-[[bin]]
-name = "goose-internal-tauri"
-path = "src/main.rs"
+default-run = "Goose"
 
 [lib]
 name = "goose_internal_lib"

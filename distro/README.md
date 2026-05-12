@@ -1,6 +1,6 @@
-# Goose Internal distro bundles
+# Goose distro bundles
 
-A Goose Internal distro bundle is an optional app-specific package of configuration and policy that the Tauri shell loads at startup.
+A Goose distro bundle is an optional app-specific package of configuration and policy that the Tauri shell loads at startup.
 
 ## What a distro bundle is
 
@@ -68,7 +68,7 @@ Example:
 
 ## Runtime effects
 
-When a distro bundle is present, Goose Internal does two kinds of things with it.
+When a distro bundle is present, Goose does two kinds of things with it.
 
 ### Frontend behavior
 
@@ -105,7 +105,7 @@ Use distro bundles for packaged-app policy and shell-level defaults.
 
 Good fits:
 
-- feature flags for Goose Internal UI behavior
+- feature flags for Goose UI behavior
 - allowlists that suggest visible product choices
 - config or helper binaries that should be present when `goose serve` starts
 

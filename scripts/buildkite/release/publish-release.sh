@@ -11,7 +11,7 @@ source "$SCRIPT_DIR/lib.sh"
 
 RELEASE_VERSION="$(meta version)"
 TAG="v${RELEASE_VERSION}"
-TITLE="Goose Internal v${RELEASE_VERSION}"
+TITLE="Goose v${RELEASE_VERSION}"
 NOTES="Built by Buildkite build #${BUILDKITE_BUILD_NUMBER:-local} from \`${BUILDKITE_COMMIT:-HEAD}\`."
 
 rm -rf "$RELEASE_DIR"
@@ -28,8 +28,8 @@ DMG_SRC="$STAGED/${APP_BUNDLE_NAME}.dmg"
 
 # Stamp the version into the asset filenames so downloads carry it. Switch to
 # space-free names here for friendlier download URLs.
-APP_ZIP="$STAGED/Goose-Internal_${RELEASE_VERSION}.app.zip"
-DMG="$STAGED/Goose-Internal_${RELEASE_VERSION}_aarch64.dmg"
+APP_ZIP="$STAGED/Goose_${RELEASE_VERSION}.app.zip"
+DMG="$STAGED/Goose_${RELEASE_VERSION}_aarch64.dmg"
 mv "$APP_ZIP_SRC" "$APP_ZIP"
 mv "$DMG_SRC"     "$DMG"
 

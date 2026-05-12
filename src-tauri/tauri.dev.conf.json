@@ -1,6 +1,6 @@
 {
   "identifier": "com.squareup.goose-internal.dev",
-  "productName": "Goose Internal",
+  "productName": "Goose",
   "bundle": {
     "externalBin": []
   }

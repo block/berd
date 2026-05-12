@@ -17,7 +17,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 RELEASE_DIR="${REPO_ROOT}/release"
 
 APP_NAME="goose-internal"
-APP_BUNDLE_NAME="Goose Internal"
+APP_BUNDLE_NAME="Goose"
 
 GOOSE_INTERNAL_REPO="${GOOSE_INTERNAL_REPO:-squareup/goose-internal}"
 

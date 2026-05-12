@@ -3,8 +3,8 @@ agents:
 
 # The macos-environment plugin activates Xcode and sets up RVM/bundler so the
 # upload-mobile-release plugin's pre-command can find `fastlane` if it ever
-# needs to. Goose Internal only builds macOS, but the plugin's signing/upload
-# helpers still rely on the environment it primes.
+# needs to. Goose only builds macOS, but the plugin's signing/upload helpers
+# still rely on the environment it primes.
 common:
   - macos_env: &macos_env
       squareup/macos-environment#v2:
@@ -12,7 +12,7 @@ common:
         xcode_version: "26.3.0"
 
 steps:
-  - input: ":mac: Cut a Goose Internal release"
+  - input: ":mac: Cut a Goose release"
     key: "release-input"
     fields:
       - text: "version"
@@ -25,25 +25,25 @@ steps:
     depends_on: "release-input"
     command: ./scripts/buildkite/release/build-macos.sh
     artifact_paths:
-      - "release/macos/Goose Internal.app.zip"
-      - "release/macos/Goose Internal.dmg"
+      - "release/macos/Goose.app.zip"
+      - "release/macos/Goose.dmg"
     plugins:
       - *macos_env
       - squareup/apple-codesign#v1:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
           artifacts:
-            - path: "release/macos/Goose Internal.app"
+            - path: "release/macos/Goose.app"
               entitlements: src-tauri/entitlements.plist
-            - path: "release/macos/Goose Internal.app.zip"
+            - path: "release/macos/Goose.app.zip"
               package:
-                from: "release/macos/Goose Internal.app"
+                from: "release/macos/Goose.app"
               sign: false
               notarize: false
               staple: false
-            - path: "release/macos/Goose Internal.dmg"
+            - path: "release/macos/Goose.dmg"
               package:
-                from: "release/macos/Goose Internal.app"
-                volname: "Goose Internal"
+                from: "release/macos/Goose.app"
+                volname: "Goose"
       - squareup/upload-mobile-release#v2:
           team_ids:
             - "EYF346PHUG"
@@ -52,7 +52,7 @@ steps:
               project: "goose2"
               platform: "mac_zip"
               variant: "release"
-              file: "release/macos/Goose Internal.app.zip"
+              file: "release/macos/Goose.app.zip"
               version: "scripts/buildkite/release/release-version.sh"
 
   - label: ":github: Publish GitHub release"
