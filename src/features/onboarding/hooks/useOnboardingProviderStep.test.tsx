@@ -158,6 +158,25 @@ describe("useOnboardingProviderStep", () => {
     });
   });
 
+  it("no-ops when readiness has no current default", () => {
+    const { result, onReady, onSelectedSetup } = renderProviderStep(
+      readyReadiness({
+        isUsable: false,
+        providerId: undefined,
+        modelId: undefined,
+        modelName: undefined,
+      }),
+    );
+
+    act(() => {
+      result.current.onContinue();
+    });
+
+    expect(onReady).not.toHaveBeenCalled();
+    expect(mocks.saveDefaults).not.toHaveBeenCalled();
+    expect(onSelectedSetup).not.toHaveBeenCalled();
+  });
+
   it("continues with a current ACP agent without writing Goose model defaults", async () => {
     const { result, onReady, onSelectedSetup } = renderProviderStep(
       readyReadiness({

@@ -23,6 +23,7 @@ interface ProviderStepProps {
   credentialLoading: boolean;
   modelProviders: ReturnType<typeof getModelProviders>;
   canBrowseAllProviders: boolean;
+  hasReadinessMatch: boolean;
   usableDefaultEntries: UsableDefaultEntry[];
   configuredIds: Set<string>;
   savingProviderIds: Set<string>;
@@ -50,6 +51,7 @@ export function ProviderStep({
   credentialLoading,
   modelProviders,
   canBrowseAllProviders,
+  hasReadinessMatch,
   usableDefaultEntries,
   configuredIds,
   savingProviderIds,
@@ -205,7 +207,7 @@ export function ProviderStep({
         </div>
       ) : null}
 
-      {hasUsableDefaults ? (
+      {hasUsableDefaults && hasReadinessMatch ? (
         <div className="mt-6 flex items-center justify-center">
           <Button
             type="button"

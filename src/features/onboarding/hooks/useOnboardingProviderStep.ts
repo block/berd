@@ -158,37 +158,32 @@ export function useOnboardingProviderStep({
   }
 
   async function continueWithCurrentDefault() {
-    if (!readiness.isUsable || !readiness.providerId) {
-      return;
-    }
+    const providerId = readiness.providerId;
+    const modelId = readiness.modelId;
+    const modelName = readiness.modelName;
 
-    const setup = {
-      providerId: readiness.providerId,
-      modelId: readiness.modelId,
-      modelName: readiness.modelName,
-    };
+    if (!readiness.isUsable || !providerId) return;
+
+    const setup = { providerId, modelId, modelName };
     const isAgentProvider = getAgentProviders().some(
-      (provider) => provider.id === readiness.providerId,
+      (provider) => provider.id === providerId,
     );
 
     setProviderError("");
-    setSelectingProviderId(readiness.providerId);
+    setSelectingProviderId(providerId);
     try {
       if (isAgentProvider) {
-        agentStore.setSelectedProvider(readiness.providerId);
+        agentStore.setSelectedProvider(providerId);
       } else {
-        if (!readiness.modelId || !readiness.modelName) {
+        if (!modelId || !modelName) {
           setProviderError(t("onboarding:provider.noModels"));
           return;
         }
-        await saveDefaults({
-          providerId: readiness.providerId,
-          modelId: readiness.modelId,
-        });
+        await saveDefaults({ providerId, modelId });
         setStoredModelPreference("goose", {
-          providerId: readiness.providerId,
-          modelId: readiness.modelId,
-          modelName: readiness.modelName,
+          providerId,
+          modelId,
+          modelName,
         });
         agentStore.setSelectedProvider("goose");
       }
@@ -210,6 +205,7 @@ export function useOnboardingProviderStep({
     modelProviders: visibleModelProviders,
     canBrowseAllProviders:
       !showAllProviders && visibleModelProviders.length < modelProviders.length,
+    hasReadinessMatch: readiness.isUsable && !!readiness.providerId,
     usableDefaultEntries,
     configuredIds,
     savingProviderIds,
