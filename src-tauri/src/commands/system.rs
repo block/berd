@@ -243,9 +243,8 @@ pub fn read_image_attachment(path: String) -> Result<ImageAttachmentPayload, Str
         .map_err(|error| format!("Failed to inspect image '{}': {}", attachment.path, error))?;
     if metadata.len() > MAX_IMAGE_ATTACHMENT_BYTES {
         return Err(format!(
-            "Image attachment '{}' exceeds the {} MB limit",
-            attachment.path,
-            MAX_IMAGE_ATTACHMENT_BYTES / (1024 * 1024)
+            "Image attachment '{}' exceeds the {} byte limit",
+            attachment.path, MAX_IMAGE_ATTACHMENT_BYTES
         ));
     }
 
@@ -621,6 +620,9 @@ mod tests {
         let error =
             read_image_attachment(image.to_string_lossy().into_owned()).expect_err("size limit");
 
-        assert!(error.contains("exceeds the 20 MB limit"));
+        assert!(error.contains(&format!(
+            "exceeds the {} byte limit",
+            MAX_IMAGE_ATTACHMENT_BYTES
+        )));
     }
 }

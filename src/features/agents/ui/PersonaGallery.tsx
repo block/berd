@@ -18,8 +18,12 @@ interface PersonaGalleryProps {
   onExportPersona?: (persona: Persona) => void;
   onCreatePersona: () => void;
   onImportFile?: (fileBytes: number[], fileName: string) => void;
-  validateImportFile?: (file: Pick<File, "name" | "type">) => string | null;
+  validateImportFile?: (
+    file: Pick<File, "name" | "type" | "size">,
+  ) => string | null;
   onImportError?: (message: string) => void;
+  maxImportBytes?: number;
+  importTooLargeMessage?: string;
   isLoading?: boolean;
   hasAnyPersonas?: boolean;
 }
@@ -59,6 +63,8 @@ export function PersonaGallery({
   onImportFile,
   validateImportFile,
   onImportError,
+  maxImportBytes,
+  importTooLargeMessage,
   isLoading = false,
   hasAnyPersonas = personas.length > 0,
 }: PersonaGalleryProps) {
@@ -68,6 +74,8 @@ export function PersonaGallery({
       onImportFile: onImportFile ?? (() => {}),
       validateFile: validateImportFile,
       onImportError,
+      maxBytes: maxImportBytes,
+      fileTooLargeMessage: importTooLargeMessage,
     });
   const sorted = useMemo(() => {
     const builtins = personas

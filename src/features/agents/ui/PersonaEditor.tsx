@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
-import type { Persona, ProviderType, Avatar } from "@/shared/types/agents";
+import type { Persona, ProviderType } from "@/shared/types/agents";
 import type {
   CreatePersonaRequest,
   UpdatePersonaRequest,
@@ -35,12 +35,14 @@ import { discoverAcpProviders } from "@/shared/api/acp";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
 import { getProviderInventory } from "@/features/providers/api/inventory";
+import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import {
+  canDeletePersona,
+  canEditPersona,
+  getPersonaProviderLabel,
   getPersonaSource,
-  isPersonaReadOnly,
 } from "@/features/agents/lib/personaPresentation";
-import { AvatarDropZone } from "./AvatarDropZone";
 import { PersonaDetails } from "./PersonaDetails";
 
 interface PersonaEditorProps {
@@ -69,20 +71,21 @@ export function PersonaEditor({
   const { t } = useTranslation(["agents", "common"]);
   const isEditing = mode === "edit";
   const detailsMode = mode === "details";
-  const readOnlyBySource = persona ? isPersonaReadOnly(persona) : false;
+  const readOnlyBySource = persona ? !canEditPersona(persona) : false;
   const isReadOnly = detailsMode || readOnlyBySource;
-  const personaSource = persona ? getPersonaSource(persona) : "custom";
-  const canEditPersona = personaSource === "custom";
-  const canDeletePersona = personaSource !== "builtin";
+  const personaSource = persona ? getPersonaSource(persona) : null;
+  const canEditCurrentPersona = persona ? canEditPersona(persona) : false;
+  const canDeleteCurrentPersona = persona ? canDeletePersona(persona) : false;
   const acpProviders = useAgentStore((s) => s.providers);
   const setProviders = useAgentStore((s) => s.setProviders);
   const mergeInventoryEntries = useProviderInventoryStore(
     (s) => s.mergeEntries,
   );
-  const { getEntry, getModelsForProvider } = useProviderInventory();
+  const { getEntry, getModelsForAgent } = useProviderInventory();
 
   const [displayName, setDisplayName] = useState("");
-  const [avatar, setAvatar] = useState<Avatar | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [provider, setProvider] = useState<ProviderType | "">("");
   const [model, setModel] = useState("");
@@ -100,14 +103,21 @@ export function PersonaEditor({
         if (!cancelled) {
           setProviders(providers);
         }
-      } catch {}
+      } catch (error) {
+        console.warn("Failed to load ACP providers for persona editor:", error);
+      }
 
       try {
         const entries = await getProviderInventory();
         if (!cancelled) {
           mergeInventoryEntries(entries);
         }
-      } catch {}
+      } catch (error) {
+        console.warn(
+          "Failed to load provider inventory for persona editor:",
+          error,
+        );
+      }
     };
 
     void syncProviderOptions();
@@ -120,24 +130,33 @@ export function PersonaEditor({
   useEffect(() => {
     if (isOpen && persona) {
       setDisplayName(persona.displayName);
-      setAvatar(persona.avatar ?? null);
+      setAvatarUrl(normalizeAvatarUrl(persona.avatar) ?? "");
       setSystemPrompt(persona.systemPrompt);
       setProvider(persona.provider ?? "");
       setModel(persona.model ?? "");
     } else if (isOpen) {
       setDisplayName("");
-      setAvatar(null);
+      setAvatarUrl("");
       setSystemPrompt("");
       setProvider("");
       setModel("");
     }
+    setAvatarPreviewFailed(false);
   }, [isOpen, persona]);
 
+  const trimmedAvatarUrl = avatarUrl.trim();
+  const normalizedAvatarUrl = normalizeAvatarUrl(trimmedAvatarUrl);
+  const avatarUrlError =
+    trimmedAvatarUrl.length > 0 && !normalizedAvatarUrl
+      ? t("editor.avatarUrlInvalid")
+      : null;
+  const avatarSrc = useAvatarSrc(normalizedAvatarUrl ?? null);
   const isValid =
-    displayName.trim().length > 0 && systemPrompt.trim().length > 0;
-  const avatarSrc = useAvatarSrc(avatar);
+    displayName.trim().length > 0 &&
+    systemPrompt.trim().length > 0 &&
+    !avatarUrlError;
 
-  const availableModels = provider ? getModelsForProvider(provider) : [];
+  const availableModels = provider ? getModelsForAgent(provider) : [];
   const providerInventory = provider ? getEntry(provider) : undefined;
   const modelStatusMessage =
     providerInventory?.modelSelectionHint ??
@@ -153,31 +172,33 @@ export function PersonaEditor({
       ? t("editor.readOnlyBuiltIn")
       : t("editor.readOnlyFile")
     : null;
-  const providerLabel = provider
-    ? (acpProviders.find((providerOption) => providerOption.id === provider)
-        ?.label ?? provider)
-    : t("common:labels.none");
+  const providerLabel = getPersonaProviderLabel(
+    provider || undefined,
+    acpProviders,
+    t("common:labels.none"),
+  );
   const modelLabel = model || t("common:labels.none");
-
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
       if (!isValid || isReadOnly) return;
 
+      // Update requests use null to clear source properties; undefined leaves them unchanged.
       const data: CreatePersonaRequest | UpdatePersonaRequest = {
         displayName: displayName.trim(),
-        avatar: avatar ?? undefined,
+        avatar: normalizedAvatarUrl ?? (isEditing ? null : undefined),
         systemPrompt: systemPrompt.trim(),
-        provider: provider || undefined,
-        model: model.trim() || undefined,
+        provider: provider || (isEditing ? null : undefined),
+        model: model.trim() || (isEditing ? null : undefined),
       };
       onSave(data);
     },
     [
       isValid,
       isReadOnly,
+      isEditing,
       displayName,
-      avatar,
+      normalizedAvatarUrl,
       systemPrompt,
       provider,
       model,
@@ -187,8 +208,13 @@ export function PersonaEditor({
 
   const initials = displayName.charAt(0).toUpperCase() || "?";
 
-  // For new personas, use a temporary ID for the avatar upload
-  const avatarPersonaId = persona?.id ?? "new-persona";
+  const handleAvatarUrlChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setAvatarUrl(e.target.value);
+      setAvatarPreviewFailed(false);
+    },
+    [],
+  );
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -208,9 +234,9 @@ export function PersonaEditor({
           ) : null}
         </DialogHeader>
 
-        {detailsMode ? (
+        {detailsMode && personaSource ? (
           <PersonaDetails
-            avatar={avatar}
+            avatar={normalizedAvatarUrl ?? null}
             displayName={displayName}
             modelLabel={modelLabel}
             personaSource={personaSource}
@@ -224,24 +250,64 @@ export function PersonaEditor({
             className="min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pb-5"
           >
             <div className="flex justify-center">
-              {isReadOnly ? (
+              <div className="relative">
                 <AvatarRoot className="h-16 w-16 border border-border">
                   <AvatarImage
                     src={avatarSrc ?? undefined}
                     alt={t("avatar.previewAlt")}
+                    onError={() => setAvatarPreviewFailed(true)}
                   />
                   <AvatarFallback className="text-lg font-semibold">
                     {initials}
                   </AvatarFallback>
                 </AvatarRoot>
-              ) : (
-                <AvatarDropZone
-                  personaId={avatarPersonaId}
-                  avatar={avatar}
-                  onChange={setAvatar}
-                  disabled={isReadOnly}
-                />
-              )}
+                {trimmedAvatarUrl.length > 0 && !isReadOnly ? (
+                  <Button
+                    type="button"
+                    variant="destructive-flat"
+                    size="icon-xs"
+                    aria-label={t("avatar.removeAria")}
+                    className="absolute -right-2 -top-2"
+                    onClick={() => {
+                      setAvatarUrl("");
+                      setAvatarPreviewFailed(false);
+                    }}
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="space-y-1">
+              <Label className="text-xs font-medium text-muted-foreground">
+                {t("editor.avatarUrl")}
+              </Label>
+              <Input
+                type="text"
+                inputMode="url"
+                value={avatarUrl}
+                onChange={handleAvatarUrlChange}
+                readOnly={isReadOnly}
+                aria-invalid={avatarUrlError ? true : undefined}
+                aria-describedby={
+                  avatarUrlError ? "avatar-url-error" : undefined
+                }
+                placeholder={t("editor.avatarUrlPlaceholder")}
+                className={cn(isReadOnly && "opacity-70 cursor-not-allowed")}
+              />
+              {avatarUrlError ? (
+                <p
+                  id="avatar-url-error"
+                  className="text-[11px] text-destructive"
+                >
+                  {avatarUrlError}
+                </p>
+              ) : avatarPreviewFailed ? (
+                <p className="text-[11px] text-muted-foreground">
+                  {t("avatar.loadFailed")}
+                </p>
+              ) : null}
             </div>
 
             <div className="space-y-1">
@@ -396,7 +462,7 @@ export function PersonaEditor({
         <DialogFooter className="shrink-0 border-t px-5 py-4">
           {detailsMode && persona ? (
             <>
-              {onEdit && canEditPersona ? (
+              {onEdit && canEditCurrentPersona ? (
                 <Button
                   type="button"
                   variant="outline-flat"
@@ -418,7 +484,7 @@ export function PersonaEditor({
                   {t("editor.duplicate")}
                 </Button>
               ) : null}
-              {onDelete && canDeletePersona ? (
+              {onDelete && canDeleteCurrentPersona ? (
                 <Button
                   type="button"
                   variant="destructive-flat"

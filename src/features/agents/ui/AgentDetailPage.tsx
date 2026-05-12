@@ -21,10 +21,13 @@ import { DetailPageShell, PageHeader } from "@/shared/ui/page-shell";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
 import type { Persona } from "@/shared/types/agents";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
+  canDeletePersona,
+  canEditPersona,
   getPersonaInitials,
+  getPersonaProviderLabel,
   getPersonaSource,
-  isPersonaReadOnly,
 } from "@/features/agents/lib/personaPresentation";
 
 interface AgentDetailPageProps {
@@ -91,19 +94,24 @@ export function AgentDetailPage({
   onExport,
 }: AgentDetailPageProps) {
   const { t } = useTranslation(["agents", "common"]);
+  const acpProviders = useAgentStore((s) => s.providers);
   const avatarSrc = useAvatarSrc(persona.avatar);
   const initials = getPersonaInitials(persona.displayName);
   const personaSource = getPersonaSource(persona);
-  const canEditPersona = !isPersonaReadOnly(persona);
-  const canDeletePersona = personaSource !== "builtin";
+  const isEditable = canEditPersona(persona);
+  const isDeletable = canDeletePersona(persona);
   const sourceLabel =
     personaSource === "builtin"
       ? t("common:labels.builtIn")
-      : personaSource === "file"
-        ? t("card.fileBacked")
-        : t("common:labels.custom");
-  const providerLabel = persona.provider || t("common:labels.none");
+      : t("card.fileBacked");
+  const providerLabel = getPersonaProviderLabel(
+    persona.provider,
+    acpProviders,
+    t("common:labels.none"),
+  );
   const modelLabel = persona.model || t("common:labels.none");
+  const createdLabel = persona.createdAt ? formatDate(persona.createdAt) : null;
+  const updatedLabel = persona.updatedAt ? formatDate(persona.updatedAt) : null;
 
   return (
     <DetailPageShell>
@@ -139,7 +147,7 @@ export function AgentDetailPage({
           actionsPlacement="below"
           actions={
             <>
-              {canEditPersona ? (
+              {isEditable ? (
                 <AgentHeaderActionButton
                   label={t("common:actions.edit")}
                   icon={<Pencil className="size-3.5" />}
@@ -156,7 +164,7 @@ export function AgentDetailPage({
                 icon={<Download className="size-3.5" />}
                 onClick={() => onExport(persona)}
               />
-              {canDeletePersona ? (
+              {isDeletable ? (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -215,14 +223,20 @@ export function AgentDetailPage({
               </DetailField>
             </section>
 
-            <section className="space-y-5">
-              <DetailField label={t("view.created")} contentAs="p">
-                {formatDate(persona.createdAt)}
-              </DetailField>
-              <DetailField label={t("view.updated")} contentAs="p">
-                {formatDate(persona.updatedAt)}
-              </DetailField>
-            </section>
+            {createdLabel || updatedLabel ? (
+              <section className="space-y-5">
+                {createdLabel ? (
+                  <DetailField label={t("view.created")} contentAs="p">
+                    {createdLabel}
+                  </DetailField>
+                ) : null}
+                {updatedLabel ? (
+                  <DetailField label={t("view.updated")} contentAs="p">
+                    {updatedLabel}
+                  </DetailField>
+                ) : null}
+              </section>
+            ) : null}
           </aside>
         }
       >

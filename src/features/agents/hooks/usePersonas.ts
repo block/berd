@@ -7,6 +7,7 @@ import {
 import type {
   CreatePersonaRequest,
   UpdatePersonaRequest,
+  Persona,
 } from "@/shared/types/agents";
 import * as api from "@/shared/api/agents";
 
@@ -21,28 +22,69 @@ export function usePersonas() {
   const removePersona = useAgentStore((s) => s.removePersona);
   const setPersonasLoading = useAgentStore((s) => s.setPersonasLoading);
   const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const listRequestInFlightRef = useRef(false);
+  const mutationVersionRef = useRef(0);
+  const mutationsInFlightRef = useRef(0);
+
+  const replacePersonasFromApi = useCallback(
+    async (
+      fetchPersonas: () => Promise<Persona[]>,
+      options: { showLoading: boolean; errorMessage: string },
+    ) => {
+      if (listRequestInFlightRef.current) {
+        return;
+      }
+
+      listRequestInFlightRef.current = true;
+      const mutationVersionAtStart = mutationVersionRef.current;
+      if (options.showLoading) {
+        setPersonasLoading(true);
+      }
+
+      try {
+        const personas = await fetchPersonas();
+        if (
+          mutationVersionAtStart === mutationVersionRef.current &&
+          mutationsInFlightRef.current === 0
+        ) {
+          setPersonas(personas);
+        }
+      } catch (error) {
+        console.error(options.errorMessage, error);
+      } finally {
+        listRequestInFlightRef.current = false;
+        if (options.showLoading) {
+          setPersonasLoading(false);
+        }
+      }
+    },
+    [setPersonas, setPersonasLoading],
+  );
+
+  const trackMutation = useCallback(async <T>(mutation: () => Promise<T>) => {
+    mutationVersionRef.current += 1;
+    mutationsInFlightRef.current += 1;
+    try {
+      return await mutation();
+    } finally {
+      mutationsInFlightRef.current -= 1;
+      mutationVersionRef.current += 1;
+    }
+  }, []);
 
   const loadPersonas = useCallback(async () => {
-    setPersonasLoading(true);
-    try {
-      const personas = await api.listPersonas();
-      setPersonas(personas);
-    } catch (error) {
-      console.error("Failed to load personas:", error);
-      // Fall back to empty list - builtins will come from backend
-    } finally {
-      setPersonasLoading(false);
-    }
-  }, [setPersonas, setPersonasLoading]);
+    await replacePersonasFromApi(api.listPersonas, {
+      showLoading: true,
+      errorMessage: "Failed to load personas:",
+    });
+  }, [replacePersonasFromApi]);
 
   const refreshFromDisk = useCallback(async () => {
-    try {
-      const personas = await api.refreshPersonas();
-      setPersonas(personas);
-    } catch (error) {
-      console.error("Failed to refresh personas from disk:", error);
-    }
-  }, [setPersonas]);
+    await replacePersonasFromApi(api.refreshPersonas, {
+      showLoading: false,
+      errorMessage: "Failed to refresh personas from disk:",
+    });
+  }, [replacePersonasFromApi]);
 
   useEffect(() => {
     loadPersonas();
@@ -67,28 +109,30 @@ export function usePersonas() {
 
   const createPersona = useCallback(
     async (req: CreatePersonaRequest) => {
-      const persona = await api.createPersona(req);
+      const persona = await trackMutation(() => api.createPersona(req));
       addPersona(persona);
       return persona;
     },
-    [addPersona],
+    [addPersona, trackMutation],
   );
 
   const updatePersona = useCallback(
-    async (id: string, req: UpdatePersonaRequest) => {
-      const persona = await api.updatePersona(id, req);
-      updatePersonaInStore(id, persona);
+    async (existing: Persona, req: UpdatePersonaRequest) => {
+      const persona = await trackMutation(() =>
+        api.updatePersona(existing, req),
+      );
+      updatePersonaInStore(existing.id, persona);
       return persona;
     },
-    [updatePersonaInStore],
+    [trackMutation, updatePersonaInStore],
   );
 
   const deletePersona = useCallback(
     async (id: string) => {
-      await api.deletePersona(id);
+      await trackMutation(() => api.deletePersona(id));
       removePersona(id);
     },
-    [removePersona],
+    [removePersona, trackMutation],
   );
 
   return {

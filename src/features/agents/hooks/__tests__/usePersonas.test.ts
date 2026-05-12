@@ -12,6 +12,7 @@ vi.mock("@/shared/api/agents", () => ({
     displayName: "Test",
     systemPrompt: "You are helpful.",
     isBuiltin: false,
+    writable: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   }),
@@ -20,6 +21,7 @@ vi.mock("@/shared/api/agents", () => ({
     displayName: "Updated",
     systemPrompt: "Updated prompt",
     isBuiltin: false,
+    writable: true,
     createdAt: "2026-01-01T00:00:00Z",
     updatedAt: "2026-01-01T00:00:00Z",
   }),
@@ -41,6 +43,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     displayName: "Test Persona",
     systemPrompt: "You are helpful.",
     isBuiltin: false,
+    writable: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -58,6 +61,7 @@ describe("usePersonas", () => {
       displayName: "Test",
       systemPrompt: "You are helpful.",
       isBuiltin: false,
+      writable: true,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     });
@@ -66,6 +70,7 @@ describe("usePersonas", () => {
       displayName: "Updated",
       systemPrompt: "Updated prompt",
       isBuiltin: false,
+      writable: true,
       createdAt: "2026-01-01T00:00:00Z",
       updatedAt: "2026-01-01T00:00:00Z",
     });
@@ -144,6 +149,7 @@ describe("usePersonas", () => {
         displayName: "Test",
         systemPrompt: "You are helpful.",
         isBuiltin: false,
+        writable: true,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       };
@@ -183,6 +189,7 @@ describe("usePersonas", () => {
         displayName: "Updated",
         systemPrompt: "Updated prompt",
         isBuiltin: false,
+        writable: true,
         createdAt: "2026-01-01T00:00:00Z",
         updatedAt: "2026-01-01T00:00:00Z",
       };
@@ -196,12 +203,12 @@ describe("usePersonas", () => {
       });
 
       await act(async () => {
-        await result.current.updatePersona("test-id", {
+        await result.current.updatePersona(existing, {
           displayName: "Updated",
         });
       });
 
-      expect(api.updatePersona).toHaveBeenCalledWith("test-id", {
+      expect(api.updatePersona).toHaveBeenCalledWith(existing, {
         displayName: "Updated",
       });
       expect(
@@ -251,6 +258,67 @@ describe("usePersonas", () => {
 
       expect(api.refreshPersonas).toHaveBeenCalled();
       expect(result.current.personas).toEqual(refreshed);
+    });
+
+    it("does not start overlapping refresh requests", async () => {
+      let resolveRefresh!: (value: Persona[]) => void;
+      vi.mocked(api.refreshPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+
+      const { result } = renderHook(() => usePersonas());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const firstRefresh = result.current.refreshFromDisk();
+      const secondRefresh = result.current.refreshFromDisk();
+
+      expect(api.refreshPersonas).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolveRefresh([]);
+        await firstRefresh;
+        await secondRefresh;
+      });
+    });
+
+    it("ignores stale refresh results that started before a mutation", async () => {
+      const stalePersona = makePersona({ id: "stale" });
+      const createdPersona = makePersona({ id: "created" });
+      let resolveRefresh!: (value: Persona[]) => void;
+      vi.mocked(api.refreshPersonas).mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          }),
+      );
+      vi.mocked(api.createPersona).mockResolvedValueOnce(createdPersona);
+
+      const { result } = renderHook(() => usePersonas());
+
+      await waitFor(() => {
+        expect(result.current.isLoading).toBe(false);
+      });
+
+      const refresh = result.current.refreshFromDisk();
+      await act(async () => {
+        await result.current.createPersona({
+          displayName: "Created",
+          systemPrompt: "Created prompt.",
+        });
+      });
+
+      await act(async () => {
+        resolveRefresh([stalePersona]);
+        await refresh;
+      });
+
+      expect(result.current.personas).toEqual([createdPersona]);
     });
   });
 });

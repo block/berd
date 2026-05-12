@@ -1,28 +1,26 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
-import { getAvatarsDir } from "@/shared/api/agents";
-import type { Avatar } from "@/shared/types/agents";
-
-let cachedAvatarsDir: string | null = null;
-
-async function ensureAvatarsDir(): Promise<string> {
-  if (!cachedAvatarsDir) {
-    cachedAvatarsDir = await getAvatarsDir();
+export function isRemoteAvatarUrl(value: string): boolean {
+  try {
+    const url = new URL(value.trim());
+    return (
+      (url.protocol === "http:" || url.protocol === "https:") &&
+      url.hostname.length > 0 &&
+      url.username.length === 0 &&
+      url.password.length === 0
+    );
+  } catch {
+    return false;
   }
-  return cachedAvatarsDir;
 }
 
-/**
- * Resolve an Avatar to a displayable image URL.
- * Lazily fetches the avatars directory on first call for a local avatar.
- */
-export async function resolveAvatarSrc(
-  avatar: Avatar | null | undefined,
-): Promise<string | undefined> {
-  if (!avatar) return undefined;
-  if (avatar.type === "url") return avatar.value;
-  if (avatar.type === "local") {
-    const dir = await ensureAvatarsDir();
-    return convertFileSrc(`${dir}/${avatar.value}`);
+export function isSupportedAvatarUrl(value: string): boolean {
+  return isRemoteAvatarUrl(value);
+}
+
+export function normalizeAvatarUrl(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
   }
-  return undefined;
+
+  const trimmed = value.trim();
+  return isSupportedAvatarUrl(trimmed) ? trimmed : undefined;
 }

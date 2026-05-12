@@ -3,7 +3,6 @@ mod services;
 mod types;
 
 use services::distro_bundle::DistroBundleState;
-use services::personas::PersonaStore;
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
@@ -28,8 +27,7 @@ pub fn run() {
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
                 .build(),
-        )
-        .manage(PersonaStore::new());
+        );
 
     #[cfg(feature = "app-test-driver")]
     let builder = builder.plugin(tauri_plugin_app_test_driver::init());
@@ -83,17 +81,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            commands::agents::list_personas,
-            commands::agents::create_persona,
-            commands::agents::update_persona,
-            commands::agents::delete_persona,
-            commands::agents::refresh_personas,
-            commands::agents::export_persona,
-            commands::agents::import_personas,
             commands::agents::read_import_persona_file,
-            commands::agents::save_persona_avatar,
-            commands::agents::save_persona_avatar_bytes,
-            commands::agents::get_avatars_dir,
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,
             commands::automations::get_automation_tile_results,

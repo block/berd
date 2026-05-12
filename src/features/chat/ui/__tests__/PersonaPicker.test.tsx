@@ -11,6 +11,7 @@ const PERSONAS: Persona[] = [
     systemPrompt:
       "You are an orchestration agent that decomposes complex tasks into smaller pieces so collaborators can move quickly and confidently.",
     isBuiltin: true,
+    writable: false,
     createdAt: "",
     updatedAt: "",
   },

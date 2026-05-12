@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { Persona, Agent } from "@/shared/types/agents";
 import type { AcpProvider } from "@/shared/api/acp";
+import { canEditPersona } from "@/features/agents/lib/personaPresentation";
 
 const PROVIDER_STORAGE_KEY = "goose:defaultProvider";
 const FALLBACK_PROVIDER = "goose";
@@ -219,5 +220,5 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
 
   getBuiltinPersonas: () => get().personas.filter((p) => p.isBuiltin),
 
-  getCustomPersonas: () => get().personas.filter((p) => !p.isBuiltin),
+  getCustomPersonas: () => get().personas.filter(canEditPersona),
 }));

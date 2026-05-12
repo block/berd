@@ -2,8 +2,10 @@ import { useCallback, useRef, useState } from "react";
 
 interface FileImportZoneOptions {
   onImportFile: (fileBytes: number[], fileName: string) => void;
-  validateFile?: (file: Pick<File, "name" | "type">) => string | null;
+  validateFile?: (file: Pick<File, "name" | "type" | "size">) => string | null;
   onImportError?: (message: string) => void;
+  maxBytes?: number;
+  fileTooLargeMessage?: string;
 }
 
 /**
@@ -14,6 +16,8 @@ export function useFileImportZone({
   onImportFile,
   validateFile,
   onImportError,
+  maxBytes,
+  fileTooLargeMessage,
 }: FileImportZoneOptions) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragOver, setIsDragOver] = useState(false);
@@ -25,11 +29,18 @@ export function useFileImportZone({
         onImportError?.(validationMessage);
         return;
       }
+      if (typeof maxBytes === "number" && file.size > maxBytes) {
+        onImportError?.(
+          fileTooLargeMessage ??
+            `File is too large. Choose a file no larger than ${maxBytes} bytes.`,
+        );
+        return;
+      }
       const buffer = await file.arrayBuffer();
       const bytes = Array.from(new Uint8Array(buffer));
       onImportFile(bytes, file.name);
     },
-    [onImportFile, onImportError, validateFile],
+    [fileTooLargeMessage, maxBytes, onImportFile, onImportError, validateFile],
   );
 
   const dropHandlers = {

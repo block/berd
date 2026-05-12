@@ -10,6 +10,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     displayName: "Test Persona",
     systemPrompt: "You are helpful.",
     isBuiltin: false,
+    writable: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -182,7 +183,7 @@ describe("agentStore", () => {
     useAgentStore
       .getState()
       .setPersonas([
-        makePersona({ id: "b", isBuiltin: true }),
+        makePersona({ id: "b", isBuiltin: true, writable: false }),
         makePersona({ id: "c", isBuiltin: false }),
       ]);
     const builtins = useAgentStore.getState().getBuiltinPersonas();
@@ -190,12 +191,13 @@ describe("agentStore", () => {
     expect(builtins[0].id).toBe("b");
   });
 
-  it("getCustomPersonas returns only non-builtins", () => {
+  it("getCustomPersonas returns only writable personas", () => {
     useAgentStore
       .getState()
       .setPersonas([
-        makePersona({ id: "b", isBuiltin: true }),
+        makePersona({ id: "b", isBuiltin: true, writable: false }),
         makePersona({ id: "c", isBuiltin: false }),
+        makePersona({ id: "readonly", isBuiltin: false, writable: false }),
       ]);
     const custom = useAgentStore.getState().getCustomPersonas();
     expect(custom).toHaveLength(1);

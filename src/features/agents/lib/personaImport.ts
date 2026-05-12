@@ -6,17 +6,24 @@ const JSON_MIME_TYPES = new Set([
   "text/plain",
 ]);
 
+export const MAX_PERSONA_IMPORT_BYTES = 4 * 1024 * 1024;
+
 export interface ImportMessageDescriptor {
   key:
     | "view.importInvalidExtension"
     | "view.importInvalidMimeType"
+    | "view.importTooLarge"
     | "view.imported_one"
     | "view.imported_other";
   options?: Record<string, unknown>;
 }
 
+export function formatPersonaImportFileSize(bytes: number): string {
+  return `${Math.floor(bytes / (1024 * 1024))} MB`;
+}
+
 export function validatePersonaImportFile(
-  file: Pick<File, "name" | "type">,
+  file: Pick<File, "name" | "type"> & { size?: number },
 ): ImportMessageDescriptor | null {
   const lowerName = file.name.toLowerCase();
   if (!lowerName.endsWith(".json")) {
@@ -28,6 +35,15 @@ export function validatePersonaImportFile(
   if (!JSON_MIME_TYPES.has(file.type)) {
     return {
       key: "view.importInvalidMimeType",
+    } satisfies ImportMessageDescriptor;
+  }
+
+  if (typeof file.size === "number" && file.size > MAX_PERSONA_IMPORT_BYTES) {
+    return {
+      key: "view.importTooLarge",
+      options: {
+        maxSize: formatPersonaImportFileSize(MAX_PERSONA_IMPORT_BYTES),
+      },
     } satisfies ImportMessageDescriptor;
   }
 

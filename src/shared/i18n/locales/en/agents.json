@@ -1,13 +1,8 @@
 {
   "avatar": {
-    "chooseDialogTitle": "Choose avatar image",
-    "dialogFilterName": "Image",
     "loadFailed": "Failed to load image",
     "previewAlt": "Avatar preview",
-    "removeAria": "Remove avatar",
-    "saveFailed": "Failed to save avatar",
-    "unsupportedType": "Unsupported image type",
-    "uploadAria": "Drop an image or click to upload avatar"
+    "removeAria": "Remove avatar"
   },
   "card": {
     "ariaLabel": "Agent: {{name}}",
@@ -32,6 +27,9 @@
   "editor": {
     "create": "Create",
     "created": "Agent created.",
+    "avatarUrl": "Avatar URL",
+    "avatarUrlInvalid": "Enter a valid http or https URL without credentials.",
+    "avatarUrlPlaceholder": "https://example.com/avatar.png",
     "displayName": "Display Name",
     "displayNamePlaceholder": "e.g. Code Reviewer",
     "duplicate": "Duplicate",
@@ -80,6 +78,7 @@
     "exportedTo": "Exported to {{filename}}",
     "importInvalidExtension": "Unsupported file type. Choose a .json file.",
     "importInvalidMimeType": "Unsupported file type. Choose a JSON file.",
+    "importTooLarge": "Import file must be {{maxSize}} or smaller.",
     "importFailed": "Failed to import agent.",
     "imported_one": "Imported {{count}} agent.",
     "imported_other": "Imported {{count}} agents.",

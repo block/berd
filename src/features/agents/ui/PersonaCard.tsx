@@ -13,8 +13,9 @@ import {
 import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
 import type { Persona } from "@/shared/types/agents";
 import {
+  canDeletePersona,
+  canEditPersona,
   getPersonaInitials,
-  getPersonaSource,
 } from "@/features/agents/lib/personaPresentation";
 
 interface PersonaCardProps {
@@ -41,9 +42,8 @@ export function PersonaCard({
 
   const initials = getPersonaInitials(persona.displayName);
   const avatarSrc = useAvatarSrc(persona.avatar);
-  const personaSource = getPersonaSource(persona);
-  const canEditPersona = personaSource === "custom";
-  const canDeletePersona = personaSource !== "builtin";
+  const isEditable = canEditPersona(persona);
+  const isDeletable = canDeletePersona(persona);
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || menuOpen) {
@@ -99,7 +99,7 @@ export function PersonaCard({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={4}>
-              {canEditPersona && (
+              {isEditable && (
                 <DropdownMenuItem onSelect={() => onEdit?.(persona)}>
                   <Pencil className="size-3.5" />
                   {t("common:actions.edit")}
@@ -113,7 +113,7 @@ export function PersonaCard({
                 <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
-              {canDeletePersona && (
+              {isDeletable && (
                 <DropdownMenuItem
                   variant="destructive"
                   onSelect={() => onDelete?.(persona)}

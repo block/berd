@@ -10,6 +10,7 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
     displayName: "Goose Default",
     systemPrompt: "You are a helpful assistant that writes code.",
     isBuiltin: false,
+    writable: true,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     ...overrides,
@@ -26,9 +27,13 @@ describe("PersonaCard", () => {
     render(
       <>
         <PersonaCard
-          persona={makePersona({ id: "builtin", isBuiltin: true })}
+          persona={makePersona({
+            id: "builtin",
+            isBuiltin: true,
+            writable: false,
+          })}
         />
-        <PersonaCard persona={makePersona({ id: "file", isFromDisk: true })} />
+        <PersonaCard persona={makePersona({ id: "file", writable: true })} />
       </>,
     );
     expect(screen.queryByText("Built-in")).not.toBeInTheDocument();
@@ -100,7 +105,7 @@ describe("PersonaCard", () => {
     const user = userEvent.setup();
     render(
       <PersonaCard
-        persona={makePersona({ isBuiltin: true })}
+        persona={makePersona({ isBuiltin: true, writable: false })}
         onDelete={vi.fn()}
       />,
     );

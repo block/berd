@@ -124,6 +124,25 @@ export function buildInitScript(options?: {
         supportingFiles: [],
       });
 
+      const personaToSourceEntry = (p) => {
+        const avatarValue = typeof p.avatar === "string" ? p.avatar : p.avatar?.value;
+        return {
+          type: "agent",
+          name: p.displayName ?? p.name,
+          description: "Agent",
+          content: p.systemPrompt ?? p.content ?? "",
+          path: p.id ?? ("/mock/.agents/agents/" + (p.displayName ?? p.name ?? "agent")),
+          global: true,
+          writable: p.writable ?? !p.isBuiltin,
+          supportingFiles: [],
+          properties: {
+            ...(p.provider ? { provider: p.provider } : {}),
+            ...(p.model ? { model: p.model } : {}),
+            ...(avatarValue ? { avatar: avatarValue } : {}),
+          },
+        };
+      };
+
       function nowIso() {
         return new Date().toISOString();
       }
@@ -241,21 +260,37 @@ export function buildInitScript(options?: {
           case "goose/working_dir/update":
             return jsonRpcResult(message.id, {});
           case "_goose/sources/list":
-            return jsonRpcResult(message.id, { sources: SKILLS.map(skillToSourceEntry) });
+            return jsonRpcResult(message.id, {
+              sources:
+                message.params?.type === "agent"
+                  ? PERSONAS.map(personaToSourceEntry)
+                  : SKILLS.map(skillToSourceEntry),
+            });
           case "_goose/sources/create":
             return jsonRpcResult(message.id, {
               source: {
                 name: message.params?.name ?? "new-skill",
-                type: "skill",
+                type: message.params?.type ?? "skill",
                 description: message.params?.description ?? "",
                 content: message.params?.content ?? "",
-                path: "/mock/.agents/skills/" + (message.params?.name ?? "new-skill"),
+                path:
+                  message.params?.type === "agent"
+                    ? "/mock/.agents/agents/" + (message.params?.name ?? "new-agent")
+                    : "/mock/.agents/skills/" + (message.params?.name ?? "new-skill"),
                 global: message.params?.global ?? true,
+                writable: true,
+                properties: message.params?.properties ?? {},
               },
             });
           case "_goose/sources/update":
           case "goose/sources/update": {
             const path = message.params?.path ?? "/mock/.agents/skills/updated-skill";
+            const existingPersona = PERSONAS.find(
+              (persona) => personaToSourceEntry(persona).path === path,
+            );
+            const existingSource = existingPersona
+              ? personaToSourceEntry(existingPersona)
+              : null;
             const nextName = message.params?.name;
             const name =
               typeof nextName === "string" && nextName.length > 0
@@ -269,12 +304,15 @@ export function buildInitScript(options?: {
             return jsonRpcResult(message.id, {
               source: {
                 name,
-                type: "skill",
+                type: message.params?.type ?? "skill",
                 description: message.params?.description ?? "",
                 content: message.params?.content ?? "",
                 path: updatedPath,
-                global: message.params?.global ?? true,
+                global: message.params?.global ?? existingSource?.global ?? true,
                 supportingFiles: [],
+                writable: existingSource?.writable ?? true,
+                properties:
+                  message.params?.properties ?? existingSource?.properties ?? {},
               },
             });
           }
@@ -287,11 +325,11 @@ export function buildInitScript(options?: {
             const name = String(path).split("/").filter(Boolean).at(-1) ?? "skill";
             return jsonRpcResult(message.id, {
               json: "{}",
-              filename: name + ".skill.json",
+              filename: name + (message.params?.type === "agent" ? ".agent.json" : ".skill.json"),
             });
           }
           case "_goose/sources/import":
-            return jsonRpcResult(message.id, { sources: SKILLS.map(skillToSourceEntry) });
+            return jsonRpcResult(message.id, { sources: PERSONAS.map(personaToSourceEntry) });
           default:
             return jsonRpcResult(message.id, {});
         }
@@ -343,43 +381,6 @@ export function buildInitScript(options?: {
             case "get_distro_bundle":
               return Promise.resolve(DISTRO);
 
-            // ---- Personas ----
-            case "list_personas":
-              return Promise.resolve(PERSONAS);
-            case "refresh_personas":
-              return Promise.resolve(PERSONAS);
-            case "create_persona":
-              return Promise.resolve({
-                id: "mock-" + Math.random().toString(36).slice(2, 10),
-                displayName: args?.displayName ?? "New Agent",
-                systemPrompt: args?.systemPrompt ?? "",
-                isBuiltin: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                ...(args?.provider ? { provider: args.provider } : {}),
-                ...(args?.model ? { model: args.model } : {}),
-              });
-            case "update_persona":
-              return Promise.resolve({
-                id: args?.id ?? "mock-updated",
-                displayName: args?.displayName ?? "Updated Agent",
-                systemPrompt: args?.systemPrompt ?? "",
-                isBuiltin: false,
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-                ...(args?.provider ? { provider: args.provider } : {}),
-                ...(args?.model ? { model: args.model } : {}),
-              });
-            case "delete_persona":
-              return Promise.resolve(null);
-            case "export_persona":
-              return Promise.resolve({
-                json: "{}",
-                suggestedFilename: "persona.json",
-              });
-            case "import_personas":
-              return Promise.resolve(PERSONAS);
-
             // ---- Sessions / Misc ----
             case "list_sessions":
               return Promise.resolve(
@@ -414,16 +415,18 @@ export function buildInitScript(options?: {
               return Promise.resolve(PROJECTS);
             case "get_project":
               return Promise.resolve(PROJECTS.find(p => p.id === args?.id) ?? null);
-            case "get_avatars_dir":
-              return Promise.resolve("/tmp/avatars");
-            case "save_persona_avatar_bytes":
-              return Promise.resolve("avatar.png");
             case "list_files_for_mentions":
               return Promise.resolve([]);
             case "get_home_dir":
               return Promise.resolve("/tmp/home");
             case "path_exists":
               return Promise.resolve(false);
+            case "read_image_attachment":
+              return Promise.resolve({
+                base64:
+                  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sU4nS0AAAAASUVORK5CYII=",
+                mimeType: "image/png",
+              });
             case "resolve_path": {
               const parts = args?.request?.parts ?? [];
               const path = parts

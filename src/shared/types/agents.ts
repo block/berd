@@ -3,10 +3,8 @@
 // a narrow union.
 export type ProviderType = string;
 
-// Avatar type — either a remote URL or a local file in ~/.goose/avatars/
-export type Avatar =
-  | { type: "url"; value: string }
-  | { type: "local"; value: string };
+// Avatar values are stored directly in ACP source properties.
+export type Avatar = string;
 
 // Persona types (from sprout)
 export interface Persona {
@@ -17,9 +15,11 @@ export interface Persona {
   provider?: ProviderType;
   model?: string;
   isBuiltin: boolean;
-  isFromDisk?: boolean;
-  createdAt: string;
-  updatedAt: string;
+  writable: boolean;
+  sourceDescription?: string;
+  sourceProperties?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface CreatePersonaRequest {
@@ -34,8 +34,8 @@ export interface UpdatePersonaRequest {
   displayName?: string;
   avatar?: Avatar | null;
   systemPrompt?: string;
-  provider?: ProviderType;
-  model?: string;
+  provider?: ProviderType | null;
+  model?: string | null;
 }
 
 // Agent types

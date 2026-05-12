@@ -38,9 +38,21 @@ import type {
 import {
   formatAgentError,
   formatImportSuccessMessage,
+  formatPersonaImportFileSize,
+  MAX_PERSONA_IMPORT_BYTES,
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
-import { getPersonaSource } from "@/features/agents/lib/personaPresentation";
+import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
+
+function decodeImportFileBytes(fileBytes: number[]): string {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+      new Uint8Array(fileBytes),
+    );
+  } catch {
+    throw new Error("File is not valid UTF-8 text");
+  }
+}
 
 export function AgentsView() {
   const { t } = useTranslation(["agents", "common"]);
@@ -82,7 +94,7 @@ export function AgentsView() {
       try {
         if (editingPersona && personaEditorMode === "edit") {
           await updatePersonaViaHook(
-            editingPersona.id,
+            editingPersona,
             data as UpdatePersonaRequest,
           );
           toast.success(t("editor.updated"));
@@ -124,7 +136,7 @@ export function AgentsView() {
   );
 
   const handleDeletePersona = useCallback((persona: Persona) => {
-    if (getPersonaSource(persona) === "builtin") return;
+    if (!canDeletePersona(persona)) return;
     setDeletingPersona(persona);
   }, []);
 
@@ -161,14 +173,12 @@ export function AgentsView() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
         a.href = url;
-        a.download = result.suggestedFilename;
+        a.download = result.filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        toast.success(
-          t("view.exportedTo", { filename: result.suggestedFilename }),
-        );
+        toast.success(t("view.exportedTo", { filename: result.filename }));
       } catch (err) {
         toast.error(formatAgentError(err, t("view.exportFailed")));
       }
@@ -181,17 +191,17 @@ export function AgentsView() {
   }, []);
 
   const validateImportFile = useCallback(
-    (file: Pick<File, "name" | "type">) => {
+    (file: Pick<File, "name" | "type" | "size">) => {
       const message = validatePersonaImportFile(file);
       return message ? t(message.key, message.options) : null;
     },
     [t],
   );
 
-  const handleImportFileBytes = useCallback(
-    async (fileBytes: number[], fileName: string) => {
+  const handleImportContents = useCallback(
+    async (fileContents: string, fileName: string) => {
       try {
-        const imported = await importPersonas(fileBytes, fileName);
+        const imported = await importPersonas(fileContents, fileName);
         await refreshFromDisk();
         const message = formatImportSuccessMessage(imported.length);
         toast.success(t(message.key, message.options));
@@ -200,6 +210,17 @@ export function AgentsView() {
       }
     },
     [refreshFromDisk, t],
+  );
+
+  const handleImportFileBytes = useCallback(
+    async (fileBytes: number[], fileName: string) => {
+      try {
+        await handleImportContents(decodeImportFileBytes(fileBytes), fileName);
+      } catch (err) {
+        toast.error(formatAgentError(err, t("view.importFailed")));
+      }
+    },
+    [handleImportContents, t],
   );
 
   const handleImportPicker = useCallback(async () => {
@@ -220,10 +241,11 @@ export function AgentsView() {
         return;
       }
 
-      const { fileBytes, fileName } = await readImportPersonaFile(selected);
+      const { fileContents, fileName } = await readImportPersonaFile(selected);
       const validationMessage = validateImportFile({
         name: fileName,
         type: "",
+        size: new TextEncoder().encode(fileContents).byteLength,
       });
 
       if (validationMessage) {
@@ -231,11 +253,11 @@ export function AgentsView() {
         return;
       }
 
-      await handleImportFileBytes(fileBytes, fileName);
+      await handleImportContents(fileContents, fileName);
     } catch (err) {
       toast.error(formatAgentError(err, t("view.importFailed")));
     }
-  }, [handleImportFileBytes, t, validateImportFile]);
+  }, [handleImportContents, t, validateImportFile]);
 
   const dialogs = (
     <>
@@ -347,6 +369,10 @@ export function AgentsView() {
           onImportFile={handleImportFileBytes}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}
+          maxImportBytes={MAX_PERSONA_IMPORT_BYTES}
+          importTooLargeMessage={t("view.importTooLarge", {
+            maxSize: formatPersonaImportFileSize(MAX_PERSONA_IMPORT_BYTES),
+          })}
           isLoading={personasLoading}
         />
       </section>
