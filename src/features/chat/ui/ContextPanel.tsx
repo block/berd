@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { FilesList } from "./FilesList";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { useChangedFiles } from "@/shared/hooks/useChangedFiles";
+import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import {
   createBranch,
   createWorktree,
@@ -30,6 +31,35 @@ interface ContextPanelProps {
 }
 
 type ContextPanelTab = "details" | "files";
+type ContextPanelSection = "workspace" | "changes" | "artifacts";
+type ContextPanelSectionVisibility = Record<ContextPanelSection, boolean>;
+
+const SECTION_VISIBILITY_STORAGE_KEY = "goose:context-panel:section-visibility";
+const DEFAULT_SECTION_VISIBILITY: ContextPanelSectionVisibility = {
+  workspace: true,
+  changes: true,
+  artifacts: true,
+};
+
+function validateSectionVisibility(
+  value: unknown,
+  defaults: ContextPanelSectionVisibility,
+): ContextPanelSectionVisibility {
+  if (!value || typeof value !== "object") return defaults;
+  const parsed = value as Partial<Record<ContextPanelSection, unknown>>;
+  return {
+    workspace:
+      typeof parsed.workspace === "boolean"
+        ? parsed.workspace
+        : defaults.workspace,
+    changes:
+      typeof parsed.changes === "boolean" ? parsed.changes : defaults.changes,
+    artifacts:
+      typeof parsed.artifacts === "boolean"
+        ? parsed.artifacts
+        : defaults.artifacts,
+  };
+}
 
 export function ContextPanel({
   sessionId,
@@ -40,6 +70,11 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
+  const [sectionVisibility, setSectionVisibility] = usePersistedState(
+    SECTION_VISIBILITY_STORAGE_KEY,
+    DEFAULT_SECTION_VISIBILITY,
+    validateSectionVisibility,
+  );
   const projectDefaultWorkspaceRoot = projectWorkingDirs[0] ?? null;
 
   const activeContext = useChatSessionStore(
@@ -160,11 +195,21 @@ export function ContextPanel({
     void refetchAll();
   }, [refetchAll]);
 
+  const toggleSection = useCallback(
+    (section: ContextPanelSection) => {
+      setSectionVisibility((prev) => ({
+        ...prev,
+        [section]: !prev[section],
+      }));
+    },
+    [setSectionVisibility],
+  );
+
   return (
     <Tabs
       value={activeTab}
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
-      className="flex h-full min-w-0 flex-1 flex-col"
+      className="flex h-full min-w-0 flex-1 flex-col gap-0"
     >
       <div className="shrink-0 border-b border-border px-3 pb-2 pt-2.5">
         <TabsList variant="buttons">
@@ -178,7 +223,7 @@ export function ContextPanel({
       </div>
 
       <TabsContent value="details" className="flex-1 overflow-y-auto">
-        <div className="space-y-2.5 px-3 pb-3 pt-2">
+        <div className="pb-3">
           <WorkspaceWidget
             projectName={projectName}
             projectColor={projectColor}
@@ -198,6 +243,8 @@ export function ContextPanel({
             onCreateBranch={handleCreateBranch}
             onCreateWorktree={handleCreateWorktree}
             onRefresh={handleRefresh}
+            isOpen={sectionVisibility.workspace}
+            onToggleOpen={() => toggleSection("workspace")}
           />
           <ChangesWidget
             files={changedFiles}
@@ -205,8 +252,13 @@ export function ContextPanel({
             currentBranch={gitState?.currentBranch ?? null}
             repoPath={gitTargetPath ?? ""}
             onOpenFile={handleOpenChangedFile}
+            isOpen={sectionVisibility.changes}
+            onToggleOpen={() => toggleSection("changes")}
           />
-          <ArtifactsWidget />
+          <ArtifactsWidget
+            isOpen={sectionVisibility.artifacts}
+            onToggleOpen={() => toggleSection("artifacts")}
+          />
         </div>
       </TabsContent>
 

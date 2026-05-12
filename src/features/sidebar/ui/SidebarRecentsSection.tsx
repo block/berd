@@ -1,6 +1,6 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconEdit, IconMessage } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconMessage } from "@tabler/icons-react";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -29,6 +29,9 @@ export function SidebarRecentsSection({
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
+  isOpen,
+  onToggleOpen,
+  sectionHeaderTextClass,
 }: {
   sessions: TabInfo[];
   collapsed: boolean;
@@ -43,9 +46,13 @@ export function SidebarRecentsSection({
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
+  isOpen: boolean;
+  onToggleOpen: () => void;
+  sectionHeaderTextClass: string;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [recentsDragOver, setRecentsDragOver] = useState(false);
+  const showContent = collapsed || isOpen;
 
   const handleRecentsDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     const hasSession = e.dataTransfer.types.includes("text/x-session-id");
@@ -87,17 +94,30 @@ export function SidebarRecentsSection({
           collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
         )}
       >
-        <span
-          className={cn(
-            "text-[12px] font-normal text-muted-foreground/80 flex-1 pl-3",
-            labelTransition,
-            labelVisible
-              ? "opacity-100 w-auto"
-              : "opacity-0 w-0 overflow-hidden",
-          )}
-        >
-          {t("sections.recents")}
-        </span>
+        {!collapsed && (
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            aria-expanded={isOpen}
+            className={cn(
+              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+              labelTransition,
+              labelVisible
+                ? "opacity-100 w-auto"
+                : "opacity-0 w-0 overflow-hidden",
+            )}
+          >
+            <IconChevronDown
+              className={cn(
+                "size-3 shrink-0 text-foreground-subtle transition-transform duration-150",
+                !isOpen && "-rotate-90",
+              )}
+            />
+            <span className={cn("truncate", sectionHeaderTextClass)}>
+              {t("sections.recents")}
+            </span>
+          </button>
+        )}
         {!collapsed && onNewChat && !showEmptyState && (
           <Button
             type="button"
@@ -120,7 +140,7 @@ export function SidebarRecentsSection({
         )}
       </div>
 
-      {showEmptyState && collapsed ? (
+      {showContent && showEmptyState && collapsed ? (
         <div className="flex flex-col items-center gap-1">
           <Button
             type="button"
@@ -134,7 +154,7 @@ export function SidebarRecentsSection({
             <IconEdit className="size-4" />
           </Button>
         </div>
-      ) : showEmptyState ? (
+      ) : showContent && showEmptyState ? (
         <div className="space-y-0.5">
           <Button
             type="button"
@@ -147,7 +167,7 @@ export function SidebarRecentsSection({
             {t("empty.startChat")}
           </Button>
         </div>
-      ) : sessions.length > 0 && collapsed ? (
+      ) : showContent && sessions.length > 0 && collapsed ? (
         <div className="flex flex-col items-center gap-1">
           {sessions.map((session) => (
             <Button
@@ -176,7 +196,7 @@ export function SidebarRecentsSection({
             </Button>
           ))}
         </div>
-      ) : sessions.length > 0 ? (
+      ) : showContent && sessions.length > 0 ? (
         <div className="space-y-0.5">
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;

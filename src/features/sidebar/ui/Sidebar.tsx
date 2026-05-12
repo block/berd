@@ -6,6 +6,8 @@ import {
   IconHome,
   IconApps,
   IconArrowLeft,
+  IconLayoutSidebar,
+  IconLayoutSidebarFilled,
   IconRobotFace,
   IconSearch,
   IconSettings,
@@ -33,6 +35,8 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { Button } from "@/shared/ui/button";
 import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
+import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
+import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
 import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarSearchResults } from "./SidebarSearchResults";
@@ -46,6 +50,7 @@ interface SidebarProps {
   collapsed: boolean;
   width?: number;
   isResizing?: boolean;
+  onCollapse?: () => void;
   onSettingsClick?: () => void;
   onSettingsBack?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
@@ -75,11 +80,39 @@ interface SidebarProps {
 }
 
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
+const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
+type SidebarSectionVisibility = {
+  projects: boolean;
+  recents: boolean;
+};
+const DEFAULT_SECTION_VISIBILITY: SidebarSectionVisibility = {
+  projects: true,
+  recents: true,
+};
+
+function validateSectionVisibility(
+  value: unknown,
+  defaults: SidebarSectionVisibility,
+): SidebarSectionVisibility {
+  if (!value || typeof value !== "object") return defaults;
+  const parsed = value as Partial<
+    Record<keyof SidebarSectionVisibility, unknown>
+  >;
+  return {
+    projects:
+      typeof parsed.projects === "boolean"
+        ? parsed.projects
+        : defaults.projects,
+    recents:
+      typeof parsed.recents === "boolean" ? parsed.recents : defaults.recents,
+  };
+}
 
 export function Sidebar({
   collapsed,
-  width = 240,
+  width = SIDE_PANEL_DEFAULT_WIDTH,
   isResizing = false,
+  onCollapse,
   onSettingsClick,
   onSettingsBack,
   onSettingsSectionChange,
@@ -120,6 +153,11 @@ export function Sidebar({
       return {};
     }
   });
+  const [sectionVisibility, setSectionVisibility] = usePersistedState(
+    SECTION_VISIBILITY_STORAGE_KEY,
+    DEFAULT_SECTION_VISIBILITY,
+    validateSectionVisibility,
+  );
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
@@ -282,6 +320,9 @@ export function Sidebar({
 
   const toggleProject = (projectId: string) =>
     setExpandedProjects((prev) => ({ ...prev, [projectId]: !prev[projectId] }));
+  const toggleSection = (section: keyof SidebarSectionVisibility) => {
+    setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
 
   return (
     <div
@@ -306,6 +347,19 @@ export function Sidebar({
             )}
           >
             <GooseIcon className="text-foreground" />
+            {!collapsed && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                onClick={onCollapse}
+                className="text-muted-foreground transition-opacity duration-150 hover:text-foreground"
+                aria-label={t("actions.collapse")}
+                title={t("actions.collapse")}
+              >
+                <IconLayoutSidebarFilled className="size-4" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -328,6 +382,19 @@ export function Sidebar({
               aria-label={t("navigation.main")}
             >
               <div className="relative z-10 space-y-0.5">
+                {collapsed && (
+                  <button
+                    type="button"
+                    onClick={onCollapse}
+                    title={t("actions.expand")}
+                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
+                    aria-label={t("actions.expand")}
+                  >
+                    <IconLayoutSidebar className="size-4 flex-shrink-0" />
+                    <span className="sr-only">{t("actions.expand")}</span>
+                  </button>
+                )}
+
                 <div
                   className={cn(
                     "mb-3 flex items-center w-full rounded-md transition-all duration-300 ease-out",
@@ -458,6 +525,10 @@ export function Sidebar({
                     onMarkChatUnread={onMarkChatUnread}
                     onMoveToProject={onMoveToProject}
                     onReorderProject={onReorderProject}
+                    projectsSectionOpen={sectionVisibility.projects}
+                    recentsSectionOpen={sectionVisibility.recents}
+                    onToggleProjectsSection={() => toggleSection("projects")}
+                    onToggleRecentsSection={() => toggleSection("recents")}
                   />
                 ))}
             </nav>

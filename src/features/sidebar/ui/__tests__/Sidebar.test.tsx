@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { Sidebar } from "../Sidebar";
 
@@ -64,6 +64,11 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
 }));
 
 describe("Sidebar", () => {
+  beforeEach(() => {
+    mockSessions.splice(0, mockSessions.length);
+    window.localStorage.clear();
+  });
+
   it("shows an empty state when there are no projects or chats", async () => {
     const user = userEvent.setup();
     const onCreateProject = vi.fn();
@@ -118,8 +123,6 @@ describe("Sidebar", () => {
     expect(
       screen.queryByRole("button", { name: "Start a chat" }),
     ).not.toBeInTheDocument();
-
-    mockSessions.splice(0, mockSessions.length);
   });
 
   it("shows the chats empty state when only project chats exist", () => {
@@ -170,8 +173,6 @@ describe("Sidebar", () => {
     );
 
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
-
-    mockSessions.splice(0, mockSessions.length);
   });
 
   it("hides zero-message sessions from recents", () => {
@@ -233,6 +234,35 @@ describe("Sidebar", () => {
     render(<Sidebar collapsed onNavigate={vi.fn()} projects={[]} />);
 
     expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
+  });
+
+  it("collapses and expands the recents section", async () => {
+    const user = userEvent.setup();
+    mockSessions.splice(0, mockSessions.length, {
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    const recentsHeader = screen.getByRole("button", { name: /chats/i });
+    expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+
+    await user.click(recentsHeader);
+    expect(screen.queryByText("Recovered Session")).not.toBeInTheDocument();
+
+    await user.click(recentsHeader);
+    expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 
   it("renders settings navigation as the active sidebar surface", async () => {
