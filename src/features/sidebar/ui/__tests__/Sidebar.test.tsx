@@ -248,7 +248,6 @@ describe("Sidebar", () => {
     render(
       <Sidebar
         collapsed={false}
-        onCollapse={vi.fn()}
         onNavigate={vi.fn()}
         onSelectSession={vi.fn()}
         projects={[]}

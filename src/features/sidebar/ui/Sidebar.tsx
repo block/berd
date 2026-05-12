@@ -6,8 +6,6 @@ import {
   IconHome,
   IconApps,
   IconArrowLeft,
-  IconLayoutSidebar,
-  IconLayoutSidebarFilled,
   IconRobotFace,
   IconSearch,
   IconSettings,
@@ -50,7 +48,6 @@ interface SidebarProps {
   collapsed: boolean;
   width?: number;
   isResizing?: boolean;
-  onCollapse?: () => void;
   onSettingsClick?: () => void;
   onSettingsBack?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
@@ -112,7 +109,6 @@ export function Sidebar({
   collapsed,
   width = SIDE_PANEL_DEFAULT_WIDTH,
   isResizing = false,
-  onCollapse,
   onSettingsClick,
   onSettingsBack,
   onSettingsSectionChange,
@@ -347,19 +343,6 @@ export function Sidebar({
             )}
           >
             <GooseIcon className="text-foreground" />
-            {!collapsed && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                onClick={onCollapse}
-                className="text-muted-foreground transition-opacity duration-150 hover:text-foreground"
-                aria-label={t("actions.collapse")}
-                title={t("actions.collapse")}
-              >
-                <IconLayoutSidebarFilled className="size-4" />
-              </Button>
-            )}
           </div>
         </div>
 
@@ -382,19 +365,6 @@ export function Sidebar({
               aria-label={t("navigation.main")}
             >
               <div className="relative z-10 space-y-0.5">
-                {collapsed && (
-                  <button
-                    type="button"
-                    onClick={onCollapse}
-                    title={t("actions.expand")}
-                    className="flex w-full items-center gap-2.5 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors duration-200 hover:text-foreground"
-                    aria-label={t("actions.expand")}
-                  >
-                    <IconLayoutSidebar className="size-4 flex-shrink-0" />
-                    <span className="sr-only">{t("actions.expand")}</span>
-                  </button>
-                )}
-
                 <div
                   className={cn(
                     "mb-3 flex items-center w-full rounded-md transition-all duration-300 ease-out",

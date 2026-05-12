@@ -1162,7 +1162,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             collapsed={sidebarCollapsed}
             width={sidebarWidth}
             isResizing={isResizing}
-            onCollapse={toggleSidebar}
             onSettingsClick={() => openSettings()}
             onSettingsBack={leaveSettings}
             onSettingsSectionChange={selectSettingsSection}
