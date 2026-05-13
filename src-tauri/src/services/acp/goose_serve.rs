@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::services::distro_bundle::DistroBundleState;
+use crate::services::shell_env;
 
 use tokio::process::{Child, Command};
 use tokio::sync::OnceCell;
@@ -71,6 +72,14 @@ impl GooseServeProcess {
 
         let mut command: Command = get_goose_command(&app_handle)?;
         let binary_display = command.as_std().get_program().to_string_lossy().to_string();
+
+        // When launched from Finder/Dock/Spotlight, the app inherits a minimal
+        // launchd environment. Restore the user's login shell environment so
+        // goosed has access to PATH, LANG, and other needed variables.
+        let shell_env = shell_env::capture_shell_env().await;
+        for (key, value) in &shell_env {
+            command.env(key, value);
+        }
 
         if let Some(distro_state) = app_handle.try_state::<DistroBundleState>() {
             if let Some(bundle) = distro_state.bundle() {
