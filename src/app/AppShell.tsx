@@ -444,6 +444,32 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           resolvedProviderId === sessionModelPreference.providerId
             ? sessionModelPreference.modelId
             : undefined;
+        const readLiveHomeSession = () =>
+          useChatSessionStore.getState().getSession(homeSession.id) ??
+          homeSession;
+        const liveHomeSession = readLiveHomeSession();
+        // Once a provider+model is set, don't let stored preferences re-seed
+        // on inventory refreshes — that would clobber explicit user picks.
+        if (liveHomeSession.providerId && liveHomeSession.modelId) {
+          const result = await applyLatestSessionConfig({
+            sessionId: homeSession.id,
+            providerId: liveHomeSession.providerId,
+            workingDir,
+            modelId: liveHomeSession.modelId,
+          });
+          if (!result.applied) {
+            return liveHomeSession;
+          }
+          patchSession(homeSession.id, { workingDir });
+          return readLiveHomeSession();
+        }
+        if (
+          liveHomeSession.providerId === resolvedProviderId &&
+          liveHomeSession.workingDir === workingDir &&
+          modelIdToApply == null
+        ) {
+          return liveHomeSession;
+        }
         const result = await applyLatestSessionConfig({
           sessionId: homeSession.id,
           providerId: resolvedProviderId,

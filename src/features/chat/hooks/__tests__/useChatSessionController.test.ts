@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
@@ -11,7 +12,11 @@ const mockAcpSetModel = vi.fn();
 const mockSetSelectedProvider = vi.fn();
 const mockResolveSessionCwd = vi.fn();
 const mockGooseDefaultsRead = vi.fn();
+const mockGoosePreferencesRead = vi.fn();
+const mockGoosePreferencesSave = vi.fn();
 const mockUseProviderInventory = vi.fn();
+const mockToastError = vi.fn();
+const mockUseChatSendMessage = vi.fn();
 const mockPickerState = {
   pickerAgents: [{ id: "goose", label: "Goose" }],
   availableModels: [] as Array<{
@@ -22,6 +27,21 @@ const mockPickerState = {
   }>,
   modelsLoading: false,
   modelStatusMessage: null as string | null,
+};
+const modelFixtures: Record<
+  string,
+  { name: string; displayName: string; providerId: string }
+> = {
+  "claude-sonnet-4": {
+    name: "claude-sonnet-4",
+    displayName: "Claude Sonnet 4",
+    providerId: "anthropic",
+  },
+  "gpt-5.4": {
+    name: "gpt-5.4",
+    displayName: "GPT-5.4",
+    providerId: "openai",
+  },
 };
 
 function deferred<T = void>() {
@@ -39,10 +59,18 @@ vi.mock("@/shared/api/acp", () => ({
   acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
 }));
 
+vi.mock("sonner", () => ({
+  toast: { error: (...args: unknown[]) => mockToastError(...args) },
+}));
+
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
       GooseDefaultsRead: (...args: unknown[]) => mockGooseDefaultsRead(...args),
+      GoosePreferencesRead: (...args: unknown[]) =>
+        mockGoosePreferencesRead(...args),
+      GoosePreferencesSave: (...args: unknown[]) =>
+        mockGoosePreferencesSave(...args),
     },
   }),
 }));
@@ -52,11 +80,19 @@ vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
 }));
 
 vi.mock("../useChat", () => ({
-  useChat: () => ({
+  useChat: (
+    _sessionId: string,
+    _providerOverride?: string,
+    _systemPromptOverride?: string,
+    _personaInfo?: { id: string; name: string },
+    options?: { ensurePrepared?: () => Promise<boolean | undefined> },
+  ) => ({
     messages: [],
     chatState: "idle",
     tokenState: null,
-    sendMessage: vi.fn(),
+    sendMessage: (...args: unknown[]) =>
+      mockUseChatSendMessage(options, ...args),
+    compactConversation: vi.fn(),
     stopStreaming: vi.fn(),
     streamingMessageId: null,
   }),
@@ -90,8 +126,10 @@ vi.mock("@/features/projects/lib/sessionCwdSelection", () => ({
 
 vi.mock("../useAgentModelPickerState", () => ({
   useAgentModelPickerState: ({
+    onProviderSelected,
     onModelSelected,
   }: {
+    onProviderSelected?: (providerId: string) => void;
     onModelSelected?: (model: {
       id: string;
       name: string;
@@ -104,14 +142,16 @@ vi.mock("../useAgentModelPickerState", () => ({
     availableModels: mockPickerState.availableModels,
     modelsLoading: mockPickerState.modelsLoading,
     modelStatusMessage: mockPickerState.modelStatusMessage,
-    handleProviderChange: vi.fn(),
+    handleProviderChange: (providerId: string) =>
+      onProviderSelected?.(providerId),
     handleModelChange: (modelId: string) => {
-      if (modelId === "claude-sonnet-4") {
+      const model = modelFixtures[modelId];
+      if (model) {
         onModelSelected?.({
           id: modelId,
-          name: modelId,
-          displayName: "Claude Sonnet 4",
-          providerId: "anthropic",
+          name: model.name,
+          displayName: model.displayName,
+          providerId: model.providerId,
         });
       }
     },
@@ -124,6 +164,32 @@ describe("useChatSessionController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     window.localStorage.clear();
+    mockUseChatSendMessage.mockImplementation(
+      async (options?: {
+        ensurePrepared?: () => Promise<boolean | undefined>;
+      }) => {
+        await options?.ensurePrepared?.();
+      },
+    );
+    useProviderCatalogStore.getState().reset();
+    useProviderCatalogStore.getState().setEntries([
+      {
+        id: "openai",
+        displayName: "OpenAI",
+        category: "model",
+        description: "OpenAI",
+        setupMethod: "single_api_key",
+        group: "default",
+      },
+      {
+        id: "anthropic",
+        displayName: "Anthropic",
+        category: "model",
+        description: "Anthropic",
+        setupMethod: "single_api_key",
+        group: "default",
+      },
+    ]);
     mockAcpPrepareSession.mockResolvedValue(undefined);
     mockAcpSetModel.mockResolvedValue(undefined);
     mockResolveSessionCwd.mockResolvedValue("/tmp/project");
@@ -131,6 +197,8 @@ describe("useChatSessionController", () => {
       providerId: null,
       modelId: null,
     });
+    mockGoosePreferencesRead.mockResolvedValue({ values: [] });
+    mockGoosePreferencesSave.mockResolvedValue(undefined);
     mockUseProviderInventory.mockReturnValue({
       getEntry: () => undefined,
     });
@@ -188,6 +256,7 @@ describe("useChatSessionController", () => {
       hasHydratedSessions: true,
       isContextPanelOpen: false,
       activeWorkspaceBySession: {},
+      modelSelectionIntentBySession: {},
     });
   });
 
@@ -198,6 +267,14 @@ describe("useChatSessionController", () => {
 
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
     });
 
     await waitFor(() => {
@@ -226,7 +303,135 @@ describe("useChatSessionController", () => {
       modelId: "claude-sonnet-4",
       modelName: "Claude Sonnet 4",
     });
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("goose:preferredModelsByAgent") ?? "{}",
+        ),
+      ).toEqual({
+        goose: {
+          modelId: "claude-sonnet-4",
+          modelName: "Claude Sonnet 4",
+          providerId: "anthropic",
+        },
+      });
+    });
+    expect(
+      useChatSessionStore.getState().getModelSelectionIntent("session-1"),
+    ).toBeUndefined();
   });
+
+  it("keeps the selected model when send-time preparation supersedes the model switch", async () => {
+    const firstPrepare = deferred();
+    mockAcpPrepareSession.mockReset();
+    mockAcpPrepareSession
+      .mockReturnValueOnce(firstPrepare.promise)
+      .mockResolvedValue(undefined);
+    mockAcpSetModel.mockReset();
+    mockAcpSetModel.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("claude-sonnet-4");
+    });
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "session-1",
+        "anthropic",
+        "/tmp/project",
+      );
+    });
+
+    act(() => {
+      result.current.handleSend("use the selected model");
+    });
+
+    await waitFor(() => {
+      expect(mockUseChatSendMessage).toHaveBeenCalled();
+    });
+
+    firstPrepare.resolve();
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledTimes(2);
+    });
+    expect(mockAcpSetModel).toHaveBeenNthCalledWith(
+      2,
+      "session-1",
+      "claude-sonnet-4",
+    );
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+  });
+
+  it("does not let send-time preparation restore a stale model after a newer selection", async () => {
+    const firstCwd = deferred<string>();
+    mockResolveSessionCwd.mockReset();
+    mockResolveSessionCwd
+      .mockReturnValueOnce(firstCwd.promise)
+      .mockResolvedValue("/tmp/project");
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend("use the current model");
+    });
+
+    await waitFor(() => {
+      expect(mockResolveSessionCwd).toHaveBeenCalledTimes(1);
+    });
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "session-1",
+        "claude-sonnet-4",
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+
+    await act(async () => {
+      firstCwd.resolve("/tmp/project");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockAcpSetModel).toHaveBeenCalledTimes(1);
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+  });
+
   it("restores the previous stored model preference when setting a model fails", async () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
@@ -269,6 +474,91 @@ describe("useChatSessionController", () => {
         providerId: "openai",
       },
     });
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Could not switch to Claude Sonnet 4. This chat is still using GPT-4o.",
+    );
+    expect(
+      useChatSessionStore.getState().getModelSelectionIntent("session-1"),
+    ).toBeUndefined();
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "session-1",
+        "openai",
+        "/tmp/project",
+      );
+      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-4o");
+    });
+  });
+
+  it("keeps a newer model selection when a superseded model switch fails", async () => {
+    const firstPrepare = deferred();
+    mockAcpPrepareSession.mockReset();
+    mockAcpPrepareSession
+      .mockReturnValueOnce(firstPrepare.promise)
+      .mockResolvedValue(undefined);
+    mockAcpSetModel.mockReset();
+    mockAcpSetModel
+      .mockRejectedValueOnce(new Error("first set model failed"))
+      .mockResolvedValue(undefined);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        providerId: "anthropic",
+        modelId: "claude-sonnet-4",
+        modelName: "Claude Sonnet 4",
+      });
+    });
+
+    act(() => {
+      result.current.handleModelChange("gpt-5.4");
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        providerId: "openai",
+        modelId: "gpt-5.4",
+        modelName: "GPT-5.4",
+      });
+    });
+
+    firstPrepare.resolve();
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith("session-1", "gpt-5.4");
+    });
+    await waitFor(() => {
+      expect(
+        JSON.parse(
+          window.localStorage.getItem("goose:preferredModelsByAgent") ?? "{}",
+        ),
+      ).toEqual({
+        goose: {
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+          providerId: "openai",
+        },
+      });
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+    expect(mockToastError).not.toHaveBeenCalled();
   });
 
   it("shows the stored explicit model for new chats", async () => {
@@ -447,7 +737,7 @@ describe("useChatSessionController", () => {
     ).toBeNull();
   });
 
-  it("does not persist or record a pending Home model when ACP rejects it", async () => {
+  it("rolls back and shows an error when ACP rejects a pending Home model", async () => {
     mockAcpSetModel.mockRejectedValueOnce(new Error("set model failed"));
 
     const { result, rerender } = renderHook(
@@ -493,7 +783,7 @@ describe("useChatSessionController", () => {
       expect(
         useChatSessionStore.getState().getSession("session-3"),
       ).toMatchObject({
-        providerId: "anthropic",
+        providerId: "openai",
       });
     });
 
@@ -506,5 +796,70 @@ describe("useChatSessionController", () => {
     expect(
       window.localStorage.getItem("goose:preferredModelsByAgent"),
     ).toBeNull();
+    expect(mockToastError).toHaveBeenCalledWith(
+      "Could not switch to Claude Sonnet 4.",
+    );
+    expect(
+      useChatSessionStore.getState().getModelSelectionIntent("session-3"),
+    ).toBeUndefined();
+  });
+
+  it("catches provider-only Home sync failures after consuming pending state", async () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+    mockAcpPrepareSession.mockRejectedValueOnce(new Error("prepare failed"));
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useChatSessionController({ sessionId }),
+      {
+        initialProps: { sessionId: null as string | null },
+      },
+    );
+
+    act(() => {
+      result.current.handleProviderChange("anthropic");
+    });
+
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "session-4",
+          title: "Chat",
+          providerId: "openai",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    rerender({ sessionId: "session-4" });
+
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "session-4",
+        "anthropic",
+        "/tmp/project",
+      );
+    });
+    await waitFor(() => {
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to sync pending Home state:",
+        expect.any(Error),
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-4"),
+    ).toMatchObject({
+      providerId: "openai",
+    });
+    expect(
+      useChatSessionStore.getState().getModelSelectionIntent("session-4"),
+    ).toBeUndefined();
+
+    consoleError.mockRestore();
   });
 });

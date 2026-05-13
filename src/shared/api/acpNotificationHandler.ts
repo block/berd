@@ -96,6 +96,157 @@ function toolCallUpdatePatch(
   };
 }
 
+interface ModelConfigSnapshot {
+  modelId: string;
+  modelName: string;
+}
+
+function getStringProperty(
+  record: Record<string, unknown>,
+  key: string,
+): string | undefined {
+  const value = record[key];
+  return typeof value === "string" ? value : undefined;
+}
+
+function getModelOptions(
+  options: unknown,
+): Array<{ id: string; name: string }> {
+  if (Array.isArray(options)) {
+    return options.flatMap((value) => {
+      if (!isRecord(value)) {
+        return [];
+      }
+      const id = getStringProperty(value, "value");
+      if (id) {
+        return [{ id, name: getStringProperty(value, "name") ?? id }];
+      }
+      if (!Array.isArray(value.options)) {
+        return [];
+      }
+      return getModelOptions(value.options);
+    });
+  }
+
+  if (!isRecord(options)) {
+    return [];
+  }
+
+  const type = getStringProperty(options, "type");
+  if (type === "ungrouped") {
+    const values = options.values;
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return values.flatMap((value) => {
+      if (!isRecord(value)) {
+        return [];
+      }
+      const id = getStringProperty(value, "value");
+      if (!id) {
+        return [];
+      }
+      return [{ id, name: getStringProperty(value, "name") ?? id }];
+    });
+  }
+
+  if (type !== "grouped" || !Array.isArray(options.groups)) {
+    return [];
+  }
+
+  return options.groups.flatMap((group) => {
+    if (!isRecord(group) || !Array.isArray(group.options)) {
+      return [];
+    }
+    return group.options.flatMap((value) => {
+      if (!isRecord(value)) {
+        return [];
+      }
+      const id = getStringProperty(value, "value");
+      if (!id) {
+        return [];
+      }
+      return [{ id, name: getStringProperty(value, "name") ?? id }];
+    });
+  });
+}
+
+function getModelConfigSnapshot(
+  update: SessionUpdate,
+): ModelConfigSnapshot | null {
+  const configUpdate = update as SessionUpdate & {
+    sessionUpdate: "config_option_update";
+    options?: unknown;
+    configOptions?: unknown;
+  };
+  const options = Array.isArray(configUpdate.configOptions)
+    ? configUpdate.configOptions
+    : configUpdate.options;
+  if (!Array.isArray(options)) {
+    return null;
+  }
+
+  const modelOption = options.find(
+    (option) => isRecord(option) && option.category === "model",
+  );
+  if (!isRecord(modelOption)) {
+    return null;
+  }
+
+  const select = isRecord(modelOption.kind) ? modelOption.kind : modelOption;
+  if (select.type !== "select") {
+    return null;
+  }
+
+  const modelId = getStringProperty(select, "currentValue");
+  if (!modelId) {
+    return null;
+  }
+
+  const availableModels = getModelOptions(select.options);
+  const modelName =
+    availableModels.find((model) => model.id === modelId)?.name ?? modelId;
+
+  return { modelId, modelName };
+}
+
+function handleModelConfigSnapshot(
+  sessionId: string,
+  snapshot: ModelConfigSnapshot,
+): void {
+  const sessionStore = useChatSessionStore.getState();
+  const session = sessionStore.getSession(sessionId);
+  const intent = sessionStore.getModelSelectionIntent(sessionId);
+  const localModelId = session?.modelId;
+  const snapshotMatchesLocalModel = localModelId === snapshot.modelId;
+  const snapshotMatchesPendingIntent =
+    intent?.kind === "model" && intent.modelId === snapshot.modelId;
+
+  // Backend config snapshots can arrive out of order around a user-triggered
+  // model switch. Once the UI has a local model, only accept snapshots that
+  // confirm the local state or the active intent; otherwise a stale snapshot can
+  // flip the picker back and re-trigger preference/bootstrap churn.
+  if (
+    snapshotMatchesLocalModel ||
+    snapshotMatchesPendingIntent ||
+    (!localModelId && !intent)
+  ) {
+    sessionStore.patchSession(sessionId, {
+      modelId: snapshot.modelId,
+      modelName: snapshot.modelName,
+    });
+    return;
+  }
+
+  console.warn("Dropped divergent ACP model config snapshot", {
+    sessionId: sessionId.slice(0, 8),
+    localModelId,
+    snapshotModelId: snapshot.modelId,
+    intentKind: intent?.kind,
+    intentModelId: intent?.modelId,
+  });
+}
+
 export function setActiveMessageId(sessionId: string, messageId: string): void {
   presetMessageIds.set(sessionId, messageId);
   livePerf.set(sessionId, {
@@ -471,41 +622,9 @@ function handleShared(sessionId: string, update: SessionUpdate): void {
     }
 
     case "config_option_update": {
-      const configUpdate = update as SessionUpdate & {
-        sessionUpdate: "config_option_update";
-      };
-      if ("options" in configUpdate && Array.isArray(configUpdate.options)) {
-        const modelOption = configUpdate.options.find(
-          (opt: { category?: string; kind?: Record<string, unknown> }) =>
-            opt.category === "model",
-        );
-        if (modelOption?.kind?.type === "select") {
-          const select = modelOption.kind;
-          const currentModelId = select.currentValue;
-          const availableModels: Array<{ id: string; name: string }> = [];
-
-          if (select.options?.type === "ungrouped") {
-            for (const v of select.options.values) {
-              availableModels.push({ id: v.value, name: v.name });
-            }
-          } else if (select.options?.type === "grouped") {
-            for (const group of select.options.groups) {
-              for (const v of group.options) {
-                availableModels.push({ id: v.value, name: v.name });
-              }
-            }
-          }
-
-          const currentModelName =
-            availableModels.find((m) => m.id === currentModelId)?.name ??
-            currentModelId;
-
-          const sessionStore = useChatSessionStore.getState();
-          sessionStore.patchSession(sessionId, {
-            modelId: currentModelId,
-            modelName: currentModelName,
-          });
-        }
+      const snapshot = getModelConfigSnapshot(update);
+      if (snapshot) {
+        handleModelConfigSnapshot(sessionId, snapshot);
       }
       break;
     }

@@ -128,6 +128,8 @@
   },
   "notifications": {
     "compactionComplete": "Conversacion compactada. El contexto anterior se resumio.",
+    "modelSwitchError": "No se pudo cambiar a {{model}}. Este chat sigue usando {{fallbackModel}}.",
+    "modelSwitchErrorWithoutFallback": "No se pudo cambiar a {{model}}.",
     "moveError": "No se pudo mover el chat",
     "renameError": "No se pudo cambiar el nombre del chat"
   },

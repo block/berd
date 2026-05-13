@@ -37,6 +37,17 @@ export interface ActiveWorkspace {
   branch: string | null;
 }
 
+export interface ModelSelectionIntent {
+  requestId: string;
+  kind: "model" | "provider";
+  providerId?: string;
+  modelId?: string;
+  modelName?: string;
+  previousProviderId?: string;
+  previousModelId?: string;
+  previousModelName?: string;
+}
+
 export function hasSessionStarted(
   session: Pick<ChatSession, "messageCount">,
   localMessages?: ArrayLike<unknown>,
@@ -62,6 +73,7 @@ interface ChatSessionStoreState {
   hasHydratedSessions: boolean;
   isContextPanelOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
+  modelSelectionIntentBySession: Record<string, ModelSelectionIntent>;
 }
 
 interface CreateSessionOpts {
@@ -87,6 +99,14 @@ interface ChatSessionStoreActions {
   setActiveWorkspace: (sessionId: string, context: ActiveWorkspace) => void;
   clearActiveWorkspace: (sessionId: string) => void;
   switchSessionProvider: (sessionId: string, providerId: string) => void;
+  beginModelSelectionIntent: (
+    sessionId: string,
+    intent: ModelSelectionIntent,
+  ) => void;
+  getModelSelectionIntent: (
+    sessionId: string,
+  ) => ModelSelectionIntent | undefined;
+  clearModelSelectionIntent: (sessionId: string, requestId?: string) => void;
 
   getSession: (id: string) => ChatSession | undefined;
   getActiveSession: () => ChatSession | null;
@@ -167,6 +187,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   hasHydratedSessions: false,
   isContextPanelOpen: loadContextPanelOpenPreference(),
   activeWorkspaceBySession: {},
+  modelSelectionIntentBySession: {},
 
   createSession: async (opts) => {
     if (!opts?.workingDir) {
@@ -219,17 +240,28 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   patchSession: (id, patch) => {
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === id
-          ? {
-              ...session,
-              ...patch,
-              updatedAt: patch.updatedAt ?? session.updatedAt,
-            }
-          : session,
-      ),
-    }));
+    set((state) => {
+      const existing = state.sessions.find((session) => session.id === id);
+      if (!existing) return state;
+      const merged: ChatSession = {
+        ...existing,
+        ...patch,
+        updatedAt: patch.updatedAt ?? existing.updatedAt,
+      };
+      let changed = false;
+      for (const key of Object.keys(merged) as (keyof ChatSession)[]) {
+        if (merged[key] !== existing[key]) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return state;
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === id ? merged : session,
+        ),
+      };
+    });
   },
 
   addSession: (session) => {
@@ -289,35 +321,84 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   setActiveWorkspace: (sessionId, context) => {
-    set((state) => ({
-      activeWorkspaceBySession: {
-        ...state.activeWorkspaceBySession,
-        [sessionId]: context,
-      },
-    }));
+    set((state) => {
+      const existing = state.activeWorkspaceBySession[sessionId];
+      if (
+        existing &&
+        existing.path === context.path &&
+        existing.branch === context.branch
+      ) {
+        return state;
+      }
+      return {
+        activeWorkspaceBySession: {
+          ...state.activeWorkspaceBySession,
+          [sessionId]: context,
+        },
+      };
+    });
   },
 
   clearActiveWorkspace: (sessionId) => {
     set((state) => {
+      if (!(sessionId in state.activeWorkspaceBySession)) return state;
       const { [sessionId]: _, ...rest } = state.activeWorkspaceBySession;
       return { activeWorkspaceBySession: rest };
     });
   },
 
   switchSessionProvider: (sessionId, providerId) => {
+    set((state) => {
+      const existing = state.sessions.find((s) => s.id === sessionId);
+      if (!existing) return state;
+      if (
+        existing.providerId === providerId &&
+        existing.modelId === undefined &&
+        existing.modelName === undefined
+      ) {
+        return state;
+      }
+      return {
+        sessions: state.sessions.map((session) =>
+          session.id === sessionId
+            ? {
+                ...session,
+                providerId,
+                modelId: undefined,
+                modelName: undefined,
+                updatedAt: session.updatedAt,
+              }
+            : session,
+        ),
+      };
+    });
+  },
+
+  beginModelSelectionIntent: (sessionId, intent) => {
     set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === sessionId
-          ? {
-              ...session,
-              providerId,
-              modelId: undefined,
-              modelName: undefined,
-              updatedAt: session.updatedAt,
-            }
-          : session,
-      ),
+      modelSelectionIntentBySession: {
+        ...state.modelSelectionIntentBySession,
+        [sessionId]: intent,
+      },
     }));
+  },
+
+  getModelSelectionIntent: (sessionId) =>
+    get().modelSelectionIntentBySession[sessionId],
+
+  clearModelSelectionIntent: (sessionId, requestId) => {
+    const current = get().modelSelectionIntentBySession[sessionId];
+    if (!current || (requestId && current.requestId !== requestId)) {
+      return;
+    }
+
+    set((state) => {
+      const modelSelectionIntentBySession = {
+        ...state.modelSelectionIntentBySession,
+      };
+      delete modelSelectionIntentBySession[sessionId];
+      return { modelSelectionIntentBySession };
+    });
   },
 
   getSession: (id) => get().sessions.find((session) => session.id === id),

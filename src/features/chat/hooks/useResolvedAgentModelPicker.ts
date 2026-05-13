@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
 import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
@@ -14,16 +14,17 @@ import {
   getStoredModelPreference,
   setStoredModelPreference,
 } from "../lib/modelPreferences";
+import {
+  clearCurrentModelSelectionIntent,
+  createModelSelectionRequestId,
+  rollbackToPreviousModel,
+  type ApplySessionModelSelection,
+  type ModelSelectionApplyOptions,
+  type PreferredModelSelection,
+} from "../model-selection/modelSelectionIntent";
 import { resolveSelectedAgentId } from "../lib/agentProviderResolution";
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
-
-export type PreferredModelSelection = {
-  id: string;
-  name: string;
-  providerId?: string;
-  source: "default" | "explicit";
-};
 
 interface UseResolvedAgentModelPickerOptions {
   providers: AcpProvider[];
@@ -38,8 +39,9 @@ interface UseResolvedAgentModelPickerOptions {
   setGlobalSelectedProvider: (providerId: string) => void;
   prepareSelectedProvider: (
     providerId: string,
-    modelSelection?: PreferredModelSelection | null,
+    options?: ModelSelectionApplyOptions,
   ) => Promise<boolean>;
+  applySessionModelSelection: ApplySessionModelSelection;
 }
 
 function isModelAlias(modelId?: string | null): boolean {
@@ -56,6 +58,7 @@ export function useResolvedAgentModelPicker({
   setPendingModelSelection,
   setGlobalSelectedProvider,
   prepareSelectedProvider,
+  applySessionModelSelection,
 }: UseResolvedAgentModelPickerOptions) {
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
@@ -110,8 +113,8 @@ export function useResolvedAgentModelPicker({
     [selectedAgentId],
   );
 
-  const getPreferredSelectionForAgent = useMemo(
-    () => (agentId: string, fallbackProviderId?: string) => {
+  const getPreferredSelectionForAgent = useCallback(
+    (agentId: string, fallbackProviderId?: string) => {
       const preferredModel = getStoredModelPreference(agentId);
       if (preferredModel) {
         return {
@@ -260,18 +263,90 @@ export function useResolvedAgentModelPicker({
         return;
       }
 
-      useChatSessionStore
-        .getState()
-        .switchSessionProvider(sessionId, nextProviderId);
+      const sessionStore = useChatSessionStore.getState();
+      sessionStore.clearModelSelectionIntent(sessionId);
+      sessionStore.switchSessionProvider(sessionId, nextProviderId);
       setGlobalSelectedProvider(nextProviderId);
-      void prepareSelectedProvider(nextProviderId, nextModelSelection).catch(
-        (error) => {
-          if (selectionVersionRef.current !== versionAtSelection) {
+
+      if (nextModelSelection?.id) {
+        const previousProviderId = session?.providerId;
+        const previousModelId = session?.modelId;
+        const previousModelName = session?.modelName;
+        const requestId = createModelSelectionRequestId();
+        sessionStore.beginModelSelectionIntent(sessionId, {
+          requestId,
+          kind: "model",
+          providerId: nextModelSelection.providerId ?? nextProviderId,
+          modelId: nextModelSelection.id,
+          modelName: nextModelSelection.name,
+          previousProviderId,
+          previousModelId,
+          previousModelName,
+        });
+        void applySessionModelSelection(
+          nextProviderId,
+          nextModelSelection,
+          requestId,
+        )
+          .then(() => {
+            clearCurrentModelSelectionIntent(sessionId, requestId);
+          })
+          .catch((error) => {
+            const intentStillMatches = clearCurrentModelSelectionIntent(
+              sessionId,
+              requestId,
+            );
+            if (selectionVersionRef.current !== versionAtSelection) {
+              return;
+            }
+            if (!intentStillMatches) {
+              return;
+            }
+            console.error("Failed to update ACP session provider:", error);
+            rollbackToPreviousModel({
+              sessionId,
+              failedModelName: nextModelSelection.name,
+              previous: {
+                providerId: previousProviderId,
+                modelId: previousModelId,
+                modelName: previousModelName,
+              },
+              applySessionModelSelection,
+              prepareSelectedProvider,
+              setGlobalSelectedProvider,
+              restoreErrorMessage:
+                "Failed to restore previous model after provider switch failure:",
+            });
+          });
+        return;
+      }
+
+      const requestId = createModelSelectionRequestId();
+      sessionStore.beginModelSelectionIntent(sessionId, {
+        requestId,
+        kind: "provider",
+        providerId: nextProviderId,
+        previousProviderId: session?.providerId,
+        previousModelId: session?.modelId,
+        previousModelName: session?.modelName,
+      });
+      void prepareSelectedProvider(nextProviderId, { requestId })
+        .then(() => {
+          clearCurrentModelSelectionIntent(sessionId, requestId);
+        })
+        .catch((error) => {
+          const intentStillMatches = clearCurrentModelSelectionIntent(
+            sessionId,
+            requestId,
+          );
+          if (
+            !intentStillMatches ||
+            selectionVersionRef.current !== versionAtSelection
+          ) {
             return;
           }
           console.error("Failed to update ACP session provider:", error);
-        },
-      );
+        });
     },
     onModelSelected: (model) => {
       const modelId = model.id;
@@ -312,6 +387,7 @@ export function useResolvedAgentModelPicker({
 
       selectionVersionRef.current += 1;
       const versionAtSelection = selectionVersionRef.current;
+      const requestId = createModelSelectionRequestId();
 
       const previousStoredModelPreference =
         getStoredModelPreference(selectedAgentId);
@@ -320,37 +396,59 @@ export function useResolvedAgentModelPicker({
       const previousModelName = session.modelName;
       const providerChanged =
         Boolean(nextProviderId) && nextProviderId !== session.providerId;
+      const sessionStore = useChatSessionStore.getState();
+
+      sessionStore.beginModelSelectionIntent(sessionId, {
+        requestId,
+        kind: "model",
+        providerId: nextProviderId,
+        modelId,
+        modelName,
+        previousProviderId,
+        previousModelId,
+        previousModelName,
+      });
 
       if (providerChanged && nextProviderId) {
-        useChatSessionStore
-          .getState()
-          .switchSessionProvider(sessionId, nextProviderId);
+        sessionStore.switchSessionProvider(sessionId, nextProviderId);
         setGlobalSelectedProvider(nextProviderId);
       }
 
-      useChatSessionStore.getState().patchSession(sessionId, {
+      sessionStore.patchSession(sessionId, {
         modelId,
         modelName,
       });
 
       void (async () => {
         try {
-          const applied = await prepareSelectedProvider(
+          const applied = await applySessionModelSelection(
             nextProviderId,
             nextModelSelection,
+            requestId,
           );
-          if (!applied || selectionVersionRef.current !== versionAtSelection) {
+          const intentStillMatches = clearCurrentModelSelectionIntent(
+            sessionId,
+            requestId,
+          );
+          if (!applied || !intentStillMatches) {
+            return;
+          }
+          if (selectionVersionRef.current !== versionAtSelection) {
             return;
           }
           setStoredModelPreference(selectedAgentId, nextStoredModelPreference);
         } catch (error) {
-          if (selectionVersionRef.current !== versionAtSelection) {
+          const intentStillMatches = clearCurrentModelSelectionIntent(
+            sessionId,
+            requestId,
+          );
+          if (
+            !intentStillMatches ||
+            selectionVersionRef.current !== versionAtSelection
+          ) {
             return;
           }
           console.error("Failed to set model:", error);
-          if (providerChanged && previousProviderId) {
-            setGlobalSelectedProvider(previousProviderId);
-          }
           if (previousStoredModelPreference) {
             setStoredModelPreference(
               selectedAgentId,
@@ -359,33 +457,22 @@ export function useResolvedAgentModelPicker({
           } else {
             clearStoredModelPreference(selectedAgentId);
           }
-          useChatSessionStore.getState().patchSession(sessionId, {
-            providerId: previousProviderId,
-            modelId: previousModelId,
-            modelName: previousModelName,
+          rollbackToPreviousModel({
+            sessionId,
+            failedModelName: modelName,
+            previous: {
+              providerId: previousProviderId,
+              modelId: previousModelId,
+              modelName: previousModelName,
+            },
+            applySessionModelSelection,
+            prepareSelectedProvider,
+            setGlobalSelectedProvider: providerChanged
+              ? setGlobalSelectedProvider
+              : undefined,
+            restoreErrorMessage:
+              "Failed to restore previous model after setModel failure:",
           });
-          void (async () => {
-            try {
-              if (previousProviderId) {
-                await prepareSelectedProvider(
-                  previousProviderId,
-                  previousModelId
-                    ? {
-                        id: previousModelId,
-                        name: previousModelName ?? previousModelId,
-                        providerId: previousProviderId,
-                        source: "explicit",
-                      }
-                    : null,
-                );
-              }
-            } catch (rollbackError) {
-              console.error(
-                "Failed to restore previous provider/model after setModel failure:",
-                rollbackError,
-              );
-            }
-          })();
         }
       })();
     },

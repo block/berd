@@ -1,10 +1,11 @@
 import { waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearReplayBuffer,
   getReplayBuffer,
 } from "@/features/chat/hooks/replayBuffer";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { McpAppPayload } from "@/shared/types/messages";
 import {
   clearMessageTracking,
@@ -30,6 +31,28 @@ function createMcpAppPayload(): McpAppPayload {
   };
 }
 
+function createModelConfigUpdate(
+  currentValue: string,
+  values: Array<{ value: string; name: string }>,
+) {
+  return {
+    sessionUpdate: "config_option_update",
+    options: [
+      {
+        category: "model",
+        kind: {
+          type: "select",
+          currentValue,
+          options: {
+            type: "ungrouped",
+            values,
+          },
+        },
+      },
+    ],
+  };
+}
+
 describe("acpNotificationHandler", () => {
   beforeEach(() => {
     clearMessageTracking();
@@ -43,6 +66,15 @@ describe("acpNotificationHandler", () => {
       isConnected: false,
       loadingSessionIds: new Set<string>(),
       scrollTargetMessageBySession: {},
+    });
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      hasHydratedSessions: true,
+      isContextPanelOpen: false,
+      activeWorkspaceBySession: {},
+      modelSelectionIntentBySession: {},
     });
   });
 
@@ -141,6 +173,139 @@ describe("acpNotificationHandler", () => {
       useChatStore.getState().getSessionRuntime("acp-session")
         .streamingMessageId,
     ).toBe("assistant-1");
+  });
+
+  it("does not let a stale backend model snapshot overwrite a pending selected model", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+      requestId: "request-1",
+      kind: "model",
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+      previousProviderId: "openai",
+      previousModelId: "gpt-4o",
+      previousModelName: "GPT-4o",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("gpt-4o", [
+        { value: "gpt-4o", name: "GPT-4o" },
+        { value: "claude-sonnet-4", name: "Claude Sonnet 4" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+  });
+
+  it("updates the display name from a matching backend model snapshot", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "openai",
+      modelId: "gpt-4o",
+      modelName: "gpt-4o",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("gpt-4o", [
+        { value: "gpt-4o", name: "GPT-4o Latest" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      modelId: "gpt-4o",
+      modelName: "GPT-4o Latest",
+    });
+  });
+
+  it("hydrates an empty session model from a backend model snapshot", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "openai",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("gpt-4o", [
+        { value: "gpt-4o", name: "GPT-4o" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      modelId: "gpt-4o",
+      modelName: "GPT-4o",
+    });
+  });
+
+  it("does not hydrate an old model snapshot during a provider-only switch", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "anthropic",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+    useChatSessionStore.getState().beginModelSelectionIntent("acp-session", {
+      requestId: "provider-request-1",
+      kind: "provider",
+      providerId: "anthropic",
+      previousProviderId: "openai",
+      previousModelId: "gpt-4o",
+      previousModelName: "GPT-4o",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("gpt-4o", [
+        { value: "gpt-4o", name: "GPT-4o" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).not.toMatchObject({
+      modelId: "gpt-4o",
+      modelName: "GPT-4o",
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Dropped divergent ACP model config snapshot",
+      expect.objectContaining({
+        localModelId: undefined,
+        snapshotModelId: "gpt-4o",
+        intentKind: "provider",
+      }),
+    );
+    warnSpy.mockRestore();
   });
 
   it("preserves ACP tool kind and locations on tool requests", async () => {
