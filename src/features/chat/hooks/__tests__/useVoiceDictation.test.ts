@@ -1,32 +1,20 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockGetDictationConfig = vi.fn();
-const mockUseDictationRecorder = vi.fn();
-const mockUseVoiceInputPreferences = vi.fn();
+const mockUseOpenAiRealtimeDictation = vi.fn();
 
-vi.mock("@/shared/api/dictation", () => ({
-  getDictationConfig: () => mockGetDictationConfig(),
-}));
-
-vi.mock("../useDictationRecorder", () => ({
-  useDictationRecorder: (options: unknown) => mockUseDictationRecorder(options),
-}));
-
-vi.mock("../useVoiceInputPreferences", () => ({
-  useVoiceInputPreferences: () => mockUseVoiceInputPreferences(),
+vi.mock("../useOpenAiRealtimeDictation", () => ({
+  useOpenAiRealtimeDictation: (options: unknown) =>
+    mockUseOpenAiRealtimeDictation(options),
 }));
 
 import { useVoiceDictation } from "../useVoiceDictation";
 
 describe("useVoiceDictation", () => {
   beforeEach(() => {
-    mockGetDictationConfig.mockReset();
-    mockUseDictationRecorder.mockReset();
-    mockUseVoiceInputPreferences.mockReset();
-
-    mockUseDictationRecorder.mockReturnValue({
-      isEnabled: false,
+    mockUseOpenAiRealtimeDictation.mockReset();
+    mockUseOpenAiRealtimeDictation.mockReturnValue({
+      isEnabled: true,
       isRecording: false,
       isStarting: () => false,
       isTranscribing: false,
@@ -36,64 +24,149 @@ describe("useVoiceDictation", () => {
     });
   });
 
-  it("defers default provider fallback until preferences hydrate", async () => {
-    const voicePrefs = {
-      autoSubmitPhrases: [],
-      clearSelectedProvider: vi.fn(),
-      hasStoredProviderPreference: false,
-      isHydrated: false,
-      preferredMicrophoneId: null,
-      rawAutoSubmitPhrases: "submit",
-      selectedProvider: null,
-      setPreferredMicrophoneId: vi.fn(),
-      setRawAutoSubmitPhrases: vi.fn(),
-      setSelectedProvider: vi.fn(),
+  it("types realtime transcript snapshots into the composer", () => {
+    const setText = vi.fn();
+    const { rerender } = renderHook(
+      ({ text }) =>
+        useVoiceDictation({
+          attachments: [],
+          clearAttachments: vi.fn(),
+          onSend: vi.fn(),
+          resetTextarea: vi.fn(),
+          selectedPersonaId: null,
+          setText,
+          text,
+        }),
+      { initialProps: { text: "" } },
+    );
+
+    const options = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      onTranscriptText: (text: string) => void;
     };
 
-    mockUseVoiceInputPreferences.mockImplementation(() => voicePrefs);
-    mockGetDictationConfig.mockResolvedValue({
-      openai: {
-        availableModels: [],
-        configured: true,
-        description: "OpenAI",
-        usesProviderConfig: true,
-      },
+    options.onTranscriptText("hello");
+    expect(setText).toHaveBeenLastCalledWith("hello");
+
+    rerender({ text: "hello" });
+    options.onTranscriptText("hello world");
+    expect(setText).toHaveBeenLastCalledWith("hello world");
+  });
+
+  it("auto-submits when transcript ends with 'submit'", () => {
+    const setText = vi.fn();
+    const onSend = vi.fn().mockReturnValue(true);
+    const clearAttachments = vi.fn();
+    const resetTextarea = vi.fn();
+    const stopRecording = vi.fn();
+
+    mockUseOpenAiRealtimeDictation.mockImplementation(() => {
+      return {
+        isEnabled: true,
+        isRecording: true,
+        isStarting: () => false,
+        isTranscribing: true,
+        startRecording: vi.fn(),
+        stopRecording,
+        toggleRecording: vi.fn(),
+      };
     });
 
-    const { rerender } = renderHook(() =>
+    const { rerender } = renderHook(
+      ({ text }) =>
+        useVoiceDictation({
+          attachments: [],
+          clearAttachments,
+          onSend,
+          resetTextarea,
+          selectedPersonaId: null,
+          setText,
+          text,
+        }),
+      { initialProps: { text: "" } },
+    );
+
+    const opts = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      onTranscriptText: (text: string) => void;
+      onRecordingStart?: () => void;
+    };
+
+    // Simulate onRecordingStart to reset internal transcript state
+    opts.onRecordingStart?.();
+
+    // First transcript without trigger phrase
+    opts.onTranscriptText("hello world");
+    expect(setText).toHaveBeenLastCalledWith("hello world");
+
+    rerender({ text: "hello world" });
+
+    // Transcript now ends with "submit"
+    opts.onTranscriptText("hello world submit");
+    expect(stopRecording).toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("hello world", undefined, undefined);
+  });
+
+  it("strips trigger phrase but does not send when isSendLocked", () => {
+    const setText = vi.fn();
+    const onSend = vi.fn();
+    const stopRecording = vi.fn();
+
+    mockUseOpenAiRealtimeDictation.mockImplementation(() => ({
+      isEnabled: true,
+      isRecording: true,
+      isStarting: () => false,
+      isTranscribing: true,
+      startRecording: vi.fn(),
+      stopRecording,
+      toggleRecording: vi.fn(),
+    }));
+
+    renderHook(() =>
+      useVoiceDictation({
+        attachments: [],
+        clearAttachments: vi.fn(),
+        onSend,
+        resetTextarea: vi.fn(),
+        selectedPersonaId: null,
+        setText,
+        text: "",
+        isSendLocked: true,
+      }),
+    );
+
+    const opts = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      onTranscriptText: (text: string) => void;
+      onRecordingStart?: () => void;
+    };
+    opts.onRecordingStart?.();
+    opts.onTranscriptText("hello submit");
+
+    expect(stopRecording).toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+    expect(setText).toHaveBeenLastCalledWith("hello");
+  });
+
+  it("preserves pre-existing typed text when transcript updates", () => {
+    const setText = vi.fn();
+
+    renderHook(() =>
       useVoiceDictation({
         attachments: [],
         clearAttachments: vi.fn(),
         onSend: vi.fn(),
         resetTextarea: vi.fn(),
         selectedPersonaId: null,
-        setText: vi.fn(),
-        text: "",
+        setText,
+        text: "typed prefix ",
       }),
     );
 
-    await waitFor(() =>
-      expect(mockGetDictationConfig).toHaveBeenCalledTimes(1),
-    );
-    await waitFor(() =>
-      expect(mockUseDictationRecorder).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          provider: null,
-          providerConfigured: false,
-        }),
-      ),
-    );
+    const opts = mockUseOpenAiRealtimeDictation.mock.calls.at(-1)?.[0] as {
+      onTranscriptText: (text: string) => void;
+      onRecordingStart?: () => void;
+    };
+    opts.onRecordingStart?.();
+    opts.onTranscriptText("dictated words");
 
-    voicePrefs.isHydrated = true;
-    rerender();
-
-    await waitFor(() =>
-      expect(mockUseDictationRecorder).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          provider: "openai",
-          providerConfigured: true,
-        }),
-      ),
-    );
+    expect(setText).toHaveBeenLastCalledWith("typed prefix dictated words");
   });
 });

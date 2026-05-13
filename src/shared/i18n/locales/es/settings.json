@@ -168,50 +168,7 @@
       "reset": "Restablecer onboarding",
       "resetDescription": "El onboarding aparecerá la próxima vez que se abra Goose."
     },
-    "title": "General",
-    "voiceInput": {
-      "label": "Entrada de voz",
-      "providerLabel": "Proveedor de transcripción",
-      "disabled": "Desactivado",
-      "notConfiguredSuffix": "(no configurado)",
-      "placeholder": "Selecciona un proveedor",
-      "modelLabel": "Modelo",
-      "apiKeyLabel": "Clave API",
-      "apiKeyDescription": "Se usa para autenticar las solicitudes a este proveedor.",
-      "apiKeyPlaceholder": "sk-...",
-      "apiKeyConfigured": "Clave API configurada",
-      "addApiKey": "Agregar clave API",
-      "updateApiKey": "Actualizar clave API",
-      "removeApiKey": "Eliminar clave API",
-      "providerConfigLabel": "Credenciales del proveedor",
-      "providerConfigDescription": "Usa las credenciales de la configuración de tu proveedor de modelos.",
-      "openProviders": "Configurar proveedor",
-      "localModelLabel": "Modelo Whisper local",
-      "localModelDescription": "Descarga y selecciona un modelo Whisper para transcribir localmente.",
-      "noLocalModels": "Aún no hay modelos Whisper locales.",
-      "download": "Descargar",
-      "selectModel": "Seleccionar modelo",
-      "selectedModel": "Seleccionado",
-      "deleteModel": "Eliminar",
-      "microphoneLabel": "Micrófono",
-      "microphoneDescription": "Gestiona el acceso al micrófono para la entrada de voz.",
-      "microphoneUnavailable": "El acceso al micrófono no está disponible en este entorno.",
-      "grantMicrophone": "Permitir acceso",
-      "systemMicrophone": "Predeterminado del sistema",
-      "unknownMicrophone": "Micrófono desconocido",
-      "autoSubmitLabel": "Frases de envío automático",
-      "autoSubmitDescription": "Palabras separadas por coma que activan el envío automático (ej. \"enviar\").",
-      "providers": {
-        "openai": "OpenAI Whisper",
-        "groq": "Groq",
-        "elevenlabs": "ElevenLabs",
-        "local": "Whisper local"
-      },
-      "downloadProgress": "Descargando... {{percent}}%",
-      "loadError": "Error al cargar ajustes de voz.",
-      "saveError": "Error al guardar.",
-      "deleteError": "Error al eliminar."
-    }
+    "title": "General"
   },
   "archive": {
     "title": "Archivo"
@@ -223,8 +180,7 @@
     "compaction": "Compactación",
     "doctor": "Diagnóstico",
     "general": "General",
-    "providers": "Proveedores",
-    "voice": "Voz"
+    "providers": "Proveedores"
   },
   "projects": {
     "empty": "No hay proyectos archivados.",

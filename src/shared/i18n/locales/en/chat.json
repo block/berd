@@ -195,7 +195,7 @@
     "sendMessage": "Send message",
     "stopGeneration": "Stop generation",
     "voiceInput": "Voice dictation",
-    "voiceInputDisabled": "Configure a voice provider in Settings to enable dictation",
+    "voiceInputDisabled": "Set OPENAI_API_KEY to enable dictation",
     "voiceInputRecording": "Listening...",
     "voiceInputTranscribing": "Transcribing...",
     "voiceInputAutoSubmitHint": "Say \"submit\" to send"

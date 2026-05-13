@@ -1,4 +1,11 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import {
+  useState,
+  useRef,
+  useCallback,
+  useEffect,
+  useMemo,
+  useLayoutEffect,
+} from "react";
 import { X } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -138,11 +145,24 @@ export function ChatInput({
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
 
+  const resizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
+      return;
+    }
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+  }, []);
+
   const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }
   }, []);
+
+  useLayoutEffect(() => {
+    resizeTextarea();
+  });
 
   const hasQueuedMessage = queuedMessage !== null;
 
@@ -260,7 +280,7 @@ export function ChatInput({
         dictation.isTranscribing ||
         dictation.isStarting())
     ) {
-      dictation.stopRecording({ flushPending: false });
+      dictation.stopRecording();
     }
 
     const submittedText = text;
@@ -339,9 +359,7 @@ export function ChatInput({
     setText(value);
     const cursorPosition = event.target.selectionStart ?? value.length;
     detectMention(value, cursorPosition);
-    const textarea = event.target;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
+    resizeTextarea();
   };
 
   const handlePaste = useCallback(

@@ -168,50 +168,7 @@
       "reset": "Reset onboarding",
       "resetDescription": "Done. Onboarding will appear the next time Goose opens."
     },
-    "title": "General",
-    "voiceInput": {
-      "label": "Voice input",
-      "providerLabel": "Transcription provider",
-      "disabled": "Disabled",
-      "notConfiguredSuffix": "(not configured)",
-      "placeholder": "Select a provider",
-      "modelLabel": "Model",
-      "apiKeyLabel": "API key",
-      "apiKeyDescription": "Used to authenticate requests to this provider.",
-      "apiKeyPlaceholder": "sk-...",
-      "apiKeyConfigured": "API key configured",
-      "addApiKey": "Add API key",
-      "updateApiKey": "Update API key",
-      "removeApiKey": "Remove API key",
-      "providerConfigLabel": "Provider credentials",
-      "providerConfigDescription": "Uses credentials from your model provider setup.",
-      "openProviders": "Configure provider",
-      "localModelLabel": "Local Whisper model",
-      "localModelDescription": "Download and select a Whisper model to run transcription locally.",
-      "noLocalModels": "No local Whisper models yet.",
-      "download": "Download",
-      "selectModel": "Select model",
-      "selectedModel": "Selected",
-      "deleteModel": "Delete",
-      "microphoneLabel": "Microphone",
-      "microphoneDescription": "Manage microphone access for voice input.",
-      "microphoneUnavailable": "Microphone access isn't available.",
-      "grantMicrophone": "Grant access",
-      "systemMicrophone": "System default",
-      "unknownMicrophone": "Unknown microphone",
-      "autoSubmitLabel": "Auto-submit phrases",
-      "autoSubmitDescription": "Comma-separated words that trigger automatic send (e.g. \"submit\").",
-      "providers": {
-        "openai": "OpenAI Whisper",
-        "groq": "Groq",
-        "elevenlabs": "ElevenLabs",
-        "local": "Local Whisper"
-      },
-      "downloadProgress": "Downloading... {{percent}}%",
-      "loadError": "Couldn't load voice settings.",
-      "saveError": "Couldn't save your changes. Try again.",
-      "deleteError": "Couldn't delete. Try again."
-    }
+    "title": "General"
   },
   "archive": {
     "title": "Archive"
@@ -223,8 +180,7 @@
     "compaction": "Compaction",
     "doctor": "Doctor",
     "general": "General",
-    "providers": "Providers",
-    "voice": "Voice"
+    "providers": "Providers"
   },
   "projects": {
     "empty": "Archived projects will show here.",

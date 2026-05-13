@@ -1,16 +1,3 @@
-import type {
-  DictationProvider,
-  DictationProviderStatus,
-} from "@/shared/types/dictation";
-
-// Stored in the user's goose config.yaml via typed ACP preference methods, not localStorage.
-export const VOICE_AUTO_SUBMIT_PHRASES_CONFIG_KEY = "VOICE_AUTO_SUBMIT_PHRASES";
-export const VOICE_DICTATION_PROVIDER_CONFIG_KEY = "VOICE_DICTATION_PROVIDER";
-export const VOICE_DICTATION_PREFERRED_MIC_CONFIG_KEY =
-  "VOICE_DICTATION_PREFERRED_MIC";
-export const VOICE_DICTATION_CONFIG_EVENT = "goose:voice-dictation-config";
-export const DISABLED_DICTATION_PROVIDER_CONFIG_VALUE = "__disabled__";
-
 export const DEFAULT_AUTO_SUBMIT_PHRASES_RAW = "submit";
 
 const TRAILING_PUNCTUATION_REGEX = /[\s"'`.,!?;:)\]}]+$/u;
@@ -43,53 +30,7 @@ export function parseAutoSubmitPhrases(rawValue: string | null | undefined) {
   );
 }
 
-export function normalizeDictationProvider(
-  value: string | null | undefined,
-): DictationProvider | null {
-  if (
-    value === "openai" ||
-    value === "groq" ||
-    value === "elevenlabs" ||
-    value === "local"
-  ) {
-    return value;
-  }
-
-  return null;
-}
-
-export function getDefaultDictationProvider(
-  providerStatuses: Partial<Record<DictationProvider, DictationProviderStatus>>,
-): DictationProvider | null {
-  const configuredProviderPriority: DictationProvider[] = [
-    "openai",
-    "groq",
-    "elevenlabs",
-    "local",
-  ];
-  const fallbackProviderPriority: DictationProvider[] = [
-    "local",
-    "openai",
-    "groq",
-    "elevenlabs",
-  ];
-
-  for (const provider of configuredProviderPriority) {
-    if (providerStatuses[provider]?.configured) {
-      return provider;
-    }
-  }
-
-  for (const provider of fallbackProviderPriority) {
-    if (providerStatuses[provider]) {
-      return provider;
-    }
-  }
-
-  return null;
-}
-
-export function appendTranscribedText(baseText: string, fragment: string) {
+function appendTranscribedText(baseText: string, fragment: string) {
   const normalizedFragment = fragment.replace(/\s+/g, " ").trim();
   if (!normalizedFragment) {
     return baseText;
@@ -187,12 +128,4 @@ export function getAutoSubmitMatch(
   }
 
   return null;
-}
-
-export function notifyVoiceDictationConfigChanged() {
-  try {
-    window.dispatchEvent(new Event(VOICE_DICTATION_CONFIG_EVENT));
-  } catch {
-    // no-op
-  }
 }

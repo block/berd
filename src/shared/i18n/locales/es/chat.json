@@ -195,10 +195,10 @@
     "sendMessage": "Enviar mensaje",
     "stopGeneration": "Detener generación",
     "voiceInput": "Dictado por voz",
-    "voiceInputDisabled": "Configura un proveedor de voz en Ajustes para activar el dictado",
+    "voiceInputDisabled": "Configura OPENAI_API_KEY para activar el dictado",
     "voiceInputRecording": "Escuchando...",
     "voiceInputTranscribing": "Transcribiendo...",
-    "voiceInputAutoSubmitHint": "Di \"enviar\" para enviar"
+    "voiceInputAutoSubmitHint": "Di \"submit\" para enviar"
   },
   "tools": {
     "content": "Contenido",

@@ -116,7 +116,7 @@ export const useAudioDevices = () => {
       // When permission flips to granted mid-session (e.g. the user enabled
       // mic access via OS settings), re-enumerate devices so we pick up the
       // real deviceIds/labels — the prior enumeration may have returned
-      // empty-string entries that VoiceInputSettings filters out.
+      // empty-string entries that callers can filter out.
       if (granted) {
         void loadDevicesWithPermission();
       }

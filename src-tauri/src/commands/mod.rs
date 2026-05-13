@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod git;
 pub mod git_changes;
 pub mod model_setup;
+pub mod openai_realtime;
 pub mod path_resolver;
 pub mod project_icons;
 mod sse;

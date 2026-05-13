@@ -1,7 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  appendTranscribedText,
-  getDefaultDictationProvider,
   getAutoSubmitMatch,
   parseAutoSubmitPhrases,
   replaceTrailingTranscribedText,
@@ -13,12 +11,6 @@ describe("voiceInput helpers", () => {
       "submit",
       "ship it",
     ]);
-  });
-
-  it("appends dictated text without smashing words together", () => {
-    expect(appendTranscribedText("hello", "world")).toBe("hello world");
-    expect(appendTranscribedText("hello ", "world")).toBe("hello world");
-    expect(appendTranscribedText("hello", ", world")).toBe("hello, world");
   });
 
   it("replaces only the trailing dictated segment", () => {
@@ -49,49 +41,5 @@ describe("voiceInput helpers", () => {
       matchedPhrase: "ship it",
       textWithoutPhrase: "hello",
     });
-  });
-
-  it("picks the first configured dictation provider by priority", () => {
-    expect(
-      getDefaultDictationProvider({
-        openai: {
-          configured: false,
-          description: "OpenAI",
-          usesProviderConfig: true,
-          availableModels: [],
-        },
-        groq: {
-          configured: true,
-          description: "Groq",
-          usesProviderConfig: false,
-          availableModels: [],
-        },
-        local: {
-          configured: true,
-          description: "Local",
-          usesProviderConfig: false,
-          availableModels: [],
-        },
-      }),
-    ).toBe("groq");
-  });
-
-  it("falls back to the first available provider when none are configured", () => {
-    expect(
-      getDefaultDictationProvider({
-        elevenlabs: {
-          configured: false,
-          description: "ElevenLabs",
-          usesProviderConfig: false,
-          availableModels: [],
-        },
-        local: {
-          configured: false,
-          description: "Local",
-          usesProviderConfig: false,
-          availableModels: [],
-        },
-      }),
-    ).toBe("local");
   });
 });

@@ -110,6 +110,8 @@ pub fn run() {
             commands::git::git_create_branch,
             commands::git::git_create_worktree,
             commands::model_setup::authenticate_model_provider,
+            commands::openai_realtime::get_openai_realtime_status,
+            commands::openai_realtime::create_openai_realtime_session,
             commands::agent_setup::check_agent_installed,
             commands::agent_setup::check_agent_auth,
             commands::agent_setup::install_agent,
