@@ -55,7 +55,7 @@ describe("Button", () => {
 
     expect(button).toHaveClass(
       "h-8",
-      "px-3",
+      "px-0",
       "text-xs",
       "text-muted-foreground",
     );

@@ -1104,7 +1104,7 @@ export function AutomationsView() {
   }, []);
 
   return (
-    <div className="h-full overflow-hidden bg-background">
+    <div className="page-transition h-full overflow-hidden bg-background">
       <div className="grid h-full min-h-0 grid-cols-1 lg:grid-cols-[360px_1fr]">
         <aside
           className="min-h-0 border-b border-border lg:border-r lg:border-b-0"

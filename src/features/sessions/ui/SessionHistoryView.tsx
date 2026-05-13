@@ -418,7 +418,10 @@ export function SessionHistoryView({
 
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
-      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]"
+      >
         <div
           ref={pageContentRef}
           className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-8"

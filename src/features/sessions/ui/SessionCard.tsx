@@ -119,7 +119,7 @@ export function SessionCard({
   return (
     <div
       className={cn(
-        "group relative flex flex-col gap-2 rounded-lg border border-border bg-background p-4 text-left transition-shadow hover:shadow-card",
+        "group relative flex flex-col gap-2 rounded-lg border border-border-soft bg-background p-4 text-left transition-colors hover:border-border hover:bg-muted/10",
         archivedAt && "opacity-60",
       )}
     >

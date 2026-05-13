@@ -87,18 +87,11 @@ export function ExtensionsSettings() {
     [extensions],
   );
 
-  const renderSection = (
-    title: string,
-    sectionExtensions: ExtensionEntry[],
-    showTitle = true,
-  ) => {
+  const renderSection = (sectionExtensions: ExtensionEntry[]) => {
     if (sectionExtensions.length === 0) return null;
     return (
-      <section className="space-y-3">
-        {showTitle ? (
-          <h4 className="text-sm font-normal text-foreground">{title}</h4>
-        ) : null}
-        <div className="grid gap-x-12 sm:grid-cols-2">
+      <section>
+        <div className="grid">
           {sectionExtensions.map((ext) => (
             <ExtensionItem
               key={ext.config_key}
@@ -159,7 +152,7 @@ export function ExtensionsSettings() {
       </div>
 
       {isLoading ? (
-        <div className="grid gap-x-12 sm:grid-cols-2">
+        <div className="grid">
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div
               key={i}
@@ -179,18 +172,11 @@ export function ExtensionsSettings() {
       ) : (
         <div className="space-y-8">
           {activeFilter !== "gooseCapabilities"
-            ? renderSection(
-                t("extensions.sections.extensions"),
-                primaryExtensions,
-                false,
-              )
+            ? renderSection(primaryExtensions)
             : null}
 
           {shouldShowGooseCapabilities
-            ? renderSection(
-                t("extensions.sections.gooseCapabilities"),
-                gooseCapabilities,
-              )
+            ? renderSection(gooseCapabilities)
             : null}
 
           {showGooseCapabilitiesToggle ? (

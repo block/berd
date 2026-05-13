@@ -543,13 +543,17 @@ export function Sidebar({
                 "px-1.5 py-1.5",
               )}
             >
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-background/0 to-background"
+              />
               <Button
                 type="button"
                 variant="ghost"
                 size={collapsed ? "icon-sm" : "default"}
                 onClick={onSettingsClick}
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-muted-foreground/85 hover:bg-transparent hover:text-foreground active:bg-transparent",
+                  "h-10 w-full rounded-md bg-transparent text-foreground-subtle hover:bg-transparent hover:text-foreground active:bg-transparent dark:text-muted-foreground",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",
@@ -590,36 +594,6 @@ export function Sidebar({
               aria-label={t("settings:navigationLabel")}
             >
               <div className="space-y-0.5">
-                <button
-                  type="button"
-                  onClick={onSettingsBack}
-                  title={
-                    collapsed ? t("actions.backToMainNavigation") : undefined
-                  }
-                  aria-label={t("actions.backToMainNavigation")}
-                  className={cn(
-                    "mb-3 flex w-full items-center rounded-md text-sm text-foreground transition-colors duration-200 hover:bg-background-alt hover:text-foreground",
-                    collapsed
-                      ? "justify-center px-3 py-1.5"
-                      : "gap-2.5 px-3 py-1.5",
-                  )}
-                >
-                  <IconArrowLeft className="size-4 flex-shrink-0" />
-                  {!collapsed && (
-                    <span
-                      className={cn(
-                        "whitespace-nowrap",
-                        labelTransition,
-                        labelVisible
-                          ? "opacity-100 w-auto"
-                          : "opacity-0 w-0 overflow-hidden",
-                      )}
-                    >
-                      {t("actions.backToMainNavigation")}
-                    </span>
-                  )}
-                </button>
-
                 {SETTINGS_SECTIONS.map((item, index) => (
                   <SidebarNavItem
                     key={item.id}
@@ -643,7 +617,7 @@ export function Sidebar({
             {!collapsed && appVersionLabel ? (
               <div
                 className={cn(
-                  "flex-shrink-0 px-3 pb-3 pt-2 text-[11px] leading-4 text-muted-foreground/70",
+                  "flex-shrink-0 px-3 pb-1 pt-2 text-[11px] leading-4 text-muted-foreground/70",
                   labelTransition,
                   labelVisible
                     ? "opacity-100 w-auto"
@@ -653,6 +627,37 @@ export function Sidebar({
                 {appVersionLabel}
               </div>
             ) : null}
+            <div className={cn("flex-shrink-0 bg-background", "px-1.5 py-1.5")}>
+              <Button
+                type="button"
+                variant="ghost"
+                size={collapsed ? "icon-sm" : "default"}
+                onClick={onSettingsBack}
+                className={cn(
+                  "h-10 w-full rounded-md bg-transparent text-foreground-subtle hover:bg-transparent hover:text-foreground active:bg-transparent dark:text-muted-foreground",
+                  collapsed
+                    ? "justify-center p-3"
+                    : "justify-start gap-2.5 px-3 py-2.5",
+                )}
+                title={t("actions.backToMainNavigation")}
+                aria-label={t("actions.backToMainNavigation")}
+              >
+                <IconArrowLeft className="size-4 flex-shrink-0" />
+                {!collapsed && (
+                  <span
+                    className={cn(
+                      "whitespace-nowrap text-sm",
+                      labelTransition,
+                      labelVisible
+                        ? "opacity-100 w-auto"
+                        : "opacity-0 w-0 overflow-hidden",
+                    )}
+                  >
+                    {t("actions.backToMainNavigation")}
+                  </span>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>

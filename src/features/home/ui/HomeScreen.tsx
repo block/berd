@@ -132,7 +132,7 @@ export function HomeScreen({
 
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="relative flex min-h-full flex-col items-center justify-center px-6 pb-4">
+      <div className="page-transition relative flex min-h-full flex-col items-center justify-center px-6 pb-4">
         <div className="flex w-full max-w-[600px] flex-col antialiased">
           <HomeClock />
 

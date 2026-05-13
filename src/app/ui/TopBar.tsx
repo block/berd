@@ -52,7 +52,7 @@ export function TopBar({
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
   const toolbarButtonClassName = "size-[24px]";
-  const toolbarButtonOffsetClassName = "translate-y-px";
+  const toolbarButtonOffsetClassName = "translate-y-[5px]";
   const toolbarIconClassName = "size-[18px]";
 
   return (

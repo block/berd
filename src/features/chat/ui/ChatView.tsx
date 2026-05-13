@@ -88,7 +88,7 @@ export function ChatView({
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
     >
-      <div className="relative flex h-full min-w-0">
+      <div className="page-transition relative flex h-full min-w-0">
         <div className="flex min-w-0 flex-1 flex-col pr-1">
           {controller.isLoadingHistory ? (
             <ChatLoadingSkeleton />

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
-import { IconChevronLeft } from "@tabler/icons-react";
+import { IconArrowLeft } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
 
@@ -66,6 +66,11 @@ const buttonVariants = cva(
         variant: "inline-subtle",
         size: "xs",
         className: "h-6 gap-1.5 px-2 text-[11px]",
+      },
+      {
+        variant: "back",
+        size: "sm",
+        className: "px-0",
       },
       {
         variant: "ghost",
@@ -185,7 +190,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const Comp = asChild ? Slot : "button";
     const resolvedLeftIcon =
       variant === "back"
-        ? (leftIcon ?? <IconChevronLeft aria-hidden="true" />)
+        ? (leftIcon ?? <IconArrowLeft aria-hidden="true" />)
         : leftIcon;
 
     return (
