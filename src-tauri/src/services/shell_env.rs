@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use tokio::sync::OnceCell;
+
+static SHELL_ENV: OnceCell<HashMap<String, String>> = OnceCell::const_new();
 
 /// Capture environment variables from the user's login shell.
 ///
@@ -13,9 +16,28 @@ use std::collections::HashMap;
 ///
 /// Returns an empty map on failure so callers can fall back to the inherited env.
 pub async fn capture_shell_env() -> HashMap<String, String> {
-    tokio::task::spawn_blocking(capture_shell_env_blocking)
+    match SHELL_ENV
+        .get_or_try_init(|| async {
+            let env = tokio::task::spawn_blocking(capture_shell_env_blocking)
+                .await
+                .unwrap_or_default();
+            cacheable_shell_env(env)
+        })
         .await
-        .unwrap_or_default()
+    {
+        Ok(env) => env.clone(),
+        Err(env) => env,
+    }
+}
+
+fn cacheable_shell_env(
+    env: HashMap<String, String>,
+) -> Result<HashMap<String, String>, HashMap<String, String>> {
+    if env.is_empty() {
+        Err(env)
+    } else {
+        Ok(env)
+    }
 }
 
 fn capture_shell_env_blocking() -> HashMap<String, String> {
@@ -63,4 +85,26 @@ fn capture_shell_env_blocking() -> HashMap<String, String> {
 
     log::info!("Captured {} env vars from login shell", env.len());
     env
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cacheable_shell_env;
+    use std::collections::HashMap;
+
+    #[test]
+    fn empty_shell_env_capture_is_not_cacheable() {
+        assert!(cacheable_shell_env(HashMap::new()).is_err());
+    }
+
+    #[test]
+    fn non_empty_shell_env_capture_is_cacheable() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/shell/bin".to_string());
+
+        assert_eq!(
+            cacheable_shell_env(env).unwrap().get("PATH"),
+            Some(&"/shell/bin".to_string())
+        );
+    }
 }

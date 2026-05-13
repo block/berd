@@ -84,7 +84,11 @@ impl GooseServeProcess {
         if let Some(distro_state) = app_handle.try_state::<DistroBundleState>() {
             if let Some(bundle) = distro_state.bundle() {
                 if let Some(bin_dir) = &bundle.bin_dir {
-                    prepend_path_env(&mut command, bin_dir);
+                    prepend_path_env(
+                        &mut command,
+                        bin_dir,
+                        shell_env.get("PATH").map(String::as_str),
+                    );
                 }
                 if let Some(config_path) = &bundle.config_path {
                     append_additional_config_env(&mut command, config_path);
@@ -174,9 +178,15 @@ fn default_serve_working_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
-fn prepend_path_env(command: &mut Command, extra_dir: &std::path::Path) {
+fn prepend_path_env(
+    command: &mut Command,
+    extra_dir: &std::path::Path,
+    existing_path: Option<&str>,
+) {
     let mut paths = vec![extra_dir.to_path_buf()];
-    if let Some(existing) = std::env::var_os("PATH") {
+    if let Some(existing) = existing_path {
+        paths.extend(std::env::split_paths(existing));
+    } else if let Some(existing) = std::env::var_os("PATH") {
         paths.extend(std::env::split_paths(&existing));
     }
 
@@ -229,4 +239,65 @@ fn reserve_free_port() -> Result<u16, String> {
         .local_addr()
         .map(|address| address.port())
         .map_err(|error| format!("Failed to resolve reserved Goose serve port: {error}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepend_path_env;
+    use std::path::Path;
+    use tokio::process::Command;
+
+    #[test]
+    fn distro_path_prepend_preserves_captured_shell_path() {
+        let mut command = Command::new("goose");
+        let shell_path = "/shell/bin:/tool/bin".to_string();
+
+        prepend_path_env(&mut command, Path::new("/distro/bin"), Some(&shell_path));
+
+        let path = command
+            .as_std()
+            .get_envs()
+            .find_map(|(key, value)| {
+                if key == "PATH" {
+                    value.map(|value| value.to_os_string())
+                } else {
+                    None
+                }
+            })
+            .expect("PATH should be set");
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(Path::new("/distro/bin"))
+        );
+        assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+        assert!(paths.iter().any(|p| p == Path::new("/tool/bin")));
+    }
+
+    #[test]
+    fn distro_path_prepend_falls_back_to_process_path() {
+        let mut command = Command::new("goose");
+
+        prepend_path_env(&mut command, Path::new("/distro/bin"), None);
+
+        let path = command
+            .as_std()
+            .get_envs()
+            .find_map(|(key, value)| {
+                if key == "PATH" {
+                    value.map(|value| value.to_os_string())
+                } else {
+                    None
+                }
+            })
+            .expect("PATH should be set");
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(Path::new("/distro/bin"))
+        );
+        assert!(paths.len() > 1);
+    }
 }

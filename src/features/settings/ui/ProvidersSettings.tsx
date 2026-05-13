@@ -54,13 +54,20 @@ import type {
   ProviderSetupStatus,
   ProviderCatalogEntry,
 } from "@/shared/types/providers";
+import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 
 function resolveStatus(
   entry: ProviderCatalogEntry,
   configuredIds: Set<string>,
+  inventoryEntries: Map<string, ProviderInventoryEntryDto>,
 ): ProviderSetupStatus {
   if (entry.id === "goose") return "built_in";
-  if (entry.category === "agent") return "not_installed";
+  if (entry.category === "agent") {
+    const inventoryEntry = inventoryEntries.get(entry.id);
+    return inventoryEntry?.category === "agent" && inventoryEntry.configured
+      ? "connected"
+      : "not_installed";
+  }
   if (configuredIds.has(entry.id)) return "connected";
   return "not_configured";
 }
@@ -68,10 +75,11 @@ function resolveStatus(
 function toDisplayInfo(
   entries: ProviderCatalogEntry[],
   configuredIds: Set<string>,
+  inventoryEntries: Map<string, ProviderInventoryEntryDto>,
 ): ProviderDisplayInfo[] {
   return entries.map((entry) => ({
     ...entry,
-    status: resolveStatus(entry, configuredIds),
+    status: resolveStatus(entry, configuredIds, inventoryEntries),
   }));
 }
 
@@ -146,8 +154,9 @@ export function ProvidersSettings() {
       toDisplayInfo(
         getAgentProvidersFromEntries(catalogEntries),
         configuredIds,
+        inventoryEntries,
       ),
-    [configuredIds, catalogEntries],
+    [configuredIds, catalogEntries, inventoryEntries],
   );
 
   const allModels = useMemo(
@@ -158,8 +167,9 @@ export function ProvidersSettings() {
           distro,
         ),
         configuredIds,
+        inventoryEntries,
       ),
-    [configuredIds, distro, catalogEntries],
+    [configuredIds, distro, catalogEntries, inventoryEntries],
   );
   const providerAllowlist = useMemo(
     () => parseProviderAllowlist(distro),

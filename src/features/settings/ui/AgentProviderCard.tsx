@@ -6,16 +6,20 @@ import { Spinner } from "@/shared/ui/spinner";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { IconCheck, IconAlertTriangle, IconPlus } from "@tabler/icons-react";
 import {
-  checkAgentInstalled,
   checkAgentAuth,
   installAgent,
   authenticateAgent,
   onAgentSetupOutput,
 } from "@/features/providers/api/agentSetup";
-import type { ProviderDisplayInfo } from "@/shared/types/providers";
+import { getProviderInventory } from "@/features/providers/api/inventory";
+import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
+import type {
+  ProviderDisplayInfo,
+  ProviderSetupStatus,
+} from "@/shared/types/providers";
 
 type SetupPhase = "idle" | "checking" | "installing" | "authenticating";
-type InstallStatus = "checking" | "installed" | "missing";
+type InstallStatus = "installed" | "missing";
 type AuthStatus = "checking" | "authenticated" | "unauthenticated" | "unknown";
 
 interface OutputLine {
@@ -24,10 +28,13 @@ interface OutputLine {
 }
 
 const MAX_OUTPUT_LINES = 50;
-const CHECKING_INDICATOR_DELAY_MS = 2000;
 
 interface AgentProviderCardProps {
   provider: ProviderDisplayInfo;
+}
+
+function deriveInstalled(status: ProviderSetupStatus): boolean {
+  return status === "built_in" || status === "connected";
 }
 
 export function AgentProviderCard({ provider }: AgentProviderCardProps) {
@@ -37,15 +44,17 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   const supportsAuth = provider.supportsAuth === true;
   const supportsAuthStatus = provider.supportsAuthStatus === true;
   const hasBinary = !!provider.binaryName;
+  const inventoryInstalled = deriveInstalled(provider.status);
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
   const [setupError, setSetupError] = useState<string | null>(null);
-  const [showCheckingIndicator, setShowCheckingIndicator] = useState(false);
   const [installStatus, setInstallStatus] = useState<InstallStatus>(
-    hasBinary && !isBuiltIn ? "checking" : "installed",
+    inventoryInstalled ? "installed" : "missing",
   );
   const [authStatus, setAuthStatus] = useState<AuthStatus>(
-    supportsAuthStatus && hasBinary && !isBuiltIn ? "checking" : "unknown",
+    supportsAuthStatus && inventoryInstalled && !isBuiltIn
+      ? "checking"
+      : "unknown",
   );
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
@@ -56,6 +65,9 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   const icon = getProviderIcon(provider.id, "size-6");
   const isActive = setupPhase !== "idle";
   const authStorageKey = `agent-provider-auth:${provider.id}`;
+  const mergeInventoryEntries = useProviderInventoryStore(
+    (state) => state.mergeEntries,
+  );
 
   const setAuthHint = useCallback(
     (value: boolean) => {
@@ -86,40 +98,65 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   }, [clearListener]);
 
   useEffect(() => {
-    if (!hasBinary || isBuiltIn || !provider.binaryName) return;
+    const installed = deriveInstalled(provider.status);
+    const nextInstallStatus = installed ? "installed" : "missing";
+    setInstallStatus((current) =>
+      current === nextInstallStatus ? current : nextInstallStatus,
+    );
 
-    checkAgentInstalled(provider.id)
-      .then((installed) => {
-        if (!isMountedRef.current) return;
-        setInstallStatus(installed ? "installed" : "missing");
-        if (installed && supportsAuthStatus) {
-          return checkAgentAuth(provider.id).then((authenticated) => {
-            if (!isMountedRef.current) return;
-            setAuthStatus(authenticated ? "authenticated" : "unauthenticated");
-          });
-        }
-        if (installed && !supportsAuthStatus) {
-          setAuthStatus(getAuthHint() ? "authenticated" : "unknown");
-        }
-        if (!installed) {
-          setAuthStatus("unknown");
-          setAuthHint(false);
-        }
-      })
-      .catch(() => {
-        if (!isMountedRef.current) return;
-        setInstallStatus("missing");
-        setAuthStatus("unknown");
-      });
+    if (!installed) {
+      setAuthStatus("unknown");
+      setAuthHint(false);
+      return;
+    }
+
+    if (isBuiltIn) {
+      setAuthStatus("unknown");
+      return;
+    }
+
+    if (supportsAuthStatus) {
+      setAuthStatus("checking");
+      checkAgentAuth(provider.id)
+        .then((authenticated) => {
+          if (!isMountedRef.current) return;
+          setAuthStatus(authenticated ? "authenticated" : "unauthenticated");
+        })
+        .catch(() => {
+          if (!isMountedRef.current) return;
+          setAuthStatus("unauthenticated");
+        });
+      return;
+    }
+
+    setAuthStatus(getAuthHint() ? "authenticated" : "unknown");
   }, [
     getAuthHint,
-    hasBinary,
     isBuiltIn,
     provider.id,
-    provider.binaryName,
+    provider.status,
     supportsAuthStatus,
     setAuthHint,
   ]);
+
+  const refreshInstallStatusFromInventory =
+    useCallback(async (): Promise<boolean> => {
+      const entries = await getProviderInventory([provider.id]);
+      if (!isMountedRef.current) return false;
+      mergeInventoryEntries(entries);
+      const inventoryEntry = entries.find(
+        (entry) => entry.providerId === provider.id,
+      );
+      const installed =
+        isBuiltIn ||
+        (inventoryEntry?.category === "agent" && inventoryEntry.configured);
+      setInstallStatus(installed ? "installed" : "missing");
+      if (!installed) {
+        setAuthStatus("unknown");
+        setAuthHint(false);
+      }
+      return installed;
+    }, [isBuiltIn, mergeInventoryEntries, provider.id, setAuthHint]);
 
   useEffect(() => {
     if (outputRef.current && outputLengthRef.current !== setupOutput.length) {
@@ -170,9 +207,8 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
 
       if (hasBinary && provider.binaryName) {
         setSetupPhase("checking");
-        const installed = await checkAgentInstalled(provider.id);
+        const installed = await refreshInstallStatusFromInventory();
         if (!isMountedRef.current) return;
-        setInstallStatus(installed ? "installed" : "missing");
         if (!installed) {
           setAuthStatus("unknown");
           setAuthHint(false);
@@ -213,6 +249,13 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
       await authenticateAgent(provider.id);
       clearListener();
       if (!isMountedRef.current) return;
+      const installed = await refreshInstallStatusFromInventory();
+      if (!isMountedRef.current) return;
+      if (!installed) {
+        setSetupError(t("providers.agents.errors.installVerificationFailed"));
+        setSetupPhase("idle");
+        return;
+      }
       setAuthHint(true);
       setAuthStatus("authenticated");
       setSetupPhase("idle");
@@ -239,25 +282,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     authStatus !== "checking" &&
     authStatus !== "authenticated";
   const needsInstall = installStatus === "missing" && supportsInstall;
-  const isChecking =
-    (installStatus === "checking" && hasBinary) ||
-    (installStatus === "installed" && authStatus === "checking");
-
-  useEffect(() => {
-    if (!isChecking) {
-      setShowCheckingIndicator(false);
-      return;
-    }
-
-    setShowCheckingIndicator(false);
-    const timeoutId = window.setTimeout(() => {
-      if (isMountedRef.current) {
-        setShowCheckingIndicator(true);
-      }
-    }, CHECKING_INDICATOR_DELAY_MS);
-
-    return () => window.clearTimeout(timeoutId);
-  }, [isChecking]);
+  const isChecking = installStatus === "installed" && authStatus === "checking";
 
   if (provider.showOnlyWhenInstalled && installStatus !== "installed")
     return null;
@@ -279,7 +304,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
       );
     }
 
-    if ((isChecking && showCheckingIndicator) || isActive) {
+    if (isChecking || isActive) {
       return (
         <div
           role="status"

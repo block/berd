@@ -11,6 +11,7 @@ import { ProvidersSettings } from "../ProvidersSettings";
 const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
   useCustomProviders: vi.fn(),
+  checkAgentInstalled: vi.fn(),
 }));
 
 vi.mock("@/features/providers/hooks/useCredentials", () => ({
@@ -19,6 +20,15 @@ vi.mock("@/features/providers/hooks/useCredentials", () => ({
 
 vi.mock("@/features/providers/hooks/useCustomProviders", () => ({
   useCustomProviders: () => mocks.useCustomProviders(),
+}));
+
+vi.mock("@/features/providers/api/agentSetup", () => ({
+  checkAgentInstalled: (...args: unknown[]) =>
+    mocks.checkAgentInstalled(...args),
+  checkAgentAuth: vi.fn(),
+  installAgent: vi.fn(),
+  authenticateAgent: vi.fn(),
+  onAgentSetupOutput: vi.fn(async () => vi.fn()),
 }));
 
 function providerEntry(
@@ -73,6 +83,42 @@ const providerCatalog: ProviderCatalogEntry[] = [
     category: "model",
     description: "Claude models",
     setupMethod: "single_api_key",
+    group: "default",
+  },
+  {
+    id: "claude-acp",
+    displayName: "Claude",
+    category: "agent",
+    description: "Claude Code",
+    setupMethod: "cli_auth",
+    binaryName: "claude-agent-acp",
+    supportsInstall: true,
+    supportsAuth: false,
+    supportsAuthStatus: false,
+    group: "default",
+  },
+  {
+    id: "amp-acp",
+    displayName: "Amp",
+    category: "agent",
+    description: "Amp",
+    setupMethod: "cli_auth",
+    binaryName: "amp-acp",
+    supportsInstall: true,
+    supportsAuth: false,
+    supportsAuthStatus: false,
+    group: "default",
+  },
+  {
+    id: "codex-acp",
+    displayName: "Codex",
+    category: "agent",
+    description: "Codex",
+    setupMethod: "cli_auth",
+    binaryName: "codex-acp",
+    supportsInstall: true,
+    supportsAuth: false,
+    supportsAuthStatus: false,
     group: "default",
   },
 ];
@@ -187,6 +233,48 @@ describe("ProvidersSettings", () => {
     expect(
       screen.queryByRole("button", { name: /add custom provider/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("uses agent inventory configured state and does not probe local install on initial render", () => {
+    useProviderInventoryStore.getState().setEntries([
+      providerEntry({
+        providerId: "claude-acp",
+        providerName: "Claude",
+        providerType: "Claude",
+        category: "agent",
+        configured: true,
+      }),
+      providerEntry({
+        providerId: "amp-acp",
+        providerName: "Amp",
+        providerType: "Amp",
+        category: "agent",
+        configured: true,
+      }),
+      providerEntry({
+        providerId: "codex-acp",
+        providerName: "Codex",
+        providerType: "Codex",
+        category: "agent",
+        configured: true,
+      }),
+    ]);
+
+    render(<ProvidersSettings />);
+
+    expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Amp").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
+    expect(
+      screen.queryByRole("button", { name: /install claude/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install amp/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install codex/i }),
+    ).not.toBeInTheDocument();
+    expect(mocks.checkAgentInstalled).not.toHaveBeenCalled();
   });
 
   it("shows custom inventory providers with edit and delete actions", () => {
