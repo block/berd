@@ -32,7 +32,9 @@ tauri-plugin-app-test-driver = { path = "plugins/app-test-driver" }
 tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2"
 tauri-plugin-shell = "2"
+tauri-plugin-updater = "2"
 tauri-plugin-window-state = "2"
 tokio = { version = "1.50.0", features = ["full"] }
 uuid = { version = "1", features = ["v4", "serde"] }

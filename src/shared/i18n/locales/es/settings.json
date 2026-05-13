@@ -180,7 +180,64 @@
     "compaction": "Compactación",
     "doctor": "Diagnóstico",
     "general": "General",
-    "providers": "Proveedores"
+    "providers": "Proveedores",
+    "updates": "Actualizaciones"
+  },
+  "updates": {
+    "actions": {
+      "check": "Buscar actualizaciones",
+      "checking": "Comprobando...",
+      "restart": "Reiniciar",
+      "retry": "Intentar de nuevo"
+    },
+    "card": {
+      "checkPrompt": "Busca si hay una nueva versión disponible.",
+      "description": "Mantén Goose actualizado con las últimas funciones y correcciones.",
+      "title": "Actualizaciones de software"
+    },
+    "description": "Goose comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
+    "details": {
+      "available": "La actualización {{version}} está lista para descargarse.",
+      "checking": "Comprobando el canal de actualizaciones...",
+      "downloading": "Descargando la actualización firmada más reciente.",
+      "error": "El último intento de actualización falló.",
+      "idle": "Goose buscará actualizaciones automáticamente cada pocas horas.",
+      "installing": "Instalando la actualización descargada.",
+      "ready": "La actualización {{version}} está instalada y se aplicará al reiniciar.",
+      "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
+      "upToDate": "Goose está actualizado."
+    },
+    "indicator": {
+      "inProgress": "Actualización en curso",
+      "ready": "Reiniciar para aplicar actualización"
+    },
+    "progress": {
+      "downloading": "Descargando",
+      "installing": "Instalando",
+      "percent": "{{progress}}%"
+    },
+    "status": {
+      "available": "Disponible",
+      "checking": "Comprobando",
+      "downloading": "Descargando",
+      "error": "Error",
+      "idle": "Inactivo",
+      "installing": "Instalando",
+      "ready": "Lista",
+      "unavailable": "No disponible",
+      "upToDate": "Actualizado"
+    },
+    "title": "Actualizaciones",
+    "toast": {
+      "error": {
+        "description": "{{message}}",
+        "title": "La actualización falló"
+      },
+      "ready": {
+        "description": "Goose {{version}} se aplicará al reiniciar.",
+        "title": "Actualización lista"
+      }
+    }
   },
   "projects": {
     "empty": "No hay proyectos archivados.",

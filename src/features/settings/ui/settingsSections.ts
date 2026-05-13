@@ -1,11 +1,12 @@
 import type { ComponentType } from "react";
-import { Archive, Settings2, Stethoscope } from "lucide-react";
+import { Archive, RefreshCw, Settings2, Stethoscope } from "lucide-react";
 import { IconPlug } from "@tabler/icons-react";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: Settings2 },
   { id: "providers", labelKey: "nav.providers", icon: IconPlug },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
+  { id: "updates", labelKey: "nav.updates", icon: RefreshCw },
   { id: "doctor", labelKey: "nav.doctor", icon: Stethoscope },
 ] as const satisfies readonly {
   id: string;

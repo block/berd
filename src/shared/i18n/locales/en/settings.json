@@ -180,7 +180,64 @@
     "compaction": "Compaction",
     "doctor": "Doctor",
     "general": "General",
-    "providers": "Providers"
+    "providers": "Providers",
+    "updates": "Updates"
+  },
+  "updates": {
+    "actions": {
+      "check": "Check for Updates",
+      "checking": "Checking...",
+      "restart": "Restart",
+      "retry": "Try Again"
+    },
+    "card": {
+      "checkPrompt": "Check if a new version is available.",
+      "description": "Keep Goose up to date with the latest features and fixes.",
+      "title": "Software Updates"
+    },
+    "description": "Goose checks for signed app updates in the background and waits for you to restart.",
+    "details": {
+      "available": "Update {{version}} is ready to download.",
+      "checking": "Checking the update channel...",
+      "downloading": "Downloading the latest signed update.",
+      "error": "The last update attempt failed.",
+      "idle": "Goose will check automatically every few hours.",
+      "installing": "Installing the downloaded update.",
+      "ready": "Update {{version}} is installed and will apply after restart.",
+      "unavailable": "Updates are only available in signed Tauri release builds.",
+      "upToDate": "Goose is up to date."
+    },
+    "indicator": {
+      "inProgress": "Update in progress",
+      "ready": "Restart to apply update"
+    },
+    "progress": {
+      "downloading": "Downloading",
+      "installing": "Installing",
+      "percent": "{{progress}}%"
+    },
+    "status": {
+      "available": "Available",
+      "checking": "Checking",
+      "downloading": "Downloading",
+      "error": "Error",
+      "idle": "Idle",
+      "installing": "Installing",
+      "ready": "Ready",
+      "unavailable": "Unavailable",
+      "upToDate": "Up to date"
+    },
+    "title": "Updates",
+    "toast": {
+      "error": {
+        "description": "{{message}}",
+        "title": "Update failed"
+      },
+      "ready": {
+        "description": "Goose {{version}} will apply after restart.",
+        "title": "Update ready"
+      }
+    }
   },
   "projects": {
     "empty": "Archived projects will show here.",

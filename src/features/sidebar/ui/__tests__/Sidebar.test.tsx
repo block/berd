@@ -291,6 +291,7 @@ describe("Sidebar", () => {
     expect(
       screen.queryByRole("button", { name: /^home$/i }),
     ).not.toBeInTheDocument();
+    expect(screen.getByText(/^v\d+\.\d+\.\d+-dev$/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /^back$/i }));
     expect(onSettingsBack).toHaveBeenCalledTimes(1);

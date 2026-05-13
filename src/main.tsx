@@ -3,6 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import { App } from "@/app/App";
+import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import "@/shared/styles/globals.css";
@@ -24,7 +25,9 @@ ReactDOM.createRoot(root).render(
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
         <ThemeProvider defaultTheme="system">
-          <App />
+          <UpdaterProvider>
+            <App />
+          </UpdaterProvider>
         </ThemeProvider>
       </I18nProvider>
     </QueryClientProvider>

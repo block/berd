@@ -59,6 +59,8 @@
     "window-state:allow-save-window-state",
     "dialog:allow-open",
     "dialog:allow-save",
-    "app-test-driver:default"
+    "app-test-driver:default",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

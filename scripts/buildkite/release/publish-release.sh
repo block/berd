@@ -12,7 +12,19 @@ source "$SCRIPT_DIR/lib.sh"
 RELEASE_VERSION="$(meta version)"
 TAG="v${RELEASE_VERSION}"
 TITLE="Goose v${RELEASE_VERSION}"
-NOTES="Built by Buildkite build #${BUILDKITE_BUILD_NUMBER:-local} from \`${BUILDKITE_COMMIT:-HEAD}\`."
+APP_COMMIT="${BUILDKITE_COMMIT:-$(git rev-parse HEAD)}"
+GOOSE_BACKEND_COMMIT="$(jq -r '.commit' "$REPO_ROOT/goose-backend.lock.json")"
+if [[ -n "${BUILDKITE_BUILD_URL:-}" ]]; then
+  BUILD_REF="$BUILDKITE_BUILD_URL"
+else
+  BUILD_REF="Buildkite build #${BUILDKITE_BUILD_NUMBER:-local}"
+fi
+NOTES="$(cat <<EOF
+Buildkite build: ${BUILD_REF}
+App commit: \`${APP_COMMIT}\`
+Pinned Goose backend commit: \`${GOOSE_BACKEND_COMMIT}\`
+EOF
+)"
 
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR/macos"
@@ -36,6 +48,11 @@ mv "$DMG_SRC"     "$DMG"
 echo "+++ :github: Creating release $TAG on $GOOSE_INTERNAL_REPO"
 if gh release view "$TAG" --repo "$GOOSE_INTERNAL_REPO" >/dev/null 2>&1; then
   echo "Release $TAG already exists; re-uploading assets with --clobber"
+  gh release edit "$TAG" \
+    --repo "$GOOSE_INTERNAL_REPO" \
+    --target "${BUILDKITE_COMMIT:-main}" \
+    --title "$TITLE" \
+    --notes "$NOTES"
   gh release upload "$TAG" --repo "$GOOSE_INTERNAL_REPO" --clobber "$APP_ZIP" "$DMG"
 else
   gh release create "$TAG" \

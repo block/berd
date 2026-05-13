@@ -8,6 +8,7 @@ import {
   IconMessageReport,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { UpdateIndicator } from "@/features/updates/ui/UpdateIndicator";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 
@@ -108,6 +109,7 @@ export function TopBar({
         className="ml-[6px] min-w-0 flex-1 self-stretch"
         data-tauri-drag-region
       />
+      <UpdateIndicator />
       <Button
         type="button"
         variant="ghost"

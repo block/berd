@@ -22,6 +22,7 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
@@ -34,6 +35,23 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            // Register the updater plugin only when a signing public key is
+            // configured (i.e. release builds that include tauri.release.conf.json).
+            let updater_pubkey_present = app
+                .config()
+                .plugins
+                .0
+                .get("updater")
+                .and_then(|v| v.as_object())
+                .and_then(|u| u.get("pubkey"))
+                .and_then(|k| k.as_str())
+                .is_some_and(|k| !k.trim().is_empty());
+
+            if updater_pubkey_present {
+                app.handle()
+                    .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+
             app.manage(DistroBundleState::new(app.handle()));
             app.manage(commands::automations::AutomationStreamState::default());
 

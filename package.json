@@ -1,7 +1,7 @@
 {
   "name": "goose-internal",
   "private": true,
-  "version": "0.19.1",
+  "version": "0.1.0",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "scripts": {
@@ -23,7 +23,8 @@
     "test:e2e:skills": "pnpm build && playwright test --project=skills",
     "test:e2e:drafts": "pnpm build && playwright test --project=drafts",
     "test:app-e2e": "vitest run --config vitest.app-e2e.config.ts",
-    "test-driver": "tsx tests/app-e2e/lib/test-driver-cli.ts"
+    "test-driver": "tsx tests/app-e2e/lib/test-driver-cli.ts",
+    "tauri:release:config": "node scripts/build-tauri-release-config.mjs"
   },
   "dependencies": {
     "@aaif/goose-sdk": "workspace:*",
@@ -67,6 +68,8 @@
     "@tanstack/react-virtual": "^3.13.24",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2.7.0",
+    "@tauri-apps/plugin-process": "^2",
+    "@tauri-apps/plugin-updater": "^2.10.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
     "@tauri-apps/plugin-shell": "~2.3.5",
     "@xyflow/react": "^12.10.2",

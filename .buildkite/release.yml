@@ -1,6 +1,9 @@
 agents:
   xcode: "26.3.0"
 
+env:
+  GOOSE2_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
+
 # The macos-environment plugin activates Xcode and sets up RVM/bundler so the
 # upload-mobile-release plugin's pre-command can find `fastlane` if it ever
 # needs to. Goose only builds macOS, but the plugin's signing/upload helpers
@@ -19,6 +22,16 @@ steps:
         key: "version"
         hint: "Semver for this release (e.g. 0.2.0). Becomes the v<version> tag on this repo."
         required: true
+      - select: "Promote to auto-update channel?"
+        key: "publish_latest"
+        hint: "Updates latest.json so every installed Goose auto-updates to this build on next poll. Set to No for test builds."
+        default: "true"
+        required: true
+        options:
+          - label: "Yes"
+            value: "true"
+          - label: "No"
+            value: "false"
 
   - label: ":mac: Build & sign macOS"
     key: "build-macos"
@@ -54,6 +67,14 @@ steps:
               variant: "release"
               file: "release/macos/Goose.app.zip"
               version: "scripts/buildkite/release/release-version.sh"
+
+  - label: ":arrows_counterclockwise: Publish updater feed"
+    key: "publish-updater"
+    depends_on:
+      - "build-macos"
+    command: ./scripts/buildkite/release/publish-updater.sh
+    plugins:
+      - *macos_env
 
   - label: ":github: Publish GitHub release"
     key: "publish"
