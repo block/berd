@@ -186,6 +186,7 @@ export function UpdaterProvider({
             description: t("updates.toast.ready.description", {
               version: update.version,
             }),
+            duration: Infinity,
             action: {
               label: t("updates.actions.restart"),
               onClick: () => {

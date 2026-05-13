@@ -5,6 +5,7 @@ declare global {
 
   interface ImportMetaEnv {
     readonly VITE_APP_VERSION?: string;
+    readonly VITE_PREVIEW_READY_UPDATE?: string;
   }
 }
 

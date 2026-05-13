@@ -130,7 +130,13 @@ describe("UpdaterProvider", () => {
     expect(downloadAndInstall).toHaveBeenCalledTimes(1);
     expect(result.current.status).toBe("ready");
     expect(result.current.availableVersion).toBe("9.9.9");
-    expect(toast.success).toHaveBeenCalled();
+    expect(toast.success).toHaveBeenCalledWith(
+      "Update ready",
+      expect.objectContaining({
+        description: "Goose 9.9.9 will apply after restart.",
+        duration: Infinity,
+      }),
+    );
   });
 
   it("records download failures as errors", async () => {

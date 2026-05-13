@@ -20,6 +20,13 @@ If you already have a Goose binary you want to test, set `GOOSE_BIN=/path/to/goo
 before running `just dev`; that is an explicit local override and bypasses the
 managed pinned checkout.
 
+To preview the ready-to-restart update indicator in the top bar during local
+development, run:
+
+```bash
+VITE_PREVIEW_READY_UPDATE=true just dev
+```
+
 To bump the default Goose backend, update the lockfile in a PR:
 
 ```bash

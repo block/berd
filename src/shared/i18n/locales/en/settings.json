@@ -187,13 +187,13 @@
     "actions": {
       "check": "Check for Updates",
       "checking": "Checking...",
-      "restart": "Restart",
+      "restart": "Restart to Update",
       "retry": "Try Again"
     },
     "card": {
       "checkPrompt": "Check if a new version is available.",
       "description": "Keep Goose up to date with the latest features and fixes.",
-      "title": "Software Updates"
+      "title": "App Version"
     },
     "description": "Goose checks for signed app updates in the background and waits for you to restart.",
     "details": {

@@ -50,7 +50,7 @@ describe("UpdatesSettings", () => {
 
     renderWithProviders(<UpdatesSettings />);
 
-    expect(screen.getByText("Software Updates")).toBeInTheDocument();
+    expect(screen.getByText("App Version")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Keep Goose up to date with the latest features and fixes.",
@@ -93,7 +93,7 @@ describe("UpdatesSettings", () => {
 
     renderWithProviders(<UpdatesSettings />);
 
-    await user.click(screen.getByRole("button", { name: "Restart" }));
+    await user.click(screen.getByRole("button", { name: "Restart to Update" }));
 
     expect(state.relaunch).toHaveBeenCalledTimes(1);
   });

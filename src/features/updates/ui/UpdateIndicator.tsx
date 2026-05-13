@@ -1,6 +1,7 @@
 import { Download, RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUpdaterContext } from "@/features/updates/hooks/useUpdater";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 
@@ -14,34 +15,50 @@ const INDICATOR_STATUSES = new Set([
 export function UpdateIndicator() {
   const { t } = useTranslation("settings");
   const { status, relaunch } = useUpdaterContext();
+  const shouldPreviewReadyUpdate =
+    import.meta.env.DEV &&
+    import.meta.env.MODE === "development" &&
+    import.meta.env.VITE_PREVIEW_READY_UPDATE === "true";
+  const displayStatus = shouldPreviewReadyUpdate ? "ready" : status;
 
-  if (!INDICATOR_STATUSES.has(status)) {
+  if (!INDICATOR_STATUSES.has(displayStatus)) {
     return null;
   }
 
-  const isReady = status === "ready";
-  const isBusy = status === "downloading" || status === "installing";
+  const isReady = displayStatus === "ready";
+  const isBusy =
+    displayStatus === "downloading" || displayStatus === "installing";
   const label = t(
     isReady ? "updates.indicator.ready" : "updates.indicator.inProgress",
   );
+  const readyActionLabel = t("updates.actions.restart");
 
   return (
     <Button
       type="button"
       variant="ghost"
-      size="icon-sm"
-      className="size-[24px] translate-y-px"
+      size={isReady ? "xxs" : "icon-sm"}
+      className={cn(
+        "translate-y-px",
+        isReady ? "h-6 px-2 text-xs" : "size-[24px]",
+      )}
+      leftIcon={
+        isReady ? (
+          <RotateCcw aria-hidden="true" className="size-[14px]" />
+        ) : undefined
+      }
       onClick={() => {
+        if (shouldPreviewReadyUpdate) return;
         if (isReady) void relaunch();
       }}
       disabled={!isReady}
-      aria-label={label}
+      aria-label={isReady ? readyActionLabel : label}
       title={label}
     >
       {isBusy ? (
         <Spinner decorative className="size-[16px]" />
       ) : isReady ? (
-        <RotateCcw aria-hidden="true" className="size-[16px]" />
+        readyActionLabel
       ) : (
         <Download aria-hidden="true" className="size-[16px]" />
       )}
