@@ -37,9 +37,6 @@ steps:
     key: "build-macos"
     depends_on: "release-input"
     command: ./scripts/buildkite/release/build-macos.sh
-    artifact_paths:
-      - "release/macos/Goose.app.zip"
-      - "release/macos/Goose.dmg"
     plugins:
       - *macos_env
       - squareup/apple-codesign#v1:
