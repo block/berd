@@ -55,3 +55,8 @@ rm -rf "release/macos/${APP_BUNDLE_NAME}.app"
 ditto "$UNSIGNED_APP" "release/macos/${APP_BUNDLE_NAME}.app"
 
 ls -lh release/macos
+
+# Strip existing code signatures so apple-codesign can sign cleanly
+echo "+++ :broom: Stripping existing code signatures"
+find "release/macos/${APP_BUNDLE_NAME}.app" -type f \( -name "*.dylib" -o -perm +111 \) -exec codesign --remove-signature {} \; 2>/dev/null || true
+codesign --remove-signature "release/macos/${APP_BUNDLE_NAME}.app" 2>/dev/null || true
