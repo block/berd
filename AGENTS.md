@@ -56,8 +56,8 @@ just setup
 just bundle
 ```
 
-The Tauri config uses `"externalBin": ["binaries/goose"]`; the staging script
-copies to `src-tauri/binaries/goose-$(rustc -vV | sed -n 's|host: ||p')`, which
+The Tauri config uses `"externalBin": ["binaries/goosed"]`; the staging script
+copies to `src-tauri/binaries/goosed-$(rustc -vV | sed -n 's|host: ||p')`, which
 is the filename Tauri expects. Use `GOOSE_BIN=/path/to/goose` only as an explicit
 local override.
 

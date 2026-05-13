@@ -52,7 +52,7 @@
     "resources": {
       "../distro": "distro"
     },
-    "externalBin": ["binaries/goose"],
+    "externalBin": ["binaries/goosed"],
     "linux": {
       "deb": {
         "depends": ["libvulkan1"]

@@ -3,9 +3,9 @@
 #
 # Tauri expects external binaries to be present at build time with the host
 # target triple appended to the configured stem. For config
-#   "externalBin": ["binaries/goose"]
+#   "externalBin": ["binaries/goosed"]
 # this script creates:
-#   src-tauri/binaries/goose-$(rustc -vV | sed -n 's|host: ||p')
+#   src-tauri/binaries/goosed-$(rustc -vV | sed -n 's|host: ||p')
 
 set -euo pipefail
 
@@ -50,7 +50,7 @@ if [[ -z "$TARGET" ]]; then
 fi
 
 OUT_DIR="src-tauri/binaries"
-OUT="$OUT_DIR/goose-$TARGET"
+OUT="$OUT_DIR/goosed-$TARGET"
 mkdir -p "$OUT_DIR"
 cp "$GOOSE_SOURCE" "$OUT"
 chmod +x "$OUT"

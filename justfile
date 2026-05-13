@@ -75,7 +75,7 @@ tauri-check:
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check clippy test build
 
-# Stage the pinned Goose backend into src-tauri/binaries/goose-<target> and build bundles.
+# Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     ./scripts/prepare-goose-sidecar.sh
     pnpm tauri build

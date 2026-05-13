@@ -127,7 +127,7 @@ pub fn get_goose_command(app_handle: &tauri::AppHandle) -> Result<Command, Strin
     } else {
         let tauri_command = app_handle
             .shell()
-            .sidecar("goose")
+            .sidecar("goosed")
             .map_err(|e| format!("could not resolve goose binary: {e}"))?;
         let std_command: std::process::Command = tauri_command.into();
         Ok(std_command.into())

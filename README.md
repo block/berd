@@ -38,8 +38,8 @@ just bundle
 ```
 
 You can still stage an explicit local binary with `GOOSE_BIN=/path/to/goose just
-stage-sidecar`. Staging creates `src-tauri/binaries/goose-<rust-host-triple>`,
-matching the `"externalBin": ["binaries/goose"]` entry in
+stage-sidecar`. Staging creates `src-tauri/binaries/goosed-<rust-host-triple>`,
+matching the `"externalBin": ["binaries/goosed"]` entry in
 `src-tauri/tauri.conf.json`.
 
 ## Useful commands
