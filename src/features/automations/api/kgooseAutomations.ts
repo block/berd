@@ -47,9 +47,28 @@ export interface UpdateAutomationTileRequest {
   enableNotifications?: boolean;
 }
 
+export interface CreateAutomationTileRequest {
+  type: string | number;
+  title?: string;
+  schedule?: string;
+  timeZone?: string;
+  instructions: string[];
+  allowHumanInput?: boolean;
+  enableNotifications?: boolean;
+}
+
 export interface UpdateAutomationTileResponse {
   success?: boolean;
   errorMsg?: string;
+  tileId?: string;
+  automationId?: string;
+}
+
+export interface CreateAutomationTileResponse {
+  success?: boolean;
+  errorMsg?: string;
+  tileId?: string;
+  automationId?: string;
 }
 
 export interface DeleteAutomationTileResponse {
@@ -149,6 +168,15 @@ function asUpdateAutomationTileResponse(
     : {};
 }
 
+function asCreateAutomationTileResponse(
+  value: unknown,
+): CreateAutomationTileResponse {
+  const normalized = normalizeKgooseJson(value);
+  return isRecord(normalized)
+    ? (normalized as CreateAutomationTileResponse)
+    : {};
+}
+
 function asDeleteAutomationTileResponse(
   value: unknown,
 ): DeleteAutomationTileResponse {
@@ -213,6 +241,13 @@ export async function updateAutomationTile(
 ): Promise<UpdateAutomationTileResponse> {
   const response = await invoke<unknown>("update_automation_tile", { request });
   return asUpdateAutomationTileResponse(response);
+}
+
+export async function createAutomationTile(
+  request: CreateAutomationTileRequest,
+): Promise<CreateAutomationTileResponse> {
+  const response = await invoke<unknown>("create_automation_tile", { request });
+  return asCreateAutomationTileResponse(response);
 }
 
 export async function deleteAutomationTile(

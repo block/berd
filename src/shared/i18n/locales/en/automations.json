@@ -5,6 +5,8 @@
     "cancel": "Cancel",
     "delete": "Delete",
     "deleting": "Deleting...",
+    "duplicate": "Duplicate",
+    "duplicating": "Duplicating...",
     "edit": "Edit",
     "generateCron": "Generate cron",
     "generating": "Generating...",
@@ -17,6 +19,11 @@
     "description": "Delete \"{{name}}\"? This action cannot be undone.",
     "error": "Failed to delete automation.",
     "title": "Delete automation"
+  },
+  "duplicate": {
+    "copySuffix": "(copy)",
+    "error": "Failed to duplicate automation.",
+    "unsupportedType": "This automation type cannot be duplicated."
   },
   "builder": {
     "blockedBody": "kgoose returned a tile-shaped preview that is not an automation. This builder will not approve it.",

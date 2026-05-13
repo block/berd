@@ -1,6 +1,7 @@
 use reqwest::header::HeaderValue;
 use serde::Deserialize;
 use serde_json::{json, Map, Value};
+use std::sync::LazyLock;
 
 pub(super) fn trim_required_string(value: &str, label: &str) -> Result<String, String> {
     let trimmed = value.trim();
@@ -40,17 +41,41 @@ pub(super) fn is_builderbot_automation_type(value: &str) -> bool {
     )
 }
 
-pub(super) fn sanitize_create_automation_tile_request(mut request: Value) -> Result<Value, String> {
-    let object = request
-        .as_object_mut()
-        .ok_or_else(|| "automation tile create request must be an object".to_string())?;
-    let tile_type = object
-        .get("type")
-        .ok_or_else(|| "automation tile create request must include a type".to_string())?;
+// Shared policy for kgoose TileType proto values this app can safely create.
+// Goose Internal does not currently vend generated Rust TileType bindings, so
+// frontend and Tauri load this JSON policy instead of duplicating enum tables.
+const CREATABLE_TILE_TYPES_JSON: &str =
+    include_str!("../../../../resources/creatable-tile-types.json");
+static CREATABLE_TILE_TYPES: LazyLock<Vec<CreatableTileType>> = LazyLock::new(|| {
+    let tile_types: Vec<CreatableTileType> = serde_json::from_str(CREATABLE_TILE_TYPES_JSON)
+        .expect("resources/creatable-tile-types.json is malformed");
+    assert!(
+        tile_types
+            .iter()
+            .flat_map(|tile_type| tile_type.aliases.iter())
+            .all(|alias| alias == &alias.to_lowercase()),
+        "resources/creatable-tile-types.json aliases must be lowercase"
+    );
+    tile_types
+});
 
-    if !is_supported_automation_summary_type(tile_type) {
-        return Err("automation create request must use the summary tile type".to_string());
-    }
+#[derive(Deserialize)]
+struct CreatableTileType {
+    id: i32,
+    aliases: Vec<String>,
+}
+
+pub(super) fn sanitize_create_automation_tile_request(request: Value) -> Result<Value, String> {
+    let object = request
+        .as_object()
+        .ok_or_else(|| "automation tile create request must be an object".to_string())?;
+    let tile_type = normalize_create_tile_type(
+        object
+            .get("type")
+            .or_else(|| object.get("tileType"))
+            .or_else(|| object.get("tile_type"))
+            .ok_or_else(|| "automation tile create request must include a type".to_string())?,
+    )?;
 
     if object.get("spaceId").is_some_and(|value| !value.is_null())
         || object.get("space_id").is_some_and(|value| !value.is_null())
@@ -58,14 +83,56 @@ pub(super) fn sanitize_create_automation_tile_request(mut request: Value) -> Res
         return Err("automation tile create request must not include a space id".to_string());
     }
 
-    object.remove("spaceId");
-    object.remove("space_id");
-    Ok(request)
+    let mut sanitized = Map::new();
+    // kgoose decodes this protobuf-backed JSON field as a TileType enum.
+    // Normalize accepted aliases to enum numbers so string spellings do not get
+    // dropped before reaching CreateTileRequest.type.
+    sanitized.insert("type".to_string(), Value::Number(tile_type.into()));
+    copy_create_field(object, &mut sanitized, "title");
+    copy_create_field(object, &mut sanitized, "schedule");
+    copy_create_field(object, &mut sanitized, "timeZone");
+    copy_create_field(object, &mut sanitized, "instructions");
+    copy_create_field(object, &mut sanitized, "allowHumanInput");
+    copy_create_field(object, &mut sanitized, "enableNotifications");
+    Ok(Value::Object(sanitized))
 }
 
-fn is_supported_automation_summary_type(value: &Value) -> bool {
-    string_or_number_as_lowercase(value)
-        .is_some_and(|value| matches!(value.as_str(), "4" | "summary" | "tile_type_summary"))
+fn copy_create_field(object: &Map<String, Value>, sanitized: &mut Map<String, Value>, key: &str) {
+    if let Some(value) = object.get(key) {
+        sanitized.insert(key.to_string(), value.clone());
+    }
+}
+
+fn normalize_create_tile_type(value: &Value) -> Result<i32, String> {
+    let normalized = string_or_number_as_lowercase(value).ok_or_else(|| {
+        "automation tile create request type must be a string or number".to_string()
+    })?;
+
+    if matches!(normalized.as_str(), "6" | "task" | "tile_type_task") {
+        return Err("automation create request must not use the task tile type".to_string());
+    }
+
+    if matches!(
+        normalized.as_str(),
+        "18" | "builderbot_automation" | "tile_type_builderbot_automation"
+    ) {
+        return Err(
+            "automation create request must not use the builderbot automation tile type"
+                .to_string(),
+        );
+    }
+
+    CREATABLE_TILE_TYPES
+        .iter()
+        .find_map(|tile_type| {
+            (normalized == tile_type.id.to_string()
+                || tile_type
+                    .aliases
+                    .iter()
+                    .any(|alias| alias.as_str() == normalized))
+            .then_some(tile_type.id)
+        })
+        .ok_or_else(|| "automation create request must include a supported tile type".to_string())
 }
 
 #[derive(Deserialize)]
@@ -428,26 +495,95 @@ mod tests {
         let request = sanitize_create_automation_tile_request(json!({
             "type": "tile_type_summary",
             "title": "Daily digest",
+            "schedule": "0 9 * * *",
+            "timeZone": "America/Los_Angeles",
+            "instructions": ["Pull revenue"],
+            "allowHumanInput": false,
+            "enableNotifications": true,
+            "id": "must-not-forward",
+            "creator": "must-not-forward",
+            "created": "must-not-forward",
+            "updated": "must-not-forward",
+            "status": "must-not-forward",
+            "latestRunStatus": "must-not-forward",
+            "latestChatSessionId": "must-not-forward",
+            "lastSuccessAt": "must-not-forward",
+            "requiredConnections": ["must-not-forward"],
+            "subscribedLabels": ["must-not-forward"],
+            "toolCallNames": ["must-not-forward"],
+            "subscriptionFilters": {"statuses": ["must-not-forward"]},
             "spaceId": null,
-            "space_id": null
+            "space_id": null,
+            "latestRenderedData": {"summary": "must-not-forward"},
+            "latest_rendered_data": {"summary": "must-not-forward"}
         }))
         .unwrap();
 
-        assert_eq!(request["type"], "tile_type_summary");
-        assert!(request.get("spaceId").is_none());
-        assert!(request.get("space_id").is_none());
+        assert_eq!(request["type"], 4);
+        assert_eq!(request["title"], "Daily digest");
+        assert_eq!(request["schedule"], "0 9 * * *");
+        assert_eq!(request["timeZone"], "America/Los_Angeles");
+        assert_eq!(request["instructions"], json!(["Pull revenue"]));
+        assert_eq!(request["allowHumanInput"], false);
+        assert_eq!(request["enableNotifications"], true);
+        assert_eq!(request.as_object().unwrap().len(), 7);
     }
 
     #[test]
-    fn rejects_non_automation_tile_create_requests() {
-        assert!(sanitize_create_automation_tile_request(json!({
+    fn sanitizes_frontend_shaped_automation_tile_create_requests() {
+        let request = sanitize_create_automation_tile_request(json!({
+            "type": "TILE_TYPE_AUTOMATION",
+            "title": "Daily digest",
+            "schedule": "0 9 * * *",
+            "timeZone": "America/Los_Angeles",
+            "instructions": ["Pull revenue"],
+            "allowHumanInput": false,
+            "enableNotifications": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            request,
+            json!({
+                "type": 10,
+                "title": "Daily digest",
+                "schedule": "0 9 * * *",
+                "timeZone": "America/Los_Angeles",
+                "instructions": ["Pull revenue"],
+                "allowHumanInput": false,
+                "enableNotifications": true
+            })
+        );
+    }
+
+    #[test]
+    fn sanitizes_supported_automation_tile_create_types() {
+        let request = sanitize_create_automation_tile_request(json!({
             "type": 10,
             "title": "Automation status"
         }))
-        .is_err());
+        .unwrap();
+        assert_eq!(request["type"], 10);
+
+        let request = sanitize_create_automation_tile_request(json!({
+            "tile_type": "TILE_TYPE_FORM",
+            "title": "Form automation"
+        }))
+        .unwrap();
+        assert_eq!(request["type"], 12);
+        assert!(request.get("tile_type").is_none());
+    }
+
+    #[test]
+    fn rejects_unsupported_automation_tile_create_types() {
         assert!(sanitize_create_automation_tile_request(json!({
             "type": "TILE_TYPE_BUILDERBOT_AUTOMATION",
             "title": "BuilderBot automation"
+        }))
+        .is_err());
+        assert!(sanitize_create_automation_tile_request(json!({
+            "type": "TILE_TYPE_TASK",
+            "title": "Task automation"
         }))
         .is_err());
     }

@@ -3,6 +3,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createAutomationTile,
   deleteAutomationTile,
   generateAutomationSchedule,
   getAutomationSessionMessages,
@@ -18,6 +19,7 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTile: vi.fn(),
   getAutomationTileResults: vi.fn(),
   getAutomationSessionMessages: vi.fn(),
+  createAutomationTile: vi.fn(),
   updateAutomationTile: vi.fn(),
   deleteAutomationTile: vi.fn(),
   generateAutomationSchedule: vi.fn(),
@@ -89,6 +91,7 @@ describe("AutomationsView", () => {
         id: "automation-1",
         title: "Daily revenue digest",
         schedule: "0 9 * * *",
+        type: "TILE_TYPE_SUMMARY",
         timeZone: "America/Los_Angeles",
         latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
         status: "TILE_STATUS_ACTIVE",
@@ -110,6 +113,10 @@ describe("AutomationsView", () => {
       ],
     });
     vi.mocked(updateAutomationTile).mockResolvedValue({ success: true });
+    vi.mocked(createAutomationTile).mockResolvedValue({
+      success: true,
+      tileId: "automation-copy",
+    });
     vi.mocked(deleteAutomationTile).mockResolvedValue({ success: true });
     vi.mocked(generateAutomationSchedule).mockResolvedValue({
       success: true,
@@ -401,5 +408,97 @@ describe("AutomationsView", () => {
       "automation-1",
       expect.anything(),
     );
+  });
+
+  it("duplicates a generic automation from the selected details", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await screen.findByText("Pull revenue");
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
+
+    expect(createAutomationTile).toHaveBeenCalledWith({
+      type: "TILE_TYPE_SUMMARY",
+      title: "Daily revenue digest (copy)",
+      schedule: "0 9 * * *",
+      timeZone: "America/Los_Angeles",
+      instructions: ["Pull revenue", "Send a summary"],
+      allowHumanInput: undefined,
+      enableNotifications: true,
+    });
+  });
+
+  it("duplicates non-summary automation tile types from the selected details", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getAutomationTile).mockResolvedValue({
+      tileInfo: {
+        id: "automation-1",
+        title: "Daily revenue digest",
+        schedule: "0 9 * * *",
+        type: "TILE_TYPE_AUTOMATION",
+        timeZone: "America/Los_Angeles",
+        latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+        humanReadableInstructions: ["Pull revenue", "Send a summary"],
+        latestRenderedData: { summary: "Revenue was up." },
+      },
+    });
+
+    renderAutomationsView();
+
+    await screen.findByText("Pull revenue");
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
+
+    expect(createAutomationTile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "TILE_TYPE_AUTOMATION",
+      }),
+    );
+    expect(createAutomationTile).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        latestRenderedData: expect.anything(),
+      }),
+    );
+  });
+
+  it("does not duplicate unsupported automation tile types", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getAutomationTile).mockResolvedValue({
+      tileInfo: {
+        id: "automation-1",
+        title: "Daily revenue digest",
+        schedule: "0 9 * * *",
+        type: "TILE_TYPE_TASK",
+        timeZone: "America/Los_Angeles",
+        latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+        humanReadableInstructions: ["Pull revenue", "Send a summary"],
+      },
+    });
+
+    renderAutomationsView();
+
+    await screen.findByText("Pull revenue");
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
+    expect(createAutomationTile).not.toHaveBeenCalled();
+  });
+
+  it("does not duplicate unknown automation tile types", async () => {
+    vi.mocked(getAutomationTile).mockResolvedValue({
+      tileInfo: {
+        id: "automation-1",
+        title: "Daily revenue digest",
+        schedule: "0 9 * * *",
+        type: "TILE_TYPE_EXPERIMENTAL",
+        timeZone: "America/Los_Angeles",
+        latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+        humanReadableInstructions: ["Pull revenue", "Send a summary"],
+      },
+    });
+
+    renderAutomationsView();
+
+    await screen.findByText("Pull revenue");
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+    expect(createAutomationTile).not.toHaveBeenCalled();
   });
 });

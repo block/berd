@@ -1,0 +1,12 @@
+[
+  { "id": 2, "aliases": ["update", "tile_type_update"] },
+  { "id": 3, "aliases": ["chart", "tile_type_chart"] },
+  { "id": 4, "aliases": ["summary", "tile_type_summary"] },
+  { "id": 5, "aliases": ["table", "tile_type_table"] },
+  { "id": 7, "aliases": ["recipe", "tile_type_recipe"] },
+  { "id": 8, "aliases": ["metric", "tile_type_metric"] },
+  { "id": 9, "aliases": ["progress", "tile_type_progress"] },
+  { "id": 10, "aliases": ["automation", "tile_type_automation"] },
+  { "id": 11, "aliases": ["checklist", "tile_type_checklist"] },
+  { "id": 12, "aliases": ["form", "tile_type_form"] }
+]

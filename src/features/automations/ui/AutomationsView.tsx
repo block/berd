@@ -6,6 +6,7 @@ import {
   IconBolt,
   IconCheck,
   IconClock,
+  IconCopy,
   IconPlus,
   IconPencil,
   IconPlayerPause,
@@ -16,7 +17,9 @@ import {
 import {
   type AutomationTile,
   type AutomationTileResult,
+  type CreateAutomationTileRequest,
   type UpdateAutomationTileRequest,
+  createAutomationTile,
   deleteAutomationTile,
   generateAutomationSchedule,
   getAutomationSessionMessages,
@@ -25,6 +28,7 @@ import {
   getAutomationTiles,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
+import { canCreateTileType } from "@/features/automations/lib/creatableTileTypes";
 import { AutomationBuilderPanel } from "@/features/automations/ui/AutomationBuilderPanel";
 import { getStableInstructionItems } from "@/features/automations/lib/stableInstructionItems";
 import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
@@ -372,6 +376,37 @@ function AutomationDetails({ tile }: { tile: AutomationTile }) {
 
 function instructionsToText(tile: AutomationTile) {
   return (tile.instructions ?? tile.humanReadableInstructions ?? []).join("\n");
+}
+
+function duplicateTitle(tile: AutomationTile, copySuffix: string) {
+  return `${automationTitle(tile, "Untitled automation")} ${copySuffix}`;
+}
+
+function buildDuplicateAutomationRequest(
+  tile: AutomationTile,
+  copySuffix: string,
+): CreateAutomationTileRequest | undefined {
+  if (!canCreateTileType(tile.type)) {
+    return undefined;
+  }
+
+  const instructions = tile.instructions?.length
+    ? tile.instructions
+    : (tile.humanReadableInstructions ?? []);
+
+  return {
+    type: tile.type,
+    title: duplicateTitle(tile, copySuffix),
+    schedule: tile.schedule,
+    timeZone: automationTimeZone(tile),
+    instructions,
+    allowHumanInput: tile.allowHumanInput,
+    enableNotifications: tile.enableNotifications,
+  };
+}
+
+function canDuplicateAutomation(tile: AutomationTile) {
+  return canCreateTileType(tile.type);
 }
 
 function textToInstructions(value: string) {
@@ -960,6 +995,24 @@ export function AutomationsView() {
     ]);
   };
 
+  const selectCreatedAutomation = (automationId: string) => {
+    setPendingCreatedAutomationId(automationId);
+    setSelectedAutomationId(automationId);
+    setSelectedRunKey(null);
+  };
+
+  const scheduleDelayedAutomationsRefetch = () => {
+    if (delayedRefetchTimeoutRef.current) {
+      clearTimeout(delayedRefetchTimeoutRef.current);
+    }
+    // kgoose list propagation can lag tile creation, so refetch once more
+    // after the immediate refresh.
+    delayedRefetchTimeoutRef.current = setTimeout(() => {
+      void automationsQuery.refetch();
+      delayedRefetchTimeoutRef.current = null;
+    }, 1_500);
+  };
+
   const updateMutation = useMutation({
     mutationFn: updateAutomationTile,
     onSuccess: async (response) => {
@@ -1001,6 +1054,46 @@ export function AutomationsView() {
       );
     },
   });
+
+  const duplicateMutation = useMutation({
+    mutationFn: (tile: AutomationTile) => {
+      const request = buildDuplicateAutomationRequest(
+        tile,
+        t("duplicate.copySuffix"),
+      );
+      if (!request) {
+        throw new Error(t("duplicate.unsupportedType"));
+      }
+      return createAutomationTile(request);
+    },
+    onMutate: () => {
+      setMutationError(null);
+    },
+    onSuccess: async (response) => {
+      if (response.success === false) {
+        setMutationError(response.errorMsg ?? t("duplicate.error"));
+        return;
+      }
+      const automationId = response.tileId ?? response.automationId;
+      if (automationId) {
+        selectCreatedAutomation(automationId);
+      }
+      await invalidateAutomationQueries();
+      if (automationId) {
+        scheduleDelayedAutomationsRefetch();
+      }
+    },
+    onError: (error) => {
+      setMutationError(
+        error instanceof Error ? error.message : t("duplicate.error"),
+      );
+    },
+  });
+
+  const isMutatingAutomation =
+    updateMutation.isPending ||
+    deleteMutation.isPending ||
+    duplicateMutation.isPending;
 
   useEffect(() => {
     return () => {
@@ -1101,24 +1194,14 @@ export function AutomationsView() {
               onClose={() => setBuilderOpen(false)}
               onAutomationCreated={(automationId) => {
                 if (automationId) {
-                  setPendingCreatedAutomationId(automationId);
-                  setSelectedAutomationId(automationId);
-                  setSelectedRunKey(null);
+                  selectCreatedAutomation(automationId);
                   setBuilderOpen(false);
                 }
                 void automationsQuery.refetch().then(() => {
                   if (!automationId) {
                     return;
                   }
-                  if (delayedRefetchTimeoutRef.current) {
-                    clearTimeout(delayedRefetchTimeoutRef.current);
-                  }
-                  // kgoose list propagation can lag tile creation, so refetch
-                  // once more after the immediate refresh.
-                  delayedRefetchTimeoutRef.current = setTimeout(() => {
-                    void automationsQuery.refetch();
-                    delayedRefetchTimeoutRef.current = null;
-                  }, 1_500);
+                  scheduleDelayedAutomationsRefetch();
                 });
               }}
             />
@@ -1172,11 +1255,26 @@ export function AutomationsView() {
                           type="button"
                           variant="outline"
                           size="sm"
+                          onClick={() => duplicateMutation.mutate(detailTile)}
+                          disabled={
+                            isMutatingAutomation ||
+                            !canDuplicateAutomation(detailTile)
+                          }
+                        >
+                          <IconCopy className="size-3" aria-hidden="true" />
+                          {duplicateMutation.isPending
+                            ? t("actions.duplicating")
+                            : t("actions.duplicate")}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
                           onClick={() => {
                             setMutationError(null);
                             setEditingAutomationId(detailTileId);
                           }}
-                          disabled={updateMutation.isPending}
+                          disabled={isMutatingAutomation}
                         >
                           <IconPencil className="size-3" aria-hidden="true" />
                           {t("actions.edit")}
@@ -1189,7 +1287,7 @@ export function AutomationsView() {
                             setMutationError(null);
                             setDeleteAutomationId(detailTileId);
                           }}
-                          disabled={deleteMutation.isPending}
+                          disabled={isMutatingAutomation}
                         >
                           <IconTrash className="size-3" aria-hidden="true" />
                           {t("actions.delete")}

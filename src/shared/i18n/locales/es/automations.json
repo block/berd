@@ -5,6 +5,8 @@
     "cancel": "Cancelar",
     "delete": "Eliminar",
     "deleting": "Eliminando...",
+    "duplicate": "Duplicar",
+    "duplicating": "Duplicando...",
     "edit": "Editar",
     "generateCron": "Generar cron",
     "generating": "Generando...",
@@ -17,6 +19,11 @@
     "description": "Eliminar \"{{name}}\"? Esta accion no se puede deshacer.",
     "error": "No se pudo eliminar la automatizacion.",
     "title": "Eliminar automatizacion"
+  },
+  "duplicate": {
+    "copySuffix": "(copia)",
+    "error": "No se pudo duplicar la automatizacion.",
+    "unsupportedType": "Este tipo de automatizacion no se puede duplicar."
   },
   "builder": {
     "blockedBody": "kgoose devolvio una vista previa de mosaico que no es una automatizacion. Este creador no la aprobara.",
