@@ -164,7 +164,8 @@ export function ChatInputToolbar({
     : undefined;
   const contextProgress =
     contextLimit > 0 ? Math.min(contextTokens / contextLimit, 1) : 0;
-  const showContextUsage = isContextUsageReady ?? contextLimit > 0;
+  const showContextUsage =
+    (isContextUsageReady ?? contextLimit > 0) && contextTokens > 0;
   const contextPercentDigits =
     contextProgress > 0 && contextProgress < 0.1 ? 1 : 0;
   const usedPercentLabel = formatNumber(contextProgress, {
