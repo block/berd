@@ -25,6 +25,7 @@ function resetStore() {
     hasHydratedSessions: false,
     isContextPanelOpen: false,
     activeWorkspaceBySession: {},
+    modelSelectionIntentBySession: {},
   });
 }
 
@@ -88,6 +89,100 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
       });
       expect(useChatSessionStore.getState().sessions).toContainEqual(session);
+    });
+
+    it("creates a local draft session without touching ACP", () => {
+      const session = useChatSessionStore.getState().createDraftSession({
+        title: "New Chat",
+        providerId: "openai",
+        projectId: "project-1",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+        workingDir: "/tmp/project",
+      });
+
+      expect(mockAcpCreateSession).not.toHaveBeenCalled();
+      expect(session).toMatchObject({
+        title: "New Chat",
+        projectId: "project-1",
+        providerId: "openai",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+        workingDir: "/tmp/project",
+        messageCount: 0,
+        creationState: "pending",
+      });
+      expect(session.id).toEqual(expect.any(String));
+      expect(useChatSessionStore.getState().sessions).toContainEqual(session);
+    });
+
+    it("promotes a pending draft session to the real ACP session id", () => {
+      seedSession({
+        id: "local-session",
+        title: "New Chat",
+        projectId: "project-1",
+        providerId: "openai",
+        workingDir: "/tmp/project",
+        creationState: "pending",
+      });
+      useChatSessionStore.setState({
+        activeSessionId: "local-session",
+        activeWorkspaceBySession: {
+          "local-session": { path: "/tmp/project", branch: "main" },
+        },
+        modelSelectionIntentBySession: {
+          "local-session": {
+            requestId: "request-1",
+            kind: "model",
+            providerId: "openai",
+            modelId: "gpt-4.1",
+          },
+        },
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("local-session", "acp-session", {
+          modelId: "gpt-4.1",
+          modelName: "GPT-4.1",
+        });
+
+      const state = useChatSessionStore.getState();
+      expect(state.getSession("local-session")).toBeUndefined();
+      expect(state.getSession("acp-session")).toMatchObject({
+        id: "acp-session",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+        creationState: undefined,
+        creationError: undefined,
+      });
+      expect(state.activeSessionId).toBe("acp-session");
+      expect(state.activeWorkspaceBySession).toEqual({
+        "acp-session": { path: "/tmp/project", branch: "main" },
+      });
+      expect(state.modelSelectionIntentBySession).toHaveProperty("acp-session");
+      expect(state.modelSelectionIntentBySession).not.toHaveProperty(
+        "local-session",
+      );
+    });
+
+    it("marks a pending draft session failed when ACP creation fails", () => {
+      seedSession({
+        id: "local-session",
+        title: "New Chat",
+        creationState: "pending",
+      });
+
+      useChatSessionStore
+        .getState()
+        .markSessionCreationFailed("local-session", "boom");
+
+      expect(
+        useChatSessionStore.getState().getSession("local-session"),
+      ).toMatchObject({
+        creationState: "failed",
+        creationError: "boom",
+      });
     });
   });
 

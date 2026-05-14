@@ -30,6 +30,8 @@ export interface ChatSession {
   archivedAt?: string;
   messageCount: number;
   userSetName?: boolean;
+  creationState?: "pending" | "failed";
+  creationError?: string;
 }
 
 export interface ActiveWorkspace {
@@ -88,6 +90,13 @@ interface CreateSessionOpts {
 
 interface ChatSessionStoreActions {
   createSession: (opts?: CreateSessionOpts) => Promise<ChatSession>;
+  createDraftSession: (opts?: CreateSessionOpts) => ChatSession;
+  promoteDraftSession: (
+    draftSessionId: string,
+    backendSessionId: string,
+    patch?: Partial<ChatSession>,
+  ) => void;
+  markSessionCreationFailed: (id: string, error: string) => void;
   loadSessions: () => Promise<void>;
   patchSession: (id: string, patch: Partial<ChatSession>) => void;
   addSession: (session: ChatSession) => void;
@@ -215,6 +224,93 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
+  },
+
+  createDraftSession: (opts) => {
+    if (!opts?.workingDir) {
+      throw new Error("createDraftSession requires a working directory");
+    }
+    const now = new Date().toISOString();
+    const providerId = opts.providerId ?? "goose";
+    const chatSession: ChatSession = {
+      id: crypto.randomUUID(),
+      title: opts.title ?? DEFAULT_CHAT_TITLE,
+      projectId: opts.projectId,
+      providerId,
+      personaId: opts.personaId,
+      modelId: opts.modelId,
+      modelName: opts.modelName,
+      workingDir: opts.workingDir,
+      createdAt: now,
+      updatedAt: now,
+      messageCount: 0,
+      creationState: "pending",
+    };
+    set((state) => ({ sessions: [chatSession, ...state.sessions] }));
+    return chatSession;
+  },
+
+  promoteDraftSession: (draftSessionId, backendSessionId, patch = {}) => {
+    set((state) => {
+      const existingIndex = state.sessions.findIndex(
+        (session) => session.id === draftSessionId,
+      );
+      if (existingIndex < 0) {
+        return state;
+      }
+
+      const existing = state.sessions[existingIndex];
+      const promoted: ChatSession = {
+        ...existing,
+        ...patch,
+        id: backendSessionId,
+        creationState: undefined,
+        creationError: undefined,
+        updatedAt: patch.updatedAt ?? existing.updatedAt,
+      };
+      const sessions = state.sessions
+        .filter((session) => session.id !== backendSessionId)
+        .map((session) => (session.id === draftSessionId ? promoted : session));
+      const { [draftSessionId]: workspace, ...remainingWorkspaces } =
+        state.activeWorkspaceBySession;
+      const { [draftSessionId]: intent, ...remainingIntents } =
+        state.modelSelectionIntentBySession;
+
+      return {
+        sessions,
+        activeSessionId:
+          state.activeSessionId === draftSessionId
+            ? backendSessionId
+            : state.activeSessionId,
+        activeWorkspaceBySession: workspace
+          ? {
+              ...remainingWorkspaces,
+              [backendSessionId]: workspace,
+            }
+          : remainingWorkspaces,
+        modelSelectionIntentBySession: intent
+          ? {
+              ...remainingIntents,
+              [backendSessionId]: intent,
+            }
+          : remainingIntents,
+      };
+    });
+  },
+
+  markSessionCreationFailed: (id, error) => {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === id
+          ? {
+              ...session,
+              creationState: "failed" as const,
+              creationError: error,
+              updatedAt: new Date().toISOString(),
+            }
+          : session,
+      ),
+    }));
   },
 
   loadSessions: async () => {

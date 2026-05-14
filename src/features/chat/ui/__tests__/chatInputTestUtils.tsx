@@ -30,6 +30,8 @@ export function ChatInput({
   onStop,
   isStreaming,
   disabled,
+  sendDisabled,
+  sendDisabledReason,
   queuedMessage,
   onDismissQueue,
   personas,
@@ -69,6 +71,8 @@ export function ChatInput({
         onStop,
         isStreaming,
         disabled,
+        sendDisabled,
+        sendDisabledReason,
         queuedMessage,
         onDismissQueue,
       }}

@@ -157,6 +157,7 @@ interface ChatStoreActions {
     query?: string,
   ) => void;
   clearScrollTargetMessage: (sessionId: string) => void;
+  promoteSessionId: (draftSessionId: string, backendSessionId: string) => void;
   cleanupSession: (sessionId: string) => void;
 }
 
@@ -672,6 +673,61 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         scrollTargetMessageBySession: nextTargets,
       };
     }),
+
+  promoteSessionId: (draftSessionId, backendSessionId) => {
+    const previousSessionStateById = get().sessionStateById;
+    set((state) => {
+      const { [draftSessionId]: messages, ...remainingMessages } =
+        state.messagesBySession;
+      const { [draftSessionId]: runtime, ...remainingRuntime } =
+        state.sessionStateById;
+      const { [draftSessionId]: queuedMessage, ...remainingQueued } =
+        state.queuedMessageBySession;
+      const { [draftSessionId]: draft, ...remainingDrafts } =
+        state.draftsBySession;
+      const { [draftSessionId]: skillDrafts, ...remainingSkillDrafts } =
+        state.skillDraftsBySession;
+      const { [draftSessionId]: scrollTarget, ...remainingTargets } =
+        state.scrollTargetMessageBySession;
+      const loadingSessionIds = new Set(state.loadingSessionIds);
+      const wasLoading = loadingSessionIds.delete(draftSessionId);
+      if (wasLoading) {
+        loadingSessionIds.add(backendSessionId);
+      }
+
+      return {
+        messagesBySession: messages
+          ? { ...remainingMessages, [backendSessionId]: messages }
+          : remainingMessages,
+        sessionStateById: runtime
+          ? { ...remainingRuntime, [backendSessionId]: runtime }
+          : remainingRuntime,
+        queuedMessageBySession: queuedMessage
+          ? { ...remainingQueued, [backendSessionId]: queuedMessage }
+          : remainingQueued,
+        draftsBySession:
+          draft !== undefined
+            ? { ...remainingDrafts, [backendSessionId]: draft }
+            : remainingDrafts,
+        skillDraftsBySession: skillDrafts
+          ? { ...remainingSkillDrafts, [backendSessionId]: skillDrafts }
+          : remainingSkillDrafts,
+        scrollTargetMessageBySession: scrollTarget
+          ? { ...remainingTargets, [backendSessionId]: scrollTarget }
+          : remainingTargets,
+        loadingSessionIds,
+        activeSessionId:
+          state.activeSessionId === draftSessionId
+            ? backendSessionId
+            : state.activeSessionId,
+      };
+    });
+    persistDrafts(get().draftsBySession);
+    persistUnreadStateIfChanged(
+      previousSessionStateById,
+      get().sessionStateById,
+    );
+  },
 
   // Cleanup
   cleanupSession: (sessionId) => {

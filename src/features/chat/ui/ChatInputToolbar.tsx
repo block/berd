@@ -52,6 +52,7 @@ interface ChatInputToolbarComposerActions {
   onAttachFolders?: () => void;
   attachmentsEnabled?: boolean;
   disabled?: boolean;
+  sendDisabledReason?: string;
   voiceEnabled?: boolean;
   voiceRecording?: boolean;
   voiceTranscribing?: boolean;
@@ -121,6 +122,7 @@ export function ChatInputToolbar({
     onAttachFolders,
     attachmentsEnabled = true,
     disabled = false,
+    sendDisabledReason,
     voiceEnabled = false,
     voiceRecording = false,
     voiceTranscribing = false,
@@ -129,6 +131,9 @@ export function ChatInputToolbar({
   const compactionControlsSupported =
     supportsCompactionControls ??
     supportsContextCompactionControls(selectedProvider);
+  const sendButtonTooltip = canSend
+    ? t("toolbar.sendMessage")
+    : sendDisabledReason;
 
   const agentProviders = useMemo(() => {
     const seen = new Set<string>();
@@ -462,23 +467,31 @@ export function ChatInputToolbar({
               <Square className="h-3.5 w-3.5" />
             </Button>
           ) : (
-            <Button
-              type="button"
-              onClick={onSend}
-              disabled={!canSend}
-              size="icon-sm"
-              className={cn(
-                "rounded-full",
-                "shadow-none",
-                canSend
-                  ? "bg-foreground text-background hover:bg-foreground/90"
-                  : "cursor-default bg-foreground/10 text-muted-foreground disabled:opacity-100",
-              )}
-              aria-label={t("toolbar.sendMessage")}
-              title={canSend ? t("toolbar.sendMessage") : undefined}
-            >
-              <ArrowUp className="h-4 w-4" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span>
+                  <Button
+                    type="button"
+                    onClick={onSend}
+                    disabled={!canSend}
+                    size="icon-sm"
+                    className={cn(
+                      "rounded-full",
+                      "shadow-none",
+                      canSend
+                        ? "bg-foreground text-background hover:bg-foreground/90"
+                        : "cursor-default bg-foreground/10 text-muted-foreground disabled:opacity-100",
+                    )}
+                    aria-label={sendButtonTooltip ?? t("toolbar.sendMessage")}
+                  >
+                    <ArrowUp className="h-4 w-4" />
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {sendButtonTooltip ? (
+                <TooltipContent>{sendButtonTooltip}</TooltipContent>
+              ) : null}
+            </Tooltip>
           )}
         </div>
       </div>

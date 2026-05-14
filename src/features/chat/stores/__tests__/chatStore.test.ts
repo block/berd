@@ -31,6 +31,8 @@ describe("chatStore", () => {
       activeSessionId: null,
       isViewingActiveSession: false,
       isConnected: false,
+      loadingSessionIds: new Set(),
+      scrollTargetMessageBySession: {},
     });
   });
 
@@ -97,6 +99,43 @@ describe("chatStore", () => {
     expect(getRuntime("s1").error).toBe("boom");
     expect(getRuntime("s2").chatState).toBe("thinking");
     expect(getRuntime("s2").error).toBeNull();
+  });
+
+  it("promotes all local chat state to a real ACP session id", () => {
+    const message = makeMessage({ id: "message-1" });
+    const store = useChatStore.getState();
+
+    store.setActiveSession("local-session");
+    store.setMessages("local-session", [message]);
+    store.setChatState("local-session", "thinking");
+    store.setDraft("local-session", "draft text");
+    store.setSkillDrafts("local-session", [{ id: "skill-1", name: "Skill" }]);
+    store.enqueueMessage("local-session", { text: "queued text" });
+    store.setSessionLoading("local-session", true);
+    store.setScrollTargetMessage("local-session", "message-1", "query");
+
+    store.promoteSessionId("local-session", "acp-session");
+
+    const state = useChatStore.getState();
+    expect(state.activeSessionId).toBe("acp-session");
+    expect(state.messagesBySession["acp-session"]).toEqual([message]);
+    expect(state.messagesBySession["local-session"]).toBeUndefined();
+    expect(state.sessionStateById["acp-session"].chatState).toBe("thinking");
+    expect(state.sessionStateById["local-session"]).toBeUndefined();
+    expect(state.draftsBySession["acp-session"]).toBe("draft text");
+    expect(state.draftsBySession["local-session"]).toBeUndefined();
+    expect(state.skillDraftsBySession["acp-session"]).toEqual([
+      { id: "skill-1", name: "Skill" },
+    ]);
+    expect(state.queuedMessageBySession["acp-session"]).toEqual({
+      text: "queued text",
+    });
+    expect(state.loadingSessionIds.has("acp-session")).toBe(true);
+    expect(state.loadingSessionIds.has("local-session")).toBe(false);
+    expect(state.scrollTargetMessageBySession["acp-session"]).toEqual({
+      messageId: "message-1",
+      query: "query",
+    });
   });
 
   it("marks visible assistant messages unread unless the session is actively viewed", () => {

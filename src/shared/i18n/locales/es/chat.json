@@ -195,6 +195,8 @@
     "selectModel": "Seleccionar modelo",
     "selectProject": "Seleccionar proyecto",
     "sendMessage": "Enviar mensaje",
+    "sessionStarting": "Iniciando sesión...",
+    "sessionStartFailed": "No se pudo iniciar la sesión",
     "stopGeneration": "Detener generación",
     "voiceInput": "Dictado por voz",
     "voiceInputDisabled": "Configura OPENAI_API_KEY para activar el dictado",

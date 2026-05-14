@@ -56,6 +56,8 @@ import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
 import { useOnboardingGate } from "@/features/onboarding/hooks/useOnboardingGate";
 import { Spinner } from "@/shared/ui/spinner";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
+import { acpCreateSession } from "@/shared/api/acp";
+import { createSystemNotificationMessage } from "@/shared/types/messages";
 
 export type AppView =
   | "home"
@@ -149,6 +151,21 @@ function areAppNavigationLocationsEqual(
   );
 }
 
+function getOptimisticSessionCwd(
+  project: ProjectInfo,
+  inheritedWorkspacePath?: string | null,
+): string {
+  const workspacePath = inheritedWorkspacePath?.trim();
+  if (workspacePath) {
+    return workspacePath;
+  }
+
+  const projectWorkingDir = project.workingDirs
+    .map((directory) => directory.trim())
+    .find((directory) => directory.length > 0);
+  return projectWorkingDir ?? "~";
+}
+
 async function ensureWindowWidth(minWidth: number) {
   if (!window.__TAURI_INTERNALS__ || window.innerWidth >= minWidth) {
     return;
@@ -217,6 +234,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const setChatActiveSessionViewing = useChatStore(
     (s) => s.setActiveSessionViewing,
   );
+  const promoteChatSessionId = useChatStore((s) => s.promoteSessionId);
   const cleanupChatSession = useChatStore((s) => s.cleanupSession);
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const sessions = useChatSessionStore(selectSessions);
@@ -224,6 +242,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
   const createSession = useChatSessionStore((s) => s.createSession);
+  const createDraftSession = useChatSessionStore((s) => s.createDraftSession);
+  const promoteDraftSession = useChatSessionStore((s) => s.promoteDraftSession);
+  const markSessionCreationFailed = useChatSessionStore(
+    (s) => s.markSessionCreationFailed,
+  );
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
@@ -341,6 +364,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         : nextAvailability,
     );
   }, []);
+
+  const replaceNavigationSessionId = useCallback(
+    (fromSessionId: string, toSessionId: string) => {
+      const history = navigationHistoryRef.current;
+      history.entries = history.entries.map((entry) =>
+        entry.sessionId === fromSessionId
+          ? { ...entry, sessionId: toSessionId }
+          : entry,
+      );
+      updateNavigationAvailability();
+    },
+    [updateNavigationAvailability],
+  );
 
   useEffect(() => {
     const history = navigationHistoryRef.current;
@@ -640,11 +676,143 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     ],
   );
 
+  const createNewProjectDraft = useCallback(
+    async (title = DEFAULT_CHAT_TITLE, project: ProjectInfo) => {
+      const tStart = performance.now();
+      perfLog(
+        `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
+      );
+      const providerId =
+        project.preferredProvider ?? selectedProvider ?? "goose";
+      const sessionState = useChatSessionStore.getState();
+      const chatState = useChatStore.getState();
+      const inheritedWorkspace = resolveInheritedProjectWorkspace({
+        projectId: project.id,
+        sessions: sessionState.sessions,
+        activeSessionId: sessionState.activeSessionId,
+        activeWorkspaceBySession: sessionState.activeWorkspaceBySession,
+      });
+      const existingDraft = findExistingDraft({
+        sessions: sessionState.sessions,
+        activeSessionId: sessionState.activeSessionId,
+        draftsBySession: chatState.draftsBySession,
+        messagesBySession: chatState.messagesBySession,
+        request: {
+          title,
+          projectId: project.id,
+        },
+      });
+
+      if (existingDraft) {
+        if (inheritedWorkspace) {
+          setActiveWorkspace(existingDraft.id, inheritedWorkspace);
+          patchSession(existingDraft.id, {
+            workingDir: inheritedWorkspace.path,
+          });
+        }
+        clearSettingsSectionUrl();
+        setActiveSession(existingDraft.id);
+        setActiveView("chat");
+        setChatActiveSession(existingDraft.id);
+        perfLog(
+          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+        );
+        return existingDraft;
+      }
+
+      const optimisticWorkingDir = getOptimisticSessionCwd(
+        project,
+        inheritedWorkspace?.path,
+      );
+      const session = createDraftSession({
+        title,
+        projectId: project.id,
+        providerId,
+        workingDir: optimisticWorkingDir,
+      });
+      if (inheritedWorkspace) {
+        setActiveWorkspace(session.id, inheritedWorkspace);
+      }
+      clearSettingsSectionUrl();
+      setActiveSession(session.id);
+      setActiveView("chat");
+      setChatActiveSession(session.id);
+      perfLog(
+        `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+      );
+      void Promise.all([
+        resolveSupportedSessionModelPreference(
+          providerId,
+          providerInventoryEntries,
+          project.preferredModel ?? undefined,
+        ),
+        resolveSessionCwd(project, inheritedWorkspace?.path),
+      ])
+        .then(([sessionModelPreference, workingDir]) =>
+          acpCreateSession(sessionModelPreference.providerId, workingDir, {
+            projectId: project.id,
+            modelId: sessionModelPreference.modelId,
+          }).then(({ sessionId }) => ({
+            sessionId,
+            sessionModelPreference,
+            workingDir,
+          })),
+        )
+        .then(({ sessionId, sessionModelPreference, workingDir }) => {
+          const sessionStore = useChatSessionStore.getState();
+          const latestSession = sessionStore.getSession(session.id);
+          if (!latestSession || latestSession.archivedAt) {
+            return;
+          }
+          const shouldActivate = sessionStore.activeSessionId === session.id;
+          promoteChatSessionId(session.id, sessionId);
+          promoteDraftSession(session.id, sessionId, {
+            providerId: sessionModelPreference.providerId,
+            modelId: sessionModelPreference.modelId,
+            modelName: sessionModelPreference.modelName,
+            workingDir,
+          });
+          replaceNavigationSessionId(session.id, sessionId);
+          if (shouldActivate) {
+            setActiveSession(sessionId);
+            setChatActiveSession(sessionId);
+          }
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Failed to create session.";
+          const chatStore = useChatStore.getState();
+          markSessionCreationFailed(session.id, message);
+          chatStore.addMessage(
+            session.id,
+            createSystemNotificationMessage(message, "error"),
+          );
+          chatStore.setError(session.id, message);
+        });
+      return session;
+    },
+    [
+      selectedProvider,
+      createDraftSession,
+      markSessionCreationFailed,
+      patchSession,
+      promoteChatSessionId,
+      promoteDraftSession,
+      providerInventoryEntries,
+      replaceNavigationSessionId,
+      setActiveWorkspace,
+      setActiveSession,
+      setChatActiveSession,
+    ],
+  );
+
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
-      void createNewTab(DEFAULT_CHAT_TITLE, project);
+      void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
     },
-    [createNewTab],
+    [createNewProjectDraft],
   );
 
   const handleStartChatWithSkill = useCallback(
@@ -652,8 +820,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       const project = projectId
         ? projects.find((candidate) => candidate.id === projectId)
         : undefined;
+      const createChat = project
+        ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
+        : createNewTab(DEFAULT_CHAT_TITLE);
 
-      void createNewTab(DEFAULT_CHAT_TITLE, project)
+      void createChat
         .then((session) => {
           useChatStore
             .getState()
@@ -663,17 +834,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           console.error("Failed to start chat with skill:", error);
         });
     },
-    [createNewTab, projects],
+    [createNewProjectDraft, createNewTab, projects],
   );
 
   const handleNewChatInProject = useCallback(
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
       if (project) {
-        void createNewTab(DEFAULT_CHAT_TITLE, project);
+        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
       }
     },
-    [createNewTab, projects],
+    [createNewProjectDraft, projects],
   );
 
   const handleArchiveProject = useCallback(

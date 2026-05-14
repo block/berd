@@ -458,6 +458,31 @@ describe("ChatInput", () => {
     expect(input).toBeDisabled();
   });
 
+  it("keeps typing enabled but explains why send is disabled", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        sendDisabled
+        sendDisabledReason="Starting session..."
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "hello");
+    expect(input).toHaveValue("hello");
+
+    const sendButton = screen.getByRole("button", {
+      name: "Starting session...",
+    });
+    expect(sendButton).toBeDisabled();
+
+    await user.hover(sendButton);
+    expect(
+      await screen.findByRole("tooltip", { name: "Starting session..." }),
+    ).toBeInTheDocument();
+  });
+
   it("clears input after sending", async () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={vi.fn()} />);

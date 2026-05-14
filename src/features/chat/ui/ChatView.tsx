@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
+import { useTranslation } from "react-i18next";
 import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
@@ -44,6 +45,7 @@ export function ChatView({
   onCreatePersona,
   onCreateProject,
 }: ChatViewProps) {
+  const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const [isLoadingIndicatorMounted, setIsLoadingIndicatorMounted] =
@@ -70,6 +72,13 @@ export function ChatView({
   const shouldOverlapComposer =
     !shouldReserveComposerGap &&
     shouldOverlapComposerWithLatestMcpApp(controller.messages);
+  let sendDisabledReason: string | undefined;
+  if (controller.session?.creationState === "pending") {
+    sendDisabledReason = t("toolbar.sessionStarting");
+  } else if (controller.session?.creationState === "failed") {
+    sendDisabledReason =
+      controller.session.creationError ?? t("toolbar.sessionStartFailed");
+  }
 
   useEffect(() => {
     if (shouldShowLoadingIndicator) {
@@ -122,6 +131,8 @@ export function ChatView({
               disabled:
                 controller.projectMetadataPending ||
                 controller.isCompactingContext,
+              sendDisabled: controller.session?.creationState != null,
+              sendDisabledReason,
               queuedMessage: controller.queue.queuedMessage,
               onDismissQueue: controller.queue.dismiss,
               onStop: controller.stopStreaming,

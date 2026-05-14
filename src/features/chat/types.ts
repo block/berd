@@ -47,6 +47,8 @@ export interface ChatInputComposerActions {
   onStop?: () => void;
   isStreaming?: boolean;
   disabled?: boolean;
+  sendDisabled?: boolean;
+  sendDisabledReason?: string;
   queuedMessage?: { text: string } | null;
   onDismissQueue?: () => void;
 }

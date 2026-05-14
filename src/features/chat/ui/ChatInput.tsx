@@ -57,6 +57,8 @@ export function ChatInput({
     onStop,
     isStreaming = false,
     disabled = false,
+    sendDisabled = false,
+    sendDisabledReason,
     queuedMessage = null,
     onDismissQueue,
   } = composerActions;
@@ -183,7 +185,8 @@ export function ChatInput({
       (scopedControls.attachments && attachments.length > 0) ||
       visibleSelectedSkills.length > 0) &&
     !hasQueuedMessage &&
-    !disabled;
+    !disabled &&
+    !sendDisabled;
 
   const handleSkillMentionAdded = useCallback(
     (skill: (typeof selectedSkills)[number]) => {
@@ -264,7 +267,7 @@ export function ChatInput({
     onSend,
     onAutoSubmit: handleVoiceAutoSubmit,
     resetTextarea,
-    isSendLocked: hasQueuedMessage || disabled,
+    isSendLocked: hasQueuedMessage || disabled || sendDisabled,
   });
 
   const handleSend = useCallback(async () => {
@@ -606,6 +609,7 @@ export function ChatInput({
                   onAttachFiles: handleAttachFiles,
                   onAttachFolders: handleAttachFolders,
                   disabled,
+                  sendDisabledReason,
                   onSend: handleSend,
                   onStop,
                   voiceEnabled: scopedControls.voice && dictation.isEnabled,
