@@ -147,9 +147,10 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|app, event| {
-            if matches!(event, RunEvent::ExitRequested { .. } | RunEvent::Exit) {
+            if matches!(event, RunEvent::Exit) {
                 app.state::<commands::automations::AutomationStreamState>()
                     .abort_all();
+                services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
         });
 }
