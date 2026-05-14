@@ -40,7 +40,10 @@ import { resolveSupportedSessionModelPreference } from "./lib/resolveSupportedSe
 import { useCreatePersonaNavigation } from "./hooks/useCreatePersonaNavigation";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
-import { updateSessionTitle } from "@/features/chat/stores/chatSessionOperations";
+import {
+  moveSessionToProject,
+  updateSessionTitle,
+} from "@/features/chat/stores/chatSessionOperations";
 import {
   clearReplayBuffer,
   getAndDeleteReplayBuffer,
@@ -961,39 +964,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleMoveToProject = useCallback(
     (sessionId: string, projectId: string | null) => {
-      useChatSessionStore.getState().patchSession(sessionId, { projectId });
-
       const session = useChatSessionStore.getState().getSession(sessionId);
       if (!session) {
         return;
       }
 
-      void (async () => {
-        const nextProject =
-          projectId == null
-            ? null
-            : (useProjectStore
-                .getState()
-                .projects.find((project) => project.id === projectId) ?? null);
-        const workingDir = await resolveSessionCwd(nextProject);
-        if (!workingDir) {
-          return;
-        }
-        await applyLatestSessionConfig({
-          sessionId,
-          providerId: session.providerId ?? selectedProvider ?? "goose",
-          workingDir,
-          modelId: session.modelId,
-        });
-        patchSession(sessionId, { workingDir });
-      })().catch((error) => {
-        console.error(
-          "Failed to update ACP session project working directory:",
-          error,
-        );
+      void moveSessionToProject(sessionId, projectId, {
+        providerId: selectedProvider,
+        modelId: session.modelId,
+      }).catch((error) => {
+        console.error("Failed to move session to project:", error);
+        toast.error(t("chat:notifications.moveError"));
       });
     },
-    [patchSession, selectedProvider],
+    [selectedProvider, t],
   );
 
   const handleRenameChat = useCallback(

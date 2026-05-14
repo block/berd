@@ -30,6 +30,7 @@ import {
 } from "../lib/autoCompact";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { useResolvedAgentModelPicker } from "./useResolvedAgentModelPicker";
+import { moveSessionToProject } from "../stores/chatSessionOperations";
 import { updateSessionProject } from "@/shared/api/acpApi";
 import {
   createModelSelectionRequestId,
@@ -594,35 +595,14 @@ export function useChatSessionController({
         setPendingProjectId(projectId);
         return;
       }
-      const nextProject =
-        projectId == null
-          ? null
-          : (useProjectStore
-              .getState()
-              .projects.find((candidate) => candidate.id === projectId) ??
-            null);
-
-      useChatSessionStore.getState().patchSession(sessionId, { projectId });
-
-      void updateSessionProject(sessionId, projectId).catch(console.error);
-
-      if (!selectedProvider) {
-        return;
-      }
-      void prepareCurrentSessionWithModel(
-        selectedProvider,
-        nextProject,
-        activeWorkspace?.path,
-      ).catch((error) => {
-        console.error("Failed to update ACP session working directory:", error);
+      void moveSessionToProject(sessionId, projectId, {
+        providerId: selectedProvider,
+        activeWorkspacePath: activeWorkspace?.path,
+      }).catch((error) => {
+        console.error("Failed to move session to project:", error);
       });
     },
-    [
-      activeWorkspace?.path,
-      prepareCurrentSessionWithModel,
-      selectedProvider,
-      sessionId,
-    ],
+    [activeWorkspace?.path, selectedProvider, sessionId],
   );
 
   const handlePersonaChange = useCallback(
