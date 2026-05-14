@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
 import { AnimatePresence } from "motion/react";
 import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
@@ -45,19 +44,14 @@ export function ChatView({
   onCreatePersona,
   onCreateProject,
 }: ChatViewProps) {
-  const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
-  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const [isLoadingIndicatorMounted, setIsLoadingIndicatorMounted] =
     useState(false);
   const controller = useChatSessionController({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
   });
-  const contextPanelLabel = isContextPanelOpen
-    ? t("context.closePanel")
-    : t("context.openPanel");
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
@@ -185,10 +179,8 @@ export function ChatView({
         <ChatContextPanel
           activeSessionId={sessionId}
           isOpen={isContextPanelOpen}
-          label={contextPanelLabel}
           project={controller.project}
           sessionWorkingDir={controller.session?.workingDir}
-          setOpen={setContextPanelOpen}
         />
       </div>
     </ArtifactPolicyProvider>

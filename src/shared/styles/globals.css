@@ -489,6 +489,10 @@
   --shadow-date-field-focus: var(--shadow-date-field-focus);
 
   /* spacing — button/input heights */
+  --spacing-app-top-bar: 40px;
+  --spacing-app-top-bar-leading: 96px;
+  --spacing-app-top-bar-control: 24px;
+  --spacing-app-panel-gutter-top: 4px;
   --spacing-input: 3.25rem;
   --spacing-input-sm: 2.75rem;
   --spacing-button: 2.75rem;

@@ -51,23 +51,23 @@ export function TopBar({
   const ContextPanelIcon = contextPanelOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
-  const toolbarButtonClassName = "size-[24px]";
-  const toolbarButtonOffsetClassName = "translate-y-px";
+  const toolbarButtonClassName = "size-[var(--spacing-app-top-bar-control)]";
+  const toolbarButtonOffsetClassName = "translate-y-0.5";
   const toolbarIconClassName = "size-[18px]";
 
   return (
     <header
       className={cn(
-        "flex h-[30px] items-center bg-background/80 pr-[15px] backdrop-blur-sm",
+        "flex h-[var(--spacing-app-top-bar)] items-center bg-background/80 pr-5 backdrop-blur-sm",
         className,
       )}
     >
-      <div className="h-full w-[84px] shrink-0" data-tauri-drag-region />
       <div
-        className={cn(
-          "flex items-center gap-[1.5px]",
-          toolbarButtonOffsetClassName,
-        )}
+        className="h-full w-[var(--spacing-app-top-bar-leading)] shrink-0"
+        data-tauri-drag-region
+      />
+      <div
+        className={cn("flex items-center gap-1", toolbarButtonOffsetClassName)}
       >
         <Button
           type="button"
@@ -109,37 +109,39 @@ export function TopBar({
         className="ml-[6px] min-w-0 flex-1 self-stretch"
         data-tauri-drag-region
       />
-      <UpdateIndicator />
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        className={cn(toolbarButtonClassName, toolbarButtonOffsetClassName)}
-        onClick={onFeedbackClick}
-        aria-label={t("feedback:title")}
-        title={t("feedback:title")}
-      >
-        <IconMessageReport
-          aria-hidden="true"
-          className={toolbarIconClassName}
-        />
-      </Button>
-      {showContextPanelToggle && (
+      <div className="flex items-center gap-1">
+        <UpdateIndicator />
         <Button
           type="button"
           variant="ghost"
           size="icon-sm"
           className={cn(toolbarButtonClassName, toolbarButtonOffsetClassName)}
-          onClick={onToggleContextPanel}
-          aria-label={contextPanelLabel}
-          title={contextPanelLabel}
+          onClick={onFeedbackClick}
+          aria-label={t("feedback:title")}
+          title={t("feedback:title")}
         >
-          <ContextPanelIcon
+          <IconMessageReport
             aria-hidden="true"
             className={toolbarIconClassName}
           />
         </Button>
-      )}
+        {showContextPanelToggle && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(toolbarButtonClassName, toolbarButtonOffsetClassName)}
+            onClick={onToggleContextPanel}
+            aria-label={contextPanelLabel}
+            title={contextPanelLabel}
+          >
+            <ContextPanelIcon
+              aria-hidden="true"
+              className={toolbarIconClassName}
+            />
+          </Button>
+        )}
+      </div>
     </header>
   );
 }
