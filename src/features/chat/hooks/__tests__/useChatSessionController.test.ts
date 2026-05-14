@@ -611,7 +611,7 @@ describe("useChatSessionController", () => {
   it("applies the pending Home model to ACP when a real session becomes active", async () => {
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
-        useChatSessionController({ sessionId }),
+        useChatSessionController({ sessionId, isHomeSession: true }),
       {
         initialProps: { sessionId: null as string | null },
       },
@@ -667,7 +667,7 @@ describe("useChatSessionController", () => {
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
-        useChatSessionController({ sessionId }),
+        useChatSessionController({ sessionId, isHomeSession: true }),
       {
         initialProps: { sessionId: null as string | null },
       },
@@ -742,7 +742,7 @@ describe("useChatSessionController", () => {
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
-        useChatSessionController({ sessionId }),
+        useChatSessionController({ sessionId, isHomeSession: true }),
       {
         initialProps: { sessionId: null as string | null },
       },
@@ -812,7 +812,7 @@ describe("useChatSessionController", () => {
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
-        useChatSessionController({ sessionId }),
+        useChatSessionController({ sessionId, isHomeSession: true }),
       {
         initialProps: { sessionId: null as string | null },
       },

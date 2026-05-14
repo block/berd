@@ -43,6 +43,7 @@ import {
 
 interface UseChatSessionControllerOptions {
   sessionId: string | null;
+  isHomeSession?: boolean;
   onMessageAccepted?: (sessionId: string) => void;
   onCreatePersonaRequested?: () => void;
 }
@@ -184,6 +185,7 @@ async function syncPendingHomeModelSelection({
 
 export function useChatSessionController({
   sessionId,
+  isHomeSession,
   onMessageAccepted,
   onCreatePersonaRequested,
 }: UseChatSessionControllerOptions) {
@@ -215,14 +217,20 @@ export function useChatSessionController({
   const [pendingModelSelection, setPendingModelSelection] =
     useState<PreferredModelSelection | null>();
   const pendingDraftValue = useChatStore(
-    (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? "",
+    isHomeSession
+      ? (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? ""
+      : () => "",
   );
   const pendingSkillDrafts = useChatStore(
-    (s) =>
-      s.skillDraftsBySession[PENDING_HOME_SESSION_ID] ?? EMPTY_SKILL_DRAFTS,
+    isHomeSession
+      ? (s) =>
+          s.skillDraftsBySession[PENDING_HOME_SESSION_ID] ?? EMPTY_SKILL_DRAFTS
+      : () => EMPTY_SKILL_DRAFTS,
   );
   const pendingQueuedMessage = useChatStore(
-    (s) => s.queuedMessageBySession[PENDING_HOME_SESSION_ID] ?? null,
+    isHomeSession
+      ? (s) => s.queuedMessageBySession[PENDING_HOME_SESSION_ID] ?? null
+      : () => null,
   );
   const effectiveProjectId =
     pendingProjectId !== undefined
@@ -926,7 +934,7 @@ export function useChatSessionController({
   }, [sessionId]);
 
   useEffect(() => {
-    if (!sessionId) {
+    if (!sessionId || !isHomeSession) {
       return;
     }
 
@@ -1067,6 +1075,7 @@ export function useChatSessionController({
     activeWorkspace?.path,
     applySessionModelSelection,
     catalogEntries,
+    isHomeSession,
     pendingDraftValue,
     pendingSkillDrafts,
     pendingModelSelection,

@@ -60,6 +60,7 @@ function HomeComposer({
 }) {
   const controller = useChatSessionController({
     sessionId,
+    isHomeSession: true,
     onMessageAccepted: onActivateSession,
     onCreatePersonaRequested: onCreatePersona,
   });
