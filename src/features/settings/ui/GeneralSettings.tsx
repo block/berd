@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { type LocalePreference, useLocale } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -13,35 +13,31 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
 import { resetOnboardingCompletion } from "@/features/onboarding/hooks/useOnboardingGate";
-import { useTheme } from "@/shared/theme/ThemeProvider";
-import { Moon, Monitor, Sun, Check } from "lucide-react";
+import { ACCENT_COLORS, useTheme } from "@/shared/theme/ThemeProvider";
+import { Check, MonitorSmartphone, Moon, Search, Sun } from "lucide-react";
+import {
+  isLightTheme,
+  SYNTAX_THEMES,
+  type SyntaxThemeName,
+} from "@/shared/theme/theme-loader";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 
-const THEME_OPTIONS = [
-  { value: "light", icon: Sun },
-  { value: "dark", icon: Moon },
-  { value: "system", icon: Monitor },
-] as const;
-
-const ACCENT_COLORS = [
-  { name: "blue", value: "#3b82f6" },
-  { name: "cyan", value: "#06b6d4" },
-  { name: "green", value: "#22c55e" },
-  { name: "orange", value: "#f97316" },
-  { name: "red", value: "#ef4444" },
-  { name: "pink", value: "#ec4899" },
-  { name: "purple", value: "#a855f7" },
-];
-
 const DENSITY_OPTIONS = [
   { value: "compact" },
   { value: "comfortable" },
   { value: "spacious" },
 ] as const;
+
+function formatThemeLabel(name: string) {
+  return name
+    .split("-")
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
 
 interface AboutAppInfo {
   name: string;
@@ -114,7 +110,8 @@ export function GeneralSettings() {
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const {
-    theme,
+    selectedThemeName,
+    usingSystemTheme,
     setTheme,
     accentColorPreference,
     resetAccentColor,
@@ -122,7 +119,27 @@ export function GeneralSettings() {
     density,
     setDensity,
   } = useTheme();
+  const [themeSearch, setThemeSearch] = useState("");
+  const didScrollThemeRef = useRef(false);
   const gooseIcon = getProviderIcon("goose", "size-6");
+
+  const filteredThemes = useMemo(() => {
+    const query = themeSearch.toLowerCase().trim();
+    if (!query) {
+      return SYNTAX_THEMES;
+    }
+
+    return SYNTAX_THEMES.filter((themeName) => themeName.includes(query));
+  }, [themeSearch]);
+
+  const activeThemeRef = (node: HTMLButtonElement | null) => {
+    if (!node || didScrollThemeRef.current) {
+      return;
+    }
+
+    didScrollThemeRef.current = true;
+    node.scrollIntoView({ block: "center" });
+  };
 
   function resetOnboarding() {
     resetOnboardingCompletion();
@@ -229,44 +246,119 @@ export function GeneralSettings() {
       </SettingsSection>
 
       <SettingsSection title={t("appearance.title")}>
-        <SettingRow
-          label={t("appearance.theme.label")}
-          description={t("appearance.theme.description")}
-        >
-          <ToggleGroup
-            type="single"
-            value={theme}
-            onValueChange={(v) => v && setTheme(v as typeof theme)}
-            className="gap-1 rounded-lg bg-muted p-1"
+        <div className="space-y-3 px-4 py-4">
+          <div>
+            <p className="text-sm font-medium">{t("appearance.theme.label")}</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("appearance.theme.description")}
+            </p>
+          </div>
+
+          <button
+            aria-pressed={usingSystemTheme}
+            className={cn(
+              "flex w-full items-center gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              usingSystemTheme
+                ? "border-primary/30 bg-primary/10 text-foreground"
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+            )}
+            data-testid="theme-option-system"
+            onClick={() => {
+              setTheme(null);
+            }}
+            type="button"
           >
-            {THEME_OPTIONS.map((option) => (
-              <ToggleGroupItem
-                key={option.value}
-                value={option.value}
-                className="gap-1.5 rounded-md px-3 py-1.5 text-sm data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-none"
-              >
-                <option.icon className="h-3.5 w-3.5" />
-                {t(`appearance.theme.options.${option.value}`)}
-              </ToggleGroupItem>
-            ))}
-          </ToggleGroup>
-        </SettingRow>
+            <MonitorSmartphone className="h-4 w-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="truncate font-medium">
+                {t("appearance.theme.systemLabel")}
+              </div>
+              <div className="truncate text-xs text-muted-foreground">
+                {t("appearance.theme.systemDescription")}
+              </div>
+            </div>
+            {usingSystemTheme ? (
+              <Check className="h-4 w-4 shrink-0 text-primary" />
+            ) : null}
+          </button>
+
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              className="w-full rounded-lg border border-border/70 bg-background/70 py-2 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              data-testid="theme-search-input"
+              onChange={(event) => {
+                didScrollThemeRef.current = false;
+                setThemeSearch(event.target.value);
+              }}
+              placeholder={t("appearance.theme.searchPlaceholder")}
+              type="text"
+              value={themeSearch}
+            />
+          </div>
+
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-border/70 bg-background/70">
+            {filteredThemes.length === 0 ? (
+              <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+                {t("appearance.theme.empty")}
+              </p>
+            ) : (
+              filteredThemes.map((themeName) => {
+                const selected = selectedThemeName === themeName;
+                const ThemeIcon = isLightTheme(themeName) ? Sun : Moon;
+
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={cn(
+                      "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                      selected
+                        ? "bg-primary/10 text-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    )}
+                    data-testid={`theme-option-${themeName}`}
+                    key={themeName}
+                    onClick={() => {
+                      setTheme(themeName as SyntaxThemeName);
+                    }}
+                    ref={selected ? activeThemeRef : undefined}
+                    type="button"
+                  >
+                    <ThemeIcon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 truncate">
+                      {formatThemeLabel(themeName)}
+                    </span>
+                    {selected ? (
+                      <Check className="h-4 w-4 shrink-0 text-primary" />
+                    ) : null}
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </div>
 
         <SettingRow
           label={t("appearance.accent.label")}
-          description={t("appearance.accent.description")}
+          description={t(
+            usingSystemTheme
+              ? "appearance.accent.disabledDescription"
+              : "appearance.accent.description",
+          )}
         >
           <div className="flex max-w-36 flex-wrap justify-end gap-2">
             <button
               type="button"
               title={t("appearance.accent.colors.default")}
               aria-label={t("appearance.accent.colors.default")}
+              disabled={usingSystemTheme}
               onClick={resetAccentColor}
               className={cn(
-                "relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border transition-transform hover:scale-110",
+                "relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full border border-border transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100",
                 accentColorPreference === "default" &&
                   "ring-2 ring-ring ring-offset-2 ring-offset-background",
               )}
+              data-testid="accent-color-default"
             >
               <span className="absolute inset-0 bg-[linear-gradient(135deg,#1a1a1a_0_50%,#ffffff_50%_100%)]" />
               {accentColorPreference === "default" && (
@@ -279,12 +371,14 @@ export function GeneralSettings() {
                 key={color.value}
                 title={t(`appearance.accent.colors.${color.name}`)}
                 aria-label={t(`appearance.accent.colors.${color.name}`)}
+                disabled={usingSystemTheme}
                 onClick={() => setAccentColor(color.value)}
                 className={cn(
-                  "flex h-7 w-7 items-center justify-center rounded-full transition-transform hover:scale-110",
+                  "flex h-7 w-7 items-center justify-center rounded-full transition-transform hover:scale-110 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:scale-100",
                   accentColorPreference === color.value &&
                     "ring-2 ring-ring ring-offset-2 ring-offset-background",
                 )}
+                data-testid={`accent-color-${color.name}`}
                 style={{ backgroundColor: color.value }}
               >
                 {accentColorPreference === color.value && (

@@ -1,6 +1,6 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { renderWithProviders } from "@/test/render";
@@ -12,6 +12,60 @@ describe("GeneralSettings appearance section", () => {
     document.documentElement.removeAttribute("data-density");
     document.documentElement.style.removeProperty("--density-spacing");
     document.documentElement.style.removeProperty("--spacing");
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("filters and selects adaptive syntax themes", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId("theme-option-system")).toBeVisible();
+    expect(screen.getByTestId("accent-color-red")).toBeDisabled();
+
+    await user.type(screen.getByTestId("theme-search-input"), "dracula");
+    expect(screen.getByTestId("theme-option-dracula")).toBeVisible();
+    expect(
+      screen.queryByTestId("theme-option-github-light"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByTestId("theme-option-dracula"));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-custom-theme")).toBe("dracula");
+    });
+    expect(screen.getByTestId("accent-color-red")).toBeEnabled();
+
+    await user.click(screen.getByTestId("accent-color-red"));
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-accent-color")).toBe("#ef4444");
+    });
+  });
+
+  it("returns adaptive theming to system mode", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("goose-custom-theme", "dracula");
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-custom-theme")).toBe("dracula");
+    });
+
+    await user.click(screen.getByTestId("theme-option-system"));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-custom-theme")).toBeNull();
+    });
+    expect(screen.getByTestId("accent-color-red")).toBeDisabled();
   });
 
   it("updates interface density from the appearance controls", async () => {

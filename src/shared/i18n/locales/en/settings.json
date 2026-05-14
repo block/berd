@@ -29,6 +29,7 @@
         "red": "Red"
       },
       "description": "Used for highlights, focus rings, and active states.",
+      "disabledDescription": "Select a theme first to enable accent overrides.",
       "label": "Accent color"
     },
     "density": {
@@ -41,13 +42,12 @@
       }
     },
     "theme": {
-      "description": "Choose your color scheme.",
+      "description": "Pick a syntax-inspired app theme, or leave it unset to follow your system appearance.",
+      "empty": "No themes match your search.",
       "label": "Theme",
-      "options": {
-        "dark": "Dark",
-        "light": "Light",
-        "system": "System"
-      }
+      "searchPlaceholder": "Search themes...",
+      "systemDescription": "Uses the default Goose light or dark theme based on your device settings.",
+      "systemLabel": "System default"
     },
     "title": "Appearance"
   },
