@@ -86,11 +86,6 @@ const DEFAULT_SECTION_VISIBILITY: SidebarSectionVisibility = {
   projects: true,
   recents: true,
 };
-const BUILD_APP_VERSION = import.meta.env.VITE_APP_VERSION;
-
-function formatAppVersionLabel(version: string) {
-  return `v${version}${import.meta.env.DEV ? "-dev" : ""}`;
-}
 
 function validateSectionVisibility(
   value: unknown,
@@ -139,9 +134,6 @@ export function Sidebar({
 }: SidebarProps) {
   const { t, i18n } = useTranslation(["sidebar", "common", "settings"]);
   const [expanded, setExpanded] = useState(!collapsed);
-  const [appVersionLabel, setAppVersionLabel] = useState<string | null>(() =>
-    BUILD_APP_VERSION ? formatAppVersionLabel(BUILD_APP_VERSION) : null,
-  );
   const searchInputRef = useRef<HTMLInputElement>(null);
   const prevCollapsed = useRef(collapsed);
   const [expandedProjects, setExpandedProjects] = useState<
@@ -184,32 +176,6 @@ export function Sidebar({
     }
     prevCollapsed.current = collapsed;
   }, [collapsed]);
-
-  useEffect(() => {
-    if (import.meta.env.DEV || !window.__TAURI_INTERNALS__) {
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadAppVersion() {
-      try {
-        const { getVersion } = await import("@tauri-apps/api/app");
-        const version = await getVersion();
-        if (!cancelled) {
-          setAppVersionLabel(formatAppVersionLabel(version));
-        }
-      } catch {
-        // Keep the build-time package version fallback.
-      }
-    }
-
-    void loadAppVersion();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const labelTransition = "transition-[opacity,width] duration-300 ease-out";
   const labelVisible = expanded && !collapsed;
@@ -614,19 +580,6 @@ export function Sidebar({
                 ))}
               </div>
             </nav>
-            {!collapsed && appVersionLabel ? (
-              <div
-                className={cn(
-                  "flex-shrink-0 px-3 pb-1 pt-2 text-[11px] leading-4 text-muted-foreground/70",
-                  labelTransition,
-                  labelVisible
-                    ? "opacity-100 w-auto"
-                    : "opacity-0 w-0 overflow-hidden",
-                )}
-              >
-                {appVersionLabel}
-              </div>
-            ) : null}
             <div className={cn("flex-shrink-0 bg-background", "px-1.5 py-1.5")}>
               <Button
                 type="button"
