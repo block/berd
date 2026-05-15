@@ -1,4 +1,4 @@
-import { Download, RotateCcw } from "lucide-react";
+import { ArrowUpCircle, Download } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useUpdaterContext } from "@/features/updates/hooks/useUpdater";
 import { cn } from "@/shared/lib/cn";
@@ -31,7 +31,7 @@ export function UpdateIndicator() {
   const label = t(
     isReady ? "updates.indicator.ready" : "updates.indicator.inProgress",
   );
-  const readyActionLabel = t("updates.actions.restart");
+  const readyActionLabel = t("updates.actions.update");
 
   return (
     <Button
@@ -40,11 +40,13 @@ export function UpdateIndicator() {
       size={isReady ? "xxs" : "icon-sm"}
       className={cn(
         "translate-y-px",
-        isReady ? "h-6 px-2 text-xs" : "size-[24px]",
+        isReady
+          ? "h-6 px-2 text-xs bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
+          : "size-[24px]",
       )}
       leftIcon={
         isReady ? (
-          <RotateCcw aria-hidden="true" className="size-[14px]" />
+          <ArrowUpCircle aria-hidden="true" className="size-[14px]" />
         ) : undefined
       }
       onClick={() => {

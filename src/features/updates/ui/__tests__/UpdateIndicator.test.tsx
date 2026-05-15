@@ -60,7 +60,7 @@ describe("UpdateIndicator", () => {
 
     renderWithProviders(<UpdateIndicator />);
 
-    await user.click(screen.getByRole("button", { name: "Restart to Update" }));
+    await user.click(screen.getByRole("button", { name: "Update Goose" }));
 
     expect(state.relaunch).toHaveBeenCalledTimes(1);
   });

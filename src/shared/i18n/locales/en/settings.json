@@ -188,7 +188,8 @@
       "check": "Check for Updates",
       "checking": "Checking...",
       "restart": "Restart to Update",
-      "retry": "Try Again"
+      "retry": "Try Again",
+      "update": "Update Goose"
     },
     "card": {
       "checkPrompt": "Check if a new version is available.",

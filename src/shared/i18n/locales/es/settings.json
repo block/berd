@@ -188,7 +188,8 @@
       "check": "Buscar actualizaciones",
       "checking": "Comprobando...",
       "restart": "Reiniciar",
-      "retry": "Intentar de nuevo"
+      "retry": "Intentar de nuevo",
+      "update": "Actualizar Goose"
     },
     "card": {
       "checkPrompt": "Busca si hay una nueva versión disponible.",
