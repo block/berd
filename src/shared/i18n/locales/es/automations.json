@@ -8,8 +8,11 @@
     "duplicate": "Duplicar",
     "duplicating": "Duplicando...",
     "edit": "Editar",
+    "more": "Mas acciones",
     "refresh": "Actualizar automatizaciones",
     "refreshShort": "Actualizar",
+    "run": "Ejecutar",
+    "runUnavailable": "La ejecucion manual aun no esta conectada.",
     "save": "Guardar",
     "saving": "Guardando..."
   },
@@ -91,6 +94,8 @@
       "scheduleRepeats": "Repeticion",
       "scheduleTime": "Hora",
       "timeZone": "Zona horaria",
+      "timeZoneEmpty": "No se encontraron zonas horarias.",
+      "timeZoneSearch": "Buscar zonas horarias",
       "title": "Titulo"
     },
     "instructionsRequired": "Las instrucciones no pueden estar vacias.",

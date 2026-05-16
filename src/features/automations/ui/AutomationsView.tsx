@@ -13,6 +13,8 @@ import {
   IconCheck,
   IconClock,
   IconCopy,
+  IconDots,
+  IconPlayerPlay,
   IconPlus,
   IconRefresh,
   IconTrash,
@@ -36,6 +38,12 @@ import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
 import {
   Select,
@@ -45,10 +53,10 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { Separator } from "@/shared/ui/separator";
+import { SearchableSelect } from "@/shared/ui/searchable-select";
 import { Spinner } from "@/shared/ui/spinner";
 import { Switch } from "@/shared/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
-import { Textarea } from "@/shared/ui/textarea";
 import { PageHeader, PageShell } from "@/shared/ui/page-shell";
 import { cn } from "@/shared/lib/cn";
 
@@ -71,6 +79,26 @@ const WEEKDAY_OPTIONS = [
   { value: "4", labelKey: "edit.weekdays.thursday" },
   { value: "5", labelKey: "edit.weekdays.friday" },
   { value: "6", labelKey: "edit.weekdays.saturday" },
+] as const;
+
+const FALLBACK_TIME_ZONE_OPTIONS = [
+  "America/Los_Angeles",
+  "America/Denver",
+  "America/Chicago",
+  "America/New_York",
+  "America/Toronto",
+  "America/Sao_Paulo",
+  "Europe/London",
+  "Europe/Paris",
+  "Europe/Berlin",
+  "Europe/Madrid",
+  "Asia/Dubai",
+  "Asia/Kolkata",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "Australia/Sydney",
+  "Pacific/Auckland",
+  "UTC",
 ] as const;
 
 function formatStatus(
@@ -106,23 +134,6 @@ function statusVariant(
     return "secondary";
   }
   return "outline";
-}
-
-function statusIcon(value: string | number | undefined) {
-  const normalized = String(value ?? "").toLowerCase();
-  if (normalized.includes("failed")) {
-    return <IconAlertTriangle aria-hidden="true" />;
-  }
-  if (normalized.includes("input") || normalized.includes("configuration")) {
-    return <IconAlertTriangle aria-hidden="true" />;
-  }
-  if (normalized.includes("success") || normalized.includes("active")) {
-    return <IconCheck aria-hidden="true" />;
-  }
-  if (normalized.includes("running") || normalized.includes("pending")) {
-    return <IconClock aria-hidden="true" />;
-  }
-  return undefined;
 }
 
 function overviewActivityIcon(value: string | number | undefined) {
@@ -592,6 +603,20 @@ function automationTimeZone(tile: AutomationTile) {
   return tile.timeZone ?? defaultTimeZone();
 }
 
+function supportedTimeZones() {
+  const supportedValuesOf = (
+    Intl as typeof Intl & {
+      supportedValuesOf?: (key: "timeZone") => string[];
+    }
+  ).supportedValuesOf;
+
+  if (typeof supportedValuesOf === "function") {
+    return supportedValuesOf("timeZone");
+  }
+
+  return [...FALLBACK_TIME_ZONE_OPTIONS];
+}
+
 function AutomationHistory({
   tile,
   tileId,
@@ -916,6 +941,8 @@ function AutomationDetailPage({
   onActiveTabChange,
   onSelectRun,
   onBack,
+  onAdd,
+  onRefresh,
   onSave,
   onDelete,
   onDuplicate,
@@ -930,17 +957,13 @@ function AutomationDetailPage({
   onActiveTabChange: (tab: "details" | "history") => void;
   onSelectRun: (runKey: string) => void;
   onBack: () => void;
+  onAdd: () => void;
+  onRefresh: () => void;
   onSave: (request: UpdateAutomationTileRequest) => void;
   onDelete: () => void;
   onDuplicate: () => void;
 }) {
   const { t } = useTranslation("automations");
-  const scheduleLabels = {
-    noSchedule: t("schedule.none"),
-    paused: t("schedule.paused"),
-    pausedWithReason: (reason: string) =>
-      t("schedule.pausedWithReason", { reason }),
-  };
   const title = automationTitle(tile, t("fallbacks.untitledAutomation"));
   const initialSchedule = parseScheduleForm(tile.schedule);
   const [titleDraft, setTitleDraft] = useState(tile.title ?? "");
@@ -962,11 +985,32 @@ function AutomationDetailPage({
     tile.enableNotifications ?? false,
   );
   const [localError, setLocalError] = useState<string | null>(null);
+  const timeZoneOptions = useMemo(
+    () =>
+      [
+        ...new Set([
+          automationTimeZone(tile),
+          defaultTimeZone(),
+          ...supportedTimeZones(),
+        ]),
+      ]
+        .sort((a, b) => a.localeCompare(b))
+        .map((timeZone) => ({ value: timeZone, label: timeZone })),
+    [tile],
+  );
   const latestResultSummary = tile.latestRenderedData
     ? getOutputSummary(tile.latestRenderedData)
     : null;
-  const runStatus = tile.latestRunStatus ?? tile.status;
-  const runStatusLabel = formatStatus(runStatus, t("fallbacks.unknown"));
+  const latestRunStatus =
+    tile.latestRunStatus ?? (tile.lastSuccessAt ? "success" : undefined);
+  const latestRunAt = latestRunStatus
+    ? (tile.updated ?? tile.lastSuccessAt)
+    : undefined;
+  const latestRunActivity = latestRunAt
+    ? t("overview.lastActivity", {
+        time: formatTimestamp(latestRunAt, t("fallbacks.never")),
+      })
+    : t("overview.neverRun");
   const schedulePreview =
     (formatCronSchedule(
       buildScheduleFromForm({
@@ -1064,10 +1108,11 @@ function AutomationDetailPage({
     onSave(request);
   };
 
-  const saveTimeZone = () => {
+  const saveTimeZone = (nextTimeZone = timeZoneDraft) => {
+    setTimeZoneDraft(nextTimeZone);
     const request = baseUpdateRequest();
     if (!request) return;
-    const trimmedTimeZone = timeZoneDraft.trim();
+    const trimmedTimeZone = nextTimeZone.trim();
     if (!trimmedTimeZone || trimmedTimeZone === (tile.timeZone ?? "")) return;
     const currentSchedule = buildScheduleFromForm({
       preset: schedulePreset,
@@ -1075,14 +1120,16 @@ function AutomationDetailPage({
       weekday: scheduleWeekday,
       customSchedule,
     });
-    if (!currentSchedule) return;
     setLocalError(null);
-    onSave({
-      ...request,
+    const updateRequest: UpdateAutomationTileRequest = {
+      id: request.id,
       updateSchedule: true,
-      schedule: currentSchedule,
       timeZone: trimmedTimeZone,
-    });
+    };
+    if (currentSchedule) {
+      updateRequest.schedule = currentSchedule;
+    }
+    onSave(updateRequest);
   };
 
   const saveNotifications = (enabled: boolean) => {
@@ -1095,337 +1142,370 @@ function AutomationDetailPage({
   };
 
   const currentError = localError ?? mutationError;
+  const detailActions = (
+    <>
+      <Button
+        type="button"
+        variant="outline-flat"
+        size="xs"
+        disabled
+        title={t("actions.runUnavailable")}
+        leftIcon={<IconPlayerPlay aria-hidden="true" />}
+      >
+        {t("actions.run")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline-flat"
+        size="xs"
+        onClick={onRefresh}
+        aria-label={t("actions.refresh")}
+        title={t("actions.refresh")}
+        leftIcon={<IconRefresh aria-hidden="true" />}
+      >
+        {t("actions.refreshShort")}
+      </Button>
+      <Button
+        type="button"
+        variant="outline-flat"
+        size="xs"
+        onClick={onAdd}
+        aria-label={t("actions.add")}
+        title={t("actions.add")}
+        leftIcon={<IconPlus aria-hidden="true" />}
+      >
+        {t("actions.addShort")}
+      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            size="icon-xs"
+            variant="outline-flat"
+            aria-label={t("actions.more")}
+          >
+            <IconDots className="size-3.5" aria-hidden="true" />
+            <span className="sr-only">{t("actions.more")}</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={8}>
+          <DropdownMenuItem
+            disabled={
+              isSaving || isDuplicating || !canDuplicateAutomation(tile)
+            }
+            onSelect={onDuplicate}
+          >
+            <IconCopy className="size-3.5" aria-hidden="true" />
+            {isDuplicating ? t("actions.duplicating") : t("actions.duplicate")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            variant="destructive"
+            disabled={isDeleting}
+            onSelect={onDelete}
+          >
+            <IconTrash className="size-3.5" aria-hidden="true" />
+            {t("actions.delete")}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </>
+  );
 
   return (
-    <div className="grid min-h-full gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
-      <section className="min-w-0 space-y-8">
-        <div className="space-y-5">
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <button
-              type="button"
-              onClick={onBack}
-              className="hover:text-foreground"
-            >
-              {t("title")}
-            </button>
-            <IconChevronRight className="size-4" aria-hidden="true" />
-            <span className="truncate text-foreground">{title}</span>
-          </div>
-
-          <div className="max-w-3xl">
-            <Input
-              variant="ghost"
-              aria-label={t("edit.fields.title")}
-              value={titleDraft}
-              onChange={(event) => setTitleDraft(event.target.value)}
-              onBlur={saveTitle}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.currentTarget.blur();
-                }
-              }}
-              disabled={isSaving}
-              className="h-auto px-0 py-0 text-3xl font-medium tracking-tight text-foreground"
-            />
-            <div className="mt-4 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <Badge variant={statusVariant(runStatus)}>
-                {statusIcon(runStatus)}
-                {runStatusLabel}
-              </Badge>
-              <span>{formatSchedule(tile, scheduleLabels)}</span>
-              <span aria-hidden="true">/</span>
-              <span>
-                {formatTimestamp(
-                  tile.lastSuccessAt ?? tile.updated,
-                  t("fallbacks.never"),
-                )}
-              </span>
-            </div>
-          </div>
+    <section className="min-w-0 space-y-8">
+      <div className="space-y-5 pb-2">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <button
+            type="button"
+            onClick={onBack}
+            className="hover:text-foreground"
+          >
+            {t("title")}
+          </button>
+          <IconChevronRight className="size-4" aria-hidden="true" />
+          <span className="truncate text-foreground">{title}</span>
         </div>
 
-        {currentError ? (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {currentError}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0 flex-1">
+            <div className="max-w-3xl">
+              <Input
+                variant="ghost"
+                aria-label={t("edit.fields.title")}
+                value={titleDraft}
+                onChange={(event) => setTitleDraft(event.target.value)}
+                onBlur={saveTitle}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.currentTarget.blur();
+                  }
+                }}
+                disabled={isSaving}
+                className="h-auto px-0 py-0 text-3xl font-medium tracking-tight text-foreground"
+              />
+            </div>
           </div>
-        ) : null}
 
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) =>
-            onActiveTabChange(value as "details" | "history")
-          }
-        >
-          <TabsList variant="buttons">
-            <TabsTrigger value="details" variant="buttons">
-              {t("tabs.details")}
-            </TabsTrigger>
-            <TabsTrigger value="history" variant="buttons">
-              {t("tabs.history")}
-            </TabsTrigger>
-          </TabsList>
+          <div className="flex flex-wrap items-center gap-2">
+            {detailActions}
+          </div>
+        </div>
+      </div>
 
-          <TabsContent value="details" className="mt-6 space-y-8">
-            <section className="max-w-3xl space-y-3">
-              <div className="flex items-center justify-between gap-3">
+      {currentError ? (
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {currentError}
+        </div>
+      ) : null}
+
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) =>
+          onActiveTabChange(value as "details" | "history")
+        }
+      >
+        <TabsList variant="buttons">
+          <TabsTrigger value="details" variant="buttons">
+            {t("tabs.details")}
+          </TabsTrigger>
+          <TabsTrigger value="history" variant="buttons">
+            {t("tabs.history")}
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="details" className="mt-6">
+          <div className="grid min-h-0 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
+            <div className="min-w-0 space-y-8">
+              <section className="space-y-3">
                 <h2 className="text-sm font-medium text-foreground">
                   {t("details.instructions")}
                 </h2>
-                <span className="text-xs text-muted-foreground">
-                  {isSaving
-                    ? t("edit.autosave.saving")
-                    : t("edit.autosave.saved")}
-                </span>
-              </div>
-              <Textarea
-                aria-label={t("edit.fields.instructions")}
-                value={instructionsDraft}
-                onChange={(event) => setInstructionsDraft(event.target.value)}
-                onBlur={saveInstructions}
-                disabled={isSaving}
-                placeholder={t("details.noInstructions")}
-                className="min-h-[420px] resize-y border-transparent bg-transparent px-0 text-base leading-7 text-foreground shadow-none hover:border-border focus-visible:border-ring"
-              />
-            </section>
+                <textarea
+                  aria-label={t("edit.fields.instructions")}
+                  value={instructionsDraft}
+                  onChange={(event) => setInstructionsDraft(event.target.value)}
+                  onBlur={saveInstructions}
+                  disabled={isSaving}
+                  placeholder={t("details.noInstructions")}
+                  rows={1}
+                  className="min-h-[420px] w-full resize-none bg-transparent px-1 py-0 text-[14px] leading-relaxed text-foreground placeholder:font-light placeholder:text-muted-foreground/60 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
+                />
+              </section>
 
-            <section className="max-w-3xl space-y-3 border-t border-border pt-6">
-              <h2 className="text-sm font-medium text-foreground">
-                {t("details.latestResult")}
-              </h2>
-              {latestResultSummary ? (
-                <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                  {latestResultSummary}
+              <section className="space-y-3 border-t border-border pt-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-medium text-foreground">
+                    {t("details.latestResult")}
+                  </h2>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    {overviewActivityIcon(latestRunStatus)}
+                    {latestRunActivity}
+                  </span>
+                </div>
+                {latestResultSummary ? (
+                  <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                    {latestResultSummary}
+                  </p>
+                ) : tile.latestRenderedData ? (
+                  <JsonPreview value={tile.latestRenderedData} />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    {t("details.noLatestResult")}
+                  </p>
+                )}
+              </section>
+            </div>
+
+            <aside className="border-t border-border pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
+              <section className="space-y-4">
+                <h2 className="text-xs font-medium text-muted-foreground">
+                  {t("details.runSettings")}
+                </h2>
+                <label
+                  className="grid gap-2 text-sm"
+                  htmlFor="detail-schedule-preset"
+                >
+                  <span className="text-xs text-muted-foreground">
+                    {t("edit.fields.scheduleRepeats")}
+                  </span>
+                  <Select
+                    value={schedulePreset}
+                    onValueChange={(value) => {
+                      const nextPreset = value as SchedulePreset;
+                      setSchedulePreset(nextPreset);
+                      saveSchedule({ preset: nextPreset });
+                    }}
+                    disabled={isSaving}
+                  >
+                    <SelectTrigger
+                      id="detail-schedule-preset"
+                      className="w-full"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        {t("edit.schedulePresets.none")}
+                      </SelectItem>
+                      <SelectItem value="hourly">
+                        {t("edit.schedulePresets.hourly")}
+                      </SelectItem>
+                      <SelectItem value="daily">
+                        {t("edit.schedulePresets.daily")}
+                      </SelectItem>
+                      <SelectItem value="weekdays">
+                        {t("edit.schedulePresets.weekdays")}
+                      </SelectItem>
+                      <SelectItem value="weekly">
+                        {t("edit.schedulePresets.weekly")}
+                      </SelectItem>
+                      <SelectItem value="custom">
+                        {t("edit.schedulePresets.custom")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </label>
+
+                {schedulePreset === "weekly" ? (
+                  <label
+                    className="grid gap-2 text-sm"
+                    htmlFor="detail-schedule-day"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {t("edit.fields.scheduleDay")}
+                    </span>
+                    <Select
+                      value={scheduleWeekday}
+                      onValueChange={(value) => {
+                        setScheduleWeekday(value);
+                        saveSchedule({ weekday: value });
+                      }}
+                      disabled={isSaving}
+                    >
+                      <SelectTrigger
+                        id="detail-schedule-day"
+                        className="w-full"
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {WEEKDAY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </label>
+                ) : null}
+
+                {schedulePreset !== "none" &&
+                schedulePreset !== "hourly" &&
+                schedulePreset !== "custom" ? (
+                  <label
+                    className="grid gap-2 text-sm"
+                    htmlFor="detail-schedule-time"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {t("edit.fields.scheduleTime")}
+                    </span>
+                    <Input
+                      id="detail-schedule-time"
+                      type="time"
+                      value={scheduleTime}
+                      onChange={(event) => setScheduleTime(event.target.value)}
+                      onBlur={() => saveSchedule({ time: scheduleTime })}
+                      disabled={isSaving}
+                    />
+                  </label>
+                ) : null}
+
+                {schedulePreset === "custom" ? (
+                  <label
+                    className="grid gap-2 text-sm"
+                    htmlFor="detail-schedule-custom"
+                  >
+                    <span className="text-xs text-muted-foreground">
+                      {t("edit.fields.scheduleCustom")}
+                    </span>
+                    <Input
+                      id="detail-schedule-custom"
+                      value={customSchedule}
+                      onChange={(event) =>
+                        setCustomSchedule(event.target.value)
+                      }
+                      onBlur={() => saveSchedule({ customSchedule })}
+                      placeholder={t("edit.fields.schedulePlaceholder")}
+                      disabled={isSaving}
+                    />
+                  </label>
+                ) : null}
+
+                <p className="text-xs text-muted-foreground">
+                  {t("edit.fields.schedulePreview", {
+                    schedule: schedulePreview,
+                  })}
                 </p>
-              ) : tile.latestRenderedData ? (
-                <JsonPreview value={tile.latestRenderedData} />
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("details.noLatestResult")}
-                </p>
-              )}
-            </section>
-          </TabsContent>
 
-          <TabsContent value="history" className="mt-6">
-            {tile.id ? (
-              <AutomationHistory
-                tile={tile}
-                tileId={tile.id}
-                selectedRunKey={selectedRunKey}
-                onSelectRun={onSelectRun}
-              />
-            ) : (
-              <EmptyState
-                title={t("history.unavailableTitle")}
-                body={t("history.unavailableBody")}
-              />
-            )}
-          </TabsContent>
-        </Tabs>
-      </section>
+                <label className="grid gap-2 text-sm" htmlFor="detail-timezone">
+                  <span className="text-xs text-muted-foreground">
+                    {t("details.timeZone")}
+                  </span>
+                  <SearchableSelect
+                    id="detail-timezone"
+                    value={timeZoneDraft}
+                    options={timeZoneOptions}
+                    onValueChange={saveTimeZone}
+                    disabled={isSaving}
+                    searchPlaceholder={t("edit.fields.timeZoneSearch")}
+                    emptyLabel={t("edit.fields.timeZoneEmpty")}
+                  />
+                </label>
 
-      <aside className="space-y-8 border-t border-border pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
-        <div className="flex justify-end gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onDuplicate}
-            disabled={
-              isSaving ||
-              isDeleting ||
-              isDuplicating ||
-              !canDuplicateAutomation(tile)
-            }
-            leftIcon={<IconCopy aria-hidden="true" />}
-          >
-            {isDuplicating ? t("actions.duplicating") : t("actions.duplicate")}
-          </Button>
-          <Button
-            type="button"
-            variant="destructive"
-            size="sm"
-            onClick={onDelete}
-            disabled={isDeleting}
-            leftIcon={<IconTrash aria-hidden="true" />}
-          >
-            {t("actions.delete")}
-          </Button>
-        </div>
-
-        <section className="space-y-3">
-          <h2 className="text-xs font-medium text-muted-foreground">
-            {t("details.status")}
-          </h2>
-          <div className="space-y-2 text-sm">
-            <Badge variant={statusVariant(runStatus)}>
-              {statusIcon(runStatus)}
-              {runStatusLabel}
-            </Badge>
-            <p className="text-muted-foreground">
-              {t("details.lastSuccessfulRun")}:{" "}
-              <span className="text-foreground">
-                {formatTimestamp(tile.lastSuccessAt, t("fallbacks.never"))}
-              </span>
-            </p>
+                <label
+                  className="flex items-center justify-between gap-3 text-sm"
+                  htmlFor="detail-notifications"
+                >
+                  <span>
+                    <span className="block text-foreground">
+                      {t("edit.fields.notifications")}
+                    </span>
+                    <span className="block text-xs text-muted-foreground">
+                      {notificationsDraft
+                        ? t("details.notificationsEnabled")
+                        : t("details.notificationsDisabled")}
+                    </span>
+                  </span>
+                  <Switch
+                    id="detail-notifications"
+                    checked={notificationsDraft}
+                    onCheckedChange={saveNotifications}
+                    disabled={isSaving}
+                    aria-label={t("details.notifications")}
+                  />
+                </label>
+              </section>
+            </aside>
           </div>
-        </section>
+        </TabsContent>
 
-        <section className="space-y-4">
-          <h2 className="text-xs font-medium text-muted-foreground">
-            {t("details.runSettings")}
-          </h2>
-          <label
-            className="grid gap-2 text-sm"
-            htmlFor="detail-schedule-preset"
-          >
-            <span className="text-xs text-muted-foreground">
-              {t("edit.fields.scheduleRepeats")}
-            </span>
-            <Select
-              value={schedulePreset}
-              onValueChange={(value) => {
-                const nextPreset = value as SchedulePreset;
-                setSchedulePreset(nextPreset);
-                saveSchedule({ preset: nextPreset });
-              }}
-              disabled={isSaving}
-            >
-              <SelectTrigger id="detail-schedule-preset" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">
-                  {t("edit.schedulePresets.none")}
-                </SelectItem>
-                <SelectItem value="hourly">
-                  {t("edit.schedulePresets.hourly")}
-                </SelectItem>
-                <SelectItem value="daily">
-                  {t("edit.schedulePresets.daily")}
-                </SelectItem>
-                <SelectItem value="weekdays">
-                  {t("edit.schedulePresets.weekdays")}
-                </SelectItem>
-                <SelectItem value="weekly">
-                  {t("edit.schedulePresets.weekly")}
-                </SelectItem>
-                <SelectItem value="custom">
-                  {t("edit.schedulePresets.custom")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </label>
-
-          {schedulePreset === "weekly" ? (
-            <label className="grid gap-2 text-sm" htmlFor="detail-schedule-day">
-              <span className="text-xs text-muted-foreground">
-                {t("edit.fields.scheduleDay")}
-              </span>
-              <Select
-                value={scheduleWeekday}
-                onValueChange={(value) => {
-                  setScheduleWeekday(value);
-                  saveSchedule({ weekday: value });
-                }}
-                disabled={isSaving}
-              >
-                <SelectTrigger id="detail-schedule-day" className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {WEEKDAY_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {t(option.labelKey)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </label>
-          ) : null}
-
-          {schedulePreset !== "none" &&
-          schedulePreset !== "hourly" &&
-          schedulePreset !== "custom" ? (
-            <label
-              className="grid gap-2 text-sm"
-              htmlFor="detail-schedule-time"
-            >
-              <span className="text-xs text-muted-foreground">
-                {t("edit.fields.scheduleTime")}
-              </span>
-              <Input
-                id="detail-schedule-time"
-                type="time"
-                value={scheduleTime}
-                onChange={(event) => setScheduleTime(event.target.value)}
-                onBlur={() => saveSchedule({ time: scheduleTime })}
-                disabled={isSaving}
-              />
-            </label>
-          ) : null}
-
-          {schedulePreset === "custom" ? (
-            <label
-              className="grid gap-2 text-sm"
-              htmlFor="detail-schedule-custom"
-            >
-              <span className="text-xs text-muted-foreground">
-                {t("edit.fields.scheduleCustom")}
-              </span>
-              <Input
-                id="detail-schedule-custom"
-                value={customSchedule}
-                onChange={(event) => setCustomSchedule(event.target.value)}
-                onBlur={() => saveSchedule({ customSchedule })}
-                placeholder={t("edit.fields.schedulePlaceholder")}
-                disabled={isSaving}
-              />
-            </label>
-          ) : null}
-
-          <p className="text-xs text-muted-foreground">
-            {t("edit.fields.schedulePreview", { schedule: schedulePreview })}
-          </p>
-
-          <label className="grid gap-2 text-sm" htmlFor="detail-timezone">
-            <span className="text-xs text-muted-foreground">
-              {t("details.timeZone")}
-            </span>
-            <Input
-              id="detail-timezone"
-              value={timeZoneDraft}
-              onChange={(event) => setTimeZoneDraft(event.target.value)}
-              onBlur={saveTimeZone}
-              disabled={isSaving}
+        <TabsContent value="history" className="mt-6">
+          {tile.id ? (
+            <AutomationHistory
+              tile={tile}
+              tileId={tile.id}
+              selectedRunKey={selectedRunKey}
+              onSelectRun={onSelectRun}
             />
-          </label>
-
-          <label
-            className="flex items-center justify-between gap-3 text-sm"
-            htmlFor="detail-notifications"
-          >
-            <span>
-              <span className="block text-foreground">
-                {t("details.notifications")}
-              </span>
-              <span className="block text-xs text-muted-foreground">
-                {notificationsDraft
-                  ? t("details.notificationsEnabled")
-                  : t("details.notificationsDisabled")}
-              </span>
-            </span>
-            <Switch
-              id="detail-notifications"
-              checked={notificationsDraft}
-              onCheckedChange={saveNotifications}
-              disabled={isSaving}
-              aria-label={t("details.notifications")}
+          ) : (
+            <EmptyState
+              title={t("history.unavailableTitle")}
+              body={t("history.unavailableBody")}
             />
-          </label>
-        </section>
-      </aside>
-    </div>
+          )}
+        </TabsContent>
+      </Tabs>
+    </section>
   );
 }
 
@@ -1643,6 +1723,14 @@ export function AutomationsWorkbench() {
     };
   }, []);
 
+  const openBuilder = () => {
+    setBuilderOpen(true);
+    setDetailAutomationId(null);
+    setDetailTab("details");
+    setSelectedRunKey(null);
+    setMutationError(null);
+  };
+
   const headerActions = (
     <>
       <Button
@@ -1660,13 +1748,7 @@ export function AutomationsWorkbench() {
         type="button"
         variant="outline-flat"
         size="xs"
-        onClick={() => {
-          setBuilderOpen(true);
-          setDetailAutomationId(null);
-          setDetailTab("details");
-          setSelectedRunKey(null);
-          setMutationError(null);
-        }}
+        onClick={openBuilder}
         aria-label={t("actions.add")}
         title={t("actions.add")}
         leftIcon={<IconPlus aria-hidden="true" />}
@@ -1694,12 +1776,14 @@ export function AutomationsWorkbench() {
         />
       ) : (
         <PageShell contentClassName="gap-6">
-          <PageHeader
-            title={t("title")}
-            description={t("subtitle")}
-            titleClassName="font-normal text-foreground"
-            actions={headerActions}
-          />
+          {!detailAutomationId ? (
+            <PageHeader
+              title={t("title")}
+              description={t("subtitle")}
+              titleClassName="font-normal text-foreground"
+              actions={headerActions}
+            />
+          ) : null}
 
           {detailAutomationId ? (
             detailQuery.isLoading && !detailTile ? (
@@ -1728,6 +1812,11 @@ export function AutomationsWorkbench() {
                   onActiveTabChange={setDetailTab}
                   onSelectRun={setSelectedRunKey}
                   onBack={closeDetail}
+                  onAdd={openBuilder}
+                  onRefresh={() => {
+                    void automationsQuery.refetch();
+                    void detailQuery.refetch();
+                  }}
                   onSave={(request) => updateMutation.mutate(request)}
                   onDelete={() => {
                     if (!detailTileId) return;

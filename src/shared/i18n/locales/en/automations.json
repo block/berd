@@ -8,8 +8,11 @@
     "duplicate": "Duplicate",
     "duplicating": "Duplicating...",
     "edit": "Edit",
+    "more": "More actions",
     "refresh": "Refresh automations",
     "refreshShort": "Refresh",
+    "run": "Run",
+    "runUnavailable": "Manual runs are not connected yet.",
     "save": "Save",
     "saving": "Saving..."
   },
@@ -91,6 +94,8 @@
       "scheduleRepeats": "Repeats",
       "scheduleTime": "Time",
       "timeZone": "Time zone",
+      "timeZoneEmpty": "No time zones found.",
+      "timeZoneSearch": "Search timezones",
       "title": "Title"
     },
     "instructionsRequired": "Instructions cannot be empty.",
