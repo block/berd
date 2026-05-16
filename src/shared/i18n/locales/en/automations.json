@@ -11,9 +11,8 @@
     "more": "More actions",
     "refresh": "Refresh automations",
     "refreshShort": "Refresh",
-    "run": "Run",
-    "runUnavailable": "Manual runs are not connected yet.",
     "save": "Save",
+    "saveChanges": "Save changes",
     "saving": "Saving..."
   },
   "delete": {
@@ -60,6 +59,7 @@
     "connections": "Connections",
     "description": "Review what this automation does, how it runs, and the state of recent runs.",
     "details": "Details",
+    "editInstructions": "Edit instructions",
     "instructions": "Instructions",
     "lastSuccessfulRun": "Last successful run",
     "latestResult": "Latest result",
@@ -69,7 +69,6 @@
     "notifications": "Notifications",
     "notificationsDisabled": "Disabled",
     "notificationsEnabled": "Enabled",
-    "runSettings": "Run settings",
     "schedule": "Schedule",
     "selectBody": "Automation details and run history appear here.",
     "selectTitle": "Select an automation",
@@ -90,7 +89,6 @@
       "scheduleDay": "Day",
       "scheduleHelp": "Choose a common schedule, or use Custom for a cron expression.",
       "schedulePlaceholder": "0 13 * * *",
-      "schedulePreview": "Runs {{schedule}}",
       "scheduleRepeats": "Repeats",
       "scheduleTime": "Time",
       "timeZone": "Time zone",
@@ -134,6 +132,7 @@
     "automations": "Automations",
     "emptyBody": "kgoose returned no historical runs for this automation.",
     "emptyTitle": "No runs yet",
+    "goToAutomation": "Go to automation",
     "loadErrorTitle": "History failed to load",
     "noSessionMessages": "No chat messages were returned for this run.",
     "noOutputData": "This run did not return output data.",
@@ -156,6 +155,13 @@
   "overview": {
     "lastActivity": "Last ran {{time}}",
     "neverRun": "Never run",
+    "relativeDays": {
+      "today": "today",
+      "todayStandalone": "Today",
+      "yesterday": "yesterday",
+      "yesterdayStandalone": "Yesterday",
+      "withTime": "{{day}} at {{time}}"
+    },
     "title": "Your automations"
   },
   "schedule": {
@@ -163,7 +169,7 @@
     "paused": "Paused",
     "pausedWithReason": "Paused: {{reason}}"
   },
-  "subtitle": "Remote automations",
+  "subtitle": "Create, edit, and manage your G2 automations",
   "tabs": {
     "details": "Details",
     "history": "History",

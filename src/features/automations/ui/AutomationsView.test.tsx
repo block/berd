@@ -203,12 +203,69 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
 
-    expect(await screen.findByLabelText("Instructions")).toHaveValue(
-      "Pull revenue\nSend a summary",
+    const instructionsText = await screen.findByText(
+      /Pull revenue\s+Send a summary/,
     );
+    expect(
+      screen
+        .getByText("Latest result")
+        .compareDocumentPosition(instructionsText) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
     expect(
       screen.getByRole("combobox", { name: "Time zone" }),
     ).toHaveTextContent("America/Los_Angeles");
+    expect(
+      screen.queryByRole("button", { name: "Add automation" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Add" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("edits instructions with explicit save and cancel controls", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: "Edit instructions" }),
+    );
+    const instructionsEditor = screen.getByRole("textbox", {
+      name: "Instructions",
+    });
+    await user.clear(instructionsEditor);
+    await user.type(instructionsEditor, "Pull revenue{enter}Send a chart");
+    await user.tab();
+
+    expect(updateAutomationTile).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(
+      screen.getByText(/Pull revenue\s+Send a summary/),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit instructions" }));
+    const reopenedEditor = screen.getByRole("textbox", {
+      name: "Instructions",
+    });
+    await user.clear(reopenedEditor);
+    await user.type(reopenedEditor, "Pull revenue{enter}Send a chart");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() =>
+      expect(updateAutomationTile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "automation-1",
+          updateInstructions: true,
+          instructions: ["Pull revenue", "Send a chart"],
+        }),
+        expect.anything(),
+      ),
+    );
   });
 
   it("keeps the schedule in the detail run settings", async () => {
@@ -216,16 +273,168 @@ describe("AutomationsView", () => {
     renderAutomationsView();
 
     expect(await screen.findAllByText("Daily at 9:00 AM")).not.toHaveLength(0);
+    expect(screen.getAllByText(/Last ran/)[0].closest("span")).toHaveClass(
+      "text-placeholder",
+    );
 
     await user.click(
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
 
-    expect(
-      await screen.findByText("Runs Daily at 9:00 AM"),
-    ).toBeInTheDocument();
-    expect(screen.getByText(/Last ran/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Time")).toHaveValue("09:00");
+    expect(screen.queryByText(/^Runs /)).not.toBeInTheDocument();
+    expect(screen.getByText(/Last ran/).closest("span")).toHaveClass(
+      "text-placeholder",
+    );
     expect(screen.queryByText("Status")).not.toBeInTheDocument();
+  });
+
+  it("formats recent run activity with relative day labels", async () => {
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const weekday = new Date(now);
+    weekday.setDate(now.getDate() - 3);
+    const older = new Date(now);
+    older.setDate(now.getDate() - 8);
+    const formatTime = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    const formatDateTime = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    const weekdayLabel = new Intl.DateTimeFormat(undefined, {
+      weekday: "long",
+    }).format(weekday);
+
+    vi.mocked(getAutomationTiles).mockResolvedValue({
+      tiles: [
+        {
+          id: "today",
+          title: "Today automation",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          updated: String(now.getTime()),
+        },
+        {
+          id: "yesterday",
+          title: "Yesterday automation",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          updated: String(yesterday.getTime()),
+        },
+        {
+          id: "weekday",
+          title: "Weekday automation",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          updated: String(weekday.getTime()),
+        },
+        {
+          id: "older",
+          title: "Older automation",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          updated: String(older.getTime()),
+        },
+      ],
+    });
+
+    renderAutomationsView();
+
+    expect(
+      await screen.findByText(`Last ran today at ${formatTime(now)}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`Last ran yesterday at ${formatTime(yesterday)}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`Last ran ${weekdayLabel} at ${formatTime(weekday)}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`Last ran ${formatDateTime(older)}`),
+    ).toBeInTheDocument();
+  });
+
+  it("formats history run timestamps with relative day labels", async () => {
+    const user = userEvent.setup();
+    const now = new Date();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const weekday = new Date(now);
+    weekday.setDate(now.getDate() - 3);
+    const older = new Date(now);
+    older.setDate(now.getDate() - 8);
+    const formatTime = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    const formatDateTime = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+    const weekdayLabel = new Intl.DateTimeFormat(undefined, {
+      weekday: "long",
+    }).format(weekday);
+
+    vi.mocked(getAutomationTiles).mockResolvedValue({
+      tiles: [
+        {
+          id: "automation-1",
+          title: "Daily history",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+      ],
+    });
+    vi.mocked(getAutomationTileResults).mockResolvedValue({
+      tilesResults: [
+        {
+          sessionId: "today-run",
+          tileId: "automation-1",
+          created: String(now.getTime()),
+          runStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+        {
+          sessionId: "yesterday-run",
+          tileId: "automation-1",
+          created: String(yesterday.getTime()),
+          runStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+        {
+          sessionId: "weekday-run",
+          tileId: "automation-1",
+          created: String(weekday.getTime()),
+          runStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+        {
+          sessionId: "older-run",
+          tileId: "automation-1",
+          created: String(older.getTime()),
+          runStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+      ],
+    });
+
+    renderAutomationsView();
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+
+    expect(
+      await screen.findByText(`Today at ${formatTime(now)}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`Yesterday at ${formatTime(yesterday)}`),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(`${weekdayLabel} at ${formatTime(weekday)}`),
+    ).toBeInTheDocument();
+    expect(screen.getByText(formatDateTime(older))).toBeInTheDocument();
   });
 
   it("groups destructive detail actions under the more menu", async () => {
@@ -235,9 +444,9 @@ describe("AutomationsView", () => {
     await user.click(
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
-    await screen.findByLabelText("Instructions");
+    await screen.findByText(/Pull revenue\s+Send a summary/);
 
-    expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "More actions" }));
 
@@ -274,6 +483,31 @@ describe("AutomationsView", () => {
     expect(screen.getByText("The automation finished.")).toBeInTheDocument();
     expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");
     expect(getAutomationSessionMessages).toHaveBeenCalledWith("session-1");
+  });
+
+  it("opens global history runs in place before navigating to the automation", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Daily revenue digest/i }),
+    );
+
+    expect(await screen.findByText("Session history")).toBeInTheDocument();
+    expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Go to automation" }));
+
+    expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue(
+      "Daily revenue digest",
+    );
+    expect(screen.getByRole("tab", { name: "History" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
   });
 
   it("selects the clicked run when session ids repeat", async () => {
@@ -344,9 +578,9 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Failed build watcher" }),
     );
 
-    expect(await screen.findByLabelText("Instructions")).toHaveValue(
-      "instructions for automation-2",
-    );
+    expect(
+      await screen.findByText("instructions for automation-2"),
+    ).toHaveTextContent("instructions for automation-2");
     expect(getAutomationTile).toHaveBeenCalledWith("automation-2");
   });
 

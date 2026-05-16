@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import {
   useMutation,
   useQueries,
@@ -8,13 +8,14 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
+  IconArrowRight,
   IconBell,
   IconChevronRight,
   IconCheck,
   IconClock,
   IconCopy,
   IconDots,
-  IconPlayerPlay,
+  IconPencil,
   IconPlus,
   IconRefresh,
   IconTrash,
@@ -57,6 +58,7 @@ import { SearchableSelect } from "@/shared/ui/searchable-select";
 import { Spinner } from "@/shared/ui/spinner";
 import { Switch } from "@/shared/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { Textarea } from "@/shared/ui/textarea";
 import { PageHeader, PageShell } from "@/shared/ui/page-shell";
 import { cn } from "@/shared/lib/cn";
 
@@ -178,17 +180,55 @@ function overviewActivityIcon(value: string | number | undefined) {
   );
 }
 
-function formatTimestamp(value: string | undefined, neverLabel: string) {
+function parseTimestamp(value: string | undefined) {
   if (!value || value === "0") {
-    return neverLabel;
+    return new Date(Number.NaN);
   }
 
   const numericValue = Number(value);
-  const date = Number.isFinite(numericValue)
+  return Number.isFinite(numericValue)
     ? new Date(numericValue)
     : new Date(value);
+}
+
+function startOfLocalDay(value: Date) {
+  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
+}
+
+function formatRunActivityTime(
+  value: string | undefined,
+  labels: {
+    never: string;
+    today: string;
+    yesterday: string;
+    relativeDay: (day: string, time: string) => string;
+  },
+) {
+  const date = parseTimestamp(value);
   if (Number.isNaN(date.getTime())) {
-    return value;
+    return value || labels.never;
+  }
+
+  const time = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+  const dayDifference = Math.floor(
+    (startOfLocalDay(new Date()).getTime() - startOfLocalDay(date).getTime()) /
+      86_400_000,
+  );
+
+  if (dayDifference === 0) {
+    return labels.relativeDay(labels.today, time);
+  }
+  if (dayDifference === 1) {
+    return labels.relativeDay(labels.yesterday, time);
+  }
+  if (dayDifference > 1 && dayDifference < 7) {
+    const weekday = new Intl.DateTimeFormat(undefined, {
+      weekday: "long",
+    }).format(date);
+    return labels.relativeDay(weekday, time);
   }
 
   return new Intl.DateTimeFormat(undefined, {
@@ -423,6 +463,11 @@ type KeyedAutomationRun = {
   runKey: string;
 };
 
+type SelectedAutomationRun = {
+  automationId: string;
+  runKey: string;
+};
+
 function runTimestamp(result: AutomationTileResult) {
   const value = result.created ?? result.tileResultTimestamp ?? result.updated;
   if (!value || value === "0") return 0;
@@ -473,6 +518,41 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
+function AutomationActivityLabel({
+  status,
+  timestamp,
+  className,
+}: {
+  status: string | number | undefined;
+  timestamp: string | undefined;
+  className?: string;
+}) {
+  const { t } = useTranslation("automations");
+  const label = timestamp
+    ? t("overview.lastActivity", {
+        time: formatRunActivityTime(timestamp, {
+          never: t("fallbacks.never"),
+          today: t("overview.relativeDays.today"),
+          yesterday: t("overview.relativeDays.yesterday"),
+          relativeDay: (day, time) =>
+            t("overview.relativeDays.withTime", { day, time }),
+        }),
+      })
+    : t("overview.neverRun");
+
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-xs text-placeholder",
+        className,
+      )}
+    >
+      {overviewActivityIcon(status)}
+      {label}
+    </span>
+  );
+}
+
 function AutomationOverviewRow({
   tile,
   onOpenDetail,
@@ -497,11 +577,6 @@ function AutomationOverviewRow({
   const lastRunAt = runStatus
     ? (tile.updated ?? tile.lastSuccessAt)
     : undefined;
-  const lastActivity = lastRunAt
-    ? t("overview.lastActivity", {
-        time: formatTimestamp(lastRunAt, t("fallbacks.never")),
-      })
-    : t("overview.neverRun");
 
   return (
     <button
@@ -537,10 +612,7 @@ function AutomationOverviewRow({
           <span className="md:hidden" aria-hidden="true">
             ·
           </span>
-          <span className="inline-flex items-center gap-1">
-            {overviewActivityIcon(runStatus)}
-            {lastActivity}
-          </span>
+          <AutomationActivityLabel status={runStatus} timestamp={lastRunAt} />
         </span>
       </span>
 
@@ -686,12 +758,14 @@ function AutomationHistory({
 
 function AutomationHistoryFeed({
   automations,
-  selectedRunKey,
-  onOpenRun,
+  selectedRun,
+  onSelectRun,
+  onOpenAutomation,
 }: {
   automations: AutomationTile[];
-  selectedRunKey: string | null;
-  onOpenRun: (automationId: string, runKey: string) => void;
+  selectedRun: SelectedAutomationRun | null;
+  onSelectRun: (run: SelectedAutomationRun) => void;
+  onOpenAutomation: (run: SelectedAutomationRun) => void;
 }) {
   const { t } = useTranslation("automations");
   const automationTiles = automations.filter((tile) => tile.id);
@@ -718,6 +792,13 @@ function AutomationHistoryFeed({
     .sort((a, b) => runTimestamp(b.result) - runTimestamp(a.result));
   const isLoading = historyQueries.some((query) => query.isLoading);
   const firstError = historyQueries.find((query) => query.error)?.error;
+  const selectedRunItem = selectedRun
+    ? runs.find(
+        (run) =>
+          run.automation.id === selectedRun.automationId &&
+          run.runKey === selectedRun.runKey,
+      )
+    : undefined;
 
   if (isLoading && !runs.length) {
     return (
@@ -748,21 +829,51 @@ function AutomationHistoryFeed({
   }
 
   return (
-    <section aria-label={t("history.runs")}>
+    <section
+      aria-label={t("history.runs")}
+      className={cn(
+        "min-h-0",
+        selectedRunItem &&
+          "grid gap-4 xl:grid-cols-[minmax(300px,460px)_minmax(0,1fr)]",
+      )}
+    >
       <div className="space-y-1">
         {runs.map(({ automation, result, runKey }) => (
           <HistoryRunRow
             key={`${automation.id}:${runKey}`}
             automation={automation}
             result={result}
-            selected={runKey === selectedRunKey}
+            selected={
+              automation.id === selectedRun?.automationId &&
+              runKey === selectedRun?.runKey
+            }
             showAutomationTitle
             onSelect={() => {
-              if (automation.id) onOpenRun(automation.id, runKey);
+              if (automation.id) {
+                onSelectRun({ automationId: automation.id, runKey });
+              }
             }}
           />
         ))}
       </div>
+      {selectedRunItem ? (
+        <RunOutput
+          result={selectedRunItem.result}
+          action={
+            <Button
+              type="button"
+              size="xs"
+              variant="outline-flat"
+              onClick={() => {
+                if (selectedRun) onOpenAutomation(selectedRun);
+              }}
+              rightIcon={<IconArrowRight aria-hidden="true" />}
+            >
+              {t("history.goToAutomation")}
+            </Button>
+          }
+        />
+      ) : null}
     </section>
   );
 }
@@ -783,6 +894,13 @@ function HistoryRunRow({
   const { t } = useTranslation("automations");
   const summary = getOutputSummary(result.tileData);
   const title = automationTitle(automation, t("fallbacks.untitledAutomation"));
+  const runTimeLabel = formatRunActivityTime(result.created, {
+    never: t("fallbacks.never"),
+    today: t("overview.relativeDays.todayStandalone"),
+    yesterday: t("overview.relativeDays.yesterdayStandalone"),
+    relativeDay: (day, time) =>
+      t("overview.relativeDays.withTime", { day, time }),
+  });
 
   return (
     <button
@@ -793,17 +911,11 @@ function HistoryRunRow({
         selected && "bg-muted text-foreground",
       )}
       aria-pressed={selected}
-      aria-label={
-        showAutomationTitle
-          ? `${title}, ${formatTimestamp(result.created, t("fallbacks.never"))}`
-          : undefined
-      }
+      aria-label={showAutomationTitle ? `${title}, ${runTimeLabel}` : undefined}
     >
       <span className="flex items-center justify-between gap-3">
         <span className="min-w-0 truncate text-sm font-medium text-foreground">
-          {showAutomationTitle
-            ? title
-            : formatTimestamp(result.created, t("fallbacks.never"))}
+          {showAutomationTitle ? title : runTimeLabel}
         </span>
         <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
           {overviewActivityIcon(result.runStatus)}
@@ -813,7 +925,7 @@ function HistoryRunRow({
       <span className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
         {showAutomationTitle ? (
           <>
-            <span>{formatTimestamp(result.created, t("fallbacks.never"))}</span>
+            <span>{runTimeLabel}</span>
             <span aria-hidden="true">/</span>
           </>
         ) : null}
@@ -825,7 +937,13 @@ function HistoryRunRow({
   );
 }
 
-function RunOutput({ result }: { result: AutomationTileResult }) {
+function RunOutput({
+  result,
+  action,
+}: {
+  result: AutomationTileResult;
+  action?: ReactNode;
+}) {
   const { t } = useTranslation("automations");
   const summary = getOutputSummary(result.tileData);
   const sessionQuery = useQuery({
@@ -849,6 +967,7 @@ function RunOutput({ result }: { result: AutomationTileResult }) {
         <Badge variant={statusVariant(result.runStatus)}>
           {formatStatus(result.runStatus, t("fallbacks.unknown"))}
         </Badge>
+        {action}
       </div>
 
       {(summary || result.tileData) && (
@@ -941,7 +1060,6 @@ function AutomationDetailPage({
   onActiveTabChange,
   onSelectRun,
   onBack,
-  onAdd,
   onRefresh,
   onSave,
   onDelete,
@@ -957,7 +1075,6 @@ function AutomationDetailPage({
   onActiveTabChange: (tab: "details" | "history") => void;
   onSelectRun: (runKey: string) => void;
   onBack: () => void;
-  onAdd: () => void;
   onRefresh: () => void;
   onSave: (request: UpdateAutomationTileRequest) => void;
   onDelete: () => void;
@@ -970,6 +1087,10 @@ function AutomationDetailPage({
   const [instructionsDraft, setInstructionsDraft] = useState(
     instructionsToText(tile),
   );
+  const [isEditingInstructions, setIsEditingInstructions] = useState(false);
+  const [instructionsSaveState, setInstructionsSaveState] = useState<
+    "idle" | "requested" | "saving" | "savedPendingRefresh"
+  >("idle");
   const [schedulePreset, setSchedulePreset] = useState<SchedulePreset>(
     initialSchedule.preset,
   );
@@ -985,6 +1106,8 @@ function AutomationDetailPage({
     tile.enableNotifications ?? false,
   );
   const [localError, setLocalError] = useState<string | null>(null);
+  const previousTileIdRef = useRef(tile.id);
+  const instructionsDraftRef = useRef(instructionsDraft);
   const timeZoneOptions = useMemo(
     () =>
       [
@@ -1006,32 +1129,29 @@ function AutomationDetailPage({
   const latestRunAt = latestRunStatus
     ? (tile.updated ?? tile.lastSuccessAt)
     : undefined;
-  const latestRunActivity = latestRunAt
-    ? t("overview.lastActivity", {
-        time: formatTimestamp(latestRunAt, t("fallbacks.never")),
-      })
-    : t("overview.neverRun");
-  const schedulePreview =
-    (formatCronSchedule(
-      buildScheduleFromForm({
-        preset: schedulePreset,
-        time: scheduleTime,
-        weekday: scheduleWeekday,
-        customSchedule,
-      }),
-    ) ??
-      buildScheduleFromForm({
-        preset: schedulePreset,
-        time: scheduleTime,
-        weekday: scheduleWeekday,
-        customSchedule,
-      }).trim()) ||
-    t("schedule.none");
+  useEffect(() => {
+    instructionsDraftRef.current = instructionsDraft;
+  }, [instructionsDraft]);
 
   useEffect(() => {
     const nextSchedule = parseScheduleForm(tile.schedule);
+    const nextInstructions = instructionsToText(tile);
+    const tileIdChanged = previousTileIdRef.current !== tile.id;
+    previousTileIdRef.current = tile.id;
+
     setTitleDraft(tile.title ?? "");
-    setInstructionsDraft(instructionsToText(tile));
+    if (
+      tileIdChanged ||
+      (!isEditingInstructions && instructionsSaveState === "idle") ||
+      (instructionsSaveState === "savedPendingRefresh" &&
+        nextInstructions.trim() === instructionsDraftRef.current.trim())
+    ) {
+      setInstructionsDraft(nextInstructions);
+    }
+    if (tileIdChanged) {
+      setIsEditingInstructions(false);
+      setInstructionsSaveState("idle");
+    }
     setSchedulePreset(nextSchedule.preset);
     setScheduleTime(nextSchedule.time);
     setScheduleWeekday(nextSchedule.weekday);
@@ -1039,7 +1159,26 @@ function AutomationDetailPage({
     setTimeZoneDraft(automationTimeZone(tile));
     setNotificationsDraft(tile.enableNotifications ?? false);
     setLocalError(null);
-  }, [tile]);
+  }, [tile, instructionsSaveState, isEditingInstructions]);
+
+  useEffect(() => {
+    if (instructionsSaveState === "requested" && isSaving) {
+      setInstructionsSaveState("saving");
+      return;
+    }
+
+    if (instructionsSaveState !== "saving" || isSaving) {
+      return;
+    }
+
+    if (mutationError) {
+      setInstructionsSaveState("idle");
+      return;
+    }
+
+    setInstructionsSaveState("savedPendingRefresh");
+    setIsEditingInstructions(false);
+  }, [instructionsSaveState, isSaving, mutationError]);
 
   const baseUpdateRequest = (): UpdateAutomationTileRequest | null => {
     if (!tile.id) return null;
@@ -1075,11 +1214,26 @@ function AutomationDetailPage({
       return;
     }
     setLocalError(null);
+    setInstructionsSaveState("requested");
     onSave({
       ...request,
       updateInstructions: true,
       instructions: nextInstructions,
     });
+  };
+
+  const startEditingInstructions = () => {
+    setInstructionsDraft(instructionsToText(tile));
+    setInstructionsSaveState("idle");
+    setLocalError(null);
+    setIsEditingInstructions(true);
+  };
+
+  const cancelEditingInstructions = () => {
+    setInstructionsDraft(instructionsToText(tile));
+    setInstructionsSaveState("idle");
+    setLocalError(null);
+    setIsEditingInstructions(false);
   };
 
   const saveSchedule = (next: {
@@ -1142,18 +1296,13 @@ function AutomationDetailPage({
   };
 
   const currentError = localError ?? mutationError;
+  const instructionsText = instructionsDraft.trim();
+  const instructionsChanged =
+    instructionsDraft.trim() !== instructionsToText(tile).trim();
+  const isSavingInstructions =
+    instructionsSaveState === "requested" || instructionsSaveState === "saving";
   const detailActions = (
     <>
-      <Button
-        type="button"
-        variant="outline-flat"
-        size="xs"
-        disabled
-        title={t("actions.runUnavailable")}
-        leftIcon={<IconPlayerPlay aria-hidden="true" />}
-      >
-        {t("actions.run")}
-      </Button>
       <Button
         type="button"
         variant="outline-flat"
@@ -1164,17 +1313,6 @@ function AutomationDetailPage({
         leftIcon={<IconRefresh aria-hidden="true" />}
       >
         {t("actions.refreshShort")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline-flat"
-        size="xs"
-        onClick={onAdd}
-        aria-label={t("actions.add")}
-        title={t("actions.add")}
-        leftIcon={<IconPlus aria-hidden="true" />}
-      >
-        {t("actions.addShort")}
       </Button>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -1277,30 +1415,14 @@ function AutomationDetailPage({
           <div className="grid min-h-0 gap-10 lg:grid-cols-[minmax(0,1fr)_300px]">
             <div className="min-w-0 space-y-8">
               <section className="space-y-3">
-                <h2 className="text-sm font-medium text-foreground">
-                  {t("details.instructions")}
-                </h2>
-                <textarea
-                  aria-label={t("edit.fields.instructions")}
-                  value={instructionsDraft}
-                  onChange={(event) => setInstructionsDraft(event.target.value)}
-                  onBlur={saveInstructions}
-                  disabled={isSaving}
-                  placeholder={t("details.noInstructions")}
-                  rows={1}
-                  className="min-h-[420px] w-full resize-none bg-transparent px-1 py-0 text-[14px] leading-relaxed text-foreground placeholder:font-light placeholder:text-muted-foreground/60 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
-                />
-              </section>
-
-              <section className="space-y-3 border-t border-border pt-6">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-sm font-medium text-foreground">
                     {t("details.latestResult")}
                   </h2>
-                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                    {overviewActivityIcon(latestRunStatus)}
-                    {latestRunActivity}
-                  </span>
+                  <AutomationActivityLabel
+                    status={latestRunStatus}
+                    timestamp={latestRunAt}
+                  />
                 </div>
                 {latestResultSummary ? (
                   <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">
@@ -1314,13 +1436,78 @@ function AutomationDetailPage({
                   </p>
                 )}
               </section>
+
+              <section className="space-y-3 border-t border-border pt-6">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-medium text-foreground">
+                    {t("details.instructions")}
+                  </h2>
+                  {isEditingInstructions ? (
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={cancelEditingInstructions}
+                        disabled={isSavingInstructions}
+                      >
+                        {t("actions.cancel")}
+                      </Button>
+                      <Button
+                        type="button"
+                        size="xs"
+                        onClick={saveInstructions}
+                        disabled={
+                          isSavingInstructions ||
+                          !instructionsChanged ||
+                          !textToInstructions(instructionsDraft).length
+                        }
+                      >
+                        {isSavingInstructions
+                          ? t("actions.saving")
+                          : t("actions.saveChanges")}
+                      </Button>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline-flat"
+                      size="xs"
+                      onClick={startEditingInstructions}
+                      disabled={isSaving}
+                      aria-label={t("details.editInstructions")}
+                      leftIcon={<IconPencil aria-hidden="true" />}
+                    >
+                      {t("actions.edit")}
+                    </Button>
+                  )}
+                </div>
+                {isEditingInstructions ? (
+                  <Textarea
+                    aria-label={t("edit.fields.instructions")}
+                    value={instructionsDraft}
+                    onChange={(event) =>
+                      setInstructionsDraft(event.target.value)
+                    }
+                    disabled={isSavingInstructions}
+                    placeholder={t("details.noInstructions")}
+                    rows={12}
+                    className="min-h-[360px] resize-y rounded-md text-[14px] leading-relaxed"
+                  />
+                ) : instructionsText ? (
+                  <div className="min-h-40 whitespace-pre-wrap rounded-md border border-transparent px-1 py-0 text-sm leading-relaxed text-foreground">
+                    {instructionsText}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">
+                    {t("details.noInstructions")}
+                  </div>
+                )}
+              </section>
             </div>
 
             <aside className="border-t border-border pt-6 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-8">
               <section className="space-y-4">
-                <h2 className="text-xs font-medium text-muted-foreground">
-                  {t("details.runSettings")}
-                </h2>
                 <label
                   className="grid gap-2 text-sm"
                   htmlFor="detail-schedule-preset"
@@ -1441,12 +1628,6 @@ function AutomationDetailPage({
                   </label>
                 ) : null}
 
-                <p className="text-xs text-muted-foreground">
-                  {t("edit.fields.schedulePreview", {
-                    schedule: schedulePreview,
-                  })}
-                </p>
-
                 <label className="grid gap-2 text-sm" htmlFor="detail-timezone">
                   <span className="text-xs text-muted-foreground">
                     {t("details.timeZone")}
@@ -1519,6 +1700,8 @@ export function AutomationsWorkbench() {
   );
   const [detailTab, setDetailTab] = useState<"details" | "history">("details");
   const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
+  const [selectedGlobalRun, setSelectedGlobalRun] =
+    useState<SelectedAutomationRun | null>(null);
   const [builderOpen, setBuilderOpen] = useState(false);
   const [pendingCreatedAutomationId, setPendingCreatedAutomationId] = useState<
     string | null
@@ -1546,6 +1729,7 @@ export function AutomationsWorkbench() {
     if (!automations.length) {
       setDetailAutomationId(null);
       setSelectedRunKey(null);
+      setSelectedGlobalRun(null);
       return;
     }
 
@@ -1604,6 +1788,7 @@ export function AutomationsWorkbench() {
     setDetailTab("details");
     setSurfaceMode("overview");
     setSelectedRunKey(null);
+    setSelectedGlobalRun(null);
   };
 
   const scheduleDelayedAutomationsRefetch = () => {
@@ -1625,6 +1810,7 @@ export function AutomationsWorkbench() {
     setDetailAutomationId(automationId);
     setDetailTab("details");
     setSelectedRunKey(null);
+    setSelectedGlobalRun(null);
   };
 
   const openRunDetail = (automationId: string, runKey: string) => {
@@ -1634,6 +1820,7 @@ export function AutomationsWorkbench() {
     setDetailAutomationId(automationId);
     setDetailTab("history");
     setSelectedRunKey(runKey);
+    setSelectedGlobalRun(null);
   };
 
   const closeDetail = () => {
@@ -1641,6 +1828,7 @@ export function AutomationsWorkbench() {
     setDeleteAutomationId(null);
     setMutationError(null);
     setDetailTab("details");
+    setSelectedGlobalRun(null);
   };
 
   const updateMutation = useMutation({
@@ -1671,6 +1859,7 @@ export function AutomationsWorkbench() {
       setDeleteAutomationId(null);
       setDetailAutomationId(null);
       setSelectedRunKey(null);
+      setSelectedGlobalRun(null);
       await invalidateAutomationQueries();
     },
     onError: (error) => {
@@ -1728,6 +1917,7 @@ export function AutomationsWorkbench() {
     setDetailAutomationId(null);
     setDetailTab("details");
     setSelectedRunKey(null);
+    setSelectedGlobalRun(null);
     setMutationError(null);
   };
 
@@ -1812,7 +2002,6 @@ export function AutomationsWorkbench() {
                   onActiveTabChange={setDetailTab}
                   onSelectRun={setSelectedRunKey}
                   onBack={closeDetail}
-                  onAdd={openBuilder}
                   onRefresh={() => {
                     void automationsQuery.refetch();
                     void detailQuery.refetch();
@@ -1838,6 +2027,7 @@ export function AutomationsWorkbench() {
               onValueChange={(value) => {
                 setSurfaceMode(value as AutomationSurfaceMode);
                 setSelectedRunKey(null);
+                setSelectedGlobalRun(null);
               }}
             >
               <TabsList variant="buttons">
@@ -1879,8 +2069,11 @@ export function AutomationsWorkbench() {
                 {automations.length ? (
                   <AutomationHistoryFeed
                     automations={automations}
-                    selectedRunKey={selectedRunKey}
-                    onOpenRun={openRunDetail}
+                    selectedRun={selectedGlobalRun}
+                    onSelectRun={setSelectedGlobalRun}
+                    onOpenAutomation={({ automationId, runKey }) =>
+                      openRunDetail(automationId, runKey)
+                    }
                   />
                 ) : (
                   <EmptyState
