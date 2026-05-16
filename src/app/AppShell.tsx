@@ -61,23 +61,13 @@ import { Spinner } from "@/shared/ui/spinner";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { acpCreateSession } from "@/shared/api/acp";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
-
-export type AppView =
-  | "home"
-  | "chat"
-  | "automations"
-  | "skills"
-  | "extensions"
-  | "agents"
-  | "projects"
-  | "session-history"
-  | "settings";
-
-type AppNavigationLocation = {
-  view: AppView;
-  sessionId: string | null;
-  settingsSection: SectionId;
-};
+import type {
+  AppNavigationLocation,
+  AppNavigationUpdateOptions,
+  AppView,
+  AutomationNavigationRoute,
+} from "./types/appNavigation";
+export type { AppView } from "./types/appNavigation";
 
 type AppNavigationHistory = {
   entries: AppNavigationLocation[];
@@ -135,23 +125,34 @@ function getAppNavigationLocation(
   view: AppView,
   sessionId: string | null,
   settingsSection: SectionId,
+  skillsSkillId: string | null,
+  agentsPersonaId: string | null,
+  automationsRoute: AutomationNavigationRoute,
 ): AppNavigationLocation {
-  return {
-    view,
-    sessionId: view === "chat" ? sessionId : null,
-    settingsSection,
-  };
+  switch (view) {
+    case "chat":
+      return { view, sessionId };
+    case "automations":
+      return { view, route: automationsRoute };
+    case "skills":
+      return { view, skillId: skillsSkillId };
+    case "agents":
+      return { view, personaId: agentsPersonaId };
+    case "settings":
+      return { view, settingsSection };
+    case "home":
+    case "extensions":
+    case "projects":
+    case "session-history":
+      return { view };
+  }
 }
 
 function areAppNavigationLocationsEqual(
   a: AppNavigationLocation | undefined,
   b: AppNavigationLocation,
 ) {
-  return (
-    a?.view === b.view &&
-    a.sessionId === b.sessionId &&
-    a.settingsSection === b.settingsSection
-  );
+  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function getOptimisticSessionCwd(
@@ -213,15 +214,23 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeView, setActiveView] = useState<AppView>(
     initialSettingsSection ? "settings" : "home",
   );
+  const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
+  const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
+  const [automationsRoute, setAutomationsRoute] =
+    useState<AutomationNavigationRoute>({ surface: "overview" });
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
+  const replaceNextNavigationEntryRef = useRef(false);
   const navigationHistoryRef = useRef<AppNavigationHistory>({
     entries: [
       getAppNavigationLocation(
         initialSettingsSection ? "settings" : "home",
         null,
         initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
+        null,
+        null,
+        { surface: "overview" },
       ),
     ],
     index: 0,
@@ -372,7 +381,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     (fromSessionId: string, toSessionId: string) => {
       const history = navigationHistoryRef.current;
       history.entries = history.entries.map((entry) =>
-        entry.sessionId === fromSessionId
+        entry.view === "chat" && entry.sessionId === fromSessionId
           ? { ...entry, sessionId: toSessionId }
           : entry,
       );
@@ -387,6 +396,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       activeView,
       activeSessionId,
       activeSettingsSection,
+      skillsSkillId,
+      agentsPersonaId,
+      automationsRoute,
     );
     const currentLocation = history.entries[history.index];
 
@@ -395,6 +407,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (!areAppNavigationLocationsEqual(currentLocation, location)) {
         history.entries[history.index] = location;
       }
+      updateNavigationAvailability();
+      return;
+    }
+
+    if (replaceNextNavigationEntryRef.current) {
+      replaceNextNavigationEntryRef.current = false;
+      history.entries[history.index] = location;
       updateNavigationAvailability();
       return;
     }
@@ -419,6 +438,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     activeSessionId,
     activeSettingsSection,
     activeView,
+    agentsPersonaId,
+    automationsRoute,
+    skillsSkillId,
     updateNavigationAvailability,
   ]);
 
@@ -1058,10 +1080,55 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (view !== "chat") {
         setActiveSession(null);
       }
+      if (view === "skills") {
+        setSkillsSkillId(null);
+      }
+      if (view === "agents") {
+        setAgentsPersonaId(null);
+      }
+      if (view === "automations") {
+        setAutomationsRoute({ surface: "overview" });
+      }
       clearSettingsSectionUrl();
       setActiveView(view);
     },
     [openSettings, setActiveSession],
+  );
+
+  const navigateSkills = useCallback(
+    (skillId: string | null, options?: AppNavigationUpdateOptions) => {
+      replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+      setSkillsSkillId(skillId);
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("skills");
+    },
+    [setActiveSession],
+  );
+
+  const navigateAgents = useCallback(
+    (personaId: string | null, options?: AppNavigationUpdateOptions) => {
+      replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+      setAgentsPersonaId(personaId);
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("agents");
+    },
+    [setActiveSession],
+  );
+
+  const navigateAutomations = useCallback(
+    (
+      route: AutomationNavigationRoute,
+      options?: AppNavigationUpdateOptions,
+    ) => {
+      replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+      setAutomationsRoute(route);
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("automations");
+    },
+    [setActiveSession],
   );
 
   const handleCreatePersona = useCreatePersonaNavigation(() =>
@@ -1096,6 +1163,27 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }
 
       clearSettingsSectionUrl();
+
+      if (location.view === "skills") {
+        setActiveSession(null);
+        setSkillsSkillId(location.skillId);
+        setActiveView("skills");
+        return;
+      }
+
+      if (location.view === "agents") {
+        setActiveSession(null);
+        setAgentsPersonaId(location.personaId);
+        setActiveView("agents");
+        return;
+      }
+
+      if (location.view === "automations") {
+        setActiveSession(null);
+        setAutomationsRoute(location.route);
+        setActiveView("automations");
+        return;
+      }
 
       if (location.view === "chat" && location.sessionId) {
         const session = useChatSessionStore
@@ -1387,8 +1475,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             <AppShellContent
               activeView={activeView}
               activeSettingsSection={activeSettingsSection}
+              activeSkillsSkillId={skillsSkillId}
+              activeAgentsPersonaId={agentsPersonaId}
+              activeAutomationsRoute={automationsRoute}
               activeSession={activeSession}
               homeSessionId={homeSessionId}
+              onNavigateSkills={navigateSkills}
+              onNavigateAgents={navigateAgents}
+              onNavigateAutomations={navigateAutomations}
               onCreatePersona={handleCreatePersona}
               onArchiveChat={handleArchiveChat}
               onCreateProject={openCreateProjectDialog}

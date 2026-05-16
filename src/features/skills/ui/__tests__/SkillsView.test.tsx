@@ -259,6 +259,64 @@ describe("SkillsView", () => {
     ).toBeInTheDocument();
   });
 
+  it("uses controlled navigation for skill detail routes", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const onActiveSkillIdChange = vi.fn();
+    const user = userEvent.setup();
+
+    const { rerender } = render(
+      <SkillsView
+        activeSkillId={null}
+        onActiveSkillIdChange={onActiveSkillIdChange}
+      />,
+    );
+    await screen.findByText("code-review");
+
+    await user.click(
+      screen.getByRole("button", { name: "Open code-review details" }),
+    );
+
+    expect(onActiveSkillIdChange).toHaveBeenCalledWith(
+      "global:/path/code-review",
+      undefined,
+    );
+
+    rerender(
+      <SkillsView
+        activeSkillId="global:/path/code-review"
+        onActiveSkillIdChange={onActiveSkillIdChange}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Back to skills" }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Back to skills" }));
+
+    expect(onActiveSkillIdChange).toHaveBeenCalledWith(null, undefined);
+  });
+
+  it("replaces a missing controlled skill detail with the list route", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const onActiveSkillIdChange = vi.fn();
+
+    render(
+      <SkillsView
+        activeSkillId="missing-skill"
+        onActiveSkillIdChange={onActiveSkillIdChange}
+      />,
+    );
+
+    await screen.findByText("code-review");
+
+    await waitFor(() => {
+      expect(onActiveSkillIdChange).toHaveBeenCalledWith(null, {
+        replace: true,
+      });
+    });
+  });
+
   it("starts a chat with the selected skill from the list", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const onStartChatWithSkill = vi.fn();

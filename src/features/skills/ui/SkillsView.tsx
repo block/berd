@@ -14,6 +14,7 @@ import { SkillsEmptyState } from "./SkillsEmptyState";
 import { SkillsListSections } from "./SkillsListSections";
 import { SkillsToolbar } from "./SkillsToolbar";
 import { hydrateProjectNames } from "../lib/projectHydration";
+import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import {
   filterSkills,
   groupSkills,
@@ -28,12 +29,22 @@ import {
 } from "../api/skills";
 
 interface SkillsViewProps {
+  activeSkillId?: string | null;
+  onActiveSkillIdChange?: (
+    skillId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
   onStartChatWithSkill?: (skill: SkillInfo, projectId?: string | null) => void;
 }
 
-export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
+export function SkillsView({
+  activeSkillId,
+  onActiveSkillIdChange,
+  onStartChatWithSkill,
+}: SkillsViewProps) {
   const { t } = useTranslation(["skills", "common"]);
   const projects = useProjectStore(selectProjects);
+  const isActiveSkillControlled = activeSkillId !== undefined;
   const [search, setSearch] = useState("");
   const [activeFilter, setActiveFilter] = useState<SkillsFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -43,9 +54,24 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingSkill, setDeletingSkill] = useState<SkillInfo | null>(null);
-  const [activeSkillId, setActiveSkillId] = useState<string | null>(null);
+  const [internalActiveSkillId, setInternalActiveSkillId] = useState<
+    string | null
+  >(null);
   const [expandedSectionIds, setExpandedSectionIds] = useState<string[]>([]);
   const loadRequestIdRef = useRef(0);
+  const currentActiveSkillId = isActiveSkillControlled
+    ? activeSkillId
+    : internalActiveSkillId;
+
+  const setActiveSkill = useCallback(
+    (skillId: string | null, options?: AppNavigationUpdateOptions) => {
+      if (!isActiveSkillControlled) {
+        setInternalActiveSkillId(skillId);
+      }
+      onActiveSkillIdChange?.(skillId, options);
+    },
+    [isActiveSkillControlled, onActiveSkillIdChange],
+  );
 
   const loadSkills = useCallback(async (): Promise<SkillInfo[]> => {
     const requestId = loadRequestIdRef.current + 1;
@@ -126,7 +152,13 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
   }, [groupedSkills]);
 
   const activeSkill =
-    skills.find((skill) => skill.id === activeSkillId) ?? null;
+    skills.find((skill) => skill.id === currentActiveSkillId) ?? null;
+
+  useEffect(() => {
+    if (currentActiveSkillId && !loading && !activeSkill) {
+      setActiveSkill(null, { replace: true });
+    }
+  }, [activeSkill, currentActiveSkillId, loading, setActiveSkill]);
 
   const handleDelete = (skill: SkillInfo) => {
     if (skill.sourceKind === "builtin") {
@@ -144,8 +176,8 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
     try {
       await deleteSkill(deletingSkill.path);
       await loadSkills();
-      if (activeSkillId === deletingSkill.id) {
-        setActiveSkillId(null);
+      if (currentActiveSkillId === deletingSkill.id) {
+        setActiveSkill(null, { replace: true });
       }
       toast.success(t("view.deleteSuccess", { name: deletingSkill.name }));
     } catch {
@@ -199,10 +231,10 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
         savedSkill &&
         refreshedSkills.some((skill) => skill.id === savedSkill.id)
       ) {
-        setActiveSkillId(savedSkill.id);
+        setActiveSkill(savedSkill.id);
       }
     },
-    [loadSkills],
+    [loadSkills, setActiveSkill],
   );
 
   const refreshSkills = useCallback(async () => {
@@ -229,7 +261,7 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
   );
 
   const handleSelectSkill = (skill: SkillInfo) => {
-    setActiveSkillId(skill.id);
+    setActiveSkill(skill.id);
   };
 
   const dialogs = (
@@ -249,7 +281,7 @@ export function SkillsView({ onStartChatWithSkill }: SkillsViewProps) {
       <>
         <SkillDetailPage
           skill={activeSkill}
-          onBack={() => setActiveSkillId(null)}
+          onBack={() => setActiveSkill(null)}
           onEdit={handleEdit}
           onReveal={handleReveal}
           onShare={handleShare}

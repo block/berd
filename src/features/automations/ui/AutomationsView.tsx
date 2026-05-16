@@ -1,4 +1,11 @@
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   useMutation,
   useQueries,
@@ -61,6 +68,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { Textarea } from "@/shared/ui/textarea";
 import { PageHeader, PageShell } from "@/shared/ui/page-shell";
 import { cn } from "@/shared/lib/cn";
+import type {
+  AppNavigationUpdateOptions,
+  AutomationNavigationRoute,
+  AutomationRunLocation,
+} from "@/app/types/appNavigation";
 
 const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 
@@ -473,10 +485,7 @@ type KeyedAutomationRun = {
   runKey: string;
 };
 
-type SelectedAutomationRun = {
-  automationId: string;
-  runKey: string;
-};
+type SelectedAutomationRun = AutomationRunLocation;
 
 function runTimestamp(result: AutomationTileResult) {
   const value = result.created ?? result.tileResultTimestamp ?? result.updated;
@@ -1697,18 +1706,35 @@ function AutomationDetailPage({
   );
 }
 
-export function AutomationsWorkbench() {
+interface AutomationsWorkbenchProps {
+  route?: AutomationNavigationRoute;
+  onRouteChange?: (
+    route: AutomationNavigationRoute,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+}
+
+export function AutomationsWorkbench({
+  route,
+  onRouteChange,
+}: AutomationsWorkbenchProps = {}) {
   const { t } = useTranslation("automations");
   const queryClient = useQueryClient();
-  const [surfaceMode, setSurfaceMode] =
-    useState<AutomationSurfaceMode>("overview");
-  const [detailAutomationId, setDetailAutomationId] = useState<string | null>(
-    null,
+  const isRouteControlled = route !== undefined;
+  const [internalRoute, setInternalRoute] = useState<AutomationNavigationRoute>(
+    { surface: "overview" },
   );
-  const [detailTab, setDetailTab] = useState<"details" | "history">("details");
-  const [selectedRunKey, setSelectedRunKey] = useState<string | null>(null);
-  const [selectedGlobalRun, setSelectedGlobalRun] =
-    useState<SelectedAutomationRun | null>(null);
+  const currentRoute = route ?? internalRoute;
+  const surfaceMode: AutomationSurfaceMode =
+    currentRoute.surface === "history" ? "history" : "overview";
+  const detailAutomationId =
+    currentRoute.surface === "detail" ? currentRoute.automationId : null;
+  const detailTab =
+    currentRoute.surface === "detail" ? currentRoute.tab : "details";
+  const selectedRunKey =
+    currentRoute.surface === "detail" ? currentRoute.selectedRunKey : null;
+  const selectedGlobalRun =
+    currentRoute.surface === "history" ? currentRoute.selectedRun : null;
   const [builderOpen, setBuilderOpen] = useState(false);
   const [pendingCreatedAutomationId, setPendingCreatedAutomationId] = useState<
     string | null
@@ -1720,6 +1746,19 @@ export function AutomationsWorkbench() {
     null,
   );
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  const setNavigationRoute = useCallback(
+    (
+      nextRoute: AutomationNavigationRoute,
+      options?: AppNavigationUpdateOptions,
+    ) => {
+      if (!isRouteControlled) {
+        setInternalRoute(nextRoute);
+      }
+      onRouteChange?.(nextRoute, options);
+    },
+    [isRouteControlled, onRouteChange],
+  );
 
   const automationsQuery = useQuery({
     queryKey: ["automationTiles"],
@@ -1734,9 +1773,9 @@ export function AutomationsWorkbench() {
 
   useEffect(() => {
     if (!automations.length) {
-      setDetailAutomationId(null);
-      setSelectedRunKey(null);
-      setSelectedGlobalRun(null);
+      if (!automationsQuery.isLoading && currentRoute.surface !== "overview") {
+        setNavigationRoute({ surface: "overview" }, { replace: true });
+      }
       return;
     }
 
@@ -1745,21 +1784,33 @@ export function AutomationsWorkbench() {
       !automations.some((tile) => tile.id === detailAutomationId) &&
       detailAutomationId !== pendingCreatedAutomationId
     ) {
-      setDetailAutomationId(null);
+      setNavigationRoute({ surface: "overview" }, { replace: true });
     }
 
     if (
       pendingCreatedAutomationId &&
       automations.some((tile) => tile.id === pendingCreatedAutomationId)
     ) {
-      setDetailAutomationId(pendingCreatedAutomationId);
-      setDetailTab("details");
-      setSurfaceMode("overview");
+      setNavigationRoute(
+        {
+          surface: "detail",
+          automationId: pendingCreatedAutomationId,
+          tab: "details",
+          selectedRunKey: null,
+        },
+        { replace: true },
+      );
       setBuilderOpen(false);
-      setSelectedRunKey(null);
       setPendingCreatedAutomationId(null);
     }
-  }, [automations, detailAutomationId, pendingCreatedAutomationId]);
+  }, [
+    automations,
+    automationsQuery.isLoading,
+    currentRoute.surface,
+    detailAutomationId,
+    pendingCreatedAutomationId,
+    setNavigationRoute,
+  ]);
 
   const detailAutomation = automations.find(
     (tile) => tile.id === detailAutomationId,
@@ -1791,11 +1842,12 @@ export function AutomationsWorkbench() {
 
   const selectCreatedAutomation = (automationId: string) => {
     setPendingCreatedAutomationId(automationId);
-    setDetailAutomationId(automationId);
-    setDetailTab("details");
-    setSurfaceMode("overview");
-    setSelectedRunKey(null);
-    setSelectedGlobalRun(null);
+    setNavigationRoute({
+      surface: "detail",
+      automationId,
+      tab: "details",
+      selectedRunKey: null,
+    });
   };
 
   const scheduleDelayedAutomationsRefetch = () => {
@@ -1814,28 +1866,30 @@ export function AutomationsWorkbench() {
     setBuilderOpen(false);
     setMutationError(null);
     setDeleteAutomationId(null);
-    setDetailAutomationId(automationId);
-    setDetailTab("details");
-    setSelectedRunKey(null);
-    setSelectedGlobalRun(null);
+    setNavigationRoute({
+      surface: "detail",
+      automationId,
+      tab: "details",
+      selectedRunKey: null,
+    });
   };
 
   const openRunDetail = (automationId: string, runKey: string) => {
     setBuilderOpen(false);
     setMutationError(null);
     setDeleteAutomationId(null);
-    setDetailAutomationId(automationId);
-    setDetailTab("history");
-    setSelectedRunKey(runKey);
-    setSelectedGlobalRun(null);
+    setNavigationRoute({
+      surface: "detail",
+      automationId,
+      tab: "history",
+      selectedRunKey: runKey,
+    });
   };
 
   const closeDetail = () => {
-    setDetailAutomationId(null);
     setDeleteAutomationId(null);
     setMutationError(null);
-    setDetailTab("details");
-    setSelectedGlobalRun(null);
+    setNavigationRoute({ surface: "overview" });
   };
 
   const updateMutation = useMutation({
@@ -1864,9 +1918,7 @@ export function AutomationsWorkbench() {
       }
       setMutationError(null);
       setDeleteAutomationId(null);
-      setDetailAutomationId(null);
-      setSelectedRunKey(null);
-      setSelectedGlobalRun(null);
+      setNavigationRoute({ surface: "overview" }, { replace: true });
       await invalidateAutomationQueries();
     },
     onError: (error) => {
@@ -1921,10 +1973,7 @@ export function AutomationsWorkbench() {
 
   const openBuilder = () => {
     setBuilderOpen(true);
-    setDetailAutomationId(null);
-    setDetailTab("details");
-    setSelectedRunKey(null);
-    setSelectedGlobalRun(null);
+    setNavigationRoute({ surface: "overview" }, { replace: true });
     setMutationError(null);
   };
 
@@ -2006,8 +2055,24 @@ export function AutomationsWorkbench() {
                   isSaving={updateMutation.isPending}
                   isDeleting={deleteMutation.isPending}
                   isDuplicating={duplicateMutation.isPending}
-                  onActiveTabChange={setDetailTab}
-                  onSelectRun={setSelectedRunKey}
+                  onActiveTabChange={(tab) => {
+                    if (!detailAutomationId) return;
+                    setNavigationRoute({
+                      surface: "detail",
+                      automationId: detailAutomationId,
+                      tab,
+                      selectedRunKey,
+                    });
+                  }}
+                  onSelectRun={(runKey) => {
+                    if (!detailAutomationId) return;
+                    setNavigationRoute({
+                      surface: "detail",
+                      automationId: detailAutomationId,
+                      tab: detailTab,
+                      selectedRunKey: runKey,
+                    });
+                  }}
                   onBack={closeDetail}
                   onRefresh={() => {
                     void automationsQuery.refetch();
@@ -2032,9 +2097,12 @@ export function AutomationsWorkbench() {
             <Tabs
               value={surfaceMode}
               onValueChange={(value) => {
-                setSurfaceMode(value as AutomationSurfaceMode);
-                setSelectedRunKey(null);
-                setSelectedGlobalRun(null);
+                const nextMode = value as AutomationSurfaceMode;
+                setNavigationRoute(
+                  nextMode === "history"
+                    ? { surface: "history", selectedRun: null }
+                    : { surface: "overview" },
+                );
               }}
             >
               <TabsList variant="buttons">
@@ -2077,7 +2145,12 @@ export function AutomationsWorkbench() {
                   <AutomationHistoryFeed
                     automations={automations}
                     selectedRun={selectedGlobalRun}
-                    onSelectRun={setSelectedGlobalRun}
+                    onSelectRun={(selectedRun) =>
+                      setNavigationRoute({
+                        surface: "history",
+                        selectedRun,
+                      })
+                    }
                     onOpenAutomation={({ automationId, runKey }) =>
                       openRunDetail(automationId, runKey)
                     }

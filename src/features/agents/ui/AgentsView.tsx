@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Plus, Upload } from "lucide-react";
@@ -43,6 +43,7 @@ import {
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
 import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
+import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 
 function decodeImportFileBytes(fileBytes: number[]): string {
   try {
@@ -54,11 +55,25 @@ function decodeImportFileBytes(fileBytes: number[]): string {
   }
 }
 
-export function AgentsView() {
+interface AgentsViewProps {
+  activePersonaId?: string | null;
+  onActivePersonaIdChange?: (
+    personaId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+}
+
+export function AgentsView({
+  activePersonaId,
+  onActivePersonaIdChange,
+}: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
+  const isActivePersonaControlled = activePersonaId !== undefined;
   const [search, setSearch] = useState("");
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
-  const [activePersonaId, setActivePersonaId] = useState<string | null>(null);
+  const [internalActivePersonaId, setInternalActivePersonaId] = useState<
+    string | null
+  >(null);
 
   const personas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
@@ -76,8 +91,38 @@ export function AgentsView() {
   } = usePersonas();
 
   const lowerSearch = search.toLowerCase();
+  const currentActivePersonaId = isActivePersonaControlled
+    ? activePersonaId
+    : internalActivePersonaId;
   const activePersona =
-    personas.find((persona) => persona.id === activePersonaId) ?? null;
+    personas.find((persona) => persona.id === currentActivePersonaId) ?? null;
+
+  const setActivePersona = useCallback(
+    (personaId: string | null, options?: AppNavigationUpdateOptions) => {
+      if (!isActivePersonaControlled) {
+        setInternalActivePersonaId(personaId);
+      }
+      onActivePersonaIdChange?.(personaId, options);
+    },
+    [isActivePersonaControlled, onActivePersonaIdChange],
+  );
+
+  useEffect(() => {
+    if (
+      currentActivePersonaId &&
+      !personasLoading &&
+      personas.length > 0 &&
+      !activePersona
+    ) {
+      setActivePersona(null, { replace: true });
+    }
+  }, [
+    activePersona,
+    currentActivePersonaId,
+    personas.length,
+    personasLoading,
+    setActivePersona,
+  ]);
 
   const filteredPersonas = useMemo(
     () =>
@@ -147,8 +192,8 @@ export function AgentsView() {
       if (editingPersona?.id === deletingPersona.id) {
         closePersonaEditor();
       }
-      if (activePersonaId === deletingPersona.id) {
-        setActivePersonaId(null);
+      if (currentActivePersonaId === deletingPersona.id) {
+        setActivePersona(null, { replace: true });
       }
       toast.success(t("view.deleted", { name: deletingPersona.displayName }));
     } catch (err) {
@@ -156,11 +201,12 @@ export function AgentsView() {
     }
     setDeletingPersona(null);
   }, [
-    activePersonaId,
     closePersonaEditor,
+    currentActivePersonaId,
     deletingPersona,
     deletePersona,
     editingPersona,
+    setActivePersona,
     t,
   ]);
 
@@ -307,7 +353,7 @@ export function AgentsView() {
       <>
         <AgentDetailPage
           persona={activePersona}
-          onBack={() => setActivePersonaId(null)}
+          onBack={() => setActivePersona(null)}
           onEdit={(persona) => openPersonaEditor(persona, "edit")}
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
@@ -359,7 +405,7 @@ export function AgentsView() {
         <PersonaGallery
           personas={filteredPersonas}
           hasAnyPersonas={personas.length > 0}
-          onSelectPersona={(p) => setActivePersonaId(p.id)}
+          onSelectPersona={(p) => setActivePersona(p.id)}
           onEditPersona={(p) => openPersonaEditor(p, "edit")}
           onDuplicatePersona={handleDuplicatePersona}
           onDeletePersona={handleDeletePersona}

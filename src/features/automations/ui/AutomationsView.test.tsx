@@ -12,6 +12,7 @@ import {
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import { AutomationsWorkbench as AutomationsView } from "./AutomationsView";
+import type { AutomationNavigationRoute } from "@/app/types/appNavigation";
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -54,7 +55,13 @@ vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
   ),
 }));
 
-function renderAutomationsView() {
+function renderAutomationsView(props?: {
+  route?: AutomationNavigationRoute;
+  onRouteChange?: (
+    route: AutomationNavigationRoute,
+    options?: { replace?: boolean },
+  ) => void;
+}) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: { retry: false },
@@ -63,7 +70,7 @@ function renderAutomationsView() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <AutomationsView />
+      <AutomationsView {...props} />
     </QueryClientProvider>,
   );
 }
@@ -221,6 +228,143 @@ describe("AutomationsView", () => {
     expect(
       screen.queryByRole("button", { name: "Add" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("reports controlled navigation from overview to detail", async () => {
+    const onRouteChange = vi.fn();
+    const user = userEvent.setup();
+    renderAutomationsView({
+      route: { surface: "overview" },
+      onRouteChange,
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+
+    expect(onRouteChange).toHaveBeenCalledWith(
+      {
+        surface: "detail",
+        automationId: "automation-1",
+        tab: "details",
+        selectedRunKey: null,
+      },
+      undefined,
+    );
+  });
+
+  it("reports controlled navigation for surface tabs and global runs", async () => {
+    const onRouteChange = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = renderAutomationsView({
+      route: { surface: "overview" },
+      onRouteChange,
+    });
+
+    await screen.findByText("Daily revenue digest");
+    await user.click(screen.getByRole("tab", { name: "History" }));
+
+    expect(onRouteChange).toHaveBeenCalledWith(
+      { surface: "history", selectedRun: null },
+      undefined,
+    );
+
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+            },
+          })
+        }
+      >
+        <AutomationsView
+          route={{ surface: "history", selectedRun: null }}
+          onRouteChange={onRouteChange}
+        />
+      </QueryClientProvider>,
+    );
+
+    await user.click(
+      await screen.findByRole("button", { name: /^Daily revenue digest,/i }),
+    );
+
+    expect(onRouteChange).toHaveBeenLastCalledWith(
+      {
+        surface: "history",
+        selectedRun: {
+          automationId: "automation-1",
+          runKey: expect.any(String),
+        },
+      },
+      undefined,
+    );
+  });
+
+  it("reports controlled navigation for detail tabs and run selection", async () => {
+    const onRouteChange = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = renderAutomationsView({
+      route: {
+        surface: "detail",
+        automationId: "automation-1",
+        tab: "details",
+        selectedRunKey: null,
+      },
+      onRouteChange,
+    });
+
+    await screen.findByRole("textbox", { name: "Title" });
+    await user.click(screen.getByRole("tab", { name: "History" }));
+
+    expect(onRouteChange).toHaveBeenCalledWith(
+      {
+        surface: "detail",
+        automationId: "automation-1",
+        tab: "history",
+        selectedRunKey: null,
+      },
+      undefined,
+    );
+
+    rerender(
+      <QueryClientProvider
+        client={
+          new QueryClient({
+            defaultOptions: {
+              queries: { retry: false },
+            },
+          })
+        }
+      >
+        <AutomationsView
+          route={{
+            surface: "detail",
+            automationId: "automation-1",
+            tab: "history",
+            selectedRunKey: null,
+          }}
+          onRouteChange={onRouteChange}
+        />
+      </QueryClientProvider>,
+    );
+
+    const runButton = (await screen.findAllByText("Run completed."))
+      .map((element) => element.closest("button"))
+      .find(Boolean);
+    expect(runButton).not.toBeNull();
+    await user.click(runButton as HTMLButtonElement);
+
+    expect(onRouteChange).toHaveBeenLastCalledWith(
+      {
+        surface: "detail",
+        automationId: "automation-1",
+        tab: "history",
+        selectedRunKey: expect.any(String),
+      },
+      undefined,
+    );
   });
 
   it("edits instructions with explicit save and cancel controls", async () => {

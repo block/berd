@@ -10,14 +10,33 @@ import { SettingsView } from "@/features/settings/ui/SettingsView";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import type { AppView } from "../AppShell";
+import type {
+  AppNavigationUpdateOptions,
+  AppView,
+  AutomationNavigationRoute,
+} from "../types/appNavigation";
 import type { SectionId } from "@/features/settings/ui/settingsSections";
 
 interface AppShellContentProps {
   activeView: AppView;
   activeSettingsSection: SectionId;
+  activeSkillsSkillId: string | null;
+  activeAgentsPersonaId: string | null;
+  activeAutomationsRoute: AutomationNavigationRoute;
   activeSession?: ChatSession;
   homeSessionId: string | null;
+  onNavigateSkills: (
+    skillId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onNavigateAgents: (
+    personaId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onNavigateAutomations: (
+    route: AutomationNavigationRoute,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
   onCreatePersona: () => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
@@ -39,8 +58,14 @@ interface AppShellContentProps {
 export function AppShellContent({
   activeView,
   activeSettingsSection,
+  activeSkillsSkillId,
+  activeAgentsPersonaId,
+  activeAutomationsRoute,
   activeSession,
   homeSessionId,
+  onNavigateSkills,
+  onNavigateAgents,
+  onNavigateAutomations,
   onCreatePersona,
   onArchiveChat,
   onCreateProject,
@@ -55,13 +80,29 @@ export function AppShellContent({
     case "settings":
       return <SettingsView activeSection={activeSettingsSection} />;
     case "automations":
-      return <AutomationsWorkbench />;
+      return (
+        <AutomationsWorkbench
+          route={activeAutomationsRoute}
+          onRouteChange={onNavigateAutomations}
+        />
+      );
     case "skills":
-      return <SkillsView onStartChatWithSkill={onStartChatWithSkill} />;
+      return (
+        <SkillsView
+          activeSkillId={activeSkillsSkillId}
+          onActiveSkillIdChange={onNavigateSkills}
+          onStartChatWithSkill={onStartChatWithSkill}
+        />
+      );
     case "extensions":
       return <ExtensionsView />;
     case "agents":
-      return <AgentsView />;
+      return (
+        <AgentsView
+          activePersonaId={activeAgentsPersonaId}
+          onActivePersonaIdChange={onNavigateAgents}
+        />
+      );
     case "projects":
       return <ProjectsView onStartChat={onStartChatFromProject} />;
     case "session-history":
