@@ -1,18 +1,25 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createAutomationTile,
   deleteAutomationTile,
-  generateAutomationSchedule,
   getAutomationSessionMessages,
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
-import { AutomationsView } from "./AutomationsView";
+import { AutomationsWorkbench as AutomationsView } from "./AutomationsView";
+
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
+
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
 
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: vi.fn(),
@@ -22,7 +29,6 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   createAutomationTile: vi.fn(),
   updateAutomationTile: vi.fn(),
   deleteAutomationTile: vi.fn(),
-  generateAutomationSchedule: vi.fn(),
 }));
 
 vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
@@ -47,9 +53,6 @@ vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
     </section>
   ),
 }));
-
-HTMLElement.prototype.hasPointerCapture ??= () => false;
-HTMLElement.prototype.scrollIntoView ??= () => {};
 
 function renderAutomationsView() {
   const queryClient = new QueryClient({
@@ -76,6 +79,10 @@ describe("AutomationsView", () => {
           schedule: "0 9 * * *",
           latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
           lastSuccessAt: "1714568400000",
+          updated: "1714568400000",
+          enableNotifications: true,
+          latestRenderedData: { summary: "Revenue was up." },
+          requiredConnections: ["slack"],
         },
         {
           id: "automation-2",
@@ -83,6 +90,8 @@ describe("AutomationsView", () => {
           schedulePaused: true,
           pausedReason: "Manually paused",
           latestRunStatus: "TILE_RUN_STATUS_FAILED",
+          updated: "1714568500000",
+          latestRenderedData: { summary: "Build failed on main." },
         },
       ],
     });
@@ -118,10 +127,6 @@ describe("AutomationsView", () => {
       tileId: "automation-copy",
     });
     vi.mocked(deleteAutomationTile).mockResolvedValue({ success: true });
-    vi.mocked(generateAutomationSchedule).mockResolvedValue({
-      success: true,
-      cronExpression: "0 9 * * 1-5",
-    });
     vi.mocked(getAutomationSessionMessages).mockResolvedValue({
       sessionName: "Daily revenue digest run",
       status: "idle",
@@ -175,29 +180,76 @@ describe("AutomationsView", () => {
     });
   });
 
-  it("loads automations and shows selected automation details", async () => {
+  it("loads automations into a quiet overview list", async () => {
     renderAutomationsView();
 
     expect(
-      await screen.findByRole("button", { name: /daily revenue digest/i }),
-    ).toBeInTheDocument();
+      (await screen.findAllByText("Daily revenue digest")).length,
+    ).toBeGreaterThan(0);
     expect(screen.getByText("Failed build watcher")).toBeInTheDocument();
-    expect(await screen.findByText("Pull revenue")).toBeInTheDocument();
-    expect(screen.getByText("Send a summary")).toBeInTheDocument();
-    expect(screen.getByText("America/Los_Angeles")).toBeInTheDocument();
+    expect(screen.queryByText("Your automations")).not.toBeInTheDocument();
+    expect(screen.queryByText("Last status")).not.toBeInTheDocument();
+    expect(screen.queryByText("Recent notifications")).not.toBeInTheDocument();
     expect(screen.getByText("Revenue was up.")).toBeInTheDocument();
+  });
+
+  it("opens automation details from the overview", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+
+    expect(await screen.findByLabelText("Instructions")).toHaveValue(
+      "Pull revenue\nSend a summary",
+    );
+    expect(screen.getByDisplayValue("America/Los_Angeles")).toBeInTheDocument();
+  });
+
+  it("formats common cron schedules in read-only views", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    expect(await screen.findAllByText("Daily at 9:00 AM")).not.toHaveLength(0);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+
+    expect(await screen.findAllByText("Daily at 9:00 AM")).not.toHaveLength(0);
+  });
+
+  it("uses the button icon sizing for detail actions", async () => {
+    renderAutomationsView();
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await screen.findByLabelText("Instructions");
+
+    const deleteIcon = screen
+      .getByRole("button", { name: "Delete" })
+      .querySelector("svg");
+
+    expect(deleteIcon).toHaveClass("size-3");
   });
 
   it("shows historical run output from kgoose tile results", async () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
-    await screen.findByText("Daily revenue digest");
     await user.click(screen.getByRole("tab", { name: "History" }));
+
+    expect(screen.queryByText("Session history")).not.toBeInTheDocument();
+
+    await user.click(
+      await screen.findByRole("button", { name: /Daily revenue digest/i }),
+    );
 
     expect(await screen.findByText("Session history")).toBeInTheDocument();
     expect(screen.getAllByText("session-1").length).toBeGreaterThan(0);
-    expect(screen.getByText("Run completed.")).toBeInTheDocument();
+    expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
     expect(screen.getByText("Run now")).toBeInTheDocument();
     expect(
       screen.getByText("Fetched 3 Slack messages from #revenue."),
@@ -213,38 +265,48 @@ describe("AutomationsView", () => {
 
   it("selects the clicked run when session ids repeat", async () => {
     const user = userEvent.setup();
-    vi.mocked(getAutomationTileResults).mockResolvedValue({
-      tilesResults: [
-        {
-          sessionId: "shared-session",
-          tileId: "automation-1",
-          created: "1714568400000",
-          runStatus: "TILE_RUN_STATUS_SUCCESS",
-          tileData: { summary: "Newer run." },
-        },
-        {
-          sessionId: "shared-session",
-          tileId: "automation-1",
-          created: "1714568300000",
-          runStatus: "TILE_RUN_STATUS_SUCCESS",
-          tileData: { summary: "Older run." },
-        },
-      ],
-    });
+    vi.mocked(getAutomationTileResults).mockImplementation(async (id) => ({
+      tilesResults:
+        id === "automation-1"
+          ? [
+              {
+                sessionId: "shared-session",
+                tileId: "automation-1",
+                created: "1714568400000",
+                runStatus: "TILE_RUN_STATUS_SUCCESS",
+                tileData: { summary: "Newer run." },
+              },
+              {
+                sessionId: "shared-session",
+                tileId: "automation-1",
+                created: "1714568300000",
+                runStatus: "TILE_RUN_STATUS_SUCCESS",
+                tileData: { summary: "Older run." },
+              },
+            ]
+          : [],
+    }));
     renderAutomationsView();
 
-    await screen.findByText("Daily revenue digest");
     await user.click(screen.getByRole("tab", { name: "History" }));
 
     expect(await screen.findByText("Newer run.")).toBeInTheDocument();
 
     const runButtons = await screen.findAllByRole("button", {
-      name: /shared-session/i,
+      name: /Daily revenue digest/i,
     });
     await user.click(runButtons[1]);
 
-    expect(await screen.findByText("Older run.")).toBeInTheDocument();
-    expect(screen.queryByText("Newer run.")).not.toBeInTheDocument();
+    const output = (
+      await screen.findByRole("heading", { name: "Session history" })
+    ).closest("section");
+    expect(output).not.toBeNull();
+    expect(
+      within(output as HTMLElement).getByText("Older run."),
+    ).toBeInTheDocument();
+    expect(
+      within(output as HTMLElement).queryByText("Newer run."),
+    ).not.toBeInTheDocument();
   });
 
   it("selects another automation from the list", async () => {
@@ -266,13 +328,12 @@ describe("AutomationsView", () => {
     renderAutomationsView();
 
     await user.click(
-      await screen.findByRole("button", { name: /failed build watcher/i }),
+      await screen.findByRole("button", { name: "Failed build watcher" }),
     );
 
-    const main = screen.getByRole("main");
-    expect(
-      await within(main).findByText("instructions for automation-2"),
-    ).toBeInTheDocument();
+    expect(await screen.findByLabelText("Instructions")).toHaveValue(
+      "instructions for automation-2",
+    );
     expect(getAutomationTile).toHaveBeenCalledWith("automation-2");
   });
 
@@ -331,9 +392,7 @@ describe("AutomationsView", () => {
       screen.queryByRole("heading", { name: "Add automation" }),
     ).toBeNull();
     expect(
-      await within(screen.getByRole("main")).findByText(
-        "instructions for automation-3",
-      ),
+      await screen.findByText("instructions for automation-3"),
     ).toBeInTheDocument();
   });
 
@@ -352,49 +411,45 @@ describe("AutomationsView", () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
-    await screen.findByText("Daily revenue digest");
-    await user.click(screen.getByRole("button", { name: "Edit" }));
-    expect(screen.getByText("Pacific Time (PT)")).toBeInTheDocument();
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Revenue digest v2");
-    const scheduleInput = screen.getByPlaceholderText(
-      "0 9 * * * or every weekday at 9am",
-    );
-    await user.clear(scheduleInput);
-    await user.type(scheduleInput, "every weekday at 9am");
-    await user.click(screen.getByRole("combobox", { name: "Time zone" }));
-    await user.click(
-      screen.getByRole("option", {
-        name: "Eastern Time (ET)",
-      }),
-    );
-    await user.click(screen.getByRole("button", { name: "Generate cron" }));
 
-    expect(generateAutomationSchedule).toHaveBeenCalledWith(
-      "every weekday at 9am",
-      "America/New_York",
-    );
-    expect(await screen.findByDisplayValue("0 9 * * 1-5")).toBeInTheDocument();
+    await user.tab();
+    await waitFor(() => {
+      expect(updateAutomationTile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "automation-1",
+          title: "Revenue digest v2",
+        }),
+        expect.anything(),
+      );
+    });
 
-    await user.click(screen.getByRole("button", { name: "Save" }));
+    await user.click(screen.getByRole("combobox", { name: "Repeats" }));
+    await user.click(await screen.findByRole("option", { name: "Weekdays" }));
 
-    expect(updateAutomationTile).toHaveBeenCalledWith(
-      expect.objectContaining({
-        id: "automation-1",
-        title: "Revenue digest v2",
-        schedule: "0 9 * * 1-5",
-        timeZone: "America/New_York",
-        updateSchedule: true,
-      }),
-      expect.anything(),
-    );
+    await waitFor(() => {
+      expect(updateAutomationTile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "automation-1",
+          schedule: "0 9 * * 1-5",
+          updateSchedule: true,
+        }),
+        expect.anything(),
+      );
+    });
   });
 
   it("deletes a generic automation after confirmation", async () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
-    await screen.findByText("Daily revenue digest");
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
     await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(
@@ -414,7 +469,10 @@ describe("AutomationsView", () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
-    await screen.findByText("Pull revenue");
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await screen.findByText(/Pull revenue\s+Send a summary/);
     await user.click(screen.getByRole("button", { name: "Duplicate" }));
 
     expect(createAutomationTile).toHaveBeenCalledWith({
@@ -445,7 +503,10 @@ describe("AutomationsView", () => {
 
     renderAutomationsView();
 
-    await screen.findByText("Pull revenue");
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await screen.findByText(/Pull revenue\s+Send a summary/);
     await user.click(screen.getByRole("button", { name: "Duplicate" }));
 
     expect(createAutomationTile).toHaveBeenCalledWith(
@@ -476,13 +537,17 @@ describe("AutomationsView", () => {
 
     renderAutomationsView();
 
-    await screen.findByText("Pull revenue");
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await screen.findByText(/Pull revenue\s+Send a summary/);
     expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Duplicate" }));
     expect(createAutomationTile).not.toHaveBeenCalled();
   });
 
   it("does not duplicate unknown automation tile types", async () => {
+    const user = userEvent.setup();
     vi.mocked(getAutomationTile).mockResolvedValue({
       tileInfo: {
         id: "automation-1",
@@ -497,7 +562,10 @@ describe("AutomationsView", () => {
 
     renderAutomationsView();
 
-    await screen.findByText("Pull revenue");
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await screen.findByText(/Pull revenue\s+Send a summary/);
     expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
     expect(createAutomationTile).not.toHaveBeenCalled();
   });

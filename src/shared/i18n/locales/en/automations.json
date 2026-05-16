@@ -8,8 +8,6 @@
     "duplicate": "Duplicate",
     "duplicating": "Duplicating...",
     "edit": "Edit",
-    "generateCron": "Generate cron",
-    "generating": "Generating...",
     "refresh": "Refresh automations",
     "refreshShort": "Refresh",
     "save": "Save",
@@ -57,14 +55,18 @@
   },
   "details": {
     "connections": "Connections",
+    "description": "Review what this automation does, how it runs, and the state of recent runs.",
+    "details": "Details",
     "instructions": "Instructions",
     "lastSuccessfulRun": "Last successful run",
-    "latestOutput": "Latest output",
+    "latestResult": "Latest result",
     "latestRun": "Latest run",
     "noInstructions": "No instructions returned by kgoose.",
+    "noLatestResult": "No latest result was returned for this automation.",
     "notifications": "Notifications",
     "notificationsDisabled": "Disabled",
     "notificationsEnabled": "Enabled",
+    "runSettings": "Run settings",
     "schedule": "Schedule",
     "selectBody": "Automation details and run history appear here.",
     "selectTitle": "Select an automation",
@@ -81,15 +83,40 @@
       "notifications": "Slack notifications",
       "notificationsHelp": "Receive notifications when this automation succeeds, fails, or needs input.",
       "schedule": "Schedule",
-      "scheduleHelp": "Enter a cron expression directly, or write a natural-language schedule and generate cron before saving.",
-      "schedulePlaceholder": "0 9 * * * or every weekday at 9am",
+      "scheduleCustom": "Cron expression",
+      "scheduleDay": "Day",
+      "scheduleHelp": "Choose a common schedule, or use Custom for a cron expression.",
+      "schedulePlaceholder": "0 13 * * *",
+      "schedulePreview": "Runs {{schedule}}",
+      "scheduleRepeats": "Repeats",
+      "scheduleTime": "Time",
       "timeZone": "Time zone",
       "title": "Title"
     },
-    "generateError": "Failed to generate a cron schedule.",
     "instructionsRequired": "Instructions cannot be empty.",
+    "schedulePresets": {
+      "custom": "Custom",
+      "daily": "Daily",
+      "hourly": "Hourly",
+      "none": "No schedule",
+      "weekdays": "Weekdays",
+      "weekly": "Weekly"
+    },
     "saveError": "Failed to save automation.",
-    "title": "Edit automation"
+    "title": "Edit automation",
+    "weekdays": {
+      "friday": "Friday",
+      "monday": "Monday",
+      "saturday": "Saturday",
+      "sunday": "Sunday",
+      "thursday": "Thursday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday"
+    },
+    "autosave": {
+      "saved": "Autosaves",
+      "saving": "Saving..."
+    }
   },
   "fallbacks": {
     "never": "Never",
@@ -99,13 +126,16 @@
     "untitledAutomation": "Untitled automation"
   },
   "history": {
+    "automations": "Automations",
     "emptyBody": "kgoose returned no historical runs for this automation.",
     "emptyTitle": "No runs yet",
     "loadErrorTitle": "History failed to load",
     "noSessionMessages": "No chat messages were returned for this run.",
     "noOutputData": "This run did not return output data.",
     "noSessionId": "No session id",
+    "previousRuns": "Previous runs",
     "runOutput": "Run output",
+    "runs": "Runs",
     "sessionHistory": "Session history",
     "sessionLoadErrorTitle": "Session history failed to load",
     "sessionUnavailable": "This run does not have a chat session id.",
@@ -118,6 +148,11 @@
     "emptyTitle": "No automations",
     "loadErrorTitle": "Automations failed to load"
   },
+  "overview": {
+    "lastActivity": "Last ran {{time}}",
+    "neverRun": "Never run",
+    "title": "Your automations"
+  },
   "schedule": {
     "none": "No schedule",
     "paused": "Paused",
@@ -126,7 +161,8 @@
   "subtitle": "Remote automations",
   "tabs": {
     "details": "Details",
-    "history": "History"
+    "history": "History",
+    "overview": "My automations"
   },
   "title": "Automations"
 }

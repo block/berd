@@ -8,8 +8,6 @@
     "duplicate": "Duplicar",
     "duplicating": "Duplicando...",
     "edit": "Editar",
-    "generateCron": "Generar cron",
-    "generating": "Generando...",
     "refresh": "Actualizar automatizaciones",
     "refreshShort": "Actualizar",
     "save": "Guardar",
@@ -57,14 +55,18 @@
   },
   "details": {
     "connections": "Conexiones",
+    "description": "Revisa que hace esta automatizacion, como se ejecuta y el estado de ejecuciones recientes.",
+    "details": "Detalles",
     "instructions": "Instrucciones",
     "lastSuccessfulRun": "Ultima ejecucion exitosa",
-    "latestOutput": "Salida mas reciente",
+    "latestResult": "Resultado mas reciente",
     "latestRun": "Ejecucion mas reciente",
     "noInstructions": "kgoose no devolvio instrucciones.",
+    "noLatestResult": "No se devolvio un resultado reciente para esta automatizacion.",
     "notifications": "Notificaciones",
     "notificationsDisabled": "Desactivadas",
     "notificationsEnabled": "Activadas",
+    "runSettings": "Configuracion de ejecucion",
     "schedule": "Programacion",
     "selectBody": "Los detalles y el historial de ejecuciones apareceran aqui.",
     "selectTitle": "Selecciona una automatizacion",
@@ -81,15 +83,40 @@
       "notifications": "Notificaciones de Slack",
       "notificationsHelp": "Recibe notificaciones cuando esta automatizacion tenga exito, falle o necesite entrada.",
       "schedule": "Programacion",
-      "scheduleHelp": "Ingresa una expresion cron directamente, o escribe una programacion natural y genera cron antes de guardar.",
-      "schedulePlaceholder": "0 9 * * * o cada dia habil a las 9am",
+      "scheduleCustom": "Expresion cron",
+      "scheduleDay": "Dia",
+      "scheduleHelp": "Elige una programacion comun, o usa Personalizada para una expresion cron.",
+      "schedulePlaceholder": "0 13 * * *",
+      "schedulePreview": "Se ejecuta {{schedule}}",
+      "scheduleRepeats": "Repeticion",
+      "scheduleTime": "Hora",
       "timeZone": "Zona horaria",
       "title": "Titulo"
     },
-    "generateError": "No se pudo generar una programacion cron.",
     "instructionsRequired": "Las instrucciones no pueden estar vacias.",
+    "schedulePresets": {
+      "custom": "Personalizada",
+      "daily": "Diaria",
+      "hourly": "Cada hora",
+      "none": "Sin programacion",
+      "weekdays": "Dias habiles",
+      "weekly": "Semanal"
+    },
     "saveError": "No se pudo guardar la automatizacion.",
-    "title": "Editar automatizacion"
+    "title": "Editar automatizacion",
+    "weekdays": {
+      "friday": "Viernes",
+      "monday": "Lunes",
+      "saturday": "Sabado",
+      "sunday": "Domingo",
+      "thursday": "Jueves",
+      "tuesday": "Martes",
+      "wednesday": "Miercoles"
+    },
+    "autosave": {
+      "saved": "Autoguardado",
+      "saving": "Guardando..."
+    }
   },
   "fallbacks": {
     "never": "Nunca",
@@ -99,13 +126,16 @@
     "untitledAutomation": "Automatizacion sin titulo"
   },
   "history": {
+    "automations": "Automatizaciones",
     "emptyBody": "kgoose no devolvio ejecuciones historicas para esta automatizacion.",
     "emptyTitle": "Aun no hay ejecuciones",
     "loadErrorTitle": "No se pudo cargar el historial",
     "noSessionMessages": "No se devolvieron mensajes de chat para esta ejecucion.",
     "noOutputData": "Esta ejecucion no devolvio datos de salida.",
     "noSessionId": "Sin id de sesion",
+    "previousRuns": "Ejecuciones anteriores",
     "runOutput": "Salida de ejecucion",
+    "runs": "Ejecuciones",
     "sessionHistory": "Historial de sesion",
     "sessionLoadErrorTitle": "No se pudo cargar el historial de sesion",
     "sessionUnavailable": "Esta ejecucion no tiene id de sesion de chat.",
@@ -118,6 +148,11 @@
     "emptyTitle": "No hay automatizaciones",
     "loadErrorTitle": "No se pudieron cargar las automatizaciones"
   },
+  "overview": {
+    "lastActivity": "Ultima ejecucion {{time}}",
+    "neverRun": "Nunca ejecutada",
+    "title": "Tus automatizaciones"
+  },
   "schedule": {
     "none": "Sin programacion",
     "paused": "Pausada",
@@ -126,7 +161,8 @@
   "subtitle": "Automatizaciones de kgoose de solo lectura",
   "tabs": {
     "details": "Detalles",
-    "history": "Historial"
+    "history": "Historial",
+    "overview": "Mis automatizaciones"
   },
   "title": "Automatizaciones"
 }
