@@ -319,24 +319,28 @@ describe("AutomationsView", () => {
           id: "today",
           title: "Today automation",
           latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: String(now.getTime()),
           updated: String(now.getTime()),
         },
         {
           id: "yesterday",
           title: "Yesterday automation",
           latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: String(yesterday.getTime()),
           updated: String(yesterday.getTime()),
         },
         {
           id: "weekday",
           title: "Weekday automation",
           latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: String(weekday.getTime()),
           updated: String(weekday.getTime()),
         },
         {
           id: "older",
           title: "Older automation",
           latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: String(older.getTime()),
           updated: String(older.getTime()),
         },
       ],
@@ -356,6 +360,38 @@ describe("AutomationsView", () => {
     expect(
       screen.getByText(`Last ran ${formatDateTime(older)}`),
     ).toBeInTheDocument();
+  });
+
+  it("uses the last successful run timestamp instead of the tile update timestamp", async () => {
+    const now = new Date();
+    const lastSuccess = new Date(now);
+    lastSuccess.setDate(now.getDate() - 8);
+    const formatDateTime = (date: Date) =>
+      new Intl.DateTimeFormat(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }).format(date);
+
+    vi.mocked(getAutomationTiles).mockResolvedValue({
+      tiles: [
+        {
+          id: "recently-edited",
+          title: "Recently edited automation",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: String(lastSuccess.getTime()),
+          updated: String(now.getTime()),
+        },
+      ],
+    });
+
+    renderAutomationsView();
+
+    expect(
+      await screen.findByText(`Last ran ${formatDateTime(lastSuccess)}`),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Last ran today/i)).not.toBeInTheDocument();
   });
 
   it("formats history run timestamps with relative day labels", async () => {
@@ -703,6 +739,22 @@ describe("AutomationsView", () => {
         expect.objectContaining({
           id: "automation-1",
           timeZone: "America/New_York",
+          updateSchedule: true,
+        }),
+        expect.anything(),
+      );
+    });
+
+    await user.click(screen.getByRole("combobox", { name: "Repeats" }));
+    await user.click(
+      await screen.findByRole("option", { name: "No schedule" }),
+    );
+
+    await waitFor(() => {
+      expect(updateAutomationTile).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: "automation-1",
+          schedule: "",
           updateSchedule: true,
         }),
         expect.anything(),

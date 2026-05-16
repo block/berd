@@ -264,7 +264,7 @@ function formatCronSchedule(value: string | undefined) {
     month === "*" &&
     dayOfWeek === "*"
   ) {
-    return "Hourly";
+    return { key: "schedule.cron.hourly" };
   }
 
   const minute = Number(minutePart);
@@ -284,31 +284,31 @@ function formatCronSchedule(value: string | undefined) {
 
   const time = formatCronTime(hour, minute);
   if (dayOfWeek === "*") {
-    return `Daily at ${time}`;
+    return { key: "schedule.cron.daily", values: { time } };
   }
   if (dayOfWeek === "1-5" || dayOfWeek === "MON-FRI") {
-    return `Weekdays at ${time}`;
+    return { key: "schedule.cron.weekdays", values: { time } };
   }
   if (dayOfWeek === "0" || dayOfWeek === "SUN") {
-    return `Sundays at ${time}`;
+    return { key: "schedule.cron.sunday", values: { time } };
   }
   if (dayOfWeek === "1" || dayOfWeek === "MON") {
-    return `Mondays at ${time}`;
+    return { key: "schedule.cron.monday", values: { time } };
   }
   if (dayOfWeek === "2" || dayOfWeek === "TUE") {
-    return `Tuesdays at ${time}`;
+    return { key: "schedule.cron.tuesday", values: { time } };
   }
   if (dayOfWeek === "3" || dayOfWeek === "WED") {
-    return `Wednesdays at ${time}`;
+    return { key: "schedule.cron.wednesday", values: { time } };
   }
   if (dayOfWeek === "4" || dayOfWeek === "THU") {
-    return `Thursdays at ${time}`;
+    return { key: "schedule.cron.thursday", values: { time } };
   }
   if (dayOfWeek === "5" || dayOfWeek === "FRI") {
-    return `Fridays at ${time}`;
+    return { key: "schedule.cron.friday", values: { time } };
   }
   if (dayOfWeek === "6" || dayOfWeek === "SAT") {
-    return `Saturdays at ${time}`;
+    return { key: "schedule.cron.saturday", values: { time } };
   }
 
   return null;
@@ -428,6 +428,7 @@ function formatSchedule(
     noSchedule: string;
     paused: string;
     pausedWithReason: (reason: string) => string;
+    cron: (key: string, values?: Record<string, string>) => string;
   },
 ) {
   if (tile.schedulePaused) {
@@ -435,9 +436,18 @@ function formatSchedule(
       ? labels.pausedWithReason(tile.pausedReason)
       : labels.paused;
   }
-  return (
-    formatCronSchedule(tile.schedule) ?? tile.schedule ?? labels.noSchedule
-  );
+  const cronSchedule = formatCronSchedule(tile.schedule);
+  return cronSchedule
+    ? labels.cron(cronSchedule.key, cronSchedule.values)
+    : tile.schedule || labels.noSchedule;
+}
+
+function latestRunTimestampFromTile(tile: AutomationTile) {
+  const normalizedStatus = String(tile.latestRunStatus ?? "").toLowerCase();
+  if (normalizedStatus.includes("success")) {
+    return tile.lastSuccessAt;
+  }
+  return undefined;
 }
 
 function automationTitle(tile: AutomationTile, untitledLabel: string) {
@@ -568,15 +578,14 @@ function AutomationOverviewRow({
     paused: t("schedule.paused"),
     pausedWithReason: (reason: string) =>
       t("schedule.pausedWithReason", { reason }),
+    cron: (key: string, values?: Record<string, string>) => t(key, values),
   };
   const latestResultSummary = getOutputSummary(tile.latestRenderedData);
   const title = automationTitle(tile, t("fallbacks.untitledAutomation"));
   const schedule = formatSchedule(tile, scheduleLabels);
   const runStatus =
     tile.latestRunStatus ?? (tile.lastSuccessAt ? "success" : undefined);
-  const lastRunAt = runStatus
-    ? (tile.updated ?? tile.lastSuccessAt)
-    : undefined;
+  const lastRunAt = latestRunTimestampFromTile(tile);
 
   return (
     <button
@@ -1126,9 +1135,7 @@ function AutomationDetailPage({
     : null;
   const latestRunStatus =
     tile.latestRunStatus ?? (tile.lastSuccessAt ? "success" : undefined);
-  const latestRunAt = latestRunStatus
-    ? (tile.updated ?? tile.lastSuccessAt)
-    : undefined;
+  const latestRunAt = latestRunTimestampFromTile(tile);
   useEffect(() => {
     instructionsDraftRef.current = instructionsDraft;
   }, [instructionsDraft]);
@@ -1255,8 +1262,8 @@ function AutomationDetailPage({
     const nextTimeZone = timeZoneDraft.trim() || automationTimeZone(tile);
     setLocalError(null);
     request.updateSchedule = true;
-    if (nextSchedule) {
-      request.schedule = nextSchedule;
+    request.schedule = nextSchedule;
+    if (nextSchedule || nextTimeZone !== (tile.timeZone ?? "")) {
       request.timeZone = nextTimeZone;
     }
     onSave(request);

@@ -165,6 +165,18 @@
     "title": "Your automations"
   },
   "schedule": {
+    "cron": {
+      "daily": "Daily at {{time}}",
+      "friday": "Fridays at {{time}}",
+      "hourly": "Hourly",
+      "monday": "Mondays at {{time}}",
+      "saturday": "Saturdays at {{time}}",
+      "sunday": "Sundays at {{time}}",
+      "thursday": "Thursdays at {{time}}",
+      "tuesday": "Tuesdays at {{time}}",
+      "wednesday": "Wednesdays at {{time}}",
+      "weekdays": "Weekdays at {{time}}"
+    },
     "none": "No schedule",
     "paused": "Paused",
     "pausedWithReason": "Paused: {{reason}}"

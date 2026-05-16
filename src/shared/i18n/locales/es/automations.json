@@ -165,6 +165,18 @@
     "title": "Tus automatizaciones"
   },
   "schedule": {
+    "cron": {
+      "daily": "Diaria a las {{time}}",
+      "friday": "Viernes a las {{time}}",
+      "hourly": "Cada hora",
+      "monday": "Lunes a las {{time}}",
+      "saturday": "Sabados a las {{time}}",
+      "sunday": "Domingos a las {{time}}",
+      "thursday": "Jueves a las {{time}}",
+      "tuesday": "Martes a las {{time}}",
+      "wednesday": "Miercoles a las {{time}}",
+      "weekdays": "Dias habiles a las {{time}}"
+    },
     "none": "Sin programacion",
     "paused": "Pausada",
     "pausedWithReason": "Pausada: {{reason}}"

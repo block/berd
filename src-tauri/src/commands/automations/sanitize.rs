@@ -429,8 +429,10 @@ pub(super) fn sanitize_update_automation_request(request: Value) -> Result<Value
         sanitized.insert("updateSchedule".to_string(), Value::Bool(true));
         let mut has_schedule_update_field = false;
         if let Some(schedule) = request.schedule {
-            let schedule = trim_required_string(&schedule, "schedule")?;
-            sanitized.insert("schedule".to_string(), Value::String(schedule));
+            sanitized.insert(
+                "schedule".to_string(),
+                Value::String(schedule.trim().to_string()),
+            );
             has_schedule_update_field = true;
         }
         if let Some(time_zone) = request.time_zone {
@@ -827,16 +829,29 @@ mod tests {
         .is_err());
         assert!(sanitize_update_automation_request(json!({
             "id": "automation-1",
-            "schedule": " ",
-            "updateSchedule": true
-        }))
-        .is_err());
-        assert!(sanitize_update_automation_request(json!({
-            "id": "automation-1",
             "timeZone": " ",
             "updateSchedule": true
         }))
         .is_err());
+    }
+
+    #[test]
+    fn sanitizes_empty_schedule_as_clear_schedule_update() {
+        let request = sanitize_update_automation_request(json!({
+            "id": "automation-1",
+            "schedule": " ",
+            "updateSchedule": true
+        }))
+        .unwrap();
+
+        assert_eq!(
+            request,
+            json!({
+                "id": "automation-1",
+                "schedule": "",
+                "updateSchedule": true
+            })
+        );
     }
 
     #[test]
