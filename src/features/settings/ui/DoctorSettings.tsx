@@ -11,7 +11,41 @@ import {
 import { DoctorCheckRow } from "./DoctorCheckRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 
-function formatDebugReport(report: DoctorReport): string {
+interface DoctorCheckGroup {
+  category: string;
+  categoryLabel: string;
+  checks: DoctorCheck[];
+}
+
+// Hide upstream Doctor agent checks because Goose's ACP layer manages agent
+// state separately, and the two views can differ. The Providers page is the
+// source of truth for agent setup and status in this app.
+const HIDDEN_DOCTOR_CATEGORIES = new Set(["agents"]);
+
+function groupDoctorChecks(checks: DoctorCheck[]): DoctorCheckGroup[] {
+  const groups = new Map<string, DoctorCheckGroup>();
+
+  for (const check of checks) {
+    if (HIDDEN_DOCTOR_CATEGORIES.has(check.category)) {
+      continue;
+    }
+
+    const group = groups.get(check.category);
+    if (group) {
+      group.checks.push(check);
+    } else {
+      groups.set(check.category, {
+        category: check.category,
+        categoryLabel: check.categoryLabel,
+        checks: [check],
+      });
+    }
+  }
+
+  return Array.from(groups.values());
+}
+
+export function formatDebugReport(report: DoctorReport): string {
   const STATUS_ICONS: Record<DoctorCheck["status"], string> = {
     pass: "\u2713",
     warn: "\u26A0",
@@ -24,23 +58,29 @@ function formatDebugReport(report: DoctorReport): string {
     "=".repeat(60),
   ];
 
-  for (const check of report.checks) {
-    const icon = STATUS_ICONS[check.status];
+  for (const group of groupDoctorChecks(report.checks)) {
     lines.push("");
-    lines.push(
-      `${icon} [${check.status.toUpperCase()}] ${check.label} (${check.id})`,
-    );
-    lines.push(`  Message: ${check.message}`);
-    if (check.path) lines.push(`  Path: ${check.path}`);
-    if (check.bridgePath) lines.push(`  Bridge path: ${check.bridgePath}`);
-    if (check.fixUrl) lines.push(`  Fix URL: ${check.fixUrl}`);
-    if (check.fixCommand) lines.push(`  Fix command: ${check.fixCommand}`);
-    if (check.rawOutput) {
-      lines.push("  --- raw output ---");
-      for (const line of check.rawOutput.split("\n")) {
-        lines.push(`  ${line}`);
+    lines.push(`${group.categoryLabel} (${group.category})`);
+    lines.push("-".repeat(60));
+
+    for (const check of group.checks) {
+      const icon = STATUS_ICONS[check.status];
+      lines.push("");
+      lines.push(
+        `${icon} [${check.status.toUpperCase()}] ${check.label} (${check.id})`,
+      );
+      lines.push(`  Message: ${check.message}`);
+      if (check.path) lines.push(`  Path: ${check.path}`);
+      if (check.bridgePath) lines.push(`  Bridge path: ${check.bridgePath}`);
+      if (check.fixUrl) lines.push(`  Fix URL: ${check.fixUrl}`);
+      if (check.fixCommand) lines.push(`  Fix command: ${check.fixCommand}`);
+      if (check.rawOutput) {
+        lines.push("  --- raw output ---");
+        for (const line of check.rawOutput.split("\n")) {
+          lines.push(`  ${line}`);
+        }
+        lines.push("  --- end raw output ---");
       }
-      lines.push("  --- end raw output ---");
     }
   }
 
@@ -68,23 +108,15 @@ export function DoctorSettings() {
     }
   }, []);
 
-  /** Run checks (provider list is now static, no refresh needed). */
-  const runChecksAndRefresh = useCallback(async () => {
-    await runChecks();
-  }, [runChecks]);
-
   useEffect(() => {
     mountedRef.current = true;
-    runChecksAndRefresh();
+    runChecks();
     return () => {
       mountedRef.current = false;
     };
-  }, [runChecksAndRefresh]);
+  }, [runChecks]);
 
-  const toolChecks =
-    report?.checks.filter((c) => !c.id.startsWith("ai-agent-")) ?? [];
-  const agentChecks =
-    report?.checks.filter((c) => c.id.startsWith("ai-agent-")) ?? [];
+  const checkGroups = report ? groupDoctorChecks(report.checks) : [];
 
   async function copyDebugInfo() {
     if (!report) return;
@@ -119,7 +151,7 @@ export function DoctorSettings() {
               type="button"
               variant="outline"
               size="xxs"
-              onClick={runChecksAndRefresh}
+              onClick={runChecks}
             >
               <RefreshCw className="size-3.5" />
               {t("doctor.rerun")}
@@ -135,37 +167,25 @@ export function DoctorSettings() {
         </div>
       ) : report ? (
         <div className="space-y-6">
-          <div className="mx-auto w-full max-w-xl space-y-2">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("doctor.tools")}
-            </h4>
-            <div className="space-y-2">
-              {toolChecks.map((check) => (
-                <DoctorCheckRow
-                  key={check.id}
-                  check={check}
-                  onFixed={runChecksAndRefresh}
-                />
-              ))}
-            </div>
-          </div>
-
-          {agentChecks.length > 0 && (
-            <div className="mx-auto w-full max-w-xl space-y-2">
+          {checkGroups.map((group) => (
+            <div
+              key={group.category}
+              className="mx-auto w-full max-w-xl space-y-2"
+            >
               <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {t("doctor.agents")}
+                {group.categoryLabel}
               </h4>
               <div className="space-y-2">
-                {agentChecks.map((check) => (
+                {group.checks.map((check) => (
                   <DoctorCheckRow
                     key={check.id}
                     check={check}
-                    onFixed={runChecksAndRefresh}
+                    onFixed={runChecks}
                   />
                 ))}
               </div>
             </div>
-          )}
+          ))}
         </div>
       ) : (
         <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">

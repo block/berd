@@ -13,6 +13,8 @@ export interface DoctorCheck {
   path: string | null;
   bridgePath: string | null;
   rawOutput: string | null;
+  category: string;
+  categoryLabel: string;
 }
 
 export interface DoctorReport {
