@@ -156,7 +156,6 @@ export function SidebarProjectList({
             activeSessionId={activeSessionId}
             onSelectSession={onSelectSession}
             onNewChatInProject={onNewChatInProject}
-            onNavigate={onNavigate}
             onEditProject={onEditProject}
             onArchiveProject={onArchiveProject}
             onArchiveChat={onArchiveChat}

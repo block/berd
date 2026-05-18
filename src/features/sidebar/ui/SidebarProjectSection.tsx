@@ -5,7 +5,6 @@ import {
   IconChevronRight,
   IconEdit,
 } from "@tabler/icons-react";
-import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
@@ -14,6 +13,7 @@ import { SidebarChatRow } from "./SidebarChatRow";
 import { SidebarItemMenu } from "./SidebarItemMenu";
 
 const MAX_VISIBLE_CHATS = 5;
+const VIEW_ALL_CHATS_LABEL_THRESHOLD = 8;
 const PROJECT_ROW_TEXT_CLASS =
   "text-sidebar-nav-fg hover:bg-transparent hover:text-sidebar-nav-fg";
 
@@ -33,7 +33,6 @@ export function SidebarProjectSection({
   activeSessionId,
   onSelectSession,
   onNewChatInProject,
-  onNavigate,
   onEditProject,
   onArchiveProject,
   onArchiveChat,
@@ -57,7 +56,6 @@ export function SidebarProjectSection({
   activeSessionId?: string | null;
   onSelectSession?: (sessionId: string) => void;
   onNewChatInProject?: (projectId: string) => void;
-  onNavigate?: (view: AppView) => void;
   onEditProject?: (projectId: string) => void;
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
@@ -109,6 +107,9 @@ export function SidebarProjectSection({
     0,
     showAll ? undefined : MAX_VISIBLE_CHATS,
   );
+  const hiddenChatCount = projectChats.length - MAX_VISIBLE_CHATS;
+  const useViewAllChatsLabel =
+    projectChats.length > VIEW_ALL_CHATS_LABEL_THRESHOLD;
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
@@ -216,17 +217,7 @@ export function SidebarProjectSection({
               type="button"
               variant="ghost"
               size="xs"
-              onClick={() => {
-                if (showAll) {
-                  setShowAll(false);
-                } else {
-                  if (projectChats.length > 8) {
-                    onNavigate?.("projects");
-                  } else {
-                    setShowAll(true);
-                  }
-                }
-              }}
+              onClick={() => setShowAll((current) => !current)}
               className="h-auto w-full justify-start gap-1.5 rounded-md py-1 pl-8 pr-3 text-[11px] text-foreground hover:text-foreground"
             >
               {showAll ? (
@@ -237,14 +228,14 @@ export function SidebarProjectSection({
               ) : (
                 <>
                   <IconChevronRight className="size-3" />
-                  {projectChats.length > 8
+                  {useViewAllChatsLabel
                     ? t("viewAllChats", {
                         count: projectChats.length,
                         displayCount: projectChats.length,
                       })
                     : t("moreChats", {
-                        count: projectChats.length - MAX_VISIBLE_CHATS,
-                        displayCount: projectChats.length - MAX_VISIBLE_CHATS,
+                        count: hiddenChatCount,
+                        displayCount: hiddenChatCount,
                       })}
                 </>
               )}

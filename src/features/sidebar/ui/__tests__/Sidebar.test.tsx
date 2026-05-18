@@ -163,6 +163,48 @@ describe("Sidebar", () => {
     mockSessions.splice(0, mockSessions.length);
   });
 
+  it("expands all project chats from the view all chats control", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+
+    mockSessions.splice(
+      0,
+      mockSessions.length,
+      ...Array.from({ length: 13 }, (_, index) => {
+        const chatNumber = index + 1;
+        return {
+          id: `session-${chatNumber}`,
+          title: `Project Chat ${chatNumber}`,
+          updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+          messageCount: 3,
+          projectId: "project-1",
+        };
+      }),
+    );
+
+    render(
+      <Sidebar
+        collapsed={false}
+        onNavigate={onNavigate}
+        onSelectSession={vi.fn()}
+        projects={[mockProject()]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(screen.getByText("Project Chat 13")).toBeInTheDocument();
+    expect(screen.queryByText("Project Chat 8")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "View all 13 chats" }));
+
+    expect(screen.getByText("Project Chat 8")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show less" }),
+    ).toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalledWith("projects");
+  });
+
   it("shows sessions in recents when their project is not loaded", () => {
     mockSessions.splice(0, mockSessions.length, {
       id: "session-1",
