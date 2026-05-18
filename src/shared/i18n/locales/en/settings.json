@@ -17,21 +17,6 @@
     "title": "About"
   },
   "appearance": {
-    "accent": {
-      "colors": {
-        "blue": "Blue",
-        "cyan": "Cyan",
-        "default": "Default",
-        "green": "Green",
-        "orange": "Orange",
-        "pink": "Pink",
-        "purple": "Purple",
-        "red": "Red"
-      },
-      "description": "Used for highlights, focus rings, and active states.",
-      "disabledDescription": "Select a theme first to enable accent overrides.",
-      "label": "Accent color"
-    },
     "density": {
       "description": "Adjust spacing throughout the app.",
       "label": "Interface density",
@@ -42,12 +27,23 @@
       }
     },
     "theme": {
-      "description": "Pick a syntax-inspired app theme, or leave it unset to follow your system appearance.",
+      "darkDescription": "Always uses Goose's default dark Shiki theme.",
+      "darkLabel": "Dark · Goose Dark",
+      "description": "Use Goose's default light, dark, or system-matched theme, or pick a specific Shiki theme.",
       "empty": "No themes match your search.",
       "label": "Theme",
+      "lightDescription": "Always uses Goose's default light Shiki theme.",
+      "lightLabel": "Light · Goose Light",
       "searchPlaceholder": "Search themes...",
       "systemDescription": "Uses the default Goose light or dark theme based on your device settings.",
-      "systemLabel": "System default"
+      "systemLabel": "System · Goose Default"
+    },
+    "primary": {
+      "custom": "Custom",
+      "description": "Use the theme primary by default, or choose one primary color to keep across themes.",
+      "label": "Primary color",
+      "reset": "Use theme",
+      "theme": "Theme"
     },
     "title": "Appearance"
   },

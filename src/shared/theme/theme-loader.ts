@@ -167,6 +167,7 @@ export interface ThemeInfo {
   bg: string;
   fg: string;
   comment: string;
+  primary: string;
   added: string | null;
   deleted: string | null;
   modified: string | null;
@@ -240,6 +241,36 @@ function extractGitColors(colors: Record<string, string> | undefined) {
   };
 }
 
+function extractPrimaryColor(
+  colors: Record<string, string> | undefined,
+  fallback: string,
+) {
+  if (!colors) {
+    return fallback;
+  }
+
+  const primaryKeys = [
+    "activityBarBadge.background",
+    "progressBar.background",
+    "button.background",
+    "textLink.foreground",
+    "editorLink.activeForeground",
+    "terminal.ansiBlue",
+    "terminal.ansiMagenta",
+    "terminal.ansiCyan",
+    "focusBorder",
+  ];
+
+  for (const key of primaryKeys) {
+    const value = colors[key];
+    if (value) {
+      return stripAlpha(value);
+    }
+  }
+
+  return fallback;
+}
+
 export function isLightTheme(name: string): boolean {
   return LIGHT_THEMES.has(name as SyntaxThemeName);
 }
@@ -261,6 +292,10 @@ export function extractThemeInfo(
   const gitColors = extractGitColors(
     theme.colors as Record<string, string> | undefined,
   );
+  const primary = extractPrimaryColor(
+    theme.colors as Record<string, string> | undefined,
+    foreground,
+  );
 
   return {
     name: themeName,
@@ -270,6 +305,7 @@ export function extractThemeInfo(
       theme.settings as ReadonlyArray<ThemeSetting> | undefined,
       foreground,
     ),
+    primary,
     ...gitColors,
   };
 }

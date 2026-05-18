@@ -9,6 +9,7 @@ describe("theme-loader", () => {
       colors: {
         "editor.background": "#0f172a",
         "editor.foreground": "#e2e8f0",
+        "activityBarBadge.background": "#ff79c6",
         "gitDecoration.addedResourceForeground": "#22c55eff",
         "editorGutter.deletedBackground": "#ef4444cc",
         "gitDecoration.modifiedResourceForeground": "#f59e0b",
@@ -26,6 +27,7 @@ describe("theme-loader", () => {
       bg: "#0f172a",
       fg: "#e2e8f0",
       comment: "#94a3b8",
+      primary: "#ff79c6",
       added: "#22c55e",
       deleted: "#ef4444",
       modified: "#f59e0b",

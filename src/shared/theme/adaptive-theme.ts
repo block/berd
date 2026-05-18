@@ -36,6 +36,25 @@ function rgbToHex({ r, g, b }: RGB): string {
     .join("")}`;
 }
 
+export function normalizeHexColor(color: string | null): string | null {
+  const value = color?.trim();
+  if (!value) return null;
+
+  const hex = value.startsWith("#") ? value.slice(1) : value;
+  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+    return `#${hex
+      .split("")
+      .map((char) => char + char)
+      .join("")
+      .toLowerCase()}`;
+  }
+  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+    return `#${hex.toLowerCase()}`;
+  }
+
+  return null;
+}
+
 export function luminance(hex: string): number {
   const { r, g, b } = hexToRgb(hex);
   const [rs, gs, bs] = [r, g, b].map((channel) => {
@@ -68,9 +87,24 @@ function adjust(hex: string, amount: number): string {
   return mix(hex, target, Math.abs(amount));
 }
 
-function overlay(hex: string, alpha: number): string {
-  const { r, g, b } = hexToRgb(hex);
-  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+function deriveMutedForeground(
+  syntaxBackground: string,
+  syntaxForeground: string,
+  syntaxComment: string,
+  isDark: boolean,
+): string {
+  const normalizedForeground = normalizeHexColor(syntaxForeground);
+  const normalizedComment = normalizeHexColor(syntaxComment);
+
+  if (
+    normalizedComment &&
+    normalizedForeground &&
+    normalizedComment !== normalizedForeground
+  ) {
+    return normalizedComment;
+  }
+
+  return mix(syntaxForeground, syntaxBackground, isDark ? 0.4 : 0.45);
 }
 
 const CONTRAST_VALUE = 0.035;
@@ -184,15 +218,21 @@ export interface ThemeResult {
   vars: Record<string, string>;
 }
 
+export interface ThemeVarOptions {
+  popoverBackgroundColor?: string;
+}
+
 export function createThemeVars(
   syntaxBackground: string,
   syntaxForeground: string,
   syntaxComment: string,
   gitColors?: ThemeGitColors,
+  primaryColor = syntaxForeground,
+  options: ThemeVarOptions = {},
 ): ThemeResult {
   const isDark = luminance(syntaxBackground) < 0.5;
 
-  const { chrome: chromeColor, primary: primaryBackground } =
+  const { primary: primaryBackground } =
     calculateChromeColors(syntaxBackground);
 
   const direction = isDark ? 1 : -1;
@@ -203,9 +243,9 @@ export function createThemeVars(
   const fallbackRed = isDark ? "#f85149" : "#cf222e";
   const fallbackOrange = isDark ? "#d29922" : "#9a6700";
 
-  const accentGreen = gitColors?.added ?? fallbackGreen;
-  const accentRed = gitColors?.deleted ?? fallbackRed;
-  const accentOrange = gitColors?.modified ?? fallbackOrange;
+  const statusGreen = gitColors?.added ?? fallbackGreen;
+  const statusRed = gitColors?.deleted ?? fallbackRed;
+  const statusOrange = gitColors?.modified ?? fallbackOrange;
 
   const borderColor = mix(
     primaryBackground,
@@ -213,40 +253,41 @@ export function createThemeVars(
     isDark ? 0.15 : 0.12,
   );
   const hoverBackground = elevate(0.06);
+  const popoverBackground = options.popoverBackgroundColor ?? elevate(0.08);
   const textForeground = hexToHsl(syntaxForeground);
-  const destructiveForeground = hexToHsl(getContrastColor(accentRed));
+  const mutedForeground = deriveMutedForeground(
+    syntaxBackground,
+    syntaxForeground,
+    syntaxComment,
+    isDark,
+  );
+  const primaryForeground = hexToHsl(getContrastColor(primaryColor));
+  const textOnDanger = getContrastColor(statusRed);
 
   return {
     isDark,
     vars: {
       "--background": hexToHsl(primaryBackground),
       "--card": hexToHsl(primaryBackground),
-      "--popover": hexToHsl(elevate(0.08)),
+      "--popover": hexToHsl(popoverBackground),
       "--muted": hexToHsl(hoverBackground),
-      "--accent": hexToHsl(hoverBackground),
+      "--hover": hexToHsl(hoverBackground),
       "--secondary": hexToHsl(hoverBackground),
+      "--primary": hexToHsl(primaryColor),
+      "--primary-foreground": primaryForeground,
       "--foreground": textForeground,
       "--card-foreground": textForeground,
       "--popover-foreground": textForeground,
-      "--muted-foreground": hexToHsl(syntaxComment),
-      "--accent-foreground": textForeground,
+      "--muted-foreground": hexToHsl(mutedForeground),
+      "--hover-foreground": textForeground,
       "--secondary-foreground": textForeground,
-      "--destructive": hexToHsl(accentRed),
-      "--destructive-foreground": destructiveForeground,
       "--border": hexToHsl(borderColor),
       "--input": hexToHsl(borderColor),
       "--ring": textForeground,
-      "--sidebar-background": hexToHsl(chromeColor),
-      "--sidebar-foreground": textForeground,
-      "--sidebar-accent": hexToHsl(primaryBackground),
-      "--sidebar-accent-foreground": textForeground,
-      "--sidebar-border": hexToHsl(borderColor),
-      "--sidebar-ring": hexToHsl(borderColor),
-      "--status-added": accentGreen,
-      "--status-deleted": accentRed,
-      "--status-modified": accentOrange,
-      "--ui-warning": accentOrange,
-      "--ui-warning-bg": overlay(accentOrange, isDark ? 0.1 : 0.08),
+      "--status-added": statusGreen,
+      "--status-deleted": statusRed,
+      "--status-modified": statusOrange,
+      "--text-on-danger": textOnDanger,
     },
   };
 }

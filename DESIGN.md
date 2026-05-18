@@ -2,26 +2,28 @@
 name: Goose Internal
 description: A desktop agent workspace documented from the actual Goose Internal design-system tokens.
 colors:
-  bg-primary: "#1a1a1a"
-  text-primary-foreground: "#ffffff"
+  bg-background-primary: "#1a1a1a"
+  text-text-on-primary: "#ffffff"
   bg-background: "#ffffff"
   text-foreground: "#1a1a1a"
-  bg-background-alt: "#f5f5f5"
+  bg-background-card: "#ffffff"
+  bg-sidebar-nav-bg-hover: "#f5f5f5"
+  bg-sidebar-nav-bg-selected: "#f5f5f5"
   bg-background-muted: "#f0f0f0"
   bg-muted: "#f0f0f0"
+  text-text-muted: "#999999"
   text-muted-foreground: "#999999"
-  text-foreground-subtle: "#666666"
   text-placeholder: "#cccccc"
   border-border: "#e8e8e8"
   border-input: "#e5e5e5"
   border-border-input-hover: "#cccccc"
   border-border-strong: "#1a1a1a"
-  bg-destructive: "#f94b4b"
-  text-destructive-foreground: "#ffffff"
-  text-danger: "#f94b4b"
-  text-success: "#73b468"
-  text-info: "#5c98f9"
-  text-warning: "#fbcd44"
+  bg-background-danger-strong: "#f94b4b"
+  text-text-on-danger: "#ffffff"
+  text-text-danger: "#f94b4b"
+  text-text-success: "#73b468"
+  text-text-info: "#5c98f9"
+  text-text-warning: "#fbcd44"
 typography:
   display:
     fontFamily: "font-display"
@@ -79,8 +81,8 @@ spacing:
   py-8: "2rem"
 components:
   button-primary:
-    backgroundColor: "{colors.bg-primary}"
-    textColor: "{colors.text-primary-foreground}"
+    backgroundColor: "{colors.bg-background-primary}"
+    textColor: "{colors.text-text-on-primary}"
     rounded: "{rounded.rounded-full}"
     height: "{spacing.h-9}"
     padding: "0 1rem"
@@ -102,12 +104,12 @@ components:
     rounded: "{rounded.rounded-2xl}"
     padding: "1rem"
   card-default:
-    backgroundColor: "{colors.bg-background}"
+    backgroundColor: "{colors.bg-background-card}"
     textColor: "{colors.text-foreground}"
     rounded: "{rounded.rounded-card}"
     padding: "1.5rem"
   nav-item-active:
-    backgroundColor: "{colors.bg-background-alt}"
+    backgroundColor: "{colors.bg-sidebar-nav-bg-selected}"
     textColor: "{colors.text-foreground}"
     rounded: "6px"
     padding: "0.375rem 0.75rem"
@@ -152,14 +154,14 @@ The source palette is a semantic token system backed by a gray scale and small s
 ### Secondary
 
 - **`--background-default`**: Default app, card, popover, dialog, and composer surface.
-- **`--background-alt`**: Secondary surface for selected nav items, hover rows, and quiet panels.
+- **`--background-card`**: Card and panel surface.
 - **`--background-muted`**: Muted surface for badges, tabs, queued rows, and low-emphasis controls.
 - **`--background-medium`**: Stronger neutral fill used sparingly.
 - **`--background-inverse`**: Inverse surface, not a license to make the product feel like a terminal.
 
 ### Tertiary
 
-- **`--background-danger`, `--border-danger`, `--text-danger`**: Destructive and failure states.
+- **`--background-danger`, `--background-danger-strong`, `--border-danger`, `--text-danger`**: Danger and failure states.
 - **`--background-success`, `--border-success`, `--text-success`**: Success and ready states.
 - **`--background-info`, `--border-info`, `--text-info`**: Informational state and system feedback.
 - **`--background-warning`, `--border-warning`, `--text-warning`**: Warning state.
@@ -169,9 +171,10 @@ The source palette is a semantic token system backed by a gray scale and small s
 - **`--border-default`, `--border-soft`, `--border-soft-divider`**: General structure, dividers, and low-emphasis separation.
 - **`--border-input`, `--border-input-hover`**: Form and control boundaries.
 - **`--border-strong`, `--border-card`, `--border-inverse`**: Stronger or contextual boundaries.
-- **`--text-default`, `--text-subtle`, `--text-muted`, `--text-alt`, `--text-placeholder`, `--text-inverse`**: Lower-level semantic text values.
-- **`--foreground`, `--muted-foreground`, `--card-foreground`, `--popover-foreground`, `--secondary-foreground`, `--accent-foreground`**: Public UI aliases used by Tailwind utilities such as `text-foreground`, `text-muted-foreground`, and `text-card-foreground`.
-- **`--ring`**: Focus ring color, generated from `--brand`.
+- **`--text-default`, `--text-on-card`, `--text-on-popover`, `--text-on-primary`, `--text-on-secondary`, `--text-muted`, `--text-alt`, `--text-placeholder`, `--text-inverse`**: Lower-level semantic text values.
+- **`--sidebar-nav-bg-hover`, `--sidebar-nav-bg-selected`, `--sidebar-nav-fg`**: Left navigation row states. Hover and selected change only the fill; text and icons keep the same foreground.
+- **`--foreground`, `--muted-foreground`, `--card-foreground`, `--popover-foreground`, `--primary-foreground`, `--secondary-foreground`**: Source text inputs that semantic text tokens consume.
+- **`--ring`, `--border-focus`, `--ring-focus`**: Theme focus input and semantic focus tokens.
 
 ### Named Rules
 
@@ -234,7 +237,7 @@ Goose Internal uses semantic shadow tokens plus borders and tonal layering. Most
 Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
 
 - **Shape:** `rounded-full` for ordinary buttons.
-- **Primary:** `bg-primary text-primary-foreground`, which maps to `--brand` and `--brand-foreground`.
+- **Primary:** `bg-background-primary text-text-on-primary`, mapping through semantic primary surface and readable-on-primary text tokens.
 - **Sizing:** Use the `Button` `size` prop. Current variants map to `h-7`, `h-8`, `h-9`, and `h-10`.
 - **Ghost icon buttons:** No hover fill for `variant="ghost"` plus icon sizes; they shift from muted text to foreground text.
 - **Rule:** Add variants to `Button` when a reusable button treatment is missing.
@@ -252,7 +255,7 @@ Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), 
 Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
 
 - **Shape:** `rounded-card`, with `rounded-card-sm` and `rounded-card-lg` for system-level variants.
-- **Color:** `bg-card text-card-foreground`, mapping through `--card` and `--card-foreground` to `--background-default` and `--text-default`.
+- **Color:** `bg-background-card text-text-on-card`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
 - **Border:** `border-border`, mapping to `--border-default`.
 - **Shadow:** `hover:shadow-card` only when the card is interactive.
 - **Rule:** Do not use cards as the default page layout, and never nest cards.
@@ -263,14 +266,14 @@ Use [Input](/Users/morganm/Development/goose-internal/src/shared/ui/input.tsx), 
 
 - **Shape:** `rounded-input` for default inputs.
 - **Color:** `border-input`, `hover:border-border-input-hover`, `text-foreground`, and `placeholder:text-placeholder`.
-- **Focus:** `focus-visible:border-ring`, using `--ring`.
-- **Error / Disabled:** `aria-invalid:border-destructive`; disabled controls reduce opacity and preserve layout.
+- **Focus:** `focus-visible:border-border-focus` and `focus-visible:ring-ring-focus`, using semantic focus tokens.
+- **Error / Disabled:** `aria-invalid:border-border-danger`; disabled controls reduce opacity and preserve layout.
 
 ### Navigation
 
 Use the shared sidebar and nav item patterns as the baseline.
 
-- **Sidebar items:** `bg-background-alt` for active and hover state, `text-foreground`, compact padding, `rounded-md`.
+- **Sidebar items:** `bg-sidebar-nav-bg-hover` for hover/focus, `bg-sidebar-nav-bg-selected` for active/menu-open, stable nav foreground text, compact padding, `rounded-md`.
 - **Top bar:** compact icon-only actions using `Button` ghost icon variants.
 - **State:** Active state should be visible without relying on color alone.
 - **Behavior:** Collapsed labels may fade and width-collapse, but navigation must remain keyboard and screen-reader legible.
@@ -289,7 +292,7 @@ The composer is the signature component and should receive the most craft.
 Use Radix-backed shared primitives for dialogs, sheets, drawers, dropdowns, popovers, and tooltips.
 
 - **Shape:** `rounded-overlay` for popovers and dropdowns, `rounded-modal` for dialogs.
-- **Color:** `bg-popover text-popover-foreground` or `bg-background text-foreground`.
+- **Color:** `bg-background-popover text-text-on-popover` or `bg-background text-foreground`.
 - **Motion:** Use existing open/close animations and durations (`--duration-fast`, `--duration-normal`, `--duration-slow`).
 - **Modal Use:** Dialogs are for blocking decisions, destructive confirmation, or workflows that cannot remain inline.
 

@@ -1,6 +1,6 @@
 import * as React from "react";
 
-import { createThemeVars, hexToHsl } from "./adaptive-theme";
+import { createThemeVars, normalizeHexColor } from "./adaptive-theme";
 import {
   extractThemeInfo,
   isSyntaxThemeName,
@@ -9,6 +9,7 @@ import {
 } from "./theme-loader";
 
 type Density = "compact" | "comfortable" | "spacious";
+type ThemeMode = "system" | "light" | "dark";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
@@ -17,16 +18,19 @@ type ThemeProviderProps = {
 
 type ThemeProviderState = {
   selectedThemeName: SyntaxThemeName | null;
+  themeMode: ThemeMode;
   usingSystemTheme: boolean;
   resolvedTheme: "light" | "dark";
   resolvedThemeName: SyntaxThemeName;
   isDark: boolean;
   isLoading: boolean;
   setTheme: (themeName: SyntaxThemeName | null) => void;
-  accentColor: string;
-  accentColorPreference: string;
-  resetAccentColor: () => void;
-  setAccentColor: (color: string) => void;
+  setThemeMode: (themeMode: ThemeMode) => void;
+  primaryColor: string;
+  themePrimaryColor: string;
+  customPrimaryColor: string | null;
+  setPrimaryColor: (color: string) => void;
+  resetPrimaryColor: () => void;
   density: Density;
   setDensity: (density: Density) => void;
 };
@@ -34,6 +38,8 @@ type ThemeProviderState = {
 type CachedThemeState = {
   isDark: boolean;
   resolvedThemeName: SyntaxThemeName;
+  primaryColor: string;
+  themePrimaryColor: string;
   vars: Record<string, string>;
 };
 
@@ -49,18 +55,17 @@ type FallbackThemeInfo = {
 const LEGACY_THEME_STORAGE_KEY = "goose-theme";
 const THEME_MODE_STORAGE_KEY = "goose-theme-mode";
 const CUSTOM_THEME_STORAGE_KEY = "goose-custom-theme";
-const THEME_CACHE_STORAGE_KEY = "goose-theme-cache";
-const ACCENT_STORAGE_KEY = "goose-accent-color";
+const THEME_CACHE_STORAGE_KEY = "goose-theme-cache-v3";
+const PRIMARY_COLOR_STORAGE_KEY = "goose-primary-color";
 const DENSITY_STORAGE_KEY = "goose-density";
 
-const DEFAULT_ACCENT_COLOR_PREFERENCE = "default";
-const DEFAULT_ACCENT_COLOR = "#3b82f6";
 const DEFAULT_SYSTEM_THEMES = {
   light: "github-light",
   dark: "github-dark",
 } as const;
 
 const DENSITIES = ["compact", "comfortable", "spacious"] as const;
+const THEME_MODES = ["system", "light", "dark"] as const;
 
 const BUILTIN_FALLBACK_THEMES: Record<"light" | "dark", FallbackThemeInfo> = {
   light: {
@@ -81,16 +86,6 @@ const BUILTIN_FALLBACK_THEMES: Record<"light" | "dark", FallbackThemeInfo> = {
   },
 };
 
-export const ACCENT_COLORS = [
-  { name: "blue", value: "#3b82f6" },
-  { name: "cyan", value: "#06b6d4" },
-  { name: "green", value: "#22c55e" },
-  { name: "orange", value: "#f97316" },
-  { name: "red", value: "#ef4444" },
-  { name: "pink", value: "#ec4899" },
-  { name: "purple", value: "#a855f7" },
-] as const;
-
 const ThemeProviderContext = React.createContext<
   ThemeProviderState | undefined
 >(undefined);
@@ -99,49 +94,37 @@ function isDensity(value: string | null): value is Density {
   return DENSITIES.includes(value as Density);
 }
 
+function isThemeMode(value: string | null): value is ThemeMode {
+  return THEME_MODES.includes(value as ThemeMode);
+}
+
 function readSystemThemePreference() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
+function getResolvedDefaultMode(
+  themeMode: ThemeMode,
+  systemPrefersDark: boolean,
+): "light" | "dark" {
+  if (themeMode === "light" || themeMode === "dark") {
+    return themeMode;
+  }
+
+  return systemPrefersDark ? "dark" : "light";
+}
+
 function getResolvedThemeName(
   selectedThemeName: SyntaxThemeName | null,
+  themeMode: ThemeMode,
   systemPrefersDark: boolean,
 ): SyntaxThemeName {
   if (selectedThemeName) {
     return selectedThemeName;
   }
 
-  return systemPrefersDark
-    ? DEFAULT_SYSTEM_THEMES.dark
-    : DEFAULT_SYSTEM_THEMES.light;
-}
-
-function normalizeHexColor(color: string | null): string | null {
-  const value = color?.trim();
-  if (!value || value === DEFAULT_ACCENT_COLOR_PREFERENCE) return null;
-
-  const hex = value.startsWith("#") ? value.slice(1) : value;
-  if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-    return `#${hex
-      .split("")
-      .map((char) => char + char)
-      .join("")
-      .toLowerCase()}`;
-  }
-  if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-    return `#${hex.toLowerCase()}`;
-  }
-
-  return null;
-}
-
-function getContrastColor(hexColor: string): string {
-  const hex = hexColor.replace("#", "");
-  const red = Number.parseInt(hex.slice(0, 2), 16);
-  const green = Number.parseInt(hex.slice(2, 4), 16);
-  const blue = Number.parseInt(hex.slice(4, 6), 16);
-  const luminance = (0.299 * red + 0.587 * green + 0.114 * blue) / 255;
-  return luminance > 0.5 ? "#000000" : "#ffffff";
+  return DEFAULT_SYSTEM_THEMES[
+    getResolvedDefaultMode(themeMode, systemPrefersDark)
+  ];
 }
 
 function applyResolvedMode(isDark: boolean) {
@@ -149,40 +132,6 @@ function applyResolvedMode(isDark: boolean) {
   root.classList.remove("light", "dark");
   root.classList.add(isDark ? "dark" : "light");
   root.style.colorScheme = isDark ? "dark" : "light";
-}
-
-function applyAccentColor(hexColor: string) {
-  const root = document.documentElement;
-  const accentHsl = hexToHsl(hexColor);
-  const foreground = getContrastColor(hexColor);
-  const foregroundHsl = hexToHsl(foreground);
-
-  root.style.setProperty("--primary", accentHsl);
-  root.style.setProperty("--primary-foreground", foregroundHsl);
-  root.style.setProperty("--sidebar-primary", accentHsl);
-  root.style.setProperty("--sidebar-primary-foreground", foregroundHsl);
-  root.style.setProperty("--brand-color", hexColor);
-  root.style.setProperty("--brand-foreground-color", foreground);
-  root.style.setProperty("--brand", hexColor);
-  root.style.setProperty("--brand-foreground", foreground);
-  root.style.setProperty("--color-brand", hexColor);
-  root.style.setProperty("--color-brand-foreground", foreground);
-  root.style.accentColor = hexColor;
-}
-
-function clearAccentColor() {
-  const root = document.documentElement;
-  root.style.removeProperty("--primary");
-  root.style.removeProperty("--primary-foreground");
-  root.style.removeProperty("--sidebar-primary");
-  root.style.removeProperty("--sidebar-primary-foreground");
-  root.style.removeProperty("--brand-color");
-  root.style.removeProperty("--brand-foreground-color");
-  root.style.removeProperty("--brand");
-  root.style.removeProperty("--brand-foreground");
-  root.style.removeProperty("--color-brand");
-  root.style.removeProperty("--color-brand-foreground");
-  root.style.accentColor = "";
 }
 
 function applyCachedTheme(): CachedThemeState | null {
@@ -215,7 +164,6 @@ function applyDensityAttribute(root: HTMLElement, density: Density) {
 function readInitialThemeState(
   defaultTheme: SyntaxThemeName | "system",
 ): SyntaxThemeName | null {
-  const storedThemeMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
   const storedCustomTheme = window.localStorage.getItem(
     CUSTOM_THEME_STORAGE_KEY,
   );
@@ -223,14 +171,6 @@ function readInitialThemeState(
 
   if (isSyntaxThemeName(storedCustomTheme)) {
     return storedCustomTheme;
-  }
-
-  if (
-    storedThemeMode === "light" ||
-    storedThemeMode === "dark" ||
-    storedThemeMode === "system"
-  ) {
-    return null;
   }
 
   if (isSyntaxThemeName(legacyTheme)) {
@@ -248,28 +188,67 @@ function readInitialThemeState(
   return defaultTheme === "system" ? null : defaultTheme;
 }
 
+function readInitialThemeMode(): ThemeMode {
+  const storedThemeMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
+  const legacyTheme = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
+
+  if (isThemeMode(storedThemeMode)) {
+    return storedThemeMode;
+  }
+
+  if (isThemeMode(legacyTheme)) {
+    return legacyTheme;
+  }
+
+  return "system";
+}
+
 async function loadResolvedTheme(
   resolvedThemeName: SyntaxThemeName,
+  customPrimaryColor: string | null,
+  options: { useGooseLightSurfaces?: boolean } = {},
 ): Promise<CachedThemeState> {
   const themeData = await loadThemeData(resolvedThemeName);
   const info = extractThemeInfo(resolvedThemeName, themeData);
-  const { isDark, vars } = createThemeVars(info.bg, info.fg, info.comment, {
-    added: info.added,
-    deleted: info.deleted,
-    modified: info.modified,
-  });
+  const themePrimaryColor =
+    normalizeHexColor(info.primary) ?? normalizeHexColor(info.fg) ?? "#3b82f6";
+  const primaryColor = customPrimaryColor ?? themePrimaryColor;
+  const { isDark, vars } = createThemeVars(
+    info.bg,
+    info.fg,
+    info.comment,
+    {
+      added: info.added,
+      deleted: info.deleted,
+      modified: info.modified,
+    },
+    primaryColor,
+    {
+      popoverBackgroundColor: options.useGooseLightSurfaces
+        ? info.bg
+        : undefined,
+    },
+  );
 
   return {
     isDark,
+    primaryColor,
     resolvedThemeName,
+    themePrimaryColor,
     vars,
   };
 }
 
-function createFallbackTheme(systemPrefersDark: boolean): CachedThemeState {
-  const fallbackMode = systemPrefersDark ? "dark" : "light";
+function createFallbackTheme(
+  themeMode: ThemeMode,
+  systemPrefersDark: boolean,
+  customPrimaryColor: string | null,
+): CachedThemeState {
+  const fallbackMode = getResolvedDefaultMode(themeMode, systemPrefersDark);
   const resolvedThemeName = DEFAULT_SYSTEM_THEMES[fallbackMode];
   const fallbackTheme = BUILTIN_FALLBACK_THEMES[fallbackMode];
+  const themePrimaryColor = normalizeHexColor(fallbackTheme.fg) ?? "#3b82f6";
+  const primaryColor = customPrimaryColor ?? themePrimaryColor;
   const { isDark, vars } = createThemeVars(
     fallbackTheme.bg,
     fallbackTheme.fg,
@@ -279,11 +258,18 @@ function createFallbackTheme(systemPrefersDark: boolean): CachedThemeState {
       deleted: fallbackTheme.deleted,
       modified: fallbackTheme.modified,
     },
+    primaryColor,
+    {
+      popoverBackgroundColor:
+        fallbackMode === "light" ? fallbackTheme.bg : undefined,
+    },
   );
 
   return {
     isDark,
+    primaryColor,
     resolvedThemeName,
+    themePrimaryColor,
     vars,
   };
 }
@@ -297,20 +283,6 @@ function commitTheme(theme: CachedThemeState) {
   window.localStorage.setItem(THEME_CACHE_STORAGE_KEY, JSON.stringify(theme));
 }
 
-function applyAccentPreference(
-  selectedThemeName: SyntaxThemeName | null,
-  accentColorPreference: string,
-) {
-  if (
-    selectedThemeName &&
-    accentColorPreference !== DEFAULT_ACCENT_COLOR_PREFERENCE
-  ) {
-    applyAccentColor(accentColorPreference);
-  } else {
-    clearAccentColor();
-  }
-}
-
 export function ThemeProvider({
   children,
   defaultTheme = "system",
@@ -322,6 +294,8 @@ export function ThemeProvider({
   );
   const [selectedThemeName, setSelectedThemeName] =
     React.useState<SyntaxThemeName | null>(initialSelectedTheme);
+  const [themeMode, setThemeModeState] =
+    React.useState<ThemeMode>(readInitialThemeMode);
   const [systemPrefersDark, setSystemPrefersDark] = React.useState(
     readSystemThemePreference,
   );
@@ -331,13 +305,16 @@ export function ThemeProvider({
       false,
   );
   const [isLoading, setIsLoading] = React.useState(true);
-  const [accentColorPreference, setAccentColorPreference] =
-    React.useState<string>(() => {
-      return (
-        normalizeHexColor(window.localStorage.getItem(ACCENT_STORAGE_KEY)) ??
-        DEFAULT_ACCENT_COLOR_PREFERENCE
-      );
-    });
+  const [customPrimaryColor, setCustomPrimaryColor] = React.useState<
+    string | null
+  >(() =>
+    normalizeHexColor(window.localStorage.getItem(PRIMARY_COLOR_STORAGE_KEY)),
+  );
+  const [themePrimaryColor, setThemePrimaryColor] = React.useState(
+    normalizeHexColor(cachedTheme?.themePrimaryColor ?? null) ??
+      normalizeHexColor(cachedTheme?.primaryColor ?? null) ??
+      "#3b82f6",
+  );
   const [density, setDensityState] = React.useState<Density>(() => {
     const storedDensity = window.localStorage.getItem(DENSITY_STORAGE_KEY);
     return isDensity(storedDensity) ? storedDensity : "comfortable";
@@ -345,10 +322,10 @@ export function ThemeProvider({
 
   const usingSystemTheme = selectedThemeName === null;
   const resolvedThemeName = React.useMemo(
-    () => getResolvedThemeName(selectedThemeName, systemPrefersDark),
-    [selectedThemeName, systemPrefersDark],
+    () => getResolvedThemeName(selectedThemeName, themeMode, systemPrefersDark),
+    [selectedThemeName, systemPrefersDark, themeMode],
   );
-  const themeLoadSignature = `${selectedThemeName ?? "system"}:${resolvedThemeName}:${systemPrefersDark}`;
+  const themeLoadSignature = `${selectedThemeName ?? "default"}:${themeMode}:${resolvedThemeName}:${systemPrefersDark}:${customPrimaryColor ?? "theme-primary"}`;
   const latestThemeLoadSignatureRef = React.useRef(themeLoadSignature);
   const themeLoadGenerationRef = React.useRef(0);
 
@@ -358,13 +335,8 @@ export function ThemeProvider({
   }
   const themeLoadGeneration = themeLoadGenerationRef.current;
 
-  const accentColor =
-    accentColorPreference === DEFAULT_ACCENT_COLOR_PREFERENCE
-      ? DEFAULT_ACCENT_COLOR
-      : accentColorPreference;
   const resolvedTheme: "light" | "dark" = isDark ? "dark" : "light";
-  const accentColorPreferenceRef = React.useRef(accentColorPreference);
-  accentColorPreferenceRef.current = accentColorPreference;
+  const primaryColor = customPrimaryColor ?? themePrimaryColor;
 
   React.useEffect(() => {
     const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
@@ -384,25 +356,27 @@ export function ThemeProvider({
       window.localStorage.removeItem(CUSTOM_THEME_STORAGE_KEY);
     }
 
-    window.localStorage.removeItem(THEME_MODE_STORAGE_KEY);
     window.localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
   }, [selectedThemeName]);
 
   React.useEffect(() => {
-    if (accentColorPreference === DEFAULT_ACCENT_COLOR_PREFERENCE) {
-      window.localStorage.removeItem(ACCENT_STORAGE_KEY);
-    } else {
-      window.localStorage.setItem(ACCENT_STORAGE_KEY, accentColorPreference);
-    }
-  }, [accentColorPreference]);
-
-  React.useEffect(() => {
-    applyAccentPreference(selectedThemeName, accentColorPreference);
-  }, [accentColorPreference, selectedThemeName]);
+    window.localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
+  }, [themeMode]);
 
   React.useEffect(() => {
     window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
   }, [density]);
+
+  React.useEffect(() => {
+    if (customPrimaryColor) {
+      window.localStorage.setItem(
+        PRIMARY_COLOR_STORAGE_KEY,
+        customPrimaryColor,
+      );
+    } else {
+      window.localStorage.removeItem(PRIMARY_COLOR_STORAGE_KEY);
+    }
+  }, [customPrimaryColor]);
 
   React.useEffect(() => {
     setIsLoading(true);
@@ -412,9 +386,21 @@ export function ThemeProvider({
       let shouldClearSelectedTheme = false;
 
       try {
-        nextTheme = await loadResolvedTheme(resolvedThemeName);
+        nextTheme = await loadResolvedTheme(
+          resolvedThemeName,
+          customPrimaryColor,
+          {
+            useGooseLightSurfaces:
+              selectedThemeName === null &&
+              resolvedThemeName === DEFAULT_SYSTEM_THEMES.light,
+          },
+        );
       } catch {
-        nextTheme = createFallbackTheme(systemPrefersDark);
+        nextTheme = createFallbackTheme(
+          themeMode,
+          systemPrefersDark,
+          customPrimaryColor,
+        );
         shouldClearSelectedTheme = selectedThemeName !== null;
       }
 
@@ -429,17 +415,15 @@ export function ThemeProvider({
 
       commitTheme(nextTheme);
       setIsDark(nextTheme.isDark);
+      setThemePrimaryColor(nextTheme.themePrimaryColor);
       setIsLoading(false);
-
-      applyAccentPreference(
-        shouldClearSelectedTheme ? null : selectedThemeName,
-        accentColorPreferenceRef.current,
-      );
     })();
   }, [
+    customPrimaryColor,
     resolvedThemeName,
     selectedThemeName,
     systemPrefersDark,
+    themeMode,
     themeLoadGeneration,
   ]);
 
@@ -451,15 +435,20 @@ export function ThemeProvider({
     setSelectedThemeName(themeName);
   }, []);
 
-  const setAccentColor = React.useCallback((color: string) => {
-    const normalizedColor = normalizeHexColor(color);
-    setAccentColorPreference(
-      normalizedColor ?? DEFAULT_ACCENT_COLOR_PREFERENCE,
-    );
+  const setThemeMode = React.useCallback((nextThemeMode: ThemeMode) => {
+    setThemeModeState(nextThemeMode);
+    setSelectedThemeName(null);
   }, []);
 
-  const resetAccentColor = React.useCallback(() => {
-    setAccentColorPreference(DEFAULT_ACCENT_COLOR_PREFERENCE);
+  const setPrimaryColor = React.useCallback((color: string) => {
+    const normalizedColor = normalizeHexColor(color);
+    if (normalizedColor) {
+      setCustomPrimaryColor(normalizedColor);
+    }
+  }, []);
+
+  const resetPrimaryColor = React.useCallback(() => {
+    setCustomPrimaryColor(null);
   }, []);
 
   const setDensity = React.useCallback((nextDensity: Density) => {
@@ -469,32 +458,38 @@ export function ThemeProvider({
   const value = React.useMemo(
     () => ({
       selectedThemeName,
+      themeMode,
       usingSystemTheme,
       resolvedTheme,
       resolvedThemeName,
       isDark,
       isLoading,
       setTheme,
-      accentColor,
-      accentColorPreference,
-      resetAccentColor,
-      setAccentColor,
+      setThemeMode,
+      primaryColor,
+      themePrimaryColor,
+      customPrimaryColor,
+      setPrimaryColor,
+      resetPrimaryColor,
       density,
       setDensity,
     }),
     [
-      accentColor,
-      accentColorPreference,
+      customPrimaryColor,
       density,
       isDark,
       isLoading,
-      resetAccentColor,
+      primaryColor,
+      resetPrimaryColor,
       resolvedTheme,
       resolvedThemeName,
-      setAccentColor,
       setDensity,
+      setPrimaryColor,
       setTheme,
+      setThemeMode,
       selectedThemeName,
+      themePrimaryColor,
+      themeMode,
       usingSystemTheme,
     ],
   );

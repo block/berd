@@ -29,6 +29,22 @@ vi.mock("./adaptive-theme", () => ({
     }
     return "217.2 91.2% 59.8%";
   }),
+  normalizeHexColor: vi.fn((color: string | null) => {
+    const value = color?.trim();
+    if (!value) return null;
+    const hex = value.startsWith("#") ? value.slice(1) : value;
+    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
+      return `#${hex
+        .split("")
+        .map((char) => char + char)
+        .join("")
+        .toLowerCase()}`;
+    }
+    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
+      return `#${hex.toLowerCase()}`;
+    }
+    return null;
+  }),
 }));
 
 vi.mock("./theme-loader", () => ({
@@ -94,28 +110,35 @@ function createMediaQueryList(initialMatches: boolean) {
 function ThemeConsumer() {
   const {
     selectedThemeName,
+    themeMode,
     usingSystemTheme,
     resolvedThemeName,
     isDark,
     isLoading,
-    accentColor,
-    accentColorPreference,
-    resetAccentColor,
+    primaryColor,
+    themePrimaryColor,
+    customPrimaryColor,
     density,
     setTheme,
-    setAccentColor,
+    setThemeMode,
+    setPrimaryColor,
+    resetPrimaryColor,
     setDensity,
   } = useTheme();
 
   return (
     <div>
       <span data-testid="selected-theme">{selectedThemeName ?? "system"}</span>
+      <span data-testid="theme-mode">{themeMode}</span>
       <span data-testid="using-system">{String(usingSystemTheme)}</span>
       <span data-testid="resolved-theme">{resolvedThemeName}</span>
       <span data-testid="is-dark">{String(isDark)}</span>
       <span data-testid="is-loading">{String(isLoading)}</span>
-      <span data-testid="accent">{accentColor}</span>
-      <span data-testid="accent-preference">{accentColorPreference}</span>
+      <span data-testid="primary-color">{primaryColor}</span>
+      <span data-testid="theme-primary-color">{themePrimaryColor}</span>
+      <span data-testid="custom-primary-color">
+        {customPrimaryColor ?? "theme"}
+      </span>
       <span data-testid="density">{density}</span>
       <button onClick={() => setTheme("dracula")} type="button">
         Set Dracula
@@ -123,20 +146,20 @@ function ThemeConsumer() {
       <button onClick={() => setTheme("houston")} type="button">
         Set Houston
       </button>
-      <button onClick={() => setTheme(null)} type="button">
+      <button onClick={() => setThemeMode("system")} type="button">
         Use System
       </button>
-      <button onClick={() => setAccentColor("#ef4444")} type="button">
-        Set Red Accent
+      <button onClick={() => setThemeMode("light")} type="button">
+        Use Light
       </button>
-      <button onClick={() => setAccentColor("#22c55e")} type="button">
-        Set Green Accent
+      <button onClick={() => setThemeMode("dark")} type="button">
+        Use Dark
       </button>
-      <button onClick={() => setAccentColor("red")} type="button">
-        Set Invalid Accent
+      <button onClick={() => setPrimaryColor("#22c55e")} type="button">
+        Set Custom Primary
       </button>
-      <button onClick={resetAccentColor} type="button">
-        Reset Accent
+      <button onClick={resetPrimaryColor} type="button">
+        Reset Primary
       </button>
       <button onClick={() => setDensity("compact")} type="button">
         Set Compact
@@ -158,19 +181,27 @@ describe("ThemeProvider", () => {
       bg: name === "github-light" ? "#ffffff" : "#111827",
       fg: name === "github-light" ? "#111827" : "#f9fafb",
       comment: name === "github-light" ? "#6b7280" : "#94a3b8",
+      primary: name === "github-light" ? "#2188ff" : "#ff79c6",
       added: "#22c55e",
       deleted: "#ef4444",
       modified: "#f59e0b",
     }));
-    mockCreateThemeVars.mockImplementation((bg: string) => ({
-      isDark: bg !== "#ffffff",
-      vars: {
-        "--background": bg === "#ffffff" ? "0 0% 100%" : "224 71% 4%",
-        "--foreground": bg === "#ffffff" ? "224 71% 4%" : "0 0% 100%",
-        "--sidebar-background": bg === "#ffffff" ? "0 0% 98%" : "224 71% 6%",
-        "--ui-warning": "#f59e0b",
-      },
-    }));
+    mockCreateThemeVars.mockImplementation(
+      (bg: string, _fg, _comment, _git, primary = "#2188ff") => ({
+        isDark: bg !== "#ffffff",
+        vars: {
+          "--background": bg === "#ffffff" ? "0 0% 100%" : "224 71% 4%",
+          "--foreground": bg === "#ffffff" ? "224 71% 4%" : "0 0% 100%",
+          "--primary":
+            primary === "#22c55e"
+              ? "142.1 70.6% 45.3%"
+              : primary === "#ff79c6"
+                ? "326 100% 74%"
+                : "210 50% 50%",
+          "--primary-foreground": "0 0% 100%",
+        },
+      }),
+    );
   });
 
   it("defaults to system mode and resolves through the OS preference", async () => {
@@ -183,6 +214,7 @@ describe("ThemeProvider", () => {
     );
 
     expect(screen.getByTestId("selected-theme")).toHaveTextContent("system");
+    expect(screen.getByTestId("theme-mode")).toHaveTextContent("system");
     expect(screen.getByTestId("using-system")).toHaveTextContent("true");
     expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
       "github-light",
@@ -194,6 +226,7 @@ describe("ThemeProvider", () => {
 
     expect(document.documentElement).toHaveClass("light");
     expect(localStorage.getItem("goose-custom-theme")).toBeNull();
+    expect(localStorage.getItem("goose-theme-mode")).toBe("system");
   });
 
   it("reacts to system theme changes while no explicit theme is selected", async () => {
@@ -220,6 +253,75 @@ describe("ThemeProvider", () => {
     });
 
     expect(document.documentElement).toHaveClass("dark");
+  });
+
+  it("can pin the default Goose theme to light or dark", async () => {
+    const user = userEvent.setup();
+    createMediaQueryList(false);
+
+    render(
+      <ThemeProvider>
+        <ThemeConsumer />
+      </ThemeProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Use Dark" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-mode")).toHaveTextContent("dark");
+      expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
+        "github-dark",
+      );
+    });
+
+    expect(localStorage.getItem("goose-theme-mode")).toBe("dark");
+
+    await user.click(screen.getByRole("button", { name: "Use Light" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-mode")).toHaveTextContent("light");
+      expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
+        "github-light",
+      );
+    });
+
+    expect(localStorage.getItem("goose-theme-mode")).toBe("light");
+  });
+
+  it("returns to following the OS when system mode is selected", async () => {
+    const user = userEvent.setup();
+    const media = createMediaQueryList(false);
+
+    render(
+      <ThemeProvider>
+        <ThemeConsumer />
+      </ThemeProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Use Dark" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
+        "github-dark",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Use System" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("theme-mode")).toHaveTextContent("system");
+      expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
+        "github-light",
+      );
+    });
+
+    media.setMatches(true);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
+        "github-dark",
+      );
+    });
   });
 
   it("switches to an explicit theme and persists it", async () => {
@@ -270,7 +372,7 @@ describe("ThemeProvider", () => {
     expect(localStorage.getItem("goose-custom-theme")).toBeNull();
   });
 
-  it("migrates legacy preset storage to system mode", async () => {
+  it("migrates legacy preset storage to default theme mode", async () => {
     localStorage.setItem("goose-theme", "dark");
     createMediaQueryList(false);
 
@@ -282,8 +384,9 @@ describe("ThemeProvider", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("selected-theme")).toHaveTextContent("system");
+      expect(screen.getByTestId("theme-mode")).toHaveTextContent("dark");
       expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
-        "github-light",
+        "github-dark",
       );
     });
   });
@@ -306,10 +409,12 @@ describe("ThemeProvider", () => {
 
   it("applies cached theme vars before the async theme load resolves", () => {
     localStorage.setItem(
-      "goose-theme-cache",
+      "goose-theme-cache-v3",
       JSON.stringify({
         isDark: true,
+        primaryColor: "#ff79c6",
         resolvedThemeName: "dracula",
+        themePrimaryColor: "#ff79c6",
         vars: {
           "--background": "240 10% 4%",
           "--foreground": "0 0% 100%",
@@ -333,7 +438,7 @@ describe("ThemeProvider", () => {
     expect(screen.getByTestId("is-loading")).toHaveTextContent("true");
   });
 
-  it("only applies accent overrides after a theme is selected", async () => {
+  it("uses a custom primary color override across theme changes", async () => {
     const user = userEvent.setup();
     createMediaQueryList(false);
 
@@ -343,75 +448,71 @@ describe("ThemeProvider", () => {
       </ThemeProvider>,
     );
 
-    await waitFor(() => {
-      expect(screen.getByTestId("is-loading")).toHaveTextContent("false");
-    });
-
-    await user.click(screen.getByRole("button", { name: "Set Red Accent" }));
-    await user.click(screen.getByRole("button", { name: "Set Compact" }));
-
-    expect(localStorage.getItem("goose-accent-color")).toBe("#ef4444");
-    expect(localStorage.getItem("goose-density")).toBe("compact");
-    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
-      "",
+    await user.click(
+      screen.getByRole("button", { name: "Set Custom Primary" }),
     );
-    expect(document.documentElement.dataset.density).toBe("compact");
-
-    await user.click(screen.getByRole("button", { name: "Set Dracula" }));
 
     await waitFor(() => {
-      expect(screen.getByTestId("selected-theme")).toHaveTextContent("dracula");
+      expect(localStorage.getItem("goose-primary-color")).toBe("#22c55e");
+      expect(screen.getByTestId("custom-primary-color")).toHaveTextContent(
+        "#22c55e",
+      );
     });
-
-    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
-      "0 84.2% 60.2%",
-    );
-    expect(
-      document.documentElement.style.getPropertyValue("--primary-foreground"),
-    ).toBe("0 0% 100%");
-    expect(
-      document.documentElement.style.getPropertyValue("--brand-color"),
-    ).toBe("#ef4444");
-  });
-
-  it("keeps the latest accent override when switching selected themes", async () => {
-    const user = userEvent.setup();
-    createMediaQueryList(false);
-    mockCreateThemeVars.mockImplementation((bg: string) => ({
-      isDark: bg !== "#ffffff",
-      vars: {
-        "--background": bg === "#ffffff" ? "0 0% 100%" : "224 71% 4%",
-        "--foreground": bg === "#ffffff" ? "224 71% 4%" : "0 0% 100%",
-        "--primary": "210 50% 50%",
-        "--primary-foreground": "0 0% 100%",
-        "--sidebar-primary": "210 50% 50%",
-        "--sidebar-primary-foreground": "0 0% 100%",
-      },
-    }));
-
-    render(
-      <ThemeProvider>
-        <ThemeConsumer />
-      </ThemeProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Set Dracula" }));
-    await waitFor(() => {
-      expect(screen.getByTestId("selected-theme")).toHaveTextContent("dracula");
-    });
-
-    const themeLoadCount = mockLoadThemeData.mock.calls.length;
-
-    await user.click(screen.getByRole("button", { name: "Set Red Accent" }));
-    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
-      "0 84.2% 60.2%",
-    );
-
-    await user.click(screen.getByRole("button", { name: "Set Green Accent" }));
     expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
       "142.1 70.6% 45.3%",
     );
-    expect(mockLoadThemeData).toHaveBeenCalledTimes(themeLoadCount);
+
+    await user.click(screen.getByRole("button", { name: "Set Dracula" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-theme")).toHaveTextContent("dracula");
+    });
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+      "142.1 70.6% 45.3%",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Reset Primary" }));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-primary-color")).toBeNull();
+      expect(screen.getByTestId("custom-primary-color")).toHaveTextContent(
+        "theme",
+      );
+    });
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+      "326 100% 74%",
+    );
+  });
+
+  it("uses the selected theme primary when switching themes", async () => {
+    const user = userEvent.setup();
+    createMediaQueryList(false);
+    mockCreateThemeVars.mockImplementation(
+      (bg: string, _fg, _comment, _git, primary: string) => ({
+        isDark: bg !== "#ffffff",
+        vars: {
+          "--background": bg === "#ffffff" ? "0 0% 100%" : "224 71% 4%",
+          "--foreground": bg === "#ffffff" ? "224 71% 4%" : "0 0% 100%",
+          "--primary": primary === "#ff79c6" ? "326 100% 74%" : "210 50% 50%",
+          "--primary-foreground": "0 0% 100%",
+        },
+      }),
+    );
+
+    render(
+      <ThemeProvider>
+        <ThemeConsumer />
+      </ThemeProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Set Dracula" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("selected-theme")).toHaveTextContent("dracula");
+    });
+
+    expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+      "326 100% 74%",
+    );
 
     await user.click(screen.getByRole("button", { name: "Set Houston" }));
     await waitFor(() => {
@@ -419,40 +520,7 @@ describe("ThemeProvider", () => {
     });
 
     expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
-      "142.1 70.6% 45.3%",
-    );
-    expect(
-      document.documentElement.style.getPropertyValue("--brand-color"),
-    ).toBe("#22c55e");
-  });
-
-  it("resets invalid and default accent colors", async () => {
-    const user = userEvent.setup();
-    createMediaQueryList(false);
-
-    render(
-      <ThemeProvider>
-        <ThemeConsumer />
-      </ThemeProvider>,
-    );
-
-    await user.click(screen.getByRole("button", { name: "Set Red Accent" }));
-    expect(screen.getByTestId("accent-preference")).toHaveTextContent(
-      "#ef4444",
-    );
-
-    await user.click(
-      screen.getByRole("button", { name: "Set Invalid Accent" }),
-    );
-    expect(screen.getByTestId("accent-preference")).toHaveTextContent(
-      "default",
-    );
-    expect(localStorage.getItem("goose-accent-color")).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "Set Red Accent" }));
-    await user.click(screen.getByRole("button", { name: "Reset Accent" }));
-    expect(screen.getByTestId("accent-preference")).toHaveTextContent(
-      "default",
+      "326 100% 74%",
     );
   });
 
@@ -541,7 +609,7 @@ describe("ThemeProvider", () => {
     expect(screen.getByTestId("resolved-theme")).toHaveTextContent("dracula");
     expect(document.documentElement).toHaveClass("dark");
     expect(
-      JSON.parse(localStorage.getItem("goose-theme-cache") ?? "{}"),
+      JSON.parse(localStorage.getItem("goose-theme-cache-v3") ?? "{}"),
     ).toMatchObject({
       resolvedThemeName: "dracula",
     });

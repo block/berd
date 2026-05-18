@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -25,7 +25,6 @@ describe("GeneralSettings appearance section", () => {
     );
 
     expect(screen.getByTestId("theme-option-system")).toBeVisible();
-    expect(screen.getByTestId("accent-color-red")).toBeDisabled();
 
     await user.type(screen.getByTestId("theme-search-input"), "dracula");
     expect(screen.getByTestId("theme-option-dracula")).toBeVisible();
@@ -37,12 +36,6 @@ describe("GeneralSettings appearance section", () => {
 
     await waitFor(() => {
       expect(localStorage.getItem("goose-custom-theme")).toBe("dracula");
-    });
-    expect(screen.getByTestId("accent-color-red")).toBeEnabled();
-
-    await user.click(screen.getByTestId("accent-color-red"));
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-accent-color")).toBe("#ef4444");
     });
   });
 
@@ -65,7 +58,52 @@ describe("GeneralSettings appearance section", () => {
     await waitFor(() => {
       expect(localStorage.getItem("goose-custom-theme")).toBeNull();
     });
-    expect(screen.getByTestId("accent-color-red")).toBeDisabled();
+  });
+
+  it("selects default light and dark theme modes", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    await user.click(screen.getByTestId("theme-option-dark"));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-theme-mode")).toBe("dark");
+    });
+
+    await user.click(screen.getByTestId("theme-option-light"));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-theme-mode")).toBe("light");
+    });
+  });
+
+  it("sets and resets a custom primary color", async () => {
+    const user = userEvent.setup();
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    fireEvent.change(screen.getByTestId("primary-color-input"), {
+      target: { value: "#22c55e" },
+    });
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-primary-color")).toBe("#22c55e");
+    });
+
+    await user.click(screen.getByTestId("primary-color-reset"));
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-primary-color")).toBeNull();
+    });
   });
 
   it("updates interface density from the appearance controls", async () => {
@@ -77,7 +115,7 @@ describe("GeneralSettings appearance section", () => {
       </ThemeProvider>,
     );
 
-    const compact = screen.getByRole("radio", { name: "Compact" });
+    const compact = screen.getByRole("button", { name: "Compact" });
 
     await user.click(compact);
 
@@ -91,7 +129,7 @@ describe("GeneralSettings appearance section", () => {
         "",
       );
     });
-    expect(compact).toHaveAttribute("data-state", "on");
+    expect(compact).toHaveAttribute("aria-pressed", "true");
   });
 
   it("restores Agent Tools composer tips", async () => {

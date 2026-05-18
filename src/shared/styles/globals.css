@@ -97,52 +97,47 @@
   --secondary-foreground: 0 0% 10.2%;
   --muted: 0 0% 94.1%;
   --muted-foreground: 0 0% 60%;
-  --accent: 0 0% 94.1%;
-  --accent-foreground: 0 0% 10.2%;
-  --destructive: 0 84.2% 60.2%;
-  --destructive-foreground: 0 0% 100%;
+  --hover: 0 0% 94.1%;
+  --hover-foreground: 0 0% 10.2%;
   --border: 0 0% 90.9%;
   --input: 0 0% 89%;
   --ring: 0 0% 10.2%;
-  --sidebar-background: 0 0% 100%;
-  --sidebar-foreground: 0 0% 10.2%;
-  --sidebar-primary: 217.2 91.2% 59.8%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 94.1%;
-  --sidebar-accent-foreground: 0 0% 10.2%;
-  --sidebar-border: 0 0% 90.9%;
-  --sidebar-ring: 0 0% 90.9%;
 
   /* adaptive semantic overlays */
   --status-added: #16a34a;
   --status-deleted: #dc2626;
   --status-modified: #ca8a04;
-  --ui-warning: #ca8a04;
-  --ui-warning-bg: rgba(202, 138, 4, 0.12);
-  --brand-color: #3b82f6;
-  --brand-foreground-color: #ffffff;
+  --brand-color: hsl(var(--primary));
+  --brand-foreground-color: hsl(var(--primary-foreground));
   --brand: var(--brand-color);
   --brand-foreground: var(--brand-foreground-color);
-
-  /* theming accents */
-  --background-accent: hsl(var(--primary));
-  --border-accent: hsl(var(--primary));
-  --text-accent: hsl(var(--primary));
+  --ui-warning: var(--status-modified);
+  --ui-warning-bg: color-mix(in srgb, var(--status-modified) 12%, transparent);
 
   /* Semantic backgrounds */
   --background-default: hsl(var(--background));
   --background-alt: hsl(var(--card));
+  --background-card: hsl(var(--card));
+  --background-popover: hsl(var(--popover));
   --background-medium: hsl(var(--secondary));
   --background-muted: hsl(var(--muted));
+  --background-hover: hsl(var(--hover));
+  --background-primary: hsl(var(--primary));
   --background-inverse: hsl(var(--foreground));
-  --background-danger: hsl(var(--destructive) / 0.14);
+  --background-danger: color-mix(
+    in srgb,
+    var(--status-deleted) 14%,
+    transparent
+  );
+  --background-danger-strong: var(--status-deleted);
   --background-success: color-mix(
     in srgb,
     var(--status-added) 14%,
     transparent
   );
-  --background-info: color-mix(in srgb, var(--brand-color) 14%, transparent);
+  --background-info: color-mix(in srgb, hsl(var(--primary)) 14%, transparent);
   --background-warning: var(--ui-warning-bg);
+  --background-accent: hsl(var(--primary));
 
   /* Semantic borders */
   --border-default: hsl(var(--border));
@@ -158,13 +153,17 @@
     hsl(var(--input)) 75%,
     hsl(var(--foreground))
   );
+  --border-hover: hsl(var(--hover));
+  --border-primary: hsl(var(--primary));
+  --border-focus: hsl(var(--ring));
   --border-strong: hsl(var(--foreground));
   --border-card: hsl(var(--border));
   --border-inverse: hsl(var(--background));
-  --border-danger: hsl(var(--destructive));
+  --border-danger: var(--status-deleted);
   --border-success: var(--status-added);
-  --border-warning: var(--ui-warning);
-  --border-info: var(--brand-color);
+  --border-warning: var(--status-modified);
+  --border-info: hsl(var(--primary));
+  --border-accent: hsl(var(--primary));
 
   /* Semantic text */
   --text-default: hsl(var(--foreground));
@@ -173,27 +172,39 @@
     hsl(var(--muted-foreground)) 80%,
     hsl(var(--foreground))
   );
+  --text-on-card: hsl(var(--card-foreground));
+  --text-on-popover: hsl(var(--popover-foreground));
   --text-muted: hsl(var(--muted-foreground));
   --text-alt: hsl(var(--muted-foreground));
+  --text-hover: hsl(var(--hover-foreground));
+  --text-primary: hsl(var(--primary));
+  --text-on-primary: hsl(var(--primary-foreground));
+  --text-on-secondary: hsl(var(--secondary-foreground));
   --text-inverse: hsl(var(--background));
-  --text-danger: hsl(var(--destructive));
+  --text-danger: var(--status-deleted);
+  --text-on-danger: #ffffff;
   --text-success: var(--status-added);
-  --text-warning: var(--ui-warning);
-  --text-info: var(--brand-color);
+  --text-warning: var(--status-modified);
+  --text-info: hsl(var(--primary));
+  --text-accent: hsl(var(--primary));
   --text-placeholder: color-mix(
     in srgb,
     hsl(var(--muted-foreground)) 75%,
     transparent
   );
 
-  --sidebar: hsl(var(--sidebar-background));
-  --sidebar-foreground-color: hsl(var(--sidebar-foreground));
-  --sidebar-primary-color: hsl(var(--sidebar-primary));
-  --sidebar-primary-foreground-color: hsl(var(--sidebar-primary-foreground));
-  --sidebar-accent-color: hsl(var(--sidebar-accent));
-  --sidebar-accent-foreground-color: hsl(var(--sidebar-accent-foreground));
-  --sidebar-border-color: hsl(var(--sidebar-border));
-  --sidebar-ring-color: hsl(var(--sidebar-ring));
+  --sidebar-nav-bg-hover: hsl(var(--hover));
+  --sidebar-nav-bg-selected: hsl(var(--hover));
+  --sidebar-nav-fg: hsl(var(--foreground));
+  --ring-focus: hsl(var(--ring));
+  --sidebar: hsl(var(--background));
+  --sidebar-foreground-color: hsl(var(--foreground));
+  --sidebar-primary-color: hsl(var(--primary));
+  --sidebar-primary-foreground-color: hsl(var(--primary-foreground));
+  --sidebar-accent-color: hsl(var(--hover));
+  --sidebar-accent-foreground-color: hsl(var(--hover-foreground));
+  --sidebar-border-color: hsl(var(--border));
+  --sidebar-ring-color: hsl(var(--ring));
 
   /* Alpha variants */
   --dark-10: rgba(26, 26, 26, 0.1);
@@ -279,7 +290,7 @@
   --duration-normal: 0.2s;
   --duration-slow: 0.4s;
 
-  /* goose2 custom — brand accent + density */
+  /* goose2 custom — density */
   --density-spacing: 1;
 }
 
@@ -306,43 +317,42 @@
   --secondary-foreground: 0 0% 98%;
   --muted: 0 0% 14.9%;
   --muted-foreground: 0 0% 63.9%;
-  --accent: 0 0% 14.9%;
-  --accent-foreground: 0 0% 98%;
-  --destructive: 0 72.2% 50.6%;
-  --destructive-foreground: 0 0% 98%;
+  --hover: 0 0% 14.9%;
+  --hover-foreground: 0 0% 98%;
   --border: 0 0% 18%;
   --input: 0 0% 18%;
   --ring: 0 0% 98%;
-  --sidebar-background: 0 0% 3.9%;
-  --sidebar-foreground: 0 0% 98%;
-  --sidebar-primary: 217.2 91.2% 59.8%;
-  --sidebar-primary-foreground: 0 0% 100%;
-  --sidebar-accent: 0 0% 14.9%;
-  --sidebar-accent-foreground: 0 0% 98%;
-  --sidebar-border: 0 0% 18%;
-  --sidebar-ring: 0 0% 18%;
-  --brand-color: #3b82f6;
-  --brand-foreground-color: #ffffff;
+  --brand-color: hsl(var(--primary));
+  --brand-foreground-color: hsl(var(--primary-foreground));
   --brand: var(--brand-color);
   --brand-foreground: var(--brand-foreground-color);
-  --background-accent: hsl(var(--primary));
-  --border-accent: hsl(var(--primary));
-  --text-accent: hsl(var(--primary));
+  --ui-warning: var(--status-modified);
+  --ui-warning-bg: color-mix(in srgb, var(--status-modified) 10%, transparent);
 
   /* semantic backgrounds */
   --background-default: hsl(var(--background));
   --background-alt: hsl(var(--card));
+  --background-card: hsl(var(--card));
+  --background-popover: hsl(var(--popover));
   --background-medium: hsl(var(--secondary));
   --background-muted: hsl(var(--muted));
+  --background-hover: hsl(var(--hover));
+  --background-primary: hsl(var(--primary));
   --background-inverse: hsl(var(--foreground));
-  --background-danger: hsl(var(--destructive) / 0.18);
+  --background-danger: color-mix(
+    in srgb,
+    var(--status-deleted) 18%,
+    transparent
+  );
+  --background-danger-strong: var(--status-deleted);
   --background-success: color-mix(
     in srgb,
     var(--status-added) 16%,
     transparent
   );
-  --background-info: color-mix(in srgb, var(--brand-color) 16%, transparent);
+  --background-info: color-mix(in srgb, hsl(var(--primary)) 16%, transparent);
   --background-warning: var(--ui-warning-bg);
+  --background-accent: hsl(var(--primary));
 
   /* semantic borders */
   --border-default: hsl(var(--border));
@@ -358,13 +368,17 @@
     hsl(var(--input)) 72%,
     hsl(var(--foreground))
   );
+  --border-hover: hsl(var(--hover));
+  --border-primary: hsl(var(--primary));
+  --border-focus: hsl(var(--ring));
   --border-strong: hsl(var(--foreground));
   --border-card: hsl(var(--border));
   --border-inverse: hsl(var(--background));
-  --border-danger: hsl(var(--destructive));
+  --border-danger: var(--status-deleted);
   --border-success: var(--status-added);
-  --border-warning: var(--ui-warning);
-  --border-info: var(--brand-color);
+  --border-warning: var(--status-modified);
+  --border-info: hsl(var(--primary));
+  --border-accent: hsl(var(--primary));
 
   /* semantic text */
   --text-default: hsl(var(--foreground));
@@ -373,27 +387,39 @@
     hsl(var(--muted-foreground)) 80%,
     hsl(var(--foreground))
   );
+  --text-on-card: hsl(var(--card-foreground));
+  --text-on-popover: hsl(var(--popover-foreground));
   --text-muted: hsl(var(--muted-foreground));
   --text-alt: hsl(var(--muted-foreground));
+  --text-hover: hsl(var(--hover-foreground));
+  --text-primary: hsl(var(--primary));
+  --text-on-primary: hsl(var(--primary-foreground));
+  --text-on-secondary: hsl(var(--secondary-foreground));
   --text-inverse: hsl(var(--background));
-  --text-danger: hsl(var(--destructive));
+  --text-danger: var(--status-deleted);
+  --text-on-danger: #ffffff;
   --text-success: var(--status-added);
-  --text-warning: var(--ui-warning);
-  --text-info: var(--brand-color);
+  --text-warning: var(--status-modified);
+  --text-info: hsl(var(--primary));
+  --text-accent: hsl(var(--primary));
   --text-placeholder: color-mix(
     in srgb,
     hsl(var(--muted-foreground)) 75%,
     transparent
   );
 
-  --sidebar: hsl(var(--sidebar-background));
-  --sidebar-foreground-color: hsl(var(--sidebar-foreground));
-  --sidebar-primary-color: hsl(var(--sidebar-primary));
-  --sidebar-primary-foreground-color: hsl(var(--sidebar-primary-foreground));
-  --sidebar-accent-color: hsl(var(--sidebar-accent));
-  --sidebar-accent-foreground-color: hsl(var(--sidebar-accent-foreground));
-  --sidebar-border-color: hsl(var(--sidebar-border));
-  --sidebar-ring-color: hsl(var(--sidebar-ring));
+  --sidebar-nav-bg-hover: hsl(var(--hover));
+  --sidebar-nav-bg-selected: hsl(var(--hover));
+  --sidebar-nav-fg: hsl(var(--foreground));
+  --ring-focus: hsl(var(--ring));
+  --sidebar: hsl(var(--background));
+  --sidebar-foreground-color: hsl(var(--foreground));
+  --sidebar-primary-color: hsl(var(--primary));
+  --sidebar-primary-foreground-color: hsl(var(--primary-foreground));
+  --sidebar-accent-color: hsl(var(--hover));
+  --sidebar-accent-foreground-color: hsl(var(--hover-foreground));
+  --sidebar-border-color: hsl(var(--border));
+  --sidebar-ring-color: hsl(var(--ring));
 
   /* Alpha variants (dark mode) */
   --dark-10: rgba(242, 242, 242, 0.1);
@@ -435,35 +461,36 @@
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-placeholder: var(--text-placeholder);
-  --color-accent: hsl(var(--accent));
-  --color-accent-foreground: hsl(var(--accent-foreground));
-  --color-destructive: hsl(var(--destructive));
-  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-accent: hsl(var(--hover));
+  --color-accent-foreground: hsl(var(--hover-foreground));
+  --color-destructive: var(--status-deleted);
+  --color-destructive-foreground: var(--text-on-danger);
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
-
-  /* brand accent */
   --color-brand: var(--brand-color);
   --color-brand-foreground: var(--brand-foreground-color);
-
-  /* danger (alias for destructive) */
-  --color-danger: hsl(var(--destructive));
+  --color-danger: var(--status-deleted);
+  --color-success: var(--status-added);
+  --color-warning: var(--ui-warning);
+  --color-warning-bg: var(--ui-warning-bg);
 
   /* semantic backgrounds (custom superset) */
   --color-background-default: var(--background-default);
   --color-background-alt: var(--background-alt);
+  --color-background-card: var(--background-card);
+  --color-background-popover: var(--background-popover);
   --color-background-medium: var(--background-medium);
   --color-background-inverse: var(--background-inverse);
   --color-background-muted: var(--background-muted);
+  --color-background-hover: var(--background-hover);
+  --color-background-primary: var(--background-primary);
   --color-background-danger: var(--background-danger);
+  --color-background-danger-strong: var(--background-danger-strong);
   --color-background-success: var(--background-success);
   --color-background-info: var(--background-info);
   --color-background-warning: var(--background-warning);
-
   --color-background-accent: var(--background-accent);
-  --color-border-accent: var(--border-accent);
-  --color-text-accent: var(--text-accent);
 
   /* semantic borders */
   --color-border-default: var(--border-default);
@@ -471,6 +498,9 @@
   --color-border-soft-divider: var(--border-soft-divider);
   --color-border-input: var(--border-input);
   --color-border-input-hover: var(--border-input-hover);
+  --color-border-hover: var(--border-hover);
+  --color-border-primary: var(--border-primary);
+  --color-border-focus: var(--border-focus);
   --color-border-strong: var(--border-strong);
   --color-border-card: var(--border-card);
   --color-border-inverse: var(--border-inverse);
@@ -478,17 +508,26 @@
   --color-border-success: var(--border-success);
   --color-border-warning: var(--border-warning);
   --color-border-info: var(--border-info);
+  --color-border-accent: var(--border-accent);
 
   /* semantic text */
   --color-text-default: var(--text-default);
   --color-text-subtle: var(--text-subtle);
+  --color-text-on-card: var(--text-on-card);
+  --color-text-on-popover: var(--text-on-popover);
   --color-text-muted: var(--text-muted);
   --color-text-alt: var(--text-alt);
+  --color-text-hover: var(--text-hover);
+  --color-text-primary: var(--text-primary);
+  --color-text-on-primary: var(--text-on-primary);
+  --color-text-on-secondary: var(--text-on-secondary);
   --color-text-inverse: var(--text-inverse);
   --color-text-danger: var(--text-danger);
+  --color-text-on-danger: var(--text-on-danger);
   --color-text-success: var(--text-success);
   --color-text-warning: var(--text-warning);
   --color-text-info: var(--text-info);
+  --color-text-accent: var(--text-accent);
   --color-text-placeholder: var(--text-placeholder);
 
   /* alpha variants */
@@ -555,8 +594,11 @@
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
 
+  --color-sidebar-nav-bg-hover: var(--sidebar-nav-bg-hover);
+  --color-sidebar-nav-bg-selected: var(--sidebar-nav-bg-selected);
+  --color-sidebar-nav-fg: var(--sidebar-nav-fg);
   --color-sidebar: var(--sidebar);
-  --color-sidebar-background: hsl(var(--sidebar-background));
+  --color-sidebar-background: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground-color);
   --color-sidebar-primary: var(--sidebar-primary-color);
   --color-sidebar-primary-foreground: var(--sidebar-primary-foreground-color);
@@ -564,11 +606,10 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground-color);
   --color-sidebar-border: var(--sidebar-border-color);
   --color-sidebar-ring: var(--sidebar-ring-color);
+  --color-ring-focus: var(--ring-focus);
   --color-status-added: var(--status-added);
   --color-status-deleted: var(--status-deleted);
   --color-status-modified: var(--status-modified);
-  --color-warning: var(--ui-warning);
-  --color-warning-bg: var(--ui-warning-bg);
 
   --breakpoint-desktop: 1440px;
 
@@ -808,8 +849,8 @@ body,
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--brand) 60%, transparent);
-    color: var(--brand-foreground);
+    background: color-mix(in oklab, hsl(var(--primary)) 60%, transparent);
+    color: hsl(var(--primary-foreground));
   }
 
   ::-webkit-scrollbar {
@@ -850,7 +891,7 @@ body,
 
   *:not(body):not(.focus-override) {
     &:focus-visible {
-      @apply ring-ring ring-offset-background ring-2 ring-offset-1 outline-hidden;
+      @apply ring-ring-focus ring-offset-background ring-2 ring-offset-1 outline-hidden;
     }
   }
 
@@ -870,7 +911,7 @@ body,
 
   *:not(body):not(.focus-override).link {
     &:focus-visible {
-      @apply ring-ring ring-offset-background ring-2 ring-offset-2 outline-hidden;
+      @apply ring-ring-focus ring-offset-background ring-2 ring-offset-2 outline-hidden;
     }
   }
 }

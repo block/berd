@@ -17,21 +17,6 @@
     "title": "Acerca de"
   },
   "appearance": {
-    "accent": {
-      "colors": {
-        "blue": "Azul",
-        "cyan": "Cian",
-        "default": "Predeterminado",
-        "green": "Verde",
-        "orange": "Naranja",
-        "pink": "Rosa",
-        "purple": "Morado",
-        "red": "Rojo"
-      },
-      "description": "Elige tu color de acento",
-      "disabledDescription": "Selecciona primero un tema para activar los acentos personalizados.",
-      "label": "Color de acento"
-    },
     "density": {
       "description": "Ajusta el espaciado de los elementos de la interfaz",
       "label": "Densidad de la interfaz",
@@ -42,12 +27,23 @@
       }
     },
     "theme": {
-      "description": "Elige un tema de la app inspirado en sintaxis o déjalo sin seleccionar para seguir la apariencia del sistema.",
+      "darkDescription": "Usa siempre el tema oscuro predeterminado de Shiki en Goose.",
+      "darkLabel": "Oscuro · Goose oscuro",
+      "description": "Usa el tema predeterminado claro, oscuro o según el sistema de Goose, o elige un tema específico de Shiki.",
       "empty": "Ningún tema coincide con tu búsqueda.",
       "label": "Tema",
+      "lightDescription": "Usa siempre el tema claro predeterminado de Shiki en Goose.",
+      "lightLabel": "Claro · Goose claro",
       "searchPlaceholder": "Buscar temas...",
       "systemDescription": "Usa el tema claro u oscuro predeterminado de Goose según la configuración de tu dispositivo.",
-      "systemLabel": "Predeterminado del sistema"
+      "systemLabel": "Sistema · Goose predeterminado"
+    },
+    "primary": {
+      "custom": "Personalizado",
+      "description": "Usa el color primario del tema de forma predeterminada o elige un color primario para conservarlo entre temas.",
+      "label": "Color primario",
+      "reset": "Usar tema",
+      "theme": "Tema"
     },
     "title": "Apariencia"
   },
