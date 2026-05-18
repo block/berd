@@ -46,6 +46,51 @@ describe("SessionCard", () => {
     expect(onSelect).toHaveBeenCalledWith("s1");
   });
 
+  it("toggles selection with command-click instead of opening", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+
+    render(
+      <SessionCard
+        {...defaultProps}
+        onSelect={onSelect}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    await user.keyboard("[MetaLeft>]");
+    await user.click(screen.getByLabelText("Open Fix sidebar bug"));
+    await user.keyboard("[/MetaLeft]");
+
+    expect(onSelectionChange).toHaveBeenCalledWith("s1", true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("clears selection and opens on plain click while selection is active", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onSelectionClear = vi.fn();
+    const onSelectionChange = vi.fn();
+
+    render(
+      <SessionCard
+        {...defaultProps}
+        selected
+        selectionEnabled
+        onSelect={onSelect}
+        onSelectionClear={onSelectionClear}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    await user.click(screen.getByLabelText("Open Fix sidebar bug"));
+
+    expect(onSelectionClear).toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith("s1");
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
   it("shows rename and archive in menu for active sessions", async () => {
     const user = userEvent.setup();
 

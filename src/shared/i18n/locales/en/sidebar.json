@@ -10,7 +10,13 @@
     "newProject": "New project",
     "markRead": "Mark read",
     "markUnread": "Mark unread",
+    "selectChat": "Select {{title}}",
+    "deselectChat": "Deselect {{title}}",
     "renameHint": "Double-click to rename"
+  },
+  "bulk": {
+    "selectedContext_one": "{{displayCount}} chat selected",
+    "selectedContext_other": "{{displayCount}} chats selected"
   },
   "menu": {
     "optionsFor": "Options for {{label}}"

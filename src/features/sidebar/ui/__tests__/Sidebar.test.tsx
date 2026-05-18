@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -293,6 +293,144 @@ describe("Sidebar", () => {
 
     await user.click(recentsHeader);
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+  });
+
+  it("keeps the active chat in the selection while multi-selection is active", async () => {
+    const user = userEvent.setup();
+    mockSessions.splice(
+      0,
+      mockSessions.length,
+      {
+        id: "active-session",
+        title: "Active Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "session-2",
+        title: "Second Chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "session-3",
+        title: "Third Chat",
+        updatedAt: "2026-04-09T12:02:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    render(
+      <Sidebar
+        collapsed={false}
+        activeSessionId="active-session"
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    await user.keyboard("[ControlLeft>]");
+    await user.click(screen.getByRole("button", { name: "Second Chat" }));
+    await user.click(screen.getByRole("button", { name: "Third Chat" }));
+    await user.keyboard("[/ControlLeft]");
+
+    await user.click(
+      screen.getByRole("button", { name: /options for third chat/i }),
+    );
+
+    expect(screen.getByText("3 chats selected")).toBeInTheDocument();
+  });
+
+  it("clears selection when the last manually selected chat is toggled off", async () => {
+    const user = userEvent.setup();
+    mockSessions.splice(
+      0,
+      mockSessions.length,
+      {
+        id: "active-session",
+        title: "Active Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "session-2",
+        title: "Second Chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    render(
+      <Sidebar
+        collapsed={false}
+        activeSessionId="active-session"
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    await user.keyboard("[ControlLeft>]");
+    await user.click(screen.getByRole("button", { name: "Second Chat" }));
+    await user.click(screen.getByRole("button", { name: "Second Chat" }));
+    await user.keyboard("[/ControlLeft]");
+
+    expect(
+      screen.getByRole("button", { name: "Active Chat" }),
+    ).not.toHaveAttribute("aria-pressed");
+  });
+
+  it("confirms before bulk archiving selected chats", async () => {
+    const user = userEvent.setup();
+    const onArchiveChat = vi.fn().mockResolvedValue(undefined);
+    mockSessions.splice(
+      0,
+      mockSessions.length,
+      {
+        id: "active-session",
+        title: "Active Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "session-2",
+        title: "Second Chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    render(
+      <Sidebar
+        collapsed={false}
+        activeSessionId="active-session"
+        onArchiveChat={onArchiveChat}
+        onNavigate={vi.fn()}
+        onSelectSession={vi.fn()}
+        projects={[]}
+      />,
+    );
+
+    await user.keyboard("[ControlLeft>]");
+    await user.click(screen.getByRole("button", { name: "Second Chat" }));
+    await user.keyboard("[/ControlLeft]");
+    await user.click(
+      screen.getByRole("button", { name: /options for second chat/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: /^archive$/i }));
+
+    expect(
+      screen.getByRole("dialog", { name: /archive selected chats/i }),
+    ).toBeInTheDocument();
+    expect(onArchiveChat).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /^archive$/i }));
+
+    await waitFor(() => {
+      expect(onArchiveChat).toHaveBeenCalledWith("active-session");
+      expect(onArchiveChat).toHaveBeenCalledWith("session-2");
+    });
   });
 
   it("renders settings navigation as the active sidebar surface", async () => {

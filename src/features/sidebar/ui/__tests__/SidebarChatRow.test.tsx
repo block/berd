@@ -118,6 +118,55 @@ describe("SidebarChatRow", () => {
     ).toBeNull();
   });
 
+  it("toggles selection with command-click instead of selecting the row", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onSelectionChange = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Selectable Chat"
+        isActive={false}
+        onSelect={onSelect}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    await user.keyboard("[MetaLeft>]");
+    await user.click(screen.getByTitle("Double-click to rename"));
+    await user.keyboard("[/MetaLeft]");
+
+    expect(onSelectionChange).toHaveBeenCalledWith("session-1", true);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("clears selection and selects the row on plain click while selection is active", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+    const onSelectionClear = vi.fn();
+    const onSelectionChange = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Selectable Chat"
+        isActive={false}
+        selected
+        selectionEnabled
+        onSelect={onSelect}
+        onSelectionClear={onSelectionClear}
+        onSelectionChange={onSelectionChange}
+      />,
+    );
+
+    await user.click(screen.getByTitle("Double-click to rename"));
+
+    expect(onSelectionClear).toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith("session-1");
+    expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
   it("reserves activity space only once activity exists", () => {
     const { container, rerender } = render(
       <SidebarChatRow id="session-1" title="Recent Chat" isActive={false} />,

@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   IconBolt,
   IconHistory,
@@ -28,10 +29,17 @@ import {
 } from "@/features/chat/stores/chatSessionStore";
 import { selectSessions } from "@/features/chat/stores/chatSessionSelectors";
 import { isSessionRunning } from "@/features/chat/lib/sessionActivity";
+import {
+  areSetsEqual,
+  normalizeSelectedSessionIds,
+  toggleSessionSelection as getToggledSessionSelection,
+} from "@/features/sessions/lib/sessionSelection";
+import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { Button } from "@/shared/ui/button";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -65,7 +73,7 @@ interface SidebarProps {
   onCreateProject?: () => void;
   onEditProject?: (projectId: string) => void;
   onArchiveProject?: (projectId: string) => void;
-  onArchiveChat?: (sessionId: string) => void;
+  onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
@@ -167,16 +175,63 @@ export function Sidebar({
     DEFAULT_SECTION_VISIBILITY,
     validateSectionVisibility,
   );
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
   const getPersonaById = useAgentStore((s) => s.getPersonaById);
   const projectStoreProjects = useProjectStore(selectProjects);
-  const visibleSessions = getVisibleSessions(sessions, messagesBySession);
-  const activeSessions = visibleSessions.filter(
-    (session) => !session.archivedAt,
+  const visibleSessions = useMemo(
+    () => getVisibleSessions(sessions, messagesBySession),
+    [messagesBySession, sessions],
   );
+  const activeSessions = useMemo(
+    () => visibleSessions.filter((session) => !session.archivedAt),
+    [visibleSessions],
+  );
+  const activeSessionIds = useMemo(
+    () => new Set(activeSessions.map((session) => session.id)),
+    [activeSessions],
+  );
+  const selectedCount = selectedSessionIds.size;
+  const clearSelection = () => setSelectedSessionIds(new Set());
+  const reportBulkFailure = (failedCount: number) => {
+    toast.error(
+      t("common:bulkActions.failed", {
+        count: failedCount,
+        displayCount: failedCount,
+      }),
+    );
+  };
+  const {
+    applySelectionAction,
+    archiveConfirmOpen,
+    archiveSelectionCount,
+    confirmArchiveSelected,
+    isApplyingSelectionAction,
+    requestArchiveSelected,
+    setArchiveConfirmOpen,
+  } = useBulkSessionActions({
+    selectedSessionIds,
+    onComplete: clearSelection,
+    onFailure: reportBulkFailure,
+  });
+
+  useEffect(() => {
+    setSelectedSessionIds((current) => {
+      const next = normalizeSelectedSessionIds({
+        current,
+        activeSessionIds,
+        activeSessionId,
+        includeActiveSession: true,
+      });
+
+      return areSetsEqual(next, current) ? current : next;
+    });
+  }, [activeSessionId, activeSessionIds]);
 
   useEffect(() => {
     if (collapsed) {
@@ -338,7 +393,19 @@ export function Sidebar({
   const toggleSection = (section: keyof SidebarSectionVisibility) => {
     setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
   };
-
+  const toggleSessionSelection = (sessionId: string, selected: boolean) => {
+    setSelectedSessionIds((current) =>
+      getToggledSessionSelection({
+        current,
+        sessionId,
+        selected,
+        activeSessionId,
+        activeSessionIds,
+        includeActiveSessionOnStart: true,
+        clearActiveOnlySelection: true,
+      }),
+    );
+  };
   return (
     <div
       className={cn(
@@ -510,6 +577,18 @@ export function Sidebar({
                     onMarkChatRead={onMarkChatRead}
                     onMarkChatUnread={onMarkChatUnread}
                     onMoveToProject={onMoveToProject}
+                    selectedSessionIds={selectedSessionIds}
+                    selectionEnabled={selectedCount > 0}
+                    selectionActionsDisabled={isApplyingSelectionAction}
+                    onSelectionClear={clearSelection}
+                    onSelectionChange={toggleSessionSelection}
+                    onArchiveSelected={requestArchiveSelected}
+                    onMarkSelectedRead={() =>
+                      void applySelectionAction(onMarkChatRead)
+                    }
+                    onMarkSelectedUnread={() =>
+                      void applySelectionAction(onMarkChatUnread)
+                    }
                     onReorderProject={onReorderProject}
                     projectsSectionOpen={sectionVisibility.projects}
                     recentsSectionOpen={sectionVisibility.recents}
@@ -681,6 +760,23 @@ export function Sidebar({
           </div>
         </div>
       </div>
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        onOpenChange={setArchiveConfirmOpen}
+        title={t("common:bulkActions.archiveConfirmTitle", {
+          count: archiveSelectionCount,
+          displayCount: archiveSelectionCount,
+        })}
+        description={t("common:bulkActions.archiveConfirmDescription", {
+          count: archiveSelectionCount,
+          displayCount: archiveSelectionCount,
+        })}
+        cancelLabel={t("common:actions.cancel")}
+        confirmLabel={t("common:actions.archive")}
+        loadingLabel={t("common:bulkActions.archiving")}
+        isLoading={isApplyingSelectionAction}
+        onConfirm={() => confirmArchiveSelected(onArchiveChat)}
+      />
     </div>
   );
 }

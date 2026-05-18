@@ -36,6 +36,15 @@
   "buttons": {
     "openFixUrl": "Open fix URL"
   },
+  "bulkActions": {
+    "archiveConfirmDescription_one": "Archive {{displayCount}} selected chat?",
+    "archiveConfirmDescription_other": "Archive {{displayCount}} selected chats?",
+    "archiveConfirmTitle_one": "Archive selected chat?",
+    "archiveConfirmTitle_other": "Archive selected chats?",
+    "archiving": "Archiving...",
+    "failed_one": "{{displayCount}} action failed",
+    "failed_other": "{{displayCount}} actions failed"
+  },
   "components": {
     "codeBlock": {
       "copyLabel": "Copy code"

@@ -29,6 +29,14 @@ export function SidebarRecentsSection({
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
+  selectedSessionIds,
+  selectionEnabled = false,
+  selectionActionsDisabled = false,
+  onSelectionClear,
+  onSelectionChange,
+  onArchiveSelected,
+  onMarkSelectedRead,
+  onMarkSelectedUnread,
   isOpen,
   onToggleOpen,
   sectionHeaderTextClass,
@@ -41,11 +49,19 @@ export function SidebarRecentsSection({
   activeSessionId?: string | null;
   onNewChat?: () => void;
   onSelectSession?: (sessionId: string) => void;
-  onArchiveChat?: (sessionId: string) => void;
+  onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
+  selectedSessionIds?: Set<string>;
+  selectionEnabled?: boolean;
+  selectionActionsDisabled?: boolean;
+  onSelectionClear?: () => void;
+  onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onArchiveSelected?: () => void;
+  onMarkSelectedRead?: () => void;
+  onMarkSelectedUnread?: () => void;
   isOpen: boolean;
   onToggleOpen: () => void;
   sectionHeaderTextClass: string;
@@ -208,11 +224,20 @@ export function SidebarRecentsSection({
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
+                selected={selectedSessionIds?.has(session.id) ?? false}
+                selectionEnabled={selectionEnabled}
+                selectionActionsDisabled={selectionActionsDisabled}
+                selectedSessionIds={selectedSessionIds}
                 onSelect={onSelectSession}
+                onSelectionClear={onSelectionClear}
+                onSelectionChange={onSelectionChange}
                 onRename={onRenameChat}
                 onMarkRead={onMarkChatRead}
                 onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}
+                onArchiveSelected={onArchiveSelected}
+                onMarkSelectedRead={onMarkSelectedRead}
+                onMarkSelectedUnread={onMarkSelectedUnread}
               />
             );
           })}

@@ -41,6 +41,14 @@ export function SidebarProjectSection({
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
+  selectedSessionIds,
+  selectionEnabled = false,
+  selectionActionsDisabled = false,
+  onSelectionClear,
+  onSelectionChange,
+  onArchiveSelected,
+  onMarkSelectedRead,
+  onMarkSelectedUnread,
 }: {
   project: ProjectInfo;
   projectChats: TabInfo[];
@@ -52,11 +60,19 @@ export function SidebarProjectSection({
   onNavigate?: (view: AppView) => void;
   onEditProject?: (projectId: string) => void;
   onArchiveProject?: (projectId: string) => void;
-  onArchiveChat?: (sessionId: string) => void;
+  onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
+  selectedSessionIds?: Set<string>;
+  selectionEnabled?: boolean;
+  selectionActionsDisabled?: boolean;
+  onSelectionClear?: () => void;
+  onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onArchiveSelected?: () => void;
+  onMarkSelectedRead?: () => void;
+  onMarkSelectedUnread?: () => void;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [showAll, setShowAll] = useState(false);
@@ -177,12 +193,21 @@ export function SidebarProjectSection({
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
+                selected={selectedSessionIds?.has(session.id) ?? false}
+                selectionEnabled={selectionEnabled}
+                selectionActionsDisabled={selectionActionsDisabled}
+                selectedSessionIds={selectedSessionIds}
                 nested
                 onSelect={onSelectSession}
+                onSelectionClear={onSelectionClear}
+                onSelectionChange={onSelectionChange}
                 onRename={onRenameChat}
                 onMarkRead={onMarkChatRead}
                 onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}
+                onArchiveSelected={onArchiveSelected}
+                onMarkSelectedRead={onMarkSelectedRead}
+                onMarkSelectedUnread={onMarkSelectedUnread}
               />
             );
           })}

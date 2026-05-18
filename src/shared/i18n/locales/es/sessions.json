@@ -1,7 +1,9 @@
 {
   "card": {
+    "deselect": "Deseleccionar",
     "open": "Abrir {{title}}",
-    "optionsFor": "Opciones para {{title}}"
+    "optionsFor": "Opciones para {{title}}",
+    "select": "Seleccionar"
   },
   "dateGroups": {
     "today": "Hoy",
@@ -21,6 +23,8 @@
     "searchError": "La búsqueda de mensajes falló. Mostrando solo coincidencias por título, agente y proyecto. Inténtalo de nuevo.",
     "searchPlaceholder": "Buscar sesiones...",
     "searching": "Buscando sesiones...",
+    "selectedContext_one": "{{displayCount}} chat seleccionado",
+    "selectedContext_other": "{{displayCount}} chats seleccionados",
     "subtitle": "Explora y busca sesiones anteriores",
     "toggleArchived": "Archivadas",
     "title": "Historial de sesiones"

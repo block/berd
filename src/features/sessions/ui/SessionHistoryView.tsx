@@ -10,6 +10,7 @@ import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button } from "@/shared/ui/button";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SessionCard } from "./SessionCard";
 import { groupSessionsByDate } from "../lib/groupSessionsByDate";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -30,6 +31,12 @@ import {
 } from "@/shared/api/acp";
 import { saveExportedSessionFile } from "@/shared/api/system";
 import { defaultExportFilename, downloadJson } from "../lib/exportSession";
+import {
+  areSetsEqual,
+  normalizeSelectedSessionIds,
+  toggleSessionSelection as getToggledSessionSelection,
+} from "../lib/sessionSelection";
+import { useBulkSessionActions } from "../hooks/useBulkSessionActions";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import {
   flattenFlatSessionRows,
@@ -48,7 +55,7 @@ interface SessionHistoryViewProps {
     query?: string,
   ) => void;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
-  onArchiveChat?: (sessionId: string) => void;
+  onArchiveChat?: (sessionId: string) => void | Promise<void>;
 }
 
 export function SessionHistoryView({
@@ -65,6 +72,9 @@ export function SessionHistoryView({
   const [virtualListElement, setVirtualListElementState] =
     useState<HTMLDivElement | null>(null);
   const [listScrollMargin, setListScrollMargin] = useState(0);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
@@ -76,6 +86,39 @@ export function SessionHistoryView({
     [messagesBySession, sessions],
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const selectedCount = selectedSessionIds.size;
+  const selectedSessions = useMemo(
+    () =>
+      activeSessions.filter((session) => selectedSessionIds.has(session.id)),
+    [activeSessions, selectedSessionIds],
+  );
+  const clearSelection = useCallback(() => {
+    setSelectedSessionIds(new Set());
+  }, []);
+  const reportBulkFailure = useCallback(
+    (failedCount: number) => {
+      toast.error(
+        t("common:bulkActions.failed", {
+          count: failedCount,
+          displayCount: failedCount,
+        }),
+      );
+    },
+    [t],
+  );
+  const {
+    applySelectionAction,
+    archiveConfirmOpen,
+    archiveSelectionCount,
+    confirmArchiveSelected,
+    isApplyingSelectionAction,
+    requestArchiveSelected,
+    setArchiveConfirmOpen,
+  } = useBulkSessionActions({
+    selectedSessionIds,
+    onComplete: clearSelection,
+    onFailure: reportBulkFailure,
+  });
 
   const getPersonaName = useCallback(
     (personaId: string) =>
@@ -251,6 +294,27 @@ export function SessionHistoryView({
     [onArchiveChat],
   );
 
+  const toggleSessionSelection = useCallback(
+    (sessionId: string, selected: boolean) => {
+      setSelectedSessionIds((current) =>
+        getToggledSessionSelection({ current, sessionId, selected }),
+      );
+    },
+    [],
+  );
+
+  useEffect(() => {
+    setSelectedSessionIds((current) => {
+      const activeIds = new Set(activeSessions.map((session) => session.id));
+      const next = normalizeSelectedSessionIds({
+        current,
+        activeSessionIds: activeIds,
+      });
+
+      return areSetsEqual(next, current) ? current : next;
+    });
+  }, [activeSessions]);
+
   const handleExport = useCallback(
     async (sessionId: string) => {
       try {
@@ -296,6 +360,23 @@ export function SessionHistoryView({
     },
     [loadSessions],
   );
+
+  const duplicateSelectedSessions = useCallback(async () => {
+    const sessionIds = selectedSessions.map((session) => session.id);
+    const result = await applySelectionAction(
+      acpDuplicateSession,
+      new Set(sessionIds),
+    );
+    if (result) {
+      await loadSessions();
+      const missingSession = result.rejectedReasons.some((reason) =>
+        String(reason).includes("not found in sessions or threads"),
+      );
+      if (missingSession) {
+        await loadSessions();
+      }
+    }
+  }, [applySelectionAction, loadSessions, selectedSessions]);
 
   const handleImportSession = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -362,10 +443,18 @@ export function SessionHistoryView({
             ? () => handleSelectResult(session.id, options.messageId)
             : onSelectSession
         }
+        selected={selectedSessionIds.has(session.id)}
+        selectionEnabled={selectedCount > 0}
+        selectionActionsDisabled={isApplyingSelectionAction}
+        selectionCount={selectedCount}
+        onSelectionClear={clearSelection}
+        onSelectionChange={toggleSessionSelection}
         onRename={onRenameChat}
         onArchive={handleArchive}
+        onArchiveSelected={requestArchiveSelected}
         onExport={handleExport}
         onDuplicate={handleDuplicate}
+        onDuplicateSelected={duplicateSelectedSessions}
       />
     ),
     [
@@ -374,11 +463,18 @@ export function SessionHistoryView({
       getProjectName,
       getWorkingDir,
       handleArchive,
+      requestArchiveSelected,
+      clearSelection,
       handleDuplicate,
+      duplicateSelectedSessions,
       handleExport,
       handleSelectResult,
+      isApplyingSelectionAction,
       onRenameChat,
       onSelectSession,
+      selectedCount,
+      selectedSessionIds,
+      toggleSessionSelection,
     ],
   );
 
@@ -575,6 +671,23 @@ export function SessionHistoryView({
         accept=".json"
         onChange={handleImportSession}
         className="hidden"
+      />
+      <ConfirmDialog
+        open={archiveConfirmOpen}
+        onOpenChange={setArchiveConfirmOpen}
+        title={t("common:bulkActions.archiveConfirmTitle", {
+          count: archiveSelectionCount,
+          displayCount: archiveSelectionCount,
+        })}
+        description={t("common:bulkActions.archiveConfirmDescription", {
+          count: archiveSelectionCount,
+          displayCount: archiveSelectionCount,
+        })}
+        cancelLabel={t("common:actions.cancel")}
+        confirmLabel={t("common:actions.archive")}
+        loadingLabel={t("common:bulkActions.archiving")}
+        isLoading={isApplyingSelectionAction}
+        onConfirm={() => confirmArchiveSelected(handleArchive)}
       />
     </div>
   );

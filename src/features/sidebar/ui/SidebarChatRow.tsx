@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState } from "react";
-import { Mail, MailOpen, MoreHorizontal, Pencil, Trash2 } from "lucide-react";
+import {
+  CheckSquare,
+  Mail,
+  MailOpen,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
@@ -21,6 +31,8 @@ const INACTIVE_CHAT_ROW_CLASS =
   "text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg";
 const ACTIVE_CHAT_ROW_CLASS =
   "bg-sidebar-nav-bg-selected font-normal text-sidebar-nav-fg hover:bg-sidebar-nav-bg-selected hover:text-sidebar-nav-fg";
+const SELECTED_CHAT_ROW_CLASS =
+  "bg-background-primary/10 text-foreground ring-1 ring-inset ring-background-primary/35 hover:bg-background-primary/15 hover:text-foreground";
 
 interface SidebarChatRowProps {
   id: string;
@@ -28,13 +40,22 @@ interface SidebarChatRowProps {
   isActive: boolean;
   isRunning?: boolean;
   hasUnread?: boolean;
+  selected?: boolean;
+  selectionEnabled?: boolean;
+  selectionActionsDisabled?: boolean;
+  selectedSessionIds?: Set<string>;
   className?: string;
   nested?: boolean;
   onSelect?: (id: string) => void;
+  onSelectionClear?: () => void;
+  onSelectionChange?: (id: string, selected: boolean) => void;
   onRename?: (id: string, nextTitle: string) => void;
   onArchive?: (id: string) => void;
+  onArchiveSelected?: () => void;
   onMarkRead?: (id: string) => void;
   onMarkUnread?: (id: string) => void;
+  onMarkSelectedRead?: () => void;
+  onMarkSelectedUnread?: () => void;
 }
 
 export function SidebarChatRow({
@@ -43,13 +64,22 @@ export function SidebarChatRow({
   isActive,
   isRunning = false,
   hasUnread = false,
+  selected = false,
+  selectionEnabled = false,
+  selectionActionsDisabled = false,
+  selectedSessionIds,
   className,
   nested = false,
   onSelect,
+  onSelectionClear,
+  onSelectionChange,
   onRename,
   onArchive,
+  onArchiveSelected,
   onMarkRead,
   onMarkUnread,
+  onMarkSelectedRead,
+  onMarkSelectedUnread,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -66,6 +96,13 @@ export function SidebarChatRow({
   );
   const [draftTitle, setDraftTitle] = useState(editableTitle);
   const showActivityIndicator = isRunning || hasUnread;
+  const selectionCount = selectedSessionIds?.size ?? 0;
+  const shouldApplyToSelection = selected && selectionCount > 1;
+  const rowButtonStateClass = selected
+    ? SELECTED_CHAT_ROW_CLASS
+    : isActive
+      ? ACTIVE_CHAT_ROW_CLASS
+      : INACTIVE_CHAT_ROW_CLASS;
 
   useEffect(() => {
     setDraftTitle(editableTitle);
@@ -152,7 +189,10 @@ export function SidebarChatRow({
       }}
       className={cn(
         "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-nav-bg-hover focus-within:bg-sidebar-nav-bg-hover active:cursor-grabbing",
-        (isActive || menuOpen) && "bg-sidebar-nav-bg-selected",
+        (isActive || menuOpen) &&
+          (!selectionEnabled || selected) &&
+          "bg-sidebar-nav-bg-selected",
+        selected && SELECTED_CHAT_ROW_CLASS,
         dragging && "opacity-40 bg-background-hover/30",
         className,
       )}
@@ -161,7 +201,16 @@ export function SidebarChatRow({
         type="button"
         variant="ghost"
         size="sm"
-        onClick={() => onSelect?.(id)}
+        onClick={(event) => {
+          if (isMultiSelectModifier(event)) {
+            onSelectionChange?.(id, !selected);
+            return;
+          }
+          if (selectionEnabled) {
+            onSelectionClear?.();
+          }
+          onSelect?.(id);
+        }}
         onDoubleClick={(event) => {
           event.preventDefault();
           event.stopPropagation();
@@ -171,8 +220,9 @@ export function SidebarChatRow({
         className={cn(
           "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-normal active:cursor-grabbing",
           nested ? "pl-9" : "pl-3",
-          isActive ? ACTIVE_CHAT_ROW_CLASS : INACTIVE_CHAT_ROW_CLASS,
+          rowButtonStateClass,
         )}
+        aria-pressed={selectionEnabled ? selected : undefined}
       >
         {showActivityIndicator && !nested && (
           <span className="flex h-3 w-3 shrink-0 items-center justify-center">
@@ -214,6 +264,28 @@ export function SidebarChatRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4}>
+          {shouldApplyToSelection && (
+            <>
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                {t("bulk.selectedContext", {
+                  count: selectionCount,
+                  displayCount: selectionCount,
+                })}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            onClick={() => {
+              onSelectionChange?.(id, !selected);
+            }}
+            disabled={selectionActionsDisabled}
+          >
+            <CheckSquare className="size-3.5" />
+            {t(selected ? "actions.deselectChat" : "actions.selectChat", {
+              title: displayTitle,
+            })}
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={startRename}>
             <Pencil className="size-3.5" />
             {t("common:actions.rename")}
@@ -221,8 +293,13 @@ export function SidebarChatRow({
           {hasUnread ? (
             <DropdownMenuItem
               onClick={() => {
+                if (shouldApplyToSelection) {
+                  onMarkSelectedRead?.();
+                  return;
+                }
                 onMarkRead?.(id);
               }}
+              disabled={shouldApplyToSelection && selectionActionsDisabled}
             >
               <MailOpen className="size-3.5" />
               {t("actions.markRead")}
@@ -230,8 +307,13 @@ export function SidebarChatRow({
           ) : (
             <DropdownMenuItem
               onClick={() => {
+                if (shouldApplyToSelection) {
+                  onMarkSelectedUnread?.();
+                  return;
+                }
                 onMarkUnread?.(id);
               }}
+              disabled={shouldApplyToSelection && selectionActionsDisabled}
             >
               <Mail className="size-3.5" />
               {t("actions.markUnread")}
@@ -239,8 +321,13 @@ export function SidebarChatRow({
           )}
           <DropdownMenuItem
             onClick={() => {
+              if (shouldApplyToSelection) {
+                onArchiveSelected?.();
+                return;
+              }
               onArchive?.(id);
             }}
+            disabled={shouldApplyToSelection && selectionActionsDisabled}
           >
             <Trash2 className="size-3.5" />
             {t("common:actions.archive")}

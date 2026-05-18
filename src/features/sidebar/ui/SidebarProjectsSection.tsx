@@ -34,11 +34,19 @@ interface SidebarProjectsSectionProps {
   onCreateProject?: () => void;
   onEditProject?: (projectId: string) => void;
   onArchiveProject?: (projectId: string) => void;
-  onArchiveChat?: (sessionId: string) => void;
+  onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
+  selectedSessionIds?: Set<string>;
+  selectionEnabled?: boolean;
+  selectionActionsDisabled?: boolean;
+  onSelectionClear?: () => void;
+  onSelectionChange?: (sessionId: string, selected: boolean) => void;
+  onArchiveSelected?: () => void;
+  onMarkSelectedRead?: () => void;
+  onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
   projectsSectionOpen: boolean;
   recentsSectionOpen: boolean;
@@ -71,6 +79,14 @@ export function SidebarProjectsSection({
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
+  selectedSessionIds,
+  selectionEnabled = false,
+  selectionActionsDisabled = false,
+  onSelectionClear,
+  onSelectionChange,
+  onArchiveSelected,
+  onMarkSelectedRead,
+  onMarkSelectedUnread,
   onReorderProject,
   projectsSectionOpen,
   recentsSectionOpen,
@@ -162,6 +178,14 @@ export function SidebarProjectsSection({
           onMarkChatRead={onMarkChatRead}
           onMarkChatUnread={onMarkChatUnread}
           onMoveToProject={onMoveToProject}
+          selectedSessionIds={selectedSessionIds}
+          selectionEnabled={selectionEnabled}
+          selectionActionsDisabled={selectionActionsDisabled}
+          onSelectionClear={onSelectionClear}
+          onSelectionChange={onSelectionChange}
+          onArchiveSelected={onArchiveSelected}
+          onMarkSelectedRead={onMarkSelectedRead}
+          onMarkSelectedUnread={onMarkSelectedUnread}
           onReorderProject={onReorderProject}
         />
       )}
@@ -271,6 +295,14 @@ export function SidebarProjectsSection({
           onMarkChatRead={onMarkChatRead}
           onMarkChatUnread={onMarkChatUnread}
           onMoveToProject={onMoveToProject}
+          selectedSessionIds={selectedSessionIds}
+          selectionEnabled={selectionEnabled}
+          selectionActionsDisabled={selectionActionsDisabled}
+          onSelectionClear={onSelectionClear}
+          onSelectionChange={onSelectionChange}
+          onArchiveSelected={onArchiveSelected}
+          onMarkSelectedRead={onMarkSelectedRead}
+          onMarkSelectedUnread={onMarkSelectedUnread}
           isOpen={recentsSectionOpen}
           onToggleOpen={onToggleRecentsSection}
           sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}

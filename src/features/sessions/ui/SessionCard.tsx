@@ -10,12 +10,14 @@ import {
   ArchiveRestore,
   Copy,
   Download,
+  CheckSquare,
 } from "lucide-react";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -23,6 +25,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
@@ -38,12 +42,20 @@ interface SessionCardProps {
   archivedAt?: string;
   snippet?: string;
   matchCount?: number;
+  selected?: boolean;
+  selectionEnabled?: boolean;
+  selectionActionsDisabled?: boolean;
+  selectionCount?: number;
   onSelect?: (id: string) => void;
+  onSelectionClear?: () => void;
+  onSelectionChange?: (id: string, selected: boolean) => void;
   onRename?: (id: string, nextTitle: string) => void;
   onArchive?: (id: string) => void;
+  onArchiveSelected?: () => void;
   onUnarchive?: (id: string) => void;
   onExport?: (id: string) => void;
   onDuplicate?: (id: string) => void;
+  onDuplicateSelected?: () => void;
 }
 
 export function SessionCard({
@@ -57,12 +69,20 @@ export function SessionCard({
   archivedAt,
   snippet,
   matchCount,
+  selected = false,
+  selectionEnabled = false,
+  selectionActionsDisabled = false,
+  selectionCount = 0,
   onSelect,
+  onSelectionClear,
+  onSelectionChange,
   onRename,
   onArchive,
+  onArchiveSelected,
   onUnarchive,
   onExport,
   onDuplicate,
+  onDuplicateSelected,
 }: SessionCardProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
@@ -78,6 +98,7 @@ export function SessionCard({
     t("common:session.defaultTitle"),
   );
   const [draftTitle, setDraftTitle] = useState(editableTitle);
+  const shouldApplyToSelection = selected && selectionCount > 1;
 
   useEffect(() => {
     setDraftTitle(editableTitle);
@@ -120,15 +141,26 @@ export function SessionCard({
     <div
       className={cn(
         "group relative flex flex-col gap-2 rounded-lg border border-border-soft bg-background p-4 text-left transition-colors hover:border-border hover:bg-muted/10",
+        selected && "border-border bg-muted/20",
         archivedAt && "opacity-60",
       )}
     >
       {/* Click-to-open overlay */}
       <button
         type="button"
-        onClick={() => onSelect?.(id)}
+        onClick={(event) => {
+          if (isMultiSelectModifier(event)) {
+            onSelectionChange?.(id, !selected);
+            return;
+          }
+          if (selectionEnabled) {
+            onSelectionClear?.();
+          }
+          onSelect?.(id);
+        }}
         className="absolute inset-0 z-0 rounded-lg"
         aria-label={t("card.open", { title: displayTitle })}
+        aria-pressed={selectionEnabled ? selected : undefined}
       />
 
       {/* Title — editable or static */}
@@ -227,6 +259,26 @@ export function SessionCard({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" sideOffset={4}>
+          {shouldApplyToSelection && (
+            <>
+              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                {t("history.selectedContext", {
+                  count: selectionCount,
+                  displayCount: selectionCount,
+                })}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+            </>
+          )}
+          <DropdownMenuItem
+            onClick={() => {
+              setMenuOpen(false);
+              onSelectionChange?.(id, !selected);
+            }}
+          >
+            <CheckSquare className="size-3.5" />
+            {selected ? t("card.deselect") : t("card.select")}
+          </DropdownMenuItem>
           {archivedAt ? (
             <>
               <DropdownMenuItem
@@ -266,8 +318,13 @@ export function SessionCard({
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);
+                  if (shouldApplyToSelection) {
+                    onDuplicateSelected?.();
+                    return;
+                  }
                   onDuplicate?.(id);
                 }}
+                disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
                 <Copy className="size-3.5" />
                 {t("common:actions.duplicate")}
@@ -275,8 +332,13 @@ export function SessionCard({
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);
+                  if (shouldApplyToSelection) {
+                    onArchiveSelected?.();
+                    return;
+                  }
                   onArchive?.(id);
                 }}
+                disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
                 <Trash2 className="size-3.5" />
                 {t("common:actions.archive")}

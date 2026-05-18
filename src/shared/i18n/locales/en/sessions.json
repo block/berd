@@ -1,7 +1,9 @@
 {
   "card": {
+    "deselect": "Deselect",
     "open": "Open {{title}}",
-    "optionsFor": "Options for {{title}}"
+    "optionsFor": "Options for {{title}}",
+    "select": "Select"
   },
   "dateGroups": {
     "today": "Today",
@@ -21,6 +23,8 @@
     "searchError": "Message search failed. Showing title, agent, and project matches only. Try again.",
     "searchPlaceholder": "Search sessions...",
     "searching": "Searching sessions...",
+    "selectedContext_one": "{{displayCount}} chat selected",
+    "selectedContext_other": "{{displayCount}} chats selected",
     "subtitle": "Browse and search past sessions",
     "toggleArchived": "Archived",
     "title": "Session history"

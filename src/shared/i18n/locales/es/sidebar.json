@@ -10,7 +10,13 @@
     "newProject": "Nuevo proyecto",
     "markRead": "Marcar como leído",
     "markUnread": "Marcar como no leído",
+    "selectChat": "Seleccionar {{title}}",
+    "deselectChat": "Deseleccionar {{title}}",
     "renameHint": "Haz doble clic para renombrar"
+  },
+  "bulk": {
+    "selectedContext_one": "{{displayCount}} chat seleccionado",
+    "selectedContext_other": "{{displayCount}} chats seleccionados"
   },
   "menu": {
     "optionsFor": "Opciones para {{label}}"

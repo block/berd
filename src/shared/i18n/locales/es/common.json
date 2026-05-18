@@ -36,6 +36,15 @@
   "buttons": {
     "openFixUrl": "Abrir URL de solución"
   },
+  "bulkActions": {
+    "archiveConfirmDescription_one": "¿Archivar {{displayCount}} chat seleccionado?",
+    "archiveConfirmDescription_other": "¿Archivar {{displayCount}} chats seleccionados?",
+    "archiveConfirmTitle_one": "¿Archivar chat seleccionado?",
+    "archiveConfirmTitle_other": "¿Archivar chats seleccionados?",
+    "archiving": "Archivando...",
+    "failed_one": "{{displayCount}} acción falló",
+    "failed_other": "{{displayCount}} acciones fallaron"
+  },
   "components": {
     "codeBlock": {
       "copyLabel": "Copiar código"
