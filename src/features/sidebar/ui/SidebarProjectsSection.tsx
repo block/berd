@@ -47,7 +47,7 @@ interface SidebarProjectsSectionProps {
 }
 
 const SECTION_HEADER_TEXT_CLASS =
-  "text-[11px] font-medium uppercase tracking-[0.08em] text-foreground-subtle";
+  "text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted";
 
 export function SidebarProjectsSection({
   projects,
@@ -118,7 +118,7 @@ export function SidebarProjectsSection({
           >
             <IconChevronDown
               className={cn(
-                "size-3 shrink-0 text-foreground-subtle transition-transform duration-150",
+                "size-3 shrink-0 text-text-muted transition-transform duration-150",
                 !projectsSectionOpen && "-rotate-90",
               )}
             />
@@ -233,7 +233,7 @@ export function SidebarProjectsSection({
               >
                 <IconChevronDown
                   className={cn(
-                    "size-3 shrink-0 text-foreground-subtle transition-transform duration-150",
+                    "size-3 shrink-0 text-text-muted transition-transform duration-150",
                     !recentsSectionOpen && "-rotate-90",
                   )}
                 />

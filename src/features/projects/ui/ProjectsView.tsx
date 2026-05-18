@@ -223,7 +223,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
                 type="button"
                 variant="ghost"
                 onClick={handleNewProject}
-                className="h-auto w-full rounded-lg border border-dashed border-border px-4 py-3 text-muted-foreground hover:border-border hover:bg-accent/50"
+                className="h-auto w-full rounded-lg border border-dashed border-border px-4 py-3 text-muted-foreground hover:border-border hover:bg-background-hover/50"
               >
                 <Plus className="size-4" />
                 <span className="text-sm">{t("view.newProject")}</span>

@@ -148,7 +148,7 @@ describe("MessageBubble", () => {
     );
 
     expect(screen.getByText("Conversation compacted.")).toBeInTheDocument();
-    expect(container.querySelector(".text-success")).toBeInTheDocument();
+    expect(container.querySelector(".text-text-success")).toBeInTheDocument();
   });
 
   it("renders user text inside a muted bubble shell", () => {
@@ -250,7 +250,7 @@ describe("MessageBubble", () => {
     );
     expect(actions).toHaveAttribute("data-copy-confirmed", "false");
     const copyButton = screen.getByRole("button", { name: /copy/i });
-    expect(copyButton).not.toHaveClass("bg-accent");
+    expect(copyButton).not.toHaveClass("bg-background-hover");
 
     await act(async () => {
       fireEvent.click(copyButton);
@@ -259,19 +259,19 @@ describe("MessageBubble", () => {
 
     expect(mockWriteText).toHaveBeenCalledWith("response");
     expect(actions).toHaveAttribute("data-copy-confirmed", "true");
-    expect(copyButton).toHaveClass("bg-accent");
+    expect(copyButton).toHaveClass("bg-background-hover");
 
     await act(async () => {
       vi.advanceTimersByTime(1999);
     });
     expect(actions).toHaveAttribute("data-copy-confirmed", "true");
-    expect(copyButton).toHaveClass("bg-accent");
+    expect(copyButton).toHaveClass("bg-background-hover");
 
     await act(async () => {
       vi.advanceTimersByTime(1);
     });
     expect(actions).toHaveAttribute("data-copy-confirmed", "false");
-    expect(copyButton).not.toHaveClass("bg-accent");
+    expect(copyButton).not.toHaveClass("bg-background-hover");
   });
 
   it("renders tool request content as ToolCallCard", () => {

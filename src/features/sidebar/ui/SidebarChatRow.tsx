@@ -18,9 +18,9 @@ import { Input } from "@/shared/ui/input";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 
 const INACTIVE_CHAT_ROW_CLASS =
-  "text-foreground hover:bg-background-alt hover:text-foreground";
+  "text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg";
 const ACTIVE_CHAT_ROW_CLASS =
-  "bg-background-alt font-normal text-foreground hover:bg-background-alt hover:text-foreground";
+  "bg-sidebar-nav-bg-selected font-normal text-sidebar-nav-fg hover:bg-sidebar-nav-bg-selected hover:text-sidebar-nav-fg";
 
 interface SidebarChatRowProps {
   id: string;
@@ -151,9 +151,9 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt active:cursor-grabbing",
-        (isActive || menuOpen) && "bg-background-alt",
-        dragging && "opacity-40 bg-accent/30",
+        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-nav-bg-hover focus-within:bg-sidebar-nav-bg-hover active:cursor-grabbing",
+        (isActive || menuOpen) && "bg-sidebar-nav-bg-selected",
+        dragging && "opacity-40 bg-background-hover/30",
         className,
       )}
     >

@@ -147,7 +147,7 @@ export function SkillEditor({
           {/* Name */}
           <div className="space-y-1">
             <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.name")} <span className="text-destructive">*</span>
+              {t("dialog.name")} <span className="text-text-danger">*</span>
             </Label>
             <Input
               value={name}
@@ -155,7 +155,7 @@ export function SkillEditor({
               placeholder={t("dialog.namePlaceholder")}
             />
             {name.length > 0 && !nameValid && (
-              <p className="text-xs text-destructive">
+              <p className="text-xs text-text-danger">
                 {t("dialog.nameValidation")}
               </p>
             )}
@@ -194,7 +194,7 @@ export function SkillEditor({
           <div className="space-y-1">
             <Label className="text-xs font-medium text-muted-foreground">
               {t("dialog.description")}{" "}
-              <span className="text-destructive">*</span>
+              <span className="text-text-danger">*</span>
             </Label>
             <Input
               value={description}
@@ -228,7 +228,7 @@ export function SkillEditor({
           </div>
 
           {/* Error */}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-text-danger">{error}</p>}
         </form>
 
         <DialogFooter className="shrink-0 border-t px-5 py-4">

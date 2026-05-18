@@ -345,7 +345,7 @@ export function MessageTimeline({
                 index === 0 ? "mt-0" : "mt-4",
                 "rounded-xl transition-[background-color,box-shadow]",
                 pulsingMessageId === message.id &&
-                  "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+                  "bg-background-hover/25 ring-2 ring-background-hover/35 ring-inset",
               )}
             >
               {showDateSeparator && (

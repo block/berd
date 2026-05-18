@@ -109,7 +109,7 @@ export function SidebarRecentsSection({
           >
             <IconChevronDown
               className={cn(
-                "size-3 shrink-0 text-foreground-subtle transition-transform duration-150",
+                "size-3 shrink-0 text-text-muted transition-transform duration-150",
                 !isOpen && "-rotate-90",
               )}
             />

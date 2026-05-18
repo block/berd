@@ -109,7 +109,7 @@ export function ProjectIconPicker({
           </button>
         </div>
       </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+      {error && <p className="text-xs text-text-danger">{error}</p>}
     </div>
   );
 }

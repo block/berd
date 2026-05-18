@@ -459,7 +459,9 @@ export function SessionHistoryView({
           />
 
           {search.error && (
-            <p className="text-xs text-danger">{t("history.searchError")}</p>
+            <p className="text-xs text-text-danger">
+              {t("history.searchError")}
+            </p>
           )}
 
           <div

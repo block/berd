@@ -78,9 +78,9 @@ function AutomationDraftPreview({
 
   if (draftState.blockedToolRequest && !draft) {
     return (
-      <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+      <section className="rounded-lg border border-border-danger/40 bg-background-danger p-4">
         <div className="flex items-start gap-2">
-          <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
+          <IconAlertTriangle className="mt-0.5 size-4 text-text-danger" />
           <div>
             <h3 className="text-sm font-medium text-foreground">
               {t("builder.blockedTitle")}
@@ -98,7 +98,7 @@ function AutomationDraftPreview({
     return (
       <section className="rounded-lg border border-dashed border-border p-4">
         <div className="flex items-start gap-2">
-          <IconSparkles className="mt-0.5 size-4 text-brand" />
+          <IconSparkles className="mt-0.5 size-4 text-text-primary" />
           <div>
             <h3 className="text-sm font-medium text-foreground">
               {t("builder.previewEmptyTitle")}
@@ -247,7 +247,7 @@ export function AutomationBuilderPanel({
             ) : (
               <div className="flex h-full items-center justify-center p-6 text-center">
                 <div>
-                  <IconSparkles className="mx-auto size-6 text-brand" />
+                  <IconSparkles className="mx-auto size-6 text-text-primary" />
                   <h3 className="mt-3 text-sm font-medium text-foreground">
                     {t("builder.emptyTitle")}
                   </h3>
@@ -297,7 +297,7 @@ export function AutomationBuilderPanel({
             onApprove={builder.approveDraft}
           />
           {builder.error ? (
-            <div className="mt-4 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            <div className="mt-4 rounded-lg border border-border-danger/40 bg-background-danger p-3 text-sm text-text-danger">
               {builder.error}
             </div>
           ) : null}

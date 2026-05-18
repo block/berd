@@ -88,7 +88,7 @@ export function ArchivedProjectsSection() {
                 variant="ghost"
                 size="xs"
                 onClick={() => setDeletingProject(project)}
-                className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                className="text-text-danger hover:bg-background-danger hover:text-text-danger"
               >
                 {t("common:actions.delete")}
               </Button>

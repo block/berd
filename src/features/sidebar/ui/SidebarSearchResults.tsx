@@ -55,8 +55,9 @@ export function SidebarSearchResults({
             variant="ghost"
             onClick={() => onSelectResult?.(session.id, result.messageId)}
             className={cn(
-              "h-auto w-full items-start justify-start rounded-lg border border-transparent px-3 py-2 text-left hover:bg-accent/40",
-              activeSessionId === session.id && "border-border bg-accent/40",
+              "h-auto w-full items-start justify-start rounded-lg border border-transparent px-3 py-2 text-left hover:bg-background-hover/40",
+              activeSessionId === session.id &&
+                "border-border bg-background-hover/40",
             )}
           >
             <div className="min-w-0 flex-1 space-y-1">

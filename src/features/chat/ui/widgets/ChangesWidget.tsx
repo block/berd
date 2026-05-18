@@ -154,7 +154,7 @@ export function ChangesWidget({
           ))}
         </div>
       ) : (
-        <p className="px-3 text-sm text-foreground-subtle">
+        <p className="px-3 text-sm text-text-muted">
           {t("contextPanel.empty.noChanges")}
         </p>
       )}

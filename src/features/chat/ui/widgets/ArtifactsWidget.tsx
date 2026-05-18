@@ -88,9 +88,7 @@ export function ArtifactsWidget({
       isOpen={isOpen}
       onToggleOpen={onToggleOpen}
       action={
-        <span className="text-xxs text-foreground-subtle">
-          {artifacts.length}
-        </span>
+        <span className="text-xxs text-text-muted">{artifacts.length}</span>
       }
       flush
     >
@@ -106,7 +104,7 @@ export function ArtifactsWidget({
               className="relative flex w-full select-none items-center gap-2 px-3 py-1.5 text-left transition-colors duration-100 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border/70 before:content-[''] hover:bg-muted/80"
               onClick={() => void openResolvedPath(artifact.resolvedPath)}
             >
-              <Icon className="size-4 shrink-0 text-foreground-subtle" />
+              <Icon className="size-4 shrink-0 text-text-muted" />
               <span className="truncate text-sm text-foreground">
                 {artifact.filename}
               </span>

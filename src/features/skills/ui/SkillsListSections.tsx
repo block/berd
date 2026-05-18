@@ -59,7 +59,7 @@ export function SkillsListSections({
                   >
                     <button
                       type="button"
-                      className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring"
+                      className="absolute inset-0 cursor-pointer outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring-focus"
                       onClick={() => onSelectSkill(skill)}
                       aria-label={t("view.openDetails", { name: skill.name })}
                     />

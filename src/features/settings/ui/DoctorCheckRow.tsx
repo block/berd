@@ -35,8 +35,8 @@ const STATUS_ICON = {
 
 const STATUS_COLOR = {
   pass: "text-status-added",
-  warn: "text-warning",
-  fail: "text-destructive",
+  warn: "text-text-warning",
+  fail: "text-text-danger",
 } as const;
 
 export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
@@ -135,7 +135,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
               {check.fixCommand}
             </code>
           </AlertDialogHeader>
-          {fixError && <p className="text-xs text-destructive">{fixError}</p>}
+          {fixError && <p className="text-xs text-text-danger">{fixError}</p>}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={fixing}>
               {t("common:actions.cancel")}

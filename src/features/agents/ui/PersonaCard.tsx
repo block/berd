@@ -66,7 +66,7 @@ export function PersonaCard({
       className={cn(
         "group relative flex min-h-48 cursor-pointer flex-col rounded-2xl border border-border-soft bg-background p-5",
         "transition-colors duration-200",
-        "hover:border-border hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "hover:border-border hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
         isActive && "border-border bg-muted/20",
       )}
     >

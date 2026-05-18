@@ -600,7 +600,7 @@ function AutomationOverviewRow({
     <button
       type="button"
       className={cn(
-        "group grid w-full gap-3 rounded-md px-3 py-3.5 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        "group grid w-full gap-3 rounded-md px-3 py-3.5 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
         selected && "bg-muted text-foreground",
       )}
       onClick={onOpenDetail}
@@ -728,7 +728,7 @@ function AutomationHistory({
   if (historyQuery.isLoading) {
     return (
       <div className="flex min-h-48 items-center justify-center">
-        <Spinner className="size-5 text-brand" />
+        <Spinner className="size-5 text-text-primary" />
       </div>
     );
   }
@@ -925,7 +925,7 @@ function HistoryRunRow({
       type="button"
       onClick={onSelect}
       className={cn(
-        "grid w-full gap-1.5 rounded-md px-3 py-3 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        "grid w-full gap-1.5 rounded-md px-3 py-3 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
         selected && "bg-muted text-foreground",
       )}
       aria-pressed={selected}
@@ -1014,7 +1014,7 @@ function RunOutput({
         </p>
       ) : sessionQuery.isLoading ? (
         <div className="flex min-h-32 items-center justify-center">
-          <Spinner className="size-5 text-brand" />
+          <Spinner className="size-5 text-text-primary" />
         </div>
       ) : sessionQuery.error ? (
         <EmptyState
@@ -1407,7 +1407,7 @@ function AutomationDetailPage({
       </div>
 
       {currentError ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <div className="rounded-md border border-border-danger/40 bg-background-danger px-3 py-2 text-sm text-text-danger">
           {currentError}
         </div>
       ) : null}

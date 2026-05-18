@@ -73,7 +73,7 @@ export function PersonaPicker({
             variant="ghost"
             size="sm"
             className={cn(
-              "gap-1.5 rounded-lg px-2.5 font-medium text-foreground hover:bg-accent",
+              "gap-1.5 rounded-lg px-2.5 font-medium text-foreground hover:bg-background-hover",
               className,
             )}
             aria-label={t("persona.chooseAssistant")}
@@ -220,7 +220,7 @@ function PersonaAvatar({
         "flex items-center justify-center rounded-full",
         isBuiltin
           ? "bg-foreground/10 text-foreground"
-          : "bg-brand/10 text-brand",
+          : "bg-background-primary/10 text-text-primary",
       )}
     >
       {isBuiltin ? (

@@ -33,7 +33,7 @@ export function InventorySyncMessage({
         role="status"
         className="flex items-center gap-2 text-xs text-muted-foreground"
       >
-        <Spinner className="size-3 text-brand" />
+        <Spinner className="size-3 text-text-primary" />
         <span>{t("providers.loadingModels")}</span>
       </p>
     );
@@ -190,7 +190,7 @@ export function ConnectedFieldsPanel({
           size="sm"
           onClick={() => onRemove()}
           disabled={saving}
-          className="text-danger hover:text-danger"
+          className="text-text-danger hover:text-text-danger"
         >
           {saving ? <Spinner className="size-3" /> : null}
           {t("providers.disconnect")}
@@ -201,7 +201,7 @@ export function ConnectedFieldsPanel({
         syncing={inventorySyncing}
         warning={inventoryWarning}
       />
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && <p className="text-xs text-text-danger">{error}</p>}
     </div>
   );
 }
@@ -308,7 +308,7 @@ export function SetupFieldsPanel({
         syncing={inventorySyncing}
         warning={inventoryWarning}
       />
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {error && <p className="text-xs text-text-danger">{error}</p>}
     </div>
   );
 }

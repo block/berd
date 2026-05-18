@@ -217,7 +217,7 @@ export function SessionCard({
             aria-label={t("card.optionsFor", { title: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-2 top-2 z-10 size-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent/50",
+              "absolute right-2 top-2 z-10 size-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-background-hover/50",
               menuOpen
                 ? "visible opacity-100"
                 : "invisible group-hover:visible opacity-0 group-hover:opacity-100",

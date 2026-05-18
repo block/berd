@@ -195,7 +195,7 @@ export function CustomProviderDialog({
         <button
           type="button"
           onClick={handleStartManual}
-          className="flex min-h-24 items-start gap-3 rounded-lg border border-border px-3 py-3 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-24 items-start gap-3 rounded-lg border border-border px-3 py-3 text-left transition-colors hover:bg-background-hover/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus"
         >
           <IconSettings className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0">
@@ -211,7 +211,7 @@ export function CustomProviderDialog({
         <button
           type="button"
           onClick={() => setCreateStep("template")}
-          className="flex min-h-24 items-start gap-3 rounded-lg border border-border px-3 py-3 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="flex min-h-24 items-start gap-3 rounded-lg border border-border px-3 py-3 text-left transition-colors hover:bg-background-hover/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus"
         >
           <IconLayoutGrid className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
           <span className="min-w-0">

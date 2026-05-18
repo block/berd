@@ -41,7 +41,7 @@ export function UpdateIndicator() {
       className={cn(
         "translate-y-px",
         isReady
-          ? "h-6 px-2 text-xs bg-destructive/10 text-destructive hover:bg-destructive/20 hover:text-destructive"
+          ? "h-6 px-2 text-xs bg-background-danger text-text-danger hover:bg-background-danger hover:text-text-danger"
           : "size-[24px]",
       )}
       leftIcon={

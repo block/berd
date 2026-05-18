@@ -15,7 +15,7 @@ import { SidebarItemMenu } from "./SidebarItemMenu";
 
 const MAX_VISIBLE_CHATS = 5;
 const PROJECT_ROW_TEXT_CLASS =
-  "text-foreground hover:bg-transparent hover:text-foreground";
+  "text-sidebar-nav-fg hover:bg-transparent hover:text-sidebar-nav-fg";
 
 interface TabInfo {
   id: string;
@@ -103,8 +103,8 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt",
-          menuOpen && "bg-background-alt",
+          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-sidebar-nav-bg-hover focus-within:bg-sidebar-nav-bg-hover",
+          menuOpen && "bg-sidebar-nav-bg-selected",
         )}
       >
         <Button

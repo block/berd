@@ -238,7 +238,7 @@ export function CreateProjectDialog({
           {/* Name */}
           <div className="space-y-1">
             <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.name")} <span className="text-destructive">*</span>
+              {t("dialog.name")} <span className="text-text-danger">*</span>
             </Label>
             <Input
               value={name}
@@ -324,7 +324,7 @@ export function CreateProjectDialog({
           </div>
 
           {/* Error */}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {error && <p className="text-xs text-text-danger">{error}</p>}
         </form>
 
         <DialogFooter className="shrink-0 border-t px-5 py-4">

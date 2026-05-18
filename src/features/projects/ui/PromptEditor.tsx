@@ -212,7 +212,7 @@ export function PromptEditor({
       data-placeholder={placeholder}
       className={cn(
         "w-full overflow-y-auto resize-y rounded-lg border border-input bg-background px-3 py-2 text-xs font-mono leading-relaxed",
-        "focus:outline-none focus:ring-1 focus:ring-ring transition-colors",
+        "focus:outline-none focus:ring-1 focus:ring-ring-focus transition-colors",
         "whitespace-pre-wrap min-h-[120px]",
         showPlaceholder &&
           "empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground",

@@ -37,7 +37,7 @@ export function MessageBubbleActions({
           className={cn(
             "text-muted-foreground",
             copied &&
-              "bg-accent text-foreground hover:bg-accent active:bg-accent",
+              "bg-background-hover text-foreground hover:bg-background-hover active:bg-background-hover",
           )}
           tooltip={copied ? t("message.copied") : t("common:actions.copy")}
           onClick={onCopy}

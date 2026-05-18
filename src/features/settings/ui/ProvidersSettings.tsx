@@ -339,10 +339,10 @@ export function ProvidersSettings() {
       {catalogError && (
         <div
           role="alert"
-          className="mb-4 rounded-md border border-danger/30 bg-danger/10 p-3"
+          className="mb-4 rounded-md border border-border-danger/30 bg-background-danger p-3"
         >
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-danger">{catalogError}</p>
+            <p className="text-xs text-text-danger">{catalogError}</p>
             <Button
               type="button"
               variant="outline"
@@ -392,7 +392,7 @@ export function ProvidersSettings() {
             </h4>
             {loading ? (
               <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                <Spinner className="size-3 text-brand" />
+                <Spinner className="size-3 text-text-primary" />
                 {t("providers.models.checkingStatus")}
               </span>
             ) : null}
@@ -405,7 +405,7 @@ export function ProvidersSettings() {
         {customProviderError ? (
           <p
             role="alert"
-            className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="mb-3 rounded-md border border-border-danger/30 bg-background-danger px-3 py-2 text-xs text-text-danger"
           >
             {customProviderError}
           </p>
@@ -413,7 +413,7 @@ export function ProvidersSettings() {
         {customProviderDeleteError ? (
           <p
             role="alert"
-            className="mb-3 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger"
+            className="mb-3 rounded-md border border-border-danger/30 bg-background-danger px-3 py-2 text-xs text-text-danger"
           >
             {customProviderDeleteError}
           </p>

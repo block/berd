@@ -107,7 +107,7 @@ export function WorkspaceWidget({
             <span className="truncate text-foreground">{projectName}</span>
           </div>
         ) : (
-          <p className="text-foreground-subtle">
+          <p className="text-text-muted">
             {t("contextPanel.empty.noProjectAssigned")}
           </p>
         )}
@@ -120,7 +120,7 @@ export function WorkspaceWidget({
             <span>{t("contextPanel.states.gitLoading")}</span>
           </div>
         ) : error ? (
-          <p className="text-destructive">{gitErrorMessage}</p>
+          <p className="text-text-danger">{gitErrorMessage}</p>
         ) : gitState?.isGitRepo ? (
           <div className="space-y-2">
             <WorkingContextPicker
@@ -145,7 +145,7 @@ export function WorkspaceWidget({
           </div>
         ) : (
           <div className="space-y-3">
-            <p className="truncate text-foreground-subtle">
+            <p className="truncate text-text-muted">
               {shortenPath(primaryWorkspaceRoot)}
             </p>
             <Button

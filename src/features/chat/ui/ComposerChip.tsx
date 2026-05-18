@@ -45,7 +45,7 @@ export function ComposerChip({
       <button
         type="button"
         onClick={onRemove}
-        className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus"
         aria-label={removeLabel}
       >
         {leading ? (

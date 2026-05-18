@@ -396,7 +396,7 @@ export function WorkspaceCreateDialog({
             </>
           ) : null}
 
-          {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          {error ? <p className="text-xs text-text-danger">{error}</p> : null}
         </form>
 
         <DialogFooter className="border-t px-5 py-4">

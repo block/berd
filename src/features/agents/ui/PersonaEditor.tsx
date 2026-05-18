@@ -299,7 +299,7 @@ export function PersonaEditor({
               {avatarUrlError ? (
                 <p
                   id="avatar-url-error"
-                  className="text-[11px] text-destructive"
+                  className="text-[11px] text-text-danger"
                 >
                   {avatarUrlError}
                 </p>
@@ -313,7 +313,7 @@ export function PersonaEditor({
             <div className="space-y-1">
               <Label className="text-xs font-medium text-muted-foreground">
                 {t("editor.displayName")}{" "}
-                <span className="text-destructive">*</span>
+                <span className="text-text-danger">*</span>
               </Label>
               <Input
                 value={displayName}
@@ -329,7 +329,7 @@ export function PersonaEditor({
               <div className="flex items-center justify-between">
                 <Label className="text-xs font-medium text-muted-foreground">
                   {t("editor.systemPrompt")}{" "}
-                  <span className="text-destructive">*</span>
+                  <span className="text-text-danger">*</span>
                 </Label>
                 <span className="text-[10px] text-muted-foreground">
                   {t("common:labels.characterCount", {

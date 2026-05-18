@@ -118,8 +118,8 @@ export function MentionAutocomplete({
             className={cn(
               "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
               index === selectedIndex
-                ? "bg-accent text-foreground"
-                : "text-muted-foreground hover:bg-accent/50",
+                ? "bg-background-hover text-foreground"
+                : "text-muted-foreground hover:bg-background-hover/50",
             )}
             onClick={() => handleSelect({ type: "persona", persona })}
             onMouseEnter={() => setInternalIndex(index)}
@@ -159,13 +159,13 @@ export function MentionAutocomplete({
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
                 globalIndex === selectedIndex
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/50",
+                  ? "bg-background-hover text-foreground"
+                  : "text-muted-foreground hover:bg-background-hover/50",
               )}
               onClick={() => handleSelect({ type: "skill", skill })}
               onMouseEnter={() => setInternalIndex(globalIndex)}
             >
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-brand/10 text-brand">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-background-primary/10 text-text-primary">
                 <SkillIcon className="h-3.5 w-3.5" />
               </div>
               <div className="flex min-w-0 flex-col">
@@ -199,8 +199,8 @@ export function MentionAutocomplete({
               className={cn(
                 "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
                 globalIndex === selectedIndex
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:bg-accent/50",
+                  ? "bg-background-hover text-foreground"
+                  : "text-muted-foreground hover:bg-background-hover/50",
               )}
               onClick={() => handleSelect({ type: "file", file })}
               onMouseEnter={() => setInternalIndex(globalIndex)}
@@ -248,7 +248,7 @@ function MentionAvatar({ persona }: { persona: Persona }) {
         "flex h-7 w-7 items-center justify-center rounded-full",
         persona.isBuiltin
           ? "bg-foreground/10 text-foreground"
-          : "bg-brand/10 text-brand",
+          : "bg-background-primary/10 text-text-primary",
       )}
     >
       {persona.isBuiltin ? (
