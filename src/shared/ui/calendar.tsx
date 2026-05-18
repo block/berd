@@ -45,11 +45,11 @@ function Calendar({
           "relative z-10 size-8 p-0 font-normal aria-selected:opacity-100",
         ),
         range_start:
-          "day-range-start rounded-full aria-selected:bg-primary aria-selected:text-primary-foreground",
+          "day-range-start rounded-full aria-selected:bg-background-primary aria-selected:text-text-on-primary",
         range_end:
-          "day-range-end rounded-full aria-selected:bg-primary aria-selected:text-primary-foreground",
+          "day-range-end rounded-full aria-selected:bg-background-primary aria-selected:text-text-on-primary",
         selected:
-          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
+          "bg-background-primary text-text-on-primary hover:bg-background-primary hover:text-text-on-primary focus:bg-background-primary focus:text-text-on-primary",
         today: "bg-muted text-muted-foreground",
         outside:
           "day-outside text-muted-foreground aria-selected:text-muted-foreground",

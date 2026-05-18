@@ -24,7 +24,7 @@ const searchBarSizes = {
     wrapper: "",
     icon: "left-3 size-4",
     input:
-      "rounded-lg border-border-soft bg-background pr-3 pl-9 text-sm font-normal hover:border-border-soft focus-visible:border-ring",
+      "rounded-lg border-border-soft bg-background pr-3 pl-9 text-sm font-normal hover:border-border-soft focus-visible:border-border-focus",
     inputVariant: "default" as const,
   },
 } as const;

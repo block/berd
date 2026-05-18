@@ -47,7 +47,7 @@ function ResizableHandle({
     <ResizablePrimitive.Separator
       data-slot="resizable-handle"
       className={cn(
-        "group focus-visible:ring-ring relative flex w-px shrink-0 items-center justify-center focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:top-1/2 aria-[orientation=horizontal]:after:-translate-y-1/2 aria-[orientation=horizontal]:after:translate-x-0 [&[aria-orientation=horizontal]>div]:rotate-90",
+        "group focus-visible:ring-ring-focus relative flex w-px shrink-0 items-center justify-center focus-visible:ring-1 focus-visible:ring-offset-1 focus-visible:outline-hidden after:absolute after:inset-y-0 after:left-1/2 after:-translate-x-1/2 aria-[orientation=horizontal]:h-px aria-[orientation=horizontal]:w-full aria-[orientation=horizontal]:after:left-0 aria-[orientation=horizontal]:after:top-1/2 aria-[orientation=horizontal]:after:-translate-y-1/2 aria-[orientation=horizontal]:after:translate-x-0 [&[aria-orientation=horizontal]>div]:rotate-90",
         variant === "subtle"
           ? "bg-transparent transition-colors after:w-5 hover:bg-border data-[separator=active]:bg-border-default focus-visible:bg-border-default aria-[orientation=horizontal]:after:h-5 aria-[orientation=horizontal]:after:w-full"
           : "bg-border-default after:w-1 aria-[orientation=horizontal]:after:h-1 aria-[orientation=horizontal]:after:w-full",

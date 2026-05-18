@@ -35,7 +35,7 @@ export const AudioPlayer = ({
         "--media-button-icon-height": "1rem",
         "--media-button-icon-width": "1rem",
         "--media-control-background": "transparent",
-        "--media-control-hover-background": "var(--color-accent)",
+        "--media-control-hover-background": "var(--color-background-hover)",
         "--media-control-padding": "0",
         "--media-font": "var(--font-sans)",
         "--media-font-size": "10px",

@@ -258,7 +258,7 @@ export const WebPreviewConsole = ({
               <div
                 className={cn(
                   "text-xs",
-                  log.level === "error" && "text-destructive",
+                  log.level === "error" && "text-text-danger",
                   log.level === "warn" && "text-yellow-600",
                   log.level === "log" && "text-foreground",
                 )}

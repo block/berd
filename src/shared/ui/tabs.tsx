@@ -3,13 +3,14 @@ import { cva, type VariantProps } from "class-variance-authority";
 import * as TabsPrimitive from "@radix-ui/react-tabs";
 
 import { cn } from "@/shared/lib/cn";
+import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 const tabsListVariants = cva(
-  "text-muted-foreground inline-flex w-fit items-center justify-center",
+  "text-text-muted inline-flex w-fit items-center justify-center",
   {
     variants: {
       variant: {
-        default: "h-9 rounded-lg bg-muted p-[3px]",
+        default: "h-9 rounded-lg bg-background-muted p-[3px]",
         buttons: "h-auto gap-1 bg-transparent p-0",
       },
     },
@@ -25,9 +26,9 @@ const tabsTriggerVariants = cva(
     variants: {
       variant: {
         default:
-          "data-[state=active]:bg-background dark:data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-muted/30 h-[calc(100%-1px)] rounded-md border border-transparent px-2 py-1 text-sm text-foreground dark:text-muted-foreground",
+          "data-[state=active]:bg-background-default dark:data-[state=active]:text-text-default dark:data-[state=active]:border-border-input dark:data-[state=active]:bg-background-muted/30 h-[calc(100%-1px)] rounded-md border border-transparent px-2 py-1 text-sm text-text-default dark:text-text-muted",
         buttons:
-          "h-8 rounded-md px-3 py-1 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground",
+          "h-8 rounded-md px-3 py-1 text-xs font-medium text-text-default hover:bg-background-hover hover:text-text-hover data-[state=active]:bg-background-muted data-[state=active]:text-text-default",
       },
     },
     defaultVariants: {
@@ -42,6 +43,12 @@ function Tabs({
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return (
     <TabsPrimitive.Root
+      {...getDesignSystemMetadata({
+        component: "Tabs",
+        slot: "tabs",
+        source: "src/shared/ui/tabs.tsx",
+        customClassName: typeof className === "string" ? className : undefined,
+      })}
       data-slot="tabs"
       className={cn("flex flex-col gap-2", className)}
       {...props}
@@ -57,6 +64,13 @@ function TabsList({
   VariantProps<typeof tabsListVariants>) {
   return (
     <TabsPrimitive.List
+      {...getDesignSystemMetadata({
+        component: "Tabs",
+        slot: "tabs-list",
+        source: "src/shared/ui/tabs.tsx",
+        variant: variant ?? "default",
+        customClassName: typeof className === "string" ? className : undefined,
+      })}
       data-slot="tabs-list"
       className={cn(tabsListVariants({ variant }), className)}
       {...props}
@@ -72,6 +86,14 @@ function TabsTrigger({
   VariantProps<typeof tabsTriggerVariants>) {
   return (
     <TabsPrimitive.Trigger
+      {...getDesignSystemMetadata({
+        component: "Tabs",
+        slot: "tabs-trigger",
+        source: "src/shared/ui/tabs.tsx",
+        variant: variant ?? "default",
+        props: { value: props.value },
+        customClassName: typeof className === "string" ? className : undefined,
+      })}
       data-slot="tabs-trigger"
       className={cn(tabsTriggerVariants({ variant }), className)}
       {...props}
@@ -85,6 +107,13 @@ function TabsContent({
 }: React.ComponentProps<typeof TabsPrimitive.Content>) {
   return (
     <TabsPrimitive.Content
+      {...getDesignSystemMetadata({
+        component: "Tabs",
+        slot: "tabs-content",
+        source: "src/shared/ui/tabs.tsx",
+        props: { value: props.value },
+        customClassName: typeof className === "string" ? className : undefined,
+      })}
       data-slot="tabs-content"
       className={cn("flex-1 outline-none", className)}
       {...props}

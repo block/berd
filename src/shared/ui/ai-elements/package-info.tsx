@@ -50,9 +50,9 @@ export const PackageInfoName = ({
 };
 
 const changeTypeStyles: Record<ChangeType, string> = {
-  added: "bg-brand/10 text-brand",
+  added: "bg-background-primary/10 text-text-primary",
   major: "bg-status-deleted/10 text-status-deleted",
-  minor: "bg-warning-bg text-warning",
+  minor: "bg-background-warning text-text-warning",
   patch: "bg-status-added/10 text-status-added",
   removed: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
 };

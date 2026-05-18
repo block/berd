@@ -43,6 +43,21 @@ describe("Button", () => {
     expect(screen.getByTestId("icon")).not.toHaveClass("size-3");
   });
 
+  it("sets a default nested svg size for icon-only buttons", () => {
+    render(
+      <Button size="icon-xs" aria-label="Back">
+        <IconArrowNarrowLeft data-testid="icon" />
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Back" });
+
+    expect(screen.getByTestId("icon")).not.toHaveClass("size-3");
+    expect(button.className).toContain(
+      "[&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+    );
+  });
+
   it("renders the back variant with its default chevron icon", () => {
     render(
       <Button variant="back" size="sm">

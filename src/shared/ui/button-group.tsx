@@ -1,7 +1,9 @@
+import type * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
 import { cn } from "@/shared/lib/cn";
+import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 import { Separator } from "@/shared/ui/separator";
 
 const buttonGroupVariants = cva(
@@ -28,6 +30,12 @@ function ButtonGroup({
 }: React.ComponentProps<"div"> & VariantProps<typeof buttonGroupVariants>) {
   return (
     <div
+      {...getDesignSystemMetadata({
+        component: "ButtonGroup",
+        slot: "button-group",
+        source: "src/shared/ui/button-group.tsx",
+        variant: orientation ?? "horizontal",
+      })}
       role="group"
       data-slot="button-group"
       data-orientation={orientation}
@@ -48,8 +56,15 @@ function ButtonGroupText({
 
   return (
     <Comp
+      {...getDesignSystemMetadata({
+        component: "ButtonGroup",
+        slot: "button-group-text",
+        source: "src/shared/ui/button-group.tsx",
+        props: { asChild },
+      })}
+      data-slot="button-group-text"
       className={cn(
-        "bg-muted shadow-xs flex items-center gap-2 rounded-md border px-4 text-sm font-medium [&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none",
+        "flex items-center gap-2 rounded-md border border-border-default bg-background-muted px-4 text-sm font-medium shadow-xs [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -64,10 +79,16 @@ function ButtonGroupSeparator({
 }: React.ComponentProps<typeof Separator>) {
   return (
     <Separator
+      {...getDesignSystemMetadata({
+        component: "ButtonGroup",
+        slot: "button-group-separator",
+        source: "src/shared/ui/button-group.tsx",
+        variant: orientation,
+      })}
       data-slot="button-group-separator"
       orientation={orientation}
       className={cn(
-        "bg-input relative !m-0 self-stretch data-[orientation=vertical]:h-auto",
+        "relative !m-0 self-stretch bg-border-input data-[orientation=vertical]:h-auto",
         className,
       )}
       {...props}

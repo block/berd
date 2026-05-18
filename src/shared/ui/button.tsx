@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { IconArrowLeft } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
+import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -11,39 +12,43 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-primary text-primary-foreground shadow-none hover:bg-primary/90",
+          "bg-background-primary text-text-on-primary shadow-none hover:bg-background-primary/90",
         destructive:
-          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
+          "bg-background-danger-strong text-text-on-danger shadow-none hover:bg-background-danger-strong/90",
         "destructive-flat":
-          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
+          "bg-background-danger-strong text-text-on-danger shadow-none hover:bg-background-danger-strong/90",
         outline:
-          "border border-input bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
+          "border border-border-input bg-background shadow-none hover:bg-background-hover hover:text-text-hover",
         "outline-flat":
-          "border border-border-soft bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
+          "border border-border-soft bg-background shadow-none hover:bg-background-hover hover:text-text-hover",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost: "hover:bg-accent hover:text-accent-foreground",
+          "bg-background-medium text-text-on-secondary hover:bg-background-medium/80",
+        ghost: "hover:bg-background-hover hover:text-text-hover",
         "ghost-light":
-          "font-normal hover:bg-accent hover:text-accent-foreground",
+          "font-normal hover:bg-background-hover hover:text-text-hover",
         "inline-subtle":
           "rounded-md bg-transparent font-normal text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground",
         quiet:
           "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
         toolbar:
-          "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
+          "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-background-hover hover:text-text-hover active:bg-background-hover active:text-text-hover data-[state=open]:bg-background-hover data-[state=open]:text-text-hover aria-expanded:bg-background-hover aria-expanded:text-text-hover",
         back: "justify-start text-muted-foreground hover:text-foreground",
-        link: "text-brand underline-offset-4 hover:underline",
+        link: "text-text-primary underline-offset-4 hover:underline",
       },
       size: {
-        xxs: "h-6 gap-1.5 px-2 text-[11px]",
-        xs: "h-7 px-2.5 text-xs",
-        default: "h-9 px-4 py-2",
-        sm: "h-8 px-3 text-xs",
-        lg: "h-10 px-8",
-        icon: "h-9 w-9",
-        "icon-xs": "h-7 w-7",
-        "icon-sm": "h-8 w-8",
-        "icon-lg": "h-10 w-10",
+        xxs: "h-6 gap-1.5 px-2 text-[11px] [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+        xs: "h-7 px-2.5 text-xs [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+        default:
+          "h-9 px-4 py-2 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
+        sm: "h-8 px-3 text-xs [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+        lg: "h-10 px-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
+        icon: "h-9 w-9 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
+        "icon-xs":
+          "h-7 w-7 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
+        "icon-sm":
+          "h-8 w-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
+        "icon-lg":
+          "h-10 w-10 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-5",
       },
     },
     compoundVariants: [
@@ -195,6 +200,21 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 
     return (
       <Comp
+        {...getDesignSystemMetadata({
+          component: "Button",
+          slot: "button",
+          source: "src/shared/ui/button.tsx",
+          variant: variant ?? "default",
+          size: size ?? "default",
+          props: {
+            asChild,
+            disabled: props.disabled,
+            leftIcon: Boolean(resolvedLeftIcon),
+            rightIcon: Boolean(rightIcon),
+          },
+          customClassName:
+            typeof className === "string" ? className : undefined,
+        })}
         data-slot="button"
         className={cn(buttonVariants({ variant, size, className }))}
         ref={ref}

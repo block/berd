@@ -111,7 +111,7 @@ export const TestResultsSummary = ({
           )}
           {summary.skipped > 0 && (
             <Badge
-              className="gap-1 bg-warning-bg text-warning"
+              className="gap-1 bg-background-warning text-text-warning"
               variant="secondary"
             >
               <CircleIcon className="size-3" />
@@ -221,8 +221,8 @@ const TestSuiteContext = createContext<TestSuiteContextType>({
 const statusStyles: Record<TestStatus, string> = {
   failed: "text-status-deleted",
   passed: "text-status-added",
-  running: "text-brand",
-  skipped: "text-warning",
+  running: "text-text-primary",
+  skipped: "text-text-warning",
 };
 
 const statusIcons: Record<TestStatus, React.ReactNode> = {
@@ -311,7 +311,9 @@ export const TestSuiteStats = ({
         {failed > 0 && (
           <span className="text-status-deleted">{failed} failed</span>
         )}
-        {skipped > 0 && <span className="text-warning">{skipped} skipped</span>}
+        {skipped > 0 && (
+          <span className="text-text-warning">{skipped} skipped</span>
+        )}
       </>
     )}
   </div>
