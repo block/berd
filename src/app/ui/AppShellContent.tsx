@@ -6,6 +6,8 @@ import { AgentsView } from "@/features/agents/ui/AgentsView";
 import { ProjectsView } from "@/features/projects/ui/ProjectsView";
 import { SessionHistoryView } from "@/features/sessions/ui/SessionHistoryView";
 import { SettingsView } from "@/features/settings/ui/SettingsView";
+import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
+import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -15,6 +17,7 @@ import type {
   AutomationNavigationRoute,
 } from "../types/appNavigation";
 import type { SectionId } from "@/features/settings/ui/settingsSections";
+import type { DesignSystemSection } from "@/features/design-system/ui/designSystemSections";
 
 interface AppShellContentProps {
   activeView: AppView;
@@ -22,6 +25,7 @@ interface AppShellContentProps {
   activeSkillsSkillId: string | null;
   activeAgentsPersonaId: string | null;
   activeAutomationsRoute: AutomationNavigationRoute;
+  activeDesignSystemSection: DesignSystemSection;
   activeSession?: ChatSession;
   homeSessionId: string | null;
   onNavigateSkills: (
@@ -60,6 +64,7 @@ export function AppShellContent({
   activeSkillsSkillId,
   activeAgentsPersonaId,
   activeAutomationsRoute,
+  activeDesignSystemSection,
   activeSession,
   homeSessionId,
   onNavigateSkills,
@@ -76,6 +81,10 @@ export function AppShellContent({
   onStartChatWithSkill,
 }: AppShellContentProps) {
   switch (activeView) {
+    case "design-system":
+      return isDesignSystemExplorerEnabled() ? (
+        <DesignSystemView activeSection={activeDesignSystemSection} />
+      ) : null;
     case "settings":
       return <SettingsView activeSection={activeSettingsSection} />;
     case "automations":

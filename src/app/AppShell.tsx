@@ -61,6 +61,12 @@ import { Spinner } from "@/shared/ui/spinner";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { acpCreateSession } from "@/shared/api/acp";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
+import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import {
+  DEFAULT_DESIGN_SYSTEM_SECTION,
+  type DesignSystemSection,
+} from "@/features/design-system/ui/designSystemSections";
+import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import type {
   AppNavigationLocation,
   AppNavigationUpdateOptions,
@@ -103,6 +109,17 @@ function getInitialSettingsSection(): SectionId | null {
   return resolveSettingsSection(section);
 }
 
+function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
+  if (initialSettingsSection) return "settings";
+  if (
+    isDesignSystemExplorerEnabled() &&
+    window.location.pathname === "/design-system"
+  ) {
+    return "design-system";
+  }
+  return "home";
+}
+
 function setSettingsSectionUrl(section: SectionId) {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
@@ -111,10 +128,18 @@ function setSettingsSectionUrl(section: SectionId) {
   window.history.replaceState(window.history.state, "", url);
 }
 
+function setDesignSystemUrl() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.pathname = "/design-system";
+  url.search = "";
+  window.history.replaceState(window.history.state, "", url);
+}
+
 function clearSettingsSectionUrl() {
   if (typeof window === "undefined") return;
   const url = new URL(window.location.href);
-  if (url.pathname === "/settings") {
+  if (url.pathname === "/settings" || url.pathname === "/design-system") {
     url.pathname = "/";
   }
   url.searchParams.delete("section");
@@ -128,12 +153,15 @@ function getAppNavigationLocation(
   skillsSkillId: string | null,
   agentsPersonaId: string | null,
   automationsRoute: AutomationNavigationRoute,
+  designSystemSection: DesignSystemSection,
 ): AppNavigationLocation {
   switch (view) {
     case "chat":
       return { view, sessionId };
     case "automations":
       return { view, route: automationsRoute };
+    case "design-system":
+      return { view, designSystemSection };
     case "skills":
       return { view, skillId: skillsSkillId };
     case "agents":
@@ -204,15 +232,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeSettingsSection, setActiveSettingsSection] = useState<SectionId>(
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
+  const [activeDesignSystemSection, setActiveDesignSystemSection] =
+    useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
+  const initialActiveView = getInitialAppView(initialSettingsSection);
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [createProjectInitialWorkingDir, setCreateProjectInitialWorkingDir] =
     useState<string | null>(null);
   const [editingProject, setEditingProject] = useState<ProjectInfo | null>(
     null,
   );
-  const [activeView, setActiveView] = useState<AppView>(
-    initialSettingsSection ? "settings" : "home",
-  );
+  const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [automationsRoute, setAutomationsRoute] =
@@ -224,12 +253,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const navigationHistoryRef = useRef<AppNavigationHistory>({
     entries: [
       getAppNavigationLocation(
-        initialSettingsSection ? "settings" : "home",
+        initialActiveView,
         null,
         initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
         null,
         null,
         { surface: "overview" },
+        DEFAULT_DESIGN_SYSTEM_SECTION,
       ),
     ],
     index: 0,
@@ -273,7 +303,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const pendingProjectCreatedRef = useRef<((projectId: string) => void) | null>(
     null,
   );
-  const lastNonSettingsViewRef = useRef<AppView>("home");
+  const lastNonSecondaryViewRef = useRef<AppView>("home");
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
@@ -346,8 +376,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [activeSessionId, activeView, setChatActiveSessionViewing]);
 
   useEffect(() => {
-    if (activeView !== "settings") {
-      lastNonSettingsViewRef.current = activeView;
+    if (activeView !== "settings" && activeView !== "design-system") {
+      lastNonSecondaryViewRef.current = activeView;
     }
   }, [activeView]);
 
@@ -398,6 +428,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       skillsSkillId,
       agentsPersonaId,
       automationsRoute,
+      activeDesignSystemSection,
     );
     const currentLocation = history.entries[history.index];
 
@@ -435,6 +466,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     updateNavigationAvailability();
   }, [
     activeSessionId,
+    activeDesignSystemSection,
     activeSettingsSection,
     activeView,
     agentsPersonaId,
@@ -907,8 +939,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
-      if (activeView !== "settings") {
-        lastNonSettingsViewRef.current = activeView;
+      if (activeView !== "settings" && activeView !== "design-system") {
+        lastNonSecondaryViewRef.current = activeView;
       }
       setActiveSettingsSection(section);
       setSettingsSectionUrl(section);
@@ -920,15 +952,34 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [activeView, expandSidebar, sidebarCollapsed],
   );
 
-  const leaveSettings = useCallback(() => {
+  const leaveSecondarySurface = useCallback(() => {
     clearSettingsSectionUrl();
-    setActiveView(lastNonSettingsViewRef.current);
+    setActiveView(lastNonSecondaryViewRef.current);
   }, []);
 
   const selectSettingsSection = useCallback((section: SectionId) => {
     setActiveSettingsSection(section);
     setSettingsSectionUrl(section);
   }, []);
+
+  const openDesignSystem = useCallback(() => {
+    if (!isDesignSystemExplorerEnabled()) return;
+    if (activeView !== "settings" && activeView !== "design-system") {
+      lastNonSecondaryViewRef.current = activeView;
+    }
+    setDesignSystemUrl();
+    setActiveView("design-system");
+    if (sidebarCollapsed) {
+      void expandSidebar();
+    }
+  }, [activeView, expandSidebar, sidebarCollapsed]);
+
+  const selectDesignSystemSection = useCallback(
+    (section: DesignSystemSection) => {
+      setActiveDesignSystemSection(section);
+    },
+    [],
+  );
 
   useEffect(() => {
     const handleOpenSettingsEvent = (event: Event) => {
@@ -1076,6 +1127,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         openSettings();
         return;
       }
+      if (view === "design-system") {
+        openDesignSystem();
+        return;
+      }
       if (view !== "chat") {
         setActiveSession(null);
       }
@@ -1091,7 +1146,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       clearSettingsSectionUrl();
       setActiveView(view);
     },
-    [openSettings, setActiveSession],
+    [openDesignSystem, openSettings, setActiveSession],
   );
 
   const navigateSkills = useCallback(
@@ -1155,6 +1210,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveSettingsSection(location.settingsSection);
         setSettingsSectionUrl(location.settingsSection);
         setActiveView("settings");
+        if (sidebarCollapsed) {
+          void expandSidebar();
+        }
+        return;
+      }
+
+      if (
+        location.view === "design-system" &&
+        isDesignSystemExplorerEnabled()
+      ) {
+        setActiveDesignSystemSection(location.designSystemSection);
+        setDesignSystemUrl();
+        setActiveView("design-system");
         if (sidebarCollapsed) {
           void expandSidebar();
         }
@@ -1338,7 +1406,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (e.key === "," && e.metaKey) {
         e.preventDefault();
         if (activeView === "settings") {
-          leaveSettings();
+          leaveSecondarySurface();
           return;
         }
         openSettings();
@@ -1354,7 +1422,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         const { activeSessionId } = useChatSessionStore.getState();
         if (activeSessionId) {
           clearActiveSession(activeSessionId);
-        } else if (activeView === "settings") {
+        } else if (
+          activeView === "settings" ||
+          activeView === "design-system"
+        ) {
           clearSettingsSectionUrl();
           setActiveView("home");
         }
@@ -1372,7 +1443,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [
     activeView,
     clearActiveSession,
-    leaveSettings,
+    leaveSecondarySurface,
     openSettings,
     setActiveSession,
     toggleSidebar,
@@ -1381,12 +1452,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   if (!startup.ready) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-        <Spinner className="size-5 text-brand" />
+        <Spinner className="size-5 text-text-primary" />
       </div>
     );
   }
 
-  if (onboardingGate.shouldShowOnboarding) {
+  if (
+    onboardingGate.shouldShowOnboarding &&
+    !(isDesignSystemExplorerEnabled() && activeView === "design-system")
+  ) {
     return (
       <OnboardingFlow
         readiness={onboardingGate.readiness}
@@ -1431,8 +1505,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             width={sidebarWidth}
             isResizing={isResizing}
             onSettingsClick={() => openSettings()}
-            onSettingsBack={leaveSettings}
+            onSettingsBack={leaveSecondarySurface}
             onSettingsSectionChange={selectSettingsSection}
+            onDesignSystemBack={leaveSecondarySurface}
+            onDesignSystemSectionChange={selectDesignSystemSection}
             onNavigate={handleNavigate}
             onNewChatInProject={handleNewChatInProject}
             onNewChat={() => {
@@ -1453,6 +1529,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onSelectSearchResult={handleSelectSearchResult}
             activeView={activeView}
             activeSettingsSection={activeSettingsSection}
+            activeDesignSystemSection={activeDesignSystemSection}
             activeSessionId={activeSessionId}
             projects={projects}
             className="h-full rounded-xl"
@@ -1477,6 +1554,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               activeSkillsSkillId={skillsSkillId}
               activeAgentsPersonaId={agentsPersonaId}
               activeAutomationsRoute={automationsRoute}
+              activeDesignSystemSection={activeDesignSystemSection}
               activeSession={activeSession}
               homeSessionId={homeSessionId}
               onNavigateSkills={navigateSkills}
@@ -1513,6 +1591,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         initialWorkingDir={createProjectInitialWorkingDir}
         editingProject={editingProject ?? undefined}
       />
+      {isDesignSystemExplorerEnabled() ? <DesignSystemInspector /> : null}
     </div>
   );
 }

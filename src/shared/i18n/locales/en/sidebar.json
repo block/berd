@@ -33,6 +33,7 @@
     "searching": "Searching chats..."
   },
   "sections": {
+    "components": "Components",
     "projects": "Projects",
     "recents": "Chats"
   },

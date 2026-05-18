@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import globalsCss from "../styles/globals.css?raw";
@@ -244,15 +244,16 @@ describe("ThemeProvider", () => {
       );
     });
 
-    media.setMatches(true);
+    act(() => {
+      media.setMatches(true);
+    });
 
     await waitFor(() => {
       expect(screen.getByTestId("resolved-theme")).toHaveTextContent(
         "github-dark",
       );
+      expect(document.documentElement).toHaveClass("dark");
     });
-
-    expect(document.documentElement).toHaveClass("dark");
   });
 
   it("can pin the default Goose theme to light or dark", async () => {

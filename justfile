@@ -21,8 +21,8 @@ setup:
 
 # ── Build & Check ────────────────────────────────────────────
 
-# Run the frontend non-test checks: formatting, lint, i18n, and TypeScript.
-check: frontend-fmt-check lint i18n-check typecheck
+# Run the frontend non-test checks: design-system guardrails, formatting, lint, i18n, and TypeScript.
+check: design-system-check frontend-fmt-check lint i18n-check typecheck
 
 # Format frontend and Tauri/Rust files.
 fmt:
@@ -35,6 +35,25 @@ fmt-check: frontend-fmt-check tauri-fmt-check
 # Format frontend files with Biome.
 frontend-fmt:
     pnpm format
+
+# Generate the design-system component manifest.
+design-system-generate:
+    pnpm design-system:generate
+
+# Check generated design-system facts, token/style guardrails, and explorer coverage.
+design-system-check: design-system-manifest-check design-system-audit design-system-coverage
+
+# Check that the generated design-system component manifest is up to date.
+design-system-manifest-check:
+    pnpm design-system:manifest-check
+
+# Audit covered components for custom color styling and source-token drift.
+design-system-audit:
+    pnpm design-system:audit
+
+# Check that curated explorer component pages follow the page contract.
+design-system-coverage:
+    pnpm design-system:coverage -- --strict
 
 # Check frontend formatting with Biome.
 frontend-fmt-check:
@@ -105,6 +124,7 @@ dev:
 
     VITE_PORT={{ vite_port }}
     export VITE_PORT
+    export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
 
     if [[ -n "${GOOSE_BIN:-}" ]]; then

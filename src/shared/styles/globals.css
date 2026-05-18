@@ -107,16 +107,9 @@
   --status-added: #16a34a;
   --status-deleted: #dc2626;
   --status-modified: #ca8a04;
-  --brand-color: hsl(var(--primary));
-  --brand-foreground-color: hsl(var(--primary-foreground));
-  --brand: var(--brand-color);
-  --brand-foreground: var(--brand-foreground-color);
-  --ui-warning: var(--status-modified);
-  --ui-warning-bg: color-mix(in srgb, var(--status-modified) 12%, transparent);
 
   /* Semantic backgrounds */
   --background-default: hsl(var(--background));
-  --background-alt: hsl(var(--card));
   --background-card: hsl(var(--card));
   --background-popover: hsl(var(--popover));
   --background-medium: hsl(var(--secondary));
@@ -136,8 +129,11 @@
     transparent
   );
   --background-info: color-mix(in srgb, hsl(var(--primary)) 14%, transparent);
-  --background-warning: var(--ui-warning-bg);
-  --background-accent: hsl(var(--primary));
+  --background-warning: color-mix(
+    in srgb,
+    var(--status-modified) 12%,
+    transparent
+  );
 
   /* Semantic borders */
   --border-default: hsl(var(--border));
@@ -163,15 +159,9 @@
   --border-success: var(--status-added);
   --border-warning: var(--status-modified);
   --border-info: hsl(var(--primary));
-  --border-accent: hsl(var(--primary));
 
   /* Semantic text */
   --text-default: hsl(var(--foreground));
-  --text-subtle: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 80%,
-    hsl(var(--foreground))
-  );
   --text-on-card: hsl(var(--card-foreground));
   --text-on-popover: hsl(var(--popover-foreground));
   --text-muted: hsl(var(--muted-foreground));
@@ -186,7 +176,6 @@
   --text-success: var(--status-added);
   --text-warning: var(--status-modified);
   --text-info: hsl(var(--primary));
-  --text-accent: hsl(var(--primary));
   --text-placeholder: color-mix(
     in srgb,
     hsl(var(--muted-foreground)) 75%,
@@ -197,14 +186,6 @@
   --sidebar-nav-bg-selected: hsl(var(--hover));
   --sidebar-nav-fg: hsl(var(--foreground));
   --ring-focus: hsl(var(--ring));
-  --sidebar: hsl(var(--background));
-  --sidebar-foreground-color: hsl(var(--foreground));
-  --sidebar-primary-color: hsl(var(--primary));
-  --sidebar-primary-foreground-color: hsl(var(--primary-foreground));
-  --sidebar-accent-color: hsl(var(--hover));
-  --sidebar-accent-foreground-color: hsl(var(--hover-foreground));
-  --sidebar-border-color: hsl(var(--border));
-  --sidebar-ring-color: hsl(var(--ring));
 
   /* Alpha variants */
   --dark-10: rgba(26, 26, 26, 0.1);
@@ -322,16 +303,9 @@
   --border: 0 0% 18%;
   --input: 0 0% 18%;
   --ring: 0 0% 98%;
-  --brand-color: hsl(var(--primary));
-  --brand-foreground-color: hsl(var(--primary-foreground));
-  --brand: var(--brand-color);
-  --brand-foreground: var(--brand-foreground-color);
-  --ui-warning: var(--status-modified);
-  --ui-warning-bg: color-mix(in srgb, var(--status-modified) 10%, transparent);
 
   /* semantic backgrounds */
   --background-default: hsl(var(--background));
-  --background-alt: hsl(var(--card));
   --background-card: hsl(var(--card));
   --background-popover: hsl(var(--popover));
   --background-medium: hsl(var(--secondary));
@@ -351,8 +325,11 @@
     transparent
   );
   --background-info: color-mix(in srgb, hsl(var(--primary)) 16%, transparent);
-  --background-warning: var(--ui-warning-bg);
-  --background-accent: hsl(var(--primary));
+  --background-warning: color-mix(
+    in srgb,
+    var(--status-modified) 10%,
+    transparent
+  );
 
   /* semantic borders */
   --border-default: hsl(var(--border));
@@ -378,15 +355,9 @@
   --border-success: var(--status-added);
   --border-warning: var(--status-modified);
   --border-info: hsl(var(--primary));
-  --border-accent: hsl(var(--primary));
 
   /* semantic text */
   --text-default: hsl(var(--foreground));
-  --text-subtle: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 80%,
-    hsl(var(--foreground))
-  );
   --text-on-card: hsl(var(--card-foreground));
   --text-on-popover: hsl(var(--popover-foreground));
   --text-muted: hsl(var(--muted-foreground));
@@ -401,7 +372,6 @@
   --text-success: var(--status-added);
   --text-warning: var(--status-modified);
   --text-info: hsl(var(--primary));
-  --text-accent: hsl(var(--primary));
   --text-placeholder: color-mix(
     in srgb,
     hsl(var(--muted-foreground)) 75%,
@@ -412,14 +382,6 @@
   --sidebar-nav-bg-selected: hsl(var(--hover));
   --sidebar-nav-fg: hsl(var(--foreground));
   --ring-focus: hsl(var(--ring));
-  --sidebar: hsl(var(--background));
-  --sidebar-foreground-color: hsl(var(--foreground));
-  --sidebar-primary-color: hsl(var(--primary));
-  --sidebar-primary-foreground-color: hsl(var(--primary-foreground));
-  --sidebar-accent-color: hsl(var(--hover));
-  --sidebar-accent-foreground-color: hsl(var(--hover-foreground));
-  --sidebar-border-color: hsl(var(--border));
-  --sidebar-ring-color: hsl(var(--ring));
 
   /* Alpha variants (dark mode) */
   --dark-10: rgba(242, 242, 242, 0.1);
@@ -449,7 +411,6 @@
   /* shadcn/ui standard Tailwind color mappings */
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
-  --color-foreground-subtle: var(--text-subtle);
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
   --color-popover: hsl(var(--popover));
@@ -461,23 +422,12 @@
   --color-muted: hsl(var(--muted));
   --color-muted-foreground: hsl(var(--muted-foreground));
   --color-placeholder: var(--text-placeholder);
-  --color-accent: hsl(var(--hover));
-  --color-accent-foreground: hsl(var(--hover-foreground));
-  --color-destructive: var(--status-deleted);
-  --color-destructive-foreground: var(--text-on-danger);
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
-  --color-brand: var(--brand-color);
-  --color-brand-foreground: var(--brand-foreground-color);
-  --color-danger: var(--status-deleted);
-  --color-success: var(--status-added);
-  --color-warning: var(--ui-warning);
-  --color-warning-bg: var(--ui-warning-bg);
 
   /* semantic backgrounds (custom superset) */
   --color-background-default: var(--background-default);
-  --color-background-alt: var(--background-alt);
   --color-background-card: var(--background-card);
   --color-background-popover: var(--background-popover);
   --color-background-medium: var(--background-medium);
@@ -490,7 +440,6 @@
   --color-background-success: var(--background-success);
   --color-background-info: var(--background-info);
   --color-background-warning: var(--background-warning);
-  --color-background-accent: var(--background-accent);
 
   /* semantic borders */
   --color-border-default: var(--border-default);
@@ -508,11 +457,9 @@
   --color-border-success: var(--border-success);
   --color-border-warning: var(--border-warning);
   --color-border-info: var(--border-info);
-  --color-border-accent: var(--border-accent);
 
   /* semantic text */
   --color-text-default: var(--text-default);
-  --color-text-subtle: var(--text-subtle);
   --color-text-on-card: var(--text-on-card);
   --color-text-on-popover: var(--text-on-popover);
   --color-text-muted: var(--text-muted);
@@ -527,7 +474,6 @@
   --color-text-success: var(--text-success);
   --color-text-warning: var(--text-warning);
   --color-text-info: var(--text-info);
-  --color-text-accent: var(--text-accent);
   --color-text-placeholder: var(--text-placeholder);
 
   /* alpha variants */
@@ -597,15 +543,6 @@
   --color-sidebar-nav-bg-hover: var(--sidebar-nav-bg-hover);
   --color-sidebar-nav-bg-selected: var(--sidebar-nav-bg-selected);
   --color-sidebar-nav-fg: var(--sidebar-nav-fg);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-background: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground-color);
-  --color-sidebar-primary: var(--sidebar-primary-color);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground-color);
-  --color-sidebar-accent: var(--sidebar-accent-color);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground-color);
-  --color-sidebar-border: var(--sidebar-border-color);
-  --color-sidebar-ring: var(--sidebar-ring-color);
   --color-ring-focus: var(--ring-focus);
   --color-status-added: var(--status-added);
   --color-status-deleted: var(--status-deleted);

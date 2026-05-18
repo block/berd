@@ -5,6 +5,7 @@ import {
   IconHistory,
   IconHome,
   IconArrowLeft,
+  IconPalette,
   IconRobotFace,
   IconSearch,
   IconSettings,
@@ -42,6 +43,13 @@ import {
   SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
+import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import {
+  DEFAULT_DESIGN_SYSTEM_SECTION,
+  DESIGN_SYSTEM_COMPONENT_SECTIONS,
+  DESIGN_SYSTEM_CORE_SECTIONS,
+  type DesignSystemSection,
+} from "@/features/design-system/ui/designSystemSections";
 
 interface SidebarProps {
   collapsed: boolean;
@@ -50,6 +58,8 @@ interface SidebarProps {
   onSettingsClick?: () => void;
   onSettingsBack?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
+  onDesignSystemBack?: () => void;
+  onDesignSystemSectionChange?: (section: DesignSystemSection) => void;
   onNewChatInProject?: (projectId: string) => void;
   onNewChat?: () => void;
   onCreateProject?: () => void;
@@ -70,6 +80,7 @@ interface SidebarProps {
   ) => void;
   activeView?: AppView;
   activeSettingsSection?: SectionId;
+  activeDesignSystemSection?: DesignSystemSection;
   activeSessionId?: string | null;
   className?: string;
   projects: ProjectInfo[];
@@ -111,6 +122,8 @@ export function Sidebar({
   onSettingsClick,
   onSettingsBack,
   onSettingsSectionChange,
+  onDesignSystemBack,
+  onDesignSystemSectionChange,
   onNewChatInProject,
   onNewChat,
   onCreateProject,
@@ -127,6 +140,7 @@ export function Sidebar({
   onSelectSearchResult,
   activeView,
   activeSettingsSection = DEFAULT_SETTINGS_SECTION,
+  activeDesignSystemSection = DEFAULT_DESIGN_SYSTEM_SECTION,
   activeSessionId,
   className,
   projects,
@@ -179,6 +193,8 @@ export function Sidebar({
   const labelTransition = "transition-[opacity,width] duration-300 ease-out";
   const labelVisible = expanded && !collapsed;
   const isSettingsSurface = activeView === "settings";
+  const isDesignSystemSurface = activeView === "design-system";
+  const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
   const defaultTitle = t("common:session.defaultTitle");
   const navItems: readonly {
     id: AppView;
@@ -193,6 +209,15 @@ export function Sidebar({
       label: t("navigation.sessionHistory"),
       icon: IconHistory,
     },
+    ...(isDesignSystemExplorerEnabled()
+      ? [
+          {
+            id: "design-system" as const,
+            label: "Design system (dev only)",
+            icon: IconPalette,
+          },
+        ]
+      : []),
   ];
 
   const MAX_RECENTS = 20;
@@ -344,12 +369,12 @@ export function Sidebar({
           <div
             className={cn(
               "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-              isSettingsSurface
+              isSecondarySurface
                 ? "pointer-events-none -translate-x-full opacity-0"
                 : "translate-x-0 opacity-100",
             )}
-            inert={isSettingsSurface ? true : undefined}
-            aria-hidden={isSettingsSurface}
+            inert={isSecondarySurface ? true : undefined}
+            aria-hidden={isSecondarySurface}
           >
             <nav
               className={cn(
@@ -417,9 +442,6 @@ export function Sidebar({
                       labelVisible={labelVisible}
                       isActive={isActive}
                       onClick={() => onNavigate?.(item.id)}
-                      itemTransitionDelay={
-                        !collapsed && expanded ? `${index * 30}ms` : "0ms"
-                      }
                       labelTransitionDelay={
                         labelVisible ? `${index * 30 + 60}ms` : "0ms"
                       }
@@ -432,7 +454,7 @@ export function Sidebar({
                 (sidebarSearch.submittedQuery ? (
                   <div className="relative z-10 space-y-2">
                     {sidebarSearch.error && (
-                      <p className="px-1 text-xs text-danger">
+                      <p className="px-1 text-xs text-text-danger">
                         {t("search.error")}
                       </p>
                     )}
@@ -513,7 +535,7 @@ export function Sidebar({
                 size={collapsed ? "icon-sm" : "default"}
                 onClick={onSettingsClick}
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-foreground-subtle hover:bg-transparent hover:text-foreground active:bg-transparent dark:text-muted-foreground",
+                  "h-10 w-full rounded-md bg-transparent text-text-muted hover:bg-transparent hover:text-foreground active:bg-transparent",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",
@@ -542,36 +564,85 @@ export function Sidebar({
           <div
             className={cn(
               "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-              isSettingsSurface
+              isSecondarySurface
                 ? "translate-x-0 opacity-100"
                 : "pointer-events-none translate-x-full opacity-0",
             )}
-            inert={!isSettingsSurface ? true : undefined}
-            aria-hidden={!isSettingsSurface}
+            inert={!isSecondarySurface ? true : undefined}
+            aria-hidden={!isSecondarySurface}
           >
             <nav
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 scrollbar-none"
-              aria-label={t("settings:navigationLabel")}
+              aria-label={
+                isSettingsSurface
+                  ? t("settings:navigationLabel")
+                  : "Design system navigation"
+              }
             >
               <div className="space-y-0.5">
-                {SETTINGS_SECTIONS.map((item, index) => (
-                  <SidebarNavItem
-                    key={item.id}
-                    icon={item.icon}
-                    label={t(`settings:${item.labelKey}`)}
-                    collapsed={collapsed}
-                    labelTransition={labelTransition}
-                    labelVisible={labelVisible}
-                    isActive={activeSettingsSection === item.id}
-                    onClick={() => onSettingsSectionChange?.(item.id)}
-                    itemTransitionDelay={
-                      !collapsed && expanded ? `${index * 30}ms` : "0ms"
-                    }
-                    labelTransitionDelay={
-                      labelVisible ? `${index * 30 + 60}ms` : "0ms"
-                    }
-                  />
-                ))}
+                {isSettingsSurface ? (
+                  SETTINGS_SECTIONS.map((item, index) => (
+                    <SidebarNavItem
+                      key={item.id}
+                      icon={item.icon}
+                      label={t(`settings:${item.labelKey}`)}
+                      collapsed={collapsed}
+                      labelTransition={labelTransition}
+                      labelVisible={labelVisible}
+                      isActive={activeSettingsSection === item.id}
+                      onClick={() => onSettingsSectionChange?.(item.id)}
+                      labelTransitionDelay={
+                        labelVisible ? `${index * 30 + 60}ms` : "0ms"
+                      }
+                    />
+                  ))
+                ) : (
+                  <>
+                    {DESIGN_SYSTEM_CORE_SECTIONS.map((item, index) => (
+                      <SidebarNavItem
+                        key={item.id}
+                        label={item.label}
+                        collapsed={collapsed}
+                        labelTransition={labelTransition}
+                        labelVisible={labelVisible}
+                        isActive={activeDesignSystemSection === item.id}
+                        onClick={() => onDesignSystemSectionChange?.(item.id)}
+                        labelTransitionDelay={
+                          labelVisible ? `${index * 30 + 60}ms` : "0ms"
+                        }
+                      />
+                    ))}
+                    {!collapsed && (
+                      <div
+                        className={cn(
+                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          labelTransition,
+                          labelVisible
+                            ? "opacity-100"
+                            : "opacity-0 overflow-hidden",
+                        )}
+                      >
+                        {t("sections.components")}
+                      </div>
+                    )}
+                    {DESIGN_SYSTEM_COMPONENT_SECTIONS.map((item, index) => (
+                      <SidebarNavItem
+                        key={item.id}
+                        label={item.label}
+                        collapsed={collapsed}
+                        labelTransition={labelTransition}
+                        labelVisible={labelVisible}
+                        isActive={activeDesignSystemSection === item.id}
+                        onClick={() => onDesignSystemSectionChange?.(item.id)}
+                        labelTransitionDelay={
+                          labelVisible
+                            ? `${(DESIGN_SYSTEM_CORE_SECTIONS.length + index) * 30 + 60}ms`
+                            : "0ms"
+                        }
+                      />
+                    ))}
+                  </>
+                )}
               </div>
             </nav>
             <div className={cn("flex-shrink-0 bg-background", "px-1.5 py-1.5")}>
@@ -579,9 +650,11 @@ export function Sidebar({
                 type="button"
                 variant="ghost"
                 size={collapsed ? "icon-sm" : "default"}
-                onClick={onSettingsBack}
+                onClick={
+                  isSettingsSurface ? onSettingsBack : onDesignSystemBack
+                }
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-foreground-subtle hover:bg-transparent hover:text-foreground active:bg-transparent dark:text-muted-foreground",
+                  "h-10 w-full rounded-md bg-transparent text-text-muted hover:bg-transparent hover:text-foreground active:bg-transparent",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",

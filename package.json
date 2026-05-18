@@ -6,6 +6,11 @@
   "packageManager": "pnpm@10.33.0",
   "scripts": {
     "dev": "vite",
+    "design-system:audit": "node ./scripts/design-system-audit.mjs",
+    "design-system:check": "pnpm design-system:manifest-check && pnpm design-system:audit && pnpm design-system:coverage -- --strict",
+    "design-system:coverage": "node ./scripts/design-system-coverage.mjs",
+    "design-system:generate": "node ./scripts/design-system-manifest.mjs",
+    "design-system:manifest-check": "node ./scripts/design-system-manifest.mjs --check",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
     "check:i18n": "node ./scripts/check-i18n-strings.mjs",

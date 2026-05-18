@@ -1,9 +1,11 @@
 import type { SectionId } from "@/features/settings/ui/settingsSections";
+import type { DesignSystemSection } from "@/features/design-system/ui/designSystemSections";
 
 export type AppView =
   | "home"
   | "chat"
   | "automations"
+  | "design-system"
   | "skills"
   | "agents"
   | "projects"
@@ -32,6 +34,7 @@ export type AppNavigationLocation =
   | { view: "home" }
   | { view: "chat"; sessionId: string | null }
   | { view: "automations"; route: AutomationNavigationRoute }
+  | { view: "design-system"; designSystemSection: DesignSystemSection }
   | { view: "skills"; skillId: string | null }
   | { view: "agents"; personaId: string | null }
   | { view: "projects" }

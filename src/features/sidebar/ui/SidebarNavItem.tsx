@@ -1,8 +1,9 @@
 import type { ComponentType } from "react";
 import { cn } from "@/shared/lib/cn";
+import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 interface SidebarNavItemProps {
-  icon: ComponentType<{ className?: string }>;
+  icon?: ComponentType<{ className?: string }>;
   label: string;
   collapsed: boolean;
   labelTransition: string;
@@ -10,7 +11,6 @@ interface SidebarNavItemProps {
   isActive: boolean;
   onClick: () => void;
   testId?: string;
-  itemTransitionDelay?: string;
   labelTransitionDelay?: string;
 }
 
@@ -23,27 +23,37 @@ export function SidebarNavItem({
   isActive,
   onClick,
   testId,
-  itemTransitionDelay,
   labelTransitionDelay,
 }: SidebarNavItemProps) {
+  const className = cn(
+    "flex items-center w-full text-sm transition-colors duration-200 rounded-md",
+    Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",
+    isActive
+      ? "bg-sidebar-nav-bg-selected font-normal text-sidebar-nav-fg"
+      : "font-normal text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg",
+  );
+
   return (
     <button
+      {...getDesignSystemMetadata({
+        component: "SidebarNavItem",
+        slot: "sidebar-nav-item",
+        source: "src/features/sidebar/ui/SidebarNavItem.tsx",
+        props: {
+          isActive,
+          collapsed,
+        },
+        customClassName: className,
+      })}
       type="button"
       data-testid={testId}
       onClick={onClick}
       title={collapsed ? label : undefined}
       aria-label={label}
       aria-current={isActive ? "page" : undefined}
-      className={cn(
-        "flex items-center w-full text-sm transition-colors duration-200 rounded-md",
-        "gap-2.5 px-3 py-1.5",
-        isActive
-          ? "bg-background-alt font-normal text-foreground"
-          : "font-normal text-foreground hover:bg-background-alt hover:text-foreground",
-      )}
-      style={{ transitionDelay: itemTransitionDelay }}
+      className={className}
     >
-      <Icon className="size-4 flex-shrink-0" />
+      {Icon ? <Icon className="size-4 flex-shrink-0" /> : null}
       <span
         className={cn(
           "whitespace-nowrap",

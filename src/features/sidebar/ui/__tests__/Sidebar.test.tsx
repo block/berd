@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { Sidebar } from "../Sidebar";
 
+const designSystemExplorer = vi.hoisted(() => ({
+  isEnabled: vi.fn(() => false),
+}));
+
 const mockSessions: Array<{
   id: string;
   title: string;
@@ -63,10 +67,15 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
     }),
 }));
 
+vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
+  isDesignSystemExplorerEnabled: () => designSystemExplorer.isEnabled(),
+}));
+
 describe("Sidebar", () => {
   beforeEach(() => {
     mockSessions.splice(0, mockSessions.length);
     window.localStorage.clear();
+    designSystemExplorer.isEnabled.mockReturnValue(false);
   });
 
   it("shows an empty state when there are no projects or chats", async () => {
@@ -228,6 +237,28 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("button", { name: /automations/i }));
 
     expect(onNavigate).toHaveBeenCalledWith("automations");
+  });
+
+  it("renders the dev-only design system button after session history", () => {
+    designSystemExplorer.isEnabled.mockReturnValue(true);
+
+    render(<Sidebar collapsed onNavigate={vi.fn()} projects={[]} />);
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const labels = within(mainNavigation)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"));
+
+    expect(labels).toEqual([
+      "Home",
+      "Agents",
+      "Skills",
+      "Automations",
+      "Session history",
+      "Design system (dev only)",
+    ]);
   });
 
   it("keeps the home button visible when the sidebar is collapsed", () => {
