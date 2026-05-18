@@ -1,10 +1,11 @@
 import type { ComponentType } from "react";
 import { Archive, RefreshCw, Settings2, Stethoscope } from "lucide-react";
-import { IconPlug } from "@tabler/icons-react";
+import { IconApps, IconPlug } from "@tabler/icons-react";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: Settings2 },
   { id: "providers", labelKey: "nav.providers", icon: IconPlug },
+  { id: "extensions", labelKey: "nav.extensions", icon: IconApps },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
   { id: "updates", labelKey: "nav.updates", icon: RefreshCw },
   { id: "doctor", labelKey: "nav.doctor", icon: Stethoscope },

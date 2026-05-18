@@ -21,7 +21,6 @@
   },
   "navigation": {
     "agents": "Agentes",
-    "extensions": "Extensiones",
     "home": "Inicio",
     "main": "Navegación principal",
     "sessionHistory": "Historial de sesiones",

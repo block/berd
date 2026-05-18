@@ -4,7 +4,6 @@ import {
   IconBolt,
   IconHistory,
   IconHome,
-  IconApps,
   IconArrowLeft,
   IconRobotFace,
   IconSearch,
@@ -188,11 +187,6 @@ export function Sidebar({
   }[] = [
     { id: "agents", label: t("navigation.agents"), icon: IconRobotFace },
     { id: "skills", label: t("navigation.skills"), icon: SkillIcon },
-    {
-      id: "extensions",
-      label: t("navigation.extensions"),
-      icon: IconApps,
-    },
     { id: "automations", label: t("navigation.automations"), icon: IconBolt },
     {
       id: "session-history",

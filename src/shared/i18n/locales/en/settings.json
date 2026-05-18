@@ -179,6 +179,7 @@
     "archive": "Archive",
     "compaction": "Compaction",
     "doctor": "Doctor",
+    "extensions": "Extensions",
     "general": "General",
     "providers": "Providers",
     "updates": "Updates"

@@ -141,7 +141,6 @@ function getAppNavigationLocation(
     case "settings":
       return { view, settingsSection };
     case "home":
-    case "extensions":
     case "projects":
     case "session-history":
       return { view };
