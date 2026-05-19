@@ -12,12 +12,19 @@ import { UpdateIndicator } from "@/features/updates/ui/UpdateIndicator";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 
+type TopBarLeadingChromeInset = "compact" | "trafficLights";
+
+export interface TopBarChromeInsets {
+  leading: TopBarLeadingChromeInset;
+}
+
 interface TopBarProps {
   canGoBack?: boolean;
   canGoForward?: boolean;
   className?: string;
   contextPanelLabel?: string;
   contextPanelOpen?: boolean;
+  chromeInsets?: TopBarChromeInsets;
   showContextPanelToggle?: boolean;
   sidebarCollapsed?: boolean;
   onGoBack?: () => void;
@@ -33,6 +40,7 @@ export function TopBar({
   className,
   contextPanelLabel,
   contextPanelOpen = false,
+  chromeInsets = { leading: "trafficLights" },
   showContextPanelToggle = false,
   sidebarCollapsed = false,
   onGoBack,
@@ -54,16 +62,23 @@ export function TopBar({
   const toolbarButtonClassName = "size-[var(--spacing-app-top-bar-control)]";
   const toolbarButtonOffsetClassName = "translate-y-0.5";
   const toolbarIconClassName = "size-[18px]";
+  const leadingSpaceClassName =
+    chromeInsets.leading === "trafficLights"
+      ? "w-[var(--spacing-app-top-bar-leading)]"
+      : "w-[var(--spacing-app-top-bar-leading-compact)]";
 
   return (
     <header
       className={cn(
-        "flex h-[var(--spacing-app-top-bar)] items-center bg-background/80 pr-5 backdrop-blur-sm",
+        "flex h-[var(--spacing-app-top-bar)] items-center bg-background/80 backdrop-blur-sm",
         className,
       )}
     >
       <div
-        className="h-full w-[var(--spacing-app-top-bar-leading)] shrink-0"
+        className={cn(
+          "h-full shrink-0 transition-[width] duration-200 ease-out",
+          leadingSpaceClassName,
+        )}
         data-tauri-drag-region
       />
       <div
@@ -142,6 +157,13 @@ export function TopBar({
           </Button>
         )}
       </div>
+      <div
+        className={cn(
+          "h-full shrink-0 transition-[width] duration-200 ease-out",
+          "w-[var(--spacing-app-top-bar-trailing)]",
+        )}
+        data-tauri-drag-region
+      />
     </header>
   );
 }

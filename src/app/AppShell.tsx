@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Sidebar } from "@/features/sidebar/ui/Sidebar";
 import { getVersion } from "@tauri-apps/api/app";
 import { openFeedbackForm } from "@/shared/api/feedback";
-import { getPlatform } from "@/shared/lib/platform";
+import { getPlatform, type Platform } from "@/shared/lib/platform";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -15,6 +15,7 @@ import {
 } from "@/features/settings/ui/settingsSections";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { TopBar } from "./ui/TopBar";
+import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
 import {
@@ -223,11 +224,71 @@ async function syncWindowMinimumSize() {
   );
 }
 
+function useWindowFullscreenState() {
+  const [isWindowFullscreen, setIsWindowFullscreen] = useState(false);
+
+  useEffect(() => {
+    if (!window.__TAURI_INTERNALS__) {
+      return;
+    }
+
+    let didCancel = false;
+    let unlisten: (() => void) | undefined;
+
+    async function setupFullscreenState() {
+      const { getCurrentWindow } = await import("@tauri-apps/api/window");
+      const appWindow = getCurrentWindow();
+
+      async function syncFullscreenState() {
+        const nextIsFullscreen = await appWindow.isFullscreen();
+        if (!didCancel) {
+          setIsWindowFullscreen(nextIsFullscreen);
+        }
+      }
+
+      await syncFullscreenState();
+      unlisten = await appWindow.onResized(() => {
+        void syncFullscreenState();
+      });
+
+      if (didCancel) {
+        unlisten();
+      }
+    }
+
+    void setupFullscreenState().catch(() => undefined);
+
+    return () => {
+      didCancel = true;
+      unlisten?.();
+    };
+  }, []);
+
+  return isWindowFullscreen;
+}
+
+function getTopBarChromeInsets(
+  platform: Platform,
+  isWindowFullscreen: boolean,
+): TopBarChromeInsets {
+  if (platform === "mac" && !isWindowFullscreen) {
+    return { leading: "trafficLights" };
+  }
+
+  return { leading: "compact" };
+}
+
 export function AppShell({ children }: { children?: React.ReactNode }) {
   const { t } = useTranslation("chat");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
+  const isWindowFullscreen = useWindowFullscreenState();
+  const platform = getPlatform();
+  const topBarChromeInsets = getTopBarChromeInsets(
+    platform,
+    isWindowFullscreen,
+  );
   const initialSettingsSection = getInitialSettingsSection();
   const [activeSettingsSection, setActiveSettingsSection] = useState<SectionId>(
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
@@ -1484,6 +1545,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         showContextPanelToggle={
           activeView === "chat" && Boolean(activeSessionId)
         }
+        chromeInsets={topBarChromeInsets}
         contextPanelOpen={isContextPanelOpen}
         contextPanelLabel={contextPanelLabel}
         onToggleContextPanel={toggleContextPanel}

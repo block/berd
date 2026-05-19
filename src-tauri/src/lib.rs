@@ -6,7 +6,12 @@ use services::distro_bundle::DistroBundleState;
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
+#[cfg(target_os = "macos")]
+use tauri::{WebviewWindow, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
+
+#[cfg(target_os = "macos")]
+const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 25.0);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -60,6 +65,8 @@ pub fn run() {
             // "Goose" instead of the lowercase Cargo binary name "goose".
             #[cfg(target_os = "macos")]
             {
+                refresh_traffic_light_position_on_window_changes(app);
+
                 let app_menu = SubmenuBuilder::new(app, "Goose")
                     .about(Some(
                         AboutMetadataBuilder::new().name(Some("Goose")).build(),
@@ -153,4 +160,91 @@ pub fn run() {
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
         });
+}
+
+#[cfg(target_os = "macos")]
+fn refresh_traffic_light_position_on_window_changes(app: &tauri::App) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+
+    schedule_traffic_light_position_refresh(&window);
+
+    let window_for_events = window.clone();
+    window.on_window_event(move |event| {
+        if matches!(
+            event,
+            WindowEvent::Resized(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+                | WindowEvent::Focused(true)
+        ) {
+            schedule_traffic_light_position_refresh(&window_for_events);
+
+            let delayed_window = window_for_events.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+                schedule_traffic_light_position_refresh(&delayed_window);
+            });
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn schedule_traffic_light_position_refresh(window: &WebviewWindow) {
+    let window_for_main_thread = window.clone();
+    let window_for_refresh = window.clone();
+    let _ = window_for_main_thread.run_on_main_thread(move || {
+        apply_traffic_light_position(&window_for_refresh);
+    });
+}
+
+#[cfg(target_os = "macos")]
+fn apply_traffic_light_position(window: &WebviewWindow) {
+    let Ok(ns_window) = window.ns_window() else {
+        return;
+    };
+
+    unsafe {
+        let ns_window = &*ns_window.cast::<objc2_app_kit::NSWindow>();
+        inset_traffic_lights(
+            ns_window,
+            TRAFFIC_LIGHT_POSITION.0,
+            TRAFFIC_LIGHT_POSITION.1,
+        );
+    }
+}
+
+#[cfg(target_os = "macos")]
+unsafe fn inset_traffic_lights(window: &objc2_app_kit::NSWindow, x: f64, y: f64) {
+    use objc2_app_kit::{NSView, NSWindowButton};
+
+    let Some(close) = window.standardWindowButton(NSWindowButton::CloseButton) else {
+        return;
+    };
+    let Some(miniaturize) = window.standardWindowButton(NSWindowButton::MiniaturizeButton) else {
+        return;
+    };
+
+    let Some(title_bar_container_view) = close.superview().and_then(|view| view.superview()) else {
+        return;
+    };
+
+    let close_rect = NSView::frame(&close);
+    let title_bar_frame_height = close_rect.size.height + y;
+    let mut title_bar_rect = NSView::frame(&title_bar_container_view);
+    title_bar_rect.size.height = title_bar_frame_height;
+    title_bar_rect.origin.y = window.frame().size.height - title_bar_frame_height;
+    title_bar_container_view.setFrame(title_bar_rect);
+
+    let space_between = NSView::frame(&miniaturize).origin.x - close_rect.origin.x;
+    let mut window_buttons = vec![close, miniaturize];
+    if let Some(zoom) = window.standardWindowButton(NSWindowButton::ZoomButton) {
+        window_buttons.push(zoom);
+    }
+
+    for (index, button) in window_buttons.into_iter().enumerate() {
+        let mut rect = NSView::frame(&button);
+        rect.origin.x = x + (index as f64 * space_between);
+        button.setFrameOrigin(rect.origin);
+    }
 }

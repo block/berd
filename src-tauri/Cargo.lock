@@ -16,6 +16,7 @@ dependencies = [
  "libc",
  "log",
  "mime_guess",
+ "objc2-app-kit",
  "reqwest",
  "serde",
  "serde_json",

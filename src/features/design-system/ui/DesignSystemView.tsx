@@ -786,7 +786,16 @@ const spacingTokens: RuntimeToken[] = [
   },
   {
     name: "--spacing-app-top-bar-leading",
-    description: "Leading space reserved in the app top bar.",
+    description: "Leading space reserved for macOS traffic lights.",
+  },
+  {
+    name: "--spacing-app-top-bar-leading-compact",
+    description:
+      "Compact leading space used when native controls do not occupy the left edge.",
+  },
+  {
+    name: "--spacing-app-top-bar-trailing",
+    description: "Default trailing space in the app top bar.",
   },
   {
     name: "--spacing-app-top-bar-control",
