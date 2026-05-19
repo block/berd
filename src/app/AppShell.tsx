@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { Sidebar } from "@/features/sidebar/ui/Sidebar";
 import { getVersion } from "@tauri-apps/api/app";
 import { openFeedbackForm } from "@/shared/api/feedback";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
-import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import {
@@ -14,7 +12,6 @@ import {
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
-import { TopBar } from "./ui/TopBar";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
@@ -36,9 +33,22 @@ import { findExistingDraft } from "@/features/chat/lib/newChat";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
+import { useProjectDialog } from "./hooks/useProjectDialog";
+import { useResizableSidebar } from "./hooks/useResizableSidebar";
+import {
+  areAppNavigationLocationsEqual,
+  getAppNavigationLocation,
+} from "./lib/appNavigationLocation";
 import { loadStoredHomeSessionId } from "./lib/homeSessionStorage";
 import { resolveSupportedSessionModelPreference } from "./lib/resolveSupportedSessionModelPreference";
+import {
+  clearSettingsSectionUrl,
+  getInitialSettingsSection,
+  setDesignSystemUrl,
+  setSettingsSectionUrl,
+} from "./lib/settingsSectionUrl";
 import { useCreatePersonaNavigation } from "./hooks/useCreatePersonaNavigation";
+import { AppShellLayout } from "./ui/AppShellLayout";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
 import {
@@ -59,7 +69,6 @@ import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceC
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
-import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { acpCreateSession } from "@/shared/api/acp";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
@@ -67,7 +76,6 @@ import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
-import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import type {
   AppNavigationLocation,
   AppNavigationUpdateOptions,
@@ -82,33 +90,7 @@ type AppNavigationHistory = {
   isApplying: boolean;
 };
 
-const SIDEBAR_OUTER_GUTTER_WIDTH = 12;
-const SIDEBAR_RESIZE_HANDLE_WIDTH = 12;
-const SIDEBAR_DEFAULT_WIDTH = SIDE_PANEL_DEFAULT_WIDTH;
-const SIDEBAR_MIN_WIDTH = 220;
-const SIDEBAR_MAX_WIDTH = 380;
-const SIDEBAR_SNAP_COLLAPSE_THRESHOLD = 100;
-const SIDEBAR_COLLAPSED_WIDTH = 48;
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
-const APP_SHELL_HORIZONTAL_CHROME_WIDTH = 28;
-const MIN_MAIN_CONTENT_WIDTH = 532;
-const MIN_WINDOW_HEIGHT = 600;
-const COLLAPSED_WINDOW_MIN_WIDTH =
-  SIDEBAR_COLLAPSED_WIDTH +
-  APP_SHELL_HORIZONTAL_CHROME_WIDTH +
-  MIN_MAIN_CONTENT_WIDTH;
-function getExpandedSidebarFitWidth(sidebarWidth: number) {
-  return (
-    sidebarWidth + APP_SHELL_HORIZONTAL_CHROME_WIDTH + MIN_MAIN_CONTENT_WIDTH
-  );
-}
-
-function getInitialSettingsSection(): SectionId | null {
-  if (typeof window === "undefined") return null;
-  if (window.location.pathname !== "/settings") return null;
-  const section = new URLSearchParams(window.location.search).get("section");
-  return resolveSettingsSection(section);
-}
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
   if (initialSettingsSection) return "settings";
@@ -119,68 +101,6 @@ function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
     return "design-system";
   }
   return "home";
-}
-
-function setSettingsSectionUrl(section: SectionId) {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.pathname = "/settings";
-  url.searchParams.set("section", section);
-  window.history.replaceState(window.history.state, "", url);
-}
-
-function setDesignSystemUrl() {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  url.pathname = "/design-system";
-  url.search = "";
-  window.history.replaceState(window.history.state, "", url);
-}
-
-function clearSettingsSectionUrl() {
-  if (typeof window === "undefined") return;
-  const url = new URL(window.location.href);
-  if (url.pathname === "/settings" || url.pathname === "/design-system") {
-    url.pathname = "/";
-  }
-  url.searchParams.delete("section");
-  window.history.replaceState(window.history.state, "", url);
-}
-
-function getAppNavigationLocation(
-  view: AppView,
-  sessionId: string | null,
-  settingsSection: SectionId,
-  skillsSkillId: string | null,
-  agentsPersonaId: string | null,
-  automationsRoute: AutomationNavigationRoute,
-  designSystemSection: DesignSystemSection,
-): AppNavigationLocation {
-  switch (view) {
-    case "chat":
-      return { view, sessionId };
-    case "automations":
-      return { view, route: automationsRoute };
-    case "design-system":
-      return { view, designSystemSection };
-    case "skills":
-      return { view, skillId: skillsSkillId };
-    case "agents":
-      return { view, personaId: agentsPersonaId };
-    case "settings":
-      return { view, settingsSection };
-    case "home":
-    case "projects":
-    case "session-history":
-      return { view };
-  }
-}
-
-function areAppNavigationLocationsEqual(
-  a: AppNavigationLocation | undefined,
-  b: AppNavigationLocation,
-) {
-  return JSON.stringify(a) === JSON.stringify(b);
 }
 
 function getOptimisticSessionCwd(
@@ -196,32 +116,6 @@ function getOptimisticSessionCwd(
     .map((directory) => directory.trim())
     .find((directory) => directory.length > 0);
   return projectWorkingDir ?? "~";
-}
-
-async function ensureWindowWidth(minWidth: number) {
-  if (!window.__TAURI_INTERNALS__ || window.innerWidth >= minWidth) {
-    return;
-  }
-
-  const { getCurrentWindow, LogicalSize } = await import(
-    "@tauri-apps/api/window"
-  );
-  await getCurrentWindow().setSize(
-    new LogicalSize(minWidth, window.innerHeight),
-  );
-}
-
-async function syncWindowMinimumSize() {
-  if (!window.__TAURI_INTERNALS__) {
-    return;
-  }
-
-  const { getCurrentWindow, LogicalSize } = await import(
-    "@tauri-apps/api/window"
-  );
-  await getCurrentWindow().setMinSize(
-    new LogicalSize(COLLAPSED_WINDOW_MIN_WIDTH, MIN_WINDOW_HEIGHT),
-  );
 }
 
 function useWindowFullscreenState() {
@@ -280,9 +174,17 @@ function getTopBarChromeInsets(
 
 export function AppShell({ children }: { children?: React.ReactNode }) {
   const { t } = useTranslation(["chat", "common"]);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
-  const [isResizing, setIsResizing] = useState(false);
+  const {
+    expandSidebar,
+    handleResizeDoubleClick,
+    handleResizeStart,
+    isResizing,
+    resizeHandleWidth,
+    sidebarCollapsed,
+    sidebarOuterWidth,
+    sidebarWidth,
+    toggleSidebar,
+  } = useResizableSidebar();
   const isWindowFullscreen = useWindowFullscreenState();
   const platform = getPlatform();
   const topBarChromeInsets = getTopBarChromeInsets(
@@ -296,12 +198,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
   const initialActiveView = getInitialAppView(initialSettingsSection);
-  const [createProjectOpen, setCreateProjectOpen] = useState(false);
-  const [createProjectInitialWorkingDir, setCreateProjectInitialWorkingDir] =
-    useState<string | null>(null);
-  const [editingProject, setEditingProject] = useState<ProjectInfo | null>(
-    null,
-  );
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
@@ -358,12 +254,21 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const projects = useProjectStore(selectProjects);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
+  const refreshProjectsAfterDialogSave = useCallback(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
+  const {
+    closeCreateProjectDialog,
+    createProjectInitialWorkingDir,
+    createProjectOpen,
+    editingProject,
+    handleProjectCreated,
+    openCreateProjectDialog,
+    openEditProjectDialog,
+  } = useProjectDialog({ onProjectCreated: refreshProjectsAfterDialogSave });
   const providerInventoryEntries = useProviderInventoryStore((s) => s.entries);
   const startup = useAppStartup();
   const migrationGate = useMigrationGate(startup.ready);
-  const pendingProjectCreatedRef = useRef<((projectId: string) => void) | null>(
-    null,
-  );
   const lastNonSecondaryViewRef = useRef<AppView>("home");
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
@@ -986,18 +891,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [cleanupChatSession, setActiveSession],
   );
 
-  const expandSidebar = useCallback(async () => {
-    const expandedFitWidth = getExpandedSidebarFitWidth(sidebarWidth);
-
-    try {
-      await ensureWindowWidth(expandedFitWidth);
-    } catch (error) {
-      console.warn("Failed to resize window before expanding sidebar:", error);
-    }
-
-    setSidebarCollapsed(false);
-  }, [sidebarWidth]);
-
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
       if (activeView !== "settings" && activeView !== "design-system") {
@@ -1088,11 +981,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
       if (project) {
-        setEditingProject(project);
-        setCreateProjectOpen(true);
+        openEditProjectDialog(project);
       }
     },
-    [projects],
+    [openEditProjectDialog, projects],
   );
 
   const handleMoveToProject = useCallback(
@@ -1130,19 +1022,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const handleMarkChatUnread = useCallback((sessionId: string) => {
     useChatStore.getState().markSessionUnread(sessionId);
   }, []);
-
-  const openCreateProjectDialog = useCallback(
-    (options?: {
-      initialWorkingDir?: string | null;
-      onCreated?: (projectId: string) => void;
-    }) => {
-      setEditingProject(null);
-      setCreateProjectInitialWorkingDir(options?.initialWorkingDir ?? null);
-      pendingProjectCreatedRef.current = options?.onCreated ?? null;
-      setCreateProjectOpen(true);
-    },
-    [],
-  );
 
   const activateHomeSession = useCallback(
     (sessionId: string) => {
@@ -1249,19 +1128,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const handleCreatePersona = useCreatePersonaNavigation(() =>
     handleNavigate("agents"),
   );
-
-  const collapseSidebar = useCallback(() => {
-    setSidebarCollapsed(true);
-  }, []);
-
-  const toggleSidebar = useCallback(() => {
-    if (sidebarCollapsed) {
-      void expandSidebar();
-      return;
-    }
-
-    collapseSidebar();
-  }, [collapseSidebar, expandSidebar, sidebarCollapsed]);
 
   const applyNavigationLocation = useCallback(
     (location: AppNavigationLocation) => {
@@ -1383,84 +1249,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     });
   }, []);
 
-  const handleResizeStart = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      setIsResizing(true);
-      const startX = e.clientX;
-      const startWidth = sidebarCollapsed
-        ? SIDEBAR_COLLAPSED_WIDTH
-        : sidebarWidth;
-      let shouldCollapse = false;
-
-      const onMouseMove = (moveEvent: MouseEvent) => {
-        const delta = moveEvent.clientX - startX;
-        const newWidth = startWidth + delta;
-
-        if (newWidth < SIDEBAR_SNAP_COLLAPSE_THRESHOLD) {
-          shouldCollapse = true;
-          setSidebarWidth(SIDEBAR_MIN_WIDTH);
-        } else {
-          shouldCollapse = false;
-          setSidebarCollapsed(false);
-          setSidebarWidth(
-            Math.min(SIDEBAR_MAX_WIDTH, Math.max(SIDEBAR_MIN_WIDTH, newWidth)),
-          );
-        }
-      };
-
-      const cleanup = () => {
-        setIsResizing(false);
-        if (shouldCollapse) setSidebarCollapsed(true);
-        document.removeEventListener("mousemove", onMouseMove);
-        document.removeEventListener("mouseup", cleanup);
-        window.removeEventListener("blur", cleanup);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
-      };
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", cleanup);
-      window.addEventListener("blur", cleanup);
-    },
-    [sidebarCollapsed, sidebarWidth],
-  );
-
-  const handleResizeDoubleClick = useCallback(() => {
-    setSidebarWidth(SIDEBAR_DEFAULT_WIDTH);
-    void ensureWindowWidth(getExpandedSidebarFitWidth(SIDEBAR_DEFAULT_WIDTH))
-      .catch((error) => {
-        console.warn(
-          "Failed to resize window before resetting sidebar:",
-          error,
-        );
-      })
-      .finally(() => setSidebarCollapsed(false));
-  }, []);
-
-  useEffect(() => {
-    void syncWindowMinimumSize().catch((error) => {
-      console.warn("Failed to update window minimum size:", error);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (sidebarCollapsed) {
-      return;
-    }
-
-    const handleWindowResize = () => {
-      if (window.innerWidth < getExpandedSidebarFitWidth(sidebarWidth)) {
-        setSidebarCollapsed(true);
-      }
-    };
-
-    handleWindowResize();
-    window.addEventListener("resize", handleWindowResize);
-    return () => window.removeEventListener("resize", handleWindowResize);
-  }, [sidebarCollapsed, sidebarWidth]);
-
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Cmd+, for settings
@@ -1554,126 +1342,93 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
-      <TopBar
-        sidebarCollapsed={sidebarCollapsed}
-        canGoBack={navigationAvailability.canGoBack}
-        canGoForward={navigationAvailability.canGoForward}
-        onToggleSidebar={toggleSidebar}
-        onGoBack={goBack}
-        onGoForward={goForward}
-        showContextPanelToggle={
-          activeView === "chat" && Boolean(activeSessionId)
-        }
-        chromeInsets={topBarChromeInsets}
-        contextPanelOpen={isContextPanelOpen}
-        contextPanelLabel={contextPanelLabel}
-        onToggleContextPanel={toggleContextPanel}
-        onFeedbackClick={handleFeedbackClick}
-      />
-
-      <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">
-        <div
-          className="flex-shrink-0 h-full pt-[var(--spacing-app-panel-gutter-top)] pb-3 pl-3"
-          style={{
-            width: sidebarCollapsed
-              ? SIDEBAR_COLLAPSED_WIDTH + SIDEBAR_OUTER_GUTTER_WIDTH
-              : sidebarWidth + SIDEBAR_OUTER_GUTTER_WIDTH,
-            transition: isResizing ? "none" : "width 200ms ease-out",
-          }}
-        >
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            width={sidebarWidth}
-            isResizing={isResizing}
-            onSettingsClick={() => openSettings()}
-            onSettingsBack={leaveSecondarySurface}
-            onSettingsSectionChange={selectSettingsSection}
-            onDesignSystemBack={leaveSecondarySurface}
-            onDesignSystemSectionChange={selectDesignSystemSection}
-            onNavigate={handleNavigate}
-            onNewChatInProject={handleNewChatInProject}
-            onNewChat={() => {
-              setActiveSession(null);
-              clearSettingsSectionUrl();
-              setActiveView("home");
-            }}
-            onCreateProject={() => openCreateProjectDialog()}
-            onEditProject={handleEditProject}
-            onArchiveProject={handleArchiveProject}
-            onArchiveChat={handleArchiveChat}
-            onRenameChat={handleRenameChat}
-            onMarkChatRead={handleMarkChatRead}
-            onMarkChatUnread={handleMarkChatUnread}
-            onMoveToProject={handleMoveToProject}
-            onReorderProject={reorderProjects}
-            onSelectSession={handleSelectSession}
-            onSelectSearchResult={handleSelectSearchResult}
-            activeView={activeView}
-            activeSettingsSection={activeSettingsSection}
-            activeDesignSystemSection={activeDesignSystemSection}
-            activeSessionId={activeSessionId}
-            projects={projects}
-            className="h-full rounded-xl"
-          />
-        </div>
-
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle for sidebar resize */}
-        <div
-          onMouseDown={handleResizeStart}
-          onDoubleClick={handleResizeDoubleClick}
-          className="flex-shrink-0 h-full cursor-col-resize group flex items-center justify-center"
-          style={{ width: SIDEBAR_RESIZE_HANDLE_WIDTH }}
-        >
-          <div className="w-px h-8 rounded-full bg-transparent group-hover:bg-border transition-colors" />
-        </div>
-
-        <main className="min-h-0 min-w-0 flex-1">
-          {children ?? (
-            <AppShellContent
-              activeView={activeView}
-              activeSettingsSection={activeSettingsSection}
-              activeSkillsSkillId={skillsSkillId}
-              activeAgentsPersonaId={agentsPersonaId}
-              activeAutomationsRoute={automationsRoute}
-              activeDesignSystemSection={activeDesignSystemSection}
-              activeSession={activeSession}
-              homeSessionId={homeSessionId}
-              onNavigateSkills={navigateSkills}
-              onNavigateAgents={navigateAgents}
-              onNavigateAutomations={navigateAutomations}
-              onCreatePersona={handleCreatePersona}
-              onArchiveChat={handleArchiveChat}
-              onCreateProject={openCreateProjectDialog}
-              onActivateHomeSession={activateHomeSession}
-              onRenameChat={handleRenameChat}
-              onSelectSession={handleSelectSession}
-              onSelectSearchResult={handleSelectSearchResult}
-              onStartChatFromProject={handleStartChatFromProject}
-              onStartChatWithSkill={handleStartChatWithSkill}
-            />
-          )}
-        </main>
-      </div>
-
-      <CreateProjectDialog
-        isOpen={createProjectOpen}
-        onClose={() => {
-          setCreateProjectOpen(false);
-          setEditingProject(null);
-          setCreateProjectInitialWorkingDir(null);
-          pendingProjectCreatedRef.current = null;
-        }}
-        onCreated={(project) => {
-          fetchProjects();
-          pendingProjectCreatedRef.current?.(project.id);
-          pendingProjectCreatedRef.current = null;
-          setCreateProjectInitialWorkingDir(null);
-        }}
-        initialWorkingDir={createProjectInitialWorkingDir}
-        editingProject={editingProject ?? undefined}
-      />
-      {isDesignSystemExplorerEnabled() ? <DesignSystemInspector /> : null}
-    </div>
+    <AppShellLayout
+      topBar={{
+        sidebarCollapsed,
+        canGoBack: navigationAvailability.canGoBack,
+        canGoForward: navigationAvailability.canGoForward,
+        onToggleSidebar: toggleSidebar,
+        onGoBack: goBack,
+        onGoForward: goForward,
+        showContextPanelToggle:
+          activeView === "chat" && Boolean(activeSessionId),
+        chromeInsets: topBarChromeInsets,
+        contextPanelOpen: isContextPanelOpen,
+        contextPanelLabel,
+        onToggleContextPanel: toggleContextPanel,
+        onFeedbackClick: handleFeedbackClick,
+      }}
+      sidebar={{
+        collapsed: sidebarCollapsed,
+        width: sidebarWidth,
+        isResizing,
+        onSettingsClick: () => openSettings(),
+        onSettingsBack: leaveSecondarySurface,
+        onSettingsSectionChange: selectSettingsSection,
+        onDesignSystemBack: leaveSecondarySurface,
+        onDesignSystemSectionChange: selectDesignSystemSection,
+        onNavigate: handleNavigate,
+        onNewChatInProject: handleNewChatInProject,
+        onNewChat: () => {
+          setActiveSession(null);
+          clearSettingsSectionUrl();
+          setActiveView("home");
+        },
+        onCreateProject: () => openCreateProjectDialog(),
+        onEditProject: handleEditProject,
+        onArchiveProject: handleArchiveProject,
+        onArchiveChat: handleArchiveChat,
+        onRenameChat: handleRenameChat,
+        onMarkChatRead: handleMarkChatRead,
+        onMarkChatUnread: handleMarkChatUnread,
+        onMoveToProject: handleMoveToProject,
+        onReorderProject: reorderProjects,
+        onSelectSession: handleSelectSession,
+        onSelectSearchResult: handleSelectSearchResult,
+        activeView,
+        activeSettingsSection,
+        activeDesignSystemSection,
+        activeSessionId,
+        projects,
+        className: "h-full rounded-xl",
+      }}
+      sidebarOuterWidth={sidebarOuterWidth}
+      isResizing={isResizing}
+      resizeHandleWidth={resizeHandleWidth}
+      onResizeStart={handleResizeStart}
+      onResizeDoubleClick={handleResizeDoubleClick}
+      createProjectDialog={{
+        isOpen: createProjectOpen,
+        onClose: closeCreateProjectDialog,
+        onCreated: handleProjectCreated,
+        initialWorkingDir: createProjectInitialWorkingDir,
+        editingProject: editingProject ?? undefined,
+      }}
+    >
+      {children ?? (
+        <AppShellContent
+          activeView={activeView}
+          activeSettingsSection={activeSettingsSection}
+          activeSkillsSkillId={skillsSkillId}
+          activeAgentsPersonaId={agentsPersonaId}
+          activeAutomationsRoute={automationsRoute}
+          activeDesignSystemSection={activeDesignSystemSection}
+          activeSession={activeSession}
+          homeSessionId={homeSessionId}
+          onNavigateSkills={navigateSkills}
+          onNavigateAgents={navigateAgents}
+          onNavigateAutomations={navigateAutomations}
+          onCreatePersona={handleCreatePersona}
+          onArchiveChat={handleArchiveChat}
+          onCreateProject={openCreateProjectDialog}
+          onActivateHomeSession={activateHomeSession}
+          onRenameChat={handleRenameChat}
+          onSelectSession={handleSelectSession}
+          onSelectSearchResult={handleSelectSearchResult}
+          onStartChatFromProject={handleStartChatFromProject}
+          onStartChatWithSkill={handleStartChatWithSkill}
+        />
+      )}
+    </AppShellLayout>
   );
 }
