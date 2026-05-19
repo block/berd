@@ -40,6 +40,7 @@
   },
   "sections": {
     "components": "Components",
+    "notUsed": "Not used",
     "projects": "Projects",
     "recents": "Chats"
   },

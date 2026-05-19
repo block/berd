@@ -56,6 +56,7 @@ import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   DESIGN_SYSTEM_COMPONENT_SECTIONS,
   DESIGN_SYSTEM_CORE_SECTIONS,
+  DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
 
@@ -720,6 +721,37 @@ export function Sidebar({
                         }
                       />
                     ))}
+                    {!collapsed && (
+                      <div
+                        className={cn(
+                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          labelTransition,
+                          labelVisible
+                            ? "opacity-100"
+                            : "opacity-0 overflow-hidden",
+                        )}
+                      >
+                        {t("sections.notUsed")}
+                      </div>
+                    )}
+                    {DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.map(
+                      (item, index) => (
+                        <SidebarNavItem
+                          key={item.id}
+                          label={item.label}
+                          collapsed={collapsed}
+                          labelTransition={labelTransition}
+                          labelVisible={labelVisible}
+                          isActive={activeDesignSystemSection === item.id}
+                          onClick={() => onDesignSystemSectionChange?.(item.id)}
+                          labelTransitionDelay={
+                            labelVisible
+                              ? `${(DESIGN_SYSTEM_CORE_SECTIONS.length + DESIGN_SYSTEM_COMPONENT_SECTIONS.length + index) * 30 + 60}ms`
+                              : "0ms"
+                          }
+                        />
+                      ),
+                    )}
                   </>
                 )}
               </div>

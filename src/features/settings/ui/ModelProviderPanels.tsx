@@ -1,6 +1,5 @@
 import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
-import { AsyncButton } from "@/shared/ui/async-button";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
@@ -282,19 +281,23 @@ export function SetupFieldsPanel({
       })}
 
       <div className="flex justify-end">
-        <AsyncButton
+        <Button
           type="button"
-          state={saving ? "pending" : showSavedState ? "success" : "idle"}
-          idleLabel={t("common:actions.save")}
-          pendingLabel={t("providers.saving")}
+          feedbackState={
+            saving ? "loading" : showSavedState ? "success" : "idle"
+          }
+          loadingLabel={t("providers.saving")}
           successLabel={t("providers.saved")}
-          pendingVisual="text"
-          pendingDelayMs={250}
+          loadingVisual="text"
+          loadingDelayMs={250}
+          preserveWidth
           size="sm"
           onClick={() => onSaveSetup()}
           disabled={saving || showSavedState}
           className="h-8"
-        />
+        >
+          {t("common:actions.save")}
+        </Button>
       </div>
       {setupMethod === "host_with_oauth_fallback"
         ? renderInlineCodeMessage(

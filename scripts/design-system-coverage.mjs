@@ -22,16 +22,83 @@ function pageFunctionName(label) {
   )}Page`;
 }
 
-function getExplorerComponentLabels() {
+function getExplorerComponentEntries() {
   const sourceText = fs.readFileSync(sectionsPath, "utf8");
-  const componentBlock =
-    /DESIGN_SYSTEM_COMPONENT_SECTIONS[\s\S]*?=\s*\[([\s\S]*?)\];/.exec(
-      sourceText,
-    )?.[1];
+  const componentBlocks = Array.from(
+    sourceText.matchAll(
+      /DESIGN_SYSTEM_(UNUSED_COMPONENT|COMPONENT)_SECTIONS[\s\S]*?=\s*\[([\s\S]*?)\];/g,
+    ),
+  ).map((match) => ({
+    usage: match[1] === "UNUSED_COMPONENT" ? "unused" : "used",
+    block: match[2],
+  }));
 
-  return Array.from(componentBlock?.matchAll(/label:\s*"([^"]+)"/g) ?? []).map(
-    (match) => match[1],
+  return componentBlocks.flatMap((componentBlock) =>
+    Array.from(componentBlock.block.matchAll(/label:\s*"([^"]+)"/g)).map(
+      (match) => ({
+        label: match[1],
+        usage: componentBlock.usage,
+      }),
+    ),
   );
+}
+
+function listSourceFiles(directory) {
+  return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return listSourceFiles(entryPath);
+    }
+
+    return entry.name.endsWith(".ts") || entry.name.endsWith(".tsx")
+      ? [entryPath]
+      : [];
+  });
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function getProductImportUsage(manifest) {
+  const ignoredPathParts = [
+    `${path.sep}src${path.sep}features${path.sep}design-system${path.sep}`,
+    `${path.sep}src${path.sep}shared${path.sep}ui${path.sep}`,
+    `${path.sep}__tests__${path.sep}`,
+  ];
+  const sourceFiles = listSourceFiles(path.join(repoRoot, "src")).filter(
+    (filePath) =>
+      !filePath.endsWith(".test.ts") &&
+      !filePath.endsWith(".test.tsx") &&
+      !ignoredPathParts.some((ignoredPathPart) =>
+        filePath.includes(ignoredPathPart),
+      ),
+  );
+  const usageByName = new Map();
+
+  for (const sourceFile of sourceFiles) {
+    const sourceText = fs.readFileSync(sourceFile, "utf8");
+    const relativeSourceFile = path.relative(repoRoot, sourceFile);
+
+    for (const component of manifest) {
+      const importPath = component.source
+        .replace(/^src\/shared\/ui\//, "@/shared/ui/")
+        .replace(/\.tsx$/, "");
+      const importPattern = new RegExp(
+        `from\\s+["']${escapeRegex(importPath)}["']|import\\s*\\(\\s*["']${escapeRegex(importPath)}["']\\s*\\)`,
+      );
+
+      if (!importPattern.test(sourceText)) {
+        continue;
+      }
+
+      const usages = usageByName.get(component.name) ?? [];
+      usages.push(relativeSourceFile);
+      usageByName.set(component.name, usages);
+    }
+  }
+
+  return usageByName;
 }
 
 function getFunctionBlock(sourceText, functionName) {
@@ -54,7 +121,9 @@ function runCoverage() {
   );
   const manifestByName = new Map(manifest.map((item) => [item.name, item]));
   const viewSource = fs.readFileSync(viewPath, "utf8");
-  const explorerLabels = getExplorerComponentLabels();
+  const explorerComponentEntries = getExplorerComponentEntries();
+  const explorerLabels = explorerComponentEntries.map((entry) => entry.label);
+  const productImportUsage = getProductImportUsage(manifest);
   const genericComponentPageBlock = getFunctionBlock(
     viewSource,
     "GenericComponentPage",
@@ -106,6 +175,22 @@ function runCoverage() {
 
     return row;
   });
+
+  for (const entry of explorerComponentEntries) {
+    const usages = productImportUsage.get(entry.label) ?? [];
+    if (entry.usage === "used" && usages.length === 0) {
+      failures.push(
+        `${entry.label}: listed under Components but no product imports were found`,
+      );
+    }
+    if (entry.usage === "unused" && usages.length > 0) {
+      failures.push(
+        `${entry.label}: listed under Not used but imported by ${usages.join(
+          ", ",
+        )}`,
+      );
+    }
+  }
 
   const labelsInExplorer = new Set(explorerLabels);
   const notInExplorer = manifest

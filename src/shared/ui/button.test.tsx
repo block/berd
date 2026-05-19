@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { IconArrowNarrowLeft } from "@tabler/icons-react";
 import { Button } from "./button";
 
@@ -58,6 +58,39 @@ describe("Button", () => {
     );
   });
 
+  it("keeps child icons and labels as one inline button row", () => {
+    render(
+      <Button>
+        <IconArrowNarrowLeft data-testid="child-icon" />
+        <span>Settings</span>
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Settings" });
+
+    expect(button.firstElementChild).toBe(screen.getByTestId("child-icon"));
+    expect(button).toHaveClass("inline-flex", "items-center", "gap-2");
+  });
+
+  it("keeps preserve-width child icons and labels in an inline row", () => {
+    render(
+      <Button preserveWidth>
+        <IconArrowNarrowLeft data-testid="child-icon" />
+        <span>Settings</span>
+      </Button>,
+    );
+
+    const activeFeedbackLayer =
+      screen.getAllByTestId("child-icon")[0].parentElement;
+
+    expect(activeFeedbackLayer).toHaveClass(
+      "inline-flex",
+      "items-center",
+      "gap-2",
+      "whitespace-nowrap",
+    );
+  });
+
   it("renders the back variant with its default chevron icon", () => {
     render(
       <Button variant="back" size="sm">
@@ -76,5 +109,75 @@ describe("Button", () => {
     );
     expect(icon).not.toBeNull();
     expect(icon).toHaveClass("size-3");
+  });
+
+  it("disables and marks the button busy while loading", () => {
+    render(
+      <Button
+        feedbackState="loading"
+        loadingLabel="Saving"
+        loadingVisual="text"
+      >
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Saving" });
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveAttribute("data-feedback-state", "loading");
+  });
+
+  it("renders success feedback through the main button", () => {
+    render(
+      <Button feedbackState="success" successLabel="Saved">
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Saved" });
+
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("data-feedback-state", "success");
+  });
+
+  it("renders feedback inside an asChild target", () => {
+    const onClick = vi.fn();
+
+    render(
+      <Button
+        asChild
+        feedbackState="loading"
+        loadingLabel="Opening"
+        onClick={onClick}
+      >
+        <a href="/settings">Settings</a>
+      </Button>,
+    );
+
+    const link = screen.getByRole("link", { name: "Opening" });
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+
+    expect(link).toHaveAttribute("aria-busy", "true");
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    expect(link).toHaveAttribute("data-feedback-state", "loading");
+    expect(link).toHaveClass("pointer-events-none");
+    expect(link.dispatchEvent(event)).toBe(false);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("preserves asChild click handlers when idle", () => {
+    const onClick = vi.fn();
+
+    render(
+      <Button asChild onClick={onClick}>
+        <a href="#settings">Settings</a>
+      </Button>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "Settings" }));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
   });
 });

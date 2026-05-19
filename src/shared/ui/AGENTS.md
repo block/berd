@@ -18,6 +18,13 @@ Use the primitives in `src/shared/ui/` as the default way to build interface ele
 - For icon-only actions, use the `icon-*` sizes instead of text button sizes.
 - For active icon-only buttons, prefer native hover via `title` plus `aria-label`.
 - Reserve custom `Tooltip` for disabled controls or richer explanatory content.
+- Use `Button` for async action feedback too. Prefer its `feedbackState`,
+  `loadingLabel`, `successLabel`, `errorLabel`, `loadingVisual`, and
+  `preserveWidth` props over creating a separate async button wrapper or
+  hand-placing spinners in feature code.
+- When combining async feedback with `asChild`, keep the visible label inside
+  the slotted child so `Button` can swap it with loading, success, or error
+  feedback.
 
 ### Ghost icon buttons
 
@@ -52,4 +59,3 @@ Before writing custom classes in a feature, ask:
 1. Can an existing shared component already do this?
 2. Should this become a shared variant or prop?
 3. Will another screen likely need the same pattern?
-

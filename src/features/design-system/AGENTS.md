@@ -46,6 +46,29 @@ When populating a component page:
   changes disabled, invalid, open, selected, or destructive state, the token
   rows should describe that state.
 
+## Playground Control Heuristics
+
+Playground controls should help designers inspect meaningful component behavior,
+not turn the preview into a remote-controlled demo.
+
+- Prefer controls for props, modes, composition choices, and states that cannot
+  be easily inspected by directly interacting with the preview.
+- Do not add a control for state the user can naturally change in the preview,
+  such as an accordion's open section, unless the state is otherwise hard to
+  reach or compare.
+- Keep controls scoped to real component API or real product states. Do not
+  invent visual variants just to fill the control panel.
+- Do not add scenario/content presets when they only swap demo copy. Add them
+  only when each preset exposes a distinct component behavior, layout stress, or
+  product state.
+- Hide controls when they do not apply to the selected mode instead of showing a
+  disabled control with unclear meaning.
+- Remove impossible options when another control changes the valid state space.
+  For example, if a single accordion cannot collapse, the open-section choices
+  should not include `None`.
+- Use the smallest set of controls that explains the component. A strong page
+  usually exposes 3-6 high-signal controls rather than every possible state.
+
 ## Token Table Rules
 
 - Color rows answer: what background, text/icon, and border color is visible for

@@ -5,6 +5,7 @@ import { IconArrowLeft } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
+import { Spinner } from "@/shared/ui/spinner";
 
 const buttonVariants = cva(
   "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-left text-sm font-normal transition-colors disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -132,6 +133,26 @@ type ButtonIconProps = {
   style?: React.CSSProperties;
 };
 
+export type ButtonFeedbackState = "idle" | "loading" | "success" | "error";
+
+type ButtonLoadingVisual = "text" | "spinner" | "spinnerText";
+
+function getButtonSpinnerClass(
+  size: VariantProps<typeof buttonVariants>["size"],
+) {
+  switch (size) {
+    case "xs":
+    case "sm":
+    case "icon-xs":
+      return "size-3";
+    case "lg":
+    case "icon-lg":
+      return "size-4";
+    default:
+      return "size-3.5";
+  }
+}
+
 function hasExplicitIconDimensions(icon: React.ReactElement<ButtonIconProps>) {
   return (
     icon.props.size !== undefined ||
@@ -176,6 +197,13 @@ export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
     asChild?: boolean;
     leftIcon?: React.ReactNode;
     rightIcon?: React.ReactNode;
+    feedbackState?: ButtonFeedbackState;
+    loadingLabel?: React.ReactNode;
+    successLabel?: React.ReactNode;
+    errorLabel?: React.ReactNode;
+    loadingDelayMs?: number;
+    loadingVisual?: ButtonLoadingVisual;
+    preserveWidth?: boolean;
   };
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
@@ -188,15 +216,134 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       leftIcon,
       rightIcon,
       children,
+      feedbackState = "idle",
+      loadingLabel = "Loading...",
+      successLabel,
+      errorLabel,
+      loadingDelayMs = 0,
+      loadingVisual = "spinnerText",
+      preserveWidth = false,
+      disabled,
+      onClick,
       ...props
     },
     ref,
   ) => {
+    const [displayStatus, setDisplayStatus] =
+      React.useState<ButtonFeedbackState>(feedbackState);
     const Comp = asChild ? Slot : "button";
+    const childContent =
+      asChild &&
+      React.isValidElement<{ children?: React.ReactNode }>(children) &&
+      children.type !== React.Fragment
+        ? children.props.children
+        : children;
     const resolvedLeftIcon =
       variant === "back"
         ? (leftIcon ?? <IconArrowLeft aria-hidden="true" />)
         : leftIcon;
+    const isLoading = feedbackState === "loading";
+    const resolvedDisabled = disabled || isLoading;
+    const spinnerClass = getButtonSpinnerClass(size);
+    const labels = {
+      idle: childContent,
+      loading: loadingLabel,
+      success: successLabel ?? childContent,
+      error: errorLabel ?? childContent,
+    } satisfies Record<ButtonFeedbackState, React.ReactNode>;
+    const statusesToRender = preserveWidth
+      ? (["idle", "loading", "success", "error"] as const)
+      : ([displayStatus] as const);
+    const hasFeedbackContent = feedbackState !== "idle" || preserveWidth;
+
+    React.useEffect(() => {
+      if (feedbackState !== "loading") {
+        setDisplayStatus(feedbackState);
+        return;
+      }
+
+      if (loadingDelayMs <= 0) {
+        setDisplayStatus("loading");
+        return;
+      }
+
+      const timer = window.setTimeout(() => {
+        setDisplayStatus("loading");
+      }, loadingDelayMs);
+
+      return () => window.clearTimeout(timer);
+    }, [feedbackState, loadingDelayMs]);
+
+    function renderStatusContent(
+      targetStatus: ButtonFeedbackState,
+      isActive: boolean,
+    ) {
+      if (targetStatus === "loading") {
+        if (loadingVisual === "spinner") {
+          return isActive ? (
+            <>
+              <Spinner className={spinnerClass} aria-hidden="true" />
+              <span className="sr-only">{labels.loading}</span>
+            </>
+          ) : (
+            <span className={cn("inline-block shrink-0", spinnerClass)} />
+          );
+        }
+
+        if (loadingVisual === "spinnerText") {
+          return (
+            <>
+              {isActive ? (
+                <Spinner className={spinnerClass} aria-hidden="true" />
+              ) : (
+                <span className={cn("inline-block shrink-0", spinnerClass)} />
+              )}
+              <span>{labels.loading}</span>
+            </>
+          );
+        }
+      }
+
+      return labels[targetStatus];
+    }
+
+    const statusContent = preserveWidth ? (
+      <span className="inline-grid items-center justify-items-center">
+        {statusesToRender.map((targetStatus) => (
+          <span
+            key={targetStatus}
+            aria-hidden={targetStatus !== displayStatus}
+            className={cn(
+              "inline-flex items-center justify-center gap-2 whitespace-nowrap [grid-area:1/1] transition-opacity",
+              targetStatus === displayStatus
+                ? "opacity-100"
+                : "pointer-events-none opacity-0",
+            )}
+          >
+            {renderStatusContent(targetStatus, targetStatus === displayStatus)}
+          </span>
+        ))}
+      </span>
+    ) : (
+      renderStatusContent(displayStatus, true)
+    );
+    const buttonContent = hasFeedbackContent ? statusContent : children;
+    const asChildContent =
+      asChild && hasFeedbackContent
+        ? React.isValidElement<{ children?: React.ReactNode }>(children) &&
+          children.type !== React.Fragment
+          ? React.cloneElement(children, undefined, statusContent)
+          : children
+        : children;
+    function handleClick(event: React.MouseEvent<HTMLButtonElement>) {
+      if (resolvedDisabled) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      onClick?.(event);
+    }
 
     return (
       <Comp
@@ -208,24 +355,33 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           size: size ?? "default",
           props: {
             asChild,
-            disabled: props.disabled,
+            disabled: resolvedDisabled,
             leftIcon: Boolean(resolvedLeftIcon),
             rightIcon: Boolean(rightIcon),
+            feedbackState,
           },
           customClassName:
             typeof className === "string" ? className : undefined,
         })}
         data-slot="button"
-        className={cn(buttonVariants({ variant, size, className }))}
+        data-feedback-state={feedbackState}
+        aria-busy={isLoading}
+        aria-disabled={asChild && resolvedDisabled ? true : undefined}
+        disabled={resolvedDisabled}
+        className={cn(
+          buttonVariants({ variant, size, className }),
+          asChild && resolvedDisabled && "pointer-events-none",
+        )}
+        onClick={handleClick}
         ref={ref}
         {...props}
       >
         {asChild ? (
-          children
+          asChildContent
         ) : (
           <>
             {renderButtonIcon(resolvedLeftIcon, "button-left-icon", size)}
-            {children}
+            {buttonContent}
             {renderButtonIcon(rightIcon, "button-right-icon", size)}
           </>
         )}

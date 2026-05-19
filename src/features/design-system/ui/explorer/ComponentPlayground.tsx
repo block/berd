@@ -17,6 +17,7 @@ type SelectControl = {
   label: string;
   type: "select";
   value: string;
+  disabled?: boolean;
   options: Array<{ label: string; value: string }>;
   onChange: (value: string) => void;
 };
@@ -94,8 +95,17 @@ function PlaygroundControlField({ control }: { control: PlaygroundControl }) {
         >
           {control.label}
         </Label>
-        <Select value={control.value} onValueChange={control.onChange}>
-          <SelectTrigger id={controlId} className="w-full" size="sm">
+        <Select
+          value={control.value}
+          onValueChange={control.onChange}
+          disabled={control.disabled}
+        >
+          <SelectTrigger
+            id={controlId}
+            className="w-full"
+            size="sm"
+            disabled={control.disabled}
+          >
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

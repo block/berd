@@ -144,16 +144,6 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
-    name: "Async Button",
-    source: "src/shared/ui/async-button.tsx",
-    exports: ["AsyncButton", "AsyncButtonState"],
-    slots: [],
-    cva: [],
-    tokenClasses: [],
-    stateClasses: [],
-    sourceTokenClasses: [],
-  },
-  {
     name: "Avatar",
     source: "src/shared/ui/avatar.tsx",
     exports: ["Avatar", "AvatarFallback", "AvatarImage"],
@@ -313,7 +303,7 @@ export const designSystemComponentManifest = [
   {
     name: "Button",
     source: "src/shared/ui/button.tsx",
-    exports: ["Button", "ButtonProps", "buttonVariants"],
+    exports: ["Button", "ButtonFeedbackState", "ButtonProps", "buttonVariants"],
     slots: ["button"],
     cva: [
       {

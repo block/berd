@@ -6,6 +6,7 @@ import {
 } from "@tabler/icons-react";
 import { Plus, Search } from "lucide-react";
 
+import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
   isLightTheme,
@@ -17,6 +18,7 @@ import {
   Accordion,
   AccordionContent,
   AccordionItem,
+  AccordionSectionTrigger,
   AccordionTrigger,
 } from "@/shared/ui/accordion";
 import {
@@ -31,7 +33,6 @@ import {
   AlertDialogTrigger,
 } from "@/shared/ui/alert-dialog";
 import { AspectRatio } from "@/shared/ui/aspect-ratio";
-import { AsyncButton } from "@/shared/ui/async-button";
 import { Avatar, AvatarFallback } from "@/shared/ui/avatar";
 import { Badge } from "@/shared/ui/badge";
 import {
@@ -42,7 +43,7 @@ import {
   BreadcrumbPage as BreadcrumbCurrentPage,
   BreadcrumbSeparator,
 } from "@/shared/ui/breadcrumb";
-import { Button } from "@/shared/ui/button";
+import { Button, buttonVariants } from "@/shared/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/shared/ui/button-group";
 import { Calendar } from "@/shared/ui/calendar";
 import { Carousel, CarouselContent, CarouselItem } from "@/shared/ui/carousel";
@@ -177,7 +178,9 @@ import { Toggle } from "@/shared/ui/toggle";
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
+  DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS,
   DESIGN_SYSTEM_COMPONENT_SECTIONS,
+  DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "./designSystemSections";
 import { ComponentPlayground } from "./explorer/ComponentPlayground";
@@ -186,6 +189,12 @@ type ButtonVariant = NonNullable<
   React.ComponentProps<typeof Button>["variant"]
 >;
 type ButtonSize = NonNullable<React.ComponentProps<typeof Button>["size"]>;
+type ButtonFeedbackState = NonNullable<
+  React.ComponentProps<typeof Button>["feedbackState"]
+>;
+type ButtonLoadingVisual = NonNullable<
+  React.ComponentProps<typeof Button>["loadingVisual"]
+>;
 type BadgeVariant = NonNullable<React.ComponentProps<typeof Badge>["variant"]>;
 type ButtonGroupOrientation = NonNullable<
   React.ComponentProps<typeof ButtonGroup>["orientation"]
@@ -205,6 +214,11 @@ type ToggleGroupSize = NonNullable<
 type ToggleGroupSelectionType = "single" | "multiple";
 type AlertVariant = "default" | "destructive";
 type DropdownMenuItemVariant = "default" | "destructive";
+type AccordionTriggerStyle = "default" | "section";
+type AccordionBehavior = "single" | "multiple";
+type AccordionIndicatorPosition = "start" | "end" | "none";
+type AlertDialogActionTone = "default" | "destructive";
+type AlertDialogDescriptionLength = "short" | "detailed" | "long";
 type ManifestItem = (typeof designSystemComponentManifest)[number];
 
 const componentPageDescriptions: Partial<Record<string, string>> = {
@@ -214,8 +228,6 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
     "Blocking confirmation surfaces where modal structure, copy hierarchy, and action placement need to stay consistent.",
   "Aspect Ratio":
     "A layout primitive for fixed-ratio media and previews that should resize predictably across containers.",
-  "Async Button":
-    "A stateful Button wrapper for pending, success, and error feedback without layout shift.",
   Avatar:
     "Compact identity marks for people, agents, and entities, including fallback behavior.",
   Breadcrumb:
@@ -248,7 +260,7 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
     "File-specific action menu composition for copying paths and related file operations.",
   Form: "Form composition primitives that connect fields, labels, descriptions, and validation messages.",
   "Goose Logo":
-    "Brand mark rendering for places where the product identity needs to appear as UI.",
+    "Animated brand mark wrapper around GooseIcon. The sidebar uses GooseIcon directly, so this wrapper currently has no product imports.",
   "Hover Card":
     "Hover-triggered supporting information with popover surface and motion tokens.",
   "Image Lightbox":
@@ -335,6 +347,59 @@ const scrollAreaPreviewRows = [
   "Scroll row 7",
   "Scroll row 8",
 ];
+const accordionItems = [
+  {
+    value: "first",
+    title: "Component anatomy",
+    meta: "4 slots",
+    content:
+      "Trigger, item, content, and root slots keep disclosure structure predictable.",
+  },
+  {
+    value: "second",
+    title: "State behavior",
+    meta: "Radix state",
+    content:
+      "Open, closed, focus-visible, hover, and disabled states are surfaced through data attributes and shared tokens.",
+  },
+  {
+    value: "third",
+    title: "Longer content",
+    meta: "Wrapping",
+    content:
+      "Use this row to check content spacing, animation rhythm, and how the trigger alignment holds when the panel carries more explanatory copy.",
+  },
+] as const;
+const accordionTriggerStyleOptions = [
+  { label: "Default trigger", value: "default" },
+  { label: "Section trigger", value: "section" },
+] satisfies Array<{ label: string; value: AccordionTriggerStyle }>;
+const accordionBehaviorOptions = [
+  { label: "Single open", value: "single" },
+  { label: "Multiple open", value: "multiple" },
+] satisfies Array<{ label: string; value: AccordionBehavior }>;
+const accordionIndicatorPositionOptions = [
+  { label: "End", value: "end" },
+  { label: "Start", value: "start" },
+  { label: "None", value: "none" },
+] satisfies Array<{ label: string; value: AccordionIndicatorPosition }>;
+const alertDialogCopy = {
+  trigger: "Delete project",
+  title: "Delete project?",
+  shortDescription: "This action permanently deletes the project.",
+  detailedDescription:
+    "This removes the project, its saved context, and any project-specific settings. Existing chat history stays in your archive.",
+  action: "Delete project",
+};
+const alertDialogActionToneOptions = [
+  { label: "Default", value: "default" },
+  { label: "Destructive", value: "destructive" },
+] satisfies Array<{ label: string; value: AlertDialogActionTone }>;
+const alertDialogDescriptionLengthOptions = [
+  { label: "Short", value: "short" },
+  { label: "Detailed", value: "detailed" },
+  { label: "Long wrap", value: "long" },
+] satisfies Array<{ label: string; value: AlertDialogDescriptionLength }>;
 const buttonGroupPlaygroundOptions = [
   { value: "one", label: "Button one" },
   { value: "two", label: "Button two" },
@@ -878,10 +943,13 @@ function getManifestItem(name: string) {
 }
 
 const componentInventory: ManifestItem[] =
-  DESIGN_SYSTEM_COMPONENT_SECTIONS.flatMap((section) => {
+  DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS.flatMap((section) => {
     const item = getManifestItem(section.label);
     return item ? [item] : [];
   });
+const unusedComponentLabels = new Set(
+  DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.map((section) => section.label),
+);
 
 function getCvaVariantValues({
   componentName,
@@ -938,6 +1006,19 @@ const buttonSizeOptions = getComponentVariantOptions<ButtonSize>({
   cvaName: "buttonVariants",
   variantName: "size",
 });
+
+const buttonFeedbackStateOptions = [
+  { label: "idle", value: "idle" },
+  { label: "loading", value: "loading" },
+  { label: "success", value: "success" },
+  { label: "error", value: "error" },
+] satisfies Array<{ label: string; value: ButtonFeedbackState }>;
+
+const buttonLoadingVisualOptions = [
+  { label: "text", value: "text" },
+  { label: "spinner", value: "spinner" },
+  { label: "spinner + text", value: "spinnerText" },
+] satisfies Array<{ label: string; value: ButtonLoadingVisual }>;
 
 const badgeVariantOptions = getComponentVariantOptions<BadgeVariant>({
   componentName: "Badge",
@@ -1248,6 +1329,184 @@ function getButtonTokenDetails({
       {
         anatomy: "Button label",
         size: buttonTextSizeBySize[size],
+        weight: "font-normal",
+      },
+    ],
+  };
+}
+
+function getAccordionTokenDetails({
+  triggerStyle,
+  disabledItem,
+}: {
+  triggerStyle: AccordionTriggerStyle;
+  disabledItem: boolean;
+}): {
+  colorRows: TokenColorRow[];
+  textRows: TokenTextRow[];
+} {
+  return {
+    colorRows: [
+      {
+        anatomy: "Trigger",
+        state: "Default",
+        background: "transparent",
+        textIcon: "--foreground",
+        border: "none",
+      },
+      {
+        anatomy: "Trigger",
+        state: "Focus",
+        background: "transparent",
+        textIcon: "--foreground",
+        border: "--border-focus",
+      },
+      {
+        anatomy: "Indicator",
+        state: "Default",
+        background: "none",
+        textIcon: "--muted-foreground",
+        border: "none",
+      },
+      {
+        anatomy: "Content",
+        state: "Open",
+        background: "transparent",
+        textIcon: "--foreground",
+        border: "none",
+      },
+      ...(disabledItem
+        ? [
+            {
+              anatomy: "Disabled trigger",
+              state: "Disabled",
+              background: "transparent",
+              textIcon: "--foreground / 50%",
+              border: "none",
+            } satisfies TokenColorRow,
+          ]
+        : []),
+    ],
+    textRows: [
+      {
+        anatomy: triggerStyle === "section" ? "Section title" : "Trigger label",
+        size: triggerStyle === "section" ? "text-base" : "text-sm",
+        weight: "font-normal",
+      },
+      ...(triggerStyle === "section"
+        ? [
+            {
+              anatomy: "Section meta",
+              size: "text-xs",
+              weight: "font-light",
+            } satisfies TokenTextRow,
+          ]
+        : []),
+      {
+        anatomy: "Content",
+        size: "text-sm",
+        weight: "font-normal",
+      },
+    ],
+  };
+}
+
+function getAlertDialogDescription(length: AlertDialogDescriptionLength) {
+  if (length === "short") {
+    return alertDialogCopy.shortDescription;
+  }
+
+  if (length === "detailed") {
+    return alertDialogCopy.detailedDescription;
+  }
+
+  return `${alertDialogCopy.detailedDescription} This longer copy checks how the modal handles wrapping, line length, and footer placement when confirmation language needs extra context.`;
+}
+
+function getAlertDialogTokenDetails({
+  actionTone,
+  triggerDisabled,
+}: {
+  actionTone: AlertDialogActionTone;
+  triggerDisabled: boolean;
+}): {
+  colorRows: TokenColorRow[];
+  textRows: TokenTextRow[];
+} {
+  const actionDefault =
+    actionTone === "destructive"
+      ? {
+          background: "--background-danger-strong",
+          textIcon: "--text-on-danger",
+        }
+      : {
+          background: "--background-primary",
+          textIcon: "--text-on-primary",
+        };
+
+  return {
+    colorRows: [
+      {
+        anatomy: "Overlay",
+        state: "Open",
+        background: "black / 50%",
+        textIcon: "none",
+        border: "none",
+      },
+      {
+        anatomy: "Content",
+        state: "Open",
+        background: "--background",
+        textIcon: "--foreground",
+        border: "--border",
+      },
+      {
+        anatomy: "Description",
+        state: "Default",
+        background: "transparent",
+        textIcon: "--muted-foreground",
+        border: "none",
+      },
+      {
+        anatomy: "Cancel action",
+        state: "Default",
+        background: "--background-default",
+        textIcon: "--text-default",
+        border: "--border-input",
+      },
+      {
+        anatomy: "Primary action",
+        state: actionTone === "destructive" ? "Destructive" : "Default",
+        background: actionDefault.background,
+        textIcon: actionDefault.textIcon,
+        border: "none",
+      },
+      ...(triggerDisabled
+        ? [
+            {
+              anatomy: "Trigger",
+              state: "Disabled",
+              background: withDisabledOpacity(actionDefault.background),
+              textIcon: withDisabledOpacity(actionDefault.textIcon),
+              border: "none",
+            } satisfies TokenColorRow,
+          ]
+        : []),
+    ],
+    textRows: [
+      {
+        anatomy: "Title",
+        size: "text-lg",
+        weight: "font-semibold",
+      },
+      {
+        anatomy: "Description",
+        size: "text-sm",
+        weight: "font-normal",
+      },
+      {
+        anatomy: "Action label",
+        size: "text-sm",
         weight: "font-normal",
       },
     ],
@@ -2147,15 +2406,6 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
         16:9 preview
       </div>
     </AspectRatio>
-  ),
-  "Async Button": () => (
-    <AsyncButton
-      type="button"
-      state="pending"
-      idleLabel="Save"
-      pendingLabel="Saving"
-      pendingVisual="spinnerText"
-    />
   ),
   Avatar: () => (
     <Avatar className="size-12">
@@ -3118,12 +3368,22 @@ function OverviewPage() {
         title="Goose design system inventory"
         description="A small internal map of components, theme behavior, token values, and style drift. Component facts now come from a generated manifest."
       />
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-4">
         {[
           [
             String(designSystemComponentManifest.length),
             "UI component files",
             "Generated from src/shared/ui",
+          ],
+          [
+            String(DESIGN_SYSTEM_COMPONENT_SECTIONS.length),
+            "Used components",
+            "Imported outside the explorer",
+          ],
+          [
+            String(DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.length),
+            "Not used",
+            "No product imports found",
           ],
           [
             String(
@@ -3135,7 +3395,6 @@ function OverviewPage() {
             "CVA variant maps",
             "Parsed from class-variance-authority calls",
           ],
-          ["57", "Selectable themes", "Shiki themes converted into app tokens"],
         ].map(([value, label, detail]) => (
           <div
             key={label}
@@ -3158,6 +3417,7 @@ function OverviewPage() {
             <thead className="border-b border-border bg-muted/30 text-xs text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">Component</th>
+                <th className="px-3 py-2 font-medium">Usage</th>
                 <th className="px-3 py-2 font-medium">Variants</th>
                 <th className="px-3 py-2 font-medium">Slots</th>
               </tr>
@@ -3173,6 +3433,19 @@ function OverviewPage() {
                     <span className="mt-0.5 block font-mono text-[11px] font-normal text-muted-foreground">
                       {item.source}
                     </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    <Badge
+                      variant={
+                        unusedComponentLabels.has(item.name)
+                          ? "outline"
+                          : "secondary"
+                      }
+                    >
+                      {unusedComponentLabels.has(item.name)
+                        ? "Not used"
+                        : "Used"}
+                    </Badge>
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">
                     {formatManifestVariants(item)}
@@ -3194,6 +3467,11 @@ function ButtonPage() {
   const [playgroundVariant, setPlaygroundVariant] =
     useState<ButtonVariant>("default");
   const [playgroundSize, setPlaygroundSize] = useState<ButtonSize>("default");
+  const [playgroundFeedbackState, setPlaygroundFeedbackState] =
+    useState<ButtonFeedbackState>("idle");
+  const [playgroundLoadingVisual, setPlaygroundLoadingVisual] =
+    useState<ButtonLoadingVisual>("spinnerText");
+  const [playgroundPreserveWidth, setPlaygroundPreserveWidth] = useState(true);
   const [playgroundLabel, setPlaygroundLabel] = useState("Button");
   const [playgroundDisabled, setPlaygroundDisabled] = useState(false);
   const [playgroundLeftIcon, setPlaygroundLeftIcon] = useState(false);
@@ -3219,6 +3497,12 @@ function ButtonPage() {
             type="button"
             variant={playgroundVariant}
             size={playgroundSize}
+            feedbackState={playgroundFeedbackState}
+            loadingLabel="Saving"
+            successLabel="Saved"
+            errorLabel="Try again"
+            loadingVisual={playgroundLoadingVisual}
+            preserveWidth={playgroundPreserveWidth}
             disabled={playgroundDisabled}
             aria-label={
               playgroundIsIconOnly ? playgroundLabel || "Button" : undefined
@@ -3259,27 +3543,58 @@ function ButtonPage() {
             onChange: (value) => setPlaygroundSize(value as ButtonSize),
           },
           {
+            id: "button-feedback-state",
+            label: "Feedback state",
+            type: "select",
+            value: playgroundFeedbackState,
+            options: buttonFeedbackStateOptions,
+            onChange: (value) =>
+              setPlaygroundFeedbackState(value as ButtonFeedbackState),
+          },
+          ...(playgroundFeedbackState === "loading"
+            ? [
+                {
+                  id: "button-loading-visual",
+                  label: "Loading visual",
+                  type: "select" as const,
+                  value: playgroundLoadingVisual,
+                  options: buttonLoadingVisualOptions,
+                  onChange: (value: string) =>
+                    setPlaygroundLoadingVisual(value as ButtonLoadingVisual),
+                },
+              ]
+            : []),
+          {
             id: "button-label",
             label: playgroundIsIconOnly ? "Accessible label" : "Label",
             type: "text",
             value: playgroundLabel,
             onChange: setPlaygroundLabel,
           },
+          ...(!playgroundIsIconOnly
+            ? [
+                {
+                  id: "button-left-icon",
+                  label: "Left icon",
+                  type: "switch" as const,
+                  checked: playgroundLeftIcon,
+                  onChange: setPlaygroundLeftIcon,
+                },
+                {
+                  id: "button-right-icon",
+                  label: "Right icon",
+                  type: "switch" as const,
+                  checked: playgroundRightIcon,
+                  onChange: setPlaygroundRightIcon,
+                },
+              ]
+            : []),
           {
-            id: "button-left-icon",
-            label: "Left icon",
+            id: "button-preserve-width",
+            label: "Preserve width",
             type: "switch",
-            checked: playgroundLeftIcon,
-            disabled: playgroundIsIconOnly,
-            onChange: setPlaygroundLeftIcon,
-          },
-          {
-            id: "button-right-icon",
-            label: "Right icon",
-            type: "switch",
-            checked: playgroundRightIcon,
-            disabled: playgroundIsIconOnly,
-            onChange: setPlaygroundRightIcon,
+            checked: playgroundPreserveWidth,
+            onChange: setPlaygroundPreserveWidth,
           },
           {
             id: "button-disabled",
@@ -3925,19 +4240,238 @@ function DropdownMenuPage() {
 }
 
 function AccordionPage() {
-  return <GenericComponentPage name="Accordion" />;
+  const [triggerStyle, setTriggerStyle] =
+    useState<AccordionTriggerStyle>("default");
+  const [behavior, setBehavior] = useState<AccordionBehavior>("single");
+  const [allowCollapse, setAllowCollapse] = useState(true);
+  const [disabledItem, setDisabledItem] = useState(false);
+  const [indicatorPosition, setIndicatorPosition] =
+    useState<AccordionIndicatorPosition>("end");
+  const playgroundTokenDetails = getAccordionTokenDetails({
+    triggerStyle,
+    disabledItem,
+  });
+
+  const renderAccordionItems = () =>
+    accordionItems.map((item, index) => (
+      <AccordionItem
+        key={item.value}
+        value={item.value}
+        disabled={disabledItem && index === 1}
+      >
+        {triggerStyle === "section" ? (
+          <AccordionSectionTrigger title={item.title} meta={item.meta} />
+        ) : (
+          <AccordionTrigger indicatorPosition={indicatorPosition}>
+            {item.title}
+          </AccordionTrigger>
+        )}
+        <AccordionContent
+          className={
+            triggerStyle === "section"
+              ? "px-5 text-muted-foreground"
+              : undefined
+          }
+        >
+          {item.content}
+        </AccordionContent>
+      </AccordionItem>
+    ));
+
+  return (
+    <>
+      <PageIntro
+        title="Accordion"
+        description="Disclosure stacks for progressive detail, with behavior, composition, and Radix state exposed in the playground."
+      />
+      <ComponentSpec name="Accordion" />
+
+      <ComponentPlayground
+        description="Control the real Accordion composition across open state, single or multiple behavior, disabled rows, and indicator placement."
+        preview={
+          behavior === "single" ? (
+            <Accordion
+              key={`single-${allowCollapse}`}
+              type="single"
+              collapsible={allowCollapse}
+              defaultValue="first"
+              className={cn(
+                "w-full max-w-xl rounded-md border border-border bg-background",
+                triggerStyle === "default" && "px-4",
+              )}
+            >
+              {renderAccordionItems()}
+            </Accordion>
+          ) : (
+            <Accordion
+              key="multiple"
+              type="multiple"
+              defaultValue={["first"]}
+              className={cn(
+                "w-full max-w-xl rounded-md border border-border bg-background",
+                triggerStyle === "default" && "px-4",
+              )}
+            >
+              {renderAccordionItems()}
+            </Accordion>
+          )
+        }
+        controls={[
+          {
+            id: "accordion-trigger-style",
+            label: "Trigger style",
+            type: "select",
+            value: triggerStyle,
+            options: accordionTriggerStyleOptions,
+            onChange: (value) =>
+              setTriggerStyle(value as AccordionTriggerStyle),
+          },
+          {
+            id: "accordion-behavior",
+            label: "Behavior",
+            type: "select",
+            value: behavior,
+            options: accordionBehaviorOptions,
+            onChange: (value) => setBehavior(value as AccordionBehavior),
+          },
+          ...(behavior === "single"
+            ? [
+                {
+                  id: "accordion-allow-collapse",
+                  label: "Allow collapse",
+                  type: "switch" as const,
+                  checked: allowCollapse,
+                  onChange: setAllowCollapse,
+                },
+              ]
+            : []),
+          {
+            id: "accordion-disabled-item",
+            label: "Disable second item",
+            type: "switch",
+            checked: disabledItem,
+            onChange: setDisabledItem,
+          },
+          ...(triggerStyle === "default"
+            ? [
+                {
+                  id: "accordion-indicator-position",
+                  label: "Indicator position",
+                  type: "select" as const,
+                  value: indicatorPosition,
+                  options: accordionIndicatorPositionOptions,
+                  onChange: (value: string) =>
+                    setIndicatorPosition(value as AccordionIndicatorPosition),
+                },
+              ]
+            : []),
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={playgroundTokenDetails.colorRows}
+            textRows={playgroundTokenDetails.textRows}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function AlertDialogPage() {
-  return <GenericComponentPage name="Alert Dialog" />;
+  const [actionTone, setActionTone] =
+    useState<AlertDialogActionTone>("destructive");
+  const [descriptionLength, setDescriptionLength] =
+    useState<AlertDialogDescriptionLength>("detailed");
+  const [triggerDisabled, setTriggerDisabled] = useState(false);
+  const playgroundTokenDetails = getAlertDialogTokenDetails({
+    actionTone,
+    triggerDisabled,
+  });
+
+  return (
+    <>
+      <PageIntro
+        title="Alert Dialog"
+        description="Blocking confirmation surfaces where modal structure, copy hierarchy, and action placement need to stay consistent."
+      />
+      <ComponentSpec name="Alert Dialog" />
+
+      <ComponentPlayground
+        description="Open the real modal from the trigger, then compare action tone, trigger state, and description length under wrapping pressure."
+        preview={
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant={
+                  actionTone === "destructive" ? "destructive-flat" : "outline"
+                }
+                disabled={triggerDisabled}
+              >
+                {alertDialogCopy.trigger}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>{alertDialogCopy.title}</AlertDialogTitle>
+                <AlertDialogDescription>
+                  {getAlertDialogDescription(descriptionLength)}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  className={
+                    actionTone === "destructive"
+                      ? buttonVariants({ variant: "destructive-flat" })
+                      : undefined
+                  }
+                >
+                  {alertDialogCopy.action}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        }
+        controls={[
+          {
+            id: "alert-dialog-action-tone",
+            label: "Action tone",
+            type: "select",
+            value: actionTone,
+            options: alertDialogActionToneOptions,
+            onChange: (value) => setActionTone(value as AlertDialogActionTone),
+          },
+          {
+            id: "alert-dialog-description-length",
+            label: "Description",
+            type: "select",
+            value: descriptionLength,
+            options: alertDialogDescriptionLengthOptions,
+            onChange: (value) =>
+              setDescriptionLength(value as AlertDialogDescriptionLength),
+          },
+          {
+            id: "alert-dialog-trigger-disabled",
+            label: "Disable trigger",
+            type: "switch",
+            checked: triggerDisabled,
+            onChange: setTriggerDisabled,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={playgroundTokenDetails.colorRows}
+            textRows={playgroundTokenDetails.textRows}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function AspectRatioPage() {
   return <GenericComponentPage name="Aspect Ratio" />;
-}
-
-function AsyncButtonPage() {
-  return <GenericComponentPage name="Async Button" />;
 }
 
 function AvatarPage() {
@@ -4418,8 +4952,6 @@ function renderSection(section: DesignSystemSection) {
       return <AlertDialogPage />;
     case "component-aspect-ratio":
       return <AspectRatioPage />;
-    case "component-async-button":
-      return <AsyncButtonPage />;
     case "component-avatar":
       return <AvatarPage />;
     case "component-button":
