@@ -33,13 +33,6 @@
     "sessionHistory": "Session history",
     "skills": "Skills"
   },
-  "search": {
-    "error": "Message search failed. Showing metadata matches only. Try again.",
-    "loadingMore": "Searching more chats...",
-    "placeholder": "Search chats...",
-    "searchMore": "Search more chats",
-    "searching": "Searching chats..."
-  },
   "sections": {
     "components": "Components",
     "notUsed": "Not used",

@@ -8,11 +8,9 @@ import {
   IconArrowLeft,
   IconPalette,
   IconRobotFace,
-  IconSearch,
   IconSettings,
 } from "@tabler/icons-react";
 import { SkillIcon } from "@/features/skills/ui/SkillIcon";
-import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { GooseIcon } from "@/shared/ui/icons/GooseIcon";
 import { cn } from "@/shared/lib/cn";
 import type { AppView } from "@/app/AppShell";
@@ -37,18 +35,12 @@ import {
   toggleSessionSelection as getToggledSessionSelection,
 } from "@/features/sessions/lib/sessionSelection";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
-import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
-import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarNavItem } from "./SidebarNavItem";
-import { SidebarSearchResults } from "./SidebarSearchResults";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -85,11 +77,6 @@ interface SidebarProps {
   onReorderProject?: (fromId: string, toId: string) => void;
   onNavigate?: (view: AppView) => void;
   onSelectSession?: (sessionId: string) => void;
-  onSelectSearchResult?: (
-    sessionId: string,
-    messageId?: string,
-    query?: string,
-  ) => void;
   activeView?: AppView;
   activeSettingsSection?: SectionId;
   activeDesignSystemSection?: DesignSystemSection;
@@ -99,16 +86,7 @@ interface SidebarProps {
 }
 
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
-const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const MAX_RECENTS = 20;
-type SidebarSectionVisibility = {
-  projects: boolean;
-  recents: boolean;
-};
-const DEFAULT_SECTION_VISIBILITY: SidebarSectionVisibility = {
-  projects: true,
-  recents: true,
-};
 
 type SidebarSessionGroups = {
   byProject: Record<string, SidebarSessionItem[]>;
@@ -177,34 +155,6 @@ function getSidebarSessionGroups(
   };
 }
 
-function getLoadedVisibleSessions(): ChatSession[] {
-  const sessionState = useChatSessionStore.getState();
-  const chatState = useChatStore.getState();
-  return getVisibleSessions(sessionState.sessions, chatState.messagesBySession);
-}
-
-function getLoadedActiveSessions(): ChatSession[] {
-  return getLoadedVisibleSessions().filter((session) => !session.archivedAt);
-}
-
-function validateSectionVisibility(
-  value: unknown,
-  defaults: SidebarSectionVisibility,
-): SidebarSectionVisibility {
-  if (!value || typeof value !== "object") return defaults;
-  const parsed = value as Partial<
-    Record<keyof SidebarSectionVisibility, unknown>
-  >;
-  return {
-    projects:
-      typeof parsed.projects === "boolean"
-        ? parsed.projects
-        : defaults.projects,
-    recents:
-      typeof parsed.recents === "boolean" ? parsed.recents : defaults.recents,
-  };
-}
-
 export function Sidebar({
   collapsed,
   width = SIDE_PANEL_DEFAULT_WIDTH,
@@ -227,7 +177,6 @@ export function Sidebar({
   onReorderProject,
   onNavigate,
   onSelectSession,
-  onSelectSearchResult,
   activeView,
   activeSettingsSection = DEFAULT_SETTINGS_SECTION,
   activeDesignSystemSection = DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -235,9 +184,8 @@ export function Sidebar({
   className,
   projects,
 }: SidebarProps) {
-  const { t, i18n } = useTranslation(["sidebar", "common", "settings"]);
+  const { t } = useTranslation(["sidebar", "common", "settings"]);
   const [expanded, setExpanded] = useState(!collapsed);
-  const searchInputRef = useRef<HTMLInputElement>(null);
   const prevCollapsed = useRef(collapsed);
   const [expandedProjects, setExpandedProjects] = useState<
     Record<string, boolean>
@@ -252,11 +200,6 @@ export function Sidebar({
       return {};
     }
   });
-  const [sectionVisibility, setSectionVisibility] = usePersistedState(
-    SECTION_VISIBILITY_STORAGE_KEY,
-    DEFAULT_SECTION_VISIBILITY,
-    validateSectionVisibility,
-  );
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
@@ -264,12 +207,6 @@ export function Sidebar({
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
   const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
-  const isLoadingMoreSessions = useChatSessionStore(
-    (s) => s.isLoadingMoreSessions,
-  );
-  const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
-  const getPersonaById = useAgentStore((s) => s.getPersonaById);
-  const projectStoreProjects = useProjectStore(selectProjects);
   const projectIds = useMemo(
     () => new Set(projects.map((project) => project.id)),
     [projects],
@@ -340,12 +277,6 @@ export function Sidebar({
   const isSettingsSurface = activeView === "settings";
   const isDesignSystemSurface = activeView === "design-system";
   const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
-  const defaultTitle = t("common:session.defaultTitle");
-  const getDisplayTitle = useCallback(
-    (session: { title: string }) =>
-      getDisplaySessionTitle(session.title, defaultTitle),
-    [defaultTitle],
-  );
   const navItems: readonly {
     id: AppView;
     label: string;
@@ -375,38 +306,6 @@ export function Sidebar({
       getSidebarSessionGroups(visibleSessions, projectIds, sessionStateById),
     [projectIds, sessionStateById, visibleSessions],
   );
-
-  const projectNamesById = useMemo(
-    () =>
-      new Map(
-        projectStoreProjects.map((project) => [project.id, project.name]),
-      ),
-    [projectStoreProjects],
-  );
-  const sidebarResolvers = useMemo(
-    () => ({
-      getPersonaName: (personaId: string) =>
-        getPersonaById(personaId)?.displayName,
-      getProjectName: (projectId: string) => projectNamesById.get(projectId),
-    }),
-    [getPersonaById, projectNamesById],
-  );
-  const sidebarSearch = useSessionSearch({
-    sessions: activeSessions,
-    resolvers: sidebarResolvers,
-    locale: i18n.resolvedLanguage,
-    getDisplayTitle,
-  });
-  const {
-    isSearching: isSidebarSearching,
-    query: sidebarSearchQuery,
-    results: sidebarSearchResults,
-    search: submitSidebarSearch,
-    searchMore: searchMoreLoadedSidebarChats,
-    setQuery: setSidebarSearchQuery,
-    submittedQuery: submittedSidebarSearchQuery,
-    error: sidebarSearchError,
-  } = sidebarSearch;
 
   const activeProjectId = useMemo(() => {
     if (!activeSessionId) return undefined;
@@ -444,45 +343,12 @@ export function Sidebar({
     });
   }, [projectIds]);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "k" && e.metaKey) {
-        e.preventDefault();
-        searchInputRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
-
   const toggleProject = useCallback((projectId: string) => {
     setExpandedProjects((prev) => ({
       ...prev,
       [projectId]: !prev[projectId],
     }));
   }, []);
-  const searchMoreSidebarChats = useCallback(async () => {
-    const state = useChatSessionStore.getState();
-    if (
-      !submittedSidebarSearchQuery ||
-      !state.hasMoreSessions ||
-      state.isLoadingMoreSessions ||
-      isSidebarSearching
-    ) {
-      return;
-    }
-
-    await loadMoreSessions();
-    await searchMoreLoadedSidebarChats(getLoadedActiveSessions());
-  }, [
-    isSidebarSearching,
-    loadMoreSessions,
-    searchMoreLoadedSidebarChats,
-    submittedSidebarSearchQuery,
-  ]);
-  const toggleSection = (section: keyof SidebarSectionVisibility) => {
-    setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
-  };
   const toggleSessionSelection = (sessionId: string, selected: boolean) => {
     setSelectedSessionIds((current) =>
       getToggledSessionSelection({
@@ -505,7 +371,7 @@ export function Sidebar({
       )}
       style={{ width: collapsed ? 54 : width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-background">
+      <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-surface-chrome backdrop-blur-md">
         <div
           className={cn(
             "flex-shrink-0 pt-[8px]",
@@ -541,41 +407,6 @@ export function Sidebar({
               aria-label={t("navigation.main")}
             >
               <div className="relative z-10 space-y-0.5">
-                <div
-                  className={cn(
-                    "mb-3 flex items-center w-full rounded-md transition-all duration-300 ease-out",
-                    collapsed
-                      ? "justify-center p-3 text-foreground"
-                      : "gap-2 border border-border px-2.5 py-1.5 text-xs text-foreground hover:text-foreground hover:bg-transparent",
-                  )}
-                >
-                  <IconSearch className="size-3.5 flex-shrink-0 text-placeholder" />
-                  {!collapsed && (
-                    <input
-                      ref={searchInputRef}
-                      type="text"
-                      enterKeyHint="search"
-                      value={sidebarSearchQuery}
-                      onChange={(e) => setSidebarSearchQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void submitSidebarSearch();
-                        }
-                      }}
-                      placeholder={t("search.placeholder")}
-                      className={cn(
-                        "focus-override appearance-none bg-transparent border-none text-xs flex-1 min-w-0 placeholder:text-placeholder outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
-                        labelTransition,
-                        labelVisible
-                          ? "opacity-100 w-auto"
-                          : "opacity-0 w-0 overflow-hidden",
-                      )}
-                      onClick={(e) => e.stopPropagation()}
-                    />
-                  )}
-                </div>
-
                 <SidebarNavItem
                   testId="nav-home"
                   icon={IconHome}
@@ -607,112 +438,56 @@ export function Sidebar({
                 })}
               </div>
 
-              {!collapsed &&
-                (submittedSidebarSearchQuery ? (
-                  <div className="relative z-10 space-y-2">
-                    {sidebarSearchError && (
-                      <p className="px-1 text-xs text-text-danger">
-                        {t("search.error")}
-                      </p>
-                    )}
-
-                    {isSidebarSearching &&
-                      sidebarSearchResults.length === 0 && (
-                        <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
-                          {t("search.searching")}
-                        </div>
-                      )}
-
-                    {(!isSidebarSearching ||
-                      sidebarSearchResults.length > 0) && (
-                      <SidebarSearchResults
-                        results={sidebarSearchResults}
-                        activeSessionId={activeSessionId}
-                        onSelectResult={(sessionId, messageId) => {
-                          if (messageId) {
-                            onSelectSearchResult?.(
-                              sessionId,
-                              messageId,
-                              submittedSidebarSearchQuery,
-                            );
-                            return;
-                          }
-                          onSelectSession?.(sessionId);
-                        }}
-                        getPersonaName={sidebarResolvers.getPersonaName}
-                        getProjectName={sidebarResolvers.getProjectName}
-                      />
-                    )}
-
-                    {hasMoreSessions && (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="xs"
-                        onClick={() => void searchMoreSidebarChats()}
-                        disabled={isLoadingMoreSessions || isSidebarSearching}
-                        className="h-auto w-full justify-start rounded-md px-3 py-1.5 text-[11px] text-foreground hover:text-foreground"
-                      >
-                        {isLoadingMoreSessions || isSidebarSearching
-                          ? t("search.loadingMore")
-                          : t("search.searchMore")}
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <SidebarProjectsSection
-                    projects={projects}
-                    projectSessions={projectSessions}
-                    hasVisibleChats={activeSessions.length > 0}
-                    expandedProjects={expandedProjects}
-                    toggleProject={toggleProject}
-                    collapsed={collapsed}
-                    labelTransition={labelTransition}
-                    labelVisible={labelVisible}
-                    activeSessionId={activeSessionId}
-                    onNavigate={onNavigate}
-                    onSelectSession={onSelectSession}
-                    onNewChatInProject={onNewChatInProject}
-                    onNewChat={onNewChat}
-                    onCreateProject={onCreateProject}
-                    onEditProject={onEditProject}
-                    onArchiveProject={onArchiveProject}
-                    onArchiveChat={onArchiveChat}
-                    onRenameChat={onRenameChat}
-                    onMarkChatRead={onMarkChatRead}
-                    onMarkChatUnread={onMarkChatUnread}
-                    onMoveToProject={onMoveToProject}
-                    selectedSessionIds={selectedSessionIds}
-                    selectionEnabled={selectedCount > 0}
-                    selectionActionsDisabled={isApplyingSelectionAction}
-                    onSelectionClear={clearSelection}
-                    onSelectionChange={toggleSessionSelection}
-                    onArchiveSelected={requestArchiveSelected}
-                    onMarkSelectedRead={() =>
-                      void applySelectionAction(onMarkChatRead)
-                    }
-                    onMarkSelectedUnread={() =>
-                      void applySelectionAction(onMarkChatUnread)
-                    }
-                    onReorderProject={onReorderProject}
-                    hasMoreSessions={hasMoreSessions}
-                    projectsSectionOpen={sectionVisibility.projects}
-                    recentsSectionOpen={sectionVisibility.recents}
-                    onToggleProjectsSection={() => toggleSection("projects")}
-                    onToggleRecentsSection={() => toggleSection("recents")}
-                  />
-                ))}
+              {!collapsed && (
+                <SidebarProjectsSection
+                  projects={projects}
+                  projectSessions={projectSessions}
+                  hasVisibleChats={activeSessions.length > 0}
+                  expandedProjects={expandedProjects}
+                  toggleProject={toggleProject}
+                  collapsed={collapsed}
+                  labelTransition={labelTransition}
+                  labelVisible={labelVisible}
+                  activeSessionId={activeSessionId}
+                  onNavigate={onNavigate}
+                  onSelectSession={onSelectSession}
+                  onNewChatInProject={onNewChatInProject}
+                  onNewChat={onNewChat}
+                  onCreateProject={onCreateProject}
+                  onEditProject={onEditProject}
+                  onArchiveProject={onArchiveProject}
+                  onArchiveChat={onArchiveChat}
+                  onRenameChat={onRenameChat}
+                  onMarkChatRead={onMarkChatRead}
+                  onMarkChatUnread={onMarkChatUnread}
+                  onMoveToProject={onMoveToProject}
+                  selectedSessionIds={selectedSessionIds}
+                  selectionEnabled={selectedCount > 0}
+                  selectionActionsDisabled={isApplyingSelectionAction}
+                  onSelectionClear={clearSelection}
+                  onSelectionChange={toggleSessionSelection}
+                  onArchiveSelected={requestArchiveSelected}
+                  onMarkSelectedRead={() =>
+                    void applySelectionAction(onMarkChatRead)
+                  }
+                  onMarkSelectedUnread={() =>
+                    void applySelectionAction(onMarkChatUnread)
+                  }
+                  onReorderProject={onReorderProject}
+                  hasMoreSessions={hasMoreSessions}
+                />
+              )}
             </nav>
 
             <div
               className={cn(
-                "absolute inset-x-0 bottom-0 z-20 bg-background",
+                "absolute inset-x-0 bottom-0 z-20 bg-surface-card",
                 "px-1.5 py-1.5",
               )}
             >
               <div
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-background/0 to-background"
+                className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-transparent to-surface-card"
               />
               <Button
                 type="button"
@@ -800,7 +575,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          "px-3 pb-1 pt-4 text-[10px] font-light text-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -829,7 +604,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          "px-3 pb-1 pt-4 text-[10px] font-light text-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -861,7 +636,9 @@ export function Sidebar({
                 )}
               </div>
             </nav>
-            <div className={cn("flex-shrink-0 bg-background", "px-1.5 py-1.5")}>
+            <div
+              className={cn("flex-shrink-0 bg-surface-card", "px-1.5 py-1.5")}
+            >
               <Button
                 type="button"
                 variant="ghost"

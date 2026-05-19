@@ -6,6 +6,10 @@ This file documents the reskin foundation tokens added before any product
 surface rewrites. The intent is to make later PRs consume named design-system
 decisions instead of introducing one-off colors, radii, or background recipes.
 
+The reskin tokens should preserve the visual values from the `ui-reskin`
+direction unless Morgan explicitly approves a token redesign. Keep architecture
+fixes, such as the theme selector contract, separate from visual token changes.
+
 ## Layers
 
 1. Primitives live in `@theme` as constant `--color-*` values.
@@ -47,6 +51,10 @@ says light and another says dark.
 | `--surface-composer` | `bg-surface-composer` | Translucent composer surfaces. |
 | `--surface-button` | `bg-surface-button` | Filled neutral buttons. |
 | `--surface-install` | `bg-surface-install` | Install/setup surfaces. |
+
+Current light values intentionally use a soft gray canvas (`#f5f5f5`),
+translucent white chrome, and gray-50 tiles. Current dark values intentionally
+invert to a near-black canvas, translucent black chrome, and gray-800 surfaces.
 
 `--backdrop-composer-glass` is a shared backdrop-filter recipe for glassy
 composer surfaces. Use it only where a component already needs a custom

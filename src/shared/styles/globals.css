@@ -118,35 +118,26 @@
   --status-deleted: #dc2626;
   --status-modified: #ca8a04;
 
-  /* Reskin foundation tokens. These are additive aliases for upcoming surfaces,
-     so existing app behavior keeps using the older semantic tokens until each
-     product area is moved intentionally. */
-  --brand: hsl(var(--primary));
-  --brand-foreground: hsl(var(--primary-foreground));
+  /* Reskin foundation tokens. These carry the visual target from the reskin
+     branch while each product area adopts them intentionally. */
+  --brand: var(--color-gray-900);
+  --brand-foreground: var(--color-white);
 
-  --canvas-base: hsl(var(--background));
-  --canvas-project-tint: color-mix(
-    in oklab,
-    hsl(var(--primary)) 8%,
-    hsl(var(--background))
-  );
-  --surface-chrome: color-mix(in srgb, hsl(var(--background)) 80%, transparent);
-  --surface-card: hsl(var(--card));
-  --surface-card-soft: color-mix(in srgb, hsl(var(--card)) 40%, transparent);
-  --surface-overlay: hsl(var(--popover));
-  --surface-tile: hsl(var(--muted));
-  --surface-composer: color-mix(
-    in srgb,
-    hsl(var(--background)) 20%,
-    transparent
-  );
-  --surface-button: hsl(var(--muted));
+  --canvas-base: #f5f5f5;
+  --canvas-project-tint: #d6dde7;
+  --surface-chrome: rgba(255, 255, 255, 0.8);
+  --surface-card: var(--color-white);
+  --surface-card-soft: rgba(255, 255, 255, 0.4);
+  --surface-overlay: var(--color-white);
+  --surface-tile: var(--color-gray-50);
+  --surface-composer: color-mix(in srgb, var(--color-white) 20%, transparent);
+  --surface-button: var(--color-gray-50);
   --surface-install: var(--canvas-base);
   --backdrop-composer-glass: blur(24px) saturate(180%) brightness(1.05);
   --project-tint: transparent;
 
   --chip-file-bg: var(--surface-tile);
-  --chip-file-fg: hsl(var(--muted-foreground));
+  --chip-file-fg: var(--color-gray-600);
   --chip-agent-bg: color-mix(in oklab, var(--color-blue-200) 18%, transparent);
   --chip-agent-fg: var(--color-blue-700);
   --chip-skill-bg: color-mix(
@@ -162,28 +153,16 @@
   );
   --chip-automation-fg: var(--color-green-700);
 
-  --text-subtle: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 80%,
-    hsl(var(--foreground))
-  );
-  --text-title: hsl(var(--foreground));
-  --text-breadcrumb-separator: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 70%,
-    transparent
-  );
+  --text-subtle: var(--color-gray-600);
+  --text-title: #19191a;
+  --text-breadcrumb-separator: #afafaf;
   --text-placeholder-composer: color-mix(
     in oklab,
-    hsl(var(--foreground)) 35%,
+    var(--color-black) 35%,
     transparent
   );
   --clock-face: #1c1c1c;
-  --dot-color-base: color-mix(
-    in oklab,
-    hsl(var(--foreground)) 18%,
-    transparent
-  );
+  --dot-color-base: #cbcbcb;
   --dot-size: 1px;
   --dot-spacing: 24px;
 
@@ -383,30 +362,22 @@
   --input: 0 0% 18%;
   --ring: 0 0% 98%;
 
-  --brand: hsl(var(--primary));
-  --brand-foreground: hsl(var(--primary-foreground));
+  --brand: var(--color-white);
+  --brand-foreground: var(--color-black);
 
-  --canvas-base: hsl(var(--background));
-  --canvas-project-tint: color-mix(
-    in oklab,
-    hsl(var(--primary)) 8%,
-    hsl(var(--background))
-  );
-  --surface-chrome: color-mix(in srgb, hsl(var(--background)) 80%, transparent);
-  --surface-card: hsl(var(--card));
-  --surface-card-soft: color-mix(in srgb, hsl(var(--card)) 8%, transparent);
-  --surface-overlay: hsl(var(--popover));
-  --surface-tile: hsl(var(--muted));
-  --surface-composer: color-mix(
-    in srgb,
-    hsl(var(--foreground)) 6%,
-    transparent
-  );
-  --surface-button: hsl(var(--muted));
+  --canvas-base: #1a1a1a;
+  --canvas-project-tint: #1a1d22;
+  --surface-chrome: rgba(0, 0, 0, 0.8);
+  --surface-card: var(--color-gray-800);
+  --surface-card-soft: rgba(255, 255, 255, 0.08);
+  --surface-overlay: var(--color-gray-800);
+  --surface-tile: var(--color-gray-800);
+  --surface-composer: color-mix(in srgb, var(--color-white) 6%, transparent);
+  --surface-button: var(--color-gray-800);
   --surface-install: var(--canvas-base);
 
-  --chip-file-bg: var(--surface-tile);
-  --chip-file-fg: hsl(var(--muted-foreground));
+  --chip-file-bg: var(--color-gray-800);
+  --chip-file-fg: var(--color-gray-400);
   --chip-agent-bg: color-mix(in oklab, var(--color-blue-100) 10%, transparent);
   --chip-agent-fg: var(--color-blue-100);
   --chip-skill-bg: color-mix(
@@ -422,27 +393,15 @@
   );
   --chip-automation-fg: var(--color-green-100);
 
-  --text-subtle: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 80%,
-    hsl(var(--foreground))
-  );
-  --text-title: hsl(var(--foreground));
-  --text-breadcrumb-separator: color-mix(
-    in srgb,
-    hsl(var(--muted-foreground)) 70%,
-    transparent
-  );
+  --text-subtle: var(--color-gray-400);
+  --text-title: var(--color-white);
+  --text-breadcrumb-separator: var(--color-gray-400);
   --text-placeholder-composer: color-mix(
     in oklab,
-    hsl(var(--foreground)) 35%,
+    var(--color-white) 35%,
     transparent
   );
-  --dot-color-base: color-mix(
-    in oklab,
-    hsl(var(--foreground)) 18%,
-    transparent
-  );
+  --dot-color-base: rgba(255, 255, 255, 0.12);
 
   /* semantic backgrounds */
   --background-default: hsl(var(--background));

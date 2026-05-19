@@ -33,13 +33,6 @@
     "sessionHistory": "Historial de sesiones",
     "skills": "Habilidades"
   },
-  "search": {
-    "error": "La búsqueda de mensajes falló. Mostrando solo coincidencias de metadatos. Inténtalo de nuevo.",
-    "loadingMore": "Buscando más chats...",
-    "placeholder": "Buscar chats...",
-    "searchMore": "Buscar más chats",
-    "searching": "Buscando chats..."
-  },
   "sections": {
     "components": "Componentes",
     "notUsed": "Sin uso",

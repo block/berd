@@ -25,7 +25,6 @@ let mockHasMoreSessions = false;
 let mockIsLoadingMoreSessions = false;
 let mockSessionPageCursor: string | null = null;
 const mockLoadMoreSessions = vi.fn();
-const mockAcpSearchSessions = vi.fn();
 
 function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   return {
@@ -100,10 +99,6 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
   ),
 }));
 
-vi.mock("@/shared/api/acp", () => ({
-  acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
-}));
-
 vi.mock("@/features/chat/stores/chatSessionStore", () => ({
   getVisibleSessions: (sessions: typeof mockSessions) =>
     sessions.filter((session) => session.messageCount > 0),
@@ -128,20 +123,6 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
   ),
 }));
 
-vi.mock("@/features/agents/stores/agentStore", () => ({
-  useAgentStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      getPersonaById: () => undefined,
-    }),
-}));
-
-vi.mock("@/features/projects/stores/projectStore", () => ({
-  useProjectStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      projects: [],
-    }),
-}));
-
 vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
   isDesignSystemExplorerEnabled: () => designSystemExplorer.isEnabled(),
 }));
@@ -153,8 +134,6 @@ describe("Sidebar", () => {
     mockIsLoadingMoreSessions = false;
     mockSessionPageCursor = null;
     mockLoadMoreSessions.mockReset();
-    mockAcpSearchSessions.mockReset();
-    mockAcpSearchSessions.mockResolvedValue([]);
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
   });
@@ -418,8 +397,7 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
   });
 
-  it("collapses and expands the recents section", async () => {
-    const user = userEvent.setup();
+  it("shows the recents section without a collapsible section header", () => {
     seedSessions({
       id: "session-1",
       title: "Recovered Session",
@@ -429,13 +407,10 @@ describe("Sidebar", () => {
 
     renderSidebar();
 
-    const recentsHeader = screen.getByRole("button", { name: /chats/i });
-    expect(screen.getByText("Recovered Session")).toBeInTheDocument();
-
-    await user.click(recentsHeader);
-    expect(screen.queryByText("Recovered Session")).not.toBeInTheDocument();
-
-    await user.click(recentsHeader);
+    expect(
+      screen.queryByRole("button", { name: /^chats$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Chats")).toBeInTheDocument();
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 

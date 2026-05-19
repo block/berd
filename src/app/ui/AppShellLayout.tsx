@@ -29,7 +29,7 @@ export function AppShellLayout({
   topBar,
 }: AppShellLayoutProps) {
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground">
       <TopBar {...topBar} />
 
       <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">
@@ -47,10 +47,10 @@ export function AppShellLayout({
         <div
           onMouseDown={onResizeStart}
           onDoubleClick={onResizeDoubleClick}
-          className="flex-shrink-0 h-full cursor-col-resize group flex items-center justify-center"
+          className="group flex h-full flex-shrink-0 cursor-col-resize items-center justify-center"
           style={{ width: resizeHandleWidth }}
         >
-          <div className="w-px h-8 rounded-full bg-transparent group-hover:bg-border transition-colors" />
+          <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
         </div>
 
         <main className="min-h-0 min-w-0 flex-1">{children}</main>

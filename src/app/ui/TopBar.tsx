@@ -70,7 +70,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "flex h-[var(--spacing-app-top-bar)] items-center bg-background/80 backdrop-blur-sm",
+        "flex h-[var(--spacing-app-top-bar)] items-center bg-transparent",
         className,
       )}
     >
