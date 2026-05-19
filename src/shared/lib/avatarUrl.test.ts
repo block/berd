@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { isRemoteAvatarUrl, normalizeAvatarUrl } from "./avatarUrl";
+import {
+  isRemoteAvatarUrl,
+  isSupportedAvatarUrl,
+  normalizeAvatarRef,
+  normalizeAvatarUrl,
+  resolveAvatarMedia,
+  resolveAvatarSrc,
+} from "./avatarUrl";
 
 describe("avatarUrl", () => {
   it("accepts http and https avatar URLs", () => {
@@ -7,6 +14,25 @@ describe("avatarUrl", () => {
     expect(normalizeAvatarUrl(" http://example.test/avatar.png ")).toBe(
       "http://example.test/avatar.png",
     );
+  });
+
+  it("accepts known bundled avatar refs", () => {
+    expect(isSupportedAvatarUrl("app-avatar:gloopy-1")).toBe(true);
+    expect(normalizeAvatarUrl(" app-avatar:gloopy-1 ")).toBe(
+      "app-avatar:gloopy-1",
+    );
+    expect(normalizeAvatarRef("app-avatar:gloopy-2")).toBe(
+      "app-avatar:gloopy-2",
+    );
+    expect(resolveAvatarSrc("app-avatar:gloopy-1")).toContain("gloopy-1.webm");
+    expect(resolveAvatarMedia("app-avatar:gloopy-1")).toMatchObject({
+      mediaType: "video",
+    });
+  });
+
+  it("rejects unknown bundled avatar refs", () => {
+    expect(normalizeAvatarUrl("app-avatar:unknown")).toBeUndefined();
+    expect(resolveAvatarSrc("app-avatar:../gloopy-1")).toBeUndefined();
   });
 
   it("rejects unsafe avatar URL schemes and credentials", () => {
@@ -19,5 +45,18 @@ describe("avatarUrl", () => {
     expect(
       normalizeAvatarUrl("https://user:pass@example.test/avatar.png"),
     ).toBeUndefined();
+  });
+
+  it("rejects local paths and traversal-like strings", () => {
+    expect(normalizeAvatarUrl("/tmp/avatar.png")).toBeUndefined();
+    expect(normalizeAvatarUrl("C:\\tmp\\avatar.png")).toBeUndefined();
+    expect(normalizeAvatarUrl("../avatar.png")).toBeUndefined();
+    expect(
+      normalizeAvatarUrl("https://example.test/../avatar.png"),
+    ).toBeUndefined();
+    expect(
+      normalizeAvatarUrl("https://example.test/%2e%2e/avatar.png"),
+    ).toBeUndefined();
+    expect(normalizeAvatarUrl("gloopy-1.png")).toBeUndefined();
   });
 });

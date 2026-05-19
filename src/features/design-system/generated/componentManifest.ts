@@ -144,6 +144,16 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Avatar Media",
+    source: "src/shared/ui/avatar-media.tsx",
+    exports: ["AvatarMedia"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Avatar",
     source: "src/shared/ui/avatar.tsx",
     exports: ["Avatar", "AvatarFallback", "AvatarImage"],

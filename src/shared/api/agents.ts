@@ -52,6 +52,16 @@ function propertyToAvatar(value: unknown): Avatar | null {
   return normalizeAvatarUrl(value) ?? null;
 }
 
+function avatarToUpdateProperty(
+  avatar: Avatar | null | undefined,
+): string | null | undefined {
+  if (avatar === undefined) {
+    return undefined;
+  }
+
+  return avatarToProperty(avatar) ?? null;
+}
+
 function propertyToString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
@@ -101,7 +111,11 @@ function mergedPersonaProperties(
 
   applyOptionalProperty(properties, "provider", request.provider);
   applyOptionalProperty(properties, "model", request.model);
-  applyOptionalProperty(properties, "avatar", avatarToProperty(request.avatar));
+  applyOptionalProperty(
+    properties,
+    "avatar",
+    avatarToUpdateProperty(request.avatar),
+  );
 
   return properties;
 }
@@ -206,7 +220,7 @@ function serializePersonaMarkdown(source: AgentSourceEntry): ExportResult {
     frontmatter.model = model;
   }
 
-  const avatar = propertyToString(properties?.avatar);
+  const avatar = normalizeAvatarUrl(properties?.avatar);
   if (avatar) {
     frontmatter.avatar = avatar;
   }

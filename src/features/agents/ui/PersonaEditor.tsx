@@ -1,17 +1,28 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useId } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Pencil, Trash2 } from "lucide-react";
+import {
+  avatarCollections,
+  avatarRef,
+  getAvatarCatalogEntry,
+  isBundledAvatarRef,
+} from "@/shared/avatars/catalog";
+import type {
+  AvatarCatalogEntry,
+  AvatarCollection,
+} from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
 import {
   Avatar as AvatarRoot,
   AvatarImage,
   AvatarFallback,
 } from "@/shared/ui/avatar";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import {
   Dialog,
   DialogContent,
@@ -82,9 +93,17 @@ export function PersonaEditor({
     (s) => s.mergeEntries,
   );
   const { getEntry, getModelsForAgent } = useProviderInventory();
+  const displayNameId = useId();
+  const avatarUrlId = useId();
+  const avatarUrlErrorId = useId();
+  const systemPromptId = useId();
 
   const [displayName, setDisplayName] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarValue, setAvatarValue] = useState("");
+  const [avatarChanged, setAvatarChanged] = useState(false);
+  const [selectedAvatarCollectionId, setSelectedAvatarCollectionId] = useState<
+    string | null
+  >(null);
   const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [provider, setProvider] = useState<ProviderType | "">("");
@@ -130,27 +149,35 @@ export function PersonaEditor({
   useEffect(() => {
     if (isOpen && persona) {
       setDisplayName(persona.displayName);
-      setAvatarUrl(normalizeAvatarUrl(persona.avatar) ?? "");
+      setAvatarValue(normalizeAvatarUrl(persona.avatar) ?? "");
       setSystemPrompt(persona.systemPrompt);
       setProvider(persona.provider ?? "");
       setModel(persona.model ?? "");
     } else if (isOpen) {
       setDisplayName("");
-      setAvatarUrl("");
+      setAvatarValue("");
       setSystemPrompt("");
       setProvider("");
       setModel("");
     }
+    setAvatarChanged(false);
+    setSelectedAvatarCollectionId(null);
     setAvatarPreviewFailed(false);
   }, [isOpen, persona]);
 
-  const trimmedAvatarUrl = avatarUrl.trim();
-  const normalizedAvatarUrl = normalizeAvatarUrl(trimmedAvatarUrl);
+  const trimmedAvatarValue = avatarValue.trim();
+  const normalizedAvatarValue = normalizeAvatarUrl(trimmedAvatarValue);
   const avatarUrlError =
-    trimmedAvatarUrl.length > 0 && !normalizedAvatarUrl
+    trimmedAvatarValue.length > 0 && !normalizedAvatarValue
       ? t("editor.avatarUrlInvalid")
       : null;
-  const avatarSrc = useAvatarSrc(normalizedAvatarUrl ?? null);
+  const customAvatarUrlValue = isBundledAvatarRef(trimmedAvatarValue)
+    ? ""
+    : avatarValue;
+  const avatarMedia = useAvatarMedia(normalizedAvatarValue ?? null);
+  const selectedAvatarCollection = avatarCollections.find(
+    (collection) => collection.id === selectedAvatarCollectionId,
+  );
   const isValid =
     displayName.trim().length > 0 &&
     systemPrompt.trim().length > 0 &&
@@ -186,7 +213,11 @@ export function PersonaEditor({
       // Update requests use null to clear source properties; undefined leaves them unchanged.
       const data: CreatePersonaRequest | UpdatePersonaRequest = {
         displayName: displayName.trim(),
-        avatar: normalizedAvatarUrl ?? (isEditing ? null : undefined),
+        avatar: isEditing
+          ? avatarChanged
+            ? (normalizedAvatarValue ?? null)
+            : undefined
+          : (normalizedAvatarValue ?? undefined),
         systemPrompt: systemPrompt.trim(),
         provider: provider || (isEditing ? null : undefined),
         model: model.trim() || (isEditing ? null : undefined),
@@ -198,7 +229,8 @@ export function PersonaEditor({
       isReadOnly,
       isEditing,
       displayName,
-      normalizedAvatarUrl,
+      normalizedAvatarValue,
+      avatarChanged,
       systemPrompt,
       provider,
       model,
@@ -208,17 +240,96 @@ export function PersonaEditor({
 
   const initials = displayName.charAt(0).toUpperCase() || "?";
 
+  const handleClearAvatar = useCallback(() => {
+    setAvatarValue("");
+    setAvatarChanged(true);
+    setAvatarPreviewFailed(false);
+  }, []);
+
   const handleAvatarUrlChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      setAvatarUrl(e.target.value);
+      setAvatarValue(e.target.value);
+      setAvatarChanged(true);
       setAvatarPreviewFailed(false);
     },
     [],
   );
 
+  const selectAvatar = (avatarId: string) => {
+    setAvatarValue(avatarRef(avatarId));
+    setAvatarChanged(true);
+    setAvatarPreviewFailed(false);
+  };
+
+  const renderAvatarTile = (entry: AvatarCatalogEntry) => {
+    const ref = avatarRef(entry.id);
+    const selected = normalizedAvatarValue === ref;
+
+    return (
+      <button
+        key={entry.id}
+        type="button"
+        className={cn(
+          "relative flex h-40 items-center justify-center overflow-hidden rounded-md border border-border-soft bg-muted/30 p-2 transition-colors hover:border-border",
+          selected &&
+            "border-background-primary ring-2 ring-background-primary/25",
+        )}
+        aria-label={entry.label}
+        aria-pressed={selected}
+        onClick={() => selectAvatar(entry.id)}
+      >
+        <AvatarMedia
+          media={{ src: entry.src, mediaType: entry.mediaType }}
+          alt=""
+          lazy
+          className="max-h-full max-w-full object-contain"
+        />
+        {selected ? (
+          <span className="absolute right-1 top-1 flex h-5 w-5 items-center justify-center rounded-full bg-background-primary text-text-on-primary">
+            <Check className="h-3 w-3" />
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  const renderCollectionButton = (collection: AvatarCollection) => {
+    const cover = getAvatarCatalogEntry(collection.coverAvatarId);
+    if (!cover) {
+      return null;
+    }
+
+    return (
+      <button
+        key={collection.id}
+        type="button"
+        className="group flex min-w-0 flex-col items-center gap-2 rounded-md border border-border-soft bg-muted/20 p-3 text-center transition-colors hover:border-border hover:bg-background-hover"
+        onClick={() => setSelectedAvatarCollectionId(collection.id)}
+      >
+        <span className="flex h-32 w-full shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/30">
+          <AvatarMedia
+            media={{ src: cover.src, mediaType: cover.mediaType }}
+            alt=""
+            className="h-full w-full object-contain p-1"
+          />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-xs font-medium text-foreground">
+            {collection.label}
+          </span>
+          <span className="block text-[11px] text-muted-foreground">
+            {t("editor.avatarCollectionCount", {
+              count: collection.avatarIds.length,
+            })}
+          </span>
+        </span>
+      </button>
+    );
+  };
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
+      <DialogContent className="grid max-h-[94dvh] max-w-3xl grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 px-5 py-4">
           <DialogTitle className="text-sm">
             {detailsMode
@@ -236,7 +347,7 @@ export function PersonaEditor({
 
         {detailsMode && personaSource ? (
           <PersonaDetails
-            avatar={normalizedAvatarUrl ?? null}
+            avatar={normalizedAvatarValue ?? null}
             displayName={displayName}
             modelLabel={modelLabel}
             personaSource={personaSource}
@@ -247,75 +358,137 @@ export function PersonaEditor({
           <form
             id="persona-form"
             onSubmit={handleSubmit}
-            className="min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pb-5"
+            className="min-h-0 overflow-y-auto space-y-4 px-5 pb-5"
           >
-            <div className="flex justify-center">
-              <div className="relative">
-                <AvatarRoot className="h-16 w-16 border border-border">
-                  <AvatarImage
-                    src={avatarSrc ?? undefined}
-                    alt={t("avatar.previewAlt")}
-                    onError={() => setAvatarPreviewFailed(true)}
-                  />
-                  <AvatarFallback className="text-lg font-semibold">
-                    {initials}
-                  </AvatarFallback>
-                </AvatarRoot>
-                {trimmedAvatarUrl.length > 0 && !isReadOnly ? (
-                  <Button
-                    type="button"
-                    variant="destructive-flat"
-                    size="icon-xs"
-                    aria-label={t("avatar.removeAria")}
-                    className="absolute -right-2 -top-2"
-                    onClick={() => {
-                      setAvatarUrl("");
-                      setAvatarPreviewFailed(false);
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                ) : null}
+            <div className="space-y-3">
+              <div className="flex justify-center">
+                <div className="relative">
+                  <AvatarRoot className="h-[clamp(8rem,28vh,12rem)] w-[clamp(8rem,28vh,12rem)] overflow-visible rounded-none bg-transparent">
+                    {avatarMedia?.mediaType === "video" ? (
+                      <AvatarMedia
+                        media={avatarMedia}
+                        alt={t("avatar.previewAlt")}
+                        className="object-contain"
+                        onError={() => setAvatarPreviewFailed(true)}
+                      />
+                    ) : (
+                      <>
+                        <AvatarImage
+                          src={avatarMedia?.src}
+                          alt={t("avatar.previewAlt")}
+                          className="object-contain"
+                          onError={() => setAvatarPreviewFailed(true)}
+                        />
+                        <AvatarFallback className="rounded-full text-4xl font-semibold">
+                          {initials}
+                        </AvatarFallback>
+                      </>
+                    )}
+                  </AvatarRoot>
+                  {trimmedAvatarValue.length > 0 && !isReadOnly ? (
+                    <Button
+                      type="button"
+                      variant="destructive-flat"
+                      size="icon-xs"
+                      aria-label={t("avatar.removeAria")}
+                      className="absolute right-1 top-1"
+                      onClick={handleClearAvatar}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  ) : null}
+                </div>
               </div>
-            </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t("editor.avatarUrl")}
-              </Label>
-              <Input
-                type="text"
-                inputMode="url"
-                value={avatarUrl}
-                onChange={handleAvatarUrlChange}
-                readOnly={isReadOnly}
-                aria-invalid={avatarUrlError ? true : undefined}
-                aria-describedby={
-                  avatarUrlError ? "avatar-url-error" : undefined
-                }
-                placeholder={t("editor.avatarUrlPlaceholder")}
-                className={cn(isReadOnly && "opacity-70 cursor-not-allowed")}
-              />
-              {avatarUrlError ? (
-                <p
-                  id="avatar-url-error"
-                  className="text-[11px] text-text-danger"
+              {!isReadOnly ? (
+                <div className="space-y-1">
+                  <Label
+                    htmlFor={avatarUrlId}
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    {t("editor.avatarUrl")}
+                  </Label>
+                  <Input
+                    id={avatarUrlId}
+                    type="text"
+                    inputMode="url"
+                    value={customAvatarUrlValue}
+                    onChange={handleAvatarUrlChange}
+                    aria-invalid={avatarUrlError ? true : undefined}
+                    aria-describedby={
+                      avatarUrlError ? avatarUrlErrorId : undefined
+                    }
+                    placeholder={t("editor.avatarUrlPlaceholder")}
+                  />
+                  {avatarUrlError ? (
+                    <p
+                      id={avatarUrlErrorId}
+                      className="text-[11px] text-text-danger"
+                    >
+                      {avatarUrlError}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {!isReadOnly ? (
+                <div
+                  className={cn(
+                    "space-y-3",
+                    selectedAvatarCollection &&
+                      "flex h-[18.5rem] min-h-0 flex-col gap-3 space-y-0",
+                  )}
                 >
-                  {avatarUrlError}
-                </p>
-              ) : avatarPreviewFailed ? (
-                <p className="text-[11px] text-muted-foreground">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    {t("editor.avatarBundled")}
+                  </p>
+                  {selectedAvatarCollection ? (
+                    <div className="flex min-h-0 flex-1 flex-col gap-2">
+                      <div className="flex items-center gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon-xs"
+                          aria-label={t("editor.avatarBackToCollections")}
+                          onClick={() => setSelectedAvatarCollectionId(null)}
+                        >
+                          <ArrowLeft className="h-3.5 w-3.5" />
+                        </Button>
+                        <p className="text-xs font-medium text-foreground">
+                          {selectedAvatarCollection.label}
+                        </p>
+                      </div>
+                      <div className="grid min-h-0 flex-1 grid-cols-3 gap-3 overflow-y-auto pr-1">
+                        {selectedAvatarCollection.avatarIds.map((avatarId) => {
+                          const entry = getAvatarCatalogEntry(avatarId);
+                          return entry ? renderAvatarTile(entry) : null;
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-3">
+                      {avatarCollections.map(renderCollectionButton)}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+              {avatarPreviewFailed ? (
+                <p className="text-center text-[11px] text-muted-foreground">
                   {t("avatar.loadFailed")}
                 </p>
               ) : null}
             </div>
 
             <div className="space-y-1">
-              <Label className="text-xs font-medium text-muted-foreground">
+              <Label
+                htmlFor={displayNameId}
+                className="text-xs font-medium text-muted-foreground"
+              >
                 {t("editor.displayName")}{" "}
                 <span className="text-text-danger">*</span>
               </Label>
               <Input
+                id={displayNameId}
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
                 readOnly={isReadOnly}
@@ -327,7 +500,10 @@ export function PersonaEditor({
 
             <div className="space-y-1">
               <div className="flex items-center justify-between">
-                <Label className="text-xs font-medium text-muted-foreground">
+                <Label
+                  htmlFor={systemPromptId}
+                  className="text-xs font-medium text-muted-foreground"
+                >
                   {t("editor.systemPrompt")}{" "}
                   <span className="text-text-danger">*</span>
                 </Label>
@@ -338,6 +514,7 @@ export function PersonaEditor({
                 </span>
               </div>
               <Textarea
+                id={systemPromptId}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 readOnly={isReadOnly}
@@ -351,111 +528,109 @@ export function PersonaEditor({
               />
             </div>
 
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t("editor.provider")}
-              </Label>
-              <Select
-                value={provider || "__none__"}
-                onValueChange={(v: string) => {
-                  const nextProvider =
-                    v === "__none__"
-                      ? ("" as ProviderType | "")
-                      : (v as ProviderType);
-                  setProvider(nextProvider);
-                  if (nextProvider !== provider) {
-                    setModel("");
-                  }
-                }}
-                disabled={isReadOnly}
-              >
-                <SelectTrigger
-                  className={cn(
-                    "w-full",
-                    isReadOnly && "opacity-70 cursor-not-allowed",
-                  )}
-                >
-                  <SelectValue placeholder={t("common:labels.none")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">
-                    {t("common:labels.none")}
-                  </SelectItem>
-                  {acpProviders.map((providerOption) => (
-                    <SelectItem
-                      key={providerOption.id}
-                      value={providerOption.id}
-                    >
-                      {providerOption.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t("editor.model")}
-              </Label>
-              <Select
-                value={modelSelectValue}
-                onValueChange={(value: string) => {
-                  if (value === "__none__") {
-                    setModel("");
-                    return;
-                  }
-                  if (value.startsWith("__saved__:")) {
-                    setModel(value.slice("__saved__:".length));
-                    return;
-                  }
-                  setModel(value);
-                }}
-                disabled={isReadOnly || !provider}
-              >
-                <SelectTrigger
-                  className={cn(
-                    "w-full",
-                    isReadOnly && "opacity-70 cursor-not-allowed",
-                  )}
-                >
-                  <SelectValue
-                    placeholder={
-                      provider
-                        ? t("editor.modelPlaceholder")
-                        : t("editor.chooseProviderFirst")
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  {t("editor.provider")}
+                </Label>
+                <Select
+                  value={provider || "__none__"}
+                  onValueChange={(v: string) => {
+                    const nextProvider =
+                      v === "__none__"
+                        ? ("" as ProviderType | "")
+                        : (v as ProviderType);
+                    setProvider(nextProvider);
+                    if (nextProvider !== provider) {
+                      setModel("");
                     }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none__">
-                    {t("common:labels.none")}
-                  </SelectItem>
-                  {hasSavedModelOutsideInventory && (
-                    <SelectItem value={`__saved__:${model}`}>
-                      {t("editor.savedModelUnavailable", { model })}
+                  }}
+                  disabled={isReadOnly}
+                >
+                  <SelectTrigger
+                    className={cn(
+                      "w-full",
+                      isReadOnly && "opacity-70 cursor-not-allowed",
+                    )}
+                  >
+                    <SelectValue placeholder={t("common:labels.none")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">
+                      {t("common:labels.none")}
                     </SelectItem>
-                  )}
-                  {availableModels.map((modelOption) => (
-                    <SelectItem key={modelOption.id} value={modelOption.id}>
-                      {modelOption.displayName ?? modelOption.name}
+                    {acpProviders.map((providerOption) => (
+                      <SelectItem
+                        key={providerOption.id}
+                        value={providerOption.id}
+                      >
+                        {providerOption.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1">
+                <Label className="text-xs font-medium text-muted-foreground">
+                  {t("editor.model")}
+                </Label>
+                <Select
+                  value={modelSelectValue}
+                  onValueChange={(value: string) => {
+                    if (value === "__none__") {
+                      setModel("");
+                      return;
+                    }
+                    if (value.startsWith("__saved__:")) {
+                      setModel(value.slice("__saved__:".length));
+                      return;
+                    }
+                    setModel(value);
+                  }}
+                  disabled={isReadOnly || !provider}
+                >
+                  <SelectTrigger
+                    className={cn(
+                      "w-full",
+                      isReadOnly && "opacity-70 cursor-not-allowed",
+                    )}
+                  >
+                    <SelectValue
+                      placeholder={
+                        provider
+                          ? t("editor.modelPlaceholder")
+                          : t("editor.chooseProviderFirst")
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">
+                      {t("common:labels.none")}
                     </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {hasSavedModelOutsideInventory ? (
-                <p className="text-[11px] text-muted-foreground">
-                  {t("editor.savedModelUnavailableHelp")}
-                </p>
-              ) : !provider ? (
-                <p className="text-[11px] text-muted-foreground">
-                  {t("editor.chooseProviderFirst")}
-                </p>
-              ) : availableModels.length === 0 ? (
-                <p className="text-[11px] text-muted-foreground">
-                  {modelStatusMessage ?? t("editor.noModelsAvailable")}
-                </p>
-              ) : null}
+                    {hasSavedModelOutsideInventory && (
+                      <SelectItem value={`__saved__:${model}`}>
+                        {t("editor.savedModelUnavailable", { model })}
+                      </SelectItem>
+                    )}
+                    {availableModels.map((modelOption) => (
+                      <SelectItem key={modelOption.id} value={modelOption.id}>
+                        {modelOption.displayName ?? modelOption.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+            {hasSavedModelOutsideInventory ? (
+              <p className="text-[11px] text-muted-foreground">
+                {t("editor.savedModelUnavailableHelp")}
+              </p>
+            ) : availableModels.length === 0 ? (
+              <p className="text-[11px] text-muted-foreground">
+                {modelStatusMessage ?? t("editor.noModelsAvailable")}
+              </p>
+            ) : null}
           </form>
         )}
 

@@ -27,10 +27,13 @@
   "editor": {
     "create": "Create",
     "created": "Agent created.",
-    "avatarUrl": "Avatar URL",
+    "avatarBackToCollections": "Back to avatar collections",
+    "avatarBundled": "Bundled",
+    "avatarCollectionCount": "{{count}} avatars",
+    "avatarUrl": "Custom avatar URL",
     "avatarUrlInvalid": "Enter a valid http or https URL without credentials.",
     "avatarUrlPlaceholder": "https://example.com/avatar.png",
-    "displayName": "Display Name",
+    "displayName": "Agent Name",
     "displayNamePlaceholder": "e.g. Code Reviewer",
     "duplicate": "Duplicate",
     "duplicated": "Agent duplicated.",
@@ -47,8 +50,8 @@
     "savedModelUnavailable": "{{model}} (saved, unavailable)",
     "savedModelUnavailableHelp": "This agent uses a saved model that is not in the current provider inventory.",
     "saving": "Saving...",
-    "systemPrompt": "System Prompt",
-    "systemPromptPlaceholder": "You are a helpful assistant that...",
+    "systemPrompt": "What do you want this agent to do?",
+    "systemPromptPlaceholder": "Describe the agent's goal and instructions",
     "updated": "Agent updated."
   },
   "gallery": {

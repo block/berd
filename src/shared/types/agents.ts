@@ -3,7 +3,8 @@
 // a narrow union.
 export type ProviderType = string;
 
-// Avatar values are stored directly in ACP source properties.
+// Avatar values are stored directly in ACP source properties as either
+// credential-free http(s) URLs or known bundled refs like app-avatar:gloopy-1.
 export type Avatar = string;
 
 // Persona types (from sprout)

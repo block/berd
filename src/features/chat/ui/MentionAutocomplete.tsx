@@ -4,7 +4,8 @@ import { Sparkles, User } from "lucide-react";
 import { IconFile, IconFolder } from "@tabler/icons-react";
 import { SkillIcon } from "@/features/skills/ui/SkillIcon";
 import { cn } from "@/shared/lib/cn";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { PopoverContent } from "@/shared/ui/popover";
 import type { Persona } from "@/shared/types/agents";
 import type {
@@ -231,11 +232,11 @@ export function MentionAutocomplete({
 // ---------------------------------------------------------------------------
 
 function MentionAvatar({ persona }: { persona: Persona }) {
-  const avatarSrc = useAvatarSrc(persona.avatar);
-  if (avatarSrc) {
+  const avatarMedia = useAvatarMedia(persona.avatar);
+  if (avatarMedia) {
     return (
-      <img
-        src={avatarSrc}
+      <AvatarMedia
+        media={avatarMedia}
         alt={persona.displayName}
         className="h-7 w-7 rounded-full object-cover"
       />

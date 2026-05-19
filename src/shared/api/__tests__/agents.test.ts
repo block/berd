@@ -8,6 +8,7 @@ const mockGooseSourcesUpdate = vi.fn();
 const mockGooseSourcesDelete = vi.fn();
 const mockGooseSourcesExport = vi.fn();
 const mockGooseSourcesImport = vi.fn();
+const appAvatarRef = "app-avatar:gloopy-1";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -127,6 +128,24 @@ describe("agents API", () => {
     expect(result[0].avatar).toBeNull();
   });
 
+  it("preserves app avatar refs from listed personas", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            avatar: appAvatarRef,
+          },
+        },
+      ],
+    });
+
+    const { listPersonas } = await import("../agents");
+    const result = await listPersonas();
+
+    expect(result[0].avatar).toBe(appAvatarRef);
+  });
+
   it("marks read-only agent sources as built in personas", async () => {
     mockGooseSourcesList.mockResolvedValue({
       sources: [{ ...agentSource, writable: false }],
@@ -203,6 +222,36 @@ describe("agents API", () => {
       content: "Research carefully.",
       global: true,
       properties: {},
+    });
+  });
+
+  it("stores app avatar refs on create", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({
+      source: {
+        ...agentSource,
+        properties: {
+          ...agentSource.properties,
+          avatar: appAvatarRef,
+        },
+      },
+    });
+
+    const { createPersona } = await import("../agents");
+    await createPersona({
+      displayName: "Scout",
+      avatar: appAvatarRef,
+      systemPrompt: "Research carefully.",
+    });
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      global: true,
+      properties: {
+        avatar: appAvatarRef,
+      },
     });
   });
 
@@ -297,6 +346,105 @@ describe("agents API", () => {
     });
   });
 
+  it("stores app avatar refs on update", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        ...agentSource,
+        properties: {
+          ...agentSource.properties,
+          avatar: appAvatarRef,
+        },
+      },
+    });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(loadedPersona, {
+      avatar: appAvatarRef,
+    });
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: agentSource.path,
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        provider: "openai",
+        model: "gpt-4.1",
+        avatar: appAvatarRef,
+      },
+    });
+  });
+
+  it("preserves unsupported existing avatar values on unrelated update", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        ...agentSource,
+        properties: {
+          ...agentSource.properties,
+          avatar: "data:image/png;base64,aWNvbg==",
+        },
+      },
+    });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(
+      {
+        ...loadedPersona,
+        sourceProperties: {
+          ...loadedPersona.sourceProperties,
+          avatar: "data:image/png;base64,aWNvbg==",
+        },
+      },
+      {
+        provider: "anthropic",
+      },
+    );
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: agentSource.path,
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        provider: "anthropic",
+        model: "gpt-4.1",
+        avatar: "data:image/png;base64,aWNvbg==",
+      },
+    });
+  });
+
+  it("clears unsupported requested avatar values on update", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        ...agentSource,
+        properties: {
+          ...agentSource.properties,
+          avatar: null,
+        },
+      },
+    });
+
+    const { updatePersona } = await import("../agents");
+    await updatePersona(loadedPersona, {
+      avatar: "javascript:alert(1)",
+    });
+
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: agentSource.path,
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      properties: {
+        provider: "openai",
+        model: "gpt-4.1",
+        avatar: null,
+      },
+    });
+  });
+
   it("deletes personas through ACP source delete", async () => {
     const { deletePersona } = await import("../agents");
     await deletePersona(agentSource.path);
@@ -324,6 +472,44 @@ describe("agents API", () => {
       filename: "scout.persona.md",
       mimeType: "text/markdown",
     });
+  });
+
+  it("exports app avatar refs in persona markdown", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            ...agentSource.properties,
+            avatar: appAvatarRef,
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(agentSource.path);
+
+    expect(result.contents).toContain(`avatar: ${appAvatarRef}\n`);
+  });
+
+  it("drops unsafe avatar values from persona markdown exports", async () => {
+    mockGooseSourcesList.mockResolvedValue({
+      sources: [
+        {
+          ...agentSource,
+          properties: {
+            ...agentSource.properties,
+            avatar: "data:image/png;base64,aWNvbg==",
+          },
+        },
+      ],
+    });
+
+    const { exportPersona } = await import("../agents");
+    const result = await exportPersona(agentSource.path);
+
+    expect(result.contents).not.toContain("avatar:");
   });
 
   it("exports preserved Sprout frontmatter from imported persona markdown", async () => {
@@ -438,6 +624,61 @@ Research carefully.
     });
     expect(mockGooseSourcesImport).not.toHaveBeenCalled();
     expect(result).toHaveLength(1);
+  });
+
+  it("imports app avatar refs from Sprout persona markdown", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = `---
+name: scout
+display_name: "Scout"
+avatar: "${appAvatarRef}"
+---
+
+Research carefully.
+`;
+
+    await importPersonas(raw, "scout.persona.md");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      global: true,
+      properties: {
+        avatar: appAvatarRef,
+        sprout: {
+          name: "scout",
+        },
+      },
+    });
+  });
+
+  it("imports app avatar refs from legacy persona JSON", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({ source: agentSource });
+
+    const { importPersonas } = await import("../agents");
+    const raw = JSON.stringify({
+      version: 1,
+      displayName: "Scout",
+      systemPrompt: "Research carefully.",
+      avatar: appAvatarRef,
+    });
+
+    await importPersonas(raw, "scout.persona.json");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: "Scout",
+      description: "Agent",
+      content: "Research carefully.",
+      global: true,
+      properties: {
+        avatar: appAvatarRef,
+      },
+    });
   });
 
   it("preserves model ids with colons when importing persona markdown", async () => {

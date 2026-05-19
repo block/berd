@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Copy, Download, MoreVertical, Pencil, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { Avatar, AvatarImage, AvatarFallback } from "@/shared/ui/avatar";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,
@@ -10,7 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import type { Persona } from "@/shared/types/agents";
 import {
   canDeletePersona,
@@ -41,7 +42,7 @@ export function PersonaCard({
   const [menuOpen, setMenuOpen] = useState(false);
 
   const initials = getPersonaInitials(persona.displayName);
-  const avatarSrc = useAvatarSrc(persona.avatar);
+  const avatarMedia = useAvatarMedia(persona.avatar);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
 
@@ -72,10 +73,16 @@ export function PersonaCard({
     >
       <div className="flex items-start justify-between gap-3">
         <Avatar className="size-12 border border-border-soft bg-muted/30">
-          <AvatarImage src={avatarSrc ?? undefined} alt={persona.displayName} />
-          <AvatarFallback className="text-sm font-semibold">
-            {initials}
-          </AvatarFallback>
+          {avatarMedia?.mediaType === "video" ? (
+            <AvatarMedia media={avatarMedia} alt={persona.displayName} />
+          ) : (
+            <>
+              <AvatarImage src={avatarMedia?.src} alt={persona.displayName} />
+              <AvatarFallback className="text-sm font-semibold">
+                {initials}
+              </AvatarFallback>
+            </>
+          )}
         </Avatar>
 
         <div className="relative z-20 -mr-2 -mt-2">

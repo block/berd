@@ -4,10 +4,11 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/shared/ui/avatar";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { DetailField } from "@/shared/ui/detail-field";
 import { Badge } from "@/shared/ui/badge";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import type { Avatar } from "@/shared/types/agents";
 import type { PersonaSource } from "@/features/agents/lib/personaPresentation";
 
@@ -29,7 +30,7 @@ export function PersonaDetails({
   systemPrompt,
 }: PersonaDetailsProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const avatarSrc = useAvatarSrc(avatar);
+  const avatarMedia = useAvatarMedia(avatar);
   const initials = displayName.charAt(0).toUpperCase() || "?";
 
   return (
@@ -38,13 +39,19 @@ export function PersonaDetails({
         <section className="rounded-xl border border-border bg-muted/20 p-4">
           <div className="flex items-start gap-4">
             <AvatarRoot className="h-16 w-16 border border-border bg-background">
-              <AvatarImage
-                src={avatarSrc ?? undefined}
-                alt={t("avatar.previewAlt")}
-              />
-              <AvatarFallback className="text-lg font-semibold">
-                {initials}
-              </AvatarFallback>
+              {avatarMedia?.mediaType === "video" ? (
+                <AvatarMedia media={avatarMedia} alt={t("avatar.previewAlt")} />
+              ) : (
+                <>
+                  <AvatarImage
+                    src={avatarMedia?.src}
+                    alt={t("avatar.previewAlt")}
+                  />
+                  <AvatarFallback className="text-lg font-semibold">
+                    {initials}
+                  </AvatarFallback>
+                </>
+              )}
             </AvatarRoot>
             <div className="min-w-0 flex-1 space-y-2">
               <DetailField

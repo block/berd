@@ -13,7 +13,8 @@ import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
   Reasoning,
@@ -326,7 +327,7 @@ export const MessageBubble = memo(function MessageBubble({
       : undefined,
   );
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
-  const personaAvatarUrl = useAvatarSrc(persona?.avatar);
+  const personaAvatarMedia = useAvatarMedia(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
@@ -368,7 +369,7 @@ export const MessageBubble = memo(function MessageBubble({
     : null;
   const showAssistantIdentity = Boolean(
     !isUser &&
-      (assistantDisplayName || personaAvatarUrl || assistantProviderIcon),
+      (assistantDisplayName || personaAvatarMedia || assistantProviderIcon),
   );
   const messageAttachments = message.metadata?.attachments ?? [];
   const messageChips = message.metadata?.chips ?? [];
@@ -405,9 +406,9 @@ export const MessageBubble = memo(function MessageBubble({
       >
         {showAssistantIdentity ? (
           <div className="mb-0.5 flex items-center gap-1 text-xs">
-            {personaAvatarUrl ? (
-              <img
-                src={personaAvatarUrl}
+            {personaAvatarMedia ? (
+              <AvatarMedia
+                media={personaAvatarMedia}
                 alt=""
                 className="h-5 w-5 rounded-full"
               />

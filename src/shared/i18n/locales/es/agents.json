@@ -27,10 +27,13 @@
   "editor": {
     "create": "Crear",
     "created": "Agente creado.",
-    "avatarUrl": "URL del avatar",
-    "avatarUrlInvalid": "Introduce una URL http o https válida sin credenciales.",
+    "avatarBackToCollections": "Volver a las colecciones de avatares",
+    "avatarBundled": "Incluidos",
+    "avatarCollectionCount": "{{count}} avatares",
+    "avatarUrl": "URL de avatar personalizada",
+    "avatarUrlInvalid": "Ingresa una URL http o https válida sin credenciales.",
     "avatarUrlPlaceholder": "https://example.com/avatar.png",
-    "displayName": "Nombre para mostrar",
+    "displayName": "Nombre del agente",
     "displayNamePlaceholder": "p. ej. Revisor de código",
     "duplicate": "Duplicar",
     "duplicated": "Agente duplicado.",
@@ -47,8 +50,8 @@
     "savedModelUnavailable": "{{model}} (guardado, no disponible)",
     "savedModelUnavailableHelp": "Este agente usa un modelo guardado que no está en el inventario actual del proveedor.",
     "saving": "Guardando...",
-    "systemPrompt": "Prompt del sistema",
-    "systemPromptPlaceholder": "Eres un asistente útil que...",
+    "systemPrompt": "¿Qué quieres que haga este agente?",
+    "systemPromptPlaceholder": "Describe el objetivo y las instrucciones del agente",
     "updated": "Agente actualizado."
   },
   "gallery": {

@@ -2,7 +2,8 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { AtSign, ChevronDown, Check, Plus, Sparkles, User } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
-import { useAvatarSrc } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -200,11 +201,11 @@ function PersonaAvatar({
     size === "xs" ? "h-3.5 w-3.5" : size === "sm" ? "h-4 w-4" : "h-6 w-6";
   const iconDim = size === "md" ? "h-3.5 w-3.5" : "h-2.5 w-2.5";
 
-  const avatarSrc = useAvatarSrc(persona?.avatar);
-  if (avatarSrc) {
+  const avatarMedia = useAvatarMedia(persona?.avatar);
+  if (avatarMedia) {
     return (
-      <img
-        src={avatarSrc}
+      <AvatarMedia
+        media={avatarMedia}
         alt={persona?.displayName ?? ""}
         className={cn(dim, "rounded-full object-cover")}
       />
