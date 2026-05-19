@@ -40,6 +40,16 @@
   --color-yellow-100: #ffd966;
   --color-yellow-200: #fbcd44;
 
+  /* decorative entity pills */
+  --color-pill-pink: #eec2ea;
+  --color-pill-olive: #cdcda1;
+  --color-pill-blue: #bcc6f4;
+  --color-pill-lavender: #d6c8f0;
+  --color-pill-sage: #c4d8b8;
+  --color-pill-mint: #b8e0d2;
+  --color-pill-peach: #f6cdb2;
+  --color-pill-neutral: #ffffff;
+
   /* compat — standard Tailwind scales used by ai-elements */
   --color-red-50: #fef2f2;
   --color-red-400: #f87171;
@@ -107,6 +117,75 @@
   --status-added: #16a34a;
   --status-deleted: #dc2626;
   --status-modified: #ca8a04;
+
+  /* Reskin foundation tokens. These are additive aliases for upcoming surfaces,
+     so existing app behavior keeps using the older semantic tokens until each
+     product area is moved intentionally. */
+  --brand: hsl(var(--primary));
+  --brand-foreground: hsl(var(--primary-foreground));
+
+  --canvas-base: hsl(var(--background));
+  --canvas-project-tint: color-mix(
+    in oklab,
+    hsl(var(--primary)) 8%,
+    hsl(var(--background))
+  );
+  --surface-chrome: color-mix(in srgb, hsl(var(--background)) 80%, transparent);
+  --surface-card: hsl(var(--card));
+  --surface-card-soft: color-mix(in srgb, hsl(var(--card)) 40%, transparent);
+  --surface-overlay: hsl(var(--popover));
+  --surface-tile: hsl(var(--muted));
+  --surface-composer: color-mix(
+    in srgb,
+    hsl(var(--background)) 20%,
+    transparent
+  );
+  --surface-button: hsl(var(--muted));
+  --surface-install: var(--canvas-base);
+  --backdrop-composer-glass: blur(24px) saturate(180%) brightness(1.05);
+  --project-tint: transparent;
+
+  --chip-file-bg: var(--surface-tile);
+  --chip-file-fg: hsl(var(--muted-foreground));
+  --chip-agent-bg: color-mix(in oklab, var(--color-blue-200) 18%, transparent);
+  --chip-agent-fg: var(--color-blue-700);
+  --chip-skill-bg: color-mix(
+    in oklab,
+    var(--color-yellow-200) 22%,
+    transparent
+  );
+  --chip-skill-fg: var(--color-yellow-700);
+  --chip-automation-bg: color-mix(
+    in oklab,
+    var(--color-green-200) 18%,
+    transparent
+  );
+  --chip-automation-fg: var(--color-green-700);
+
+  --text-subtle: color-mix(
+    in srgb,
+    hsl(var(--muted-foreground)) 80%,
+    hsl(var(--foreground))
+  );
+  --text-title: hsl(var(--foreground));
+  --text-breadcrumb-separator: color-mix(
+    in srgb,
+    hsl(var(--muted-foreground)) 70%,
+    transparent
+  );
+  --text-placeholder-composer: color-mix(
+    in oklab,
+    hsl(var(--foreground)) 35%,
+    transparent
+  );
+  --clock-face: #1c1c1c;
+  --dot-color-base: color-mix(
+    in oklab,
+    hsl(var(--foreground)) 18%,
+    transparent
+  );
+  --dot-size: 1px;
+  --dot-spacing: 24px;
 
   /* Semantic backgrounds */
   --background-default: hsl(var(--background));
@@ -304,6 +383,67 @@
   --input: 0 0% 18%;
   --ring: 0 0% 98%;
 
+  --brand: hsl(var(--primary));
+  --brand-foreground: hsl(var(--primary-foreground));
+
+  --canvas-base: hsl(var(--background));
+  --canvas-project-tint: color-mix(
+    in oklab,
+    hsl(var(--primary)) 8%,
+    hsl(var(--background))
+  );
+  --surface-chrome: color-mix(in srgb, hsl(var(--background)) 80%, transparent);
+  --surface-card: hsl(var(--card));
+  --surface-card-soft: color-mix(in srgb, hsl(var(--card)) 8%, transparent);
+  --surface-overlay: hsl(var(--popover));
+  --surface-tile: hsl(var(--muted));
+  --surface-composer: color-mix(
+    in srgb,
+    hsl(var(--foreground)) 6%,
+    transparent
+  );
+  --surface-button: hsl(var(--muted));
+  --surface-install: var(--canvas-base);
+
+  --chip-file-bg: var(--surface-tile);
+  --chip-file-fg: hsl(var(--muted-foreground));
+  --chip-agent-bg: color-mix(in oklab, var(--color-blue-100) 10%, transparent);
+  --chip-agent-fg: var(--color-blue-100);
+  --chip-skill-bg: color-mix(
+    in oklab,
+    var(--color-yellow-100) 10%,
+    transparent
+  );
+  --chip-skill-fg: var(--color-yellow-100);
+  --chip-automation-bg: color-mix(
+    in oklab,
+    var(--color-green-100) 10%,
+    transparent
+  );
+  --chip-automation-fg: var(--color-green-100);
+
+  --text-subtle: color-mix(
+    in srgb,
+    hsl(var(--muted-foreground)) 80%,
+    hsl(var(--foreground))
+  );
+  --text-title: hsl(var(--foreground));
+  --text-breadcrumb-separator: color-mix(
+    in srgb,
+    hsl(var(--muted-foreground)) 70%,
+    transparent
+  );
+  --text-placeholder-composer: color-mix(
+    in oklab,
+    hsl(var(--foreground)) 35%,
+    transparent
+  );
+  --dot-color-base: color-mix(
+    in oklab,
+    hsl(var(--foreground)) 18%,
+    transparent
+  );
+
   /* semantic backgrounds */
   --background-default: hsl(var(--background));
   --background-card: hsl(var(--card));
@@ -411,6 +551,7 @@
   /* shadcn/ui standard Tailwind color mappings */
   --color-background: hsl(var(--background));
   --color-foreground: hsl(var(--foreground));
+  --color-foreground-subtle: var(--text-subtle);
   --color-card: hsl(var(--card));
   --color-card-foreground: hsl(var(--card-foreground));
   --color-popover: hsl(var(--popover));
@@ -425,6 +566,30 @@
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
+
+  /* reskin foundation */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-canvas-base: var(--canvas-base);
+  --color-canvas-project-tint: var(--canvas-project-tint);
+  --color-surface-chrome: var(--surface-chrome);
+  --color-surface-card: var(--surface-card);
+  --color-surface-card-soft: var(--surface-card-soft);
+  --color-surface-overlay: var(--surface-overlay);
+  --color-surface-tile: var(--surface-tile);
+  --color-surface-composer: var(--surface-composer);
+  --color-surface-button: var(--surface-button);
+  --color-surface-install: var(--surface-install);
+  --color-chip-file-bg: var(--chip-file-bg);
+  --color-chip-file-fg: var(--chip-file-fg);
+  --color-chip-agent-bg: var(--chip-agent-bg);
+  --color-chip-agent-fg: var(--chip-agent-fg);
+  --color-chip-skill-bg: var(--chip-skill-bg);
+  --color-chip-skill-fg: var(--chip-skill-fg);
+  --color-chip-automation-bg: var(--chip-automation-bg);
+  --color-chip-automation-fg: var(--chip-automation-fg);
+  --color-text-placeholder-composer: var(--text-placeholder-composer);
+  --color-clock-face: var(--clock-face);
 
   /* semantic backgrounds (custom superset) */
   --color-background-default: var(--background-default);
@@ -463,6 +628,9 @@
   --color-text-on-card: var(--text-on-card);
   --color-text-on-popover: var(--text-on-popover);
   --color-text-muted: var(--text-muted);
+  --color-text-subtle: var(--text-subtle);
+  --color-text-title: var(--text-title);
+  --color-text-breadcrumb-separator: var(--text-breadcrumb-separator);
   --color-text-alt: var(--text-alt);
   --color-text-hover: var(--text-hover);
   --color-text-primary: var(--text-primary);
@@ -502,6 +670,10 @@
   --radius-card: 20px;
   --radius-card-lg: 24px;
   --radius-card-sm: 14px;
+  --radius-card-chat: 16px;
+  --radius-chrome: 16px;
+  --radius-composer: 40px;
+  --radius-tile: 20px;
   --radius-dropdown: 20px;
   --radius-overlay: 20px;
   --radius-modal: 16px;
@@ -535,6 +707,10 @@
   --spacing-button-sm: 2rem;
 
   --text-xxs: 10px;
+  --text-label-alex: 10px;
+  --text-body-alex: 14px;
+  --text-input-alex: 16px;
+  --text-title-alex: 24px;
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
@@ -747,7 +923,35 @@
   }
 }
 
-/* @font-face — add your own here */
+/* Canvas utility used by later reskin slices. The tint hook lets project views
+   adjust the whole canvas without hand-authored background colors. */
+.bg-dot-grid {
+  background-color: color-mix(
+    in oklch,
+    var(--project-tint, transparent) 7%,
+    var(--canvas-base)
+  );
+  background-image: radial-gradient(
+    circle,
+    color-mix(
+        in oklch,
+        var(--project-tint, transparent) 12%,
+        var(--dot-color-base)
+      )
+      var(--dot-size),
+    transparent var(--dot-size)
+  );
+  background-size: var(--dot-spacing) var(--dot-spacing);
+  transition:
+    background-color 240ms ease,
+    background-image 240ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-dot-grid {
+    transition: none;
+  }
+}
 
 /* App shell lock — outside @layer so nothing can override */
 html,
