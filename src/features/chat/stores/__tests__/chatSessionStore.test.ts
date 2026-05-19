@@ -2,17 +2,22 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
 import { useChatSessionStore, type ChatSession } from "../chatSessionStore";
 
-const mockAcpCreateSession = vi.fn();
-const mockAcpListSessions = vi.fn();
+const mocks = vi.hoisted(() => ({
+  acpCreateSession: vi.fn(),
+  acpListSessionsPage: vi.fn(),
+  archiveSession: vi.fn(),
+  unarchiveSession: vi.fn(),
+}));
 
 vi.mock("@/shared/api/acp", () => ({
-  acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
-  acpListSessions: (...args: unknown[]) => mockAcpListSessions(...args),
+  acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
+  acpListSessionsPage: (...args: unknown[]) =>
+    mocks.acpListSessionsPage(...args),
 }));
 
 vi.mock("@/shared/api/acpApi", () => ({
-  archiveSession: vi.fn().mockResolvedValue(undefined),
-  unarchiveSession: vi.fn().mockResolvedValue(undefined),
+  archiveSession: (...args: unknown[]) => mocks.archiveSession(...args),
+  unarchiveSession: (...args: unknown[]) => mocks.unarchiveSession(...args),
   renameSession: vi.fn().mockResolvedValue(undefined),
   updateSessionProject: vi.fn().mockResolvedValue(undefined),
 }));
@@ -22,7 +27,10 @@ function resetStore() {
     sessions: [],
     activeSessionId: null,
     isLoading: false,
+    isLoadingMoreSessions: false,
     hasHydratedSessions: false,
+    sessionPageCursor: null,
+    hasMoreSessions: false,
     isContextPanelOpen: false,
     activeWorkspaceBySession: {},
     modelSelectionIntentBySession: {},
@@ -48,16 +56,54 @@ function seedSession(overrides: Partial<ChatSession> = {}): ChatSession {
   return session;
 }
 
+function makeAcpSession(
+  overrides: Partial<AcpSessionInfo> & { sessionId: string },
+): AcpSessionInfo {
+  const { sessionId, ...rest } = overrides;
+  return {
+    sessionId,
+    title: "ACP Session",
+    updatedAt: "2026-04-01T00:00:00.000Z",
+    createdAt: "2026-04-01T00:00:00.000Z",
+    archivedAt: null,
+    userSetName: false,
+    messageCount: 1,
+    workingDir: null,
+    projectId: null,
+    providerId: null,
+    modelId: null,
+    personaId: null,
+    ...rest,
+  };
+}
+
+function mockPage(
+  sessions: AcpSessionInfo[] = [],
+  nextCursor: string | null = null,
+) {
+  return { sessions, nextCursor };
+}
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 describe("chatSessionStore", () => {
   beforeEach(() => {
     window.localStorage.removeItem("goose:context-panel-open");
     resetStore();
     vi.clearAllMocks();
+    mocks.archiveSession.mockResolvedValue(undefined);
+    mocks.unarchiveSession.mockResolvedValue(undefined);
   });
 
   describe("createSession", () => {
     it("creates a real ACP-backed session", async () => {
-      mockAcpCreateSession.mockResolvedValue({ sessionId: "acp-1" });
+      mocks.acpCreateSession.mockResolvedValue({ sessionId: "acp-1" });
 
       const session = await useChatSessionStore.getState().createSession({
         title: "New Chat",
@@ -69,7 +115,7 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
       });
 
-      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      expect(mocks.acpCreateSession).toHaveBeenCalledWith(
         "openai",
         "/tmp/project",
         {
@@ -101,7 +147,7 @@ describe("chatSessionStore", () => {
         workingDir: "/tmp/project",
       });
 
-      expect(mockAcpCreateSession).not.toHaveBeenCalled();
+      expect(mocks.acpCreateSession).not.toHaveBeenCalled();
       expect(session).toMatchObject({
         title: "New Chat",
         projectId: "project-1",
@@ -188,34 +234,37 @@ describe("chatSessionStore", () => {
 
   describe("loadSessions", () => {
     it("loads sessions from ACP and maps them correctly", async () => {
-      mockAcpListSessions.mockResolvedValue([
-        {
-          sessionId: "acp-1",
-          title: "ACP Session 1",
-          updatedAt: "2026-04-01",
-          createdAt: "2026-03-31",
-          archivedAt: null,
-          userSetName: false,
-          messageCount: 4,
-          workingDir: "/tmp/acp-1",
-          providerId: "openai",
-          modelId: "gpt-4.1",
-        },
-        {
-          sessionId: "acp-2",
-          title: null,
-          updatedAt: "2026-04-02",
-          createdAt: "2026-04-02",
-          archivedAt: null,
-          userSetName: false,
-          messageCount: 7,
-          providerId: null,
-          modelId: null,
-        },
-      ]);
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage(
+          [
+            makeAcpSession({
+              sessionId: "acp-1",
+              title: "ACP Session 1",
+              updatedAt: "2026-04-01",
+              createdAt: "2026-03-31",
+              userSetName: true,
+              messageCount: 4,
+              workingDir: "/tmp/acp-1",
+              projectId: "project-123",
+              providerId: "openai",
+              personaId: "persona-1",
+              modelId: "gpt-4.1",
+            }),
+            makeAcpSession({
+              sessionId: "acp-2",
+              title: null,
+              updatedAt: "2026-04-02",
+              createdAt: "2026-04-02",
+              messageCount: 7,
+            }),
+          ],
+          "cursor-2",
+        ),
+      );
 
       await useChatSessionStore.getState().loadSessions();
 
+      expect(mocks.acpListSessionsPage).toHaveBeenCalledWith();
       const sessions = useChatSessionStore.getState().sessions;
       expect(sessions).toHaveLength(2);
       expect(sessions[0].id).toBe("acp-2");
@@ -225,99 +274,262 @@ describe("chatSessionStore", () => {
       expect(sessions[1].title).toBe("ACP Session 1");
       expect(sessions[1].messageCount).toBe(4);
       expect(sessions[1].providerId).toBe("openai");
+      expect(sessions[1].projectId).toBe("project-123");
+      expect(sessions[1].personaId).toBe("persona-1");
       expect(sessions[1].modelId).toBe("gpt-4.1");
       expect(sessions[1].workingDir).toBe("/tmp/acp-1");
+      expect(sessions[1].userSetName).toBe(true);
+      expect(useChatSessionStore.getState().sessionPageCursor).toBe("cursor-2");
+      expect(useChatSessionStore.getState().hasMoreSessions).toBe(true);
     });
 
-    it("reads all metadata fields from backend response", async () => {
-      mockAcpListSessions.mockResolvedValue([
-        {
-          sessionId: "acp-1",
-          title: "Renamed Chat",
-          updatedAt: "2026-04-02",
-          createdAt: "2026-03-31",
-          archivedAt: null,
-          userSetName: true,
-          messageCount: 7,
-          workingDir: "/tmp/project-123",
-          projectId: "project-123",
-          providerId: "anthropic",
-          personaId: "persona-1",
-          modelId: "claude-sonnet-4",
-        },
-      ]);
-
-      await useChatSessionStore.getState().loadSessions();
-
-      const session = useChatSessionStore.getState().sessions[0];
-      expect(session.title).toBe("Renamed Chat");
-      expect(session.projectId).toBe("project-123");
-      expect(session.providerId).toBe("anthropic");
-      expect(session.personaId).toBe("persona-1");
-      expect(session.createdAt).toBe("2026-03-31");
-      expect(session.updatedAt).toBe("2026-04-02");
-      expect(session.messageCount).toBe(7);
-      expect(session.userSetName).toBe(true);
-      expect(session.modelId).toBe("claude-sonnet-4");
-      expect(session.workingDir).toBe("/tmp/project-123");
-    });
-
-    it("drops stale sessions that are no longer in ACP", async () => {
+    it("hydrates the first page without dropping local sessions or clearing active session", async () => {
+      const draft = makeSession({
+        id: "draft-session",
+        title: "Draft",
+        creationState: "pending",
+        updatedAt: "2026-04-03T00:00:00.000Z",
+      });
       useChatSessionStore.setState({
         sessions: [
-          makeSession({ id: "stale-session", title: "Stale Session" }),
+          draft,
+          makeSession({
+            id: "older-loaded-session",
+            title: "Older Loaded Session",
+            updatedAt: "2026-03-01T00:00:00.000Z",
+          }),
         ],
-        activeSessionId: "stale-session",
+        activeSessionId: "older-loaded-session",
       });
 
-      mockAcpListSessions.mockResolvedValue([
-        {
-          sessionId: "acp-1",
-          title: "ACP Session",
-          updatedAt: "2026-04-02",
-          createdAt: "2026-04-02",
-          archivedAt: null,
-          userSetName: false,
-          messageCount: 1,
-          providerId: null,
-          modelId: null,
-        },
-      ]);
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage(
+          [
+            makeAcpSession({
+              sessionId: "acp-1",
+              updatedAt: "2026-04-02",
+              createdAt: "2026-04-02",
+            }),
+          ],
+          "cursor-2",
+        ),
+      );
 
       await useChatSessionStore.getState().loadSessions();
 
       const state = useChatSessionStore.getState();
-      expect(state.sessions).toHaveLength(1);
-      expect(state.sessions[0].id).toBe("acp-1");
-      expect(state.activeSessionId).toBeNull();
-    });
-
-    it("sets isLoading during fetch", async () => {
-      let resolvePromise: (value: AcpSessionInfo[]) => void = () => {};
-      mockAcpListSessions.mockReturnValue(
-        new Promise((resolve) => {
-          resolvePromise = resolve;
-        }),
-      );
-
-      const loadPromise = useChatSessionStore.getState().loadSessions();
-      expect(useChatSessionStore.getState().isLoading).toBe(true);
-      expect(useChatSessionStore.getState().hasHydratedSessions).toBe(false);
-
-      resolvePromise([]);
-      await loadPromise;
-
-      expect(useChatSessionStore.getState().isLoading).toBe(false);
-      expect(useChatSessionStore.getState().hasHydratedSessions).toBe(true);
+      expect(state.sessions.map((session) => session.id)).toEqual([
+        "draft-session",
+        "acp-1",
+        "older-loaded-session",
+      ]);
+      expect(state.activeSessionId).toBe("older-loaded-session");
+      expect(state.sessionPageCursor).toBe("cursor-2");
+      expect(state.hasMoreSessions).toBe(true);
     });
 
     it("keeps empty sessions list on error", async () => {
-      mockAcpListSessions.mockRejectedValue(new Error("Network error"));
+      mocks.acpListSessionsPage.mockRejectedValue(new Error("Network error"));
 
       await useChatSessionStore.getState().loadSessions();
 
       expect(useChatSessionStore.getState().sessions).toEqual([]);
       expect(useChatSessionStore.getState().hasHydratedSessions).toBe(true);
+    });
+
+    it("appends the next page and advances the cursor", async () => {
+      useChatSessionStore.setState({
+        sessions: [
+          makeSession({
+            id: "acp-1",
+            updatedAt: "2026-04-03T00:00:00.000Z",
+          }),
+        ],
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage(
+          [
+            makeAcpSession({
+              sessionId: "acp-2",
+              updatedAt: "2026-04-02T00:00:00.000Z",
+            }),
+          ],
+          "cursor-3",
+        ),
+      );
+
+      await useChatSessionStore.getState().loadMoreSessions();
+
+      expect(mocks.acpListSessionsPage).toHaveBeenCalledWith({
+        cursor: "cursor-2",
+      });
+      const state = useChatSessionStore.getState();
+      expect(state.sessions.map((session) => session.id)).toEqual([
+        "acp-1",
+        "acp-2",
+      ]);
+      expect(state.sessionPageCursor).toBe("cursor-3");
+      expect(state.hasMoreSessions).toBe(true);
+    });
+
+    it("does not start a second next-page request while one is in flight", async () => {
+      const deferred = createDeferredPromise<ReturnType<typeof mockPage>>();
+      useChatSessionStore.setState({
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.acpListSessionsPage.mockReturnValue(deferred.promise);
+
+      const firstLoad = useChatSessionStore.getState().loadMoreSessions();
+      const secondLoad = useChatSessionStore.getState().loadMoreSessions();
+
+      expect(mocks.acpListSessionsPage).toHaveBeenCalledOnce();
+
+      deferred.resolve(mockPage());
+      await Promise.all([firstLoad, secondLoad]);
+
+      expect(useChatSessionStore.getState().isLoadingMoreSessions).toBe(false);
+    });
+
+    it("stops pagination when the backend repeats a cursor", async () => {
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      useChatSessionStore.setState({
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage(
+          [
+            makeAcpSession({
+              sessionId: "acp-2",
+              updatedAt: "2026-04-02T00:00:00.000Z",
+            }),
+          ],
+          "cursor-2",
+        ),
+      );
+
+      await useChatSessionStore.getState().loadMoreSessions();
+
+      const state = useChatSessionStore.getState();
+      expect(state.sessionPageCursor).toBeNull();
+      expect(state.hasMoreSessions).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(
+        "ACP session/list returned the same pagination cursor; stopping pagination to avoid an infinite loop.",
+      );
+      warnSpy.mockRestore();
+    });
+
+    it("does not apply stale loadMore results after loadSessions starts", async () => {
+      const loadMore = createDeferredPromise<ReturnType<typeof mockPage>>();
+      const loadFirstPage =
+        createDeferredPromise<ReturnType<typeof mockPage>>();
+      useChatSessionStore.setState({
+        sessions: [
+          makeSession({
+            id: "existing-session",
+            updatedAt: "2026-04-03T00:00:00.000Z",
+          }),
+        ],
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.acpListSessionsPage
+        .mockReturnValueOnce(loadMore.promise)
+        .mockReturnValueOnce(loadFirstPage.promise);
+
+      const loadMorePromise = useChatSessionStore.getState().loadMoreSessions();
+      const loadSessionsPromise = useChatSessionStore.getState().loadSessions();
+
+      loadFirstPage.resolve(
+        mockPage([
+          makeAcpSession({
+            sessionId: "fresh-session",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+          }),
+        ]),
+      );
+      await loadSessionsPromise;
+
+      loadMore.resolve(
+        mockPage(
+          [
+            makeAcpSession({
+              sessionId: "stale-session",
+              updatedAt: "2026-04-05T00:00:00.000Z",
+            }),
+          ],
+          "cursor-3",
+        ),
+      );
+      await loadMorePromise;
+
+      const state = useChatSessionStore.getState();
+      expect(mocks.acpListSessionsPage).toHaveBeenNthCalledWith(1, {
+        cursor: "cursor-2",
+      });
+      expect(mocks.acpListSessionsPage).toHaveBeenNthCalledWith(2);
+      expect(state.sessions.map((session) => session.id)).toEqual([
+        "fresh-session",
+        "existing-session",
+      ]);
+      expect(state.sessionPageCursor).toBeNull();
+      expect(state.hasMoreSessions).toBe(false);
+      expect(state.isLoadingMoreSessions).toBe(false);
+    });
+
+    it("dedupes sessions by id and refreshes existing metadata", async () => {
+      seedSession({
+        id: "acp-1",
+        title: "Old Title",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+      });
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "acp-1",
+            title: "Updated Title",
+            updatedAt: "2026-04-03T00:00:00.000Z",
+            modelId: "gpt-4.1",
+          }),
+          makeAcpSession({
+            sessionId: "acp-1",
+            title: "Duplicate Title",
+            updatedAt: "2026-04-04T00:00:00.000Z",
+            modelId: "gpt-4.1",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      const sessions = useChatSessionStore.getState().sessions;
+      expect(sessions).toHaveLength(1);
+      expect(sessions[0]).toMatchObject({
+        id: "acp-1",
+        title: "Duplicate Title",
+        updatedAt: "2026-04-04T00:00:00.000Z",
+        modelId: "gpt-4.1",
+        modelName: "GPT-4.1",
+      });
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "acp-1",
+            modelId: "gpt-5.4",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      const session = useChatSessionStore.getState().getSession("acp-1");
+      expect(session?.modelId).toBe("gpt-5.4");
+      expect(session?.modelName).toBeUndefined();
     });
   });
 
@@ -381,26 +593,6 @@ describe("chatSessionStore", () => {
 
       expect(useChatSessionStore.getState().isContextPanelOpen).toBe(false);
       expect(window.localStorage.getItem("goose:context-panel-open")).toBe("0");
-    });
-  });
-
-  describe("archiveSession", () => {
-    it("sets archivedAt on the session", async () => {
-      const session = seedSession();
-
-      await useChatSessionStore.getState().archiveSession(session.id);
-
-      const archived = useChatSessionStore.getState().getSession(session.id);
-      expect(archived?.archivedAt).toBeDefined();
-    });
-
-    it("clears activeSessionId if archiving the active session", async () => {
-      const session = seedSession();
-      useChatSessionStore.getState().setActiveSession(session.id);
-
-      await useChatSessionStore.getState().archiveSession(session.id);
-
-      expect(useChatSessionStore.getState().activeSessionId).toBeNull();
     });
   });
 });

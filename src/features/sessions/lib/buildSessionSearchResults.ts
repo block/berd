@@ -22,6 +22,31 @@ function sortByUpdatedAtDesc(sessions: ChatSession[]): ChatSession[] {
   );
 }
 
+function sortResultsByUpdatedAtDesc(
+  results: SessionSearchDisplayResult[],
+): SessionSearchDisplayResult[] {
+  return [...results].sort(
+    (a, b) =>
+      new Date(b.session.updatedAt).getTime() -
+      new Date(a.session.updatedAt).getTime(),
+  );
+}
+
+export function mergeSessionSearchResults(
+  existingResults: SessionSearchDisplayResult[],
+  nextResults: SessionSearchDisplayResult[],
+): SessionSearchDisplayResult[] {
+  const bySessionId = new Map<string, SessionSearchDisplayResult>();
+  for (const result of existingResults) {
+    bySessionId.set(result.session.id, result);
+  }
+  for (const result of nextResults) {
+    bySessionId.set(result.session.id, result);
+  }
+
+  return sortResultsByUpdatedAtDesc([...bySessionId.values()]);
+}
+
 export function buildSessionSearchResults(
   sessions: ChatSession[],
   query: string,

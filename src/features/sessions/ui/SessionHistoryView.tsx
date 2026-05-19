@@ -58,6 +58,22 @@ interface SessionHistoryViewProps {
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
 }
 
+const LOAD_MORE_VIEWPORT_THRESHOLD_RATIO = 0.75;
+
+function isNearLoadMoreThreshold(scrollElement: HTMLDivElement): boolean {
+  if (scrollElement.clientHeight <= 0) {
+    return false;
+  }
+
+  const remainingScroll =
+    scrollElement.scrollHeight -
+    scrollElement.scrollTop -
+    scrollElement.clientHeight;
+  const threshold =
+    scrollElement.clientHeight * LOAD_MORE_VIEWPORT_THRESHOLD_RATIO;
+  return remainingScroll <= threshold;
+}
+
 export function SessionHistoryView({
   onSelectSession,
   onSelectSearchResult,
@@ -72,12 +88,20 @@ export function SessionHistoryView({
   const [virtualListElement, setVirtualListElementState] =
     useState<HTMLDivElement | null>(null);
   const [listScrollMargin, setListScrollMargin] = useState(0);
+  const viewportLoadCheckTimerRef = useRef<number | null>(null);
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
+  const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
+  const isLoadingMoreSessions = useChatSessionStore(
+    (s) => s.isLoadingMoreSessions,
+  );
+  const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
+  const removeSession = useChatSessionStore((s) => s.removeSession);
+  const loadMoreInFlightRef = useRef(false);
   const activeSessions = useMemo(
     () =>
       getVisibleSessions(sessions, messagesBySession).filter(
@@ -127,30 +151,138 @@ export function SessionHistoryView({
   );
 
   const projects = useProjectStore(selectProjects);
-  const getProjectName = useCallback(
-    (projectId: string) => projects.find((p) => p.id === projectId)?.name,
+  const projectsById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
     [projects],
+  );
+
+  const getProjectName = useCallback(
+    (projectId: string) => projectsById.get(projectId)?.name,
+    [projectsById],
   );
 
   const getProjectColor = useCallback(
-    (projectId: string) => projects.find((p) => p.id === projectId)?.color,
-    [projects],
+    (projectId: string) => projectsById.get(projectId)?.color,
+    [projectsById],
   );
 
   const getWorkingDir = useCallback(
-    (projectId: string) =>
-      projects.find((p) => p.id === projectId)?.workingDirs[0],
-    [projects],
+    (projectId: string) => projectsById.get(projectId)?.workingDirs[0],
+    [projectsById],
   );
 
-  const resolvers = { getPersonaName, getProjectName };
+  const resolvers = useMemo(
+    () => ({ getPersonaName, getProjectName }),
+    [getPersonaName, getProjectName],
+  );
+  const defaultSessionTitle = t("common:session.defaultTitle");
+  const getDisplayTitle = useCallback(
+    (session: ChatSession) =>
+      getDisplaySessionTitle(session.title, defaultSessionTitle),
+    [defaultSessionTitle],
+  );
   const search = useSessionSearch({
     sessions: activeSessions,
     resolvers,
     locale: i18n.resolvedLanguage,
-    getDisplayTitle: (session) =>
-      getDisplaySessionTitle(session.title, t("common:session.defaultTitle")),
+    getDisplayTitle,
   });
+  const {
+    error: searchError,
+    isSearching,
+    query: searchQuery,
+    results: searchResults,
+    search: submitSearch,
+    searchMore,
+    setQuery: setSearchQuery,
+    submittedQuery,
+  } = search;
+
+  const getLoadedActiveSessions = useCallback(() => {
+    const state = useChatSessionStore.getState();
+    const chatState = useChatStore.getState();
+    return getVisibleSessions(
+      state.sessions,
+      chatState.messagesBySession,
+    ).filter((session) => !session.archivedAt);
+  }, []);
+
+  const loadNextPageIfNeeded = useCallback(async () => {
+    const shouldSearchNewPage = Boolean(submittedQuery);
+    if (
+      !hasMoreSessions ||
+      isLoadingMoreSessions ||
+      (shouldSearchNewPage && isSearching) ||
+      loadMoreInFlightRef.current
+    ) {
+      return;
+    }
+
+    loadMoreInFlightRef.current = true;
+    try {
+      await loadMoreSessions();
+      if (shouldSearchNewPage) {
+        await searchMore(getLoadedActiveSessions());
+      }
+    } finally {
+      loadMoreInFlightRef.current = false;
+    }
+  }, [
+    getLoadedActiveSessions,
+    hasMoreSessions,
+    isLoadingMoreSessions,
+    isSearching,
+    loadMoreSessions,
+    searchMore,
+    submittedQuery,
+  ]);
+  const loadNextPageIfNeededRef = useRef(loadNextPageIfNeeded);
+
+  useEffect(() => {
+    loadNextPageIfNeededRef.current = loadNextPageIfNeeded;
+  }, [loadNextPageIfNeeded]);
+
+  const checkViewportForNextPage = useCallback(() => {
+    const scrollElement = scrollRef.current;
+    if (!scrollElement || !isNearLoadMoreThreshold(scrollElement)) {
+      return;
+    }
+
+    void loadNextPageIfNeededRef.current();
+  }, []);
+
+  const scheduleViewportLoadCheck = useCallback(() => {
+    if (typeof window === "undefined") {
+      checkViewportForNextPage();
+      return;
+    }
+
+    if (viewportLoadCheckTimerRef.current !== null) {
+      window.clearTimeout(viewportLoadCheckTimerRef.current);
+    }
+
+    viewportLoadCheckTimerRef.current = window.setTimeout(() => {
+      viewportLoadCheckTimerRef.current = null;
+      checkViewportForNextPage();
+    }, 0);
+  }, [checkViewportForNextPage]);
+
+  useEffect(
+    () => () => {
+      if (
+        typeof window !== "undefined" &&
+        viewportLoadCheckTimerRef.current !== null
+      ) {
+        window.clearTimeout(viewportLoadCheckTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const handleScroll = useCallback(() => {
+    checkViewportForNextPage();
+  }, [checkViewportForNextPage]);
+
   const getVirtualListScrollMargin = useCallback(
     (node: HTMLDivElement | null = virtualListRef.current) => {
       const scrollElement = scrollRef.current;
@@ -168,7 +300,8 @@ export function SessionHistoryView({
   );
   const updateListScrollMargin = useCallback(() => {
     setListScrollMargin(getVirtualListScrollMargin());
-  }, [getVirtualListScrollMargin]);
+    scheduleViewportLoadCheck();
+  }, [getVirtualListScrollMargin, scheduleViewportLoadCheck]);
   const setVirtualListElement = useCallback(
     (node: HTMLDivElement | null) => {
       virtualListRef.current = node;
@@ -251,6 +384,11 @@ export function SessionHistoryView({
     rangeExtractor: groupedRangeExtractor,
     scrollMargin: listScrollMargin,
   });
+
+  const isSessionNotFoundError = useCallback((error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error);
+    return message.includes("not found in sessions or threads");
+  }, []);
   const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
   const firstGroupedVirtualIndex = groupedVirtualItems[0]?.index ?? 0;
   const activeGroupedHeaderIndex = useMemo(
@@ -261,8 +399,8 @@ export function SessionHistoryView({
     [firstGroupedVirtualIndex, groupedHeaderIndexes],
   );
   const searchRows = useMemo(
-    () => flattenFlatSessionRows(search.results, columns),
-    [columns, search.results],
+    () => flattenFlatSessionRows(searchResults, columns),
+    [columns, searchResults],
   );
   const searchVirtualizer = useVirtualizer({
     count: searchRows.length,
@@ -277,6 +415,34 @@ export function SessionHistoryView({
     overscan: 5,
     scrollMargin: listScrollMargin,
   });
+  const viewportLoadCheckState = useMemo(
+    () => ({
+      activeSessionCount: activeSessions.length,
+      columnCount: columns,
+      groupedRowCount: groupedRows.length,
+      hasMoreSessions,
+      searchRowCount: searchRows.length,
+      sessionCount: sessions.length,
+      submittedQuery,
+    }),
+    [
+      activeSessions.length,
+      columns,
+      groupedRows.length,
+      hasMoreSessions,
+      searchRows.length,
+      sessions.length,
+      submittedQuery,
+    ],
+  );
+
+  useEffect(() => {
+    if (!viewportLoadCheckState.hasMoreSessions) {
+      return;
+    }
+
+    scheduleViewportLoadCheck();
+  }, [scheduleViewportLoadCheck, viewportLoadCheckState]);
 
   const handleArchive = useCallback(
     async (sessionId: string) => {
@@ -335,14 +501,13 @@ export function SessionHistoryView({
         toast.success(`Exported session to ${filename}`);
       } catch (error) {
         console.error("Export failed:", error);
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("not found in sessions or threads")) {
-          await loadSessions();
+        if (isSessionNotFoundError(error)) {
+          removeSession(sessionId);
         }
         toast.error("Failed to export session");
       }
     },
-    [activeSessions, loadSessions],
+    [activeSessions, isSessionNotFoundError, removeSession],
   );
 
   const handleDuplicate = useCallback(
@@ -352,31 +517,36 @@ export function SessionHistoryView({
         await loadSessions();
       } catch (error) {
         console.error("Duplicate failed:", error);
-        const message = error instanceof Error ? error.message : String(error);
-        if (message.includes("not found in sessions or threads")) {
-          await loadSessions();
+        if (isSessionNotFoundError(error)) {
+          removeSession(sessionId);
         }
       }
     },
-    [loadSessions],
+    [isSessionNotFoundError, loadSessions, removeSession],
   );
 
   const duplicateSelectedSessions = useCallback(async () => {
     const sessionIds = selectedSessions.map((session) => session.id);
-    const result = await applySelectionAction(
-      acpDuplicateSession,
-      new Set(sessionIds),
-    );
+    const result = await applySelectionAction(async (sessionId) => {
+      try {
+        await acpDuplicateSession(sessionId);
+      } catch (error) {
+        if (isSessionNotFoundError(error)) {
+          removeSession(sessionId);
+        }
+        throw error;
+      }
+    }, new Set(sessionIds));
     if (result) {
       await loadSessions();
-      const missingSession = result.rejectedReasons.some((reason) =>
-        String(reason).includes("not found in sessions or threads"),
-      );
-      if (missingSession) {
-        await loadSessions();
-      }
     }
-  }, [applySelectionAction, loadSessions, selectedSessions]);
+  }, [
+    applySelectionAction,
+    isSessionNotFoundError,
+    loadSessions,
+    removeSession,
+    selectedSessions,
+  ]);
 
   const handleImportSession = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -401,12 +571,12 @@ export function SessionHistoryView({
   const handleSelectResult = useCallback(
     (sessionId: string, messageId?: string) => {
       if (messageId) {
-        onSelectSearchResult?.(sessionId, messageId, search.submittedQuery);
+        onSelectSearchResult?.(sessionId, messageId, submittedQuery);
         return;
       }
       onSelectSession?.(sessionId);
     },
-    [onSelectSearchResult, onSelectSession, search.submittedQuery],
+    [onSelectSearchResult, onSelectSession, submittedQuery],
   );
 
   const renderSessionCard = useCallback(
@@ -512,10 +682,20 @@ export function SessionHistoryView({
     [renderSessionCard],
   );
 
+  const isLoadingAdditionalSessions =
+    isLoadingMoreSessions || (Boolean(submittedQuery) && isSearching);
+  const loadMoreStatus = isLoadingAdditionalSessions
+    ? submittedQuery
+      ? t("history.loadingMoreSearchResults")
+      : t("history.loadingMoreSessions")
+    : "";
+
   return (
     <div className="flex h-full min-h-0 flex-1 flex-col">
       <div
         ref={scrollRef}
+        data-testid="session-history-scroll"
+        onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]"
       >
         <div
@@ -543,22 +723,26 @@ export function SessionHistoryView({
           </div>
 
           <SearchBar
-            value={search.query}
-            onChange={search.setQuery}
+            value={searchQuery}
+            onChange={setSearchQuery}
             placeholder={t("history.searchPlaceholder")}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
-                void search.search();
+                void submitSearch();
               }
             }}
           />
 
-          {search.error && (
+          {searchError && (
             <p className="text-xs text-text-danger">
               {t("history.searchError")}
             </p>
           )}
+
+          <div role="status" aria-live="polite" className="sr-only">
+            {loadMoreStatus}
+          </div>
 
           <div
             ref={columnProbeRef}
@@ -566,8 +750,8 @@ export function SessionHistoryView({
             className="pointer-events-none invisible grid h-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
           />
 
-          {search.submittedQuery ? (
-            search.results.length > 0 ? (
+          {submittedQuery ? (
+            searchResults.length > 0 ? (
               <div
                 ref={setVirtualListElement}
                 className="relative w-full"
@@ -599,11 +783,11 @@ export function SessionHistoryView({
                 <History className="h-10 w-10 opacity-30" />
                 <div className="text-center">
                   <p className="text-sm font-medium">
-                    {search.isSearching
+                    {isSearching
                       ? t("history.searching")
                       : t("history.emptyNoMatches")}
                   </p>
-                  {!search.isSearching && (
+                  {!isSearching && (
                     <p className="mt-1 text-xs text-muted-foreground">
                       {t("history.emptyNoMatchesHint")}
                     </p>
@@ -660,6 +844,14 @@ export function SessionHistoryView({
                   {t("history.emptyHint")}
                 </p>
               </div>
+            </div>
+          )}
+
+          {hasMoreSessions && isLoadingAdditionalSessions && (
+            <div className="flex justify-center pt-1 text-xs text-muted-foreground">
+              {submittedQuery
+                ? t("history.loadingMoreSearchResults")
+                : t("history.loadingMoreSessions")}
             </div>
           )}
         </div>

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { AcpSessionSearchResult } from "@/shared/api/acp";
-import { buildSessionSearchResults } from "./buildSessionSearchResults";
+import {
+  buildSessionSearchResults,
+  mergeSessionSearchResults,
+} from "./buildSessionSearchResults";
 
 const resolvers = {
   getPersonaName: (id: string) => (id === "persona-1" ? "Builder" : undefined),
@@ -118,5 +121,52 @@ describe("buildSessionSearchResults", () => {
       matchType: "message",
       snippet: "found in body",
     });
+  });
+
+  it("merges result pages by session id and sorts newest first", () => {
+    const olderSession = makeSession({
+      id: "session-1",
+      title: "Older needle",
+      updatedAt: "2026-04-09T12:00:00Z",
+    });
+    const newerSession = makeSession({
+      id: "session-2",
+      title: "Newer needle",
+      updatedAt: "2026-04-10T12:00:00Z",
+    });
+
+    const results = mergeSessionSearchResults(
+      [
+        {
+          session: olderSession,
+          matchType: "metadata",
+        },
+      ],
+      [
+        {
+          session: newerSession,
+          matchType: "message",
+          snippet: "newer body match",
+        },
+        {
+          session: olderSession,
+          matchType: "message",
+          snippet: "refreshed older match",
+        },
+      ],
+    );
+
+    expect(results).toMatchObject([
+      {
+        session: { id: "session-2" },
+        matchType: "message",
+        snippet: "newer body match",
+      },
+      {
+        session: { id: "session-1" },
+        matchType: "message",
+        snippet: "refreshed older match",
+      },
+    ]);
   });
 });

@@ -6,14 +6,7 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarChatRow } from "./SidebarChatRow";
-
-interface TabInfo {
-  id: string;
-  title: string;
-  projectId?: string;
-  isRunning?: boolean;
-  hasUnread?: boolean;
-}
+import type { SidebarSessionItem } from "./SidebarProjectSection";
 
 export function SidebarRecentsSection({
   sessions,
@@ -41,7 +34,7 @@ export function SidebarRecentsSection({
   onToggleOpen,
   sectionHeaderTextClass,
 }: {
-  sessions: TabInfo[];
+  sessions: SidebarSessionItem[];
   collapsed: boolean;
   labelTransition: string;
   labelVisible: boolean;

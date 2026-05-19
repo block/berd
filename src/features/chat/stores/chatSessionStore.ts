@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import {
   acpCreateSession,
-  acpListSessions,
+  acpListSessionsPage,
   type AcpSessionInfo,
+  type AcpSessionsPage,
 } from "@/shared/api/acp";
 import type { Session } from "@/shared/types/chat";
 import {
@@ -15,6 +16,8 @@ import {
 } from "@/shared/api/acpApi";
 
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
+
+let sessionLoadEpoch = 0;
 
 export interface ChatSession {
   id: string;
@@ -72,7 +75,10 @@ interface ChatSessionStoreState {
   sessions: ChatSession[];
   activeSessionId: string | null;
   isLoading: boolean;
+  isLoadingMoreSessions: boolean;
   hasHydratedSessions: boolean;
+  sessionPageCursor: string | null;
+  hasMoreSessions: boolean;
   isContextPanelOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
   modelSelectionIntentBySession: Record<string, ModelSelectionIntent>;
@@ -98,8 +104,10 @@ interface ChatSessionStoreActions {
   ) => void;
   markSessionCreationFailed: (id: string, error: string) => void;
   loadSessions: () => Promise<void>;
+  loadMoreSessions: () => Promise<void>;
   patchSession: (id: string, patch: Partial<ChatSession>) => void;
   addSession: (session: ChatSession) => void;
+  removeSession: (id: string) => void;
   archiveSession: (id: string) => Promise<void>;
   unarchiveSession: (id: string) => Promise<void>;
 
@@ -148,6 +156,62 @@ function sortByUpdatedAtDesc(sessions: ChatSession[]): ChatSession[] {
   );
 }
 
+function mergeSessionMetadata(
+  existingSessions: ChatSession[],
+  loadedSessions: ChatSession[],
+): ChatSession[] {
+  const byId = new Map<string, ChatSession>();
+
+  for (const session of existingSessions) {
+    byId.set(session.id, session);
+  }
+
+  for (const session of loadedSessions) {
+    const existing = byId.get(session.id);
+    const modelName =
+      existing?.modelId === session.modelId ? existing?.modelName : undefined;
+    byId.set(session.id, {
+      ...existing,
+      ...session,
+      modelName,
+      creationState: undefined,
+      creationError: undefined,
+    });
+  }
+
+  return sortByUpdatedAtDesc([...byId.values()]);
+}
+
+function mergeSessionPage(
+  state: ChatSessionStoreState,
+  page: AcpSessionsPage,
+  previousCursor: string | null,
+): Pick<
+  ChatSessionStoreState,
+  "sessions" | "sessionPageCursor" | "hasMoreSessions"
+> {
+  const { nextCursor } = page;
+  const repeatedCursor =
+    nextCursor != null &&
+    previousCursor != null &&
+    nextCursor === previousCursor;
+  if (repeatedCursor) {
+    console.warn(
+      "ACP session/list returned the same pagination cursor; stopping pagination to avoid an infinite loop.",
+    );
+  }
+  const hasMoreSessions = nextCursor != null && !repeatedCursor;
+
+  return {
+    sessions: mergeSessionMetadata(
+      state.sessions,
+      page.sessions.map(acpSessionToChatSession),
+    ),
+    sessionPageCursor: hasMoreSessions ? nextCursor : null,
+    hasMoreSessions,
+  };
+}
+
 function loadContextPanelOpenPreference(): boolean {
   if (typeof window === "undefined") return false;
 
@@ -193,7 +257,10 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   sessions: [],
   activeSessionId: null,
   isLoading: false,
+  isLoadingMoreSessions: false,
   hasHydratedSessions: false,
+  sessionPageCursor: null,
+  hasMoreSessions: false,
   isContextPanelOpen: loadContextPanelOpenPreference(),
   activeWorkspaceBySession: {},
   modelSelectionIntentBySession: {},
@@ -314,24 +381,41 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   loadSessions: async () => {
+    const loadEpoch = ++sessionLoadEpoch;
     set({ isLoading: true });
     try {
-      const acpSessions = await acpListSessions();
-      const sessions = sortByUpdatedAtDesc(
-        acpSessions.map(acpSessionToChatSession),
-      );
-      const activeSessionId = get().activeSessionId;
-      const activeSessionStillExists =
-        activeSessionId == null ||
-        sessions.some((session) => session.id === activeSessionId);
-      set({
-        sessions,
-        activeSessionId: activeSessionStillExists ? activeSessionId : null,
-      });
+      const page = await acpListSessionsPage();
+      if (sessionLoadEpoch !== loadEpoch) return;
+      set((state) => mergeSessionPage(state, page, null));
     } catch (error) {
-      console.error("Failed to load sessions from ACP:", error);
+      if (sessionLoadEpoch === loadEpoch) {
+        console.error("Failed to load sessions from ACP:", error);
+      }
     } finally {
-      set({ isLoading: false, hasHydratedSessions: true });
+      if (sessionLoadEpoch === loadEpoch) {
+        set({ isLoading: false, hasHydratedSessions: true });
+      }
+    }
+  },
+
+  loadMoreSessions: async () => {
+    const { sessionPageCursor, hasMoreSessions, isLoadingMoreSessions } = get();
+    if (isLoadingMoreSessions || !hasMoreSessions) {
+      return;
+    }
+
+    const loadEpoch = sessionLoadEpoch;
+    set({ isLoadingMoreSessions: true });
+    try {
+      const page = await acpListSessionsPage({ cursor: sessionPageCursor });
+      if (sessionLoadEpoch !== loadEpoch) return;
+      set((state) => mergeSessionPage(state, page, sessionPageCursor));
+    } catch (error) {
+      if (sessionLoadEpoch === loadEpoch) {
+        console.error("Failed to load more sessions from ACP:", error);
+      }
+    } finally {
+      set({ isLoadingMoreSessions: false });
     }
   },
 
@@ -371,6 +455,30 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         return { sessions: updated };
       }
       return { sessions: [session, ...state.sessions] };
+    });
+  },
+
+  removeSession: (id) => {
+    set((state) => {
+      const nextSessions = state.sessions.filter(
+        (session) => session.id !== id,
+      );
+      if (nextSessions.length === state.sessions.length) {
+        return state;
+      }
+
+      const { [id]: _workspace, ...activeWorkspaceBySession } =
+        state.activeWorkspaceBySession;
+      const { [id]: _intent, ...modelSelectionIntentBySession } =
+        state.modelSelectionIntentBySession;
+
+      return {
+        sessions: nextSessions,
+        activeSessionId:
+          state.activeSessionId === id ? null : state.activeSessionId,
+        activeWorkspaceBySession,
+        modelSelectionIntentBySession,
+      };
     });
   },
 

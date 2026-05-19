@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -8,14 +9,23 @@ const designSystemExplorer = vi.hoisted(() => ({
   isEnabled: vi.fn(() => false),
 }));
 
-const mockSessions: Array<{
+type MockSession = {
   id: string;
   title: string;
   updatedAt: string;
   messageCount: number;
   projectId?: string;
+  workingDir?: string | null;
   archivedAt?: string;
-}> = [];
+};
+
+type SidebarProps = ComponentProps<typeof Sidebar>;
+const mockSessions: MockSession[] = [];
+let mockHasMoreSessions = false;
+let mockIsLoadingMoreSessions = false;
+let mockSessionPageCursor: string | null = null;
+const mockLoadMoreSessions = vi.fn();
+const mockAcpSearchSessions = vi.fn();
 
 function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   return {
@@ -36,21 +46,86 @@ function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   };
 }
 
-vi.mock("@/features/chat/stores/chatStore", () => ({
-  useChatStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      messagesBySession: {},
-      sessionStateById: {},
+function seedSessions(...sessions: MockSession[]) {
+  mockSessions.splice(0, mockSessions.length, ...sessions);
+}
+
+function seedProjectChats(count: number, overrides: Partial<MockSession> = {}) {
+  seedSessions(
+    ...Array.from({ length: count }, (_, index) => {
+      const chatNumber = index + 1;
+      return {
+        id: `session-${chatNumber}`,
+        title: `Project Chat ${chatNumber}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+        projectId: "project-1",
+        ...overrides,
+      };
     }),
+  );
+}
+
+function sidebarProps(props: Partial<SidebarProps> = {}): SidebarProps {
+  return {
+    collapsed: false,
+    onNavigate: vi.fn(),
+    onSelectSession: vi.fn(),
+    projects: [],
+    ...props,
+  };
+}
+
+function renderSidebar(props: Partial<SidebarProps> = {}) {
+  return render(<Sidebar {...sidebarProps(props)} />);
+}
+
+async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "View more chats" }));
+}
+
+vi.mock("@/features/chat/stores/chatStore", () => ({
+  useChatStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        messagesBySession: {},
+        sessionStateById: {},
+      }),
+    {
+      getState: () => ({
+        messagesBySession: {},
+        sessionStateById: {},
+      }),
+    },
+  ),
+}));
+
+vi.mock("@/shared/api/acp", () => ({
+  acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
 vi.mock("@/features/chat/stores/chatSessionStore", () => ({
   getVisibleSessions: (sessions: typeof mockSessions) =>
     sessions.filter((session) => session.messageCount > 0),
-  useChatSessionStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      sessions: mockSessions,
-    }),
+  useChatSessionStore: Object.assign(
+    (selector: (state: unknown) => unknown) =>
+      selector({
+        sessions: mockSessions,
+        hasMoreSessions: mockHasMoreSessions,
+        isLoadingMoreSessions: mockIsLoadingMoreSessions,
+        sessionPageCursor: mockSessionPageCursor,
+        loadMoreSessions: mockLoadMoreSessions,
+      }),
+    {
+      getState: () => ({
+        sessions: mockSessions,
+        hasMoreSessions: mockHasMoreSessions,
+        isLoadingMoreSessions: mockIsLoadingMoreSessions,
+        loadMoreSessions: mockLoadMoreSessions,
+        sessionPageCursor: mockSessionPageCursor,
+      }),
+    },
+  ),
 }));
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
@@ -73,7 +148,13 @@ vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
 
 describe("Sidebar", () => {
   beforeEach(() => {
-    mockSessions.splice(0, mockSessions.length);
+    seedSessions();
+    mockHasMoreSessions = false;
+    mockIsLoadingMoreSessions = false;
+    mockSessionPageCursor = null;
+    mockLoadMoreSessions.mockReset();
+    mockAcpSearchSessions.mockReset();
+    mockAcpSearchSessions.mockResolvedValue([]);
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
   });
@@ -83,17 +164,7 @@ describe("Sidebar", () => {
     const onCreateProject = vi.fn();
     const onNewChat = vi.fn();
 
-    mockSessions.splice(0, mockSessions.length);
-
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onCreateProject={onCreateProject}
-        onNewChat={onNewChat}
-        projects={[]}
-      />,
-    );
+    renderSidebar({ onCreateProject, onNewChat });
 
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
@@ -109,21 +180,14 @@ describe("Sidebar", () => {
   });
 
   it("shows the projects empty state when chats exist", () => {
-    mockSessions.splice(0, mockSessions.length, {
+    seedSessions({
       id: "session-1",
       title: "Agents page UI redesign",
       updatedAt: "2026-04-09T12:00:00.000Z",
       messageCount: 3,
     });
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar();
 
     expect(
       screen.getByRole("button", { name: "Create a project" }),
@@ -135,7 +199,7 @@ describe("Sidebar", () => {
   });
 
   it("shows the chats empty state when only project chats exist", () => {
-    mockSessions.splice(0, mockSessions.length, {
+    seedSessions({
       id: "session-1",
       title: "Project Chat",
       updatedAt: "2026-04-09T12:00:00.000Z",
@@ -143,14 +207,7 @@ describe("Sidebar", () => {
       projectId: "project-1",
     });
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[mockProject()]}
-      />,
-    );
+    renderSidebar({ projects: [mockProject()] });
 
     expect(
       screen.queryByRole("button", { name: "Create a project" }),
@@ -159,54 +216,96 @@ describe("Sidebar", () => {
       screen.getByRole("button", { name: "Start a chat" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Project One")).toBeInTheDocument();
-
-    mockSessions.splice(0, mockSessions.length);
   });
 
-  it("expands all project chats from the view all chats control", async () => {
+  it("expands loaded project chats from the view more chats control", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
-    mockSessions.splice(
-      0,
-      mockSessions.length,
-      ...Array.from({ length: 13 }, (_, index) => {
-        const chatNumber = index + 1;
-        return {
-          id: `session-${chatNumber}`,
-          title: `Project Chat ${chatNumber}`,
-          updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
-          messageCount: 3,
-          projectId: "project-1",
-        };
-      }),
-    );
-
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={onNavigate}
-        onSelectSession={vi.fn()}
-        projects={[mockProject()]}
-      />,
-    );
+    seedProjectChats(13);
+    renderSidebar({ onNavigate, projects: [mockProject()] });
 
     await user.click(screen.getByRole("button", { name: "Project One" }));
 
     expect(screen.getByText("Project Chat 13")).toBeInTheDocument();
     expect(screen.queryByText("Project Chat 8")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "View all 13 chats" }));
+    await clickViewMore(user);
 
+    expect(screen.getByText("Project Chat 13")).toBeInTheDocument();
     expect(screen.getByText("Project Chat 8")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Show less" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Show less" }),
+    ).not.toBeInTheDocument();
     expect(onNavigate).not.toHaveBeenCalledWith("projects");
   });
 
+  it("links to session history after expanding loaded project chats", async () => {
+    const user = userEvent.setup();
+    mockHasMoreSessions = true;
+    const onNavigate = vi.fn();
+    mockLoadMoreSessions.mockImplementation(async () => {
+      mockHasMoreSessions = false;
+    });
+    seedProjectChats(6);
+    renderSidebar({ onNavigate, projects: [mockProject()] });
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+    await clickViewMore(user);
+    expect(mockLoadMoreSessions).not.toHaveBeenCalled();
+
+    const historyLink = await screen.findByRole("button", {
+      name: "View older chats in Session History",
+    });
+    await user.click(historyLink);
+    expect(onNavigate).toHaveBeenCalledWith("session-history");
+  });
+
+  it("caps expanded project chats and links overflow to session history", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    seedProjectChats(21);
+    renderSidebar({ onNavigate, projects: [mockProject()] });
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+    await clickViewMore(user);
+
+    expect(screen.getByText("Project Chat 21")).toBeInTheDocument();
+    expect(screen.getByText("Project Chat 2")).toBeInTheDocument();
+    expect(screen.queryByText("Project Chat 1")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "View older chats in Session History",
+      }),
+    );
+    expect(onNavigate).toHaveBeenCalledWith("session-history");
+  });
+
+  it("does not render a project page load control while a global load is in flight", async () => {
+    const user = userEvent.setup();
+    mockHasMoreSessions = true;
+    mockIsLoadingMoreSessions = true;
+    seedSessions({
+      id: "session-1",
+      title: "Project Chat 1",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({ projects: [mockProject()] });
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(
+      screen.queryByRole("button", { name: "Loading chats..." }),
+    ).not.toBeInTheDocument();
+    expect(mockLoadMoreSessions).not.toHaveBeenCalled();
+  });
+
   it("shows sessions in recents when their project is not loaded", () => {
-    mockSessions.splice(0, mockSessions.length, {
+    seedSessions({
       id: "session-1",
       title: "Recovered Session",
       updatedAt: "2026-04-09T12:00:00.000Z",
@@ -214,22 +313,41 @@ describe("Sidebar", () => {
       projectId: "missing-project",
     });
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar();
 
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 
+  it("groups project chats by project id even when the working directory differs", async () => {
+    const user = userEvent.setup();
+    seedSessions({
+      id: "session-1",
+      title: "Mismatched Directory Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+      workingDir: "/tmp/not-a-project-working-dir",
+    });
+
+    renderSidebar({
+      projects: [
+        mockProject({
+          workingDirs: ["/tmp/project-working-dir"],
+        }),
+      ],
+    });
+
+    expect(
+      screen.queryByText("Mismatched Directory Chat"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(screen.getByText("Mismatched Directory Chat")).toBeInTheDocument();
+  });
+
   it("hides zero-message sessions from recents", () => {
-    mockSessions.splice(
-      0,
-      mockSessions.length,
+    seedSessions(
       {
         id: "home-session",
         title: "New Chat",
@@ -244,26 +362,17 @@ describe("Sidebar", () => {
       },
     );
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar();
 
     expect(screen.queryByText("New Chat")).not.toBeInTheDocument();
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
-
-    mockSessions.splice(0, mockSessions.length);
   });
 
   it("renders a home button in the sidebar header and navigates home", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
-    render(<Sidebar collapsed={false} onNavigate={onNavigate} projects={[]} />);
+    renderSidebar({ onNavigate });
 
     await user.click(screen.getByRole("button", { name: /home/i }));
 
@@ -274,7 +383,7 @@ describe("Sidebar", () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
-    render(<Sidebar collapsed={false} onNavigate={onNavigate} projects={[]} />);
+    renderSidebar({ onNavigate });
 
     await user.click(screen.getByRole("button", { name: /automations/i }));
 
@@ -284,7 +393,7 @@ describe("Sidebar", () => {
   it("renders the dev-only design system button after session history", () => {
     designSystemExplorer.isEnabled.mockReturnValue(true);
 
-    render(<Sidebar collapsed onNavigate={vi.fn()} projects={[]} />);
+    renderSidebar({ collapsed: true });
 
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
@@ -304,28 +413,21 @@ describe("Sidebar", () => {
   });
 
   it("keeps the home button visible when the sidebar is collapsed", () => {
-    render(<Sidebar collapsed onNavigate={vi.fn()} projects={[]} />);
+    renderSidebar({ collapsed: true });
 
     expect(screen.getByRole("button", { name: /home/i })).toBeInTheDocument();
   });
 
   it("collapses and expands the recents section", async () => {
     const user = userEvent.setup();
-    mockSessions.splice(0, mockSessions.length, {
+    seedSessions({
       id: "session-1",
       title: "Recovered Session",
       updatedAt: "2026-04-09T12:00:00.000Z",
       messageCount: 3,
     });
 
-    render(
-      <Sidebar
-        collapsed={false}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar();
 
     const recentsHeader = screen.getByRole("button", { name: /chats/i });
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
@@ -339,9 +441,7 @@ describe("Sidebar", () => {
 
   it("keeps the active chat in the selection while multi-selection is active", async () => {
     const user = userEvent.setup();
-    mockSessions.splice(
-      0,
-      mockSessions.length,
+    seedSessions(
       {
         id: "active-session",
         title: "Active Chat",
@@ -362,15 +462,7 @@ describe("Sidebar", () => {
       },
     );
 
-    render(
-      <Sidebar
-        collapsed={false}
-        activeSessionId="active-session"
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar({ activeSessionId: "active-session" });
 
     await user.keyboard("[ControlLeft>]");
     await user.click(screen.getByRole("button", { name: "Second Chat" }));
@@ -386,9 +478,7 @@ describe("Sidebar", () => {
 
   it("clears selection when the last manually selected chat is toggled off", async () => {
     const user = userEvent.setup();
-    mockSessions.splice(
-      0,
-      mockSessions.length,
+    seedSessions(
       {
         id: "active-session",
         title: "Active Chat",
@@ -403,15 +493,7 @@ describe("Sidebar", () => {
       },
     );
 
-    render(
-      <Sidebar
-        collapsed={false}
-        activeSessionId="active-session"
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar({ activeSessionId: "active-session" });
 
     await user.keyboard("[ControlLeft>]");
     await user.click(screen.getByRole("button", { name: "Second Chat" }));
@@ -426,9 +508,7 @@ describe("Sidebar", () => {
   it("confirms before bulk archiving selected chats", async () => {
     const user = userEvent.setup();
     const onArchiveChat = vi.fn().mockResolvedValue(undefined);
-    mockSessions.splice(
-      0,
-      mockSessions.length,
+    seedSessions(
       {
         id: "active-session",
         title: "Active Chat",
@@ -443,16 +523,10 @@ describe("Sidebar", () => {
       },
     );
 
-    render(
-      <Sidebar
-        collapsed={false}
-        activeSessionId="active-session"
-        onArchiveChat={onArchiveChat}
-        onNavigate={vi.fn()}
-        onSelectSession={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar({
+      activeSessionId: "active-session",
+      onArchiveChat,
+    });
 
     await user.keyboard("[ControlLeft>]");
     await user.click(screen.getByRole("button", { name: "Second Chat" }));
@@ -480,17 +554,12 @@ describe("Sidebar", () => {
     const onSettingsBack = vi.fn();
     const onSettingsSectionChange = vi.fn();
 
-    render(
-      <Sidebar
-        collapsed={false}
-        activeView="settings"
-        activeSettingsSection="providers"
-        onNavigate={vi.fn()}
-        onSettingsBack={onSettingsBack}
-        onSettingsSectionChange={onSettingsSectionChange}
-        projects={[]}
-      />,
-    );
+    renderSidebar({
+      activeView: "settings",
+      activeSettingsSection: "providers",
+      onSettingsBack,
+      onSettingsSectionChange,
+    });
 
     expect(
       screen.getByRole("navigation", { name: /settings navigation/i }),
@@ -512,17 +581,13 @@ describe("Sidebar", () => {
   });
 
   it("does not render an in-panel expand control in collapsed settings navigation", () => {
-    render(
-      <Sidebar
-        collapsed
-        activeView="settings"
-        activeSettingsSection="general"
-        onNavigate={vi.fn()}
-        onSettingsBack={vi.fn()}
-        onSettingsSectionChange={vi.fn()}
-        projects={[]}
-      />,
-    );
+    renderSidebar({
+      collapsed: true,
+      activeView: "settings",
+      activeSettingsSection: "general",
+      onSettingsBack: vi.fn(),
+      onSettingsSectionChange: vi.fn(),
+    });
 
     expect(
       screen.queryByRole("button", { name: /expand sidebar/i }),

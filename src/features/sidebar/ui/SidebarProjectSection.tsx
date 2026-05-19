@@ -1,10 +1,11 @@
-import { useCallback, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
   IconChevronRight,
   IconEdit,
 } from "@tabler/icons-react";
+import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
@@ -12,14 +13,15 @@ import { Button } from "@/shared/ui/button";
 import { SidebarChatRow } from "./SidebarChatRow";
 import { SidebarItemMenu } from "./SidebarItemMenu";
 
-const MAX_VISIBLE_CHATS = 5;
-const VIEW_ALL_CHATS_LABEL_THRESHOLD = 8;
+const MAX_VISIBLE_PROJECT_CHATS = 5;
+const MAX_EXPANDED_PROJECT_CHATS = 20;
 const PROJECT_ROW_TEXT_CLASS =
   "text-sidebar-nav-fg hover:bg-transparent hover:text-sidebar-nav-fg";
 
-interface TabInfo {
+export interface SidebarSessionItem {
   id: string;
   title: string;
+  updatedAt: string;
   projectId?: string;
   isRunning?: boolean;
   hasUnread?: boolean;
@@ -48,9 +50,11 @@ export function SidebarProjectSection({
   onArchiveSelected,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  onNavigate,
+  hasMoreSessions = false,
 }: {
   project: ProjectInfo;
-  projectChats: TabInfo[];
+  projectChats: SidebarSessionItem[];
   isExpanded: boolean;
   toggleProject: (projectId: string) => void;
   activeSessionId?: string | null;
@@ -71,11 +75,19 @@ export function SidebarProjectSection({
   onArchiveSelected?: () => void;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  onNavigate?: (view: AppView) => void;
+  hasMoreSessions?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const [showAll, setShowAll] = useState(false);
+  const [showExpandedChats, setShowExpandedChats] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    if (!isExpanded) {
+      setShowExpandedChats(false);
+    }
+  }, [isExpanded]);
 
   const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (e.dataTransfer.types.includes("text/x-session-id")) {
@@ -103,13 +115,15 @@ export function SidebarProjectSection({
     },
     [onMoveToProject, project.id, isExpanded, toggleProject],
   );
-  const visibleChats = projectChats.slice(
-    0,
-    showAll ? undefined : MAX_VISIBLE_CHATS,
-  );
-  const hiddenChatCount = projectChats.length - MAX_VISIBLE_CHATS;
-  const useViewAllChatsLabel =
-    projectChats.length > VIEW_ALL_CHATS_LABEL_THRESHOLD;
+  const visibleChatLimit = showExpandedChats
+    ? MAX_EXPANDED_PROJECT_CHATS
+    : MAX_VISIBLE_PROJECT_CHATS;
+  const visibleChats = projectChats.slice(0, visibleChatLimit);
+  const canRevealLoadedChats =
+    !showExpandedChats && projectChats.length > MAX_VISIBLE_PROJECT_CHATS;
+  const showHistoryHint =
+    showExpandedChats &&
+    (projectChats.length > MAX_EXPANDED_PROJECT_CHATS || hasMoreSessions);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
@@ -212,33 +226,27 @@ export function SidebarProjectSection({
               />
             );
           })}
-          {projectChats.length > MAX_VISIBLE_CHATS && (
+          {canRevealLoadedChats && (
             <Button
               type="button"
               variant="ghost"
               size="xs"
-              onClick={() => setShowAll((current) => !current)}
+              onClick={() => setShowExpandedChats(true)}
               className="h-auto w-full justify-start gap-1.5 rounded-md py-1 pl-8 pr-3 text-[11px] text-foreground hover:text-foreground"
             >
-              {showAll ? (
-                <>
-                  <IconChevronDown className="size-3" />
-                  {t("showLess")}
-                </>
-              ) : (
-                <>
-                  <IconChevronRight className="size-3" />
-                  {useViewAllChatsLabel
-                    ? t("viewAllChats", {
-                        count: projectChats.length,
-                        displayCount: projectChats.length,
-                      })
-                    : t("moreChats", {
-                        count: hiddenChatCount,
-                        displayCount: hiddenChatCount,
-                      })}
-                </>
-              )}
+              <IconChevronRight className="size-3" />
+              {t("viewMoreChats")}
+            </Button>
+          )}
+          {showHistoryHint && onNavigate && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => onNavigate("session-history")}
+              className="h-auto w-full justify-start rounded-md py-1 pl-8 pr-3 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {t("olderChatsInHistory")}
             </Button>
           )}
         </div>

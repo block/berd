@@ -29,6 +29,11 @@ export interface AcpSessionInfo {
   personaId: string | null;
 }
 
+export interface AcpSessionsPage {
+  sessions: AcpSessionInfo[];
+  nextCursor: string | null;
+}
+
 export const DEPRECATED_PROVIDER_IDS = new Set([
   "claude-code",
   "codex",
@@ -68,10 +73,8 @@ export async function listProviders(): Promise<AcpProvider[]> {
   return buildProviderListFromEntries(result.entries);
 }
 
-export async function listSessions(): Promise<AcpSessionInfo[]> {
-  const client = await getClient();
-  const response = await client.listSessions({});
-  return response.sessions.map((info: SessionInfo) => ({
+function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
+  return {
     sessionId: info.sessionId,
     title: info.title ?? null,
     updatedAt: info.updatedAt ?? null,
@@ -84,7 +87,26 @@ export async function listSessions(): Promise<AcpSessionInfo[]> {
     providerId: (info._meta?.providerId as string) ?? null,
     modelId: (info._meta?.modelId as string) ?? null,
     personaId: (info._meta?.personaId as string) ?? null,
-  }));
+  };
+}
+
+export async function listSessionsPage({
+  cursor,
+}: {
+  cursor?: string | null;
+} = {}): Promise<AcpSessionsPage> {
+  const client = await getClient();
+  const normalizedCursor = cursor?.trim() || null;
+  // ACP session/list only standardizes cwd and cursor filters. Goose project
+  // membership lives in _meta.projectId, so callers must paginate globally and
+  // group by projectId client-side instead of using cwd as a proxy.
+  const response = await client.listSessions(
+    normalizedCursor == null ? {} : { cursor: normalizedCursor },
+  );
+  return {
+    sessions: response.sessions.map(mapSessionInfo),
+    nextCursor: response.nextCursor?.trim() || null,
+  };
 }
 
 export async function exportSession(sessionId: string): Promise<string> {

@@ -1,6 +1,6 @@
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import * as directAcp from "./acpApi";
-import type { AcpSessionInfo } from "./acpApi";
+import type { AcpSessionInfo, AcpSessionsPage } from "./acpApi";
 import * as sessionRegistry from "./acpSessionRegistry";
 import {
   getCatalogEntry,
@@ -177,7 +177,7 @@ export async function acpSetModel(
   return directAcp.setModel(sessionId, modelId);
 }
 
-export type { AcpSessionInfo };
+export type { AcpSessionInfo, AcpSessionsPage };
 
 export interface AcpSessionSearchResult {
   sessionId: string;
@@ -187,9 +187,13 @@ export interface AcpSessionSearchResult {
   matchCount: number;
 }
 
-/** List all sessions known to the goose binary. */
-export async function acpListSessions(): Promise<AcpSessionInfo[]> {
-  return directAcp.listSessions();
+/** List one page of sessions known to the goose binary. */
+export async function acpListSessionsPage({
+  cursor,
+}: {
+  cursor?: string | null;
+} = {}): Promise<AcpSessionsPage> {
+  return directAcp.listSessionsPage({ cursor });
 }
 
 export async function acpSearchSessions(

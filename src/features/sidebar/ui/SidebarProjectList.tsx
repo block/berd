@@ -4,15 +4,10 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SidebarProjectSection } from "./SidebarProjectSection";
-
-interface TabInfo {
-  id: string;
-  title: string;
-  projectId?: string;
-  isRunning?: boolean;
-  hasUnread?: boolean;
-}
+import {
+  SidebarProjectSection,
+  type SidebarSessionItem,
+} from "./SidebarProjectSection";
 
 export function SidebarProjectList({
   projects,
@@ -40,9 +35,10 @@ export function SidebarProjectList({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onReorderProject,
+  hasMoreSessions = false,
 }: {
   projects: ProjectInfo[];
-  projectSessionsByProject: Record<string, TabInfo[]>;
+  projectSessionsByProject: Record<string, SidebarSessionItem[]>;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -66,6 +62,7 @@ export function SidebarProjectList({
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
+  hasMoreSessions?: boolean;
 }) {
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
   const [dropTargetProjectId, setDropTargetProjectId] = useState<string | null>(
@@ -154,6 +151,7 @@ export function SidebarProjectList({
             isExpanded={expandedProjects[project.id] ?? false}
             toggleProject={toggleProject}
             activeSessionId={activeSessionId}
+            onNavigate={onNavigate}
             onSelectSession={onSelectSession}
             onNewChatInProject={onNewChatInProject}
             onEditProject={onEditProject}
@@ -171,6 +169,7 @@ export function SidebarProjectList({
             onArchiveSelected={onArchiveSelected}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
+            hasMoreSessions={hasMoreSessions}
           />
         </div>
       ))}

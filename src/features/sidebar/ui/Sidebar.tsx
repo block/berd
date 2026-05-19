@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -23,8 +23,10 @@ import {
   selectSessionStateById,
 } from "@/features/chat/stores/chatSelectors";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
+import type { SessionChatRuntime } from "@/shared/types/chat";
 import {
   getVisibleSessions,
+  type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { selectSessions } from "@/features/chat/stores/chatSessionSelectors";
@@ -44,6 +46,7 @@ import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
+import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarNavItem } from "./SidebarNavItem";
 import { SidebarSearchResults } from "./SidebarSearchResults";
 import {
@@ -97,6 +100,7 @@ interface SidebarProps {
 
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
+const MAX_RECENTS = 20;
 type SidebarSectionVisibility = {
   projects: boolean;
   recents: boolean;
@@ -105,6 +109,83 @@ const DEFAULT_SECTION_VISIBILITY: SidebarSectionVisibility = {
   projects: true,
   recents: true,
 };
+
+type SidebarSessionGroups = {
+  byProject: Record<string, SidebarSessionItem[]>;
+  standalone: SidebarSessionItem[];
+};
+
+function validateExpandedProjects(value: unknown): Record<string, boolean> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, boolean] => typeof entry[1] === "boolean",
+  );
+  return Object.fromEntries(entries);
+}
+
+function compareSessionsByUpdatedAtDesc(
+  a: Pick<SidebarSessionItem, "updatedAt">,
+  b: Pick<SidebarSessionItem, "updatedAt">,
+): number {
+  return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
+}
+
+function toSidebarSessionItem(
+  session: ChatSession,
+  sessionStateById: Record<string, SessionChatRuntime>,
+): SidebarSessionItem {
+  const runtime = sessionStateById[session.id] ?? INITIAL_SESSION_CHAT_RUNTIME;
+  return {
+    id: session.id,
+    title: session.title,
+    projectId: session.projectId ?? undefined,
+    updatedAt: session.updatedAt,
+    isRunning: isSessionRunning(runtime.chatState),
+    hasUnread: runtime.hasUnread,
+  };
+}
+
+function getSidebarSessionGroups(
+  visibleSessions: ChatSession[],
+  projectIds: ReadonlySet<string>,
+  sessionStateById: Record<string, SessionChatRuntime>,
+): SidebarSessionGroups {
+  const byProject: Record<string, SidebarSessionItem[]> = {};
+  const standalone: SidebarSessionItem[] = [];
+
+  for (const session of visibleSessions) {
+    if (session.archivedAt) continue;
+    const item = toSidebarSessionItem(session, sessionStateById);
+    if (session.projectId && projectIds.has(session.projectId)) {
+      byProject[session.projectId] ??= [];
+      byProject[session.projectId].push(item);
+    } else {
+      standalone.push(item);
+    }
+  }
+
+  for (const chats of Object.values(byProject)) {
+    chats.sort(compareSessionsByUpdatedAtDesc);
+  }
+
+  return {
+    byProject,
+    standalone: standalone
+      .sort(compareSessionsByUpdatedAtDesc)
+      .slice(0, MAX_RECENTS),
+  };
+}
+
+function getLoadedVisibleSessions(): ChatSession[] {
+  const sessionState = useChatSessionStore.getState();
+  const chatState = useChatStore.getState();
+  return getVisibleSessions(sessionState.sessions, chatState.messagesBySession);
+}
+
+function getLoadedActiveSessions(): ChatSession[] {
+  return getLoadedVisibleSessions().filter((session) => !session.archivedAt);
+}
 
 function validateSectionVisibility(
   value: unknown,
@@ -166,7 +247,7 @@ export function Sidebar({
       const stored = window.localStorage.getItem(EXPANDED_PROJECTS_STORAGE_KEY);
       if (!stored) return {};
       const parsed = JSON.parse(stored);
-      return parsed && typeof parsed === "object" ? parsed : {};
+      return validateExpandedProjects(parsed);
     } catch {
       return {};
     }
@@ -179,12 +260,20 @@ export function Sidebar({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
-
   const messagesBySession = useChatStore(selectMessagesBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
+  const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
+  const isLoadingMoreSessions = useChatSessionStore(
+    (s) => s.isLoadingMoreSessions,
+  );
+  const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const getPersonaById = useAgentStore((s) => s.getPersonaById);
   const projectStoreProjects = useProjectStore(selectProjects);
+  const projectIds = useMemo(
+    () => new Set(projects.map((project) => project.id)),
+    [projects],
+  );
   const visibleSessions = useMemo(
     () => getVisibleSessions(sessions, messagesBySession),
     [messagesBySession, sessions],
@@ -252,6 +341,11 @@ export function Sidebar({
   const isDesignSystemSurface = activeView === "design-system";
   const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
   const defaultTitle = t("common:session.defaultTitle");
+  const getDisplayTitle = useCallback(
+    (session: { title: string }) =>
+      getDisplaySessionTitle(session.title, defaultTitle),
+    [defaultTitle],
+  );
   const navItems: readonly {
     id: AppView;
     label: string;
@@ -276,81 +370,57 @@ export function Sidebar({
       : []),
   ];
 
-  const MAX_RECENTS = 20;
-  const validProjectIds = new Set(projects.map((project) => project.id));
+  const projectSessions = useMemo(
+    () =>
+      getSidebarSessionGroups(visibleSessions, projectIds, sessionStateById),
+    [projectIds, sessionStateById, visibleSessions],
+  );
 
-  const projectSessions = (() => {
-    type SessionItem = {
-      id: string;
-      title: string;
-      sessionId: string;
-      projectId?: string;
-      updatedAt: string;
-      isRunning: boolean;
-      hasUnread: boolean;
-    };
-    const byProject: Record<string, SessionItem[]> = {};
-    const standalone: SessionItem[] = [];
-    for (const session of visibleSessions) {
-      if (session.archivedAt) continue;
-      const runtime =
-        sessionStateById[session.id] ?? INITIAL_SESSION_CHAT_RUNTIME;
-      const item: SessionItem = {
-        id: session.id,
-        title: session.title,
-        sessionId: session.id,
-        projectId: session.projectId ?? undefined,
-        updatedAt: session.updatedAt,
-        isRunning: isSessionRunning(runtime.chatState),
-        hasUnread: runtime.hasUnread,
-      };
-      if (session.projectId && validProjectIds.has(session.projectId)) {
-        if (!byProject[session.projectId]) byProject[session.projectId] = [];
-        byProject[session.projectId].push(item);
-      } else {
-        standalone.push(item);
-      }
-    }
-    for (const chats of Object.values(byProject)) {
-      chats.sort(
-        (a, b) =>
-          new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-      );
-    }
-
-    standalone.sort(
-      (a, b) =>
-        new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-    );
-    const limitedStandalone = standalone.slice(0, MAX_RECENTS);
-    return { byProject, standalone: limitedStandalone };
-  })();
-
-  const sidebarResolvers = {
-    getPersonaName: (personaId: string) =>
-      getPersonaById(personaId)?.displayName,
-    getProjectName: (projectId: string) =>
-      projectStoreProjects.find((p) => p.id === projectId)?.name,
-  };
+  const projectNamesById = useMemo(
+    () =>
+      new Map(
+        projectStoreProjects.map((project) => [project.id, project.name]),
+      ),
+    [projectStoreProjects],
+  );
+  const sidebarResolvers = useMemo(
+    () => ({
+      getPersonaName: (personaId: string) =>
+        getPersonaById(personaId)?.displayName,
+      getProjectName: (projectId: string) => projectNamesById.get(projectId),
+    }),
+    [getPersonaById, projectNamesById],
+  );
   const sidebarSearch = useSessionSearch({
     sessions: activeSessions,
     resolvers: sidebarResolvers,
     locale: i18n.resolvedLanguage,
-    getDisplayTitle: (session) =>
-      getDisplaySessionTitle(session.title, defaultTitle),
+    getDisplayTitle,
   });
+  const {
+    isSearching: isSidebarSearching,
+    query: sidebarSearchQuery,
+    results: sidebarSearchResults,
+    search: submitSidebarSearch,
+    searchMore: searchMoreLoadedSidebarChats,
+    setQuery: setSidebarSearchQuery,
+    submittedQuery: submittedSidebarSearchQuery,
+    error: sidebarSearchError,
+  } = sidebarSearch;
+
+  const activeProjectId = useMemo(() => {
+    if (!activeSessionId) return undefined;
+    return sessions.find((session) => session.id === activeSessionId)
+      ?.projectId;
+  }, [activeSessionId, sessions]);
 
   useEffect(() => {
-    if (!activeSessionId) return;
-    const activeSession = visibleSessions.find((s) => s.id === activeSessionId);
-    const projectId = activeSession?.projectId;
-    if (projectId) {
-      setExpandedProjects((prev) => {
-        if (prev[projectId]) return prev;
-        return { ...prev, [projectId]: true };
-      });
-    }
-  }, [activeSessionId, visibleSessions]);
+    if (!activeProjectId || !projectIds.has(activeProjectId)) return;
+    setExpandedProjects((prev) => {
+      if (prev[activeProjectId]) return prev;
+      return { ...prev, [activeProjectId]: true };
+    });
+  }, [activeProjectId, projectIds]);
 
   useEffect(() => {
     try {
@@ -364,19 +434,15 @@ export function Sidebar({
   }, [expandedProjects]);
 
   useEffect(() => {
-    if (projects.length === 0) return;
-    const validProjectIds = new Set(projects.map((project) => project.id));
     setExpandedProjects((prev) => {
       const next = Object.fromEntries(
-        Object.entries(prev).filter(([projectId]) =>
-          validProjectIds.has(projectId),
-        ),
+        Object.entries(prev).filter(([projectId]) => projectIds.has(projectId)),
       );
       return Object.keys(next).length === Object.keys(prev).length
         ? prev
         : next;
     });
-  }, [projects]);
+  }, [projectIds]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -389,8 +455,31 @@ export function Sidebar({
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const toggleProject = (projectId: string) =>
-    setExpandedProjects((prev) => ({ ...prev, [projectId]: !prev[projectId] }));
+  const toggleProject = useCallback((projectId: string) => {
+    setExpandedProjects((prev) => ({
+      ...prev,
+      [projectId]: !prev[projectId],
+    }));
+  }, []);
+  const searchMoreSidebarChats = useCallback(async () => {
+    const state = useChatSessionStore.getState();
+    if (
+      !submittedSidebarSearchQuery ||
+      !state.hasMoreSessions ||
+      state.isLoadingMoreSessions ||
+      isSidebarSearching
+    ) {
+      return;
+    }
+
+    await loadMoreSessions();
+    await searchMoreLoadedSidebarChats(getLoadedActiveSessions());
+  }, [
+    isSidebarSearching,
+    loadMoreSessions,
+    searchMoreLoadedSidebarChats,
+    submittedSidebarSearchQuery,
+  ]);
   const toggleSection = (section: keyof SidebarSectionVisibility) => {
     setSectionVisibility((prev) => ({ ...prev, [section]: !prev[section] }));
   };
@@ -466,12 +555,12 @@ export function Sidebar({
                       ref={searchInputRef}
                       type="text"
                       enterKeyHint="search"
-                      value={sidebarSearch.query}
-                      onChange={(e) => sidebarSearch.setQuery(e.target.value)}
+                      value={sidebarSearchQuery}
+                      onChange={(e) => setSidebarSearchQuery(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          void sidebarSearch.search();
+                          void submitSidebarSearch();
                         }
                       }}
                       placeholder={t("search.placeholder")}
@@ -519,32 +608,32 @@ export function Sidebar({
               </div>
 
               {!collapsed &&
-                (sidebarSearch.submittedQuery ? (
+                (submittedSidebarSearchQuery ? (
                   <div className="relative z-10 space-y-2">
-                    {sidebarSearch.error && (
+                    {sidebarSearchError && (
                       <p className="px-1 text-xs text-text-danger">
                         {t("search.error")}
                       </p>
                     )}
 
-                    {sidebarSearch.isSearching &&
-                      sidebarSearch.results.length === 0 && (
+                    {isSidebarSearching &&
+                      sidebarSearchResults.length === 0 && (
                         <div className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
                           {t("search.searching")}
                         </div>
                       )}
 
-                    {(!sidebarSearch.isSearching ||
-                      sidebarSearch.results.length > 0) && (
+                    {(!isSidebarSearching ||
+                      sidebarSearchResults.length > 0) && (
                       <SidebarSearchResults
-                        results={sidebarSearch.results}
+                        results={sidebarSearchResults}
                         activeSessionId={activeSessionId}
                         onSelectResult={(sessionId, messageId) => {
                           if (messageId) {
                             onSelectSearchResult?.(
                               sessionId,
                               messageId,
-                              sidebarSearch.submittedQuery,
+                              submittedSidebarSearchQuery,
                             );
                             return;
                           }
@@ -553,6 +642,21 @@ export function Sidebar({
                         getPersonaName={sidebarResolvers.getPersonaName}
                         getProjectName={sidebarResolvers.getProjectName}
                       />
+                    )}
+
+                    {hasMoreSessions && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="xs"
+                        onClick={() => void searchMoreSidebarChats()}
+                        disabled={isLoadingMoreSessions || isSidebarSearching}
+                        className="h-auto w-full justify-start rounded-md px-3 py-1.5 text-[11px] text-foreground hover:text-foreground"
+                      >
+                        {isLoadingMoreSessions || isSidebarSearching
+                          ? t("search.loadingMore")
+                          : t("search.searchMore")}
+                      </Button>
                     )}
                   </div>
                 ) : (
@@ -591,6 +695,7 @@ export function Sidebar({
                       void applySelectionAction(onMarkChatUnread)
                     }
                     onReorderProject={onReorderProject}
+                    hasMoreSessions={hasMoreSessions}
                     projectsSectionOpen={sectionVisibility.projects}
                     recentsSectionOpen={sectionVisibility.recents}
                     onToggleProjectsSection={() => toggleSection("projects")}

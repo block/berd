@@ -27,6 +27,7 @@
   },
   "navigation": {
     "agents": "Agentes",
+    "automations": "Automatizaciones",
     "home": "Inicio",
     "main": "Navegación principal",
     "sessionHistory": "Historial de sesiones",
@@ -34,7 +35,9 @@
   },
   "search": {
     "error": "La búsqueda de mensajes falló. Mostrando solo coincidencias de metadatos. Inténtalo de nuevo.",
+    "loadingMore": "Buscando más chats...",
     "placeholder": "Buscar chats...",
+    "searchMore": "Buscar más chats",
     "searching": "Buscando chats..."
   },
   "sections": {
@@ -44,8 +47,6 @@
     "recents": "Chats"
   },
   "showLess": "Mostrar menos",
-  "viewAllChats_one": "Ver {{displayCount}} chat",
-  "viewAllChats_other": "Ver los {{displayCount}} chats",
-  "moreChats_one": "{{displayCount}} más",
-  "moreChats_other": "{{displayCount}} más"
+  "viewMoreChats": "Ver más chats",
+  "olderChatsInHistory": "Ver chats antiguos en Historial de sesiones"
 }

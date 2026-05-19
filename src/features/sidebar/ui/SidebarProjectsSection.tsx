@@ -5,20 +5,14 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { SidebarProjectList } from "./SidebarProjectList";
+import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
 
-interface TabInfo {
-  id: string;
-  title: string;
-  projectId?: string;
-  isRunning?: boolean;
-  hasUnread?: boolean;
-}
 interface SidebarProjectsSectionProps {
   projects: ProjectInfo[];
   projectSessions: {
-    byProject: Record<string, TabInfo[]>;
-    standalone: TabInfo[];
+    byProject: Record<string, SidebarSessionItem[]>;
+    standalone: SidebarSessionItem[];
   };
   hasVisibleChats: boolean;
   expandedProjects: Record<string, boolean>;
@@ -48,6 +42,7 @@ interface SidebarProjectsSectionProps {
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
+  hasMoreSessions?: boolean;
   projectsSectionOpen: boolean;
   recentsSectionOpen: boolean;
   onToggleProjectsSection: () => void;
@@ -88,6 +83,7 @@ export function SidebarProjectsSection({
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onReorderProject,
+  hasMoreSessions = false,
   projectsSectionOpen,
   recentsSectionOpen,
   onToggleProjectsSection,
@@ -187,6 +183,7 @@ export function SidebarProjectsSection({
           onMarkSelectedRead={onMarkSelectedRead}
           onMarkSelectedUnread={onMarkSelectedUnread}
           onReorderProject={onReorderProject}
+          hasMoreSessions={hasMoreSessions}
         />
       )}
 

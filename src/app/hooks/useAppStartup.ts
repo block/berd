@@ -163,13 +163,11 @@ export function useAppStartup() {
       const loadSessionState = async () => {
         const t0 = performance.now();
         perfLog("[perf:startup] loadSessionState start");
-        const { loadSessions, setActiveSession } =
-          useChatSessionStore.getState();
+        const { loadSessions } = useChatSessionStore.getState();
         await loadSessions();
         perfLog(
           `[perf:startup] loadSessions done in ${(performance.now() - t0).toFixed(1)}ms`,
         );
-        setActiveSession(null);
       };
 
       // Catalog loading has its own fallback/error state and should not block
