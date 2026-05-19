@@ -8,12 +8,8 @@ vi.mock("./hooks/useAppStartup", () => ({
   useAppStartup: () => ({ ready: true }),
 }));
 
-vi.mock("@/features/onboarding/hooks/useOnboardingGate", () => ({
-  useOnboardingGate: () => ({
-    shouldShowOnboarding: false,
-    readiness: {},
-    completeOnboarding: vi.fn(),
-  }),
+vi.mock("@/features/migration/hooks/useMigrationGate", () => ({
+  useMigrationGate: () => ({ status: "ready", retry: vi.fn() }),
 }));
 
 vi.mock("@/features/sidebar/ui/Sidebar", () => ({

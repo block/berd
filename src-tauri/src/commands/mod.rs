@@ -6,6 +6,7 @@ pub mod distro;
 pub mod doctor;
 pub mod git;
 pub mod git_changes;
+pub mod migration;
 pub mod model_setup;
 pub mod openai_realtime;
 pub mod path_resolver;

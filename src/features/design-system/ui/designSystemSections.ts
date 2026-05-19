@@ -88,6 +88,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   label: string;
 }> = [
   { id: "component-accordion", label: "Accordion" },
+  { id: "component-alert", label: "Alert" },
   { id: "component-alert-dialog", label: "Alert Dialog" },
   { id: "component-avatar", label: "Avatar" },
   { id: "component-button", label: "Button" },
@@ -137,7 +138,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
 }> = [
   { id: "component-aspect-ratio", label: "Aspect Ratio" },
   { id: "component-breadcrumb", label: "Breadcrumb" },
-  { id: "component-alert", label: "Alert" },
   { id: "component-calendar", label: "Calendar" },
   { id: "component-card", label: "Card" },
   { id: "component-carousel", label: "Carousel" },

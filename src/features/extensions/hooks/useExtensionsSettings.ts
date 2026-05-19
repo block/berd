@@ -5,6 +5,7 @@ import {
   addExtension,
   listExtensions,
   removeExtension,
+  toggleExtension,
 } from "../api/extensions";
 import { nameToKey } from "../lib/extensionKeys";
 import type { ExtensionConfig, ExtensionEntry } from "../types";
@@ -91,6 +92,18 @@ export function useExtensionsSettings() {
     [fetchExtensions, t],
   );
 
+  const handleReset = useCallback(
+    async (configKey: string) => {
+      try {
+        await toggleExtension(configKey, false);
+        await fetchExtensions();
+      } catch {
+        toast.error(t("extensions.errors.resetFailed"));
+      }
+    },
+    [fetchExtensions, t],
+  );
+
   const handleModalClose = useCallback(() => {
     setModalMode(null);
     setEditingExtension(null);
@@ -105,6 +118,7 @@ export function useExtensionsSettings() {
     handleConfigure,
     handleSubmit,
     handleDelete,
+    handleReset,
     handleModalClose,
   };
 }

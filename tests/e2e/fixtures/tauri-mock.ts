@@ -94,14 +94,6 @@ export function buildInitScript(options?: {
         },
       ];
 
-      localStorage.setItem(
-        "goose:onboarding:v1",
-        JSON.stringify({
-          completedAt: new Date().toISOString(),
-          providerId: "openai",
-          modelId: "gpt-4.1",
-        }),
-      );
       localStorage.setItem("goose:defaultProvider", "goose");
       localStorage.setItem(
         "goose:preferredModelsByAgent",

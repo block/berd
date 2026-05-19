@@ -85,6 +85,12 @@
   "errors": {
     "clipboardUnavailable": "La API del portapapeles no está disponible"
   },
+  "migration": {
+    "error": {
+      "title": "No se pudo finalizar la configuración",
+      "description": "Algo salió mal al preparar Goose. Inténtalo de nuevo para continuar."
+    }
+  },
   "labels": {
     "assistant": "Asistente",
     "copyPath": "Copiar ruta",

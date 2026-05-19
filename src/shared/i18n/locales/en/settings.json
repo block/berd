@@ -131,7 +131,19 @@
     "errors": {
       "saveFailed": "Couldn't save the extension. Try again.",
       "deleteFailed": "Couldn't delete the extension. Try again.",
+      "resetFailed": "Couldn't reset the extension. Try again.",
       "nameConflict": "An extension named \"{{name}}\" already exists."
+    },
+    "alwaysOn": {
+      "label": "Always on",
+      "reset": "Reset",
+      "resetAria": "Reset {{name}} to on-demand",
+      "tooltip": "This extension is loaded into every chat. Reset to make it available on demand."
+    },
+    "disabledBanner": {
+      "title": "Some extensions are now enabled on demand",
+      "description": "These extensions used to be auto enabled for every session, but are now enabled when needed: {{names}}.",
+      "dismiss": "Dismiss"
     }
   },
   "doctor": {
@@ -157,12 +169,6 @@
       "label": "Language",
       "spanish": "Spanish",
       "system": "System default ({{language}})"
-    },
-    "onboarding": {
-      "description": "Shows onboarding again the next time Goose opens.",
-      "label": "Onboarding",
-      "reset": "Reset onboarding",
-      "resetDescription": "Done. Onboarding will appear the next time Goose opens."
     },
     "title": "General"
   },

@@ -12,7 +12,6 @@ import {
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { ButtonGroup } from "@/shared/ui/button-group";
-import { resetOnboardingCompletion } from "@/features/onboarding/hooks/useOnboardingGate";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { Check, MonitorSmartphone, Moon, Search, Sun } from "lucide-react";
 import {
@@ -106,7 +105,6 @@ function AboutInfoRow({ label, value }: { label: string; value: string }) {
 export function GeneralSettings() {
   const { t } = useTranslation("settings");
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
-  const [onboardingReset, setOnboardingReset] = useState(false);
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const {
@@ -143,11 +141,6 @@ export function GeneralSettings() {
     didScrollThemeRef.current = true;
     node.scrollIntoView({ block: "center" });
   };
-
-  function resetOnboarding() {
-    resetOnboardingCompletion();
-    setOnboardingReset(true);
-  }
 
   useEffect(() => {
     let cancelled = false;
@@ -216,24 +209,6 @@ export function GeneralSettings() {
               </SelectItem>
             </SelectContent>
           </Select>
-        </SettingRow>
-
-        <SettingRow
-          label={t("general.onboarding.label")}
-          description={t(
-            onboardingReset
-              ? "general.onboarding.resetDescription"
-              : "general.onboarding.description",
-          )}
-        >
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={resetOnboarding}
-          >
-            {t("general.onboarding.reset")}
-          </Button>
         </SettingRow>
 
         <SettingRow

@@ -1,6 +1,13 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconPlus } from "@tabler/icons-react";
+import {
+  IconAlertTriangle,
+  IconChevronDown,
+  IconPlus,
+  IconX,
+} from "@tabler/icons-react";
+import { useMigrationStore } from "@/features/migration/stores/migrationStore";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { FilterRow, PageHeader } from "@/shared/ui/page-shell";
@@ -48,11 +55,21 @@ export function ExtensionsSettings() {
     handleConfigure,
     handleSubmit,
     handleDelete,
+    handleReset,
     handleModalClose,
   } = useExtensionsSettings();
   const [searchTerm, setSearchTerm] = useState("");
   const [activeFilter, setActiveFilter] = useState<ExtensionFilter>("all");
   const [showGooseCapabilities, setShowGooseCapabilities] = useState(false);
+  const disabledExtensions = useMigrationStore(
+    (state) => state.disabledExtensions,
+  );
+  const bannerDismissedAt = useMigrationStore(
+    (state) => state.bannerDismissedAt,
+  );
+  const dismissBanner = useMigrationStore((state) => state.dismissBanner);
+  const showDisabledBanner =
+    disabledExtensions.length > 0 && !bannerDismissedAt;
 
   const filteredExtensions = useMemo(
     () =>
@@ -97,6 +114,7 @@ export function ExtensionsSettings() {
               key={ext.config_key}
               extension={ext}
               onConfigure={handleConfigure}
+              onReset={handleReset}
             />
           ))}
         </div>
@@ -122,6 +140,35 @@ export function ExtensionsSettings() {
           </Button>
         }
       />
+
+      {showDisabledBanner ? (
+        <Alert variant="default" className="my-6 pr-10">
+          <IconAlertTriangle
+            aria-hidden="true"
+            className="text-text-warning!"
+          />
+          <AlertTitle>{t("extensions.disabledBanner.title")}</AlertTitle>
+          <AlertDescription>
+            <p>
+              {t("extensions.disabledBanner.description", {
+                names: disabledExtensions.map((ext) => ext.name).join(", "),
+              })}
+            </p>
+          </AlertDescription>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => {
+              void dismissBanner();
+            }}
+            aria-label={t("extensions.disabledBanner.dismiss")}
+            className="absolute top-2 right-2"
+          >
+            <IconX className="size-3.5" />
+          </Button>
+        </Alert>
+      ) : null}
 
       <div className="space-y-3">
         <SearchBar

@@ -8,6 +8,14 @@ import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import "@/shared/styles/globals.css";
 
+// One-time cleanup of legacy onboarding state from previous builds. Safe to
+// remove once we're confident no users still carry this localStorage entry.
+try {
+  localStorage.removeItem("goose:onboarding:v1");
+} catch {
+  // localStorage may be unavailable in some environments; ignore.
+}
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {

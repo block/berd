@@ -131,7 +131,19 @@
     "errors": {
       "saveFailed": "Error al guardar la extensión. Inténtalo de nuevo.",
       "deleteFailed": "Error al eliminar la extensión. Inténtalo de nuevo.",
+      "resetFailed": "No se pudo restablecer la extensión. Inténtalo de nuevo.",
       "nameConflict": "Ya existe una extensión llamada \"{{name}}\"."
+    },
+    "alwaysOn": {
+      "label": "Siempre activa",
+      "reset": "Restablecer",
+      "resetAria": "Restablecer {{name}} a bajo demanda",
+      "tooltip": "Esta extensión se carga en cada chat. Restablécela para que esté disponible bajo demanda."
+    },
+    "disabledBanner": {
+      "title": "Algunas extensiones se cargan ahora bajo demanda",
+      "description": "Estas extensiones se cargaban automáticamente en cada sesión, pero ahora solo se cargan cuando se necesitan: {{names}}.",
+      "dismiss": "Descartar"
     }
   },
   "doctor": {
@@ -157,12 +169,6 @@
       "label": "Idioma",
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
-    },
-    "onboarding": {
-      "description": "Muestra la configuración otra vez la próxima vez que se abra Goose.",
-      "label": "Onboarding",
-      "reset": "Restablecer onboarding",
-      "resetDescription": "El onboarding aparecerá la próxima vez que se abra Goose."
     },
     "title": "General"
   },

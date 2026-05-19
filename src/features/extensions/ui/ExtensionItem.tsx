@@ -1,12 +1,14 @@
 import { useTranslation } from "react-i18next";
-import { IconSettings } from "@tabler/icons-react";
+import { IconAlertTriangle, IconSettings } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { isAlwaysOnAllowed } from "../lib/keepEnabled";
 import { getDisplayName, type ExtensionEntry } from "../types";
 
 interface ExtensionItemProps {
   extension: ExtensionEntry;
   onConfigure?: (extension: ExtensionEntry) => void;
+  onReset?: (configKey: string) => void;
   className?: string;
 }
 
@@ -30,11 +32,14 @@ function isEditable(ext: ExtensionEntry): boolean {
 export function ExtensionItem({
   extension,
   onConfigure,
+  onReset,
   className,
 }: ExtensionItemProps) {
   const { t } = useTranslation("settings");
   const editable = isEditable(extension);
   const displayName = getDisplayName(extension);
+  const showAlwaysOnWarning =
+    extension.enabled && !isAlwaysOnAllowed(extension.config_key);
 
   return (
     <div
@@ -44,14 +49,34 @@ export function ExtensionItem({
       )}
     >
       <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
-          <span className="truncate text-sm font-medium">{displayName}</span>
-        </div>
+        <span className="block truncate text-sm font-medium">
+          {displayName}
+        </span>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {getSubtitle(extension)}
         </p>
       </div>
       <div className="flex shrink-0 items-center gap-2">
+        {showAlwaysOnWarning && (
+          <span className="inline-flex items-center gap-1 text-xs text-text-warning">
+            <IconAlertTriangle className="size-3.5" aria-hidden="true" />
+            {t("extensions.alwaysOn.label")}
+          </span>
+        )}
+        {showAlwaysOnWarning && onReset && (
+          <Button
+            type="button"
+            variant="outline-flat"
+            size="xs"
+            onClick={() => onReset(extension.config_key)}
+            aria-label={t("extensions.alwaysOn.resetAria", {
+              name: displayName,
+            })}
+            title={t("extensions.alwaysOn.tooltip")}
+          >
+            {t("extensions.alwaysOn.reset")}
+          </Button>
+        )}
         {editable && onConfigure && (
           <Button
             variant="ghost"

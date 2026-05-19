@@ -56,8 +56,8 @@ import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
-import { OnboardingFlow } from "@/features/onboarding/ui/OnboardingFlow";
-import { useOnboardingGate } from "@/features/onboarding/hooks/useOnboardingGate";
+import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
+import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { acpCreateSession } from "@/shared/api/acp";
@@ -279,7 +279,7 @@ function getTopBarChromeInsets(
 }
 
 export function AppShell({ children }: { children?: React.ReactNode }) {
-  const { t } = useTranslation("chat");
+  const { t } = useTranslation(["chat", "common"]);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(SIDEBAR_DEFAULT_WIDTH);
   const [isResizing, setIsResizing] = useState(false);
@@ -360,7 +360,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
   const providerInventoryEntries = useProviderInventoryStore((s) => s.entries);
   const startup = useAppStartup();
-  const onboardingGate = useOnboardingGate(startup.ready);
+  const migrationGate = useMigrationGate(startup.ready);
   const pendingProjectCreatedRef = useRef<((projectId: string) => void) | null>(
     null,
   );
@@ -700,13 +700,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (activeView !== "home" || onboardingGate.shouldShowOnboarding) {
+    if (activeView !== "home" || migrationGate.status !== "ready") {
       return;
     }
     void ensureHomeSession().catch((error) => {
       console.error("Failed to ensure Home session:", error);
     });
-  }, [activeView, ensureHomeSession, onboardingGate.shouldShowOnboarding]);
+  }, [activeView, ensureHomeSession, migrationGate.status]);
 
   const createNewTab = useCallback(
     async (title = DEFAULT_CHAT_TITLE, project?: ProjectInfo) => {
@@ -1519,17 +1519,37 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   if (
-    onboardingGate.shouldShowOnboarding &&
+    migrationGate.status !== "ready" &&
     !(isDesignSystemExplorerEnabled() && activeView === "design-system")
   ) {
+    if (migrationGate.status === "error") {
+      return (
+        <div className="flex h-screen w-screen items-center justify-center bg-background px-6 text-foreground">
+          <div className="flex max-w-md flex-col items-center gap-3 text-center">
+            <h1 className="text-base font-medium text-text-primary">
+              {t("common:migration.error.title")}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {migrationGate.error?.message ??
+                t("common:migration.error.description")}
+            </p>
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={migrationGate.retry}
+            >
+              {t("common:actions.retry")}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
     return (
-      <OnboardingFlow
-        readiness={onboardingGate.readiness}
-        onComplete={(setup) => {
-          onboardingGate.completeOnboarding(setup);
-          setActiveView("home");
-        }}
-      />
+      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
+        <Spinner className="size-5 text-text-primary" />
+      </div>
     );
   }
 

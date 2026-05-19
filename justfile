@@ -184,3 +184,34 @@ clean:
 
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
+
+# Delete the silent migration marker(s) so the next launch re-runs the migration.
+reset-migration:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "$(uname -s)" in
+        Darwin)
+            base="$HOME/Library/Application Support"
+            ;;
+        Linux)
+            base="${XDG_DATA_HOME:-$HOME/.local/share}"
+            ;;
+        *)
+            echo "❌ Unsupported platform: $(uname -s)" >&2
+            exit 1
+            ;;
+    esac
+
+    removed=0
+    for ident in com.squareup.goose-internal com.squareup.goose-internal.dev; do
+        marker="$base/$ident/migration.json"
+        if [[ -f "$marker" ]]; then
+            rm -v "$marker"
+            removed=$((removed + 1))
+        fi
+    done
+
+    if [[ $removed -eq 0 ]]; then
+        echo "No migration marker found under $base/com.squareup.goose-internal{,.dev}/."
+    fi

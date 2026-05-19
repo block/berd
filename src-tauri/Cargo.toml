@@ -19,6 +19,7 @@ bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
 doctor = { git = "https://github.com/block/builderbot", rev = "8e1c3ec145edc0df5f04b4427cfd758378036862" }
+etcetera = "0.11.0"
 ignore = "0.4.25"
 libc = "0.2"
 log = "0.4.29"

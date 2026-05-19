@@ -85,6 +85,12 @@
   "errors": {
     "clipboardUnavailable": "Clipboard API not available"
   },
+  "migration": {
+    "error": {
+      "title": "Couldn't finish setup",
+      "description": "Something went wrong while preparing Goose. Try again to continue."
+    }
+  },
   "labels": {
     "assistant": "Assistant",
     "copyPath": "Copy path",
