@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Package, MoreHorizontal } from "lucide-react";
+import {
+  ArchiveRestore,
+  CheckSquare,
+  Copy,
+  Download,
+  MoreHorizontal,
+  Package,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
@@ -245,9 +254,9 @@ export function SessionCard({
             aria-label={t("card.optionsFor", { title: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:bg-text-default hover:text-text-on-popover-inverse",
+              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:text-text-default",
               menuOpen
-                ? "visible opacity-100 bg-text-default text-text-on-popover-inverse"
+                ? "visible opacity-100 text-text-default"
                 : "invisible group-hover:visible opacity-0 group-hover:opacity-100 text-text-default/40",
             )}
           >
@@ -277,6 +286,7 @@ export function SessionCard({
               onSelectionChange?.(id, !selected);
             }}
           >
+            <CheckSquare className="size-3.5" />
             {selected ? t("card.deselect") : t("card.select")}
           </DropdownMenuItem>
           {archivedAt ? (
@@ -287,6 +297,7 @@ export function SessionCard({
                   onExport?.(id);
                 }}
               >
+                <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -295,12 +306,14 @@ export function SessionCard({
                   onUnarchive?.(id);
                 }}
               >
+                <ArchiveRestore className="size-3.5" />
                 {t("common:actions.restore")}
               </DropdownMenuItem>
             </>
           ) : (
             <>
               <DropdownMenuItem onClick={startRename}>
+                <Pencil className="size-3.5" />
                 {t("common:actions.rename")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -309,6 +322,7 @@ export function SessionCard({
                   onExport?.(id);
                 }}
               >
+                <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -322,6 +336,7 @@ export function SessionCard({
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
+                <Copy className="size-3.5" />
                 {t("common:actions.duplicate")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -335,6 +350,7 @@ export function SessionCard({
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
+                <Trash2 className="size-3.5" />
                 {t("common:actions.archive")}
               </DropdownMenuItem>
             </>

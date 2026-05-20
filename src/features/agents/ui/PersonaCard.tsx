@@ -120,16 +120,21 @@ export function PersonaCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "rounded-full bg-background/70 text-muted-foreground backdrop-blur-sm hover:bg-background hover:text-foreground",
+                  "size-5 rounded-full transition-colors hover:text-text-default",
                   menuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                    ? "opacity-100 text-text-default"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
                 )}
               >
                 <IconDots className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
+            <DropdownMenuContent
+              variant="inverse"
+              align="start"
+              alignOffset={-4}
+              sideOffset={4}
+            >
               {isEditable && (
                 <DropdownMenuItem onSelect={() => onEdit?.(persona)}>
                   <IconPencil className="size-3.5" />

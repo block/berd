@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { IconDots } from "@tabler/icons-react";
+import { IconDots, IconPencil, IconTrash } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -94,9 +94,9 @@ export function SkillCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "size-5 rounded-full transition-colors hover:bg-text-default hover:text-text-on-popover-inverse",
+                  "size-5 rounded-full transition-colors hover:text-text-default",
                   menuOpen
-                    ? "opacity-100 bg-text-default text-text-on-popover-inverse"
+                    ? "opacity-100 text-text-default"
                     : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
                 )}
               >
@@ -111,6 +111,7 @@ export function SkillCard({
             >
               {onEdit && isEditable ? (
                 <DropdownMenuItem onSelect={() => onEdit(skill)}>
+                  <IconPencil className="size-3.5" />
                   {t("common:actions.edit")}
                 </DropdownMenuItem>
               ) : null}
@@ -119,6 +120,7 @@ export function SkillCard({
                   variant="destructive"
                   onSelect={() => onDelete(skill)}
                 >
+                  <IconTrash className="size-3.5" />
                   {t("common:actions.delete")}
                 </DropdownMenuItem>
               ) : null}

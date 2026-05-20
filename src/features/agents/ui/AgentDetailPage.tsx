@@ -184,7 +184,11 @@ export function AgentDetailPage({
                       <span className="sr-only">{t("view.more")}</span>
                     </Button>
                   </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" sideOffset={8}>
+                  <DropdownMenuContent
+                    variant="inverse"
+                    align="end"
+                    sideOffset={8}
+                  >
                     <DropdownMenuItem
                       variant="destructive"
                       onSelect={() => onDelete(persona)}

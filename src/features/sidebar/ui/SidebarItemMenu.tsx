@@ -42,16 +42,21 @@ export function SidebarItemMenu({
           aria-label={t("menu.optionsFor", { label })}
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            "size-6 rounded-md",
+            "size-5 rounded-full transition-colors hover:text-text-default",
             open
-              ? "visible opacity-100"
-              : "invisible group-hover:visible group-focus-within:visible opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+              ? "visible opacity-100 text-text-default"
+              : "invisible group-hover:visible group-focus-within:visible opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
           )}
         >
-          <IconDots className="size-4" />
+          <IconDots className="size-3.5" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent side="right" align="start" sideOffset={8}>
+      <DropdownMenuContent
+        variant="inverse"
+        align="start"
+        alignOffset={-4}
+        sideOffset={4}
+      >
         {onEdit && (
           <DropdownMenuItem onClick={onEdit}>
             <Pencil className="size-3.5" />

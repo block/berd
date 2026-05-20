@@ -134,7 +134,7 @@ export function SkillDetailPage({
                 <span className="sr-only">{moreLabel}</span>
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={8}>
+            <DropdownMenuContent variant="inverse" align="end" sideOffset={8}>
               <DropdownMenuItem onSelect={() => onShare(skill)}>
                 <IconShare className="size-3.5" />
                 {t("view.share")}

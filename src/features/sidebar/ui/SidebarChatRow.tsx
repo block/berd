@@ -254,16 +254,21 @@ export function SidebarChatRow({
             aria-label={t("menu.optionsFor", { label: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-1 size-6 rounded-md",
+              "absolute right-1 size-5 rounded-full transition-colors hover:text-text-default",
               menuOpen
-                ? "visible opacity-100"
-                : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100",
+                ? "visible opacity-100 text-text-default"
+                : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-text-default/40",
             )}
           >
-            <MoreHorizontal className="size-4" />
+            <MoreHorizontal className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={4}>
+        <DropdownMenuContent
+          variant="inverse"
+          align="start"
+          alignOffset={-4}
+          sideOffset={4}
+        >
           {shouldApplyToSelection && (
             <>
               <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
