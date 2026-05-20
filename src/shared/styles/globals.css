@@ -254,7 +254,7 @@
   --text-breadcrumb-separator: #afafaf;
   --text-alt: var(--color-gray-600);
   --text-title: #19191a;
-  --text-placeholder: var(--color-gray-400);
+  --text-placeholder: var(--color-gray-500);
   --text-on-primary: var(--brand-foreground);
   --text-inverse: var(--color-white);
   --text-danger: var(--color-red-200);

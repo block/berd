@@ -1,17 +1,25 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconPlus, IconUpload } from "@tabler/icons-react";
+import { IconChevronDown, IconPlus, IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { PageShell } from "@/shared/ui/page-shell";
+import { SearchBar } from "@/shared/ui/SearchBar";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { useSkillImportExport } from "../hooks/useSkillImportExport";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsDialogs } from "./SkillsDialogs";
-import { SkillsGrid } from "./SkillsGrid";
+import { skillsGridClass, SkillsGrid } from "./SkillsGrid";
 import { hydrateProjectNames } from "../lib/projectHydration";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import {
@@ -30,6 +38,34 @@ interface SkillsViewProps {
   onStartChatWithSkill?: (skill: SkillInfo, projectId?: string | null) => void;
 }
 
+type SkillScope = "all" | "global" | `project:${string}`;
+
+function skillMatchesQuery(skill: SkillInfo, query: string): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  return [
+    skill.name,
+    skill.description,
+    skill.sourceLabel,
+    ...skill.projectLinks.map((project) => project.name),
+  ].some((field) => field.toLowerCase().includes(normalizedQuery));
+}
+
+function skillMatchesScope(skill: SkillInfo, scope: SkillScope): boolean {
+  if (scope === "all") {
+    return true;
+  }
+  if (scope === "global") {
+    return skill.sourceKind !== "project";
+  }
+
+  const projectId = scope.replace(/^project:/, "");
+  return skill.projectLinks.some((project) => project.id === projectId);
+}
+
 export function SkillsView({
   activeSkillId,
   onActiveSkillIdChange,
@@ -45,6 +81,8 @@ export function SkillsView({
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [deletingSkill, setDeletingSkill] = useState<SkillInfo | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [skillScope, setSkillScope] = useState<SkillScope>("all");
   const [internalActiveSkillId, setInternalActiveSkillId] = useState<
     string | null
   >(null);
@@ -94,8 +132,52 @@ export function SkillsView({
     loadSkills();
   }, [loadSkills]);
 
+  const projectsWithSkillDirs = useMemo(
+    () => projects.filter((project) => project.workingDirs.length > 0),
+    [projects],
+  );
+
+  useEffect(() => {
+    if (!skillScope.startsWith("project:")) {
+      return;
+    }
+    const selectedProjectId = skillScope.replace(/^project:/, "");
+    if (
+      !projectsWithSkillDirs.some((project) => project.id === selectedProjectId)
+    ) {
+      setSkillScope("all");
+    }
+  }, [projectsWithSkillDirs, skillScope]);
+
   const activeSkill =
     skills.find((skill) => skill.id === currentActiveSkillId) ?? null;
+
+  const visibleSkills = useMemo(
+    () =>
+      skills.filter(
+        (skill) =>
+          skillMatchesScope(skill, skillScope) &&
+          skillMatchesQuery(skill, searchQuery),
+      ),
+    [searchQuery, skillScope, skills],
+  );
+
+  const selectedProjectId = skillScope.startsWith("project:")
+    ? skillScope.replace(/^project:/, "")
+    : null;
+
+  const selectedScopeLabel = useMemo(() => {
+    if (selectedProjectId) {
+      return (
+        projects.find((project) => project.id === selectedProjectId)?.name ??
+        t("view.scope.project")
+      );
+    }
+    if (skillScope === "global") {
+      return t("view.scope.global");
+    }
+    return t("view.scope.all");
+  }, [projects, selectedProjectId, skillScope, t]);
 
   useEffect(() => {
     if (currentActiveSkillId && !loading && !activeSkill) {
@@ -210,6 +292,55 @@ export function SkillsView({
     }
     setTopBarActions(
       <>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="page-header"
+              size="xs"
+              aria-label={t("view.scope.ariaLabel")}
+              rightIcon={<IconChevronDown />}
+            >
+              {selectedScopeLabel}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem
+              className={
+                skillScope === "all" ? "bg-background-muted" : undefined
+              }
+              onSelect={() => setSkillScope("all")}
+            >
+              {t("view.scope.all")}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className={
+                skillScope === "global" ? "bg-background-muted" : undefined
+              }
+              onSelect={() => setSkillScope("global")}
+            >
+              {t("view.scope.global")}
+            </DropdownMenuItem>
+            {projectsWithSkillDirs.length > 0 ? (
+              <DropdownMenuLabel className="pt-2 text-xs text-text-placeholder">
+                {t("view.scope.projects")}
+              </DropdownMenuLabel>
+            ) : null}
+            {projectsWithSkillDirs.map((project) => (
+              <DropdownMenuItem
+                key={project.id}
+                className={
+                  skillScope === `project:${project.id}`
+                    ? "bg-background-muted"
+                    : undefined
+                }
+                onSelect={() => setSkillScope(`project:${project.id}`)}
+              >
+                {project.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           type="button"
           variant="page-header"
@@ -231,7 +362,16 @@ export function SkillsView({
       </>,
     );
     return () => setTopBarActions(null);
-  }, [activeSkill, handleNewSkill, openFilePicker, setTopBarActions, t]);
+  }, [
+    activeSkill,
+    handleNewSkill,
+    openFilePicker,
+    projectsWithSkillDirs,
+    selectedScopeLabel,
+    setTopBarActions,
+    skillScope,
+    t,
+  ]);
 
   const handleShare = useCallback(
     (skill: SkillInfo) => {
@@ -253,6 +393,7 @@ export function SkillsView({
       onDialogClose={handleDialogClose}
       onSaved={handleSkillSaved}
       editingSkill={editingSkill}
+      initialProjectId={selectedProjectId}
       deletingSkill={deletingSkill}
       onDeletingSkillChange={setDeletingSkill}
       onConfirmDelete={handleConfirmDeleteSkill}
@@ -279,9 +420,23 @@ export function SkillsView({
 
   return (
     <PageShell contentWidth="full">
-      <section aria-labelledby="skills-heading">
+      <section
+        aria-labelledby="skills-heading"
+        className="flex flex-col gap-10"
+      >
+        <div className={skillsGridClass}>
+          <div className="col-span-full sm:col-span-2">
+            <SearchBar
+              size="pill"
+              value={searchQuery}
+              onChange={setSearchQuery}
+              placeholder={t("view.searchPlaceholder")}
+              aria-label={t("view.searchAriaLabel")}
+            />
+          </div>
+        </div>
         <SkillsGrid
-          skills={skills}
+          skills={visibleSkills}
           isLoading={loading}
           onSelectSkill={handleSelectSkill}
           onCreateSkill={handleNewSkill}

@@ -49,6 +49,7 @@ interface SkillEditorProps {
   onClose: () => void;
   onSaved?: (savedSkill?: SkillInfo) => void | Promise<void>;
   editingSkill?: EditingSkill;
+  initialProjectId?: string | null;
   onDelete?: (editingSkill: EditingSkill) => void;
 }
 
@@ -57,6 +58,7 @@ export function SkillEditor({
   onClose,
   onSaved,
   editingSkill,
+  initialProjectId,
   onDelete,
 }: SkillEditorProps) {
   const { t } = useTranslation(["skills", "common"]);
@@ -90,10 +92,10 @@ export function SkillEditor({
       setName("");
       setDescription("");
       setInstructions("");
-      setSaveLocation(GLOBAL_VALUE);
+      setSaveLocation(initialProjectId ?? GLOBAL_VALUE);
       setError(null);
     }
-  }, [isOpen, editingSkill]);
+  }, [isOpen, editingSkill, initialProjectId]);
 
   const nameValid = isValidSkillName(name);
   const canSave = nameValid && description.trim().length > 0 && !saving;

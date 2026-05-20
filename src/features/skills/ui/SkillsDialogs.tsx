@@ -18,6 +18,7 @@ interface SkillsDialogsProps {
   onDialogClose: () => void;
   onSaved: (savedSkill?: SkillInfo) => void | Promise<void>;
   editingSkill?: EditingSkill;
+  initialProjectId?: string | null;
   deletingSkill: SkillInfo | null;
   onDeletingSkillChange: (skill: SkillInfo | null) => void;
   onConfirmDelete: () => void | Promise<void>;
@@ -29,6 +30,7 @@ export function SkillsDialogs({
   onDialogClose,
   onSaved,
   editingSkill,
+  initialProjectId,
   deletingSkill,
   onDeletingSkillChange,
   onConfirmDelete,
@@ -43,6 +45,7 @@ export function SkillsDialogs({
         onClose={onDialogClose}
         onSaved={onSaved}
         editingSkill={editingSkill}
+        initialProjectId={initialProjectId}
         onDelete={onDeleteFromEditor}
       />
 

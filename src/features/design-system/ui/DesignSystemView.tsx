@@ -768,9 +768,8 @@ const gooseSemanticColorTokens: RuntimeToken[] = [
   {
     name: "--text-placeholder",
     description: "Placeholder text.",
-    definition:
-      "color-mix(in srgb, hsl(var(--muted-foreground)) 75%, transparent)",
-    sources: ["--muted-foreground"],
+    definition: "light: var(--color-gray-500); dark: var(--color-gray-600)",
+    sources: ["--color-gray-500", "--color-gray-600"],
   },
   {
     name: "--sidebar-nav-bg-hover",
