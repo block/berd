@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { IconEdit, IconFolderPlus } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconFolderPlus } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { cn } from "@/shared/lib/cn";
@@ -43,9 +43,14 @@ interface SidebarProjectsSectionProps {
   onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
   hasMoreSessions?: boolean;
+  projectsSectionOpen: boolean;
+  recentsSectionOpen: boolean;
+  onToggleProjectsSection: () => void;
+  onToggleRecentsSection: () => void;
 }
 
-const SECTION_HEADER_TEXT_CLASS = "text-[13px] font-normal text-foreground";
+const SECTION_HEADER_TEXT_CLASS =
+  "text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted";
 
 export function SidebarProjectsSection({
   projects,
@@ -79,18 +84,23 @@ export function SidebarProjectsSection({
   onMarkSelectedUnread,
   onReorderProject,
   hasMoreSessions = false,
+  projectsSectionOpen,
+  recentsSectionOpen,
+  onToggleProjectsSection,
+  onToggleRecentsSection,
 }: SidebarProjectsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const showProjectsEmptyState = projects.length === 0;
   const showChatsEmptyState = projectSessions.standalone.length === 0;
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
+  const showProjects = collapsed || projectsSectionOpen;
   const emptyActionClasses =
     "h-8 w-full justify-start px-3 text-[13px] text-muted-foreground";
 
   return (
     <div
       className={cn(
-        "relative z-10 mt-4 before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border-soft",
+        "relative z-10",
         labelTransition,
         labelVisible
           ? "opacity-100 max-h-[2000px]"
@@ -102,23 +112,32 @@ export function SidebarProjectsSection({
       <div
         className={cn(
           "group/projects-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
+          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
         )}
       >
         {!collapsed && (
-          <div
+          <button
+            type="button"
+            onClick={onToggleProjectsSection}
+            aria-expanded={projectsSectionOpen}
             className={cn(
-              "flex min-w-0 flex-1 items-center py-1 text-left",
+              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"
                 : "opacity-0 w-0 overflow-hidden",
             )}
           >
+            <IconChevronDown
+              className={cn(
+                "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                !projectsSectionOpen && "-rotate-90",
+              )}
+            />
             <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
               {t("sections.projects")}
             </span>
-          </div>
+          </button>
         )}
         {!collapsed && !showProjectsEmptyState && (
           <Button
@@ -128,7 +147,7 @@ export function SidebarProjectsSection({
             onClick={onCreateProject}
             title={t("actions.newProject")}
             className={cn(
-              "mr-1 h-6 flex-shrink-0 rounded-full bg-surface-tile px-2 text-[11px] text-foreground opacity-0 transition-opacity duration-150 ease-out hover:bg-surface-tile hover:text-foreground",
+              "mr-1 h-6 flex-shrink-0 rounded-full bg-muted px-2 text-[11px] text-foreground opacity-0 transition-opacity duration-150 ease-out hover:bg-muted/80 hover:text-foreground",
               "pointer-events-none group-hover/projects-header:pointer-events-auto group-hover/projects-header:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
             )}
           >
@@ -137,34 +156,36 @@ export function SidebarProjectsSection({
         )}
       </div>
 
-      <SidebarProjectList
-        projects={projects}
-        projectSessionsByProject={projectSessions.byProject}
-        expandedProjects={expandedProjects}
-        toggleProject={toggleProject}
-        collapsed={collapsed}
-        activeSessionId={activeSessionId}
-        onNavigate={onNavigate}
-        onSelectSession={onSelectSession}
-        onNewChatInProject={onNewChatInProject}
-        onEditProject={onEditProject}
-        onArchiveProject={onArchiveProject}
-        onArchiveChat={onArchiveChat}
-        onRenameChat={onRenameChat}
-        onMarkChatRead={onMarkChatRead}
-        onMarkChatUnread={onMarkChatUnread}
-        onMoveToProject={onMoveToProject}
-        selectedSessionIds={selectedSessionIds}
-        selectionEnabled={selectionEnabled}
-        selectionActionsDisabled={selectionActionsDisabled}
-        onSelectionClear={onSelectionClear}
-        onSelectionChange={onSelectionChange}
-        onArchiveSelected={onArchiveSelected}
-        onMarkSelectedRead={onMarkSelectedRead}
-        onMarkSelectedUnread={onMarkSelectedUnread}
-        onReorderProject={onReorderProject}
-        hasMoreSessions={hasMoreSessions}
-      />
+      {showProjects && (
+        <SidebarProjectList
+          projects={projects}
+          projectSessionsByProject={projectSessions.byProject}
+          expandedProjects={expandedProjects}
+          toggleProject={toggleProject}
+          collapsed={collapsed}
+          activeSessionId={activeSessionId}
+          onNavigate={onNavigate}
+          onSelectSession={onSelectSession}
+          onNewChatInProject={onNewChatInProject}
+          onEditProject={onEditProject}
+          onArchiveProject={onArchiveProject}
+          onArchiveChat={onArchiveChat}
+          onRenameChat={onRenameChat}
+          onMarkChatRead={onMarkChatRead}
+          onMarkChatUnread={onMarkChatUnread}
+          onMoveToProject={onMoveToProject}
+          selectedSessionIds={selectedSessionIds}
+          selectionEnabled={selectionEnabled}
+          selectionActionsDisabled={selectionActionsDisabled}
+          onSelectionClear={onSelectionClear}
+          onSelectionChange={onSelectionChange}
+          onArchiveSelected={onArchiveSelected}
+          onMarkSelectedRead={onMarkSelectedRead}
+          onMarkSelectedUnread={onMarkSelectedUnread}
+          onReorderProject={onReorderProject}
+          hasMoreSessions={hasMoreSessions}
+        />
+      )}
 
       {showProjectsEmptyState &&
         (collapsed ? (
@@ -219,19 +240,28 @@ export function SidebarProjectsSection({
             )}
           >
             {!collapsed && (
-              <div
+              <button
+                type="button"
+                onClick={onToggleRecentsSection}
+                aria-expanded={recentsSectionOpen}
                 className={cn(
-                  "flex min-w-0 flex-1 items-center py-1 text-left",
+                  "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
                   labelTransition,
                   labelVisible
                     ? "opacity-100 w-auto"
                     : "opacity-0 w-0 overflow-hidden",
                 )}
               >
+                <IconChevronDown
+                  className={cn(
+                    "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                    !recentsSectionOpen && "-rotate-90",
+                  )}
+                />
                 <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
                   {t("sections.recents")}
                 </span>
-              </div>
+              </button>
             )}
           </div>
           <div className="space-y-0.5">
@@ -270,6 +300,8 @@ export function SidebarProjectsSection({
           onArchiveSelected={onArchiveSelected}
           onMarkSelectedRead={onMarkSelectedRead}
           onMarkSelectedUnread={onMarkSelectedUnread}
+          isOpen={recentsSectionOpen}
+          onToggleOpen={onToggleRecentsSection}
           sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}
         />
       )}

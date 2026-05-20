@@ -1,6 +1,6 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconEdit, IconMessage } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconMessage } from "@tabler/icons-react";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -30,6 +30,8 @@ export function SidebarRecentsSection({
   onArchiveSelected,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  isOpen,
+  onToggleOpen,
   sectionHeaderTextClass,
 }: {
   sessions: SidebarSessionItem[];
@@ -53,10 +55,13 @@ export function SidebarRecentsSection({
   onArchiveSelected?: () => void;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  isOpen: boolean;
+  onToggleOpen: () => void;
   sectionHeaderTextClass: string;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
   const [recentsDragOver, setRecentsDragOver] = useState(false);
+  const showContent = collapsed || isOpen;
 
   const handleRecentsDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
     const hasSession = e.dataTransfer.types.includes("text/x-session-id");
@@ -88,7 +93,6 @@ export function SidebarRecentsSection({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
     <div
-      className="relative mt-4 before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border-soft"
       onDragOver={handleRecentsDragOver}
       onDragLeave={handleRecentsDragLeave}
       onDrop={handleRecentsDrop}
@@ -96,23 +100,32 @@ export function SidebarRecentsSection({
       <div
         className={cn(
           "relative group/chats-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
+          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
         )}
       >
         {!collapsed && (
-          <div
+          <button
+            type="button"
+            onClick={onToggleOpen}
+            aria-expanded={isOpen}
             className={cn(
-              "flex min-w-0 flex-1 items-center py-1 text-left",
+              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"
                 : "opacity-0 w-0 overflow-hidden",
             )}
           >
+            <IconChevronDown
+              className={cn(
+                "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                !isOpen && "-rotate-90",
+              )}
+            />
             <span className={cn("truncate", sectionHeaderTextClass)}>
               {t("sections.recents")}
             </span>
-          </div>
+          </button>
         )}
         {!collapsed && onNewChat && !showEmptyState && (
           <Button
@@ -136,7 +149,7 @@ export function SidebarRecentsSection({
         )}
       </div>
 
-      {showEmptyState && collapsed ? (
+      {showContent && showEmptyState && collapsed ? (
         <div className="flex flex-col items-center gap-1">
           <Button
             type="button"
@@ -150,7 +163,7 @@ export function SidebarRecentsSection({
             <IconEdit className="size-4" />
           </Button>
         </div>
-      ) : showEmptyState ? (
+      ) : showContent && showEmptyState ? (
         <div className="space-y-0.5">
           <Button
             type="button"
@@ -163,7 +176,7 @@ export function SidebarRecentsSection({
             {t("empty.startChat")}
           </Button>
         </div>
-      ) : sessions.length > 0 && collapsed ? (
+      ) : showContent && sessions.length > 0 && collapsed ? (
         <div className="flex flex-col items-center gap-1">
           {sessions.map((session) => (
             <Button
@@ -192,7 +205,7 @@ export function SidebarRecentsSection({
             </Button>
           ))}
         </div>
-      ) : sessions.length > 0 ? (
+      ) : showContent && sessions.length > 0 ? (
         <div className="space-y-0.5">
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;

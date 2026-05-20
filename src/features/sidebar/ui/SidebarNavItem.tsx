@@ -29,8 +29,8 @@ export function SidebarNavItem({
     "flex items-center w-full text-sm transition-colors duration-200 rounded-md",
     Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",
     isActive
-      ? "bg-sidebar-nav-bg-selected font-light text-sidebar-nav-fg"
-      : "font-light text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg",
+      ? "bg-sidebar-nav-bg-selected font-normal text-sidebar-nav-fg"
+      : "font-normal text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg",
   );
 
   return (
