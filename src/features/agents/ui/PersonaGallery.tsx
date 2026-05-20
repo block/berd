@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus } from "lucide-react";
+import { IconPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
@@ -30,22 +30,12 @@ interface PersonaGalleryProps {
 
 function SkeletonCard() {
   return (
-    <div
-      aria-hidden="true"
-      className="flex flex-col rounded-2xl border border-border-soft bg-background p-5"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <Skeleton className="h-12 w-12 rounded-full" />
-        <Skeleton className="h-6 w-6 rounded-md" />
-      </div>
-      <div className="mt-3 min-w-0 space-y-1.5">
-        <Skeleton className="h-4 w-28" />
-        <Skeleton className="h-3 w-full" />
-        <Skeleton className="h-3 w-5/6" />
-      </div>
-      <div aria-hidden="true" className="h-7 shrink-0" />
-      <div>
-        <Skeleton className="h-3 w-3/4" />
+    <div aria-hidden="true" className="flex w-full flex-col gap-4 p-2">
+      <Skeleton className="aspect-square w-full rounded-card-sm" />
+      <div className="space-y-3 px-1">
+        <Skeleton className="h-px w-full rounded-none" />
+        <Skeleton className="h-5 w-24 rounded-full" />
+        <Skeleton className="h-4 w-5/6" />
       </div>
     </div>
   );
@@ -77,6 +67,7 @@ export function PersonaGallery({
       maxBytes: maxImportBytes,
       fileTooLargeMessage: importTooLargeMessage,
     });
+
   const sorted = useMemo(() => {
     const builtins = personas
       .filter((p) => p.isBuiltin)
@@ -87,12 +78,18 @@ export function PersonaGallery({
     return [...builtins, ...custom];
   }, [personas]);
 
+  // Figma 916:17681 ("more than 5") lays five agents across at 1440px. We
+  // mirror that at 2xl and step down responsively for narrower viewports.
+  const gridClass = cn(
+    "grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+  );
+
   if (isLoading) {
     return (
       <div
         role="status"
         aria-label={t("gallery.loading")}
-        className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3"
+        className={gridClass}
       >
         <SkeletonCard />
         <SkeletonCard />
@@ -107,7 +104,7 @@ export function PersonaGallery({
       <div
         {...dropHandlers}
         className={cn(
-          "flex min-h-72 flex-col items-center justify-center rounded-2xl border border-dashed border-border-soft bg-muted/10 px-6 text-center",
+          "flex min-h-72 flex-col items-center justify-center rounded-card border border-dashed border-border-soft bg-muted/10 px-6 text-center",
           isDragOver && "border-border bg-muted/30",
         )}
       >
@@ -119,20 +116,19 @@ export function PersonaGallery({
             ? t("gallery.noResultsDescription")
             : t("view.emptyAgentsDescription")}
         </p>
-        <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-          <Button
-            type="button"
-            size="sm"
-            aria-label={t("gallery.createAria")}
-            onClick={onCreatePersona}
-          >
-            <Plus className="size-3.5" />
-            {t("gallery.new")}
-          </Button>
-        </div>
+        <Button
+          type="button"
+          size="sm"
+          className="mt-5"
+          aria-label={t("gallery.createAria")}
+          onClick={onCreatePersona}
+          leftIcon={<IconPlus />}
+        >
+          {t("gallery.new")}
+        </Button>
         {onImportFile && (
           <>
-            <p className="mt-3 text-[11px] text-muted-foreground">
+            <p className="mt-3 text-xs text-muted-foreground">
               {t("gallery.dropFile")}
             </p>
             <input
@@ -149,7 +145,7 @@ export function PersonaGallery({
   }
 
   return (
-    <div className="grid auto-rows-fr grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+    <div {...dropHandlers} className={gridClass}>
       {sorted.map((persona) => (
         <PersonaCard
           key={persona.id}
@@ -162,30 +158,6 @@ export function PersonaGallery({
           onExport={onExportPersona}
         />
       ))}
-
-      <Button
-        type="button"
-        variant="ghost"
-        onClick={onCreatePersona}
-        aria-label={t("gallery.createAria")}
-        {...dropHandlers}
-        className={cn(
-          "flex h-full min-h-48 w-full flex-col items-center justify-center gap-2 rounded-2xl border border-dashed p-5",
-          "text-muted-foreground transition-colors",
-          "hover:border-border hover:text-foreground hover:bg-muted/20",
-          isDragOver
-            ? "border-border bg-muted/50 text-muted-foreground"
-            : "border-border-soft",
-        )}
-      >
-        <Plus className="size-6" />
-        <span className="text-sm font-medium">{t("gallery.new")}</span>
-        {onImportFile && (
-          <span className="text-[11px] text-muted-foreground">
-            {t("gallery.dropFile")}
-          </span>
-        )}
-      </Button>
       {onImportFile && (
         <input
           ref={fileInputRef}

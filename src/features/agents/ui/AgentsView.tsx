@@ -1,7 +1,13 @@
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Plus, Upload } from "lucide-react";
+import {
+  IconArrowsSort,
+  IconLayoutGrid,
+  IconPlus,
+  IconSearch,
+  IconUpload,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button, buttonVariants } from "@/shared/ui/button";
@@ -365,7 +371,7 @@ export function AgentsView({
   }
 
   return (
-    <PageShell>
+    <PageShell contentWidth="full">
       <PageHeader
         title={t("view.title")}
         description={t("view.description")}
@@ -374,11 +380,41 @@ export function AgentsView({
           <>
             <Button
               type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled
+              aria-label="Search agents"
+              title="Search (coming soon)"
+            >
+              <IconSearch aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled
+              aria-label="Toggle view"
+              title="View options (coming soon)"
+            >
+              <IconLayoutGrid aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-sm"
+              disabled
+              aria-label="Sort agents"
+              title="Sort (coming soon)"
+            >
+              <IconArrowsSort aria-hidden="true" />
+            </Button>
+            <Button
+              type="button"
               variant="outline-flat"
               size="xs"
               onClick={() => void handleImportPicker()}
+              leftIcon={<IconUpload />}
             >
-              <Upload className="size-3.5" />
               {t("common:actions.import")}
             </Button>
             <Button
@@ -386,8 +422,8 @@ export function AgentsView({
               variant="outline-flat"
               size="xs"
               onClick={() => openPersonaEditor()}
+              leftIcon={<IconPlus />}
             >
-              <Plus className="size-3.5" />
               {t("view.newPersona")}
             </Button>
           </>

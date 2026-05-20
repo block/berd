@@ -1,8 +1,13 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Download, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import {
+  IconCopy,
+  IconDownload,
+  IconDots,
+  IconPencil,
+  IconTrash,
+} from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
-import { Avatar, AvatarImage, AvatarFallback } from "@/shared/ui/avatar";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
 import {
@@ -16,8 +21,8 @@ import type { Persona } from "@/shared/types/agents";
 import {
   canDeletePersona,
   canEditPersona,
-  getPersonaInitials,
 } from "@/features/agents/lib/personaPresentation";
+import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 
 interface PersonaCardProps {
   persona: Persona;
@@ -29,6 +34,15 @@ interface PersonaCardProps {
   isActive?: boolean;
 }
 
+/**
+ * Agents-page persona tile. Layout matches Figma 916:17434:
+ *   - Large illustrated PNG avatar (square, ~260px)
+ *   - Horizontal divider
+ *   - Name in a small pill chip
+ *   - 2-line description below
+ *
+ * The avatar is a deterministic 1-of-4 PNG keyed off persona.id.
+ */
 export function PersonaCard({
   persona,
   onSelect,
@@ -41,8 +55,8 @@ export function PersonaCard({
   const { t } = useTranslation(["agents", "common"]);
   const [menuOpen, setMenuOpen] = useState(false);
 
-  const initials = getPersonaInitials(persona.displayName);
   const avatarMedia = useAvatarMedia(persona.avatar);
+  const fallbackIconSrc = resolveAgentIcon(persona.id);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
 
@@ -65,27 +79,37 @@ export function PersonaCard({
       onKeyDown={handleCardKeyDown}
       tabIndex={0}
       className={cn(
-        "group relative flex min-h-48 cursor-pointer flex-col rounded-2xl border border-border-soft bg-background p-5",
+        "group relative flex w-full cursor-pointer flex-col gap-4",
+        "rounded-card bg-transparent p-2",
         "transition-colors duration-200",
-        "hover:border-border hover:bg-muted/10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
-        isActive && "border-border bg-muted/20",
+        "focus-visible:outline-none",
+        isActive && "bg-background-muted/40",
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        <Avatar className="size-12 border border-border-soft bg-muted/30">
-          {avatarMedia?.mediaType === "video" ? (
-            <AvatarMedia media={avatarMedia} alt={persona.displayName} />
-          ) : (
-            <>
-              <AvatarImage src={avatarMedia?.src} alt={persona.displayName} />
-              <AvatarFallback className="text-sm font-semibold">
-                {initials}
-              </AvatarFallback>
-            </>
-          )}
-        </Avatar>
+      <div className="relative aspect-square w-full overflow-hidden rounded-card-sm">
+        {avatarMedia ? (
+          <AvatarMedia
+            media={avatarMedia}
+            alt={persona.displayName}
+            lazy
+            className={cn(
+              "pointer-events-none object-contain transition-transform duration-300",
+              "group-hover:scale-[1.02]",
+            )}
+          />
+        ) : (
+          <img
+            alt=""
+            aria-hidden="true"
+            src={fallbackIconSrc}
+            className={cn(
+              "pointer-events-none size-full object-contain transition-transform duration-300",
+              "group-hover:scale-[1.02]",
+            )}
+          />
+        )}
 
-        <div className="relative z-20 -mr-2 -mt-2">
+        <div className="absolute right-1 top-1 z-20">
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenuTrigger asChild>
               <Button
@@ -96,28 +120,28 @@ export function PersonaCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "size-6 rounded-md text-muted-foreground hover:text-foreground",
+                  "rounded-full bg-background/70 text-muted-foreground backdrop-blur-sm hover:bg-background hover:text-foreground",
                   menuOpen
                     ? "opacity-100"
                     : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
                 )}
               >
-                <MoreVertical className="size-4" />
+                <IconDots className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={4}>
               {isEditable && (
                 <DropdownMenuItem onSelect={() => onEdit?.(persona)}>
-                  <Pencil className="size-3.5" />
+                  <IconPencil className="size-3.5" />
                   {t("common:actions.edit")}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem onSelect={() => onDuplicate?.(persona)}>
-                <Copy className="size-3.5" />
+                <IconCopy className="size-3.5" />
                 {t("common:actions.duplicate")}
               </DropdownMenuItem>
               <DropdownMenuItem onSelect={() => onExport?.(persona)}>
-                <Download className="size-3.5" />
+                <IconDownload className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
               {isDeletable && (
@@ -125,7 +149,7 @@ export function PersonaCard({
                   variant="destructive"
                   onSelect={() => onDelete?.(persona)}
                 >
-                  <Trash2 className="size-3.5" />
+                  <IconTrash className="size-3.5" />
                   {t("common:actions.delete")}
                 </DropdownMenuItem>
               )}
@@ -134,17 +158,19 @@ export function PersonaCard({
         </div>
       </div>
 
-      <div className="mt-3 min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <h3 className="min-w-0 flex-1 truncate text-sm font-medium leading-5 text-foreground">
-            {persona.displayName}
-          </h3>
-        </div>
-      </div>
+      <div className="flex flex-col gap-3 px-1">
+        <div className="h-px w-full bg-border-soft" />
 
-      <p className="mt-3 line-clamp-3 max-w-2xl text-xs font-light leading-5 text-muted-foreground">
-        {persona.systemPrompt}
-      </p>
+        <div className="flex items-center">
+          <span className="inline-flex h-5 items-center rounded-full bg-background px-1.5 py-0.5 text-sm leading-[15px] text-foreground">
+            {persona.displayName}
+          </span>
+        </div>
+
+        <p className="line-clamp-3 max-w-[28ch] text-base font-light leading-5 text-muted-foreground">
+          {persona.systemPrompt}
+        </p>
+      </div>
     </div>
   );
 }

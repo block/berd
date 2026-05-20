@@ -6,8 +6,14 @@ interface ShellProps {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
-  contentWidth?: "default" | "narrow";
+  contentWidth?: "default" | "narrow" | "full";
 }
+
+const SHELL_WIDTH_CLASSES = {
+  narrow: "max-w-3xl",
+  default: "max-w-5xl",
+  full: "max-w-none",
+} as const;
 
 interface PageHeaderProps {
   eyebrow?: ReactNode;
@@ -30,7 +36,7 @@ export function PageShell({
   contentClassName,
   contentWidth = "default",
 }: ShellProps) {
-  const widthClassName = contentWidth === "narrow" ? "max-w-3xl" : "max-w-5xl";
+  const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
 
   return (
     <MainPanelLayout className={className}>
@@ -55,7 +61,7 @@ export function DetailPageShell({
   contentClassName,
   contentWidth = "default",
 }: ShellProps) {
-  const widthClassName = contentWidth === "narrow" ? "max-w-3xl" : "max-w-5xl";
+  const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
 
   return (
     <MainPanelLayout className={className}>

@@ -55,11 +55,6 @@ describe("PersonaCard", () => {
     expect(screen.queryByText(/claude-sonnet/i)).not.toBeInTheDocument();
   });
 
-  it("shows avatar with initial", () => {
-    render(<PersonaCard persona={makePersona({ displayName: "Alpha" })} />);
-    expect(screen.getByText("A")).toBeInTheDocument();
-  });
-
   it("shows system prompt preview", () => {
     render(
       <PersonaCard
@@ -131,5 +126,14 @@ describe("PersonaCard", () => {
 
     expect(screen.getByRole("menu")).toBeInTheDocument();
     expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("renders an illustrated agent icon image", () => {
+    const { container } = render(
+      <PersonaCard persona={makePersona({ id: "stable-id" })} />,
+    );
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src") ?? "").toBeTruthy();
   });
 });
