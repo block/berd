@@ -286,9 +286,20 @@
   --shadow-card: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-elevated: 0 3px 12px rgba(76, 76, 76, 0.22);
   --shadow-popover: none;
+  --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
+
+  /* Inverse popover — dark menu on light surface (Alex tile menu).
+     Reuses gray-900 / white so the chain stays inside the existing palette. */
+  --background-popover-inverse: var(--color-gray-900);
+  --text-on-popover-inverse: var(--color-white);
+  --text-on-popover-inverse-muted: rgba(255, 255, 255, 0.4);
+
+  /* Pill input fill — darker than the muted page canvas so search pills
+     read against the dotted backdrop without needing a border. */
+  --background-input-pill: #dedede;
 
   /* Charts */
   --chart-1: #f6b44a;
@@ -510,9 +521,18 @@
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 3px 12px rgba(0, 0, 0, 0.5);
   --shadow-popover: none;
+  --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
+
+  /* Inverse popover — light menu on dark surface (inverted for dark theme). */
+  --background-popover-inverse: var(--color-gray-50);
+  --text-on-popover-inverse: var(--color-gray-900);
+  --text-on-popover-inverse-muted: rgba(26, 26, 26, 0.4);
+
+  /* Pill input fill — lighter than the canvas in dark theme. */
+  --background-input-pill: rgba(255, 255, 255, 0.08);
 
   --status-added: var(--color-green-400);
   --status-deleted: var(--color-red-400);
@@ -604,6 +624,8 @@
   --color-background-muted: var(--background-muted);
   --color-background-primary: var(--background-primary);
   --color-background-inverse: var(--background-inverse);
+  --color-background-popover-inverse: var(--background-popover-inverse);
+  --color-background-input-pill: var(--background-input-pill);
   --color-background-danger: var(--background-danger);
   --color-background-success: var(--background-success);
   --color-background-info: var(--background-info);
@@ -635,6 +657,8 @@
   --color-text-placeholder: var(--text-placeholder);
   --color-text-on-primary: var(--text-on-primary);
   --color-text-inverse: var(--text-inverse);
+  --color-text-on-popover-inverse: var(--text-on-popover-inverse);
+  --color-text-on-popover-inverse-muted: var(--text-on-popover-inverse-muted);
   --color-text-danger: var(--text-danger);
   --color-text-success: var(--text-success);
   --color-text-warning: var(--text-warning);
@@ -713,6 +737,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-elevated: var(--shadow-elevated);
   --shadow-popover: var(--shadow-popover);
+  --shadow-popover-inverse: var(--shadow-popover-inverse);
   --shadow-modal: var(--shadow-modal);
   --shadow-kbd: var(--shadow-kbd);
   --shadow-date-field-focus: var(--shadow-date-field-focus);

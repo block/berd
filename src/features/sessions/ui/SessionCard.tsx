@@ -1,17 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import {
-  Calendar,
-  Folder,
-  Bot,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
-  ArchiveRestore,
-  Copy,
-  Download,
-  CheckSquare,
-} from "lucide-react";
+import { Package, MoreHorizontal } from "lucide-react";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
@@ -138,11 +127,15 @@ export function SessionCard({
     setEditing(false);
   };
 
+  const relativeTime = formatRelativeTimeToNow(updatedAt);
+  const hasSubtitle = Boolean(projectName || relativeTime || personaName);
+
   return (
     <div
       className={cn(
-        "group relative flex flex-col gap-2 rounded-lg border border-border-soft bg-background p-4 text-left transition-colors hover:border-border hover:bg-muted/10",
-        selected && "border-border bg-muted/20",
+        "group relative flex h-20 flex-col justify-between gap-1 rounded-card-chat bg-surface-card p-3 text-left transition-shadow",
+        "hover:shadow-card",
+        selected && "ring-1 ring-inset ring-text-default",
         archivedAt && "opacity-60",
       )}
     >
@@ -159,7 +152,7 @@ export function SessionCard({
           }
           onSelect?.(id);
         }}
-        className="absolute inset-0 z-0 rounded-lg"
+        className="absolute inset-0 z-0 rounded-card-chat"
         aria-label={t("card.open", { title: displayTitle })}
         aria-pressed={selectionEnabled ? selected : undefined}
       />
@@ -183,46 +176,48 @@ export function SessionCard({
               cancelRename();
             }
           }}
-          className="relative z-10 text-sm font-medium"
+          className="relative z-10 text-sm"
         />
       ) : (
-        <p className="text-sm font-medium line-clamp-2 break-words pr-6">
+        <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-text-default">
           {displayTitle}
         </p>
       )}
 
-      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
-        <div className="flex items-center gap-1.5">
-          <Calendar className="size-3 shrink-0" />
-          <span>{formatRelativeTimeToNow(updatedAt)}</span>
+      {hasSubtitle && (
+        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-text-default/40">
+          {projectName && (
+            <span className="inline-flex shrink-0 items-center justify-center">
+              {projectColor ? (
+                <span
+                  className="inline-block size-2 rounded-full"
+                  style={{ backgroundColor: projectColor }}
+                  aria-hidden="true"
+                />
+              ) : (
+                <Package className="size-3" aria-hidden="true" />
+              )}
+            </span>
+          )}
+          {projectName && <span className="truncate">{projectName}</span>}
+          {projectName && relativeTime && <span aria-hidden="true">•</span>}
+          {relativeTime && (
+            <span className="truncate whitespace-nowrap">{relativeTime}</span>
+          )}
+          {personaName && (
+            <>
+              <span aria-hidden="true">•</span>
+              <span className="truncate">{personaName}</span>
+            </>
+          )}
         </div>
+      )}
 
-        {personaName && (
-          <div className="flex items-center gap-1.5">
-            <Bot className="size-3 shrink-0" />
-            <span className="truncate">{personaName}</span>
-          </div>
-        )}
-
-        {projectName && (
-          <div className="flex items-center gap-1.5">
-            <span
-              className="inline-block size-2 shrink-0 rounded-full"
-              style={
-                projectColor ? { backgroundColor: projectColor } : undefined
-              }
-            />
-            <span className="truncate">{projectName}</span>
-          </div>
-        )}
-
-        {workingDir && (
-          <div className="flex items-center gap-1.5">
-            <Folder className="size-3 shrink-0" />
-            <span className="truncate">{workingDir}</span>
-          </div>
-        )}
-      </div>
+      {workingDir && !hasSubtitle && (
+        <div className="relative z-0 truncate text-[10px] leading-none text-text-default/40">
+          {workingDir}
+        </div>
+      )}
 
       {(snippet || matchCount) && (
         <div className="relative z-10 mt-1 space-y-1 text-xs">
@@ -250,16 +245,21 @@ export function SessionCard({
             aria-label={t("card.optionsFor", { title: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-2 top-2 z-10 size-6 rounded-md text-muted-foreground hover:text-foreground hover:bg-background-hover/50",
+              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:bg-text-default hover:text-text-on-popover-inverse",
               menuOpen
-                ? "visible opacity-100"
-                : "invisible group-hover:visible opacity-0 group-hover:opacity-100",
+                ? "visible opacity-100 bg-text-default text-text-on-popover-inverse"
+                : "invisible group-hover:visible opacity-0 group-hover:opacity-100 text-text-default/40",
             )}
           >
             <MoreHorizontal className="size-3.5" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={4}>
+        <DropdownMenuContent
+          variant="inverse"
+          align="start"
+          alignOffset={-4}
+          sideOffset={4}
+        >
           {shouldApplyToSelection && (
             <>
               <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
@@ -277,7 +277,6 @@ export function SessionCard({
               onSelectionChange?.(id, !selected);
             }}
           >
-            <CheckSquare className="size-3.5" />
             {selected ? t("card.deselect") : t("card.select")}
           </DropdownMenuItem>
           {archivedAt ? (
@@ -288,7 +287,6 @@ export function SessionCard({
                   onExport?.(id);
                 }}
               >
-                <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -297,14 +295,12 @@ export function SessionCard({
                   onUnarchive?.(id);
                 }}
               >
-                <ArchiveRestore className="size-3.5" />
                 {t("common:actions.restore")}
               </DropdownMenuItem>
             </>
           ) : (
             <>
               <DropdownMenuItem onClick={startRename}>
-                <Pencil className="size-3.5" />
                 {t("common:actions.rename")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -313,7 +309,6 @@ export function SessionCard({
                   onExport?.(id);
                 }}
               >
-                <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -327,7 +322,6 @@ export function SessionCard({
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
-                <Copy className="size-3.5" />
                 {t("common:actions.duplicate")}
               </DropdownMenuItem>
               <DropdownMenuItem
@@ -341,7 +335,6 @@ export function SessionCard({
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
-                <Trash2 className="size-3.5" />
                 {t("common:actions.archive")}
               </DropdownMenuItem>
             </>

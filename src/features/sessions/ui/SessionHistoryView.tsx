@@ -1,9 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  defaultRangeExtractor,
-  type Range,
-  useVirtualizer,
-} from "@tanstack/react-virtual";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { History } from "lucide-react";
 import { IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -13,6 +9,7 @@ import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { SearchBar } from "@/shared/ui/SearchBar";
 import { SessionCard } from "./SessionCard";
 import { groupSessionsByDate } from "../lib/groupSessionsByDate";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -353,32 +350,10 @@ export function SessionHistoryView({
     () => flattenGroupedSessionRows(dateGroups, columns),
     [columns, dateGroups],
   );
-  const groupedHeaderIndexes = useMemo(
-    () =>
-      groupedRows.flatMap((row, index) =>
-        row.kind === "header" ? [index] : [],
-      ),
-    [groupedRows],
-  );
-  const groupedRangeExtractor = useCallback(
-    (range: Range) => {
-      const activeHeaderIndex =
-        groupedHeaderIndexes.findLast((index) => index <= range.startIndex) ??
-        null;
-
-      const baseRange = defaultRangeExtractor(range);
-      if (activeHeaderIndex == null || baseRange.includes(activeHeaderIndex)) {
-        return baseRange;
-      }
-
-      return [activeHeaderIndex, ...baseRange];
-    },
-    [groupedHeaderIndexes],
-  );
   const groupedVirtualizer = useVirtualizer({
     count: groupedRows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (index) => (groupedRows[index]?.kind === "header" ? 32 : 96),
+    estimateSize: (index) => (groupedRows[index]?.kind === "header" ? 72 : 96),
     getItemKey: (index) => groupedRows[index]?.key ?? index,
     measureElement:
       typeof window !== "undefined" &&
@@ -386,7 +361,6 @@ export function SessionHistoryView({
         ? (element) => element?.getBoundingClientRect().height
         : undefined,
     overscan: 5,
-    rangeExtractor: groupedRangeExtractor,
     scrollMargin: listScrollMargin,
   });
 
@@ -395,14 +369,6 @@ export function SessionHistoryView({
     return message.includes("not found in sessions or threads");
   }, []);
   const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
-  const firstGroupedVirtualIndex = groupedVirtualItems[0]?.index ?? 0;
-  const activeGroupedHeaderIndex = useMemo(
-    () =>
-      groupedHeaderIndexes.findLast(
-        (index) => index <= firstGroupedVirtualIndex,
-      ) ?? null,
-    [firstGroupedVirtualIndex, groupedHeaderIndexes],
-  );
   const searchRows = useMemo(
     () => flattenFlatSessionRows(searchResults, columns),
     [columns, searchResults],
@@ -680,7 +646,7 @@ export function SessionHistoryView({
           <h2
             className={cn(
               SESSION_GRID_COLS,
-              "bg-background py-1 text-sm font-medium text-muted-foreground",
+              "pt-10 pb-3 text-base text-text-default",
             )}
           >
             <span>{row.label}</span>
@@ -689,7 +655,7 @@ export function SessionHistoryView({
       }
 
       return (
-        <div className={cn(SESSION_GRID_COLS, "gap-y-10 pb-3 pt-2")}>
+        <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3 pt-2")}>
           {row.sessions.map((session) => renderSessionCard(session))}
         </div>
       );
@@ -699,7 +665,7 @@ export function SessionHistoryView({
 
   const renderSearchRow = useCallback(
     (row: FlatSessionRow<SessionSearchDisplayResult>) => (
-      <div className={cn(SESSION_GRID_COLS, "gap-y-10 pb-3")}>
+      <div className={cn(SESSION_GRID_COLS, "gap-y-4 pb-3")}>
         {row.items.map((result) =>
           renderSessionCard(result.session, {
             snippet: result.snippet,
@@ -733,22 +699,21 @@ export function SessionHistoryView({
           className="page-transition mx-auto flex w-full max-w-none flex-col gap-5 px-6 py-8"
         >
           <div className={SESSION_GRID_COLS}>
-            <input
-              type="search"
-              autoComplete="off"
-              spellCheck={false}
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void submitSearch();
-                }
-              }}
-              placeholder={t("history.searchPlaceholder")}
-              aria-label={t("history.searchPlaceholder")}
-              className="focus-override col-span-full w-full appearance-none border-0 bg-transparent font-sans text-[56px] font-light leading-[0.96] tracking-normal text-text-title shadow-none outline-none ring-0 placeholder:text-text-title placeholder:opacity-10 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-            />
+            <div className="col-span-full sm:col-span-2">
+              <SearchBar
+                size="pill"
+                value={searchQuery}
+                onChange={setSearchQuery}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void submitSearch();
+                  }
+                }}
+                placeholder={t("history.searchPlaceholder")}
+                aria-label={t("history.searchPlaceholder")}
+              />
+            </div>
           </div>
 
           {searchError && (
@@ -825,30 +790,17 @@ export function SessionHistoryView({
                 const row = groupedRows[virtualRow.index];
                 if (!row) return null;
 
-                const isActiveHeader =
-                  row.kind === "header" &&
-                  virtualRow.index === activeGroupedHeaderIndex;
-
                 return (
                   <div
                     key={virtualRow.key}
                     data-index={virtualRow.index}
                     ref={groupedVirtualizer.measureElement}
-                    className="left-0 top-0 w-full"
-                    style={
-                      isActiveHeader
-                        ? {
-                            position: "sticky",
-                            top: 0,
-                            zIndex: 20,
-                          }
-                        : {
-                            position: "absolute",
-                            transform: `translateY(${
-                              virtualRow.start - listScrollMargin
-                            }px)`,
-                          }
-                    }
+                    className="absolute left-0 top-0 w-full"
+                    style={{
+                      transform: `translateY(${
+                        virtualRow.start - listScrollMargin
+                      }px)`,
+                    }}
                   >
                     {renderGroupedRow(row)}
                   </div>

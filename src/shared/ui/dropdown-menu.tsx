@@ -1,9 +1,14 @@
-import type * as React from "react";
+import * as React from "react";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { CheckIcon, ChevronRightIcon, CircleIcon } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
+
+type DropdownMenuVariant = "default" | "inverse";
+
+const DropdownMenuVariantContext =
+  React.createContext<DropdownMenuVariant>("default");
 
 function DropdownMenu({
   ...props
@@ -48,28 +53,39 @@ function DropdownMenuTrigger({
 function DropdownMenuContent({
   className,
   sideOffset = 4,
+  variant = "default",
   ...props
-}: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+}: React.ComponentProps<typeof DropdownMenuPrimitive.Content> & {
+  variant?: DropdownMenuVariant;
+}) {
+  const isInverse = variant === "inverse";
   return (
-    <DropdownMenuPrimitive.Portal>
-      <DropdownMenuPrimitive.Content
-        {...getDesignSystemMetadata({
-          component: "DropdownMenu",
-          slot: "dropdown-menu-content",
-          source: "src/shared/ui/dropdown-menu.tsx",
-          props: { sideOffset },
-          customClassName:
-            typeof className === "string" ? className : undefined,
-        })}
-        data-slot="dropdown-menu-content"
-        sideOffset={sideOffset}
-        className={cn(
-          "bg-surface-overlay text-text-default data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto rounded-overlay p-1.5",
-          className,
-        )}
-        {...props}
-      />
-    </DropdownMenuPrimitive.Portal>
+    <DropdownMenuVariantContext.Provider value={variant}>
+      <DropdownMenuPrimitive.Portal>
+        <DropdownMenuPrimitive.Content
+          {...getDesignSystemMetadata({
+            component: "DropdownMenu",
+            slot: "dropdown-menu-content",
+            source: "src/shared/ui/dropdown-menu.tsx",
+            variant,
+            props: { sideOffset },
+            customClassName:
+              typeof className === "string" ? className : undefined,
+          })}
+          data-slot="dropdown-menu-content"
+          data-variant={variant}
+          sideOffset={sideOffset}
+          className={cn(
+            "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 z-50 max-h-(--radix-dropdown-menu-content-available-height) min-w-[8rem] origin-(--radix-dropdown-menu-content-transform-origin) overflow-x-hidden overflow-y-auto",
+            isInverse
+              ? "bg-background-popover-inverse text-text-on-popover-inverse shadow-popover-inverse rounded-[10px] px-2 py-1.5"
+              : "bg-surface-overlay text-text-default rounded-overlay p-1.5",
+            className,
+          )}
+          {...props}
+        />
+      </DropdownMenuPrimitive.Portal>
+    </DropdownMenuVariantContext.Provider>
   );
 }
 
@@ -90,6 +106,8 @@ function DropdownMenuItem({
   inset?: boolean;
   variant?: "default" | "destructive";
 }) {
+  const menuVariant = React.useContext(DropdownMenuVariantContext);
+  const isInverse = menuVariant === "inverse";
   return (
     <DropdownMenuPrimitive.Item
       {...getDesignSystemMetadata({
@@ -100,6 +118,7 @@ function DropdownMenuItem({
         props: {
           inset: Boolean(inset),
           disabled: props.disabled,
+          menuVariant,
         },
         customClassName: typeof className === "string" ? className : undefined,
       })}
@@ -107,7 +126,10 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "text-text-default focus:bg-background-muted focus:text-text-default data-[variant=destructive]:text-text-danger data-[variant=destructive]:focus:bg-background-danger dark:data-[variant=destructive]:focus:bg-background-danger data-[variant=destructive]:focus:text-text-danger data-[variant=destructive]:*:[svg]:!text-text-danger [&_svg:not([class*='text-'])]:text-text-muted relative flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "relative flex cursor-default items-center gap-2 outline-hidden select-none data-[disabled]:pointer-events-none data-[disabled]:opacity-50 data-[inset]:pl-8 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        isInverse
+          ? "text-text-on-popover-inverse focus:text-text-on-popover-inverse focus:bg-white/10 rounded-[4px] px-1 py-1 text-xs leading-tight"
+          : "text-text-default focus:bg-background-muted focus:text-text-default data-[variant=destructive]:text-text-danger data-[variant=destructive]:focus:bg-background-danger dark:data-[variant=destructive]:focus:bg-background-danger data-[variant=destructive]:focus:text-text-danger data-[variant=destructive]:*:[svg]:!text-text-danger [&_svg:not([class*='text-'])]:text-text-muted rounded-sm px-2 py-1.5 text-sm",
         className,
       )}
       {...props}

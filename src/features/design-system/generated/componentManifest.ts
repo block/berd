@@ -1036,6 +1036,7 @@ export const designSystemComponentManifest = [
     cva: [],
     tokenClasses: [
       "[&_svg:not([class*='text-'])]:text-text-muted",
+      "bg-background-popover-inverse",
       "bg-border-default",
       "dark:data-[variant=destructive]:focus:bg-background-danger",
       "data-[state=open]:bg-background-muted",
@@ -1045,8 +1046,10 @@ export const designSystemComponentManifest = [
       "data-[variant=destructive]:text-text-danger",
       "focus:bg-background-muted",
       "focus:text-text-default",
+      "focus:text-text-on-popover-inverse",
       "text-text-default",
       "text-text-muted",
+      "text-text-on-popover-inverse",
     ],
     stateClasses: [
       "data-[disabled]:opacity-50",
@@ -1069,7 +1072,9 @@ export const designSystemComponentManifest = [
       "data-[variant=destructive]:focus:text-text-danger",
       "data-[variant=destructive]:text-text-danger",
       "focus:bg-background-muted",
+      "focus:bg-white/10",
       "focus:text-text-default",
+      "focus:text-text-on-popover-inverse",
     ],
     sourceTokenClasses: [],
   },
@@ -1756,11 +1761,13 @@ export const designSystemComponentManifest = [
     cva: [],
     tokenClasses: [
       "bg-background",
+      "bg-background-input-pill",
       "border-border-soft",
       "focus-visible:border-border-focus",
       "hover:border-border-soft",
       "hover:text-foreground",
       "text-muted-foreground",
+      "text-text-default",
     ],
     stateClasses: [
       "aria-label",

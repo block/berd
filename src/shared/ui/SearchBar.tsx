@@ -11,6 +11,7 @@ const searchBarSizes = {
     input:
       "h-auto border-none bg-transparent px-0 pl-5 pr-0 text-[11px] font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
     inputVariant: "ghost" as const,
+    hideIcon: false,
   },
   small: {
     wrapper:
@@ -19,6 +20,7 @@ const searchBarSizes = {
     input:
       "h-auto border-none bg-transparent px-0 pl-6 pr-0 text-xs font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
     inputVariant: "ghost" as const,
+    hideIcon: false,
   },
   default: {
     wrapper: "",
@@ -26,6 +28,15 @@ const searchBarSizes = {
     input:
       "rounded-lg border-border-soft bg-background pr-3 pl-9 text-sm font-normal hover:border-border-soft focus-visible:border-border-focus",
     inputVariant: "default" as const,
+    hideIcon: false,
+  },
+  pill: {
+    wrapper: "rounded-full bg-background-input-pill px-4 py-2.5",
+    icon: "",
+    input:
+      "h-auto border-none bg-transparent px-0 text-sm font-normal text-text-default shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-text-default! placeholder:opacity-40",
+    inputVariant: "ghost" as const,
+    hideIcon: true,
   },
 } as const;
 
@@ -62,12 +73,14 @@ export function SearchBar({
 
   return (
     <div className={cn("relative w-full", styles.wrapper, className)}>
-      <Search
-        className={cn(
-          "pointer-events-none absolute top-1/2 -translate-y-1/2 text-placeholder",
-          styles.icon,
-        )}
-      />
+      {!styles.hideIcon && (
+        <Search
+          className={cn(
+            "pointer-events-none absolute top-1/2 -translate-y-1/2 text-placeholder",
+            styles.icon,
+          )}
+        />
+      )}
       <Input
         inputRef={inputRef}
         variant={styles.inputVariant}
