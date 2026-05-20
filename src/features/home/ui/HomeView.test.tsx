@@ -28,10 +28,6 @@ vi.mock("sonner", () => ({
   },
 }));
 
-vi.mock("./HomeComposer", () => ({
-  HomeComposer: () => <div>home composer</div>,
-}));
-
 vi.mock("./WidgetCanvas", () => ({
   WidgetCanvas: () => <div>widget canvas</div>,
 }));
@@ -70,9 +66,7 @@ function layout(overrides: Partial<Layout> = {}): Layout {
 }
 
 function renderHomeView() {
-  return render(
-    <HomeView sessionId="home-session" onActivateSession={vi.fn()} />,
-  );
+  return render(<HomeView />);
 }
 
 beforeEach(() => {
@@ -96,16 +90,16 @@ describe("HomeView", () => {
     expect(getLayout).toHaveBeenCalledWith(HOME_LAYOUT_ID);
   });
 
-  it("shows loading state without hiding composer", () => {
+  it("shows loading state without inline composer", () => {
     vi.mocked(getLayout).mockReturnValue(new Promise(() => {}));
 
     renderHomeView();
 
     expect(screen.getByText("Loading widgets...")).toBeInTheDocument();
-    expect(screen.getByText("home composer")).toBeInTheDocument();
+    expect(screen.queryByText("home composer")).not.toBeInTheDocument();
   });
 
-  it("shows error actions without hiding composer", async () => {
+  it("shows error actions without inline composer", async () => {
     vi.mocked(getLayout).mockRejectedValue("raw backend error");
 
     renderHomeView();
@@ -117,7 +111,7 @@ describe("HomeView", () => {
     expect(
       screen.getByRole("button", { name: "Copy details" }),
     ).toBeInTheDocument();
-    expect(screen.getByText("home composer")).toBeInTheDocument();
+    expect(screen.queryByText("home composer")).not.toBeInTheDocument();
   });
 
   it("copy details writes the raw error string and shows a toast", async () => {

@@ -163,10 +163,6 @@ export function AppShellContent({
     case "home":
       return (
         <HomeView
-          sessionId={homeSessionId}
-          onActivateSession={onActivateHomeSession}
-          onCreatePersona={onCreatePersona}
-          onCreateProject={onCreateProject}
           onOpenAgent={(agentId) => onNavigateAgents(agentId)}
           onSelectSession={onSelectSession}
           onOpenAutomation={(automationId) =>
