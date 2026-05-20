@@ -87,6 +87,29 @@ describe("PersonaEditor", () => {
     );
   });
 
+  it("saves a bundled avatar for new personas", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+
+    renderWithProviders(
+      <PersonaEditor isOpen onClose={vi.fn()} onSave={onSave} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /gloopies/i }));
+    await user.click(screen.getByRole("button", { name: /^gloopy 1$/i }));
+    await fillDisplayName(user);
+    await fillSystemPrompt(user);
+    await user.click(screen.getByRole("button", { name: /^create$/i }));
+
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        avatar: "app-avatar:gloopy-1",
+        displayName: "Scout",
+        systemPrompt: "Research.",
+      }),
+    );
+  });
+
   it("disables saving invalid custom avatar URLs", async () => {
     const user = userEvent.setup();
 

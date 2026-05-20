@@ -1,6 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Sparkles, Trash2 } from "lucide-react";
+import { ArrowLeft, Check, Copy, Trash2 } from "lucide-react";
+import {
+  avatarCollections,
+  avatarRef,
+  getAvatarCatalogEntry,
+  isBundledAvatarRef,
+} from "@/shared/avatars/catalog";
+import type {
+  AvatarCatalogEntry,
+  AvatarCollection,
+} from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
@@ -8,6 +18,8 @@ import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/sheet";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
+import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { AvatarMedia } from "@/shared/ui/avatar-media";
 import {
   Select,
   SelectContent,
@@ -85,7 +97,12 @@ export function PersonaEditor({
   const [systemPrompt, setSystemPrompt] = useState("");
   const [provider, setProvider] = useState<ProviderType | "">("");
   const [model, setModel] = useState("");
-  const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarValue, setAvatarValue] = useState("");
+  const [avatarChanged, setAvatarChanged] = useState(false);
+  const [selectedAvatarCollectionId, setSelectedAvatarCollectionId] = useState<
+    string | null
+  >(null);
+  const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
 
   useEffect(() => {
     if (!isOpen) {
@@ -130,23 +147,32 @@ export function PersonaEditor({
       setSystemPrompt(persona.systemPrompt);
       setProvider(persona.provider ?? "");
       setModel(persona.model ?? "");
-      setAvatarUrl(normalizeAvatarUrl(persona.avatar) ?? "");
+      setAvatarValue(normalizeAvatarUrl(persona.avatar) ?? "");
     } else if (isOpen) {
       setDisplayName("");
       setSystemPrompt("");
       setProvider("");
       setModel("");
-      setAvatarUrl("");
+      setAvatarValue("");
     }
+    setAvatarChanged(false);
+    setSelectedAvatarCollectionId(null);
+    setAvatarPreviewFailed(false);
   }, [isOpen, persona]);
 
-  const trimmedAvatarUrl = avatarUrl.trim();
-  const normalizedAvatarUrl = normalizeAvatarUrl(trimmedAvatarUrl);
-  const savedAvatarUrl = persona ? normalizeAvatarUrl(persona.avatar) : null;
+  const trimmedAvatarValue = avatarValue.trim();
+  const normalizedAvatarValue = normalizeAvatarUrl(trimmedAvatarValue);
+  const customAvatarUrlValue = isBundledAvatarRef(trimmedAvatarValue)
+    ? ""
+    : avatarValue;
   const avatarUrlError =
-    trimmedAvatarUrl.length > 0 && !normalizedAvatarUrl
+    trimmedAvatarValue.length > 0 && !normalizedAvatarValue
       ? t("editor.avatarUrlInvalid")
       : null;
+  const avatarMedia = useAvatarMedia(normalizedAvatarValue ?? null);
+  const selectedAvatarCollection = avatarCollections.find(
+    (collection) => collection.id === selectedAvatarCollectionId,
+  );
 
   const isValid =
     displayName.trim().length > 0 &&
@@ -170,9 +196,28 @@ export function PersonaEditor({
       : t("editor.readOnlyFile")
     : null;
 
-  // Hero rendering uses only the deterministic local goose PNG. Custom avatar
-  // URLs are validated and saved below, but are not auto-loaded in the editor.
   const fallbackAvatarSrc = resolveAgentIcon(persona?.id ?? "new");
+
+  const handleClearAvatar = useCallback(() => {
+    setAvatarValue("");
+    setAvatarChanged(true);
+    setAvatarPreviewFailed(false);
+  }, []);
+
+  const handleAvatarUrlChange = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      setAvatarValue(event.target.value);
+      setAvatarChanged(true);
+      setAvatarPreviewFailed(false);
+    },
+    [],
+  );
+
+  const handleSelectAvatar = useCallback((avatarId: string) => {
+    setAvatarValue(avatarRef(avatarId));
+    setAvatarChanged(true);
+    setAvatarPreviewFailed(false);
+  }, []);
 
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
@@ -180,21 +225,16 @@ export function PersonaEditor({
       if (!isValid || isReadOnly) return;
 
       // Update requests use null to clear source properties; undefined leaves them unchanged.
-      const avatarValue = isEditing
-        ? normalizedAvatarUrl
-          ? normalizedAvatarUrl === savedAvatarUrl
-            ? undefined
-            : normalizedAvatarUrl
-          : savedAvatarUrl
-            ? null
-            : undefined
-        : (normalizedAvatarUrl ?? undefined);
       const data: CreatePersonaRequest | UpdatePersonaRequest = {
         displayName: displayName.trim(),
         systemPrompt: systemPrompt.trim(),
         provider: provider || (isEditing ? null : undefined),
         model: model.trim() || (isEditing ? null : undefined),
-        avatar: avatarValue,
+        avatar: isEditing
+          ? avatarChanged
+            ? (normalizedAvatarValue ?? null)
+            : undefined
+          : (normalizedAvatarValue ?? undefined),
       };
       onSave(data);
     },
@@ -206,8 +246,8 @@ export function PersonaEditor({
       systemPrompt,
       provider,
       model,
-      normalizedAvatarUrl,
-      savedAvatarUrl,
+      avatarChanged,
+      normalizedAvatarValue,
       onSave,
     ],
   );
@@ -217,6 +257,77 @@ export function PersonaEditor({
     : isEditing
       ? (persona?.displayName ?? t("editor.editTitle"))
       : t("editor.newTitle");
+
+  const renderAvatarTile = (entry: AvatarCatalogEntry) => {
+    const ref = avatarRef(entry.id);
+    const selected = normalizedAvatarValue === ref;
+
+    return (
+      <button
+        key={entry.id}
+        type="button"
+        className={cn(
+          "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-card-sm bg-surface-overlay p-2",
+          "border border-border-soft transition-colors hover:border-border",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus",
+          selected && "border-border-focus ring-2 ring-ring-focus/25",
+        )}
+        aria-label={entry.label}
+        aria-pressed={selected}
+        onClick={() => handleSelectAvatar(entry.id)}
+      >
+        <AvatarMedia
+          media={{ src: entry.src, mediaType: entry.mediaType }}
+          alt=""
+          lazy
+          className="max-h-full max-w-full object-contain"
+        />
+        {selected ? (
+          <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-background-primary text-text-on-primary">
+            <Check className="size-3" />
+          </span>
+        ) : null}
+      </button>
+    );
+  };
+
+  const renderCollectionButton = (collection: AvatarCollection) => {
+    const cover = getAvatarCatalogEntry(collection.coverAvatarId);
+    if (!cover) {
+      return null;
+    }
+
+    return (
+      <button
+        key={collection.id}
+        type="button"
+        className={cn(
+          "flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-surface-overlay p-3 text-center",
+          "border border-border-soft transition-colors hover:border-border hover:bg-background-hover",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus",
+        )}
+        onClick={() => setSelectedAvatarCollectionId(collection.id)}
+      >
+        <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center overflow-hidden rounded-card-sm bg-background">
+          <AvatarMedia
+            media={{ src: cover.src, mediaType: cover.mediaType }}
+            alt=""
+            className="h-full w-full object-contain p-1"
+          />
+        </span>
+        <span className="min-w-0">
+          <span className="block truncate text-xs text-foreground">
+            {collection.label}
+          </span>
+          <span className="block text-[11px] text-muted-foreground">
+            {t("editor.avatarCollectionCount", {
+              count: collection.avatarIds.length,
+            })}
+          </span>
+        </span>
+      </button>
+    );
+  };
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -242,28 +353,39 @@ export function PersonaEditor({
             ) : null}
           </div>
 
-          {/* Hero: goose avatar PNG over neutral backdrop, with a floating
-              Customize pill anchored bottom-right. */}
           <div
             className={cn(
               "relative shrink-0 overflow-hidden bg-muted",
               HERO_HEIGHT_CLASS,
             )}
           >
-            <img
-              src={fallbackAvatarSrc}
-              alt=""
-              className="absolute inset-0 h-full w-full object-contain"
-            />
-            <button
-              type="button"
-              disabled
-              title={t("editor.customizeComingSoon")}
-              className="absolute right-4 bottom-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-surface-overlay px-3 text-sm text-foreground opacity-90 disabled:cursor-not-allowed"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("editor.customize")}
-            </button>
+            {avatarMedia ? (
+              <AvatarMedia
+                media={avatarMedia}
+                alt={t("avatar.previewAlt")}
+                className="absolute inset-0 h-full w-full object-contain p-8"
+                onError={() => setAvatarPreviewFailed(true)}
+              />
+            ) : (
+              <img
+                src={fallbackAvatarSrc}
+                alt=""
+                aria-hidden="true"
+                className="absolute inset-0 h-full w-full object-contain p-8"
+              />
+            )}
+            {trimmedAvatarValue.length > 0 && !isReadOnly ? (
+              <Button
+                type="button"
+                variant="destructive-flat"
+                size="icon-sm"
+                aria-label={t("avatar.removeAria")}
+                className="absolute right-4 top-4"
+                onClick={handleClearAvatar}
+              >
+                <Trash2 className="size-3.5" />
+              </Button>
+            ) : null}
           </div>
 
           {/* Scrollable form body. Background uses the neutral surface so the
@@ -275,9 +397,10 @@ export function PersonaEditor({
               </Label>
               <Input
                 id="persona-avatar-url"
-                type="url"
-                value={avatarUrl}
-                onChange={(e) => setAvatarUrl(e.target.value)}
+                type="text"
+                inputMode="url"
+                value={customAvatarUrlValue}
+                onChange={handleAvatarUrlChange}
                 readOnly={isReadOnly}
                 placeholder={t("editor.avatarUrlPlaceholder")}
                 aria-invalid={avatarUrlError ? true : undefined}
@@ -298,6 +421,53 @@ export function PersonaEditor({
                 </p>
               ) : null}
             </div>
+
+            {!isReadOnly ? (
+              <div
+                className={cn(
+                  "space-y-2",
+                  selectedAvatarCollection &&
+                    "flex min-h-[18rem] flex-col gap-2 space-y-0",
+                )}
+              >
+                <Label className={FIELD_LABEL_CLASS}>
+                  {t("editor.avatarBundled")}
+                </Label>
+                {selectedAvatarCollection ? (
+                  <div className="flex min-h-0 flex-1 flex-col gap-2">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        aria-label={t("editor.avatarBackToCollections")}
+                        onClick={() => setSelectedAvatarCollectionId(null)}
+                      >
+                        <ArrowLeft className="size-3.5" />
+                      </Button>
+                      <p className="text-xs text-foreground">
+                        {selectedAvatarCollection.label}
+                      </p>
+                    </div>
+                    <div className="grid min-h-0 flex-1 grid-cols-3 gap-2 overflow-y-auto pr-1">
+                      {selectedAvatarCollection.avatarIds.map((avatarId) => {
+                        const entry = getAvatarCatalogEntry(avatarId);
+                        return entry ? renderAvatarTile(entry) : null;
+                      })}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2">
+                    {avatarCollections.map(renderCollectionButton)}
+                  </div>
+                )}
+                {avatarPreviewFailed ? (
+                  <p className="text-[11px] text-muted-foreground">
+                    {t("avatar.loadFailed")}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className={SECTION_GAP_CLASS}>
               <Label
