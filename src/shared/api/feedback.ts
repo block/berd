@@ -14,11 +14,5 @@ export async function openFeedbackForm(
     description: body,
   });
   const webUrl = `https://linear.app/squareup/team/BOT/new?${params.toString()}`;
-  const desktopUrl = webUrl.replace("https://linear.app/", "linear://");
-
-  try {
-    await openUrl(desktopUrl);
-  } catch {
-    await openUrl(webUrl);
-  }
+  await openUrl(webUrl);
 }

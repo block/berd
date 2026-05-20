@@ -60,7 +60,7 @@ function ResizableHandle({
           className={cn(
             "z-10 flex items-center justify-center border text-muted-foreground",
             variant === "subtle"
-              ? "bg-background/95 shadow-xs h-5 w-5 rounded-full border-border-soft opacity-0 transition-all duration-150 ease-out group-hover:scale-100 group-hover:opacity-100 group-focus-visible:scale-100 group-focus-visible:opacity-100 group-data-[separator=active]:scale-100 group-data-[separator=active]:opacity-100 scale-95"
+              ? "bg-background/95 h-5 w-5 rounded-full border-border-soft opacity-0 transition-all duration-150 ease-out group-hover:scale-100 group-hover:opacity-100 group-focus-visible:scale-100 group-focus-visible:opacity-100 group-data-[separator=active]:scale-100 group-data-[separator=active]:opacity-100 scale-95"
               : "bg-border-default h-4 w-3 rounded-xs",
             handleClassName,
           )}

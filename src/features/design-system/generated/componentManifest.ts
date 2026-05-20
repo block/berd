@@ -554,7 +554,7 @@ export const designSystemComponentManifest = [
       "text-muted-foreground",
       "text-text-on-card",
     ],
-    stateClasses: ["hover:shadow-card"],
+    stateClasses: [],
     sourceTokenClasses: ["text-muted-foreground"],
   },
   {
@@ -1126,7 +1126,7 @@ export const designSystemComponentManifest = [
       "hover-card-trigger",
     ],
     cva: [],
-    tokenClasses: ["bg-background-popover", "text-text-on-popover"],
+    tokenClasses: ["text-popover-foreground"],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",
@@ -1139,7 +1139,7 @@ export const designSystemComponentManifest = [
       "data-[state=open]:fade-in-0",
       "data-[state=open]:zoom-in-95",
     ],
-    sourceTokenClasses: [],
+    sourceTokenClasses: ["text-popover-foreground"],
   },
   {
     name: "Image Lightbox",
@@ -1571,7 +1571,7 @@ export const designSystemComponentManifest = [
     exports: ["Popover", "PopoverAnchor", "PopoverContent", "PopoverTrigger"],
     slots: ["popover", "popover-anchor", "popover-content", "popover-trigger"],
     cva: [],
-    tokenClasses: ["bg-background-popover", "text-text-on-popover"],
+    tokenClasses: ["text-popover-foreground"],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",
@@ -1584,7 +1584,7 @@ export const designSystemComponentManifest = [
       "data-[state=open]:fade-in-0",
       "data-[state=open]:zoom-in-95",
     ],
-    sourceTokenClasses: [],
+    sourceTokenClasses: ["text-popover-foreground"],
   },
   {
     name: "Progress",

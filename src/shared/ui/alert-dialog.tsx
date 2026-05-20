@@ -56,7 +56,7 @@ function AlertDialogContent({
         <AlertDialogPrimitive.Content
           data-slot="alert-dialog-content"
           className={cn(
-            "pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full max-w-lg gap-4 overflow-y-auto rounded-modal border bg-background p-6 shadow-modal data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
+            "pointer-events-auto relative grid max-h-[calc(100dvh-2rem)] w-full max-w-lg gap-4 overflow-y-auto rounded-modal border bg-background p-6 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0",
             className,
           )}
           {...props}
