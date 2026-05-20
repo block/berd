@@ -68,6 +68,7 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
+import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import {
@@ -274,6 +275,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const providerInventoryEntries = useProviderInventoryStore((s) => s.entries);
   const startup = useAppStartup();
   const migrationGate = useMigrationGate(startup.ready);
+  const defaultModelGate = useDefaultModelGate(
+    migrationGate.status === "ready",
+  );
   const lastNonSecondaryViewRef = useRef<AppView>("home");
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
@@ -610,13 +614,22 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   ]);
 
   useEffect(() => {
-    if (activeView !== "home" || migrationGate.status !== "ready") {
+    if (
+      activeView !== "home" ||
+      migrationGate.status !== "ready" ||
+      defaultModelGate.status !== "ok"
+    ) {
       return;
     }
     void ensureHomeSession().catch((error) => {
       console.error("Failed to ensure Home session:", error);
     });
-  }, [activeView, ensureHomeSession, migrationGate.status]);
+  }, [
+    activeView,
+    ensureHomeSession,
+    migrationGate.status,
+    defaultModelGate.status,
+  ]);
 
   const createNewTab = useCallback(
     async (title = DEFAULT_CHAT_TITLE, project?: ProjectInfo) => {
@@ -1410,10 +1423,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   if (
-    migrationGate.status !== "ready" &&
+    (migrationGate.status !== "ready" || defaultModelGate.status !== "ok") &&
     !(isDesignSystemExplorerEnabled() && activeView === "design-system")
   ) {
-    if (migrationGate.status === "error") {
+    const blockingError =
+      migrationGate.status === "error"
+        ? { error: migrationGate.error, retry: migrationGate.retry }
+        : defaultModelGate.status === "error"
+          ? { error: defaultModelGate.error, retry: defaultModelGate.retry }
+          : null;
+
+    if (blockingError) {
       return (
         <div className="flex h-screen w-screen items-center justify-center bg-background px-6 text-foreground">
           <div className="flex max-w-md flex-col items-center gap-3 text-center">
@@ -1421,14 +1441,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               {t("common:migration.error.title")}
             </h1>
             <p className="text-sm text-muted-foreground">
-              {migrationGate.error?.message ??
+              {blockingError.error?.message ??
                 t("common:migration.error.description")}
             </p>
             <Button
               type="button"
               variant="default"
               size="sm"
-              onClick={migrationGate.retry}
+              onClick={blockingError.retry}
             >
               {t("common:actions.retry")}
             </Button>

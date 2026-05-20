@@ -226,40 +226,24 @@ describe("runMigration", () => {
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
   });
 
-  it("falls back to saving the provider alone when the server rejects the modelId with invalid_params", async () => {
-    // Simulates Databricks deprecating/renaming the model id pinned in
-    // DEFAULT_MODEL_ID. The migration should retry without modelId so
-    // first boot lands on a usable picker prompt instead of the gate's
-    // error state.
+  it("propagates failures from GooseDefaultsSave instead of swallowing them", async () => {
+    // The orchestrator is a strict pipeline: any GooseDefaultsSave failure
+    // — including invalid_params for a stale DEFAULT_MODEL_ID — must
+    // surface as the gate's retryable error state, not be papered over.
+    // The marker is the caller's job, so the next boot retries cleanly
+    // once the underlying issue is fixed (e.g. shipping a new constant).
     const invalidParams = Object.assign(new Error("Invalid params"), {
       code: -32602,
     });
-    mockGooseDefaultsSave
-      .mockImplementationOnce(async () => {
-        throw invalidParams;
-      })
-      .mockResolvedValueOnce(undefined);
+    mockGooseDefaultsSave.mockRejectedValueOnce(invalidParams);
 
     const { runMigration } = await import("./runMigration");
-    const { DEFAULT_MODEL_ID } = await import("./lib/constants");
-    await runMigration();
-
-    expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(2);
-    expect(mockGooseDefaultsSave).toHaveBeenNthCalledWith(1, {
-      providerId: "databricks",
-      modelId: DEFAULT_MODEL_ID,
-    });
-    expect(mockGooseDefaultsSave).toHaveBeenNthCalledWith(2, {
-      providerId: "databricks",
-    });
-    // The per-agent model preference must NOT be mirrored when the
-    // configured default was rejected — otherwise the chat UI would
-    // pin a bad id locally even though the server forgot it.
+    await expect(runMigration()).rejects.toBe(invalidParams);
+    expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(1);
     expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
-    expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
   });
 
-  it("propagates non-invalid_params failures from GooseDefaultsSave instead of swallowing them", async () => {
+  it("propagates non-invalid_params failures from GooseDefaultsSave too", async () => {
     const internalError = Object.assign(new Error("Internal error"), {
       code: -32603,
     });

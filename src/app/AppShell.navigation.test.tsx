@@ -12,6 +12,10 @@ vi.mock("@/features/migration/hooks/useMigrationGate", () => ({
   useMigrationGate: () => ({ status: "ready", retry: vi.fn() }),
 }));
 
+vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
+  useDefaultModelGate: () => ({ status: "ok", retry: vi.fn() }),
+}));
+
 vi.mock("@/features/sidebar/ui/Sidebar", () => ({
   Sidebar: ({
     onNavigate,

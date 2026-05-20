@@ -1,0 +1,38 @@
+import { getClient } from "@/shared/api/acpConnection";
+
+export interface DefaultModelStatus {
+  providerId?: string;
+  modelId?: string;
+  /**
+   * True when a provider is configured but its model id is empty or missing.
+   * Every `setProvider` against this state fails with `-32603`
+   * ("Configuration value not found: GOOSE_MODEL"), locking the chat UI;
+   * the recovery gate short-circuits on this signal before `setProvider`.
+   */
+  modelMissing: boolean;
+}
+
+function normalize(value: string | null | undefined): string | undefined {
+  if (value == null) return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
+ * Pre-flight read of the backend's persisted Goose defaults via
+ * `_goose/defaults/read`. Returns the active provider/model ids and a
+ * deterministic `modelMissing` flag for the broken state Phase 2 recovers
+ * from, so callers can route to the recovery screen without parsing a
+ * `-32603` error string raised later by `acpPrepareSession`.
+ */
+export async function readDefaultModelStatus(): Promise<DefaultModelStatus> {
+  const client = await getClient();
+  const defaults = await client.goose.GooseDefaultsRead({});
+  const providerId = normalize(defaults.providerId);
+  const modelId = normalize(defaults.modelId);
+  return {
+    providerId,
+    modelId,
+    modelMissing: providerId !== undefined && modelId === undefined,
+  };
+}
