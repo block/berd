@@ -1,0 +1,72 @@
+import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import { IconPlus } from "@tabler/icons-react";
+import { cn } from "@/shared/lib/cn";
+import { Skeleton } from "@/shared/ui/skeleton";
+import type { SkillInfo } from "../api/skills";
+import { compareSkillsByName } from "../lib/skillsHelpers";
+import { SkillCard } from "./SkillCard";
+
+interface SkillsGridProps {
+  skills: SkillInfo[];
+  isLoading?: boolean;
+  onSelectSkill: (skill: SkillInfo) => void;
+  onCreateSkill: () => void;
+}
+
+const gridClass = cn(
+  "grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+);
+
+function SkeletonTile() {
+  return (
+    <div aria-hidden="true" className="flex w-full flex-col gap-3 p-2">
+      <Skeleton className="h-5 w-24 rounded-pill" />
+      <Skeleton className="h-4 w-5/6" />
+      <Skeleton className="h-4 w-2/3" />
+    </div>
+  );
+}
+
+export function SkillsGrid({
+  skills,
+  isLoading = false,
+  onSelectSkill,
+  onCreateSkill,
+}: SkillsGridProps) {
+  const { t } = useTranslation(["skills", "common"]);
+
+  const sorted = useMemo(() => [...skills].sort(compareSkillsByName), [skills]);
+
+  if (isLoading) {
+    return (
+      <div role="status" aria-label={t("common:loading")} className={gridClass}>
+        <SkeletonTile />
+        <SkeletonTile />
+        <SkeletonTile />
+        <SkeletonTile />
+      </div>
+    );
+  }
+
+  return (
+    <div className={gridClass}>
+      <button
+        type="button"
+        onClick={onCreateSkill}
+        aria-label={t("view.newSkill")}
+        className={cn(
+          "group flex h-full w-full items-center justify-center rounded-tile border border-transparent p-4",
+          "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
+          "hover:border-surface-card-soft hover:bg-surface-card-soft hover:text-foreground hover:backdrop-blur-sm",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        <IconPlus className="size-8 stroke-[1.25]" aria-hidden="true" />
+      </button>
+      {sorted.map((skill) => (
+        <SkillCard key={skill.id} skill={skill} onSelect={onSelectSkill} />
+      ))}
+    </div>
+  );
+}

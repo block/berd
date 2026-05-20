@@ -136,25 +136,17 @@ function createDeferred<T>() {
 }
 
 describe("SkillsView", () => {
-  it("shows the redesigned heading and description", () => {
-    render(<SkillsView />);
-    expect(screen.getByText("Skills")).toBeInTheDocument();
-    expect(
-      screen.getByText(/Use skills to add specific instructions/),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the empty state when no skills are available", async () => {
+  it("renders the inline create tile even when no skills are present", async () => {
     render(<SkillsView />);
     await waitFor(() => {
       expect(listSkills).toHaveBeenCalledWith(["/tmp/alpha"]);
     });
-    await waitFor(() => {
-      expect(screen.getByText("No skills yet")).toBeInTheDocument();
+    // The grid always renders the inline "+" create tile; there is no
+    // longer a dedicated empty state copy.
+    const createTiles = await screen.findAllByRole("button", {
+      name: "New skill",
     });
-    expect(
-      screen.getByText("Create a skill or import one to get started."),
-    ).toBeInTheDocument();
+    expect(createTiles.length).toBeGreaterThan(0);
   });
 
   it("ignores stale skill loads after projects change", async () => {
@@ -208,47 +200,16 @@ describe("SkillsView", () => {
     });
   });
 
-  it("matches saved project working directories with trailing separators", async () => {
-    mockProjects = [
-      {
-        id: "project-goose",
-        name: "Goose",
-        workingDirs: ["/tmp/goose/"],
-      },
-    ];
-    listSkills.mockResolvedValue([
-      {
-        ...mockSkills[2],
-        id: "project:/tmp/goose/.agents/skills/test-writer",
-        name: "test-writer",
-        path: "/tmp/goose/.agents/skills/test-writer",
-        fileLocation: "/tmp/goose/.agents/skills/test-writer/SKILL.md",
-        sourceLabel: "goose",
-        projectLinks: [
-          {
-            id: "/tmp/goose",
-            name: "goose",
-            workingDir: "/tmp/goose",
-          },
-        ],
-      },
-    ]);
-    const user = userEvent.setup();
-
-    render(<SkillsView />);
-    await screen.findByText("test-writer");
-
-    await user.click(screen.getByRole("button", { name: "Goose" }));
-
-    expect(screen.getByText("test-writer")).toBeInTheDocument();
-  });
-
-  it("renders skills and opens the detail subpage", async () => {
+  it("renders skills as a flat grid and opens the detail subpage", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
 
     render(<SkillsView />);
     await screen.findByText("code-review");
+
+    // All skills are visible together — no section grouping.
+    expect(screen.getByText("layout")).toBeInTheDocument();
+    expect(screen.getByText("test-writer")).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "Open test-writer details" }),
@@ -257,7 +218,6 @@ describe("SkillsView", () => {
     expect(
       screen.getByRole("button", { name: "Back to skills" }),
     ).toBeInTheDocument();
-    expect(screen.getAllByText("alpha").length).toBeGreaterThan(0);
     expect(screen.getByText("Write tests...")).toBeInTheDocument();
     expect(
       screen.getByText("/tmp/alpha/.goose/skills/test-writer/SKILL.md"),
@@ -322,24 +282,6 @@ describe("SkillsView", () => {
     });
   });
 
-  it("starts a chat with the selected skill from the list", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const onStartChatWithSkill = vi.fn();
-    const user = userEvent.setup();
-
-    render(<SkillsView onStartChatWithSkill={onStartChatWithSkill} />);
-    await screen.findByText("test-writer");
-
-    await user.click(
-      screen.getByRole("button", { name: "Start chat with test-writer" }),
-    );
-
-    expect(onStartChatWithSkill).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "test-writer" }),
-      "project-alpha",
-    );
-  });
-
   it("starts a chat with the selected skill from the detail page", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const onStartChatWithSkill = vi.fn();
@@ -359,21 +301,20 @@ describe("SkillsView", () => {
     );
   });
 
-  it("returns to the list without losing filters", async () => {
+  it("returns to the list after viewing a skill detail", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
 
     render(<SkillsView />);
     await screen.findByText("code-review");
 
-    await user.click(screen.getByRole("button", { name: "alpha" }));
     await user.click(
       screen.getByRole("button", { name: "Open test-writer details" }),
     );
     await user.click(screen.getByRole("button", { name: "Back to skills" }));
 
     expect(screen.getByText("test-writer")).toBeInTheDocument();
-    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
+    expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
   it("stays on the detail page after renaming a skill", async () => {
@@ -424,60 +365,19 @@ describe("SkillsView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("filters skills by search text", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const user = userEvent.setup();
-
-    render(<SkillsView />);
-    await screen.findByText("code-review");
-
-    await user.type(
-      screen.getByPlaceholderText("Search skills"),
-      "writes tests",
-    );
-
-    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
-    expect(screen.getByText("test-writer")).toBeInTheDocument();
-  });
-
-  it("filters skills by project from the main filter row", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const user = userEvent.setup();
-
-    render(<SkillsView />);
-    await screen.findByText("code-review");
-
-    await user.click(screen.getByRole("button", { name: "alpha" }));
-
-    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
-    expect(screen.getByText("test-writer")).toBeInTheDocument();
-  });
-
-  it("groups and filters built-in skills separately", async () => {
+  it("renders built-in skills alongside user skills in the same flat grid", async () => {
     listSkills.mockResolvedValue([...mockSkills, builtinSkill]);
-    const user = userEvent.setup();
 
     render(<SkillsView />);
     await screen.findByText("goose-doc-guide");
 
-    expect(
-      screen.getByRole("button", { name: "Built in" }),
-    ).toBeInTheDocument();
-    const sectionButtons = screen
-      .getAllByRole("button")
-      .filter((button) => /\d skill/.test(button.textContent ?? ""));
-    expect(sectionButtons.map((button) => button.textContent)).toEqual([
-      expect.stringContaining("Personal"),
-      expect.stringContaining("Built in"),
-      expect.stringContaining("alpha"),
-    ]);
-
-    await user.click(screen.getByRole("button", { name: "Built in" }));
-
+    // No section headers — everything renders flat.
+    expect(screen.getByText("layout")).toBeInTheDocument();
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+    expect(screen.getByText("test-writer")).toBeInTheDocument();
     expect(screen.getByText("goose-doc-guide")).toBeInTheDocument();
-    expect(screen.queryByText("code-review")).not.toBeInTheDocument();
-    expect(screen.queryByText("test-writer")).not.toBeInTheDocument();
   });
+
   it("shows a delete confirmation from the detail panel", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
@@ -563,54 +463,22 @@ describe("SkillsView", () => {
     });
   });
 
-  it("groups multiple working directories under the saved project filter", async () => {
-    mockProjects = [
-      {
-        id: "project-goose",
-        name: "Goose",
-        workingDirs: ["/tmp/goose", "/tmp/goose-worktree"],
-      },
-    ];
-    listSkills.mockResolvedValue([
-      {
-        ...mockSkills[2],
-        id: "project:/tmp/goose/.agents/skills/test-writer",
-        name: "test-writer",
-        path: "/tmp/goose/.agents/skills/test-writer",
-        fileLocation: "/tmp/goose/.agents/skills/test-writer/SKILL.md",
-        sourceLabel: "goose",
-        projectLinks: [
-          {
-            id: "/tmp/goose",
-            name: "goose",
-            workingDir: "/tmp/goose",
-          },
-        ],
-      },
-      {
-        ...mockSkills[2],
-        id: "project:/tmp/goose-worktree/.agents/skills/audit",
-        name: "audit",
-        path: "/tmp/goose-worktree/.agents/skills/audit",
-        fileLocation: "/tmp/goose-worktree/.agents/skills/audit/SKILL.md",
-        sourceLabel: "goose-worktree",
-        projectLinks: [
-          {
-            id: "/tmp/goose-worktree",
-            name: "goose-worktree",
-            workingDir: "/tmp/goose-worktree",
-          },
-        ],
-      },
-    ]);
+  it("opens the create dialog when the inline + tile is clicked", async () => {
+    listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
 
     render(<SkillsView />);
-    await screen.findByText("test-writer");
+    await screen.findByText("code-review");
 
-    await user.click(screen.getByRole("button", { name: "Goose" }));
+    // The grid's inline create tile shares the "New skill" aria-label with
+    // the header button. Click the first matching control (the grid tile).
+    const createControls = screen.getAllByRole("button", {
+      name: "New skill",
+    });
+    await user.click(createControls[0]);
 
-    expect(screen.getByText("test-writer")).toBeInTheDocument();
-    expect(screen.getByText("audit")).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "New skill" }),
+    ).toBeInTheDocument();
   });
 });

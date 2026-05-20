@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Plus, Upload } from "lucide-react";
+import { IconPlus, IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -10,17 +10,9 @@ import { revealInFileManager } from "@/shared/lib/fileManager";
 import { useSkillImportExport } from "../hooks/useSkillImportExport";
 import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsDialogs } from "./SkillsDialogs";
-import { SkillsEmptyState } from "./SkillsEmptyState";
-import { SkillsListSections } from "./SkillsListSections";
-import { SkillsToolbar } from "./SkillsToolbar";
+import { SkillsGrid } from "./SkillsGrid";
 import { hydrateProjectNames } from "../lib/projectHydration";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
-import {
-  filterSkills,
-  groupSkills,
-  uniqueProjectFilters,
-  type SkillsFilter,
-} from "../lib/skillsHelpers";
 import {
   deleteSkill,
   listSkills,
@@ -45,8 +37,6 @@ export function SkillsView({
   const { t } = useTranslation(["skills", "common"]);
   const projects = useProjectStore(selectProjects);
   const isActiveSkillControlled = activeSkillId !== undefined;
-  const [search, setSearch] = useState("");
-  const [activeFilter, setActiveFilter] = useState<SkillsFilter>("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingSkill, setEditingSkill] = useState<EditingSkill | undefined>(
     undefined,
@@ -57,7 +47,6 @@ export function SkillsView({
   const [internalActiveSkillId, setInternalActiveSkillId] = useState<
     string | null
   >(null);
-  const [expandedSectionIds, setExpandedSectionIds] = useState<string[]>([]);
   const loadRequestIdRef = useRef(0);
   const currentActiveSkillId = isActiveSkillControlled
     ? activeSkillId
@@ -103,53 +92,6 @@ export function SkillsView({
   useEffect(() => {
     loadSkills();
   }, [loadSkills]);
-
-  const projectFilters = useMemo(() => uniqueProjectFilters(skills), [skills]);
-  const hasBuiltinSkills = useMemo(
-    () => skills.some((skill) => skill.sourceKind === "builtin"),
-    [skills],
-  );
-
-  useEffect(() => {
-    if (!activeFilter.startsWith("project:")) {
-      return;
-    }
-
-    const projectId = activeFilter.slice("project:".length);
-    if (!projectFilters.some((project) => project.id === projectId)) {
-      setActiveFilter("all");
-    }
-  }, [activeFilter, projectFilters]);
-
-  useEffect(() => {
-    if (activeFilter === "builtin" && !hasBuiltinSkills) {
-      setActiveFilter("all");
-    }
-  }, [activeFilter, hasBuiltinSkills]);
-
-  const filteredSkills = useMemo(
-    () => filterSkills(skills, { search, activeFilter }),
-    [skills, search, activeFilter],
-  );
-
-  const groupedSkills = useMemo(
-    () =>
-      groupSkills(filteredSkills, activeFilter, projectFilters, {
-        personalTitle: t("view.filtersGlobal"),
-        builtinTitle: t("view.filtersBuiltin"),
-        projectsFallback: t("view.projects"),
-      }),
-    [filteredSkills, activeFilter, projectFilters, t],
-  );
-
-  useEffect(() => {
-    const nextIds = groupedSkills.map((section) => section.id);
-    setExpandedSectionIds((prev) => {
-      const stillVisible = prev.filter((id) => nextIds.includes(id));
-      const newIds = nextIds.filter((id) => !stillVisible.includes(id));
-      return [...stillVisible, ...newIds];
-    });
-  }, [groupedSkills]);
 
   const activeSkill =
     skills.find((skill) => skill.id === currentActiveSkillId) ?? null;
@@ -241,14 +183,8 @@ export function SkillsView({
     await loadSkills();
   }, [loadSkills]);
 
-  const {
-    fileInputRef,
-    isDragOver,
-    dropHandlers,
-    handleFileChange,
-    openFilePicker,
-    handleExport,
-  } = useSkillImportExport(refreshSkills);
+  const { fileInputRef, handleFileChange, openFilePicker, handleExport } =
+    useSkillImportExport(refreshSkills);
 
   const handleShare = useCallback(
     (skill: SkillInfo) => {
@@ -294,11 +230,10 @@ export function SkillsView({
   }
 
   return (
-    <PageShell>
+    <PageShell contentWidth="full">
       <PageHeader
         title={t("view.title")}
-        description={t("view.description")}
-        titleClassName="font-normal text-foreground"
+        titleClassName="sr-only"
         actions={
           <>
             <Button
@@ -306,8 +241,8 @@ export function SkillsView({
               variant="outline-flat"
               size="xs"
               onClick={openFilePicker}
+              leftIcon={<IconUpload />}
             >
-              <Upload className="size-3.5" />
               {t("common:actions.import")}
             </Button>
             <Button
@@ -315,44 +250,22 @@ export function SkillsView({
               variant="outline-flat"
               size="xs"
               onClick={handleNewSkill}
+              leftIcon={<IconPlus />}
             >
-              <Plus className="size-3.5" />
               {t("view.newSkill")}
             </Button>
           </>
         }
       />
 
-      <SkillsToolbar
-        search={search}
-        onSearchChange={setSearch}
-        activeFilter={activeFilter}
-        onActiveFilterChange={setActiveFilter}
-        hasBuiltinSkills={hasBuiltinSkills}
-        projectFilters={projectFilters}
-        dropHandlers={dropHandlers}
-        isDragOver={isDragOver}
-      />
-
-      {!loading && filteredSkills.length > 0 ? (
-        <SkillsListSections
-          sections={groupedSkills}
-          expandedSectionIds={expandedSectionIds}
-          onExpandedSectionIdsChange={setExpandedSectionIds}
+      <section aria-labelledby="skills-heading">
+        <SkillsGrid
+          skills={skills}
+          isLoading={loading}
           onSelectSkill={handleSelectSkill}
-          onStartChat={onStartChatWithSkill ? handleStartChat : undefined}
+          onCreateSkill={handleNewSkill}
         />
-      ) : null}
-
-      {!loading && filteredSkills.length === 0 ? (
-        <SkillsEmptyState
-          hasAnySkills={skills.length > 0}
-          isDragOver={isDragOver}
-          dropHandlers={dropHandlers}
-          onNewSkill={handleNewSkill}
-          onImport={openFilePicker}
-        />
-      ) : null}
+      </section>
 
       <input
         ref={fileInputRef}

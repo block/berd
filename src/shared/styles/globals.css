@@ -82,10 +82,14 @@
 
   --color-orange-100: #ffedd5;
 
-  /* Skill pill palette — cycled by index in Skills views */
+  /* Skill pill palette — cycled deterministically (hash-from-name) in Skills views */
   --color-pill-pink: #eec2ea;
   --color-pill-olive: #cdcda1;
   --color-pill-blue: #bcc6f4;
+  --color-pill-lavender: #d6c8f0;
+  --color-pill-sage: #c4d8b8;
+  --color-pill-mint: #b8e0d2;
+  --color-pill-peach: #f6cdb2;
   --color-pill-neutral: #ffffff;
 
   /* Tailwind-scale compat for ai-elements + shadcn shipped components.
@@ -585,11 +589,8 @@
   --color-text-info: var(--text-info);
   --color-text-accent: var(--brand);
 
-  /* Skill pills */
-  --color-pill-pink: var(--color-pill-pink);
-  --color-pill-olive: var(--color-pill-olive);
-  --color-pill-blue: var(--color-pill-blue);
-  --color-pill-neutral: var(--color-pill-neutral);
+  /* Skill pills — primitives in @theme generate bg-pill-* utilities directly,
+     no bridge layer needed (would be a self-reference tautology). */
 
   /* Widget tokens */
   --color-clock-face: var(--clock-face);
