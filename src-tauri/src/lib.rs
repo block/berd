@@ -72,6 +72,12 @@ pub fn run() {
             }
             app.manage(distro_state);
             app.manage(commands::automations::AutomationStreamState::default());
+            let layout_app_data_dir = app.path().app_data_dir()?;
+            let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
+                layout_app_data_dir,
+            ))
+            .map_err(std::io::Error::other)?;
+            app.manage(layout_state);
 
             // Build a custom macOS application menu so that the app submenu,
             // "About" item, and "Quit" item use the capitalised product name
@@ -147,6 +153,10 @@ pub fn run() {
             commands::git::git_pull,
             commands::git::git_create_branch,
             commands::git::git_create_worktree,
+            commands::layout::get_layout,
+            commands::layout::save_layout_items,
+            commands::layout::save_layout_camera,
+            commands::layout::reset_layout,
             commands::migration::migration_status,
             commands::migration::backup_goose_config,
             commands::migration::mark_migration_complete,
