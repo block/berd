@@ -235,6 +235,7 @@ export function WidgetCanvas({
         open={picker.open}
         x={picker.x}
         y={picker.y}
+        instances={instances}
         onClose={closePicker}
         onSelect={(type, state) => {
           mutations.addWidget(

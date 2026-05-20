@@ -53,14 +53,36 @@
       "fallbackTitle": "Untitled automation"
     },
     "actions": {
-      "remove": "Remove"
+      "unpin": "Unpin"
     },
     "picker": {
+      "back": "Back",
+      "loading": "Loading...",
+      "loadFailed": "Could not load items.",
+      "loadingMoreChats": "Loading more chats...",
+      "pinned": "Pinned",
+      "searchMore": "Search to find more.",
       "sections": {
         "clock": "Display",
         "agent": "Agents",
         "chat": "Chats",
         "automation": "Automations"
+      },
+      "selectTitles": {
+        "clock": "Display",
+        "agent": "Pin an agent",
+        "chat": "Pin a chat",
+        "automation": "Pin an automation"
+      },
+      "searchPlaceholders": {
+        "agent": "Search agents",
+        "chat": "Search chats",
+        "automation": "Search automations"
+      },
+      "empty": {
+        "agent": "No agents found.",
+        "chat": "No chats found.",
+        "automation": "No automations found."
       }
     }
   }

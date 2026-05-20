@@ -1,11 +1,15 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageCircle } from "@tabler/icons-react";
+import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   getVisibleSessions,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { selectProjects } from "@/features/projects/stores/projectSelectors";
+import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
@@ -30,6 +34,7 @@ export function ChatPinWidget({
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const sessions = useChatSessionStore((state) => state.sessions);
   const messagesBySession = useChatStore((state) => state.messagesBySession);
+  const projects = useProjectStore(selectProjects);
 
   const visibleSessions = useMemo(
     () =>
@@ -40,7 +45,17 @@ export function ChatPinWidget({
   );
 
   const session = resolveSession(visibleSessions, getSessionId(instance.state));
-  const title = session?.title ?? t("widgets.chatPin.emptyTitle");
+  const title = session
+    ? session.title.trim() || DEFAULT_CHAT_TITLE
+    : t("widgets.chatPin.emptyTitle");
+  const project = session?.projectId
+    ? projects.find((candidate) => candidate.id === session.projectId)
+    : undefined;
+  const footerLabel = session
+    ? [project?.name, formatRelativeTimeToNow(session.updatedAt)]
+        .filter(Boolean)
+        .join(" · ")
+    : t("widgets.chatPin.emptyDescription");
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (session) onSelectSession?.(session.id);
   });
@@ -52,15 +67,22 @@ export function ChatPinWidget({
       aria-label={t("widgets.chatPin.openAria", { title })}
       className="flex h-full w-full flex-col rounded-card-chat border border-border-soft bg-surface-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-surface-tile cursor-pointer"
     >
-      <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-        <IconMessageCircle className="size-4" aria-hidden="true" />
-        {t("widgets.chatPin.kicker")}
+      <span className="flex min-w-0 items-center gap-2 text-[13px] text-foreground">
+        <IconMessageCircle
+          className="size-4 shrink-0 text-muted-foreground"
+          aria-hidden="true"
+        />
+        <span className="truncate">{title}</span>
       </span>
-      <span className="mt-3 line-clamp-2 text-base leading-5">{title}</span>
-      <span className="mt-auto text-sm text-muted-foreground">
-        {session
-          ? formatRelativeTimeToNow(session.updatedAt)
-          : t("widgets.chatPin.emptyDescription")}
+      <span className="mt-auto flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+        {project ? (
+          <ProjectIcon
+            icon={project.icon}
+            className="size-3.5 shrink-0"
+            imageClassName="size-3.5 shrink-0"
+          />
+        ) : null}
+        <span className="truncate">{footerLabel}</span>
       </span>
     </button>
   );

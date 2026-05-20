@@ -346,7 +346,6 @@ export function Sidebar({
     });
   }, [activeSessionId, activeSessionIds]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: prevCollapsed is a ref; intentionally not a dep.
   useEffect(() => {
     if (collapsed) {
       setExpanded(false);

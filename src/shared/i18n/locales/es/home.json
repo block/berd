@@ -53,14 +53,36 @@
       "fallbackTitle": "Automatización sin título"
     },
     "actions": {
-      "remove": "Eliminar"
+      "unpin": "Desanclar"
     },
     "picker": {
+      "back": "Volver",
+      "loading": "Cargando...",
+      "loadFailed": "No se pudieron cargar los elementos.",
+      "loadingMoreChats": "Cargando más chats...",
+      "pinned": "Fijado",
+      "searchMore": "Busca para encontrar más.",
       "sections": {
         "clock": "Pantalla",
         "agent": "Agentes",
         "chat": "Chats",
         "automation": "Automatizaciones"
+      },
+      "selectTitles": {
+        "clock": "Pantalla",
+        "agent": "Fijar un agente",
+        "chat": "Fijar un chat",
+        "automation": "Fijar una automatización"
+      },
+      "searchPlaceholders": {
+        "agent": "Buscar agentes",
+        "chat": "Buscar chats",
+        "automation": "Buscar automatizaciones"
+      },
+      "empty": {
+        "agent": "No se encontraron agentes.",
+        "chat": "No se encontraron chats.",
+        "automation": "No se encontraron automatizaciones."
       }
     }
   }

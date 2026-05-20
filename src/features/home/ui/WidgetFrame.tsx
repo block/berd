@@ -125,7 +125,7 @@ export function WidgetFrame({
         onPointerDownCapture={(event) => event.stopPropagation()}
       >
         <ContextMenuItem variant="destructive" onSelect={handleRemove}>
-          {t("widgets.actions.remove")}
+          {t("widgets.actions.unpin")}
         </ContextMenuItem>
       </ContextMenuContent>
     </ContextMenu>

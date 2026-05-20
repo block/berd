@@ -210,7 +210,7 @@ describe("WidgetFrame", () => {
     expect(onOpenAgent).not.toHaveBeenCalled();
   });
 
-  it("removes the widget from the context menu", async () => {
+  it("unpins the widget from the context menu", async () => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
@@ -218,7 +218,7 @@ describe("WidgetFrame", () => {
     });
 
     fireEvent.contextMenu(frame);
-    await user.click(screen.getByRole("menuitem", { name: "Remove" }));
+    await user.click(screen.getByRole("menuitem", { name: "Unpin" }));
 
     expect(removeWidget).toHaveBeenCalledWith("clock-1");
   });
