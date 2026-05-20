@@ -80,7 +80,13 @@
   --color-yellow-100: #ffd966;
   --color-yellow-200: #fbcd44;
 
-  --color-orange-100: #ffedd5;
+  --color-orange-100: #ffb27a;
+  --color-orange-200: #ff9647;
+
+  /* Indigo — chat chip identity. Same 100/200/700 pattern as other hues. */
+  --color-indigo-100: #8b9cff;
+  --color-indigo-200: #6b7cf5;
+  --color-indigo-700: #4338ca;
 
   /* Skill pill palette — cycled deterministically (hash-from-name) in Skills views */
   --color-pill-pink: #eec2ea;
@@ -143,30 +149,51 @@
   --brand-foreground: var(--color-white);
 
   /* Canvas + surfaces (Alex Q2 2026) */
-  --canvas-base: #dedede;
+  --canvas-base: #f5f5f5;
   --canvas-project-tint: #d6dde7; /* slight cool tilt for project chats */
-  --surface-chrome: rgba(255, 255, 255, 0.5);
+  --surface-chrome: rgba(255, 255, 255, 0.8);
   --surface-card: var(--color-white);
+  --surface-card-soft: rgba(255, 255, 255, 0.4);
+  --surface-overlay: var(--color-white);
   --surface-tile: var(--color-gray-50);
   --surface-composer: rgba(255, 255, 255, 0.2);
   --surface-button: var(--color-gray-50);
   --surface-install: var(--canvas-base);
 
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
-     Separate from --surface-composer (which is the chat-area composer fill). */
+     Separate from --surface-composer (which is the chat-area composer fill).
+     Deprecated: PR #6 migrates the GlobalComposerPill consumer to
+     --backdrop-composer-glass below; keep these for now so the consumer keeps
+     compiling. */
   --surface-composer-glass: rgba(255, 255, 255, 0.15);
   --ring-composer-glass-inner: rgba(255, 255, 255, 0.6);
   --outline-composer-glass-outer: rgba(0, 0, 0, 0.05);
+
+  /* Shared filter recipe for the composer glass surfaces (ChatView floating
+     straddle + Global Hover Composer Pill). Consumed via inline style as
+     `var(--backdrop-composer-glass)`. Modest blur radius per the WKWebView
+     report (docs/wkwebview-backdrop-filter-report.md): WKWebView visually
+     plateaus above ~16–20px; lean on tint opacity for legibility rather than
+     chasing larger radii. */
+  --backdrop-composer-glass: blur(18px) saturate(180%) brightness(1.04);
 
   /* Project-tint hook for the dot-grid composer below. Components in a
      project context set this on a wrapper to tint canvas + dot color
      together via color-mix. Unset/transparent = base canvas, no change. */
   --project-tint: transparent;
 
-  /* Composer chip tones — file/agent/skill/automation identity colors.
-     Each tone gets a bg + fg pair. Light values; dark block redefines. */
+  /* Composer chip tones — file/chat/project/agent/skill/automation identity
+     colors. Each tone gets a bg + fg pair. Light values; dark block redefines. */
   --chip-file-bg: var(--surface-tile);
   --chip-file-fg: var(--color-gray-600);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 18%, transparent);
+  --chip-chat-fg: var(--color-indigo-700);
+  --chip-project-bg: color-mix(
+    in oklab,
+    var(--color-orange-200) 20%,
+    transparent
+  );
+  --chip-project-fg: var(--color-orange-700);
   --chip-agent-bg: color-mix(in oklab, var(--color-blue-200) 18%, transparent);
   --chip-agent-fg: var(--color-blue-700);
   --chip-skill-bg: color-mix(
@@ -223,6 +250,7 @@
   --text-default: #242424;
   --text-subtle: var(--color-gray-600);
   --text-muted: #7f7f7f;
+  --text-breadcrumb-separator: #afafaf;
   --text-alt: var(--color-gray-600);
   --text-title: #19191a;
   --text-placeholder: var(--color-gray-400);
@@ -245,7 +273,7 @@
   --dark-40: rgba(26, 26, 26, 0.4);
 
   /* Dot-grid (canvas signature treatment) */
-  --dot-color-base: rgba(37, 37, 37, 0.15);
+  --dot-color-base: #cbcbcb;
   --dot-size: 1px;
   --dot-spacing: 24px;
 
@@ -255,7 +283,7 @@
   --shadow-btn: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-card: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-elevated: 0 3px 12px rgba(76, 76, 76, 0.22);
-  --shadow-popover: 0 8px 30px rgba(0, 0, 0, 0.12);
+  --shadow-popover: none;
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
@@ -272,7 +300,7 @@
   --foreground: var(--text-default);
   --card: var(--surface-card);
   --card-foreground: var(--text-default);
-  --popover: var(--surface-card);
+  --popover: var(--surface-overlay);
   --popover-foreground: var(--text-default);
   --primary: var(--brand);
   --primary-foreground: var(--brand-foreground);
@@ -379,8 +407,10 @@
   /* Canvas + surfaces — inverted */
   --canvas-base: #1a1a1a;
   --canvas-project-tint: #1a1d22;
-  --surface-chrome: rgba(0, 0, 0, 0.5);
+  --surface-chrome: rgba(0, 0, 0, 0.8);
   --surface-card: var(--color-gray-800);
+  --surface-card-soft: rgba(255, 255, 255, 0.08);
+  --surface-overlay: var(--color-gray-800);
   --surface-tile: var(--color-gray-800);
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-button: var(--color-gray-800);
@@ -395,6 +425,14 @@
   /* Composer chip tones — dark variants */
   --chip-file-bg: var(--color-gray-800);
   --chip-file-fg: var(--color-gray-400);
+  --chip-chat-bg: color-mix(in oklab, var(--color-indigo-100) 10%, transparent);
+  --chip-chat-fg: var(--color-indigo-100);
+  --chip-project-bg: color-mix(
+    in oklab,
+    var(--color-orange-100) 10%,
+    transparent
+  );
+  --chip-project-fg: var(--color-orange-100);
   --chip-agent-bg: color-mix(in oklab, var(--color-blue-100) 10%, transparent);
   --chip-agent-fg: var(--color-blue-100);
   --chip-skill-bg: color-mix(
@@ -443,6 +481,7 @@
   --text-default: var(--color-white);
   --text-subtle: var(--color-gray-400);
   --text-muted: var(--color-gray-500);
+  --text-breadcrumb-separator: var(--color-gray-400);
   --text-alt: var(--color-gray-500);
   --text-title: var(--color-white);
   --text-placeholder: var(--color-gray-600);
@@ -466,7 +505,7 @@
   --shadow-btn: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 3px 12px rgba(0, 0, 0, 0.5);
-  --shadow-popover: 0 8px 30px rgba(0, 0, 0, 0.4);
+  --shadow-popover: none;
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
@@ -530,6 +569,8 @@
   --color-canvas-project-tint: var(--canvas-project-tint);
   --color-surface-chrome: var(--surface-chrome);
   --color-surface-card: var(--surface-card);
+  --color-surface-card-soft: var(--surface-card-soft);
+  --color-surface-overlay: var(--surface-overlay);
   --color-surface-tile: var(--surface-tile);
   --color-surface-composer: var(--surface-composer);
   --color-surface-composer-glass: var(--surface-composer-glass);
@@ -539,6 +580,10 @@
   /* Composer chip tones */
   --color-chip-file-bg: var(--chip-file-bg);
   --color-chip-file-fg: var(--chip-file-fg);
+  --color-chip-chat-bg: var(--chip-chat-bg);
+  --color-chip-chat-fg: var(--chip-chat-fg);
+  --color-chip-project-bg: var(--chip-project-bg);
+  --color-chip-project-fg: var(--chip-project-fg);
   --color-chip-agent-bg: var(--chip-agent-bg);
   --color-chip-agent-fg: var(--chip-agent-fg);
   --color-chip-skill-bg: var(--chip-skill-bg);
@@ -579,6 +624,7 @@
   --color-text-default: var(--text-default);
   --color-text-subtle: var(--text-subtle);
   --color-text-muted: var(--text-muted);
+  --color-text-breadcrumb-separator: var(--text-breadcrumb-separator);
   --color-text-alt: var(--text-alt);
   --color-text-title: var(--text-title);
   --color-text-placeholder: var(--text-placeholder);
