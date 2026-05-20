@@ -34,6 +34,7 @@
   "navigation": {
     "agents": "Agentes",
     "automations": "Automatizaciones",
+    "gooseHome": "Inicio de Goose",
     "home": "Inicio",
     "main": "Navegación principal",
     "sessionHistory": "Historial de sesiones",

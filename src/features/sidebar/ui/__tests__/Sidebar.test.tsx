@@ -369,13 +369,13 @@ describe("Sidebar", () => {
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 
-  it("renders a home button in the sidebar header and navigates home", async () => {
+  it("navigates home when the sidebar logo is clicked", async () => {
     const user = userEvent.setup();
     const onNavigate = vi.fn();
 
     renderSidebar({ onNavigate });
 
-    await user.click(screen.getByRole("button", { name: /home/i }));
+    await user.click(screen.getByRole("button", { name: /goose home/i }));
 
     expect(onNavigate).toHaveBeenCalledWith("home");
   });

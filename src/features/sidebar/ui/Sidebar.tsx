@@ -475,7 +475,17 @@ export function Sidebar({
               collapsed ? "justify-center" : "justify-between",
             )}
           >
-            <GooseIcon className="text-foreground" />
+            <button
+              type="button"
+              className="inline-flex border-0 bg-transparent p-0 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus"
+              onClick={() => onNavigate?.("home")}
+              aria-label={t("navigation.gooseHome")}
+              title={t("navigation.gooseHome")}
+            >
+              <span className="inline-flex">
+                <GooseIcon className="text-foreground" />
+              </span>
+            </button>
           </div>
         </div>
 
