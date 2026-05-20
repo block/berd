@@ -16,7 +16,7 @@ import { SidebarItemMenu } from "./SidebarItemMenu";
 const MAX_VISIBLE_PROJECT_CHATS = 5;
 const MAX_EXPANDED_PROJECT_CHATS = 20;
 const PROJECT_ROW_TEXT_CLASS =
-  "text-sidebar-nav-fg hover:bg-transparent hover:text-sidebar-nav-fg";
+  "text-foreground hover:bg-transparent hover:text-foreground";
 
 export interface SidebarSessionItem {
   id: string;
@@ -134,8 +134,8 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-sidebar-nav-bg-hover focus-within:bg-sidebar-nav-bg-hover",
-          menuOpen && "bg-sidebar-nav-bg-selected",
+          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt",
+          menuOpen && "bg-background-alt",
         )}
       >
         <Button
@@ -144,7 +144,7 @@ export function SidebarProjectSection({
           size="sm"
           onClick={() => toggleProject(project.id)}
           className={cn(
-            "flex-1 min-w-0 justify-start gap-2 rounded-md px-3 py-2 text-sm font-normal",
+            "flex-1 min-w-0 justify-start gap-2 rounded-md px-3 py-2 text-sm font-light",
             PROJECT_ROW_TEXT_CLASS,
           )}
         >

@@ -507,11 +507,11 @@ export function Sidebar({
       )}
       style={{ width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface-chrome backdrop-blur-md">
+      <div className="flex h-full flex-col overflow-hidden rounded-chrome border border-border-soft bg-surface-chrome backdrop-blur-md">
         <div
           className={cn(
-            "flex-shrink-0 pt-[8px]",
-            collapsed ? "px-1.5 pb-1.5" : "px-3 pb-1",
+            "flex-shrink-0",
+            collapsed ? "px-1.5 pb-1.5 pt-3" : "px-3 pb-2 pt-5",
           )}
         >
           <div
@@ -537,7 +537,7 @@ export function Sidebar({
           >
             <nav
               className={cn(
-                "relative h-full overflow-y-auto overflow-x-hidden px-1.5 py-1 pt-1 scrollbar-none",
+                "relative h-full overflow-y-auto overflow-x-hidden px-1.5 py-1 scrollbar-none",
                 collapsed ? "pb-16" : "pb-[72px]",
               )}
               style={{
@@ -554,7 +554,7 @@ export function Sidebar({
                     "mb-3 flex items-center w-full rounded-md transition-all duration-300 ease-out",
                     collapsed
                       ? "justify-center p-3 text-foreground"
-                      : "gap-2 border border-border px-2.5 py-1.5 text-xs text-foreground hover:text-foreground hover:bg-transparent",
+                      : "gap-2 border border-border-soft px-2.5 py-1.5 text-xs font-light text-muted-foreground hover:text-foreground hover:bg-transparent",
                   )}
                 >
                   <IconSearch className="size-3.5 flex-shrink-0 text-placeholder" />
@@ -573,7 +573,7 @@ export function Sidebar({
                       }}
                       placeholder={t("search.placeholder")}
                       className={cn(
-                        "focus-override appearance-none bg-transparent border-none text-xs flex-1 min-w-0 placeholder:text-placeholder outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
+                        "focus-override appearance-none bg-transparent border-none text-xs font-light flex-1 min-w-0 placeholder:text-placeholder outline-none focus-visible:ring-0 focus-visible:ring-offset-0",
                         labelTransition,
                         labelVisible
                           ? "opacity-100 w-auto"
@@ -726,7 +726,7 @@ export function Sidebar({
                 size={collapsed ? "icon-sm" : "default"}
                 onClick={onSettingsClick}
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-text-muted hover:bg-transparent hover:text-foreground active:bg-transparent",
+                  "h-10 w-full rounded-md bg-transparent text-muted-foreground hover:bg-background-alt hover:text-foreground active:bg-background-alt",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",
@@ -738,7 +738,7 @@ export function Sidebar({
                 {!collapsed && (
                   <span
                     className={cn(
-                      "whitespace-nowrap text-sm",
+                      "whitespace-nowrap text-sm font-light",
                       labelTransition,
                       labelVisible
                         ? "opacity-100 w-auto"
@@ -806,7 +806,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -835,7 +835,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-wide text-muted-foreground",
+                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -876,7 +876,7 @@ export function Sidebar({
                   isSettingsSurface ? onSettingsBack : onDesignSystemBack
                 }
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-text-muted hover:bg-transparent hover:text-foreground active:bg-transparent",
+                  "h-10 w-full rounded-md bg-transparent text-muted-foreground hover:bg-background-alt hover:text-foreground active:bg-background-alt",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",
@@ -888,7 +888,7 @@ export function Sidebar({
                 {!collapsed && (
                   <span
                     className={cn(
-                      "whitespace-nowrap text-sm",
+                      "whitespace-nowrap text-sm font-light",
                       labelTransition,
                       labelVisible
                         ? "opacity-100 w-auto"

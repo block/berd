@@ -28,11 +28,11 @@ import { Input } from "@/shared/ui/input";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 
 const INACTIVE_CHAT_ROW_CLASS =
-  "text-sidebar-nav-fg hover:bg-sidebar-nav-bg-hover hover:text-sidebar-nav-fg";
+  "text-foreground hover:bg-background-alt hover:text-foreground";
 const ACTIVE_CHAT_ROW_CLASS =
-  "bg-sidebar-nav-bg-selected font-normal text-sidebar-nav-fg hover:bg-sidebar-nav-bg-selected hover:text-sidebar-nav-fg";
+  "bg-background-alt text-foreground hover:bg-background-alt hover:text-foreground";
 const SELECTED_CHAT_ROW_CLASS =
-  "bg-background-primary/10 text-foreground ring-1 ring-inset ring-background-primary/35 hover:bg-background-primary/15 hover:text-foreground";
+  "bg-background-alt text-foreground ring-1 ring-inset ring-border-soft hover:bg-background-alt hover:text-foreground";
 
 interface SidebarChatRowProps {
   id: string;
@@ -188,12 +188,12 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-nav-bg-hover focus-within:bg-sidebar-nav-bg-hover active:cursor-grabbing",
+        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt active:cursor-grabbing",
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
-          "bg-sidebar-nav-bg-selected",
+          "bg-background-alt",
         selected && SELECTED_CHAT_ROW_CLASS,
-        dragging && "opacity-40 bg-background-hover/30",
+        dragging && "bg-background-alt opacity-40",
         className,
       )}
     >
@@ -218,7 +218,7 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-normal active:cursor-grabbing",
+          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light active:cursor-grabbing",
           nested ? "pl-9" : "pl-3",
           rowButtonStateClass,
         )}

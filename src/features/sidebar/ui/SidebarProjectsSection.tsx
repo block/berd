@@ -49,8 +49,7 @@ interface SidebarProjectsSectionProps {
   onToggleRecentsSection: () => void;
 }
 
-const SECTION_HEADER_TEXT_CLASS =
-  "text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted";
+const SECTION_HEADER_TEXT_CLASS = "text-[10px] font-light text-foreground/25";
 
 export function SidebarProjectsSection({
   projects,
@@ -100,7 +99,7 @@ export function SidebarProjectsSection({
   return (
     <div
       className={cn(
-        "relative z-10",
+        "relative z-10 mt-4 border-t border-border-soft",
         labelTransition,
         labelVisible
           ? "opacity-100 max-h-[2000px]"
@@ -112,7 +111,7 @@ export function SidebarProjectsSection({
       <div
         className={cn(
           "group/projects-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
+          collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
         )}
       >
         {!collapsed && (
@@ -122,6 +121,7 @@ export function SidebarProjectsSection({
             aria-expanded={projectsSectionOpen}
             className={cn(
               "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+              "-ml-3",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"
@@ -236,7 +236,7 @@ export function SidebarProjectsSection({
           <div
             className={cn(
               "relative flex items-center transition-all duration-300",
-              collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
+              collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
             )}
           >
             {!collapsed && (
@@ -246,6 +246,7 @@ export function SidebarProjectsSection({
                 aria-expanded={recentsSectionOpen}
                 className={cn(
                   "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+                  "-ml-3",
                   labelTransition,
                   labelVisible
                     ? "opacity-100 w-auto"

@@ -93,6 +93,7 @@ export function SidebarRecentsSection({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
     <div
+      className="mt-4 border-t border-border-soft"
       onDragOver={handleRecentsDragOver}
       onDragLeave={handleRecentsDragLeave}
       onDrop={handleRecentsDrop}
@@ -100,7 +101,7 @@ export function SidebarRecentsSection({
       <div
         className={cn(
           "relative group/chats-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pt-5 pb-1.5",
+          collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
         )}
       >
         {!collapsed && (
@@ -110,6 +111,7 @@ export function SidebarRecentsSection({
             aria-expanded={isOpen}
             className={cn(
               "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+              "-ml-3",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"
