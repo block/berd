@@ -15,6 +15,23 @@ function maxZ(instances: WidgetInstance[]): number {
   return instances.reduce((max, instance) => Math.max(max, instance.z), 0);
 }
 
+function normalizeZOrder(
+  instances: WidgetInstance[],
+  topWidgetId: string,
+): WidgetInstance[] {
+  return [...instances]
+    .sort((left, right) => {
+      if (left.id === topWidgetId) {
+        return 1;
+      }
+      if (right.id === topWidgetId) {
+        return -1;
+      }
+      return left.z - right.z;
+    })
+    .map((instance, index) => ({ ...instance, z: index + 1 }));
+}
+
 function resolvePosition(
   type: string,
   x: number,
@@ -100,10 +117,14 @@ export function bumpZMutation(
     return null;
   }
 
-  const nextZ = maxZ(instances) + 1;
-  return instances.map((instance) =>
-    instance.id === id ? { ...instance, z: nextZ } : instance,
+  const zById = new Map(
+    normalizeZOrder(instances, id).map((instance) => [instance.id, instance.z]),
   );
+
+  return instances.map((instance) => ({
+    ...instance,
+    z: zById.get(instance.id) ?? instance.z,
+  }));
 }
 
 export function removeWidgetMutation(

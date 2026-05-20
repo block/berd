@@ -5,14 +5,15 @@ import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   CanvasBounds,
   WidgetInstance,
+  WidgetMutationHandlers,
   WidgetNavigationHandlers,
 } from "../widgets/types";
-import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import { WidgetFrame } from "./WidgetFrame";
 import { WidgetPicker } from "./WidgetPicker";
 
 interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
+  mutations: WidgetMutationHandlers;
 }
 
 interface PickerState {
@@ -30,12 +31,12 @@ interface PickerState {
  */
 export function WidgetCanvas({
   instances,
+  mutations,
   onOpenAgent,
   onSelectSession,
   onOpenAutomation,
 }: WidgetCanvasProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const addWidget = useHomeWidgetStore((state) => state.addWidget);
   const [picker, setPicker] = useState<PickerState>({
     open: false,
     x: 0,
@@ -81,6 +82,7 @@ export function WidgetCanvas({
               canvasRef={canvasRef}
               currentMaxZ={currentMaxZ}
               getCanvasBounds={getCanvasBounds}
+              mutations={mutations}
               onOpenAgent={onOpenAgent}
               onSelectSession={onSelectSession}
               onOpenAutomation={onOpenAutomation}
@@ -94,7 +96,13 @@ export function WidgetCanvas({
         y={picker.y}
         onClose={() => setPicker((current) => ({ ...current, open: false }))}
         onSelect={(type, state) => {
-          addWidget(type, picker.x, picker.y, state, getCanvasBounds());
+          mutations.addWidget(
+            type,
+            picker.x,
+            picker.y,
+            state,
+            getCanvasBounds(),
+          );
           setPicker((current) => ({ ...current, open: false }));
         }}
       />

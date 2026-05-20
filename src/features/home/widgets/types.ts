@@ -49,6 +49,20 @@ export interface WidgetNavigationHandlers {
   onOpenAutomation?: (automationId: string) => void;
 }
 
+export interface WidgetMutationHandlers {
+  addWidget: (
+    type: string,
+    x: number,
+    y: number,
+    state?: Record<string, unknown>,
+    bounds?: CanvasBounds,
+  ) => void;
+  moveWidget: (id: string, x: number, y: number, bounds?: CanvasBounds) => void;
+  bumpZ: (id: string) => void;
+  removeWidget: (id: string) => void;
+  updateWidgetState: (id: string, state: Record<string, unknown>) => void;
+}
+
 export type AgentPinState = { agentId: string };
 export type ChatPinState = { sessionId: string };
 export type AutomationOutputPinState = { automationId: string };

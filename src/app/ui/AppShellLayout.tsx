@@ -52,7 +52,6 @@ export function AppShellLayout({
           </div>
         </div>
 
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: drag handle for sidebar resize */}
         <div
           onMouseDown={onResizeStart}
           onDoubleClick={onResizeDoubleClick}

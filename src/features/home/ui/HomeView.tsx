@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import { WidgetCanvas } from "./WidgetCanvas";
@@ -15,24 +15,21 @@ export function HomeView({
   onOpenAutomation,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
-  const instances = useHomeWidgetStore((state) => state.instances);
-  const loadStatus = useHomeWidgetStore((state) => state.loadStatus);
-  const error = useHomeWidgetStore((state) => state.error);
-  const initialize = useHomeWidgetStore((state) => state.initialize);
-  const retryInitialize = useHomeWidgetStore((state) => state.retryInitialize);
-  const copyErrorDetails = useHomeWidgetStore(
-    (state) => state.copyErrorDetails,
-  );
-
-  useEffect(() => {
-    void initialize();
-  }, [initialize]);
+  const {
+    instances,
+    loadStatus,
+    error,
+    retryInitialize,
+    copyErrorDetails,
+    widgetMutations,
+  } = useHomeWidgetLayoutController();
 
   return (
     <div className="relative h-full w-full">
       {loadStatus === "ready" ? (
         <WidgetCanvas
           instances={instances}
+          mutations={widgetMutations}
           onOpenAgent={onOpenAgent}
           onSelectSession={onSelectSession}
           onOpenAutomation={onOpenAutomation}
@@ -79,4 +76,46 @@ export function HomeView({
       ) : null}
     </div>
   );
+}
+
+function useHomeWidgetLayoutController() {
+  const instances = useHomeWidgetStore((state) => state.instances);
+  const loadStatus = useHomeWidgetStore((state) => state.loadStatus);
+  const error = useHomeWidgetStore((state) => state.error);
+  const initialize = useHomeWidgetStore((state) => state.initialize);
+  const retryInitialize = useHomeWidgetStore((state) => state.retryInitialize);
+  const copyErrorDetails = useHomeWidgetStore(
+    (state) => state.copyErrorDetails,
+  );
+  const addWidget = useHomeWidgetStore((state) => state.addWidget);
+  const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
+  const bumpZ = useHomeWidgetStore((state) => state.bumpZ);
+  const removeWidget = useHomeWidgetStore((state) => state.removeWidget);
+  const updateWidgetState = useHomeWidgetStore(
+    (state) => state.updateWidgetState,
+  );
+
+  useEffect(() => {
+    void initialize();
+  }, [initialize]);
+
+  const widgetMutations = useMemo(
+    () => ({
+      addWidget,
+      moveWidget,
+      bumpZ,
+      removeWidget,
+      updateWidgetState,
+    }),
+    [addWidget, moveWidget, bumpZ, removeWidget, updateWidgetState],
+  );
+
+  return {
+    instances,
+    loadStatus,
+    error,
+    retryInitialize,
+    copyErrorDetails,
+    widgetMutations,
+  };
 }

@@ -383,6 +383,31 @@ describe("homeWidgetStore", () => {
     expect(saveLayoutItems).not.toHaveBeenCalled();
   });
 
+  it("normalizes z order while bumping the target widget to the top", () => {
+    vi.mocked(saveLayoutItems).mockResolvedValue({
+      ok: true,
+      layout: layout({ itemRevision: 5 }),
+    });
+    useHomeWidgetStore.setState({
+      instances: [
+        { id: "a", type: "clock", x: 0, y: 0, z: 500 },
+        { id: "b", type: "clock", x: 0, y: 0, z: 20 },
+        { id: "c", type: "clock", x: 0, y: 0, z: 1200 },
+      ],
+      itemRevision: 4,
+      lastConfirmedLayout: layout(),
+      loadStatus: "ready",
+    });
+
+    useHomeWidgetStore.getState().bumpZ("b");
+
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { id: "a", z: 1 },
+      { id: "b", z: 3 },
+      { id: "c", z: 2 },
+    ]);
+  });
+
   it.each([
     [
       "moving a missing widget",
@@ -471,7 +496,7 @@ describe("homeWidgetStore", () => {
     expect(secondRequest.items[0]).toMatchObject({
       centerX: 168,
       centerY: 168,
-      zIndex: 2,
+      zIndex: 1,
     });
     expect(secondRequest.items).toHaveLength(1);
   });
