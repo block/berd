@@ -4,13 +4,12 @@ import {
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
-import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 
 const SIDEBAR_OUTER_GUTTER_WIDTH = 12;
 const SIDEBAR_RESIZE_HANDLE_WIDTH = 12;
-const SIDEBAR_DEFAULT_WIDTH = SIDE_PANEL_DEFAULT_WIDTH;
+const SIDEBAR_DEFAULT_WIDTH = 256;
 const SIDEBAR_MIN_WIDTH = 220;
-const SIDEBAR_MAX_WIDTH = 380;
+const SIDEBAR_MAX_WIDTH = 320;
 const SIDEBAR_SNAP_COLLAPSE_THRESHOLD = 100;
 const APP_SHELL_HORIZONTAL_CHROME_WIDTH = 28;
 const MIN_MAIN_CONTENT_WIDTH = 532;

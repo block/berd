@@ -1,12 +1,11 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useEffect, useState, type CSSProperties } from "react";
-import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { cn } from "@/shared/lib/cn";
 import { ContextPanel } from "./ContextPanel";
 
 const CP_PAD_X = 12;
 const CP_PAD_Y = "var(--spacing-app-panel-gutter-top)";
-const CP_PANEL_W = SIDE_PANEL_DEFAULT_WIDTH + 15;
+const CP_PANEL_W = 315;
 const CP_TOTAL_W = CP_PANEL_W + CP_PAD_X * 2;
 const CP_FADE_S = 0.15;
 const CP_REFLOW_MS = 200;

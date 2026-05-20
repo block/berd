@@ -69,6 +69,7 @@ function seedProjectChats(count: number, overrides: Partial<MockSession> = {}) {
 function sidebarProps(props: Partial<SidebarProps> = {}): SidebarProps {
   return {
     collapsed: false,
+    width: 300,
     onNavigate: vi.fn(),
     onSelectSession: vi.fn(),
     projects: [],

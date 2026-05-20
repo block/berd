@@ -38,7 +38,6 @@ import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionA
 import { Button } from "@/shared/ui/button";
 import { Switch } from "@/shared/ui/switch";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
-import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { SidebarPinnedSection } from "./SidebarPinnedSection";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
@@ -60,7 +59,7 @@ import {
 
 interface SidebarProps {
   collapsed: boolean;
-  width?: number;
+  width: number;
   isResizing?: boolean;
   onSettingsClick?: () => void;
   onSettingsBack?: () => void;
@@ -237,7 +236,7 @@ function validateSectionVisibility(
 
 export function Sidebar({
   collapsed,
-  width = SIDE_PANEL_DEFAULT_WIDTH,
+  width,
   isResizing = false,
   onSettingsClick,
   onSettingsBack,
