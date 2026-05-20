@@ -93,6 +93,7 @@ export const DESIGN_SYSTEM_COMPONENT_SECTIONS: Array<{
   { id: "component-button", label: "Button" },
   { id: "component-button-group", label: "Button Group" },
   { id: "component-badge", label: "Badge" },
+  { id: "component-breadcrumb", label: "Breadcrumb" },
   { id: "component-checkbox", label: "Checkbox" },
   { id: "component-confirm-dialog", label: "Confirm Dialog" },
   { id: "component-contextual-tip", label: "Contextual Tip" },
@@ -139,7 +140,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
 }> = [
   { id: "component-aspect-ratio", label: "Aspect Ratio" },
   { id: "component-accordion", label: "Accordion" },
-  { id: "component-breadcrumb", label: "Breadcrumb" },
   { id: "component-calendar", label: "Calendar" },
   { id: "component-card", label: "Card" },
   { id: "component-carousel", label: "Carousel" },

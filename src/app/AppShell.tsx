@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
@@ -81,6 +81,7 @@ import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
+  DESIGN_SYSTEM_SECTIONS,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
 import type {
@@ -89,6 +90,7 @@ import type {
   AppView,
   AutomationNavigationRoute,
 } from "./types/appNavigation";
+import type { TopBarBreadcrumb } from "./ui/TopBar";
 export type { AppView } from "./types/appNavigation";
 
 type AppNavigationHistory = {
@@ -222,6 +224,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
+  const [skillsBreadcrumbLabel, setSkillsBreadcrumbLabel] = useState<
+    string | null
+  >(null);
+  const [agentsBreadcrumbLabel, setAgentsBreadcrumbLabel] = useState<
+    string | null
+  >(null);
+  const [automationsBreadcrumbLabel, setAutomationsBreadcrumbLabel] = useState<
+    string | null
+  >(null);
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
@@ -1372,6 +1383,108 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     });
   }, []);
 
+  const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
+    const rootCrumb: TopBarBreadcrumb = {
+      id: "root",
+      label: "goose",
+      onClick: () => handleNavigate("home"),
+    };
+    const current = (id: string, label: string): TopBarBreadcrumb => ({
+      id,
+      label,
+    });
+    const parent = (
+      id: string,
+      label: string,
+      onClick: () => void,
+    ): TopBarBreadcrumb => ({
+      id,
+      label,
+      onClick,
+    });
+
+    switch (activeView) {
+      case "chat":
+        return activeSession?.title
+          ? [rootCrumb, current("chat", activeSession.title)]
+          : [current("root", "goose")];
+      case "skills":
+        return [
+          rootCrumb,
+          skillsSkillId && skillsBreadcrumbLabel
+            ? parent("skills", "Skills", () => handleNavigate("skills"))
+            : current("skills", "Skills"),
+          ...(skillsSkillId && skillsBreadcrumbLabel
+            ? [current("skill-detail", skillsBreadcrumbLabel)]
+            : []),
+        ];
+      case "agents":
+        return [
+          rootCrumb,
+          agentsPersonaId && agentsBreadcrumbLabel
+            ? parent("agents", "Agents", () => handleNavigate("agents"))
+            : current("agents", "Agents"),
+          ...(agentsPersonaId && agentsBreadcrumbLabel
+            ? [current("agent-detail", agentsBreadcrumbLabel)]
+            : []),
+        ];
+      case "automations":
+        return [
+          rootCrumb,
+          automationsBreadcrumbLabel
+            ? parent("automations", "Automations", () =>
+                handleNavigate("automations"),
+              )
+            : current("automations", "Automations"),
+          ...(automationsBreadcrumbLabel
+            ? [current("automation-detail", automationsBreadcrumbLabel)]
+            : []),
+        ];
+      case "design-system": {
+        const designSystemSectionLabel = DESIGN_SYSTEM_SECTIONS.find(
+          (section) => section.id === activeDesignSystemSection,
+        )?.label;
+        const showDesignSystemSection =
+          activeDesignSystemSection !== DEFAULT_DESIGN_SYSTEM_SECTION &&
+          Boolean(designSystemSectionLabel);
+
+        return [
+          rootCrumb,
+          showDesignSystemSection
+            ? parent("design-system", "Design System", () => {
+                setActiveDesignSystemSection(DEFAULT_DESIGN_SYSTEM_SECTION);
+                openDesignSystem();
+              })
+            : current("design-system", "Design System"),
+          ...(showDesignSystemSection && designSystemSectionLabel
+            ? [current("design-system-section", designSystemSectionLabel)]
+            : []),
+        ];
+      }
+      case "settings":
+        return [rootCrumb, current("settings", "Settings")];
+      case "projects":
+        return [rootCrumb, current("projects", "Projects")];
+      case "search":
+        return [rootCrumb, current("search", "Search")];
+      case "session-history":
+        return [rootCrumb, current("session-history", "Session History")];
+      case "home":
+        return [current("root", "goose")];
+    }
+  }, [
+    activeDesignSystemSection,
+    activeSession?.title,
+    activeView,
+    agentsBreadcrumbLabel,
+    agentsPersonaId,
+    automationsBreadcrumbLabel,
+    handleNavigate,
+    openDesignSystem,
+    skillsBreadcrumbLabel,
+    skillsSkillId,
+  ]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // Cmd+, for settings
@@ -1481,6 +1594,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     <AppShellLayout
       topBar={{
         activeView,
+        breadcrumbs: topBarBreadcrumbs,
         chatSessionTitle: activeSession?.title,
         sidebarCollapsed,
         canGoBack: navigationAvailability.canGoBack,
@@ -1495,6 +1609,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         contextPanelLabel,
         onToggleContextPanel: toggleContextPanel,
         onFeedbackClick: handleFeedbackClick,
+        onNavigateHome: () => handleNavigate("home"),
         onSearchClick: () => handleNavigate("search"),
       }}
       sidebar={{
@@ -1561,6 +1676,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onNavigateSkills={navigateSkills}
             onNavigateAgents={navigateAgents}
             onNavigateAutomations={navigateAutomations}
+            onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
+            onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
+            onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
             onCreatePersona={handleCreatePersona}
             onArchiveChat={handleArchiveChat}
             onCreateProject={openCreateProjectDialog}

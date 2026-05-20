@@ -37,6 +37,7 @@ import {
   BreadcrumbList,
   BreadcrumbPage as BreadcrumbCurrentPage,
   BreadcrumbSeparator,
+  BreadcrumbTrail,
 } from "@/shared/ui/breadcrumb";
 import { Button, buttonVariants } from "@/shared/ui/button";
 import { ButtonGroup, ButtonGroupText } from "@/shared/ui/button-group";
@@ -215,6 +216,8 @@ type AccordionBehavior = "single" | "multiple";
 type AccordionIndicatorPosition = "start" | "end" | "none";
 type AlertDialogActionTone = "default" | "destructive";
 type AlertDialogDescriptionLength = "short" | "detailed" | "long";
+type BreadcrumbTreatment = "default" | "top-bar";
+type BreadcrumbDepth = "root" | "section" | "detail";
 type ManifestItem = (typeof designSystemComponentManifest)[number];
 
 const componentPageDescriptions: Partial<Record<string, string>> = {
@@ -1863,6 +1866,115 @@ function getTabsTokenDetails({ variant }: { variant: TabsVariant }): {
   };
 }
 
+function getBreadcrumbTokenDetails({
+  depth,
+  treatment,
+  showCurrent,
+}: {
+  depth: BreadcrumbDepth;
+  treatment: BreadcrumbTreatment;
+  showCurrent: boolean;
+}): {
+  colorRows: TokenColorRow[];
+  textRows: TokenTextRow[];
+} {
+  if (treatment === "top-bar") {
+    return {
+      colorRows: [
+        {
+          anatomy: showCurrent ? "Root link" : "Root page",
+          state: "Default",
+          background: "transparent",
+          textIcon: "--text-title",
+        },
+        ...(showCurrent
+          ? [
+              {
+                anatomy: "Root link",
+                state: "Hover",
+                background: "transparent",
+                textIcon: "--text-hover",
+              } satisfies TokenColorRow,
+              {
+                anatomy: "Separator",
+                state: depth === "detail" ? "Intermediate" : "Current",
+                background: "transparent",
+                textIcon: depth === "detail" ? "--text-title" : "--text-muted",
+              } satisfies TokenColorRow,
+              ...(depth === "detail"
+                ? [
+                    {
+                      anatomy: "Separator",
+                      state: "Current",
+                      background: "transparent",
+                      textIcon: "--text-muted",
+                    } satisfies TokenColorRow,
+                  ]
+                : []),
+              {
+                anatomy: depth === "detail" ? "Section link" : "Current page",
+                state: "Default",
+                background: "transparent",
+                textIcon: depth === "detail" ? "--text-title" : "--text-muted",
+              } satisfies TokenColorRow,
+              ...(depth === "detail"
+                ? [
+                    {
+                      anatomy: "Current page",
+                      state: "Default",
+                      background: "transparent",
+                      textIcon: "--text-muted",
+                    } satisfies TokenColorRow,
+                  ]
+                : []),
+            ]
+          : []),
+      ],
+      textRows: [
+        {
+          anatomy: "Top bar trail",
+          size: "text-[24px]",
+          weight: "font-light",
+        },
+      ],
+    };
+  }
+
+  return {
+    colorRows: [
+      {
+        anatomy: "Breadcrumb link",
+        state: "Default",
+        background: "transparent",
+        textIcon: "--muted-foreground",
+      },
+      {
+        anatomy: "Breadcrumb link",
+        state: "Hover",
+        background: "transparent",
+        textIcon: "--foreground",
+      },
+      ...(showCurrent
+        ? [
+            {
+              anatomy: "Current page",
+              state: "Default",
+              background: "transparent",
+              textIcon: "--foreground",
+            } satisfies TokenColorRow,
+          ]
+        : []),
+    ],
+    textRows: [
+      {
+        anatomy: "Breadcrumb item",
+        size: "text-sm",
+        weight: "font-normal",
+      },
+    ],
+  };
+}
+
 const toggleGroupTextSizeBySize = {
   default: "text-sm",
   sm: "text-sm",
@@ -2458,7 +2570,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
         </BreadcrumbItem>
         <BreadcrumbSeparator />
         <BreadcrumbItem>
-          <BreadcrumbCurrentPage>Goose</BreadcrumbCurrentPage>
+          <BreadcrumbCurrentPage>goose</BreadcrumbCurrentPage>
         </BreadcrumbItem>
       </BreadcrumbList>
     </Breadcrumb>
@@ -4517,7 +4629,109 @@ function AvatarPage() {
 }
 
 function BreadcrumbPage() {
-  return <GenericComponentPage name="Breadcrumb" />;
+  const [treatment, setTreatment] = useState<BreadcrumbTreatment>("top-bar");
+  const [depth, setDepth] = useState<BreadcrumbDepth>("detail");
+  const [rootLabel, setRootLabel] = useState("goose");
+  const [sectionLabel, setSectionLabel] = useState("Skills");
+  const [currentLabel, setCurrentLabel] = useState("adapt");
+  const showCurrent = depth !== "root";
+  const tokenDetails = getBreadcrumbTokenDetails({
+    depth,
+    treatment,
+    showCurrent,
+  });
+
+  const rootText = rootLabel.trim() || "goose";
+  const sectionText = sectionLabel.trim() || "Skills";
+  const currentText = currentLabel.trim() || "adapt";
+  const isTopBar = treatment === "top-bar";
+  const breadcrumbItems = [
+    { id: "root", label: rootText, onClick: () => undefined },
+    ...(depth === "section" ? [{ id: "section", label: sectionText }] : []),
+    ...(depth === "detail"
+      ? [
+          { id: "section", label: sectionText, onClick: () => undefined },
+          { id: "detail", label: currentText },
+        ]
+      : []),
+  ];
+
+  return (
+    <>
+      <PageIntro
+        title="Breadcrumb"
+        description={
+          componentPageDescriptions.Breadcrumb ??
+          "Hierarchy trails for wayfinding through nested pages and object detail surfaces."
+        }
+      />
+      <ComponentSpec name="Breadcrumb" />
+
+      <ComponentPlayground
+        description="Preview uses the shared BreadcrumbTrail composition, including the top-bar tone, separator, and color-fade rules used by app chrome."
+        preview={
+          <BreadcrumbTrail
+            items={breadcrumbItems}
+            variant={isTopBar ? "top-bar" : "default"}
+          />
+        }
+        controls={[
+          {
+            id: "breadcrumb-treatment",
+            label: "Treatment",
+            type: "select",
+            value: treatment,
+            options: [
+              { label: "Top bar", value: "top-bar" },
+              { label: "Default", value: "default" },
+            ],
+            onChange: (value) => setTreatment(value as BreadcrumbTreatment),
+          },
+          {
+            id: "breadcrumb-depth",
+            label: "Depth",
+            type: "select",
+            value: depth,
+            options: [
+              { label: "Root only", value: "root" },
+              { label: "Section", value: "section" },
+              { label: "Detail", value: "detail" },
+            ],
+            onChange: (value) => setDepth(value as BreadcrumbDepth),
+          },
+          {
+            id: "breadcrumb-root-label",
+            label: "Root label",
+            type: "text",
+            value: rootLabel,
+            onChange: setRootLabel,
+          },
+          {
+            id: "breadcrumb-section-label",
+            label: "Section label",
+            type: "text",
+            value: sectionLabel,
+            disabled: depth === "root",
+            onChange: setSectionLabel,
+          },
+          {
+            id: "breadcrumb-current-label",
+            label: "Current label",
+            type: "text",
+            value: currentLabel,
+            disabled: depth !== "detail",
+            onChange: setCurrentLabel,
+          },
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={tokenDetails.colorRows}
+            textRows={tokenDetails.textRows}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function CalendarPage() {

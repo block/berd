@@ -43,6 +43,9 @@ interface AppShellContentProps {
     route: AutomationNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
+  onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
+  onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
   onCreatePersona: () => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
@@ -78,6 +81,9 @@ export function AppShellContent({
   onNavigateSkills,
   onNavigateAgents,
   onNavigateAutomations,
+  onSkillsBreadcrumbLabelChange,
+  onAgentsBreadcrumbLabelChange,
+  onAutomationsBreadcrumbLabelChange,
   onCreatePersona,
   onArchiveChat,
   onCreateProject,
@@ -105,6 +111,7 @@ export function AppShellContent({
         <AutomationsWorkbench
           route={activeAutomationsRoute}
           onRouteChange={onNavigateAutomations}
+          onBreadcrumbLabelChange={onAutomationsBreadcrumbLabelChange}
         />
       );
     case "skills":
@@ -112,6 +119,7 @@ export function AppShellContent({
         <SkillsView
           activeSkillId={activeSkillsSkillId}
           onActiveSkillIdChange={onNavigateSkills}
+          onBreadcrumbLabelChange={onSkillsBreadcrumbLabelChange}
           onStartChatWithSkill={onStartChatWithSkill}
         />
       );
@@ -120,6 +128,7 @@ export function AppShellContent({
         <AgentsView
           activePersonaId={activeAgentsPersonaId}
           onActivePersonaIdChange={onNavigateAgents}
+          onBreadcrumbLabelChange={onAgentsBreadcrumbLabelChange}
         />
       );
     case "projects":

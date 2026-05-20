@@ -13,6 +13,7 @@ import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { AppView } from "@/app/types/appNavigation";
 import { UpdateIndicator } from "@/features/updates/ui/UpdateIndicator";
 import { cn } from "@/shared/lib/cn";
+import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
@@ -23,6 +24,7 @@ export interface TopBarChromeInsets {
 
 interface TopBarProps {
   activeView?: AppView;
+  breadcrumbs?: TopBarBreadcrumb[];
   chatSessionTitle?: string;
   canGoBack?: boolean;
   canGoForward?: boolean;
@@ -34,10 +36,17 @@ interface TopBarProps {
   sidebarCollapsed?: boolean;
   onGoBack?: () => void;
   onGoForward?: () => void;
+  onNavigateHome?: () => void;
   onToggleContextPanel?: () => void;
   onToggleSidebar?: () => void;
   onFeedbackClick: () => void;
   onSearchClick?: () => void;
+}
+
+export interface TopBarBreadcrumb {
+  id?: string;
+  label: string;
+  onClick?: () => void;
 }
 
 const PAGE_LABELS: Partial<Record<AppView, string>> = {
@@ -53,6 +62,7 @@ const PAGE_LABELS: Partial<Record<AppView, string>> = {
 
 export function TopBar({
   activeView,
+  breadcrumbs,
   chatSessionTitle,
   canGoBack = false,
   canGoForward = false,
@@ -64,6 +74,7 @@ export function TopBar({
   sidebarCollapsed = false,
   onGoBack,
   onGoForward,
+  onNavigateHome,
   onToggleContextPanel,
   onToggleSidebar,
   onFeedbackClick,
@@ -93,6 +104,15 @@ export function TopBar({
       : activeView
         ? PAGE_LABELS[activeView]
         : undefined;
+
+  const topBarBreadcrumbs = breadcrumbs ?? [
+    {
+      id: "root",
+      label: "goose",
+      onClick: pageLabel ? onNavigateHome : undefined,
+    },
+    ...(pageLabel ? [{ id: "current", label: pageLabel }] : []),
+  ];
 
   return (
     <header
@@ -154,19 +174,11 @@ export function TopBar({
           <IconSearch aria-hidden="true" className={toolbarIconClassName} />
         </Button>
       </div>
-      <h1
-        data-tauri-drag-region
-        className="whitespace-nowrap font-sans text-[24px] font-light leading-[0.96] tracking-[-0.04em] text-text-title"
-      >
-        {/* i18n-check-ignore */}
-        Goose
-        {pageLabel ? (
-          <>
-            <span className="text-text-breadcrumb-separator">{" / "}</span>
-            <span className="text-text-muted">{pageLabel}</span>
-          </>
-        ) : null}
-      </h1>
+      <BreadcrumbTrail
+        items={topBarBreadcrumbs}
+        variant="top-bar"
+        pageProps={{ "data-tauri-drag-region": true }}
+      />
       <div className="min-w-0 flex-1 self-stretch" data-tauri-drag-region />
       {viewActions ? (
         <div className="flex items-center gap-2">{viewActions}</div>

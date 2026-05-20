@@ -264,6 +264,8 @@ export const designSystemComponentManifest = [
       "BreadcrumbList",
       "BreadcrumbPage",
       "BreadcrumbSeparator",
+      "BreadcrumbTrail",
+      "BreadcrumbTrailItem",
     ],
     slots: [
       "breadcrumb",
@@ -277,10 +279,13 @@ export const designSystemComponentManifest = [
     cva: [],
     tokenClasses: [
       "hover:text-foreground",
+      "hover:text-text-hover",
       "text-foreground",
       "text-muted-foreground",
+      "text-text-muted",
+      "text-text-title",
     ],
-    stateClasses: ["hover:text-foreground"],
+    stateClasses: ["hover:text-foreground", "hover:text-text-hover"],
     sourceTokenClasses: [
       "hover:text-foreground",
       "text-foreground",

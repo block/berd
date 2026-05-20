@@ -35,6 +35,7 @@ interface SkillsViewProps {
     skillId: string | null,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onBreadcrumbLabelChange?: (label: string | null) => void;
   onStartChatWithSkill?: (skill: SkillInfo, projectId?: string | null) => void;
 }
 
@@ -69,6 +70,7 @@ function skillMatchesScope(skill: SkillInfo, scope: SkillScope): boolean {
 export function SkillsView({
   activeSkillId,
   onActiveSkillIdChange,
+  onBreadcrumbLabelChange,
   onStartChatWithSkill,
 }: SkillsViewProps) {
   const { t } = useTranslation(["skills", "common"]);
@@ -151,6 +153,14 @@ export function SkillsView({
 
   const activeSkill =
     skills.find((skill) => skill.id === currentActiveSkillId) ?? null;
+
+  useEffect(() => {
+    onBreadcrumbLabelChange?.(activeSkill?.name ?? null);
+  }, [activeSkill?.name, onBreadcrumbLabelChange]);
+
+  useEffect(() => {
+    return () => onBreadcrumbLabelChange?.(null);
+  }, [onBreadcrumbLabelChange]);
 
   const visibleSkills = useMemo(
     () =>

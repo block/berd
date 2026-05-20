@@ -85,6 +85,9 @@ vi.mock("./ui/AppShellContent", () => ({
     onNavigateSkills,
     onNavigateAgents,
     onNavigateAutomations,
+    onSkillsBreadcrumbLabelChange,
+    onAgentsBreadcrumbLabelChange,
+    onAutomationsBreadcrumbLabelChange,
     onExitSearch,
   }) => (
     <section>
@@ -95,17 +98,30 @@ vi.mock("./ui/AppShellContent", () => ({
       <div data-testid="automation-route">
         {JSON.stringify(activeAutomationsRoute)}
       </div>
-      <button type="button" onClick={() => onNavigateSkills("skill-1")}>
+      <button
+        type="button"
+        onClick={() => {
+          onSkillsBreadcrumbLabelChange?.("Code Review");
+          onNavigateSkills("skill-1");
+        }}
+      >
         Open skill detail
       </button>
-      <button type="button" onClick={() => onNavigateAgents("persona-1")}>
+      <button
+        type="button"
+        onClick={() => {
+          onAgentsBreadcrumbLabelChange?.("Reviewer");
+          onNavigateAgents("persona-1");
+        }}
+      >
         Open agent detail
       </button>
       <button
         type="button"
-        onClick={() =>
-          onNavigateAutomations({ surface: "history", selectedRun: null })
-        }
+        onClick={() => {
+          onAutomationsBreadcrumbLabelChange?.("History");
+          onNavigateAutomations({ surface: "history", selectedRun: null });
+        }}
       >
         Open automation history
       </button>
@@ -281,6 +297,60 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
     });
+  });
+
+  it("returns home from the top bar goose breadcrumb", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+
+    await user.click(screen.getByRole("link", { name: "goose" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+  });
+
+  it("shows and navigates from third-level Skills breadcrumbs", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(screen.getByRole("button", { name: "Open skill detail" }));
+
+    expect(screen.getByRole("link", { name: "Skills" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Code Review" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await user.click(screen.getByRole("link", { name: "Skills" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("skill-route")).toHaveTextContent("list");
+    });
+  });
+
+  it("shows Automations history as a third-level breadcrumb", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation history" }),
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Automations" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
   });
 
   it("opens search with Cmd+K", async () => {

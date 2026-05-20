@@ -1713,11 +1713,13 @@ interface AutomationsWorkbenchProps {
     route: AutomationNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onBreadcrumbLabelChange?: (label: string | null) => void;
 }
 
 export function AutomationsWorkbench({
   route,
   onRouteChange,
+  onBreadcrumbLabelChange,
 }: AutomationsWorkbenchProps = {}) {
   const { t } = useTranslation("automations");
   const queryClient = useQueryClient();
@@ -1832,6 +1834,32 @@ export function AutomationsWorkbench({
   const deleteAutomationName = deleteAutomation
     ? automationTitle(deleteAutomation, t("fallbacks.untitledAutomation"))
     : t("fallbacks.untitledAutomation");
+
+  useEffect(() => {
+    if (currentRoute.surface === "history") {
+      onBreadcrumbLabelChange?.(t("tabs.history"));
+      return;
+    }
+
+    if (detailAutomationId && detailTile) {
+      onBreadcrumbLabelChange?.(
+        automationTitle(detailTile, t("fallbacks.untitledAutomation")),
+      );
+      return;
+    }
+
+    onBreadcrumbLabelChange?.(null);
+  }, [
+    currentRoute.surface,
+    detailAutomationId,
+    detailTile,
+    onBreadcrumbLabelChange,
+    t,
+  ]);
+
+  useEffect(() => {
+    return () => onBreadcrumbLabelChange?.(null);
+  }, [onBreadcrumbLabelChange]);
 
   const invalidateAutomationQueries = async () => {
     await Promise.all([

@@ -61,11 +61,13 @@ interface AgentsViewProps {
     personaId: string | null,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onBreadcrumbLabelChange?: (label: string | null) => void;
 }
 
 export function AgentsView({
   activePersonaId,
   onActivePersonaIdChange,
+  onBreadcrumbLabelChange,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
   const isActivePersonaControlled = activePersonaId !== undefined;
@@ -94,6 +96,14 @@ export function AgentsView({
     : internalActivePersonaId;
   const activePersona =
     personas.find((persona) => persona.id === currentActivePersonaId) ?? null;
+
+  useEffect(() => {
+    onBreadcrumbLabelChange?.(activePersona?.displayName ?? null);
+  }, [activePersona?.displayName, onBreadcrumbLabelChange]);
+
+  useEffect(() => {
+    return () => onBreadcrumbLabelChange?.(null);
+  }, [onBreadcrumbLabelChange]);
 
   const setActivePersona = useCallback(
     (personaId: string | null, options?: AppNavigationUpdateOptions) => {
