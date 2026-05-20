@@ -13,6 +13,7 @@ import {
 } from "@/features/providers/api/agentSetup";
 import { getProviderInventory } from "@/features/providers/api/inventory";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
+import { ProviderSetupOutput } from "./ProviderSetupOutput";
 import type {
   ProviderDisplayInfo,
   ProviderSetupStatus,
@@ -388,14 +389,10 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     if (setupOutput.length === 0) return null;
 
     return (
-      <div
-        ref={scrollToEnd ? outputRef : undefined}
-        className="max-h-24 overflow-y-auto rounded-md bg-muted px-2 py-1.5 font-mono text-xxs leading-relaxed text-muted-foreground"
-      >
-        {setupOutput.map((entry) => (
-          <div key={entry.id}>{entry.text || "\u00A0"}</div>
-        ))}
-      </div>
+      <ProviderSetupOutput
+        lines={setupOutput}
+        scrollRef={scrollToEnd ? outputRef : undefined}
+      />
     );
   }
 

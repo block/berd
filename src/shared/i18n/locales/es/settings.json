@@ -393,6 +393,10 @@
     "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
     "saved": "Guardado",
     "saving": "Guardando...",
+    "setupOutput": {
+      "copyDeviceCode": "Copiar código de dispositivo",
+      "deviceCode": "Código de dispositivo"
+    },
     "showFewer": "Mostrar menos",
     "showMore": "Mostrar {{count}} proveedores más",
     "title": "Proveedores",

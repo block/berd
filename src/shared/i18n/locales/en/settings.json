@@ -393,6 +393,10 @@
     "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
     "saved": "Saved",
     "saving": "Saving...",
+    "setupOutput": {
+      "copyDeviceCode": "Copy device code",
+      "deviceCode": "Device code"
+    },
     "showFewer": "Show fewer",
     "showMore": "Show {{count}} more providers",
     "title": "Providers",

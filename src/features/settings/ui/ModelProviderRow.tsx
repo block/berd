@@ -40,6 +40,7 @@ import {
   InventorySyncMessage,
   SetupFieldsPanel,
 } from "./ModelProviderPanels";
+import { ProviderSetupOutput } from "./ProviderSetupOutput";
 
 interface ProviderFieldSaveInput {
   key: string;
@@ -389,13 +390,7 @@ export function ModelProviderRow({
             syncing={inventorySyncing}
             warning={inventoryWarning}
           />
-          {setupOutput.length > 0 ? (
-            <div className="space-y-1 rounded-md bg-muted px-3 py-2 font-mono text-xxs text-muted-foreground">
-              {setupOutput.map((line) => (
-                <p key={line.id}>{line.text}</p>
-              ))}
-            </div>
-          ) : null}
+          <ProviderSetupOutput lines={setupOutput} />
           {setupError ? (
             <p className="text-xs text-text-danger">{setupError}</p>
           ) : null}
