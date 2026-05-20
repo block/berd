@@ -168,6 +168,7 @@
     "ariaLabel": "Chat messages",
     "emptyDescription": "Send a message to get started",
     "emptyTitle": "Start a conversation",
+    "jumpToLatest": "Jump to latest",
     "today": "Today",
     "yesterday": "Yesterday"
   },

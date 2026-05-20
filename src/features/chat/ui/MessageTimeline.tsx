@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type WheelEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { ArrowDown } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { Button } from "@/shared/ui/button";
 import { MessageBubble } from "./MessageBubble";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { getTextContent, type Message } from "@/shared/types/messages";
@@ -70,10 +79,14 @@ export function MessageTimeline({
   const containerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
+  const userDetachedRef = useRef(false);
+  const userScrollIntentRef = useRef(false);
+  const lastScrollTopRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
   const autoScrollTimersRef = useRef<number[]>([]);
   const lastMcpAppSignatureRef = useRef<string | null>(null);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
+  const [userDetached, setUserDetached] = useState(false);
   const visibleMessages = messages.filter(
     (m) =>
       m.metadata?.userVisible !== false &&
@@ -121,10 +134,19 @@ export function MessageTimeline({
     container.scrollTop = container.scrollHeight;
   }, []);
 
+  const setDetachedFromLatest = useCallback((detached: boolean) => {
+    userDetachedRef.current = detached;
+    setUserDetached(detached);
+  }, []);
+
   const scrollToBottomIfNearBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
       const container = containerRef.current;
       if (!container) {
+        return;
+      }
+
+      if (userDetachedRef.current) {
         return;
       }
 
@@ -146,6 +168,10 @@ export function MessageTimeline({
   );
 
   const schedulePinnedBottomBurst = useCallback(() => {
+    if (userDetachedRef.current) {
+      return;
+    }
+
     stickyScrollUntilRef.current = performance.now() + MCP_APP_STICKY_SCROLL_MS;
 
     for (const timer of autoScrollTimersRef.current) {
@@ -170,6 +196,10 @@ export function MessageTimeline({
   const requestMcpAppAutoScroll = useCallback((element: HTMLElement | null) => {
     const container = containerRef.current;
     if (!container || !element) {
+      return;
+    }
+
+    if (userDetachedRef.current) {
       return;
     }
 
@@ -215,6 +245,23 @@ export function MessageTimeline({
   useEffect(() => {
     scrollToBottomIfNearBottom();
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
+
+  const latestVisibleMessage = visibleMessages.at(-1);
+  const latestVisibleMessageId = latestVisibleMessage?.id;
+
+  useEffect(() => {
+    if (!latestVisibleMessageId || latestVisibleMessage?.role !== "user") {
+      return;
+    }
+
+    setDetachedFromLatest(false);
+    scrollToBottom("auto");
+  }, [
+    latestVisibleMessageId,
+    latestVisibleMessage?.role,
+    scrollToBottom,
+    setDetachedFromLatest,
+  ]);
 
   useEffect(() => {
     if (!resolvedScrollTargetMessageId) {
@@ -297,9 +344,43 @@ export function MessageTimeline({
     const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
-    if (distanceFromBottom >= AUTO_SCROLL_THRESHOLD_PX) {
+
+    const scrollingDown = scrollTop > lastScrollTopRef.current;
+
+    if (
+      isNearBottomRef.current &&
+      (!userDetachedRef.current || scrollingDown)
+    ) {
+      setDetachedFromLatest(false);
+    } else if (
+      userScrollIntentRef.current ||
+      scrollTop < lastScrollTopRef.current
+    ) {
+      setDetachedFromLatest(true);
       stickyScrollUntilRef.current = 0;
     }
+
+    lastScrollTopRef.current = scrollTop;
+    userScrollIntentRef.current = false;
+  };
+
+  const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    userScrollIntentRef.current = true;
+
+    if (event.deltaY < 0) {
+      setDetachedFromLatest(true);
+      stickyScrollUntilRef.current = 0;
+    }
+  };
+
+  const handleUserScrollIntent = () => {
+    userScrollIntentRef.current = true;
+  };
+
+  const handleJumpToLatest = () => {
+    setDetachedFromLatest(false);
+    isNearBottomRef.current = true;
+    scrollToBottom("smooth");
   };
 
   if (visibleMessages.length === 0) {
@@ -318,64 +399,78 @@ export function MessageTimeline({
   }
 
   return (
-    <div
-      ref={containerRef}
-      onScroll={handleScroll}
-      className={cn(
-        "flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]",
-        className,
-      )}
-      role="log"
-      aria-label={t("timeline.ariaLabel")}
-      aria-live="polite"
-    >
-      <div className="mx-auto max-w-3xl py-4">
-        {visibleMessages.map((message, index) => {
-          const prev = index > 0 ? visibleMessages[index - 1] : null;
-          const showDateSeparator =
-            !prev || !isSameDay(prev.created, message.created);
+    <div className={cn("relative min-h-0 flex-1", className)}>
+      <div
+        ref={containerRef}
+        onScroll={handleScroll}
+        onWheel={handleWheel}
+        onTouchMove={handleUserScrollIntent}
+        onPointerDown={handleUserScrollIntent}
+        className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
+        role="log"
+        aria-label={t("timeline.ariaLabel")}
+        aria-live="polite"
+      >
+        <div className="mx-auto max-w-3xl py-4">
+          {visibleMessages.map((message, index) => {
+            const prev = index > 0 ? visibleMessages[index - 1] : null;
+            const showDateSeparator =
+              !prev || !isSameDay(prev.created, message.created);
 
-          return (
-            <div
-              key={message.id}
-              ref={(el) => {
-                messageRefs.current[message.id] = el;
-              }}
-              className={cn(
-                index === 0 ? "mt-0" : "mt-4",
-                "rounded-xl transition-[background-color,box-shadow]",
-                pulsingMessageId === message.id &&
-                  "bg-background-hover/25 ring-2 ring-background-hover/35 ring-inset",
-              )}
-            >
-              {showDateSeparator && (
-                <div className="my-4 px-4 text-center">
-                  <span className="text-[11px] font-medium text-muted-foreground">
-                    {formatDateSeparator(
-                      message.created,
-                      t("timeline.today"),
-                      t("timeline.yesterday"),
-                      formatDate,
-                    )}
-                  </span>
-                </div>
-              )}
-              <MessageBubble
-                message={message}
-                isStreaming={message.id === streamingMessageId}
-                onRetryMessage={
-                  message.role === "assistant" ? onRetryMessage : undefined
-                }
-                onEditMessage={
-                  message.role === "user" ? onEditMessage : undefined
-                }
-                onSendMcpAppMessage={onSendMcpAppMessage}
-                onMcpAppAutoScroll={requestMcpAppAutoScroll}
-              />
-            </div>
-          );
-        })}
+            return (
+              <div
+                key={message.id}
+                ref={(el) => {
+                  messageRefs.current[message.id] = el;
+                }}
+                className={cn(
+                  index === 0 ? "mt-0" : "mt-4",
+                  "rounded-xl transition-[background-color,box-shadow]",
+                  pulsingMessageId === message.id &&
+                    "bg-background-hover/25 ring-2 ring-background-hover/35 ring-inset",
+                )}
+              >
+                {showDateSeparator && (
+                  <div className="my-4 px-4 text-center">
+                    <span className="text-[11px] font-medium text-muted-foreground">
+                      {formatDateSeparator(
+                        message.created,
+                        t("timeline.today"),
+                        t("timeline.yesterday"),
+                        formatDate,
+                      )}
+                    </span>
+                  </div>
+                )}
+                <MessageBubble
+                  message={message}
+                  isStreaming={message.id === streamingMessageId}
+                  onRetryMessage={
+                    message.role === "assistant" ? onRetryMessage : undefined
+                  }
+                  onEditMessage={
+                    message.role === "user" ? onEditMessage : undefined
+                  }
+                  onSendMcpAppMessage={onSendMcpAppMessage}
+                  onMcpAppAutoScroll={requestMcpAppAutoScroll}
+                />
+              </div>
+            );
+          })}
+        </div>
       </div>
+      {userDetached ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleJumpToLatest}
+          leftIcon={<ArrowDown />}
+          className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-background/95 shadow-sm"
+        >
+          {t("timeline.jumpToLatest")}
+        </Button>
+      ) : null}
     </div>
   );
 }
