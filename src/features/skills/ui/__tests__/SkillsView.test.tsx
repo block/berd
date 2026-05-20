@@ -29,6 +29,7 @@ const mockSkills: SkillInfo[] = [
     sourceKind: "global" as const,
     sourceLabel: "Personal",
     projectLinks: [],
+    readonly: false,
   },
   {
     id: "global:/path/code-review",
@@ -40,6 +41,7 @@ const mockSkills: SkillInfo[] = [
     sourceKind: "global" as const,
     sourceLabel: "Personal",
     projectLinks: [],
+    readonly: false,
   },
   {
     id: "project:/tmp/alpha/.goose/skills/test-writer",
@@ -50,6 +52,7 @@ const mockSkills: SkillInfo[] = [
     fileLocation: "/tmp/alpha/.goose/skills/test-writer/SKILL.md",
     sourceKind: "project" as const,
     sourceLabel: "alpha",
+    readonly: false,
     projectLinks: [
       {
         id: "/tmp/alpha",
@@ -70,6 +73,7 @@ const builtinSkill: SkillInfo = {
   sourceKind: "builtin" as const,
   sourceLabel: "Built in",
   projectLinks: [],
+  readonly: true,
 };
 
 vi.mock("../../api/skills", () => ({
@@ -85,6 +89,7 @@ vi.mock("../../api/skills", () => ({
     sourceKind: "global",
     sourceLabel: "Personal",
     projectLinks: [],
+    readonly: false,
   }),
   deleteSkill: vi.fn().mockResolvedValue(undefined),
   exportSkill: vi

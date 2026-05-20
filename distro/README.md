@@ -11,6 +11,7 @@ Current supported files:
 - `distro.json` — distro manifest
 - `config.yaml` — optional Goose config passed to `goose serve`
 - `bin/` — optional executables or helper scripts prepended to `PATH` for `goose serve`
+- `skills/` — optional bundled skills seeded into the user's global skills directory
 
 ## How it is discovered
 
@@ -90,8 +91,13 @@ When the Tauri shell launches the long-lived `goose serve` process, it applies t
 - adds `distro/config.yaml` to `GOOSE_ADDITIONAL_CONFIG_FILES` when present
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
 - uses `kgoose` as the default endpoint for the Automations panel
+- installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
 
 This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
+
+Bundled skills reinstall existing copies only when the installed `SKILL.md`
+frontmatter has `metadata.gooseInternalBundled: true`. Existing unmarked user
+skills are left untouched.
 
 ## Development notes
 

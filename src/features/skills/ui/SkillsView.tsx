@@ -161,7 +161,7 @@ export function SkillsView({
   }, [activeSkill, currentActiveSkillId, loading, setActiveSkill]);
 
   const handleDelete = (skill: SkillInfo) => {
-    if (skill.sourceKind === "builtin") {
+    if (skill.readonly) {
       return;
     }
     setDeletingSkill(skill);
@@ -169,7 +169,7 @@ export function SkillsView({
 
   const handleConfirmDeleteSkill = async () => {
     if (!deletingSkill) return;
-    if (deletingSkill.sourceKind === "builtin") {
+    if (deletingSkill.readonly) {
       setDeletingSkill(null);
       return;
     }
@@ -187,7 +187,7 @@ export function SkillsView({
   };
 
   const handleEdit = (skill: SkillInfo) => {
-    if (skill.sourceKind === "builtin") {
+    if (skill.readonly) {
       return;
     }
     setEditingSkill({
@@ -201,7 +201,7 @@ export function SkillsView({
   };
 
   const handleReveal = useCallback((skill: SkillInfo) => {
-    if (skill.sourceKind === "builtin") {
+    if (skill.readonly) {
       return;
     }
     void revealInFileManager(skill.path);
@@ -252,7 +252,7 @@ export function SkillsView({
 
   const handleShare = useCallback(
     (skill: SkillInfo) => {
-      if (skill.sourceKind === "builtin") {
+      if (skill.readonly) {
         return;
       }
       void handleExport(skill);

@@ -2,7 +2,7 @@ mod commands;
 mod services;
 mod types;
 
-use services::distro_bundle::DistroBundleState;
+use services::{bundled_skills, distro_bundle::DistroBundleState};
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
@@ -57,7 +57,20 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
-            app.manage(DistroBundleState::new(app.handle()));
+            let distro_state = DistroBundleState::new(app.handle());
+            if let Some(bundle) = distro_state.bundle() {
+                let bundle = bundle.clone();
+                tauri::async_runtime::spawn(async move {
+                    match bundled_skills::seed_bundled_skills(&bundle) {
+                        Ok(count) if count > 0 => {
+                            log::info!("Seeded {count} bundled skill(s)");
+                        }
+                        Ok(_) => {}
+                        Err(error) => log::warn!("Failed to seed bundled skills: {error}"),
+                    }
+                });
+            }
+            app.manage(distro_state);
             app.manage(commands::automations::AutomationStreamState::default());
 
             // Build a custom macOS application menu so that the app submenu,

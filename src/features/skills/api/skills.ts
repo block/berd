@@ -27,6 +27,7 @@ export interface SkillInfo {
   sourceKind: SkillSourceKind;
   sourceLabel: string;
   projectLinks: SkillProjectLink[];
+  readonly: boolean;
 }
 
 export type EditingSkill = Pick<
@@ -67,6 +68,7 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
       sourceKind: "builtin",
       sourceLabel: "Built in",
       projectLinks: [],
+      readonly: true,
     };
   }
 
@@ -108,6 +110,7 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
     sourceLabel:
       sourceKind === "global" ? "Personal" : projectName || "Project",
     projectLinks,
+    readonly: props.gooseInternalBundled === true,
   };
 }
 

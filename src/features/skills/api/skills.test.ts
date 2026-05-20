@@ -74,6 +74,7 @@ describe("listSkills", () => {
           name: "test-writer",
           sourceKind: "project",
           sourceLabel: "alpha",
+          readonly: false,
           projectLinks: [
             {
               id: "/tmp/alpha",
@@ -112,6 +113,7 @@ describe("listSkills", () => {
           name: "legacy-writer",
           sourceKind: "project",
           sourceLabel: "beta",
+          readonly: false,
           projectLinks: [
             {
               id: "/tmp/beta",
@@ -276,6 +278,7 @@ describe("listSkills", () => {
           fileLocation: "builtin://skills/goose-doc-guide",
           sourceKind: "builtin",
           sourceLabel: "Built in",
+          readonly: true,
           projectLinks: [],
         }),
       ]),

@@ -97,7 +97,7 @@ export function SkillDetailPage({
   const editLabel = t("common:actions.edit");
   const revealLabel = t("view.reveal");
   const moreLabel = t("view.more");
-  const isBuiltin = skill.sourceKind === "builtin";
+  const isReadonly = skill.readonly;
   const actions = (
     <>
       {onStartChat ? (
@@ -108,7 +108,7 @@ export function SkillDetailPage({
           onClick={() => onStartChat(skill)}
         />
       ) : null}
-      {!isBuiltin ? (
+      {!isReadonly ? (
         <>
           <SkillHeaderActionButton
             label={editLabel}
@@ -177,7 +177,7 @@ export function SkillDetailPage({
         />
       </div>
 
-      {isBuiltin ? (
+      {isReadonly ? (
         <section className="space-y-4 pb-6">
           <DetailField label={t("view.instructions")} />
           <MessageResponse className="min-w-0 text-sm leading-6">
