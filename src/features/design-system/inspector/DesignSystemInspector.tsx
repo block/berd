@@ -2,7 +2,10 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactElement,
   type ReactNode,
 } from "react";
@@ -32,12 +35,55 @@ type InspectionRect = {
   height: number;
 };
 
+type InspectorPosition = {
+  top: number;
+  left: number;
+};
+
+type DragState = {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startTop: number;
+  startLeft: number;
+  width: number;
+  height: number;
+};
+
+const INSPECTOR_EDGE_OFFSET = 16;
+const INSPECTOR_KEYBOARD_STEP = 12;
+const INSPECTOR_DRAG_THRESHOLD = 4;
+
+function clampInspectorPosition(
+  position: InspectorPosition,
+  size: { width: number; height: number },
+) {
+  const maxLeft = Math.max(
+    INSPECTOR_EDGE_OFFSET,
+    window.innerWidth - size.width - INSPECTOR_EDGE_OFFSET,
+  );
+  const maxTop = Math.max(
+    INSPECTOR_EDGE_OFFSET,
+    window.innerHeight - size.height - INSPECTOR_EDGE_OFFSET,
+  );
+
+  return {
+    left: Math.min(Math.max(INSPECTOR_EDGE_OFFSET, position.left), maxLeft),
+    top: Math.min(Math.max(INSPECTOR_EDGE_OFFSET, position.top), maxTop),
+  };
+}
+
 export function DesignSystemInspector() {
   const [active, setActive] = useState(false);
   const [hovered, setHovered] = useState<DesignSystemInspection | null>(null);
   const [selected, setSelected] = useState<DesignSystemInspection | null>(null);
   const [hoverRect, setHoverRect] = useState<InspectionRect | null>(null);
   const [selectedRect, setSelectedRect] = useState<InspectionRect | null>(null);
+  const [controlsPosition, setControlsPosition] =
+    useState<InspectorPosition | null>(null);
+  const controlsRef = useRef<HTMLDivElement>(null);
+  const dragStateRef = useRef<DragState | null>(null);
+  const suppressNextToggleRef = useRef(false);
 
   const visibleInspection = selected ?? hovered;
   const outlineRect = selectedRect ?? hoverRect;
@@ -95,7 +141,124 @@ export function DesignSystemInspector() {
     };
   }, [active, refreshRects, selected]);
 
+  useEffect(() => {
+    const handleResize = () => {
+      setControlsPosition((current) => {
+        const rect = controlsRef.current?.getBoundingClientRect();
+        if (!current || !rect) return current;
+        return clampInspectorPosition(current, rect);
+      });
+    };
+
+    window.addEventListener("resize", handleResize);
+
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const moveControlsByKeyboard = useCallback(
+    (delta: { top: number; left: number }) => {
+      const rect = controlsRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      setControlsPosition((current) => {
+        const base = current ?? { top: rect.top, left: rect.left };
+        return clampInspectorPosition(
+          {
+            top: base.top + delta.top,
+            left: base.left + delta.left,
+          },
+          rect,
+        );
+      });
+    },
+    [],
+  );
+
+  const handleDragStart = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (!event.isPrimary || event.button !== 0) return;
+
+    const rect = controlsRef.current?.getBoundingClientRect();
+    if (!rect) return;
+
+    dragStateRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startTop: rect.top,
+      startLeft: rect.left,
+      width: rect.width,
+      height: rect.height,
+    };
+    setControlsPosition({ top: rect.top, left: rect.left });
+    event.currentTarget.setPointerCapture(event.pointerId);
+  };
+
+  const handleDragMove = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const dragState = dragStateRef.current;
+    if (!dragState || dragState.pointerId !== event.pointerId) return;
+
+    setControlsPosition(
+      clampInspectorPosition(
+        {
+          top: dragState.startTop + event.clientY - dragState.startClientY,
+          left: dragState.startLeft + event.clientX - dragState.startClientX,
+        },
+        dragState,
+      ),
+    );
+  };
+
+  const handleDragEnd = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const dragState = dragStateRef.current;
+    if (dragState?.pointerId !== event.pointerId) return;
+    dragStateRef.current = null;
+
+    const draggedDistance = Math.hypot(
+      event.clientX - dragState.startClientX,
+      event.clientY - dragState.startClientY,
+    );
+    suppressNextToggleRef.current = draggedDistance > INSPECTOR_DRAG_THRESHOLD;
+
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleDragKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (event.key === "Home") {
+      event.preventDefault();
+      setControlsPosition(null);
+      return;
+    }
+
+    const movementByKey: Record<string, { top: number; left: number }> = {
+      ArrowUp: { top: -INSPECTOR_KEYBOARD_STEP, left: 0 },
+      ArrowRight: { top: 0, left: INSPECTOR_KEYBOARD_STEP },
+      ArrowDown: { top: INSPECTOR_KEYBOARD_STEP, left: 0 },
+      ArrowLeft: { top: 0, left: -INSPECTOR_KEYBOARD_STEP },
+    };
+    const movement = movementByKey[event.key];
+    if (!movement) return;
+
+    event.preventDefault();
+    moveControlsByKeyboard(movement);
+  };
+
   const toggleLabel = active ? "Inspecting" : "Inspect";
+  const handleToggleClick = () => {
+    if (suppressNextToggleRef.current) {
+      suppressNextToggleRef.current = false;
+      return;
+    }
+
+    setActive((current) => !current);
+  };
+  const controlsStyle = controlsPosition
+    ? {
+        top: controlsPosition.top,
+        left: controlsPosition.left,
+      }
+    : undefined;
 
   return (
     <div data-design-system-inspector="root">
@@ -103,7 +266,15 @@ export function DesignSystemInspector() {
         <InspectorOutline rect={outlineRect} locked={Boolean(selected)} />
       ) : null}
 
-      <div className="fixed right-4 bottom-4 z-[120] flex items-center gap-2">
+      <div
+        ref={controlsRef}
+        className={
+          controlsPosition
+            ? "fixed z-[120] flex items-center gap-2"
+            : "fixed bottom-4 left-1/2 z-[120] flex -translate-x-1/2 items-center gap-2"
+        }
+        style={controlsStyle}
+      >
         {selected ? (
           <Button
             type="button"
@@ -123,7 +294,13 @@ export function DesignSystemInspector() {
           variant={active ? "default" : "secondary"}
           size="sm"
           leftIcon={<Crosshair aria-hidden="true" />}
-          onClick={() => setActive((current) => !current)}
+          className="cursor-grab touch-none active:cursor-grabbing"
+          onPointerDown={handleDragStart}
+          onPointerMove={handleDragMove}
+          onPointerUp={handleDragEnd}
+          onPointerCancel={handleDragEnd}
+          onKeyDown={handleDragKeyDown}
+          onClick={handleToggleClick}
           aria-pressed={active}
         >
           {toggleLabel}

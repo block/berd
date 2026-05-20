@@ -2182,18 +2182,14 @@ export const designSystemComponentManifest = [
     slots: ["switch", "switch-thumb"],
     cva: [],
     tokenClasses: [
-      "bg-background",
-      "dark:data-[state=unchecked]:bg-foreground",
-      "dark:data-[state=unchecked]:bg-muted/80",
+      "bg-text-on-primary",
       "data-[state=checked]:bg-background-primary",
-      "data-[state=checked]:bg-text-on-primary",
       "data-[state=unchecked]:bg-background-medium",
       "focus-visible:border-border-focus",
       "focus-visible:ring-ring-focus/50",
     ],
     stateClasses: [
       "data-[state=checked]:bg-background-primary",
-      "data-[state=checked]:bg-text-on-primary",
       "data-[state=checked]:translate-x-[calc(100%-2px)]",
       "data-[state=unchecked]:bg-background-medium",
       "data-[state=unchecked]:translate-x-0",
@@ -2203,11 +2199,7 @@ export const designSystemComponentManifest = [
       "focus-visible:ring-[1px]",
       "focus-visible:ring-ring-focus/50",
     ],
-    sourceTokenClasses: [
-      "bg-background",
-      "dark:data-[state=unchecked]:bg-foreground",
-      "dark:data-[state=unchecked]:bg-muted/80",
-    ],
+    sourceTokenClasses: [],
   },
   {
     name: "Table",

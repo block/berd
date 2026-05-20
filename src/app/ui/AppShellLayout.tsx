@@ -15,6 +15,7 @@ interface AppShellLayoutProps {
   sidebar: ComponentProps<typeof Sidebar>;
   sidebarCollapsed: boolean;
   sidebarOuterWidth: number;
+  showDesignSystemInspector: boolean;
   topBar: ComponentProps<typeof TopBar>;
 }
 
@@ -28,6 +29,7 @@ export function AppShellLayout({
   sidebar,
   sidebarCollapsed,
   sidebarOuterWidth,
+  showDesignSystemInspector,
   topBar,
 }: AppShellLayoutProps) {
   return (
@@ -73,7 +75,9 @@ export function AppShellLayout({
       </div>
 
       <CreateProjectDialog {...createProjectDialog} />
-      {isDesignSystemExplorerEnabled() ? <DesignSystemInspector /> : null}
+      {isDesignSystemExplorerEnabled() && showDesignSystemInspector ? (
+        <DesignSystemInspector />
+      ) : null}
     </div>
   );
 }

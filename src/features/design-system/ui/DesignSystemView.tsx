@@ -206,6 +206,7 @@ type ToggleGroupVariant = NonNullable<
 type ToggleGroupSize = NonNullable<
   React.ComponentProps<typeof ToggleGroup>["size"]
 >;
+type SwitchLabelPosition = "none" | "start" | "end";
 type ToggleGroupSelectionType = "single" | "multiple";
 type AlertVariant = "default" | "destructive";
 type DropdownMenuItemVariant = "default" | "destructive";
@@ -1049,6 +1050,12 @@ const toggleGroupSizeOptions = [
   { label: "lg", value: "lg" },
 ] satisfies Array<{ label: string; value: ToggleGroupSize }>;
 
+const switchLabelPositionOptions = [
+  { label: "None", value: "none" },
+  { label: "Label before", value: "start" },
+  { label: "Label after", value: "end" },
+] satisfies Array<{ label: string; value: SwitchLabelPosition }>;
+
 function isIconButtonSize(size: ButtonSize) {
   return size.startsWith("icon");
 }
@@ -1341,6 +1348,57 @@ function getButtonTokenDetails({
         weight: "font-normal",
       },
     ],
+  };
+}
+
+function getSwitchTokenDetails({
+  checked,
+  disabled,
+  labelPosition,
+}: {
+  checked: boolean;
+  disabled: boolean;
+  labelPosition: SwitchLabelPosition;
+}): {
+  colorRows: TokenColorRow[];
+  textRows: TokenTextRow[];
+} {
+  const state = checked ? "Checked" : "Unchecked";
+  const opacitySuffix = disabled ? " / 50%" : "";
+  const colorRows: TokenColorRow[] = [
+    {
+      anatomy: "Track",
+      state,
+      background: `${checked ? "--background-primary" : "--background-medium"}${opacitySuffix}`,
+      border: "transparent",
+    },
+    {
+      anatomy: "Thumb",
+      state,
+      background: `--text-on-primary${opacitySuffix}`,
+    },
+  ];
+
+  if (labelPosition !== "none") {
+    colorRows.push({
+      anatomy: "Label",
+      state: disabled ? "Disabled" : "Default",
+      textIcon: disabled ? "--text-default / 50%" : "--text-default",
+    });
+  }
+
+  return {
+    colorRows,
+    textRows:
+      labelPosition === "none"
+        ? []
+        : [
+            {
+              anatomy: "Label",
+              size: "text-sm",
+              weight: "font-medium",
+            },
+          ],
   };
 }
 
@@ -4644,7 +4702,97 @@ function SplitButtonPage() {
 }
 
 function SwitchPage() {
-  return <GenericComponentPage name="Switch" />;
+  const [playgroundChecked, setPlaygroundChecked] = useState(false);
+  const [playgroundDisabled, setPlaygroundDisabled] = useState(false);
+  const [playgroundLabel, setPlaygroundLabel] = useState("Label");
+  const [playgroundLabelPosition, setPlaygroundLabelPosition] =
+    useState<SwitchLabelPosition>("end");
+  const playgroundTokenDetails = getSwitchTokenDetails({
+    checked: playgroundChecked,
+    disabled: playgroundDisabled,
+    labelPosition: playgroundLabelPosition,
+  });
+  const switchId = "design-system-switch-preview";
+  const switchLabel = playgroundLabel.trim() || "Switch";
+  const switchControl = (
+    <Switch
+      id={switchId}
+      checked={playgroundChecked}
+      disabled={playgroundDisabled}
+      onCheckedChange={setPlaygroundChecked}
+      aria-label={playgroundLabelPosition === "none" ? switchLabel : undefined}
+    />
+  );
+  const labelControl =
+    playgroundLabelPosition === "none" ? null : (
+      <Label
+        htmlFor={switchId}
+        className={cn(
+          "text-sm font-medium text-foreground",
+          playgroundDisabled && "opacity-50",
+        )}
+      >
+        {switchLabel}
+      </Label>
+    );
+
+  return (
+    <>
+      <PageIntro
+        title="Switch"
+        description="Binary setting control for immediate on/off preferences, with token details for track and thumb contrast."
+      />
+      <ComponentSpec name="Switch" />
+
+      <ComponentPlayground
+        description="Inspect checked, unchecked, disabled, and labeled states against the current theme."
+        preview={
+          <div className="flex min-w-56 items-center justify-center">
+            <div className="flex items-center gap-3">
+              {playgroundLabelPosition === "start" ? labelControl : null}
+              {switchControl}
+              {playgroundLabelPosition === "end" ? labelControl : null}
+            </div>
+          </div>
+        }
+        controls={[
+          {
+            id: "switch-disabled",
+            label: "Disabled",
+            type: "switch",
+            checked: playgroundDisabled,
+            onChange: setPlaygroundDisabled,
+          },
+          {
+            id: "switch-label-position",
+            label: "Label",
+            type: "select",
+            value: playgroundLabelPosition,
+            options: switchLabelPositionOptions,
+            onChange: (value) =>
+              setPlaygroundLabelPosition(value as SwitchLabelPosition),
+          },
+          ...(playgroundLabelPosition !== "none"
+            ? [
+                {
+                  id: "switch-label",
+                  label: "Label text",
+                  type: "text" as const,
+                  value: playgroundLabel,
+                  onChange: setPlaygroundLabel,
+                },
+              ]
+            : []),
+        ]}
+        details={
+          <ComponentTokenDetails
+            colorRows={playgroundTokenDetails.colorRows}
+            textRows={playgroundTokenDetails.textRows}
+          />
+        }
+      />
+    </>
+  );
 }
 
 function TablePage() {

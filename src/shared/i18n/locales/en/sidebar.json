@@ -27,6 +27,10 @@
     "createProject": "Create a project",
     "startChat": "Start a chat"
   },
+  "designSystem": {
+    "inspector": "Inspector",
+    "showInspector": "Show inspector"
+  },
   "navigation": {
     "agents": "Agents",
     "automations": "Automations",

@@ -71,6 +71,7 @@ import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
+import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import {
   GlobalComposerPill,
   type GlobalComposeOptions,
@@ -97,6 +98,12 @@ type AppNavigationHistory = {
 };
 
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
+const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
+  "goose:design-system-inspector-visible";
+
+function validateBooleanPreference(value: unknown, defaults: boolean) {
+  return typeof value === "boolean" ? value : defaults;
+}
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
   if (initialSettingsSection) return "settings";
@@ -203,6 +210,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
+  const [designSystemInspectorVisible, setDesignSystemInspectorVisible] =
+    usePersistedState(
+      DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY,
+      true,
+      validateBooleanPreference,
+    );
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
@@ -1493,6 +1506,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onSettingsSectionChange: selectSettingsSection,
         onDesignSystemBack: leaveSecondarySurface,
         onDesignSystemSectionChange: selectDesignSystemSection,
+        designSystemInspectorVisible,
+        onDesignSystemInspectorVisibleChange: setDesignSystemInspectorVisible,
         onNavigate: handleNavigate,
         onNewChatInProject: handleNewChatInProject,
         onNewChat: () => {
@@ -1523,6 +1538,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       resizeHandleWidth={resizeHandleWidth}
       onResizeStart={handleResizeStart}
       onResizeDoubleClick={handleResizeDoubleClick}
+      showDesignSystemInspector={designSystemInspectorVisible}
       createProjectDialog={{
         isOpen: createProjectOpen,
         onClose: closeCreateProjectDialog,

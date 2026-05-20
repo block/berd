@@ -36,6 +36,7 @@ import {
 } from "@/features/sessions/lib/sessionSelection";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
 import { Button } from "@/shared/ui/button";
+import { Switch } from "@/shared/ui/switch";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -66,6 +67,8 @@ interface SidebarProps {
   onSettingsSectionChange?: (section: SectionId) => void;
   onDesignSystemBack?: () => void;
   onDesignSystemSectionChange?: (section: DesignSystemSection) => void;
+  designSystemInspectorVisible?: boolean;
+  onDesignSystemInspectorVisibleChange?: (visible: boolean) => void;
   onNewChatInProject?: (projectId: string) => void;
   onNewChat?: () => void;
   onCreateProject?: () => void;
@@ -103,6 +106,54 @@ type SidebarSessionGroups = {
   byProject: Record<string, SidebarSessionItem[]>;
   standalone: SidebarSessionItem[];
 };
+
+function SidebarInspectorToggleNavItem({
+  checked,
+  collapsed,
+  label,
+  labelTransition,
+  labelTransitionDelay,
+  labelVisible,
+  onCheckedChange,
+  switchLabel,
+}: {
+  checked: boolean;
+  collapsed: boolean;
+  label: string;
+  labelTransition: string;
+  labelTransitionDelay?: string;
+  labelVisible: boolean;
+  onCheckedChange?: (checked: boolean) => void;
+  switchLabel: string;
+}) {
+  return (
+    <div
+      className={cn(
+        "flex w-full items-center rounded-md text-sm font-light text-muted-foreground transition-colors duration-200 hover:bg-background-alt hover:text-foreground",
+        collapsed
+          ? "justify-center px-3 py-2"
+          : "justify-between gap-2.5 px-3 py-1.5",
+      )}
+      title={collapsed ? label : undefined}
+    >
+      <span
+        className={cn(
+          "min-w-0 whitespace-nowrap",
+          labelTransition,
+          labelVisible ? "opacity-100 w-auto" : "opacity-0 w-0 overflow-hidden",
+        )}
+        style={{ transitionDelay: labelTransitionDelay }}
+      >
+        {label}
+      </span>
+      <Switch
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        aria-label={switchLabel}
+      />
+    </div>
+  );
+}
 
 function validateExpandedProjects(value: unknown): Record<string, boolean> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
@@ -193,6 +244,8 @@ export function Sidebar({
   onSettingsSectionChange,
   onDesignSystemBack,
   onDesignSystemSectionChange,
+  designSystemInspectorVisible = true,
+  onDesignSystemInspectorVisibleChange,
   onNewChatInProject,
   onNewChat,
   onCreateProject,
@@ -603,6 +656,16 @@ export function Sidebar({
                   ))
                 ) : (
                   <>
+                    <SidebarInspectorToggleNavItem
+                      checked={designSystemInspectorVisible}
+                      collapsed={collapsed}
+                      label={t("designSystem.inspector")}
+                      labelTransition={labelTransition}
+                      labelVisible={labelVisible}
+                      onCheckedChange={onDesignSystemInspectorVisibleChange}
+                      switchLabel={t("designSystem.showInspector")}
+                      labelTransitionDelay={labelVisible ? "60ms" : "0ms"}
+                    />
                     {DESIGN_SYSTEM_CORE_SECTIONS.map((item, index) => (
                       <SidebarNavItem
                         key={item.id}
@@ -613,7 +676,7 @@ export function Sidebar({
                         isActive={activeDesignSystemSection === item.id}
                         onClick={() => onDesignSystemSectionChange?.(item.id)}
                         labelTransitionDelay={
-                          labelVisible ? `${index * 30 + 60}ms` : "0ms"
+                          labelVisible ? `${index * 30 + 90}ms` : "0ms"
                         }
                       />
                     ))}
