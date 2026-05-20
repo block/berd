@@ -222,6 +222,7 @@
   --background-alt: var(--color-gray-50);
   --background-medium: var(--color-gray-400);
   --background-muted: var(--color-gray-100);
+  --background-primary: var(--brand);
   --background-inverse: var(--color-black);
   --background-danger: var(--color-red-200);
   --background-success: var(--color-green-200);
@@ -254,6 +255,7 @@
   --text-alt: var(--color-gray-600);
   --text-title: #19191a;
   --text-placeholder: var(--color-gray-400);
+  --text-on-primary: var(--brand-foreground);
   --text-inverse: var(--color-white);
   --text-danger: var(--color-red-200);
   --text-success: var(--color-green-300);
@@ -459,6 +461,7 @@
   --background-alt: var(--color-gray-800);
   --background-medium: var(--color-gray-700);
   --background-muted: var(--color-gray-800);
+  --background-primary: var(--brand);
   --background-inverse: var(--color-white);
   --background-danger: var(--color-red-100);
   --background-success: var(--color-green-100);
@@ -485,6 +488,7 @@
   --text-alt: var(--color-gray-500);
   --text-title: var(--color-white);
   --text-placeholder: var(--color-gray-600);
+  --text-on-primary: var(--brand-foreground);
   --text-inverse: var(--color-black);
   --text-danger: var(--color-red-100);
   --text-success: var(--color-green-100);
@@ -598,6 +602,7 @@
   --color-background-alt: var(--background-alt);
   --color-background-medium: var(--background-medium);
   --color-background-muted: var(--background-muted);
+  --color-background-primary: var(--background-primary);
   --color-background-inverse: var(--background-inverse);
   --color-background-danger: var(--background-danger);
   --color-background-success: var(--background-success);
@@ -628,6 +633,7 @@
   --color-text-alt: var(--text-alt);
   --color-text-title: var(--text-title);
   --color-text-placeholder: var(--text-placeholder);
+  --color-text-on-primary: var(--text-on-primary);
   --color-text-inverse: var(--text-inverse);
   --color-text-danger: var(--text-danger);
   --color-text-success: var(--text-success);

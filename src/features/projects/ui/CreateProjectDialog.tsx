@@ -27,21 +27,8 @@ import {
 } from "../lib/projectPromptText";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
-import { pillBgClass, type PillTone } from "../lib/pillTones";
+import { pillCssColor, type PillTone } from "../lib/pillTones";
 import { ProjectColorPicker } from "./ProjectColorPicker";
-
-// Shared visual constants — mirrored from PersonaEditor / SkillEditor.
-// Extract to a shared primitive once a fourth surface adopts this IA.
-const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
-const HERO_HEIGHT_CLASS = "h-[280px]";
-const PILL_INPUT_CLASS =
-  "h-10 rounded-full border-none bg-surface-overlay px-4 text-sm";
-const FIELD_INPUT_CLASS =
-  "h-10 rounded-[10px] border-none bg-surface-overlay px-4 text-sm";
-const DESCRIPTION_TEXTAREA_CLASS =
-  "w-full resize-none rounded-[10px] border-none bg-surface-overlay px-4 py-3 text-sm outline-none placeholder:text-placeholder focus:outline-none";
-const FIELD_LABEL_CLASS = "text-[10px] font-normal text-muted-foreground";
-const SECTION_GAP_CLASS = "space-y-1.5";
 
 function getDefaultProjectName(path: string | null | undefined): string {
   const trimmed = path?.trim();
@@ -236,19 +223,24 @@ export function CreateProjectDialog({
     ? workingDir.split(/[\\/]/).filter(Boolean).pop()
     : null;
 
-  // Hero tone block — previews the selected pill tone as a large solid color.
-  // Falls back to DEFAULT_PROJECT_COLOR if `color` is a legacy hex.
-  const heroToneClass =
-    pillBgClass(color) ?? pillBgClass(DEFAULT_PROJECT_COLOR) ?? "";
-
   const titleText = isEditing
     ? t("dialog.editTitle")
     : t("dialog.newTitleShort");
+  const selectedPanelColor =
+    pillCssColor(color) ??
+    (/^#[0-9a-f]{3,8}$/i.test(color) ? color : null) ??
+    pillCssColor(DEFAULT_PROJECT_COLOR) ??
+    "#c4e2f6";
 
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
-        className={SHEET_CONTENT_CLASS}
+        className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.4)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
+        closeButtonClassName="top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50"
+        overlayClassName="bg-transparent"
+        style={{
+          backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 40%, transparent)`,
+        }}
         aria-describedby={undefined}
       >
         <form
@@ -257,33 +249,28 @@ export function CreateProjectDialog({
           className="flex h-full min-h-0 flex-col"
         >
           {/* Header: title at top-left. Sheet renders its own close X. */}
-          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+          <div className="flex items-center gap-2 px-8 pt-5 pb-2">
             <SheetTitle className="truncate text-sm font-normal text-foreground">
               {titleText}
             </SheetTitle>
           </div>
 
-          {/* Hero: solid pill-tone preview block. Color picker pill anchored
-              bottom-right, matching SkillEditor's "Customize" affordance. */}
-          <div
-            className={cn(
-              "relative shrink-0 overflow-hidden",
-              HERO_HEIGHT_CLASS,
-              heroToneClass,
-            )}
-          >
-            <div className="absolute right-4 bottom-4">
+          {/* Hero stays transparent so the glass panel reveals whatever sits
+              underneath instead of painting a fake backdrop. */}
+          <div className="relative h-[400px] shrink-0 overflow-hidden">
+            <div className="absolute right-6 bottom-6 z-10">
               <ProjectColorPicker
                 value={color}
                 onChange={(tone: PillTone) => setColor(tone)}
+                variant="swatches"
               />
             </div>
           </div>
 
           {/* Scrollable form body. */}
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted px-5 py-5">
-            <div className={SECTION_GAP_CLASS}>
-              <Label className={cn(FIELD_LABEL_CLASS, "text-foreground")}>
+          <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8">
+            <div className="group/field space-y-2">
+              <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
                 {t("dialog.nameLabel")}{" "}
                 <span className="text-destructive">*</span>
               </Label>
@@ -294,12 +281,12 @@ export function CreateProjectDialog({
                   setError(null);
                 }}
                 placeholder={t("dialog.nameInlinePlaceholder")}
-                className={PILL_INPUT_CLASS}
+                className="h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]"
               />
             </div>
 
-            <div className={SECTION_GAP_CLASS}>
-              <Label className={FIELD_LABEL_CLASS}>
+            <div className="group/field space-y-2">
+              <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
                 {t("dialog.describeLabel")}
               </Label>
               <textarea
@@ -307,32 +294,32 @@ export function CreateProjectDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={t("dialog.describePlaceholder")}
                 rows={4}
-                className={DESCRIPTION_TEXTAREA_CLASS}
+                className="h-[215px] min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div className={SECTION_GAP_CLASS}>
-                <Label className={FIELD_LABEL_CLASS}>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="group/field space-y-2">
+                <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
                   {t("dialog.folderLabel")}
                 </Label>
                 <button
                   type="button"
                   onClick={handleAddDirectory}
                   className={cn(
-                    FIELD_INPUT_CLASS,
-                    "flex w-full items-center gap-2 text-left",
+                    "h-[42px] !rounded-[10px] border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                    "flex w-full items-center gap-2.5 text-left",
                   )}
                 >
                   <IconFolderPlus
-                    className="size-3.5 text-muted-foreground"
+                    className="size-3 text-[#242424]"
                     aria-hidden="true"
                   />
                   <span
                     className={
                       folderDisplay
-                        ? "truncate text-foreground"
-                        : "truncate text-placeholder opacity-70"
+                        ? "truncate text-[#242424]"
+                        : "truncate text-[#242424]/30"
                     }
                   >
                     {folderDisplay ?? t("dialog.folderPlaceholder")}
@@ -340,8 +327,8 @@ export function CreateProjectDialog({
                 </button>
               </div>
 
-              <div className={SECTION_GAP_CLASS}>
-                <Label className={FIELD_LABEL_CLASS}>
+              <div className="group/field space-y-2">
+                <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
                   {t("dialog.modelLabel")}
                 </Label>
                 <Select
@@ -350,7 +337,12 @@ export function CreateProjectDialog({
                     setPreferredProvider(v === "__none__" ? null : v)
                   }
                 >
-                  <SelectTrigger className={cn(FIELD_INPUT_CLASS, "w-full")}>
+                  <SelectTrigger
+                    className={cn(
+                      "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                      "w-full",
+                    )}
+                  >
                     <SelectValue placeholder={t("dialog.modelPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -371,23 +363,24 @@ export function CreateProjectDialog({
           </div>
 
           {/* Footer: Cancel (left) + Save/Create (right). */}
-          <div className="flex shrink-0 items-center justify-end gap-2 bg-muted px-5 pb-5">
+          <div className="flex shrink-0 items-center justify-end gap-3 bg-transparent px-6 pt-2 pb-7 sm:px-8">
             <Button
               type="button"
               variant="ghost"
               size="sm"
               onClick={handleClose}
               disabled={saving}
-              className="h-8 rounded-full px-3"
+              className="h-10 rounded-full px-4 text-sm hover:bg-white/50"
             >
               {t("common:actions.cancel")}
             </Button>
             <Button
               type="submit"
               form="project-form"
+              variant="default"
               size="sm"
               disabled={!canSave}
-              className="h-8 rounded-full px-4"
+              className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
             >
               {saving
                 ? isEditing

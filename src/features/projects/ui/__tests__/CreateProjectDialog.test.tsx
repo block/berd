@@ -321,11 +321,11 @@ describe("CreateProjectDialog", () => {
   });
 
   describe("color picker", () => {
-    it("exposes the 'Choose a project color' trigger", () => {
+    it("exposes the 'Choose a project color' swatches", () => {
       render(<CreateProjectDialog {...defaultProps} isOpen={true} />);
 
       expect(
-        screen.getByRole("button", { name: "Choose a project color" }),
+        screen.getByRole("group", { name: "Choose a project color" }),
       ).toBeInTheDocument();
     });
   });
