@@ -9,6 +9,7 @@ export type AppView =
   | "skills"
   | "agents"
   | "projects"
+  | "search"
   | "session-history"
   | "settings";
 
@@ -38,6 +39,7 @@ export type AppNavigationLocation =
   | { view: "skills"; skillId: string | null }
   | { view: "agents"; personaId: string | null }
   | { view: "projects" }
+  | { view: "search" }
   | { view: "session-history" }
   | { view: "settings"; settingsSection: SectionId };
 

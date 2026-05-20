@@ -157,30 +157,33 @@ export function useSessionSearch({
     setError(null);
   }, []);
 
-  const search = useCallback(async () => {
-    const trimmed = query.trim();
-    if (!trimmed) {
-      clear();
-      return;
-    }
+  const search = useCallback(
+    async (explicitQuery?: string) => {
+      const trimmed = (explicitQuery ?? query).trim();
+      if (!trimmed) {
+        clear();
+        return;
+      }
 
-    const requestId = requestIdRef.current + 1;
-    requestIdRef.current = requestId;
-    searchedSessionIdsRef.current = new Set(
-      sessions.map((session) => session.id),
-    );
-    pendingSessionIdsRef.current = new Set();
-    activeSearchesRef.current = 0;
+      const requestId = requestIdRef.current + 1;
+      requestIdRef.current = requestId;
+      searchedSessionIdsRef.current = new Set(
+        sessions.map((session) => session.id),
+      );
+      pendingSessionIdsRef.current = new Set();
+      activeSearchesRef.current = 0;
 
-    setSubmittedSearch({ query: trimmed, requestId });
+      setSubmittedSearch({ query: trimmed, requestId });
 
-    await runSearchPage({
-      requestId,
-      trimmed,
-      targetSessions: sessions,
-      initialApplyMode: "replace",
-    });
-  }, [clear, query, runSearchPage, sessions]);
+      await runSearchPage({
+        requestId,
+        trimmed,
+        targetSessions: sessions,
+        initialApplyMode: "replace",
+      });
+    },
+    [clear, query, runSearchPage, sessions],
+  );
 
   const searchMore = useCallback(
     async (nextSessions: ChatSession[]) => {

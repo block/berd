@@ -1,0 +1,30 @@
+{
+  "title": "Search",
+  "placeholderDescription": "Search across chats, projects, skills, and agents.",
+  "actions": {
+    "openAgent": "Open agent {{name}}",
+    "openAutomation": "Open automation {{name}}",
+    "openExtension": "Open extension {{name}}",
+    "openSession": "Open chat {{name}}",
+    "openSkill": "Open skill {{name}}"
+  },
+  "heading": {
+    "ariaLabel": "Universal search",
+    "placeholder": "Search your world"
+  },
+  "noMatches": "No matches for \"{{query}}\"",
+  "sections": {
+    "agents": "Agents",
+    "automations": "Automations",
+    "chat": "Chat",
+    "extensions": "Extensions",
+    "skills": "Skills"
+  },
+  "states": {
+    "available": "Available",
+    "enabled": "Enabled"
+  },
+  "fallbackTitles": {
+    "automation": "Untitled automation"
+  }
+}

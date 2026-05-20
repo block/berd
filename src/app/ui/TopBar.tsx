@@ -6,6 +6,7 @@ import {
   IconLayoutSidebarRight,
   IconLayoutSidebarRightFilled,
   IconMessageReport,
+  IconSearch,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { UpdateIndicator } from "@/features/updates/ui/UpdateIndicator";
@@ -32,6 +33,7 @@ interface TopBarProps {
   onToggleContextPanel?: () => void;
   onToggleSidebar?: () => void;
   onFeedbackClick: () => void;
+  onSearchClick?: () => void;
 }
 
 export function TopBar({
@@ -48,6 +50,7 @@ export function TopBar({
   onToggleContextPanel,
   onToggleSidebar,
   onFeedbackClick,
+  onSearchClick,
 }: TopBarProps) {
   const { t } = useTranslation(["sidebar", "feedback"]);
   const sidebarLabel = sidebarCollapsed
@@ -118,6 +121,17 @@ export function TopBar({
           title={t("actions.forward")}
         >
           <IconArrowRight aria-hidden="true" className={toolbarIconClassName} />
+        </Button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          className={toolbarButtonClassName}
+          onClick={onSearchClick}
+          aria-label={t("actions.search")}
+          title={t("actions.search")}
+        >
+          <IconSearch aria-hidden="true" className={toolbarIconClassName} />
         </Button>
       </div>
       <div

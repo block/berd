@@ -154,6 +154,13 @@
     "dismiss": "Dismiss queued message",
     "label": "Queued: {{text}}"
   },
+  "globalPill": {
+    "ariaLabel": "Quick compose",
+    "placeholder": "Start a conversation"
+  },
+  "emptyState": {
+    "startAConversation": "Start a conversation"
+  },
   "skeleton": {
     "loadingConversation": "Loading conversation"
   },

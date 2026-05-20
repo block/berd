@@ -9,6 +9,7 @@ export const TRANSLATION_NAMESPACES = [
   "feedback",
   "home",
   "projects",
+  "search",
   "settings",
   "skills",
   "sidebar",

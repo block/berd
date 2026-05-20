@@ -154,6 +154,13 @@
     "dismiss": "Descartar mensaje en cola",
     "label": "En cola: {{text}}"
   },
+  "globalPill": {
+    "ariaLabel": "Redacción rápida",
+    "placeholder": "Inicia una conversación"
+  },
+  "emptyState": {
+    "startAConversation": "Inicia una conversación"
+  },
   "skeleton": {
     "loadingConversation": "Cargando conversación"
   },

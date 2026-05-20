@@ -12,6 +12,7 @@ import {
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import type { ExtensionEntry } from "@/features/extensions/types";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
@@ -69,6 +70,10 @@ import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceC
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
+import {
+  GlobalComposerPill,
+  type GlobalComposeOptions,
+} from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession } from "@/shared/api/acp";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
@@ -859,6 +864,36 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [createNewProjectDraft, createNewTab, projects],
   );
 
+  const handleGlobalCompose = useCallback(
+    (text: string, options?: GlobalComposeOptions) => {
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      const createChat = project
+        ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
+        : createNewTab(DEFAULT_CHAT_TITLE);
+
+      void createChat
+        .then((session) => {
+          if (options?.providerId && options.modelId) {
+            patchSession(session.id, {
+              providerId: options.providerId,
+              modelId: options.modelId,
+              modelName: options.modelName ?? options.modelId,
+            });
+          }
+          useChatStore.getState().enqueueMessage(session.id, {
+            text,
+            attachments: options?.attachments,
+          });
+        })
+        .catch((error) => {
+          console.error("Failed to start chat from global composer:", error);
+        });
+    },
+    [createNewProjectDraft, createNewTab, patchSession, projects],
+  );
+
   const handleNewChatInProject = useCallback(
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
@@ -1061,6 +1096,51 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [handleSelectSession],
   );
 
+  const handleOpenAgentFromSearch = useCallback(
+    (agentId: string) => {
+      replaceNextNavigationEntryRef.current = false;
+      setAgentsPersonaId(agentId);
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("agents");
+    },
+    [setActiveSession],
+  );
+
+  const handleOpenSkillFromSearch = useCallback(
+    (skill: SkillInfo) => {
+      replaceNextNavigationEntryRef.current = false;
+      setSkillsSkillId(skill.id);
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("skills");
+    },
+    [setActiveSession],
+  );
+
+  const handleOpenExtensionFromSearch = useCallback(
+    (_entry: ExtensionEntry) => {
+      openSettings("extensions");
+    },
+    [openSettings],
+  );
+
+  const handleOpenAutomationFromSearch = useCallback(
+    (automationId: string) => {
+      replaceNextNavigationEntryRef.current = false;
+      setAutomationsRoute({
+        surface: "detail",
+        automationId,
+        tab: "details",
+        selectedRunKey: null,
+      });
+      setActiveSession(null);
+      clearSettingsSectionUrl();
+      setActiveView("automations");
+    },
+    [setActiveSession],
+  );
+
   const handleNavigate = useCallback(
     (view: AppView) => {
       if (view === "settings") {
@@ -1071,7 +1151,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         openDesignSystem();
         return;
       }
-      if (view !== "chat") {
+      if (view !== "chat" && view !== "search") {
         setActiveSession(null);
       }
       if (view === "skills") {
@@ -1179,6 +1259,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         return;
       }
 
+      if (location.view === "search") {
+        setActiveView("search");
+        return;
+      }
+
       if (location.view === "chat" && location.sessionId) {
         const session = useChatSessionStore
           .getState()
@@ -1228,6 +1313,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     updateNavigationAvailability();
   }, [applyNavigationLocation, updateNavigationAvailability]);
 
+  const handleExitSearch = useCallback(() => {
+    const history = navigationHistoryRef.current;
+    if (history.index > 0) {
+      goBack();
+      return;
+    }
+
+    clearSettingsSectionUrl();
+    setActiveSession(null);
+    setActiveView("home");
+  }, [goBack, setActiveSession]);
+
   const toggleContextPanel = useCallback(() => {
     if (!activeSessionId) {
       return;
@@ -1265,6 +1362,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         e.preventDefault();
         toggleSidebar();
       }
+      // Cmd+K opens universal search.
+      if (e.key === "k" && e.metaKey) {
+        e.preventDefault();
+        handleNavigate("search");
+      }
       // Cmd+W returns to home instead of closing the window
       if (e.key === "w" && e.metaKey) {
         e.preventDefault();
@@ -1292,6 +1394,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [
     activeView,
     clearActiveSession,
+    handleNavigate,
     leaveSecondarySurface,
     openSettings,
     setActiveSession,
@@ -1357,6 +1460,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         contextPanelLabel,
         onToggleContextPanel: toggleContextPanel,
         onFeedbackClick: handleFeedbackClick,
+        onSearchClick: () => handleNavigate("search"),
       }}
       sidebar={{
         collapsed: sidebarCollapsed,
@@ -1406,28 +1510,38 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }}
     >
       {children ?? (
-        <AppShellContent
-          activeView={activeView}
-          activeSettingsSection={activeSettingsSection}
-          activeSkillsSkillId={skillsSkillId}
-          activeAgentsPersonaId={agentsPersonaId}
-          activeAutomationsRoute={automationsRoute}
-          activeDesignSystemSection={activeDesignSystemSection}
-          activeSession={activeSession}
-          homeSessionId={homeSessionId}
-          onNavigateSkills={navigateSkills}
-          onNavigateAgents={navigateAgents}
-          onNavigateAutomations={navigateAutomations}
-          onCreatePersona={handleCreatePersona}
-          onArchiveChat={handleArchiveChat}
-          onCreateProject={openCreateProjectDialog}
-          onActivateHomeSession={activateHomeSession}
-          onRenameChat={handleRenameChat}
-          onSelectSession={handleSelectSession}
-          onSelectSearchResult={handleSelectSearchResult}
-          onStartChatFromProject={handleStartChatFromProject}
-          onStartChatWithSkill={handleStartChatWithSkill}
-        />
+        <>
+          <AppShellContent
+            activeView={activeView}
+            activeSettingsSection={activeSettingsSection}
+            activeSkillsSkillId={skillsSkillId}
+            activeAgentsPersonaId={agentsPersonaId}
+            activeAutomationsRoute={automationsRoute}
+            activeDesignSystemSection={activeDesignSystemSection}
+            activeSession={activeSession}
+            homeSessionId={homeSessionId}
+            onNavigateSkills={navigateSkills}
+            onNavigateAgents={navigateAgents}
+            onNavigateAutomations={navigateAutomations}
+            onCreatePersona={handleCreatePersona}
+            onArchiveChat={handleArchiveChat}
+            onCreateProject={openCreateProjectDialog}
+            onActivateHomeSession={activateHomeSession}
+            onRenameChat={handleRenameChat}
+            onSelectSession={handleSelectSession}
+            onSelectSearchResult={handleSelectSearchResult}
+            onStartChatFromProject={handleStartChatFromProject}
+            onStartChatWithSkill={handleStartChatWithSkill}
+            onExitSearch={handleExitSearch}
+            onOpenExtension={handleOpenExtensionFromSearch}
+            onOpenAgent={handleOpenAgentFromSearch}
+            onOpenAutomation={handleOpenAutomationFromSearch}
+            onOpenSkill={handleOpenSkillFromSearch}
+          />
+          {activeView !== "chat" ? (
+            <GlobalComposerPill onSend={handleGlobalCompose} />
+          ) : null}
+        </>
       )}
     </AppShellLayout>
   );

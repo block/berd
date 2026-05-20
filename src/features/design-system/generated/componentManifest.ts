@@ -244,6 +244,16 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Bottom Fade",
+    source: "src/shared/ui/BottomFade.tsx",
+    exports: ["BottomFade"],
+    slots: [],
+    cva: [],
+    tokenClasses: [],
+    stateClasses: [],
+    sourceTokenClasses: [],
+  },
+  {
     name: "Breadcrumb",
     source: "src/shared/ui/breadcrumb.tsx",
     exports: [
@@ -1104,6 +1114,35 @@ export const designSystemComponentManifest = [
     ],
     stateClasses: ["data-[error=true]:text-text-danger"],
     sourceTokenClasses: ["text-muted-foreground"],
+  },
+  {
+    name: "Global Composer Pill",
+    source: "src/shared/ui/GlobalComposerPill.tsx",
+    exports: ["GlobalComposeOptions", "GlobalComposerPill"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "bg-muted",
+      "hover:text-foreground",
+      "placeholder:text-foreground",
+      "text-foreground",
+      "text-muted-foreground",
+    ],
+    stateClasses: [
+      "focus:outline-none",
+      "focus:ring-0",
+      "hover:bg-accent",
+      "hover:bg-destructive/16",
+      "hover:bg-surface-button",
+      "hover:text-foreground",
+    ],
+    sourceTokenClasses: [
+      "bg-muted",
+      "hover:text-foreground",
+      "placeholder:text-foreground",
+      "text-foreground",
+      "text-muted-foreground",
+    ],
   },
   {
     name: "Goose Logo",

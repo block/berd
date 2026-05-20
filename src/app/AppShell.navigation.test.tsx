@@ -59,6 +59,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onNavigateSkills,
     onNavigateAgents,
     onNavigateAutomations,
+    onExitSearch,
   }) => (
     <section>
       <div data-testid="active-view">{activeView}</div>
@@ -82,6 +83,11 @@ vi.mock("./ui/AppShellContent", () => ({
       >
         Open automation history
       </button>
+      {activeView === "search" ? (
+        <button type="button" onClick={onExitSearch}>
+          Exit search
+        </button>
+      ) : null}
     </section>
   )) satisfies typeof AppShellContentType,
 }));
@@ -187,6 +193,33 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("settings-section")).toHaveTextContent(
         "general",
       );
+    });
+  });
+
+  it("opens search from the top bar and returns to the previous view", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+
+    await user.click(screen.getByRole("button", { name: "Search" }));
+    expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+
+    await user.click(screen.getByRole("button", { name: "Exit search" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+    });
+  });
+
+  it("opens search with Cmd+K", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.keyboard("{Meta>}k{/Meta}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
     });
   });
 });

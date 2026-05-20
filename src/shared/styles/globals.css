@@ -148,6 +148,12 @@
   --surface-button: var(--color-gray-50);
   --surface-install: var(--canvas-base);
 
+  /* Global hover composer pill — translucent glass over the canvas/dot-grid.
+     Separate from --surface-composer (which is the chat-area composer fill). */
+  --surface-composer-glass: rgba(255, 255, 255, 0.15);
+  --ring-composer-glass-inner: rgba(255, 255, 255, 0.6);
+  --outline-composer-glass-outer: rgba(0, 0, 0, 0.05);
+
   /* Project-tint hook for the dot-grid composer below. Components in a
      project context set this on a wrapper to tint canvas + dot color
      together via color-mix. Unset/transparent = base canvas, no change. */
@@ -376,6 +382,12 @@
   --surface-button: var(--color-gray-800);
   --surface-install: var(--canvas-base);
 
+  /* Global hover composer pill — dark variants. Inner ring softens; outer
+     outline flips to white-alpha so it doesn't disappear over dark canvas. */
+  --surface-composer-glass: rgba(255, 255, 255, 0.06);
+  --ring-composer-glass-inner: rgba(255, 255, 255, 0.18);
+  --outline-composer-glass-outer: rgba(255, 255, 255, 0.05);
+
   /* Composer chip tones — dark variants */
   --chip-file-bg: var(--color-gray-800);
   --chip-file-fg: var(--color-gray-400);
@@ -516,6 +528,7 @@
   --color-surface-card: var(--surface-card);
   --color-surface-tile: var(--surface-tile);
   --color-surface-composer: var(--surface-composer);
+  --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-button: var(--surface-button);
   --color-surface-install: var(--surface-install);
 
@@ -654,8 +667,6 @@
   /* Spacing — app chrome dimensions */
   --spacing-app-top-bar: 40px;
   --spacing-app-top-bar-leading: 96px;
-  --spacing-app-top-bar-leading-compact: 20px;
-  --spacing-app-top-bar-trailing: 20px;
   --spacing-app-top-bar-control: 24px;
   --spacing-app-panel-gutter-top: 4px;
   --spacing-input: 3.25rem;

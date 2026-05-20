@@ -4,6 +4,7 @@ import { AutomationsWorkbench } from "@/features/automations/ui/AutomationsView"
 import { SkillsView } from "@/features/skills/ui/SkillsView";
 import { AgentsView } from "@/features/agents/ui/AgentsView";
 import { ProjectsView } from "@/features/projects/ui/ProjectsView";
+import { SearchView } from "@/features/search/ui/SearchView";
 import { SessionHistoryView } from "@/features/sessions/ui/SessionHistoryView";
 import { SettingsView } from "@/features/settings/ui/SettingsView";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
@@ -11,6 +12,7 @@ import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/desi
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import type { ExtensionEntry } from "@/features/extensions/types";
 import type {
   AppNavigationUpdateOptions,
   AppView,
@@ -56,6 +58,11 @@ interface AppShellContentProps {
   ) => void;
   onStartChatFromProject: (project: ProjectInfo) => void;
   onStartChatWithSkill: (skill: SkillInfo, projectId?: string | null) => void;
+  onExitSearch: () => void;
+  onOpenExtension: (entry: ExtensionEntry) => void;
+  onOpenAgent: (agentId: string) => void;
+  onOpenAutomation: (automationId: string) => void;
+  onOpenSkill: (skill: SkillInfo) => void;
 }
 
 export function AppShellContent({
@@ -79,6 +86,11 @@ export function AppShellContent({
   onSelectSearchResult,
   onStartChatFromProject,
   onStartChatWithSkill,
+  onExitSearch,
+  onOpenExtension,
+  onOpenAgent,
+  onOpenAutomation,
+  onOpenSkill,
 }: AppShellContentProps) {
   switch (activeView) {
     case "design-system":
@@ -111,6 +123,17 @@ export function AppShellContent({
       );
     case "projects":
       return <ProjectsView onStartChat={onStartChatFromProject} />;
+    case "search":
+      return (
+        <SearchView
+          onExit={onExitSearch}
+          onSelectSearchResult={onSelectSearchResult}
+          onOpenExtension={onOpenExtension}
+          onOpenAgent={onOpenAgent}
+          onOpenAutomation={onOpenAutomation}
+          onOpenSkill={onOpenSkill}
+        />
+      );
     case "session-history":
       return (
         <SessionHistoryView

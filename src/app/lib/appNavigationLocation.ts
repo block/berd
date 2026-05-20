@@ -30,6 +30,7 @@ export function getAppNavigationLocation(
       return { view, settingsSection };
     case "home":
     case "projects":
+    case "search":
     case "session-history":
       return { view };
   }

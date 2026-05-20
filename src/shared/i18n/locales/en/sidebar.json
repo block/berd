@@ -1,10 +1,12 @@
 {
+  "appName": "goose",
   "actions": {
     "backToMainNavigation": "Back",
     "back": "Back",
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
     "forward": "Forward",
+    "search": "Search",
     "newChat": "New chat",
     "newChatInProject": "New chat in project",
     "newProject": "New project",
