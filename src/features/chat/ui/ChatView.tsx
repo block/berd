@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { MessageTimeline } from "./MessageTimeline";
@@ -9,7 +9,6 @@ import { useChatSessionStore } from "../stores/chatSessionStore";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatContextPanel } from "./ChatContextPanel";
 import { perfLog } from "@/shared/lib/perfLog";
-import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
 import type { Message } from "@/shared/types/messages";
 
@@ -21,7 +20,9 @@ interface ChatViewProps {
   }) => void;
 }
 
-function shouldOverlapComposerWithLatestMcpApp(messages: Message[]): boolean {
+// Tighten the tail padding when the latest visible assistant content is an MCP
+// app so the app surface approaches the floating composer without hiding it.
+function isMcpAppTail(messages: Message[]): boolean {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];
     if (
@@ -49,8 +50,6 @@ export function ChatView({
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
-  const [isLoadingIndicatorMounted, setIsLoadingIndicatorMounted] =
-    useState(false);
   const controller = useChatSessionController({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
@@ -68,11 +67,6 @@ export function ChatView({
     controller.chatState === "compacting";
   const shouldShowLoadingIndicator =
     showIndicator && !controller.isLoadingHistory;
-  const shouldReserveComposerGap =
-    shouldShowLoadingIndicator || isLoadingIndicatorMounted;
-  const shouldOverlapComposer =
-    !shouldReserveComposerGap &&
-    shouldOverlapComposerWithLatestMcpApp(controller.messages);
   let sendDisabledReason: string | undefined;
   if (controller.session?.creationState === "pending") {
     sendDisabledReason = t("toolbar.sessionStarting");
@@ -81,27 +75,22 @@ export function ChatView({
       controller.session.creationError ?? t("toolbar.sessionStartFailed");
   }
 
-  useEffect(() => {
-    if (shouldShowLoadingIndicator) {
-      setIsLoadingIndicatorMounted(true);
-    }
-  }, [shouldShowLoadingIndicator]);
-
   return (
     <ArtifactPolicyProvider
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
     >
-      <div className="page-transition relative flex h-full min-w-0 gap-3 bg-dot-grid p-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div
-            className={cn(
-              "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-surface-card",
-              shouldOverlapComposer && "pb-0",
-            )}
-          >
+      <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <div className="relative mb-20 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-surface-card">
             {controller.isLoadingHistory ? (
               <ChatLoadingSkeleton />
+            ) : controller.messages.length === 0 ? (
+              <div className="flex h-full w-full items-center justify-center px-6">
+                <p className="text-3xl font-light text-text-title">
+                  {t("emptyState.startAConversation")}
+                </p>
+              </div>
             ) : (
               <MessageTimeline
                 messages={controller.messages}
@@ -112,13 +101,13 @@ export function ChatView({
                 scrollTargetQuery={controller.scrollTarget?.query ?? null}
                 onScrollTargetHandled={controller.handleScrollTargetHandled}
                 onSendMcpAppMessage={controller.handleSend}
+                className={
+                  isMcpAppTail(controller.messages) ? "pb-12" : "pb-24"
+                }
               />
             )}
 
-            <AnimatePresence
-              initial={false}
-              onExitComplete={() => setIsLoadingIndicatorMounted(false)}
-            >
+            <AnimatePresence initial={false}>
               {shouldShowLoadingIndicator ? (
                 <LoadingGoose
                   key="loading-indicator"
@@ -134,67 +123,77 @@ export function ChatView({
             </AnimatePresence>
           </div>
 
-          <ChatInput
-            className={shouldOverlapComposer ? "-mt-4" : undefined}
-            composerActions={{
-              onSend: controller.handleSend,
-              disabled:
-                controller.projectMetadataPending ||
-                controller.isCompactingContext,
-              sendDisabled: controller.session?.creationState != null,
-              sendDisabledReason,
-              queuedMessage: controller.queue.queuedMessage,
-              onDismissQueue: controller.queue.dismiss,
-              onStop: controller.stopStreaming,
-              isStreaming:
-                controller.chatState === "streaming" ||
-                controller.chatState === "thinking",
-            }}
-            initialValue={controller.draftValue}
-            onDraftChange={controller.handleDraftChange}
-            selectedSkills={controller.selectedSkills}
-            onSkillsChange={controller.handleSkillsChange}
-            personaPicker={{
-              personas: controller.personas,
-              selectedPersonaId: controller.selectedPersonaId,
-              onPersonaChange: controller.handlePersonaChange,
-            }}
-            agentModelPicker={{
-              providers: controller.pickerAgents,
-              providersLoading: controller.providersLoading,
-              selectedProvider: controller.selectedProvider,
-              onProviderChange: controller.handleProviderChange,
-              currentModelId: controller.currentModelId,
-              currentModelProviderId: controller.currentModelProviderId,
-              currentModel: controller.currentModelName ?? undefined,
-              availableModels: controller.availableModels,
-              modelsLoading: controller.modelsLoading,
-              modelStatusMessage: controller.modelStatusMessage,
-              onModelChange: controller.handleModelChange,
-              onPickerOpen: controller.handlePickerOpen,
-            }}
-            projectPicker={{
-              selectedProjectId: controller.selectedProjectId,
-              availableProjects: controller.availableProjects,
-              onProjectChange: controller.handleProjectChange,
-              onCreateProject: (options) =>
-                onCreateProject?.({
-                  onCreated: (projectId) => {
-                    controller.handleProjectChange(projectId);
-                    options?.onCreated?.(projectId);
-                  },
-                }),
-            }}
-            contextUsage={{
-              contextTokens: controller.tokenState.accumulatedTotal,
-              contextLimit: controller.tokenState.contextLimit,
-              isContextUsageReady: controller.isContextUsageReady,
-              onCompactContext: controller.compactConversation,
-              canCompactContext: controller.canCompactContext,
-              isCompactingContext: controller.isCompactingContext,
-              supportsCompactionControls: controller.supportsCompactionControls,
-            }}
-          />
+          <div className="pointer-events-none absolute inset-x-0 bottom-20 flex translate-y-1/2 justify-center px-4">
+            <div
+              className="pointer-events-auto w-full max-w-3xl rounded-composer bg-surface-composer-glass ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
+              style={{
+                backdropFilter: "var(--backdrop-composer-glass)",
+                WebkitBackdropFilter: "var(--backdrop-composer-glass)",
+              }}
+            >
+              <ChatInput
+                composerActions={{
+                  onSend: controller.handleSend,
+                  disabled:
+                    controller.projectMetadataPending ||
+                    controller.isCompactingContext,
+                  sendDisabled: controller.session?.creationState != null,
+                  sendDisabledReason,
+                  queuedMessage: controller.queue.queuedMessage,
+                  onDismissQueue: controller.queue.dismiss,
+                  onStop: controller.stopStreaming,
+                  isStreaming:
+                    controller.chatState === "streaming" ||
+                    controller.chatState === "thinking",
+                }}
+                initialValue={controller.draftValue}
+                onDraftChange={controller.handleDraftChange}
+                selectedSkills={controller.selectedSkills}
+                onSkillsChange={controller.handleSkillsChange}
+                personaPicker={{
+                  personas: controller.personas,
+                  selectedPersonaId: controller.selectedPersonaId,
+                  onPersonaChange: controller.handlePersonaChange,
+                }}
+                agentModelPicker={{
+                  providers: controller.pickerAgents,
+                  providersLoading: controller.providersLoading,
+                  selectedProvider: controller.selectedProvider,
+                  onProviderChange: controller.handleProviderChange,
+                  currentModelId: controller.currentModelId,
+                  currentModelProviderId: controller.currentModelProviderId,
+                  currentModel: controller.currentModelName ?? undefined,
+                  availableModels: controller.availableModels,
+                  modelsLoading: controller.modelsLoading,
+                  modelStatusMessage: controller.modelStatusMessage,
+                  onModelChange: controller.handleModelChange,
+                  onPickerOpen: controller.handlePickerOpen,
+                }}
+                projectPicker={{
+                  selectedProjectId: controller.selectedProjectId,
+                  availableProjects: controller.availableProjects,
+                  onProjectChange: controller.handleProjectChange,
+                  onCreateProject: (options) =>
+                    onCreateProject?.({
+                      onCreated: (projectId) => {
+                        controller.handleProjectChange(projectId);
+                        options?.onCreated?.(projectId);
+                      },
+                    }),
+                }}
+                contextUsage={{
+                  contextTokens: controller.tokenState.accumulatedTotal,
+                  contextLimit: controller.tokenState.contextLimit,
+                  isContextUsageReady: controller.isContextUsageReady,
+                  onCompactContext: controller.compactConversation,
+                  canCompactContext: controller.canCompactContext,
+                  isCompactingContext: controller.isCompactingContext,
+                  supportsCompactionControls:
+                    controller.supportsCompactionControls,
+                }}
+              />
+            </div>
+          </div>
         </div>
 
         <ChatContextPanel

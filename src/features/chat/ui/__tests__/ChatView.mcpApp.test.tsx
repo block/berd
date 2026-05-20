@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatView } from "../ChatView";
 
@@ -74,7 +74,19 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.handleSend.mockClear();
     mocks.useChatSessionController.mockReturnValue({
-      messages: [],
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          created: Date.now(),
+          content: [
+            {
+              type: "text",
+              text: "Hello",
+            },
+          ],
+        },
+      ],
       streamingMessageId: null,
       scrollTarget: null,
       handleScrollTargetHandled: vi.fn(),
@@ -129,7 +141,7 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.className).toBeUndefined();
   });
 
-  it("overlaps the composer when the latest visible content is an MCP app", () => {
+  it("uses tighter timeline padding when the latest visible content is an MCP app", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
       messages: [
@@ -150,14 +162,14 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" />);
 
-    expect(mocks.chatInputSpy).toHaveBeenCalled();
-    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
       className?: string;
     };
-    expect(chatInputProps.className).toBe("-mt-4");
+    expect(timelineProps.className).toBe("pb-12");
   });
 
-  it("does not overlap the composer when reasoning is the latest visible content", () => {
+  it("uses regular timeline padding when reasoning is the latest visible content", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
       messages: [
@@ -177,14 +189,14 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" />);
 
-    expect(mocks.chatInputSpy).toHaveBeenCalled();
-    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
       className?: string;
     };
-    expect(chatInputProps.className).toBeUndefined();
+    expect(timelineProps.className).toBe("pb-24");
   });
 
-  it("does not overlap the composer over the loading indicator", () => {
+  it("uses regular timeline padding over the loading indicator", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
       chatState: "thinking",
@@ -192,10 +204,23 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" />);
 
-    expect(mocks.chatInputSpy).toHaveBeenCalled();
-    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
       className?: string;
     };
-    expect(chatInputProps.className).toBeUndefined();
+    expect(timelineProps.className).toBe("pb-24");
+  });
+
+  it("renders the chat empty state instead of the timeline for a fresh chat", () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
+    expect(mocks.messageTimelineSpy).not.toHaveBeenCalled();
+    expect(mocks.chatInputSpy).toHaveBeenCalled();
   });
 });
