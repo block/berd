@@ -1,4 +1,5 @@
 import { HomeScreen } from "@/features/home/ui/HomeScreen";
+import { HomeView } from "@/features/home/ui/HomeView";
 import { ChatView } from "@/features/chat/ui/ChatView";
 import { AutomationsWorkbench } from "@/features/automations/ui/AutomationsView";
 import { SkillsView } from "@/features/skills/ui/SkillsView";
@@ -161,11 +162,21 @@ export function AppShellContent({
       );
     case "home":
       return (
-        <HomeScreen
+        <HomeView
           sessionId={homeSessionId}
           onActivateSession={onActivateHomeSession}
           onCreatePersona={onCreatePersona}
           onCreateProject={onCreateProject}
+          onOpenAgent={(agentId) => onNavigateAgents(agentId)}
+          onSelectSession={onSelectSession}
+          onOpenAutomation={(automationId) =>
+            onNavigateAutomations({
+              surface: "detail",
+              automationId,
+              tab: "details",
+              selectedRunKey: null,
+            })
+          }
         />
       );
   }

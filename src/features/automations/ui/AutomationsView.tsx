@@ -434,7 +434,7 @@ function buildScheduleFromForm({
   return `${safeMinute} ${safeHour} * * *`;
 }
 
-function formatSchedule(
+export function formatSchedule(
   tile: AutomationTile,
   labels: {
     noSchedule: string;
@@ -454,7 +454,7 @@ function formatSchedule(
     : tile.schedule || labels.noSchedule;
 }
 
-function latestRunTimestampFromTile(tile: AutomationTile) {
+export function latestRunTimestampFromTile(tile: AutomationTile) {
   const normalizedStatus = String(tile.latestRunStatus ?? "").toLowerCase();
   if (normalizedStatus.includes("success")) {
     return tile.lastSuccessAt;
@@ -507,7 +507,7 @@ function keyAutomationResults(results: AutomationTileResult[]) {
   }));
 }
 
-function getOutputSummary(data: Record<string, unknown> | undefined) {
+export function getOutputSummary(data: Record<string, unknown> | undefined) {
   if (!data) return null;
   const summary = data.summary;
   if (typeof summary === "string" && summary.trim()) {
@@ -537,7 +537,7 @@ function EmptyState({ title, body }: { title: string; body: string }) {
   );
 }
 
-function AutomationActivityLabel({
+export function AutomationActivityLabel({
   status,
   timestamp,
   className,

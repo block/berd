@@ -3,5 +3,51 @@
     "afternoon": "Buenas tardes",
     "evening": "Buenas noches",
     "morning": "Buenos días"
+  },
+  "widgets": {
+    "clock": {
+      "label": "Reloj",
+      "description": "Reloj analógico con día y fecha",
+      "current": "Hora actual"
+    },
+    "agentPin": {
+      "label": "Fijar un agente",
+      "description": "Fija un agente para acceso rápido",
+      "kicker": "Agente",
+      "fallbackName": "Goose",
+      "openAria": "Abrir {{name}}"
+    },
+    "chatPin": {
+      "label": "Fijar un chat",
+      "description": "Fija una sesión de chat",
+      "kicker": "Chat",
+      "emptyTitle": "Sin chat reciente",
+      "emptyDescription": "Fija un chat para verlo aquí",
+      "openAria": "Abrir chat: {{title}}"
+    },
+    "automationOutputPin": {
+      "label": "Fijar una automatización",
+      "description": "Fija el último resultado de una automatización",
+      "emptyOutput": "Sin resultados aún",
+      "states": {
+        "failed": "Falló",
+        "running": "Ejecutando…",
+        "paused": "En pausa",
+        "neverRun": "Se ejecutará según el horario"
+      },
+      "lastRunFailedPrefix": "Última ejecución falló:",
+      "fallbackTitle": "Automatización sin título"
+    },
+    "actions": {
+      "remove": "Eliminar"
+    },
+    "picker": {
+      "sections": {
+        "clock": "Pantalla",
+        "agent": "Agentes",
+        "chat": "Chats",
+        "automation": "Automatizaciones"
+      }
+    }
   }
 }

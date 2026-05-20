@@ -3,5 +3,51 @@
     "afternoon": "Good afternoon",
     "evening": "Good evening",
     "morning": "Good morning"
+  },
+  "widgets": {
+    "clock": {
+      "label": "Clock",
+      "description": "Analog clock with day and date",
+      "current": "Current time"
+    },
+    "agentPin": {
+      "label": "Pin an agent",
+      "description": "Pin an agent for quick access",
+      "kicker": "Agent",
+      "fallbackName": "Goose",
+      "openAria": "Open {{name}}"
+    },
+    "chatPin": {
+      "label": "Pin a chat",
+      "description": "Pin a chat session",
+      "kicker": "Chat",
+      "emptyTitle": "No recent chat",
+      "emptyDescription": "Pin a chat to see it here",
+      "openAria": "Open chat: {{title}}"
+    },
+    "automationOutputPin": {
+      "label": "Pin an automation",
+      "description": "Pin the latest output of an automation",
+      "emptyOutput": "No output yet",
+      "states": {
+        "failed": "Failed",
+        "running": "Running…",
+        "paused": "Paused",
+        "neverRun": "Will run on schedule"
+      },
+      "lastRunFailedPrefix": "Last run failed:",
+      "fallbackTitle": "Untitled automation"
+    },
+    "actions": {
+      "remove": "Remove"
+    },
+    "picker": {
+      "sections": {
+        "clock": "Display",
+        "agent": "Agents",
+        "chat": "Chats",
+        "automation": "Automations"
+      }
+    }
   }
 }
