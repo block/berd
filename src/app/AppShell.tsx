@@ -1496,9 +1496,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onNavigate: handleNavigate,
         onNewChatInProject: handleNewChatInProject,
         onNewChat: () => {
-          setActiveSession(null);
-          clearSettingsSectionUrl();
-          setActiveView("home");
+          void createNewTab(DEFAULT_CHAT_TITLE).catch((error) => {
+            console.error("Failed to start new chat:", error);
+          });
         },
         onCreateProject: () => openCreateProjectDialog(),
         onEditProject: handleEditProject,

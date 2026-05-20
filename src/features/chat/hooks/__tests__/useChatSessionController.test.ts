@@ -17,6 +17,7 @@ const mockGoosePreferencesSave = vi.fn();
 const mockUseProviderInventory = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
+const mockUseMessageQueue = vi.fn();
 const mockPickerState = {
   pickerAgents: [{ id: "goose", label: "Goose" }],
   availableModels: [] as Array<{
@@ -99,11 +100,7 @@ vi.mock("../useChat", () => ({
 }));
 
 vi.mock("../useMessageQueue", () => ({
-  useMessageQueue: () => ({
-    queuedMessage: null,
-    enqueue: vi.fn(),
-    dismiss: vi.fn(),
-  }),
+  useMessageQueue: (...args: unknown[]) => mockUseMessageQueue(...args),
 }));
 
 vi.mock("@/features/agents/hooks/useProviderSelection", () => ({
@@ -160,6 +157,12 @@ vi.mock("../useAgentModelPickerState", () => ({
 
 import { useChatSessionController } from "../useChatSessionController";
 
+function latestMessageQueueArgs() {
+  const call = mockUseMessageQueue.mock.calls.at(-1);
+  expect(call).toBeDefined();
+  return call as [string, string, unknown];
+}
+
 describe("useChatSessionController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -171,6 +174,11 @@ describe("useChatSessionController", () => {
         await options?.ensurePrepared?.();
       },
     );
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      enqueue: vi.fn(),
+      dismiss: vi.fn(),
+    }));
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
       {
@@ -258,6 +266,133 @@ describe("useChatSessionController", () => {
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });
+  });
+
+  it("keeps queued messages from draining while a project draft session is pending", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          title: "Chat",
+          providerId: "openai",
+          projectId: "project-1",
+          creationState: "pending",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useChatStore
+      .getState()
+      .enqueueMessage("draft-session", { text: "queued from pill" });
+
+    renderHook(() => useChatSessionController({ sessionId: "draft-session" }));
+
+    const [queueSessionId, queueChatState] = latestMessageQueueArgs();
+    expect(queueSessionId).toBe("draft-session");
+    expect(queueChatState).toBe("thinking");
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"],
+    ).toEqual({ text: "queued from pill" });
+  });
+
+  it("allows a queued draft message to drain after promotion to the backend session id", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          title: "Chat",
+          providerId: "openai",
+          projectId: "project-1",
+          creationState: "pending",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useChatStore
+      .getState()
+      .enqueueMessage("draft-session", { text: "queued from pill" });
+
+    const { rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useChatSessionController({ sessionId }),
+      {
+        initialProps: { sessionId: "draft-session" },
+      },
+    );
+
+    expect(latestMessageQueueArgs()[1]).toBe("thinking");
+
+    act(() => {
+      useChatStore.getState().promoteSessionId("draft-session", "backend-1");
+      useChatSessionStore.setState({
+        sessions: [
+          {
+            id: "backend-1",
+            title: "Chat",
+            providerId: "openai",
+            projectId: "project-1",
+            createdAt: "2026-04-20T00:00:00.000Z",
+            updatedAt: "2026-04-20T00:00:00.000Z",
+            messageCount: 0,
+          },
+        ],
+      });
+    });
+    rerender({ sessionId: "backend-1" });
+
+    const [queueSessionId, queueChatState] = latestMessageQueueArgs();
+    expect(queueSessionId).toBe("backend-1");
+    expect(queueChatState).toBe("idle");
+    expect(useChatStore.getState().queuedMessageBySession["backend-1"]).toEqual(
+      { text: "queued from pill" },
+    );
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"],
+    ).toBeUndefined();
+  });
+
+  it("keeps failed project draft sessions from draining queued messages", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "draft-session",
+          title: "Chat",
+          providerId: "openai",
+          projectId: "project-1",
+          creationState: "failed",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useChatStore
+      .getState()
+      .enqueueMessage("draft-session", { text: "queued from pill" });
+
+    const { rerender } = renderHook(() =>
+      useChatSessionController({ sessionId: "draft-session" }),
+    );
+    rerender();
+
+    const [queueSessionId, queueChatState] = latestMessageQueueArgs();
+    expect(queueSessionId).toBe("draft-session");
+    expect(queueChatState).toBe("thinking");
+    expect(
+      useChatStore.getState().queuedMessageBySession["draft-session"],
+    ).toEqual({ text: "queued from pill" });
+  });
+
+  it("keeps existing non-draft sessions idle so no-project queued sends still drain", () => {
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const [queueSessionId, queueChatState] = latestMessageQueueArgs();
+    expect(queueSessionId).toBe("session-1");
+    expect(queueChatState).toBe("idle");
   });
 
   it("prepares the selected model provider before setting a goose model", async () => {

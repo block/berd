@@ -806,9 +806,11 @@ export function useChatSessionController({
     sendOptions?: ChatSendOptions;
     resolve?: (accepted: boolean) => void;
   } | null>(null);
+  const queueChatState =
+    sessionId && session?.creationState == null ? chatState : "thinking";
   const queue = useMessageQueue(
     stateSessionId,
-    sessionId ? chatState : "thinking",
+    queueChatState,
     sendWithAutoCompact,
   );
 

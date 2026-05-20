@@ -1,8 +1,14 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { useChatStore } from "@/features/chat/stores/chatStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
+
+const mockAcpCreateSession = vi.hoisted(() => vi.fn());
 
 vi.mock("./hooks/useAppStartup", () => ({
   useAppStartup: () => ({ ready: true }),
@@ -19,14 +25,19 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
 vi.mock("@/features/sidebar/ui/Sidebar", () => ({
   Sidebar: ({
     onNavigate,
+    onNewChat,
     onSettingsClick,
     onSettingsSectionChange,
   }: {
     onNavigate?: (view: string) => void;
+    onNewChat?: () => void;
     onSettingsClick?: () => void;
     onSettingsSectionChange?: (section: "providers") => void;
   }) => (
     <nav aria-label="mock sidebar">
+      <button type="button" onClick={onNewChat}>
+        Sidebar new chat
+      </button>
       <button type="button" onClick={() => onNavigate?.("skills")}>
         Sidebar skills
       </button>
@@ -47,6 +58,17 @@ vi.mock("@/features/sidebar/ui/Sidebar", () => ({
       </button>
     </nav>
   ),
+}));
+
+vi.mock("@/shared/api/acp", () => ({
+  acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  discoverAcpProviders: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@/shared/api/pathResolver", () => ({
+  resolvePath: async ({ parts }: { parts: string[] }) => ({
+    path: parts.join("/") || "/tmp",
+  }),
 }));
 
 vi.mock("@/features/updates/ui/UpdateIndicator", () => ({
@@ -99,6 +121,51 @@ vi.mock("./ui/AppShellContent", () => ({
 describe("AppShell global navigation", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/");
+    window.localStorage.clear();
+    mockAcpCreateSession.mockReset();
+    mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    useChatStore.setState({
+      messagesBySession: {},
+      sessionStateById: {},
+      draftsBySession: {},
+      queuedMessageBySession: {},
+      scrollTargetMessageBySession: {},
+      activeSessionId: null,
+      isConnected: true,
+    });
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      hasHydratedSessions: false,
+      isContextPanelOpen: false,
+      activeWorkspaceBySession: {},
+      modelSelectionIntentBySession: {},
+    });
+    useAgentStore.setState({
+      selectedProvider: "goose",
+    });
+    useProjectStore.setState({
+      projects: [],
+      loading: false,
+      activeProjectId: null,
+    });
+  });
+
+  it("starts a full blank chat from the sidebar new chat action", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith("goose", "~", {
+      modelId: undefined,
+      personaId: undefined,
+      projectId: undefined,
+    });
   });
 
   it("goes back and forward through Skills detail subroutes", async () => {
