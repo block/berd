@@ -785,7 +785,6 @@ export const designSystemComponentManifest = [
     cva: [],
     tokenClasses: [
       "[&_svg:not([class*='text-'])]:text-muted-foreground",
-      "bg-background-popover",
       "bg-border",
       "dark:data-[variant=destructive]:focus:bg-background-danger",
       "data-[state=open]:bg-muted",
@@ -797,7 +796,7 @@ export const designSystemComponentManifest = [
       "focus:text-foreground",
       "text-foreground",
       "text-muted-foreground",
-      "text-text-on-popover",
+      "text-popover-foreground",
     ],
     stateClasses: [
       "data-[disabled]:opacity-50",
@@ -831,6 +830,7 @@ export const designSystemComponentManifest = [
       "focus:text-foreground",
       "text-foreground",
       "text-muted-foreground",
+      "text-popover-foreground",
     ],
   },
   {
@@ -902,7 +902,6 @@ export const designSystemComponentManifest = [
     ],
     cva: [],
     tokenClasses: [
-      "bg-background",
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
       "focus-visible:ring-ring-focus",
@@ -923,7 +922,6 @@ export const designSystemComponentManifest = [
       "hover:opacity-100",
     ],
     sourceTokenClasses: [
-      "bg-background",
       "data-[state=open]:bg-muted",
       "data-[state=open]:text-muted-foreground",
       "text-muted-foreground",
@@ -1038,7 +1036,6 @@ export const designSystemComponentManifest = [
     cva: [],
     tokenClasses: [
       "[&_svg:not([class*='text-'])]:text-text-muted",
-      "bg-background-popover",
       "bg-border-default",
       "dark:data-[variant=destructive]:focus:bg-background-danger",
       "data-[state=open]:bg-background-muted",
@@ -1048,8 +1045,8 @@ export const designSystemComponentManifest = [
       "data-[variant=destructive]:text-text-danger",
       "focus:bg-background-muted",
       "focus:text-text-default",
+      "text-text-default",
       "text-text-muted",
-      "text-text-on-popover",
     ],
     stateClasses: [
       "data-[disabled]:opacity-50",
@@ -1398,7 +1395,6 @@ export const designSystemComponentManifest = [
     tokenClasses: [
       "[&_svg:not([class*='text-'])]:text-muted-foreground",
       "bg-background",
-      "bg-background-popover",
       "bg-border",
       "dark:data-[variant=destructive]:focus:bg-background-danger",
       "data-[state=open]:bg-muted",
@@ -1409,7 +1405,7 @@ export const designSystemComponentManifest = [
       "focus:bg-muted",
       "focus:text-foreground",
       "text-muted-foreground",
-      "text-text-on-popover",
+      "text-popover-foreground",
     ],
     stateClasses: [
       "data-[disabled]:opacity-50",
@@ -1443,6 +1439,7 @@ export const designSystemComponentManifest = [
       "focus:bg-muted",
       "focus:text-foreground",
       "text-muted-foreground",
+      "text-popover-foreground",
     ],
   },
   {
@@ -1509,7 +1506,6 @@ export const designSystemComponentManifest = [
     tokenClasses: [
       "[&_svg:not([class*='text-'])]:text-muted-foreground",
       "bg-background",
-      "bg-background-popover",
       "bg-border",
       "data-[active=true]:bg-muted/50",
       "data-[active=true]:focus:bg-muted",
@@ -1522,7 +1518,7 @@ export const designSystemComponentManifest = [
       "group-data-[viewport=false]/navigation-menu:bg-background",
       "group-data-[viewport=false]/navigation-menu:text-foreground",
       "hover:bg-muted",
-      "text-text-on-popover",
+      "text-popover-foreground",
     ],
     stateClasses: [
       "data-[active=true]:bg-muted/50",
@@ -1569,6 +1565,7 @@ export const designSystemComponentManifest = [
       "group-data-[viewport=false]/navigation-menu:bg-background",
       "group-data-[viewport=false]/navigation-menu:text-foreground",
       "hover:bg-muted",
+      "text-popover-foreground",
     ],
   },
   {
@@ -1813,7 +1810,6 @@ export const designSystemComponentManifest = [
       "[&_svg:not([class*='text-'])]:text-text-muted",
       "aria-invalid:border-border-danger",
       "aria-invalid:ring-border-danger/20",
-      "bg-background-popover",
       "bg-border-default",
       "border-border-input",
       "dark:aria-invalid:ring-border-danger/40",
@@ -1824,7 +1820,6 @@ export const designSystemComponentManifest = [
       "focus:text-text-default",
       "text-text-default",
       "text-text-muted",
-      "text-text-on-popover",
     ],
     stateClasses: [
       "aria-invalid:border-border-danger",
@@ -1920,7 +1915,6 @@ export const designSystemComponentManifest = [
     ],
     cva: [],
     tokenClasses: [
-      "bg-background",
       "data-[state=open]:bg-muted",
       "focus-visible:ring-ring-focus",
       "text-foreground",
@@ -1950,7 +1944,6 @@ export const designSystemComponentManifest = [
       "hover:opacity-100",
     ],
     sourceTokenClasses: [
-      "bg-background",
       "data-[state=open]:bg-muted",
       "text-foreground",
       "text-muted-foreground",
@@ -2429,11 +2422,7 @@ export const designSystemComponentManifest = [
       "tooltip-trigger",
     ],
     cva: [],
-    tokenClasses: [
-      "bg-background-primary",
-      "fill-background-primary",
-      "text-text-on-primary",
-    ],
+    tokenClasses: ["bg-primary", "fill-primary", "text-primary-foreground"],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",
@@ -2443,6 +2432,10 @@ export const designSystemComponentManifest = [
       "data-[state=closed]:fade-out-0",
       "data-[state=closed]:zoom-out-95",
     ],
-    sourceTokenClasses: [],
+    sourceTokenClasses: [
+      "bg-primary",
+      "fill-primary",
+      "text-primary-foreground",
+    ],
   },
 ] as const satisfies readonly DesignSystemComponentManifestItem[];
