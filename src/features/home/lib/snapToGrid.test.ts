@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { clampToBounds, GRID_SIZE, snapPoint, snapTo } from "./snapToGrid";
+import {
+  clampToBounds,
+  clampToLayoutConstraints,
+  GRID_SIZE,
+  isLayoutConstraints,
+  snapPoint,
+  snapTo,
+} from "./snapToGrid";
+
+const layoutConstraints = {
+  minCenter: -100,
+  maxCenter: 100,
+  minSize: 1,
+  maxSize: 1000,
+  minZoomBps: 1000,
+  maxZoomBps: 20_000,
+  maxTitleOverrideLength: 120,
+  maxItems: 100,
+};
 
 describe("GRID_SIZE", () => {
   it("is 24px (matches dot-grid spacing)", () => {
@@ -8,29 +26,16 @@ describe("GRID_SIZE", () => {
 });
 
 describe("snapTo", () => {
-  it("snaps 0 to 0", () => {
-    expect(snapTo(0)).toBe(0);
-  });
-
-  it("rounds 11 down to 0 (below midpoint of 24)", () => {
-    expect(snapTo(11)).toBe(0);
-  });
-
-  it("rounds 12 up to 24 (Math.round half-up)", () => {
-    expect(snapTo(12)).toBe(24);
-  });
-
-  it("snaps 47 to 48", () => {
-    expect(snapTo(47)).toBe(48);
-  });
-
-  it("handles negative values", () => {
-    expect(snapTo(-13)).toBe(-24);
-  });
-
-  it("accepts a custom gridSize", () => {
-    expect(snapTo(15, 10)).toBe(20);
-    expect(snapTo(14, 10)).toBe(10);
+  it.each([
+    ["snaps 0 to 0", 0, undefined, 0],
+    ["rounds 11 down below the default midpoint", 11, undefined, 0],
+    ["rounds 12 up at the default midpoint", 12, undefined, 24],
+    ["snaps 47 to 48", 47, undefined, 48],
+    ["handles negative values", -13, undefined, -24],
+    ["rounds 15 up on a custom grid", 15, 10, 20],
+    ["rounds 14 down on a custom grid", 14, 10, 10],
+  ] as const)("%s", (_name, value, gridSize, expected) => {
+    expect(snapTo(value, gridSize)).toBe(expected);
   });
 });
 
@@ -93,5 +98,51 @@ describe("clampToBounds", () => {
         { width: 800, height: 600 },
       ),
     ).toEqual({ x: 100, y: 100 });
+  });
+});
+
+describe("isLayoutConstraints", () => {
+  it("recognizes layout constraints and rejects viewport bounds", () => {
+    expect(isLayoutConstraints(layoutConstraints)).toBe(true);
+    expect(isLayoutConstraints({ width: 800, height: 600 })).toBe(false);
+  });
+
+  it.each([
+    ["minCenter", Number.NaN],
+    ["maxCenter", Number.POSITIVE_INFINITY],
+    ["minZoomBps", Number.NEGATIVE_INFINITY],
+    ["maxZoomBps", "20_000"],
+  ] as const)("rejects malformed %s", (key, value) => {
+    expect(isLayoutConstraints({ ...layoutConstraints, [key]: value })).toBe(
+      false,
+    );
+  });
+});
+
+describe("clampToLayoutConstraints", () => {
+  const constraints = {
+    ...layoutConstraints,
+    minCenter: -120,
+    maxCenter: 240,
+  };
+
+  it("clamps top-left coordinates from center constraints and widget size", () => {
+    expect(
+      clampToLayoutConstraints(
+        { x: -500, y: 500 },
+        { width: 80, height: 120 },
+        constraints,
+      ),
+    ).toEqual({ x: -160, y: 180 });
+  });
+
+  it("leaves a point whose widget center is within constraints unchanged", () => {
+    expect(
+      clampToLayoutConstraints(
+        { x: 24, y: 48 },
+        { width: 80, height: 120 },
+        constraints,
+      ),
+    ).toEqual({ x: 24, y: 48 });
   });
 });

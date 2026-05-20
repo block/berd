@@ -1,6 +1,5 @@
-import type React from "react";
-import { createRef, type ReactNode } from "react";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   WidgetInstance,
@@ -8,49 +7,24 @@ import type {
   WidgetNavigationHandlers,
 } from "../widgets/types";
 import { WidgetFrame } from "./WidgetFrame";
+import type { WidgetFrameGestureHandlers } from "./useWidgetDragSuppression";
 
-type MotionDivProps = React.HTMLAttributes<HTMLDivElement> & {
-  onDragEnd?: (
-    event: MouseEvent | PointerEvent | TouchEvent,
-    info: { offset: { x: number; y: number } },
-  ) => void;
-};
+const clockInstance = {
+  id: "clock-1",
+  type: "clock",
+  x: 20,
+  y: 30,
+  z: 1,
+} satisfies WidgetInstance;
 
-const mocks = vi.hoisted(() => ({
-  motionDivProps: undefined as MotionDivProps | undefined,
-}));
-
-vi.mock("motion/react", async () => {
-  const { forwardRef } = await import("react");
-
-  return {
-    motion: {
-      div: forwardRef<HTMLDivElement, Record<string, unknown>>(
-        (
-          {
-            children,
-            drag: _drag,
-            dragConstraints: _dragConstraints,
-            dragElastic: _dragElastic,
-            dragMomentum: _dragMomentum,
-            initial: _initial,
-            exit: _exit,
-            transition: _transition,
-            ...props
-          },
-          ref,
-        ) => {
-          mocks.motionDivProps = props as typeof mocks.motionDivProps;
-          return (
-            <div ref={ref} data-testid="widget-frame" {...props}>
-              {children as ReactNode}
-            </div>
-          );
-        },
-      ),
-    },
-  };
-});
+const agentPinInstance = {
+  id: "agent-pin-1",
+  type: "agentPin",
+  x: 20,
+  y: 30,
+  z: 1,
+  state: { agentId: "agent-1" },
+} satisfies WidgetInstance;
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
   useAgentStore: (selector: (state: unknown) => unknown) =>
@@ -80,79 +54,64 @@ function mutationHandlers(
 
 function renderWidgetFrame({
   currentMaxZ = 1,
-  getCanvasBounds = () => ({ width: 800, height: 600 }),
-  instance = { id: "clock-1", type: "clock", x: 20, y: 30, z: 1 },
+  instance = clockInstance,
   mutations = mutationHandlers(),
   navigation,
+  shouldIgnoreActivation,
+  gestureHandlers,
+  onVisualLiftReset,
 }: {
   currentMaxZ?: number;
-  getCanvasBounds?: () => { width: number; height: number };
   instance?: WidgetInstance;
   mutations?: WidgetMutationHandlers;
   navigation?: WidgetNavigationHandlers;
+  shouldIgnoreActivation?: () => boolean;
+  gestureHandlers?: Partial<WidgetFrameGestureHandlers>;
+  onVisualLiftReset?: (id: string) => void;
 } = {}) {
-  return render(
+  const result = render(
     <WidgetFrame
       instance={instance}
-      canvasRef={createRef<HTMLDivElement>()}
       currentMaxZ={currentMaxZ}
-      getCanvasBounds={getCanvasBounds}
       mutations={mutations}
+      shouldIgnoreActivation={shouldIgnoreActivation}
+      gestureHandlers={gestureHandlers}
+      onVisualLiftReset={onVisualLiftReset}
       {...navigation}
     />,
   );
+
+  const frame = result.getByRole("group");
+
+  return { ...result, frame };
 }
 
 describe("WidgetFrame", () => {
   beforeEach(() => {
-    mocks.motionDivProps = undefined;
+    vi.clearAllMocks();
   });
 
-  it("moves the widget when a drag ends", () => {
-    const moveWidget = vi.fn();
-    const getCanvasBounds = vi.fn(() => ({ width: 800, height: 600 }));
-
-    renderWidgetFrame({
-      getCanvasBounds,
-      mutations: mutationHandlers({ moveWidget }),
-    });
-
-    act(() => {
-      mocks.motionDivProps?.onDragEnd?.(new MouseEvent("pointerup"), {
-        offset: { x: 12, y: 8 },
-      });
-    });
-
-    expect(moveWidget).toHaveBeenCalledWith("clock-1", 32, 38, {
-      width: 800,
-      height: 600,
-    });
-  });
-
-  it("does not commit z-index changes on pointer down", () => {
+  it("does not lift or commit z-index changes on pointer down", () => {
     const bumpZ = vi.fn();
 
-    renderWidgetFrame({
+    const { frame } = renderWidgetFrame({
       currentMaxZ: 2,
       mutations: mutationHandlers({ bumpZ }),
     });
 
-    const frame = screen.getByTestId("widget-frame");
     fireEvent.pointerDown(frame, { clientX: 20, clientY: 30 });
 
-    expect(frame).toHaveStyle({ zIndex: "3" });
     expect(bumpZ).not.toHaveBeenCalled();
   });
 
   it("commits z-index changes on click after pointer down", () => {
     const bumpZ = vi.fn();
 
-    renderWidgetFrame({
+    const { frame } = renderWidgetFrame({
       currentMaxZ: 2,
       mutations: mutationHandlers({ bumpZ }),
     });
 
-    const frame = screen.getByTestId("widget-frame");
     fireEvent.pointerDown(frame, { clientX: 20, clientY: 30 });
     fireEvent.click(frame);
 
@@ -162,40 +121,59 @@ describe("WidgetFrame", () => {
   it("commits z-index changes when opening the context menu", () => {
     const bumpZ = vi.fn();
 
-    renderWidgetFrame({
+    const { frame } = renderWidgetFrame({
       currentMaxZ: 2,
       mutations: mutationHandlers({ bumpZ }),
     });
 
-    const frame = screen.getByTestId("widget-frame");
-    fireEvent.pointerDown(frame, { clientX: 20, clientY: 30 });
     fireEvent.contextMenu(frame);
 
     expect(bumpZ).toHaveBeenCalledWith("clock-1");
   });
 
   it("renders the context menu above widget frames", () => {
-    renderWidgetFrame();
+    const { frame } = renderWidgetFrame();
 
-    fireEvent.contextMenu(screen.getByTestId("widget-frame"));
+    fireEvent.contextMenu(frame);
 
-    expect(
-      document.querySelector('[data-slot="context-menu-content"]'),
-    ).toHaveClass("z-[1000]");
+    expect(screen.getByRole("menu")).toHaveClass("z-[1000]");
   });
 
   it("resets visual z-index lift when the pointer is canceled", () => {
-    renderWidgetFrame({
-      currentMaxZ: 2,
-    });
+    const onVisualLiftReset = vi.fn();
 
-    const frame = screen.getByTestId("widget-frame");
-    fireEvent.pointerDown(frame, { clientX: 20, clientY: 30 });
-    expect(frame).toHaveStyle({ zIndex: "3" });
+    const { frame } = renderWidgetFrame({
+      currentMaxZ: 2,
+      onVisualLiftReset,
+    });
 
     fireEvent.pointerCancel(frame);
 
-    expect(frame).toHaveStyle({ zIndex: "1" });
+    expect(onVisualLiftReset).toHaveBeenCalledWith("clock-1");
+  });
+
+  it("passes gesture handlers to the frame", () => {
+    const gestureHandlers = {
+      onPointerDownCapture: vi.fn(),
+      onPointerMoveCapture: vi.fn(),
+      onPointerUpCapture: vi.fn(),
+      onPointerCancelCapture: vi.fn(),
+      onClickCapture: vi.fn(),
+    } satisfies Partial<WidgetFrameGestureHandlers>;
+
+    const { frame } = renderWidgetFrame({
+      gestureHandlers,
+    });
+
+    fireEvent.pointerDown(frame, { clientX: 20, clientY: 30 });
+    fireEvent.pointerMove(frame, { clientX: 26, clientY: 30 });
+    fireEvent.pointerUp(frame, { clientX: 26, clientY: 30 });
+    fireEvent.pointerCancel(frame);
+    fireEvent.click(frame);
+
+    for (const handler of Object.values(gestureHandlers)) {
+      expect(handler).toHaveBeenCalled();
+    }
   });
 
   it("preserves widget click activation before committing z-index changes", () => {
@@ -204,14 +182,7 @@ describe("WidgetFrame", () => {
 
     renderWidgetFrame({
       currentMaxZ: 2,
-      instance: {
-        id: "agent-pin-1",
-        type: "agentPin",
-        x: 20,
-        y: 30,
-        z: 1,
-        state: { agentId: "agent-1" },
-      },
+      instance: agentPinInstance,
       mutations: mutationHandlers({ bumpZ }),
       navigation: { onOpenAgent },
     });
@@ -225,50 +196,63 @@ describe("WidgetFrame", () => {
     );
   });
 
-  it("suppresses child widget activation after drag-sized pointer movement", () => {
+  it("suppresses child widget activation when the drag guard is active", () => {
     const onOpenAgent = vi.fn();
 
     renderWidgetFrame({
-      instance: {
-        id: "agent-pin-1",
-        type: "agentPin",
-        x: 20,
-        y: 30,
-        z: 1,
-        state: { agentId: "agent-1" },
-      },
+      instance: agentPinInstance,
       navigation: { onOpenAgent },
+      shouldIgnoreActivation: () => true,
     });
 
-    act(() => {
-      mocks.motionDivProps?.onDragEnd?.(new MouseEvent("pointerup"), {
-        offset: { x: 4, y: 0 },
-      });
-    });
     fireEvent.click(screen.getByRole("button", { name: /agent one/i }));
 
     expect(onOpenAgent).not.toHaveBeenCalled();
   });
 
-  it("commits z-index changes on drag end", () => {
-    const bumpZ = vi.fn();
-    const moveWidget = vi.fn();
+  it("removes the widget from the context menu", async () => {
+    const user = userEvent.setup();
+    const removeWidget = vi.fn();
+    const { frame } = renderWidgetFrame({
+      mutations: mutationHandlers({ removeWidget }),
+    });
+
+    fireEvent.contextMenu(frame);
+    await user.click(screen.getByRole("menuitem", { name: "Remove" }));
+
+    expect(removeWidget).toHaveBeenCalledWith("clock-1");
+  });
+
+  it.each([
+    ["Delete", "{Delete}"],
+    ["Backspace", "{Backspace}"],
+  ])("removes a focused non-interactive widget with %s", async (_, key) => {
+    const user = userEvent.setup();
+    const removeWidget = vi.fn();
+    const { frame } = renderWidgetFrame({
+      mutations: mutationHandlers({ removeWidget }),
+    });
+
+    await user.tab();
+    expect(frame).toHaveFocus();
+
+    await user.keyboard(key);
+
+    expect(removeWidget).toHaveBeenCalledWith("clock-1");
+  });
+
+  it("does not remove an interactive widget when a child control handles keyboard input", async () => {
+    const user = userEvent.setup();
+    const removeWidget = vi.fn();
 
     renderWidgetFrame({
-      currentMaxZ: 2,
-      mutations: mutationHandlers({ bumpZ, moveWidget }),
+      instance: agentPinInstance,
+      mutations: mutationHandlers({ removeWidget }),
     });
 
-    act(() => {
-      mocks.motionDivProps?.onDragEnd?.(new MouseEvent("pointerup"), {
-        offset: { x: 12, y: 8 },
-      });
-    });
+    screen.getByRole("button", { name: /agent one/i }).focus();
+    await user.keyboard("{Delete}");
 
-    expect(bumpZ).toHaveBeenCalledWith("clock-1");
-    expect(moveWidget).toHaveBeenCalledWith("clock-1", 32, 38, {
-      width: 800,
-      height: 600,
-    });
+    expect(removeWidget).not.toHaveBeenCalled();
   });
 });

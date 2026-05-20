@@ -3,8 +3,36 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useWidgetDragSuppression } from "./useWidgetDragSuppression";
 
+const ABOVE_THRESHOLD_OFFSET = { x: 4, y: 0 };
+
 function pointerEvent(clientX: number, clientY: number) {
-  return { clientX, clientY } as React.PointerEvent;
+  return { clientX, clientY } as React.PointerEvent<HTMLDivElement>;
+}
+
+function clickEvent() {
+  return new MouseEvent("click", { bubbles: true, cancelable: true });
+}
+
+function renderSuppressedHook() {
+  const rendered = renderHook(() => useWidgetDragSuppression());
+
+  act(() => {
+    rendered.result.current.suppressClickAfterDrag(ABOVE_THRESHOLD_OFFSET);
+  });
+
+  return rendered;
+}
+
+function renderAfterPointerMove(clientX: number) {
+  const rendered = renderHook(() => useWidgetDragSuppression());
+  const { frameHandlers } = rendered.result.current;
+
+  act(() => {
+    frameHandlers.onPointerDownCapture(pointerEvent(10, 10));
+    frameHandlers.onPointerMoveCapture(pointerEvent(clientX, 10));
+  });
+
+  return rendered;
 }
 
 describe("useWidgetDragSuppression", () => {
@@ -18,49 +46,32 @@ describe("useWidgetDragSuppression", () => {
   });
 
   it("does not suppress activation for movement at the threshold", () => {
-    const { result } = renderHook(() => useWidgetDragSuppression());
+    const { result } = renderAfterPointerMove(13);
 
     act(() => {
-      result.current.handlePointerDownCapture(pointerEvent(10, 10));
-      result.current.handlePointerMoveCapture(pointerEvent(13, 10));
-      result.current.handlePointerUpCapture(pointerEvent(13, 10));
+      result.current.frameHandlers.onPointerUpCapture(pointerEvent(13, 10));
     });
 
     expect(result.current.shouldIgnoreActivation()).toBe(false);
   });
 
   it("suppresses activation for movement above the threshold", () => {
-    const { result } = renderHook(() => useWidgetDragSuppression());
-
-    act(() => {
-      result.current.handlePointerDownCapture(pointerEvent(10, 10));
-      result.current.handlePointerMoveCapture(pointerEvent(14, 10));
-    });
+    const { result } = renderAfterPointerMove(14);
 
     expect(result.current.shouldIgnoreActivation()).toBe(true);
   });
 
   it("suppresses the next click after drag-end offset above the threshold", () => {
-    const { result } = renderHook(() => useWidgetDragSuppression());
-    const clickEvent = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-    });
+    renderSuppressedHook();
+    const event = clickEvent();
 
-    act(() => {
-      result.current.handleDragEnd({ x: 4, y: 0 });
-    });
-    window.dispatchEvent(clickEvent);
+    window.dispatchEvent(event);
 
-    expect(clickEvent.defaultPrevented).toBe(true);
+    expect(event.defaultPrevented).toBe(true);
   });
 
   it("clears suppression after 600ms", () => {
-    const { result } = renderHook(() => useWidgetDragSuppression());
-
-    act(() => {
-      result.current.handleDragEnd({ x: 4, y: 0 });
-    });
+    const { result } = renderSuppressedHook();
     expect(result.current.shouldIgnoreActivation()).toBe(true);
 
     act(() => {
@@ -71,34 +82,23 @@ describe("useWidgetDragSuppression", () => {
   });
 
   it("clears stale suppression when a new pointer interaction starts", () => {
-    const { result } = renderHook(() => useWidgetDragSuppression());
-    const clickEvent = new MouseEvent("click", {
-      bubbles: true,
-      cancelable: true,
-    });
-
-    act(() => {
-      result.current.handleDragEnd({ x: 4, y: 0 });
-    });
+    const { result } = renderSuppressedHook();
     expect(result.current.shouldIgnoreActivation()).toBe(true);
 
     act(() => {
-      result.current.handlePointerDownCapture(pointerEvent(20, 20));
+      result.current.frameHandlers.onPointerDownCapture(pointerEvent(20, 20));
     });
-    window.dispatchEvent(clickEvent);
+    const event = clickEvent();
+    window.dispatchEvent(event);
 
     expect(result.current.shouldIgnoreActivation()).toBe(false);
-    expect(clickEvent.defaultPrevented).toBe(false);
+    expect(event.defaultPrevented).toBe(false);
   });
 
   it("clears timers and listeners on unmount", () => {
     const removeEventListener = vi.spyOn(window, "removeEventListener");
     const clearTimeout = vi.spyOn(window, "clearTimeout");
-    const { result, unmount } = renderHook(() => useWidgetDragSuppression());
-
-    act(() => {
-      result.current.handleDragEnd({ x: 4, y: 0 });
-    });
+    const { unmount } = renderSuppressedHook();
     unmount();
 
     expect(clearTimeout).toHaveBeenCalled();

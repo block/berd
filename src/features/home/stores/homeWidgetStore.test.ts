@@ -1,16 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import type { Layout } from "@/features/layout/api/layout";
+import type { Layout, LayoutCamera } from "@/features/layout/api/layout";
 import {
   getLayout,
   HOME_LAYOUT_ID,
+  saveLayoutCamera,
   saveLayoutItems,
 } from "@/features/layout/api/layout";
 import { HOME_LAYOUT_REPLACE_KINDS } from "../lib/homeLayoutMapper";
+import type { WidgetInstance } from "../widgets/types";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
 } from "./homeWidgetStore";
+import type { HomeWidgetState } from "./homeWidgetRuntime";
+
+type SaveItemsResult = Awaited<ReturnType<typeof saveLayoutItems>>;
+type SaveCameraResult = Awaited<ReturnType<typeof saveLayoutCamera>>;
+type Deferred<T> = {
+  promise: Promise<T>;
+  reject: (reason?: unknown) => void;
+  resolve: (value: T) => void;
+};
 
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
@@ -18,6 +29,7 @@ vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   return {
     ...actual,
     getLayout: vi.fn(),
+    saveLayoutCamera: vi.fn(),
     saveLayoutItems: vi.fn(),
   };
 });
@@ -38,13 +50,25 @@ vi.mock("sonner", () => ({
 
 const CANVAS_BOUNDS = { width: 1200, height: 800 };
 const LEGACY_STORAGE_KEY = "goose-internal:home-widgets";
+const BACKEND_CLOCK_ID = "00000000-0000-0000-0000-000000000001";
+const SAVED_CLOCK_ID = "00000000-0000-0000-0000-000000000002";
+const INITIAL_CAMERA = {
+  centerX: 0,
+  centerY: 0,
+  zoomBps: 10_000,
+} satisfies LayoutCamera;
+const SAVED_CAMERA = {
+  centerX: 120,
+  centerY: -48,
+  zoomBps: 12_500,
+} satisfies LayoutCamera;
 
 function layout(overrides: Partial<Layout> = {}): Layout {
   return {
     layoutId: HOME_LAYOUT_ID,
     itemRevision: 4,
     cameraRevision: 1,
-    camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+    camera: INITIAL_CAMERA,
     constraints: {
       minCenter: -100_000,
       maxCenter: 100_000,
@@ -57,9 +81,9 @@ function layout(overrides: Partial<Layout> = {}): Layout {
     },
     items: [
       {
-        id: "00000000-0000-0000-0000-000000000001",
+        id: BACKEND_CLOCK_ID,
         kind: "clock",
-        targetId: "widget:00000000-0000-0000-0000-000000000001",
+        targetId: `widget:${BACKEND_CLOCK_ID}`,
         centerX: 240,
         centerY: 240,
         width: 240,
@@ -72,12 +96,86 @@ function layout(overrides: Partial<Layout> = {}): Layout {
   };
 }
 
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((promiseResolve) => {
-    resolve = promiseResolve;
+function clockLayoutItem(id: string, centerX: number): Layout["items"][number] {
+  return {
+    ...layout().items[0],
+    id,
+    targetId: `widget:${id}`,
+    centerX,
+    centerY: centerX,
+  };
+}
+
+function clockWidget(overrides: Partial<WidgetInstance> = {}): WidgetInstance {
+  return { id: "w1", type: "clock", x: 0, y: 0, z: 1, ...overrides };
+}
+
+function setReadyHomeState(overrides: Partial<HomeWidgetState> = {}): void {
+  useHomeWidgetStore.setState({
+    instances: [clockWidget()],
+    itemRevision: 4,
+    lastConfirmedLayout: layout(),
+    loadStatus: "ready",
+    ...overrides,
   });
-  return { promise, resolve };
+}
+
+function savedItemsLayout(overrides: Partial<Layout> = {}): Layout {
+  return layout({
+    camera: INITIAL_CAMERA,
+    cameraRevision: 1,
+    itemRevision: 5,
+    items: [clockLayoutItem(SAVED_CLOCK_ID, 360)],
+    ...overrides,
+  });
+}
+
+function savedCameraLayout(overrides: Partial<Layout> = {}): Layout {
+  return layout({
+    camera: SAVED_CAMERA,
+    cameraRevision: 2,
+    ...overrides,
+  });
+}
+
+function beginOverlappingSaves() {
+  const itemSave = deferred<SaveItemsResult>();
+  const cameraSave = deferred<SaveCameraResult>();
+  const confirmed = layout({ camera: INITIAL_CAMERA, cameraRevision: 1 });
+  setReadyHomeState({
+    camera: INITIAL_CAMERA,
+    cameraRevision: 1,
+    constraints: confirmed.constraints,
+    lastConfirmedLayout: confirmed,
+  });
+  vi.mocked(saveLayoutItems).mockReturnValue(itemSave.promise);
+  vi.mocked(saveLayoutCamera).mockReturnValue(cameraSave.promise);
+
+  useHomeWidgetStore.getState().moveWidget("w1", 24, 24, CANVAS_BOUNDS);
+  useHomeWidgetStore.getState().saveCamera(SAVED_CAMERA);
+
+  return { itemSave, cameraSave };
+}
+
+function expectConfirmedSavedCameraAndItem(): void {
+  expect(useHomeWidgetStore.getState().lastConfirmedLayout).toMatchObject({
+    camera: SAVED_CAMERA,
+    cameraRevision: 2,
+    itemRevision: 5,
+  });
+  expect(useHomeWidgetStore.getState().lastConfirmedLayout?.items[0].id).toBe(
+    SAVED_CLOCK_ID,
+  );
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
 }
 
 async function flushMicrotasks() {
@@ -88,6 +186,7 @@ async function flushMicrotasks() {
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
   vi.mocked(getLayout).mockReset();
+  vi.mocked(saveLayoutCamera).mockReset();
   vi.mocked(saveLayoutItems).mockReset();
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
@@ -109,12 +208,21 @@ describe("homeWidgetStore", () => {
 
     expect(getLayout).toHaveBeenCalledWith(HOME_LAYOUT_ID);
     expect(saveLayoutItems).not.toHaveBeenCalled();
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
     expect(useHomeWidgetStore.getState()).toMatchObject({
       loadStatus: "ready",
       itemRevision: 4,
+      cameraRevision: 1,
+      camera: INITIAL_CAMERA,
+      constraints: {
+        minCenter: -100_000,
+        maxCenter: 100_000,
+        minZoomBps: 1_000,
+        maxZoomBps: 20_000,
+      },
     });
     expect(useHomeWidgetStore.getState().instances).toMatchObject([
-      { id: "00000000-0000-0000-0000-000000000001", type: "clock", z: 2 },
+      { id: BACKEND_CLOCK_ID, type: "clock", z: 2 },
     ]);
   });
 
@@ -184,7 +292,7 @@ describe("homeWidgetStore", () => {
 
     expect(localStorage.getItem(LEGACY_STORAGE_KEY)).toBe("stale payload");
     expect(useHomeWidgetStore.getState().instances[0].id).toBe(
-      "00000000-0000-0000-0000-000000000001",
+      BACKEND_CLOCK_ID,
     );
   });
 
@@ -303,20 +411,9 @@ describe("homeWidgetStore", () => {
   });
 
   it("optimistically updates actions and saves with revision and replace kinds", async () => {
-    const pendingSave = deferred<Awaited<ReturnType<typeof saveLayoutItems>>>();
-    useHomeWidgetStore.setState({
-      instances: [
-        {
-          id: "00000000-0000-0000-0000-000000000001",
-          type: "clock",
-          x: 120,
-          y: 120,
-          z: 1,
-        },
-      ],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
+    const pendingSave = deferred<SaveItemsResult>();
+    setReadyHomeState({
+      instances: [clockWidget({ id: BACKEND_CLOCK_ID, x: 120, y: 120 })],
     });
     vi.mocked(saveLayoutItems).mockReturnValue(pendingSave.promise);
 
@@ -376,11 +473,155 @@ describe("homeWidgetStore", () => {
     useHomeWidgetStore.getState().bumpZ("w1");
     useHomeWidgetStore.getState().updateWidgetState("w1", { extra: true });
     useHomeWidgetStore.getState().removeWidget("w1");
+    useHomeWidgetStore
+      .getState()
+      .saveCamera({ centerX: 100, centerY: 100, zoomBps: 12_000 });
 
     expect(useHomeWidgetStore.getState().instances).toEqual([
       { id: "w1", type: "clock", x: 0, y: 0, z: 1 },
     ]);
     expect(saveLayoutItems).not.toHaveBeenCalled();
+    expect(saveLayoutCamera).not.toHaveBeenCalled();
+  });
+
+  it("optimistically saves camera with its own revision", async () => {
+    const pendingSave = deferred<SaveCameraResult>();
+    setReadyHomeState({
+      camera: INITIAL_CAMERA,
+      cameraRevision: 3,
+      constraints: layout().constraints,
+    });
+    vi.mocked(saveLayoutCamera).mockReturnValue(pendingSave.promise);
+
+    useHomeWidgetStore.getState().saveCamera(SAVED_CAMERA);
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      camera: SAVED_CAMERA,
+      cameraSaveStatus: "saving",
+    });
+    expect(saveLayoutCamera).toHaveBeenCalledWith({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: 3,
+      camera: SAVED_CAMERA,
+    });
+
+    pendingSave.resolve({
+      ok: true,
+      layout: layout({
+        cameraRevision: 4,
+        camera: SAVED_CAMERA,
+      }),
+    });
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      cameraRevision: 4,
+      cameraSaveStatus: "idle",
+      camera: SAVED_CAMERA,
+    });
+  });
+
+  it("adopts camera conflict layout without overwriting local item edits", async () => {
+    setReadyHomeState({
+      instances: [clockWidget({ id: "local" })],
+      camera: INITIAL_CAMERA,
+      cameraRevision: 3,
+      constraints: layout().constraints,
+    });
+    vi.mocked(saveLayoutCamera).mockResolvedValue({
+      ok: false,
+      reason: "revisionConflict",
+      layout: layout({
+        cameraRevision: 6,
+        camera: { centerX: 500, centerY: 600, zoomBps: 8_000 },
+      }),
+    });
+
+    useHomeWidgetStore.getState().saveCamera(SAVED_CAMERA);
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      cameraRevision: 6,
+      camera: { centerX: 500, centerY: 600, zoomBps: 8_000 },
+      instances: [{ id: "local", type: "clock", x: 0, y: 0, z: 1 }],
+    });
+    expect(toast.warning).toHaveBeenCalledWith(
+      "home:widgetLayer.toasts.conflict",
+    );
+  });
+
+  it("preserves newer camera after a stale item save response", async () => {
+    const { itemSave, cameraSave } = beginOverlappingSaves();
+
+    cameraSave.resolve({
+      ok: true,
+      layout: savedCameraLayout(),
+    });
+    await flushMicrotasks();
+
+    itemSave.resolve({
+      ok: true,
+      layout: savedItemsLayout(),
+    });
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      camera: SAVED_CAMERA,
+      cameraRevision: 2,
+      itemRevision: 5,
+    });
+    expectConfirmedSavedCameraAndItem();
+  });
+
+  it("merges camera save responses into the confirmed item snapshot", async () => {
+    const { itemSave, cameraSave } = beginOverlappingSaves();
+
+    itemSave.resolve({
+      ok: true,
+      layout: savedItemsLayout(),
+    });
+    await flushMicrotasks();
+
+    cameraSave.resolve({
+      ok: true,
+      layout: savedCameraLayout({ itemRevision: 4 }),
+    });
+    await flushMicrotasks();
+
+    expectConfirmedSavedCameraAndItem();
+  });
+
+  it.each([
+    "conflict",
+    "error",
+  ] as const)("preserves current camera after item save %s while camera save is pending", async (mode) => {
+    const { itemSave, cameraSave } = beginOverlappingSaves();
+
+    if (mode === "conflict") {
+      itemSave.resolve({
+        ok: false,
+        reason: "revisionConflict",
+        layout: savedItemsLayout({ itemRevision: 6, items: layout().items }),
+      });
+    } else {
+      itemSave.reject("write failed");
+    }
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      camera: SAVED_CAMERA,
+      cameraRevision: 1,
+      cameraSaveStatus: "saving",
+    });
+    expect(useHomeWidgetStore.getState().lastConfirmedLayout?.camera).toEqual(
+      SAVED_CAMERA,
+    );
+
+    cameraSave.resolve({
+      ok: true,
+      layout: savedCameraLayout(),
+    });
+    await flushMicrotasks();
   });
 
   it("normalizes z order while bumping the target widget to the top", () => {
@@ -388,15 +629,12 @@ describe("homeWidgetStore", () => {
       ok: true,
       layout: layout({ itemRevision: 5 }),
     });
-    useHomeWidgetStore.setState({
+    setReadyHomeState({
       instances: [
         { id: "a", type: "clock", x: 0, y: 0, z: 500 },
         { id: "b", type: "clock", x: 0, y: 0, z: 20 },
         { id: "c", type: "clock", x: 0, y: 0, z: 1200 },
       ],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
     });
 
     useHomeWidgetStore.getState().bumpZ("b");
@@ -444,20 +682,8 @@ describe("homeWidgetStore", () => {
           .updateWidgetState("w1", { mode: "local" }),
     ],
   ])("does not mutate or save when %s", (_, act) => {
-    useHomeWidgetStore.setState({
-      instances: [
-        {
-          id: "w1",
-          type: "clock",
-          x: 24,
-          y: 24,
-          z: 1,
-          state: { mode: "local" },
-        },
-      ],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
+    setReadyHomeState({
+      instances: [clockWidget({ x: 24, y: 24, state: { mode: "local" } })],
     });
     const before = useHomeWidgetStore.getState().instances;
 
@@ -468,19 +694,14 @@ describe("homeWidgetStore", () => {
   });
 
   it("coalesces queued mutations while a save is in flight", async () => {
-    const firstSave = deferred<Awaited<ReturnType<typeof saveLayoutItems>>>();
+    const firstSave = deferred<SaveItemsResult>();
     vi.mocked(saveLayoutItems)
       .mockReturnValueOnce(firstSave.promise)
       .mockResolvedValue({
         ok: true,
         layout: layout({ itemRevision: 6 }),
       });
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
-    });
+    setReadyHomeState();
 
     useHomeWidgetStore.getState().moveWidget("w1", 24, 24, CANVAS_BOUNDS);
     useHomeWidgetStore.getState().moveWidget("w1", 48, 48, CANVAS_BOUNDS);
@@ -502,12 +723,7 @@ describe("homeWidgetStore", () => {
   });
 
   it("adopts returned backend layout after a successful save", async () => {
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
-    });
+    setReadyHomeState();
     vi.mocked(saveLayoutItems).mockResolvedValue({
       ok: true,
       layout: layout({ itemRevision: 9 }),
@@ -518,18 +734,13 @@ describe("homeWidgetStore", () => {
 
     expect(useHomeWidgetStore.getState().itemRevision).toBe(9);
     expect(useHomeWidgetStore.getState().instances[0].id).toBe(
-      "00000000-0000-0000-0000-000000000001",
+      BACKEND_CLOCK_ID,
     );
   });
 
   it("adopts conflict layout and drops queued local changes", async () => {
     const conflict = layout({ itemRevision: 11 });
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
-    });
+    setReadyHomeState();
     vi.mocked(saveLayoutItems).mockResolvedValue({
       ok: false,
       reason: "revisionConflict",
@@ -546,7 +757,7 @@ describe("homeWidgetStore", () => {
     expect(useHomeWidgetStore.getState().instances).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          id: "00000000-0000-0000-0000-000000000001",
+          id: BACKEND_CLOCK_ID,
         }),
       ]),
     );
@@ -554,11 +765,9 @@ describe("homeWidgetStore", () => {
 
   it("restores last confirmed layout after save error", async () => {
     const confirmed = layout({ itemRevision: 7 });
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
+    setReadyHomeState({
       itemRevision: 7,
       lastConfirmedLayout: confirmed,
-      loadStatus: "ready",
     });
     vi.mocked(saveLayoutItems).mockRejectedValue("write failed");
 
@@ -566,7 +775,7 @@ describe("homeWidgetStore", () => {
     await flushMicrotasks();
 
     expect(useHomeWidgetStore.getState().instances[0].id).toBe(
-      "00000000-0000-0000-0000-000000000001",
+      BACKEND_CLOCK_ID,
     );
     expect(useHomeWidgetStore.getState().itemRevision).toBe(7);
     expect(toast.error).toHaveBeenCalledWith(
@@ -575,11 +784,9 @@ describe("homeWidgetStore", () => {
   });
 
   it("clears saving state after a synchronous save error", async () => {
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
+    setReadyHomeState({
       itemRevision: 7,
       lastConfirmedLayout: layout({ itemRevision: 7 }),
-      loadStatus: "ready",
     });
     vi.mocked(saveLayoutItems).mockImplementation(() => {
       throw new Error("write failed before promise");
@@ -595,16 +802,11 @@ describe("homeWidgetStore", () => {
   });
 
   it("ignores stale in-flight save results after a fresh initialization", async () => {
-    const oldSave = deferred<Awaited<ReturnType<typeof saveLayoutItems>>>();
+    const oldSave = deferred<SaveItemsResult>();
     const freshLayout = layout({ itemRevision: 12 });
     vi.mocked(saveLayoutItems).mockReturnValue(oldSave.promise);
     vi.mocked(getLayout).mockResolvedValue(freshLayout);
-    useHomeWidgetStore.setState({
-      instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
-      itemRevision: 4,
-      lastConfirmedLayout: layout(),
-      loadStatus: "ready",
-    });
+    setReadyHomeState();
 
     useHomeWidgetStore.getState().moveWidget("w1", 96, 96, CANVAS_BOUNDS);
     useHomeWidgetStore.setState({ loadStatus: "error", error: "reload" });
@@ -619,7 +821,7 @@ describe("homeWidgetStore", () => {
 
     expect(useHomeWidgetStore.getState().itemRevision).toBe(12);
     expect(useHomeWidgetStore.getState().instances[0].id).toBe(
-      "00000000-0000-0000-0000-000000000001",
+      BACKEND_CLOCK_ID,
     );
     expect(toast.warning).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();

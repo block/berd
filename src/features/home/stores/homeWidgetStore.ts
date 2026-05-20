@@ -1,8 +1,13 @@
 import { toast } from "sonner";
 import { create, type StoreApi, type UseBoundStore } from "zustand";
+import type {
+  LayoutCamera,
+  LayoutConstraints,
+} from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
-import type { CanvasBounds } from "../widgets/types";
+import { isLayoutConstraints } from "../lib/snapToGrid";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
+import type { CanvasBounds, MoveWidgetOptions } from "../widgets/types";
 import {
   addWidgetMutation,
   bumpZMutation,
@@ -20,6 +25,14 @@ function canMutateWidgets(state: HomeWidgetStore): boolean {
   return state.loadStatus === "ready" && state.itemRevision !== null;
 }
 
+type WidgetPlacementInput = CanvasBounds | LayoutConstraints;
+
+function resolvePlacementBounds(
+  bounds?: WidgetPlacementInput,
+): LayoutConstraints | undefined {
+  return isLayoutConstraints(bounds) ? bounds : undefined;
+}
+
 interface HomeWidgetStore extends HomeWidgetState {
   initialize: () => Promise<void>;
   retryInitialize: () => Promise<void>;
@@ -29,12 +42,19 @@ interface HomeWidgetStore extends HomeWidgetState {
     x: number,
     y: number,
     state?: Record<string, unknown>,
-    bounds?: CanvasBounds,
+    bounds?: WidgetPlacementInput,
   ) => void;
-  moveWidget: (id: string, x: number, y: number, bounds?: CanvasBounds) => void;
+  moveWidget: (
+    id: string,
+    x: number,
+    y: number,
+    bounds?: WidgetPlacementInput,
+    options?: MoveWidgetOptions,
+  ) => void;
   bumpZ: (id: string) => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (id: string, state: Record<string, unknown>) => void;
+  saveCamera: (camera: LayoutCamera) => void;
 }
 
 function createHomeWidgetStore() {
@@ -89,13 +109,20 @@ function createHomeWidgetStore() {
             x,
             y,
             state,
-            bounds,
+            bounds: resolvePlacementBounds(bounds),
           });
         });
       },
-      moveWidget: (id, x, y, bounds) => {
+      moveWidget: (id, x, y, bounds, options) => {
         applyMutation((instances) =>
-          moveWidgetMutation(instances, id, x, y, bounds),
+          moveWidgetMutation(
+            instances,
+            id,
+            x,
+            y,
+            resolvePlacementBounds(bounds),
+            options,
+          ),
         );
       },
       bumpZ: (id) => {
@@ -108,6 +135,15 @@ function createHomeWidgetStore() {
         applyMutation((instances) =>
           updateWidgetStateMutation(instances, id, state),
         );
+      },
+      saveCamera: (camera) => {
+        const state = get();
+        if (state.loadStatus !== "ready" || state.cameraRevision === null) {
+          return;
+        }
+
+        set({ camera });
+        runtime.enqueueCameraSave(camera);
       },
     };
   });

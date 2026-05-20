@@ -1,73 +1,19 @@
-import type { MouseEventHandler, PointerEventHandler } from "react";
-import { useCallback, useMemo, useRef } from "react";
-
-const DRAG_ACTIVATION_THRESHOLD = 3;
-
-type Point = { x: number; y: number };
-type ActivationMovementEvent = { clientX: number; clientY: number };
-type ActivationPointerHandlers = {
-  onPointerDown: PointerEventHandler<HTMLButtonElement>;
-  onPointerMove: PointerEventHandler<HTMLButtonElement>;
-  onPointerUp: PointerEventHandler<HTMLButtonElement>;
-  onPointerCancel: PointerEventHandler<HTMLButtonElement>;
-  onMouseDown: MouseEventHandler<HTMLButtonElement>;
-  onMouseMove: MouseEventHandler<HTMLButtonElement>;
-  onMouseUp: MouseEventHandler<HTMLButtonElement>;
-};
+import type { MouseEventHandler } from "react";
+import { useCallback } from "react";
 
 export function useWidgetActivationGuard(
-  shouldIgnoreParentActivation: () => boolean,
-) {
-  const pointerStartRef = useRef<Point | null>(null);
-  const movedRef = useRef(false);
+  shouldIgnoreParentActivation: (() => boolean) | undefined,
+  onActivate: () => void,
+): MouseEventHandler<HTMLButtonElement> {
+  return useCallback(
+    (event) => {
+      if (shouldIgnoreParentActivation?.()) {
+        event.preventDefault();
+        return;
+      }
 
-  const markMovedIfNeeded = useCallback((event: ActivationMovementEvent) => {
-    const start = pointerStartRef.current;
-    if (!start || movedRef.current) return;
-    if (
-      Math.abs(event.clientX - start.x) > DRAG_ACTIVATION_THRESHOLD ||
-      Math.abs(event.clientY - start.y) > DRAG_ACTIVATION_THRESHOLD
-    ) {
-      movedRef.current = true;
-    }
-  }, []);
-
-  const pointerHandlers = useMemo<ActivationPointerHandlers>(
-    () => ({
-      onPointerDown: (event) => {
-        movedRef.current = false;
-        pointerStartRef.current = { x: event.clientX, y: event.clientY };
-      },
-      onPointerMove: markMovedIfNeeded,
-      onPointerUp: (event) => {
-        markMovedIfNeeded(event);
-        pointerStartRef.current = null;
-      },
-      onPointerCancel: () => {
-        movedRef.current = false;
-        pointerStartRef.current = null;
-      },
-      onMouseDown: (event) => {
-        movedRef.current = false;
-        pointerStartRef.current = { x: event.clientX, y: event.clientY };
-      },
-      onMouseMove: markMovedIfNeeded,
-      onMouseUp: (event) => {
-        markMovedIfNeeded(event);
-        pointerStartRef.current = null;
-      },
-    }),
-    [markMovedIfNeeded],
+      onActivate();
+    },
+    [onActivate, shouldIgnoreParentActivation],
   );
-
-  const shouldIgnoreActivation = useCallback(
-    () => movedRef.current || shouldIgnoreParentActivation(),
-    [shouldIgnoreParentActivation],
-  );
-
-  const clearIgnoredActivation = useCallback(() => {
-    movedRef.current = false;
-  }, []);
-
-  return { pointerHandlers, shouldIgnoreActivation, clearIgnoredActivation };
 }

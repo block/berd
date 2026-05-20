@@ -41,22 +41,14 @@ export function ChatPinWidget({
 
   const session = resolveSession(visibleSessions, getSessionId(instance.state));
   const title = session?.title ?? t("widgets.chatPin.emptyTitle");
-  const activationGuard = useWidgetActivationGuard(
-    shouldIgnoreActivation ?? (() => false),
-  );
+  const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
+    if (session) onSelectSession?.(session.id);
+  });
 
   return (
     <button
       type="button"
-      {...activationGuard.pointerHandlers}
-      onClick={(event) => {
-        if (activationGuard.shouldIgnoreActivation()) {
-          event.preventDefault();
-          activationGuard.clearIgnoredActivation();
-          return;
-        }
-        if (session) onSelectSession?.(session.id);
-      }}
+      onClick={handleClick}
       aria-label={t("widgets.chatPin.openAria", { title })}
       className="flex h-full w-full flex-col rounded-card-chat border border-border-soft bg-surface-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-surface-tile cursor-pointer"
     >

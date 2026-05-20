@@ -1,10 +1,15 @@
 import type React from "react";
+import type { LayoutConstraints } from "@/features/layout/api/layout";
 
 export type WidgetCategory = "clock" | "agent" | "chat" | "automation";
 
 export interface CanvasBounds {
   width: number;
   height: number;
+}
+
+export interface MoveWidgetOptions {
+  bringToFront?: boolean;
 }
 
 export interface WidgetSize {
@@ -55,9 +60,15 @@ export interface WidgetMutationHandlers {
     x: number,
     y: number,
     state?: Record<string, unknown>,
-    bounds?: CanvasBounds,
+    bounds?: LayoutConstraints,
   ) => void;
-  moveWidget: (id: string, x: number, y: number, bounds?: CanvasBounds) => void;
+  moveWidget: (
+    id: string,
+    x: number,
+    y: number,
+    bounds?: LayoutConstraints,
+    options?: MoveWidgetOptions,
+  ) => void;
   bumpZ: (id: string) => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (id: string, state: Record<string, unknown>) => void;

@@ -22,8 +22,6 @@ function getAutomationId(
 }
 
 /**
- * Derive the card state from an AutomationTile.
- *
  * ACP gap (Tuesday Matt/Kalvin list): latestRunStatus can be "failed" but
  * there is currently no structured error message surfaced on AutomationTile.
  * We fall back to the empty-output i18n string until that field is added.
@@ -84,7 +82,6 @@ export function AutomationOutputWidget({
   const { t } = useTranslation("home");
   const automationId = getAutomationId(instance.state);
 
-  // Try single tile first; fall back to list if no id
   const tileQuery = useQuery<GetAutomationTileResponse>({
     queryKey: ["automation-tile", automationId],
     queryFn: () =>
@@ -108,9 +105,9 @@ export function AutomationOutputWidget({
       ? listQuery.data?.find((t) => t.id === automationId)
       : listQuery.data?.[0]);
 
-  const activationGuard = useWidgetActivationGuard(
-    shouldIgnoreActivation ?? (() => false),
-  );
+  const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
+    if (tile?.id) onOpenAutomation?.(tile.id);
+  });
 
   if (!tile) {
     return (
@@ -133,19 +130,10 @@ export function AutomationOutputWidget({
   return (
     <button
       type="button"
-      {...activationGuard.pointerHandlers}
-      onClick={(event) => {
-        if (activationGuard.shouldIgnoreActivation()) {
-          event.preventDefault();
-          activationGuard.clearIgnoredActivation();
-          return;
-        }
-        if (tile.id) onOpenAutomation?.(tile.id);
-      }}
+      onClick={handleClick}
       aria-label={title}
       className="flex h-full w-full flex-col rounded-card bg-surface-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-surface-tile cursor-pointer"
     >
-      {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
           <IconBolt
@@ -157,7 +145,6 @@ export function AutomationOutputWidget({
         <StatusDot state={cardState} />
       </div>
 
-      {/* Body */}
       <div className="mt-2 flex-1 min-h-0">
         {cardState === "failed" && (
           <p className="mb-1 text-[13px] italic text-muted-foreground line-clamp-1">
@@ -184,7 +171,6 @@ export function AutomationOutputWidget({
         )}
       </div>
 
-      {/* Footer */}
       <div className="mt-auto flex items-center justify-between gap-2 text-[13px] text-muted-foreground pt-2">
         <AutomationActivityLabel status={runStatus} timestamp={lastRunAt} />
         <StatusChip state={cardState} />

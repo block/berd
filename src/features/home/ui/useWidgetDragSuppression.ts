@@ -1,27 +1,33 @@
 import type React from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import {
+  eventClientPoint,
+  movedBeyondWidgetDragThreshold,
+  offsetBetween,
+  type WidgetGesturePoint,
+} from "../lib/widgetGesture";
 
-const DRAG_SUPPRESSION_THRESHOLD_PX = 3;
 const CLICK_SUPPRESSION_DURATION_MS = 600;
 
-function movedBeyondThreshold(offset: { x: number; y: number }): boolean {
-  return (
-    Math.abs(offset.x) > DRAG_SUPPRESSION_THRESHOLD_PX ||
-    Math.abs(offset.y) > DRAG_SUPPRESSION_THRESHOLD_PX
-  );
+export interface WidgetFrameGestureHandlers {
+  onPointerDownCapture: React.PointerEventHandler<HTMLElement>;
+  onPointerMoveCapture: React.PointerEventHandler<HTMLElement>;
+  onPointerUpCapture: React.PointerEventHandler<HTMLElement>;
+  onPointerCancelCapture: React.PointerEventHandler<HTMLElement>;
+  onClickCapture: React.MouseEventHandler<HTMLElement>;
 }
 
 export function useWidgetDragSuppression() {
   const suppressClickRef = useRef(false);
   const clickSuppressionTimerRef = useRef<number | null>(null);
   const removeClickBlockerRef = useRef<(() => void) | null>(null);
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerStartRef = useRef<WidgetGesturePoint | null>(null);
   const didDragRef = useRef(false);
 
   const clearSuppression = useCallback(() => {
     suppressClickRef.current = false;
     didDragRef.current = false;
-    if (clickSuppressionTimerRef.current) {
+    if (clickSuppressionTimerRef.current !== null) {
       window.clearTimeout(clickSuppressionTimerRef.current);
       clickSuppressionTimerRef.current = null;
     }
@@ -57,7 +63,7 @@ export function useWidgetDragSuppression() {
     suppressClickRef.current = true;
     blockNextClick();
 
-    if (clickSuppressionTimerRef.current) {
+    if (clickSuppressionTimerRef.current !== null) {
       window.clearTimeout(clickSuppressionTimerRef.current);
     }
 
@@ -71,27 +77,24 @@ export function useWidgetDragSuppression() {
     [],
   );
 
-  const handleDragStart = useCallback(() => {
+  const markDragged = useCallback(() => {
+    didDragRef.current = true;
     suppressClickBriefly();
   }, [suppressClickBriefly]);
 
-  const handleDragEnd = useCallback(
-    (offset: { x: number; y: number }) => {
-      if (movedBeyondThreshold(offset)) {
-        didDragRef.current = true;
-        suppressClickBriefly();
+  const suppressClickAfterDrag = useCallback(
+    (offset: WidgetGesturePoint) => {
+      if (movedBeyondWidgetDragThreshold(offset)) {
+        markDragged();
       }
     },
-    [suppressClickBriefly],
+    [markDragged],
   );
 
   const handlePointerDownCapture = useCallback(
     (event: React.PointerEvent) => {
       clearSuppression();
-      pointerStartRef.current = {
-        x: event.clientX,
-        y: event.clientY,
-      };
+      pointerStartRef.current = eventClientPoint(event);
     },
     [clearSuppression],
   );
@@ -103,17 +106,9 @@ export function useWidgetDragSuppression() {
         return;
       }
 
-      if (
-        movedBeyondThreshold({
-          x: event.clientX - start.x,
-          y: event.clientY - start.y,
-        })
-      ) {
-        didDragRef.current = true;
-        suppressClickBriefly();
-      }
+      suppressClickAfterDrag(offsetBetween(eventClientPoint(event), start));
     },
-    [suppressClickBriefly],
+    [suppressClickAfterDrag],
   );
 
   const handlePointerUpCapture = useCallback(
@@ -124,19 +119,19 @@ export function useWidgetDragSuppression() {
         return;
       }
 
-      if (
-        didDragRef.current ||
-        movedBeyondThreshold({
-          x: event.clientX - start.x,
-          y: event.clientY - start.y,
-        })
-      ) {
-        didDragRef.current = true;
-        suppressClickBriefly();
+      if (didDragRef.current) {
+        markDragged();
+        return;
       }
+
+      suppressClickAfterDrag(offsetBetween(eventClientPoint(event), start));
     },
-    [suppressClickBriefly],
+    [markDragged, suppressClickAfterDrag],
   );
+
+  const handlePointerCancelCapture = useCallback(() => {
+    pointerStartRef.current = null;
+  }, []);
 
   const handleClickCapture = useCallback((event: React.MouseEvent) => {
     if (!suppressClickRef.current) {
@@ -147,6 +142,23 @@ export function useWidgetDragSuppression() {
     event.stopPropagation();
   }, []);
 
+  const frameHandlers = useMemo<WidgetFrameGestureHandlers>(
+    () => ({
+      onPointerDownCapture: handlePointerDownCapture,
+      onPointerMoveCapture: handlePointerMoveCapture,
+      onPointerUpCapture: handlePointerUpCapture,
+      onPointerCancelCapture: handlePointerCancelCapture,
+      onClickCapture: handleClickCapture,
+    }),
+    [
+      handleClickCapture,
+      handlePointerCancelCapture,
+      handlePointerDownCapture,
+      handlePointerMoveCapture,
+      handlePointerUpCapture,
+    ],
+  );
+
   useEffect(
     () => () => {
       clearSuppression();
@@ -156,11 +168,7 @@ export function useWidgetDragSuppression() {
 
   return {
     shouldIgnoreActivation,
-    handleDragStart,
-    handleDragEnd,
-    handlePointerDownCapture,
-    handlePointerMoveCapture,
-    handlePointerUpCapture,
-    handleClickCapture,
+    suppressClickAfterDrag,
+    frameHandlers,
   };
 }

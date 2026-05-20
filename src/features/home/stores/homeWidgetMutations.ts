@@ -1,6 +1,11 @@
-import { clampToBounds, snapPoint } from "../lib/snapToGrid";
+import type { LayoutConstraints } from "@/features/layout/api/layout";
+import {
+  clampToLayoutConstraints,
+  isLayoutConstraints,
+  snapPoint,
+} from "../lib/snapToGrid";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
-import type { CanvasBounds, WidgetInstance } from "../widgets/types";
+import type { MoveWidgetOptions, WidgetInstance } from "../widgets/types";
 
 type AddWidgetOptions = {
   id: string;
@@ -8,42 +13,54 @@ type AddWidgetOptions = {
   x: number;
   y: number;
   state?: Record<string, unknown>;
-  bounds?: CanvasBounds;
+  bounds?: LayoutConstraints;
 };
 
 function maxZ(instances: WidgetInstance[]): number {
   return instances.reduce((max, instance) => Math.max(max, instance.z), 0);
 }
 
-function normalizeZOrder(
+function normalizedZById(
   instances: WidgetInstance[],
   topWidgetId: string,
+): Map<string, number> {
+  return new Map(
+    [...instances]
+      .sort((left, right) => {
+        if (left.id === topWidgetId) {
+          return 1;
+        }
+        if (right.id === topWidgetId) {
+          return -1;
+        }
+        return left.z - right.z;
+      })
+      .map((instance, index) => [instance.id, index + 1] as const),
+  );
+}
+
+function applyNormalizedZOrder(
+  instances: WidgetInstance[],
+  zById: Map<string, number>,
 ): WidgetInstance[] {
-  return [...instances]
-    .sort((left, right) => {
-      if (left.id === topWidgetId) {
-        return 1;
-      }
-      if (right.id === topWidgetId) {
-        return -1;
-      }
-      return left.z - right.z;
-    })
-    .map((instance, index) => ({ ...instance, z: index + 1 }));
+  return instances.map((instance) => ({
+    ...instance,
+    z: zById.get(instance.id) ?? instance.z,
+  }));
 }
 
 function resolvePosition(
   type: string,
   x: number,
   y: number,
-  bounds?: CanvasBounds,
+  bounds?: LayoutConstraints,
 ): { x: number; y: number } {
   const entry = HOME_WIDGET_CATALOG_BY_ID[type];
   const snapped = snapPoint({ x, y });
-  if (!entry || !bounds) {
+  if (!entry || !isLayoutConstraints(bounds)) {
     return snapped;
   }
-  return clampToBounds(snapped, entry.defaultSize, bounds);
+  return clampToLayoutConstraints(snapped, entry.defaultSize, bounds);
 }
 
 function isStateMergeNoop(
@@ -92,7 +109,8 @@ export function moveWidgetMutation(
   id: string,
   x: number,
   y: number,
-  bounds?: CanvasBounds,
+  bounds?: LayoutConstraints,
+  options: MoveWidgetOptions = {},
 ): WidgetInstance[] | null {
   const target = instances.find((instance) => instance.id === id);
   if (!target) {
@@ -100,13 +118,27 @@ export function moveWidgetMutation(
   }
 
   const position = resolvePosition(target.type, x, y, bounds);
-  if (target.x === position.x && target.y === position.y) {
+  const moved = target.x !== position.x || target.y !== position.y;
+  const nextInstances = moved
+    ? instances.map((instance) =>
+        instance.id === id ? { ...instance, ...position } : instance,
+      )
+    : instances;
+
+  if (!options.bringToFront) {
+    return moved ? nextInstances : null;
+  }
+
+  const zById = normalizedZById(nextInstances, id);
+  const next = applyNormalizedZOrder(nextInstances, zById);
+  if (
+    !moved &&
+    next.every((instance, index) => instance.z === nextInstances[index]?.z)
+  ) {
     return null;
   }
 
-  return instances.map((instance) =>
-    instance.id === id ? { ...instance, ...position } : instance,
-  );
+  return next;
 }
 
 export function bumpZMutation(
@@ -117,14 +149,7 @@ export function bumpZMutation(
     return null;
   }
 
-  const zById = new Map(
-    normalizeZOrder(instances, id).map((instance) => [instance.id, instance.z]),
-  );
-
-  return instances.map((instance) => ({
-    ...instance,
-    z: zById.get(instance.id) ?? instance.z,
-  }));
+  return applyNormalizedZOrder(instances, normalizedZById(instances, id));
 }
 
 export function removeWidgetMutation(

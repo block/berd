@@ -17,15 +17,6 @@ interface WidgetPickerProps {
   onSelect: (type: string, state?: Record<string, unknown>) => void;
 }
 
-/**
- * WidgetPicker — anchored popover that lets users pick a widget type to place.
- *
- * Only shows catalog entries that have a `Component` set. In post-Task-C state
- * all 4 entries will appear; today only `clock` is visible.
- *
- * UX: primary list shows categories; hovering/focusing one expands an inline
- * sub-panel listing the entries in that category.
- */
 export function WidgetPicker({
   open,
   x,
@@ -38,7 +29,6 @@ export function WidgetPicker({
     null,
   );
 
-  // Filter to entries that have a Component (prevents placing stub widgets).
   const entriesByCategory = useMemo(
     () =>
       Object.fromEntries(
@@ -52,7 +42,6 @@ export function WidgetPicker({
     [],
   );
 
-  // Only show categories that have at least one renderable entry.
   const visibleCategories = useMemo(
     () =>
       HOME_WIDGET_CATEGORIES.filter(
@@ -84,11 +73,13 @@ export function WidgetPicker({
         align="start"
         side="right"
         sideOffset={10}
+        onPointerDownCapture={(event) => event.stopPropagation()}
+        onDoubleClickCapture={(event) => event.stopPropagation()}
+        onWheelCapture={(event) => event.stopPropagation()}
         onOpenAutoFocus={(event) => event.preventDefault()}
         className="w-36 overflow-visible rounded-chrome border border-border-soft bg-surface-chrome p-1.5 text-foreground backdrop-blur-md"
       >
         <div className="relative">
-          {/* Category list */}
           <div className="space-y-0.5">
             {visibleCategories.map((category) => (
               <button
@@ -112,7 +103,6 @@ export function WidgetPicker({
             ))}
           </div>
 
-          {/* Sub-panel — entries for the active category */}
           {activeCategory !== null &&
           entriesByCategory[activeCategory].length > 0 ? (
             <div

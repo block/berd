@@ -2,8 +2,11 @@ import { toast } from "sonner";
 import {
   getLayout,
   HOME_LAYOUT_ID,
+  saveLayoutCamera,
   saveLayoutItems,
   type Layout,
+  type LayoutCamera,
+  type LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import {
@@ -23,12 +26,31 @@ export type HomeWidgetState = {
   saveStatus: SaveStatus;
   error: string | null;
   itemRevision: number | null;
+  camera: LayoutCamera | null;
+  cameraRevision: number | null;
+  constraints: LayoutConstraints | null;
+  cameraSaveStatus: SaveStatus;
   lastConfirmedLayout: Layout | null;
 };
 
 type StatePatch =
   | Partial<HomeWidgetState>
   | ((state: HomeWidgetState) => Partial<HomeWidgetState>);
+
+type LayoutState = Pick<
+  HomeWidgetState,
+  | "instances"
+  | "itemRevision"
+  | "camera"
+  | "cameraRevision"
+  | "constraints"
+  | "lastConfirmedLayout"
+>;
+
+type CameraState = Pick<
+  HomeWidgetState,
+  "camera" | "cameraRevision" | "constraints" | "lastConfirmedLayout"
+>;
 
 type HomeWidgetRuntimeOptions = {
   getState: () => HomeWidgetState;
@@ -39,8 +61,11 @@ type RuntimeState = {
   generation: number;
   initializePromise: Promise<void> | null;
   queuedInstances: WidgetInstance[] | null;
+  queuedCamera: LayoutCamera | null;
   saveLoopPromise: Promise<void> | null;
   saveLoopGeneration: number | null;
+  cameraSaveLoopPromise: Promise<void> | null;
+  cameraSaveLoopGeneration: number | null;
 };
 
 export const MAX_STARTUP_ATTEMPTS = 3;
@@ -51,6 +76,10 @@ export const initialHomeWidgetState = {
   saveStatus: "idle",
   error: null,
   itemRevision: null,
+  camera: null,
+  cameraRevision: null,
+  constraints: null,
+  cameraSaveStatus: "idle",
   lastConfirmedLayout: null,
 } satisfies HomeWidgetState;
 
@@ -73,14 +102,52 @@ function formatErrorDetails(error: unknown): string {
   return String(error);
 }
 
-function adoptLayout(
-  layout: Layout,
-): Pick<HomeWidgetState, "instances" | "itemRevision" | "lastConfirmedLayout"> {
+function adoptLayout(layout: Layout): LayoutState {
   return {
     instances: layoutItemsToHomeWidgets(layout.items),
     itemRevision: layout.itemRevision,
+    camera: layout.camera,
+    cameraRevision: layout.cameraRevision,
+    constraints: layout.constraints,
     lastConfirmedLayout: layout,
   };
+}
+
+function adoptLayoutCamera(
+  layout: Layout,
+  current: HomeWidgetState,
+): CameraState {
+  return {
+    camera: layout.camera,
+    cameraRevision: layout.cameraRevision,
+    constraints: layout.constraints,
+    lastConfirmedLayout: {
+      ...(current.lastConfirmedLayout ?? layout),
+      camera: layout.camera,
+      cameraRevision: layout.cameraRevision,
+      constraints: layout.constraints,
+    },
+  };
+}
+
+function adoptLayoutItems(
+  layout: Layout,
+  current: HomeWidgetState,
+  preserveCurrentCamera: boolean,
+): LayoutState {
+  if (
+    preserveCurrentCamera &&
+    current.camera !== null &&
+    current.cameraRevision !== null
+  ) {
+    return adoptLayout({
+      ...layout,
+      camera: current.camera,
+      cameraRevision: current.cameraRevision,
+    });
+  }
+
+  return adoptLayout(layout);
 }
 
 export function createHomeWidgetRuntime({
@@ -91,9 +158,36 @@ export function createHomeWidgetRuntime({
     generation: 0,
     initializePromise: null,
     queuedInstances: null,
+    queuedCamera: null,
     saveLoopPromise: null,
     saveLoopGeneration: null,
+    cameraSaveLoopPromise: null,
+    cameraSaveLoopGeneration: null,
   };
+
+  function shouldPreserveCurrentCamera(
+    current: HomeWidgetState,
+    layout: Layout,
+  ): boolean {
+    return (
+      current.camera !== null &&
+      current.cameraRevision !== null &&
+      (runtime.queuedCamera !== null ||
+        runtime.cameraSaveLoopPromise !== null ||
+        current.cameraRevision > layout.cameraRevision)
+    );
+  }
+
+  function adoptSavedItems(
+    layout: Layout,
+    current: HomeWidgetState,
+  ): LayoutState {
+    return adoptLayoutItems(
+      layout,
+      current,
+      shouldPreserveCurrentCamera(current, layout),
+    );
+  }
 
   function setReadyLayout(layout: Layout, generation: number): void {
     if (generation !== runtime.generation) {
@@ -167,6 +261,7 @@ export function createHomeWidgetRuntime({
 
     runtime.generation += 1;
     runtime.queuedInstances = null;
+    runtime.queuedCamera = null;
     const generation = runtime.generation;
 
     setState({
@@ -228,20 +323,19 @@ export function createHomeWidgetRuntime({
 
             if (!result.ok) {
               runtime.queuedInstances = null;
-              setState({
-                ...adoptLayout(result.layout),
+              setState((current) => ({
+                ...adoptSavedItems(result.layout, current),
                 error: null,
-              });
+              }));
               toast.warning(i18n.t("home:widgetLayer.toasts.conflict"));
               break;
             }
 
-            const confirmed = adoptLayout(result.layout);
             setState((current) => ({
-              ...confirmed,
+              ...adoptSavedItems(result.layout, current),
               instances: runtime.queuedInstances
                 ? current.instances
-                : confirmed.instances,
+                : layoutItemsToHomeWidgets(result.layout.items),
               error: null,
             }));
           } catch {
@@ -249,12 +343,13 @@ export function createHomeWidgetRuntime({
               break;
             }
 
-            const { lastConfirmedLayout } = getState();
             runtime.queuedInstances = null;
-            setState({
-              ...(lastConfirmedLayout ? adoptLayout(lastConfirmedLayout) : {}),
+            setState((current) => ({
+              ...(current.lastConfirmedLayout
+                ? adoptSavedItems(current.lastConfirmedLayout, current)
+                : {}),
               error: null,
-            });
+            }));
             toast.error(i18n.t("home:widgetLayer.toasts.saveFailed"));
             break;
           }
@@ -280,14 +375,99 @@ export function createHomeWidgetRuntime({
     void drainSaveQueue();
   }
 
+  async function drainCameraSaveQueue(): Promise<void> {
+    const generation = runtime.generation;
+    if (
+      runtime.cameraSaveLoopPromise &&
+      runtime.cameraSaveLoopGeneration === generation
+    ) {
+      return runtime.cameraSaveLoopPromise;
+    }
+
+    runtime.cameraSaveLoopGeneration = generation;
+
+    const loopPromise = (async () => {
+      setState({ cameraSaveStatus: "saving" });
+      try {
+        while (runtime.queuedCamera) {
+          const camera = runtime.queuedCamera;
+          runtime.queuedCamera = null;
+          const expectedRevision = getState().cameraRevision;
+          if (expectedRevision === null) {
+            continue;
+          }
+
+          try {
+            const result = await saveLayoutCamera({
+              layoutId: HOME_LAYOUT_ID,
+              expectedRevision,
+              camera,
+            });
+
+            if (generation !== runtime.generation) {
+              break;
+            }
+
+            if (!result.ok) {
+              runtime.queuedCamera = null;
+              setState((current) => ({
+                ...adoptLayoutCamera(result.layout, current),
+                error: null,
+              }));
+              toast.warning(i18n.t("home:widgetLayer.toasts.conflict"));
+              break;
+            }
+
+            setState((current) => ({
+              ...adoptLayoutCamera(result.layout, current),
+              camera: runtime.queuedCamera
+                ? current.camera
+                : result.layout.camera,
+              error: null,
+            }));
+          } catch {
+            if (generation !== runtime.generation) {
+              break;
+            }
+
+            runtime.queuedCamera = null;
+            setState({ error: null });
+            toast.error(i18n.t("home:widgetLayer.toasts.saveFailed"));
+            break;
+          }
+        }
+      } finally {
+        if (
+          generation === runtime.generation &&
+          runtime.cameraSaveLoopGeneration === generation
+        ) {
+          runtime.cameraSaveLoopPromise = null;
+          runtime.cameraSaveLoopGeneration = null;
+          setState({ cameraSaveStatus: "idle" });
+        }
+      }
+    })();
+
+    runtime.cameraSaveLoopPromise = loopPromise;
+    return loopPromise;
+  }
+
+  function enqueueCameraSave(camera: LayoutCamera): void {
+    runtime.queuedCamera = camera;
+    void drainCameraSaveQueue();
+  }
+
   function __resetForTests__(): void {
     // Callers awaiting an in-flight initialize may receive a resolved promise
     // without any state change after reset advances the active generation.
     runtime.generation += 1;
     runtime.initializePromise = null;
     runtime.queuedInstances = null;
+    runtime.queuedCamera = null;
     runtime.saveLoopPromise = null;
     runtime.saveLoopGeneration = null;
+    runtime.cameraSaveLoopPromise = null;
+    runtime.cameraSaveLoopGeneration = null;
     setState(initialHomeWidgetState);
   }
 
@@ -295,6 +475,7 @@ export function createHomeWidgetRuntime({
     initialize,
     retryInitialize,
     enqueueSave,
+    enqueueCameraSave,
     __resetForTests__,
   };
 }
