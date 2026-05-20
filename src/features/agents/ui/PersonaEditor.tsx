@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, Check, Copy, Trash2 } from "lucide-react";
 import {
@@ -55,18 +55,21 @@ interface PersonaEditorProps {
   isPending?: boolean;
 }
 
-// Shared visual constants for create/edit sheets. Mirrored in SkillEditor —
-// extract to a shared primitive once a third surface adopts the IA.
-const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
-const HERO_HEIGHT_CLASS = "h-[280px]";
-const PILL_INPUT_CLASS =
-  "h-10 rounded-full border-none bg-surface-overlay px-4 text-sm";
+const AGENT_PANEL_COLOR = "#d9d9d9";
+const SHEET_CONTENT_CLASS =
+  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(217,217,217,0.42)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
+const CLOSE_BUTTON_CLASS =
+  "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50";
+const HERO_HEIGHT_CLASS = "h-[400px]";
 const FIELD_INPUT_CLASS =
-  "h-10 rounded-[10px] border-none bg-surface-overlay px-4 text-sm";
+  "h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+const SELECT_TRIGGER_CLASS =
+  "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
 const TEXTAREA_FIELD_CLASS =
-  "min-h-[120px] resize-none rounded-[10px] border-none bg-surface-overlay px-4 py-3 text-sm";
-const FIELD_LABEL_CLASS = "text-[10px] text-muted-foreground";
-const SECTION_GAP_CLASS = "space-y-1";
+  "h-[215px] min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
+const FIELD_LABEL_CLASS =
+  "text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100";
+const SECTION_GAP_CLASS = "group/field space-y-2";
 
 export function PersonaEditor({
   persona,
@@ -103,6 +106,8 @@ export function PersonaEditor({
     string | null
   >(null);
   const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
+  const [formHasScrollBelow, setFormHasScrollBelow] = useState(false);
+  const formBodyRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (!isOpen) {
@@ -219,6 +224,40 @@ export function PersonaEditor({
     setAvatarPreviewFailed(false);
   }, []);
 
+  const updateFooterDivider = useCallback(() => {
+    const formBody = formBodyRef.current;
+    if (!formBody) {
+      setFormHasScrollBelow(false);
+      return;
+    }
+
+    setFormHasScrollBelow(
+      formBody.scrollHeight - formBody.scrollTop - formBody.clientHeight > 1,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setFormHasScrollBelow(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(updateFooterDivider);
+    window.addEventListener("resize", updateFooterDivider);
+    const formBody = formBodyRef.current;
+    let mutationObserver: MutationObserver | null = null;
+    if (formBody) {
+      mutationObserver = new MutationObserver(updateFooterDivider);
+      mutationObserver.observe(formBody, { childList: true, subtree: true });
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateFooterDivider);
+      mutationObserver?.disconnect();
+    };
+  }, [isOpen, updateFooterDivider]);
+
   const handleSubmit = useCallback(
     (e: React.FormEvent) => {
       e.preventDefault();
@@ -333,6 +372,11 @@ export function PersonaEditor({
     <Sheet open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <SheetContent
         className={SHEET_CONTENT_CLASS}
+        closeButtonClassName={CLOSE_BUTTON_CLASS}
+        overlayClassName="bg-transparent"
+        style={{
+          backgroundColor: `color-mix(in oklab, ${AGENT_PANEL_COLOR} 40%, transparent)`,
+        }}
         aria-describedby={undefined}
       >
         <form
@@ -342,20 +386,21 @@ export function PersonaEditor({
         >
           {/* Header: title + Built-in tag at top-left. Sheet renders its own
               close X in top-right. */}
-          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+          <div className="flex items-center gap-2 px-8 pt-5 pb-2">
             <SheetTitle className="truncate text-sm font-normal text-foreground">
               {titleText}
             </SheetTitle>
             {isBuiltIn ? (
-              <span className="rounded-full bg-surface-overlay px-1.5 py-0.5 text-[11px] text-foreground">
+              <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] text-[#242424]">
                 {t("editor.builtIn")}
               </span>
             ) : null}
           </div>
 
+          {/* Hero stays transparent so the glass panel matches project create. */}
           <div
             className={cn(
-              "relative shrink-0 overflow-hidden bg-muted",
+              "relative shrink-0 overflow-hidden",
               HERO_HEIGHT_CLASS,
             )}
           >
@@ -388,9 +433,11 @@ export function PersonaEditor({
             ) : null}
           </div>
 
-          {/* Scrollable form body. Background uses the neutral surface so the
-              field pills (bg-surface-overlay) read as elevated chips. */}
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted px-5 py-5">
+          <div
+            ref={formBodyRef}
+            onScroll={updateFooterDivider}
+            className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8"
+          >
             <div className={SECTION_GAP_CLASS}>
               <Label htmlFor="persona-avatar-url" className={FIELD_LABEL_CLASS}>
                 {t("editor.avatarUrl")}
@@ -408,7 +455,7 @@ export function PersonaEditor({
                   avatarUrlError ? "persona-avatar-url-error" : undefined
                 }
                 className={cn(
-                  PILL_INPUT_CLASS,
+                  FIELD_INPUT_CLASS,
                   isReadOnly && "cursor-not-allowed opacity-70",
                 )}
               />
@@ -485,7 +532,7 @@ export function PersonaEditor({
                 required
                 placeholder={t("editor.displayNamePlaceholder")}
                 className={cn(
-                  PILL_INPUT_CLASS,
+                  FIELD_INPUT_CLASS,
                   isReadOnly && "cursor-not-allowed opacity-70",
                 )}
               />
@@ -514,7 +561,7 @@ export function PersonaEditor({
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className={SECTION_GAP_CLASS}>
                 <Label className={FIELD_LABEL_CLASS}>
                   {t("editor.provider")}
@@ -535,7 +582,7 @@ export function PersonaEditor({
                 >
                   <SelectTrigger
                     className={cn(
-                      FIELD_INPUT_CLASS,
+                      SELECT_TRIGGER_CLASS,
                       "w-full",
                       isReadOnly && "cursor-not-allowed opacity-70",
                     )}
@@ -577,7 +624,7 @@ export function PersonaEditor({
                 >
                   <SelectTrigger
                     className={cn(
-                      FIELD_INPUT_CLASS,
+                      SELECT_TRIGGER_CLASS,
                       "w-full",
                       (isReadOnly || !provider) &&
                         "cursor-not-allowed opacity-70",
@@ -626,11 +673,15 @@ export function PersonaEditor({
             ) : null}
           </div>
 
-          {/* Footer: Delete + Duplicate on the left (destructive sits leftmost,
-              so the destructive control is visually separated from Save), Save
-              on the right. */}
-          <div className="flex shrink-0 items-center justify-between gap-2 bg-muted px-5 pb-5">
-            <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              "flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-transparent px-6 pt-4 pb-7 transition-[border-color,box-shadow] duration-200 sm:px-8",
+              formHasScrollBelow
+                ? "border-[#242424]/10 shadow-[0_-12px_24px_rgba(36,36,36,0.06)]"
+                : "border-transparent shadow-none",
+            )}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {persona && onDelete && !isReadOnly ? (
                 <Button
                   type="button"
@@ -638,7 +689,7 @@ export function PersonaEditor({
                   size="sm"
                   onClick={() => onDelete(persona)}
                   aria-label={t("common:actions.delete")}
-                  className="h-8 rounded-full px-3 text-destructive hover:bg-surface-overlay hover:text-destructive"
+                  className="h-10 rounded-full px-4 text-sm text-destructive hover:bg-white/50 hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
                   {t("common:actions.delete")}
@@ -649,7 +700,7 @@ export function PersonaEditor({
                   type="button"
                   size="sm"
                   onClick={() => onDuplicate(persona)}
-                  className="h-8 rounded-full bg-surface-overlay px-3 text-foreground hover:bg-surface-overlay/90"
+                  className="h-10 rounded-full bg-white px-4 text-sm text-[#242424] hover:bg-white/90"
                 >
                   <Copy className="h-3 w-3" />
                   {t("editor.duplicate")}
@@ -661,24 +712,36 @@ export function PersonaEditor({
                 type="button"
                 size="sm"
                 onClick={onClose}
-                className="h-8 rounded-full px-4"
+                className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90"
               >
                 {t("common:actions.close")}
               </Button>
             ) : (
-              <Button
-                type="submit"
-                form="persona-form"
-                size="sm"
-                disabled={!isValid || isPending || isReadOnly}
-                className="h-8 rounded-full px-4"
-              >
-                {isPending
-                  ? t("editor.saving")
-                  : isEditing
-                    ? t("common:actions.saveChanges")
-                    : t("editor.create")}
-              </Button>
+              <div className="ml-auto flex items-center justify-end gap-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={onClose}
+                  disabled={isPending}
+                  className="h-10 rounded-full px-4 text-sm hover:bg-white/50"
+                >
+                  {t("common:actions.cancel")}
+                </Button>
+                <Button
+                  type="submit"
+                  form="persona-form"
+                  size="sm"
+                  disabled={!isValid || isPending || isReadOnly}
+                  className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
+                >
+                  {isPending
+                    ? t("editor.saving")
+                    : isEditing
+                      ? t("common:actions.saveChanges")
+                      : t("editor.create")}
+                </Button>
+              </div>
             )}
           </div>
         </form>
