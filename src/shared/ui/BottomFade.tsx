@@ -30,7 +30,7 @@ export function BottomFade({
     const update = () => {
       const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
       if (maxScroll <= 0) {
-        setOpacity(1);
+        setOpacity(0);
         return;
       }
       const distance = maxScroll - scrollEl.scrollTop;
