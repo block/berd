@@ -184,12 +184,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     expandSidebar,
     handleResizeDoubleClick,
     handleResizeStart,
+    isCollapsed: sidebarCollapsed,
     isResizing,
     resizeHandleWidth,
-    sidebarCollapsed,
     sidebarOuterWidth,
     sidebarWidth,
-    toggleSidebar,
+    toggleCollapse: toggleSidebar,
   } = useResizableSidebar();
   const isWindowFullscreen = useWindowFullscreenState();
   const platform = getPlatform();

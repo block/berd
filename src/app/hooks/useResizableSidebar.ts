@@ -169,11 +169,13 @@ export function useResizableSidebar() {
     expandSidebar,
     handleResizeDoubleClick,
     handleResizeStart,
+    isCollapsed: sidebarCollapsed,
     isResizing,
     resizeHandleWidth: SIDEBAR_RESIZE_HANDLE_WIDTH,
     sidebarCollapsed,
     sidebarOuterWidth,
     sidebarWidth,
+    toggleCollapse: toggleSidebar,
     toggleSidebar,
   };
 }
