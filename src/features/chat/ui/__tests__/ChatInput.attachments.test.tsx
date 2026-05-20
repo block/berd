@@ -141,7 +141,7 @@ describe("ChatInput attachments", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const textbox = screen.getByRole("textbox");
-    const composer = textbox.closest("div.rounded-2xl");
+    const composer = textbox.closest("div.rounded-composer");
     if (!composer) {
       throw new Error("Expected composer container");
     }
@@ -163,7 +163,7 @@ describe("ChatInput attachments", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const textbox = screen.getByRole("textbox");
-    const composer = textbox.closest("div.rounded-2xl");
+    const composer = textbox.closest("div.rounded-composer");
     if (!composer) {
       throw new Error("Expected composer container");
     }

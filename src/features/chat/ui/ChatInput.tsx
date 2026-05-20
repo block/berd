@@ -493,8 +493,8 @@ export function ChatInput({
             <div
               ref={containerRef}
               className={cn(
-                "relative rounded-2xl border border-border bg-background px-3 pb-3 pt-4 transition-colors sm:px-4",
-                isAttachmentDragOver && "bg-muted/20",
+                "relative rounded-composer bg-surface-composer backdrop-blur-md px-5 pb-3 pt-4 transition-colors",
+                isAttachmentDragOver && "bg-surface-composer/60",
               )}
               onDragEnter={handleDragEnter}
               onDragOver={handleDragOver}
@@ -502,11 +502,8 @@ export function ChatInput({
               onDrop={handleDrop}
             >
               {isAttachmentDragOver && (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-2xl border border-dashed border-border bg-background/70">
-                  <Badge
-                    variant="secondary"
-                    className="px-3 py-1 text-sm shadow-sm"
-                  >
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border-soft bg-surface-card/60">
+                  <Badge variant="secondary" className="px-3 py-1 text-sm">
                     {t("attachments.dropToAttach")}
                   </Badge>
                 </div>
@@ -537,7 +534,7 @@ export function ChatInput({
               />
 
               {queuedMessage && (
-                <div className="mb-2 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-1.5">
+                <div className="mb-2 flex items-center gap-2 rounded-card-sm bg-surface-tile px-3 py-1.5">
                   <span className="flex-1 truncate text-xs text-muted-foreground">
                     {t("queue.label", { text: queuedMessage.text })}
                   </span>
@@ -562,7 +559,7 @@ export function ChatInput({
                   placeholder={inputPlaceholder}
                   disabled={disabled}
                   rows={1}
-                  className="mb-3 min-h-[36px] max-h-[200px] w-full resize-none bg-transparent px-1 text-[14px] leading-relaxed text-foreground placeholder:font-light placeholder:text-muted-foreground/60 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
+                  className="mb-3 min-h-[36px] max-h-[200px] w-full resize-none bg-transparent px-1 text-base leading-relaxed text-foreground placeholder:font-light placeholder:text-text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
                   aria-label={t("input.ariaLabel")}
                 />
               </PopoverAnchor>

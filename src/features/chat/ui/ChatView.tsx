@@ -9,6 +9,7 @@ import { useChatSessionStore } from "../stores/chatSessionStore";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatContextPanel } from "./ChatContextPanel";
 import { perfLog } from "@/shared/lib/perfLog";
+import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
 import type { Message } from "@/shared/types/messages";
 
@@ -91,38 +92,47 @@ export function ChatView({
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
     >
-      <div className="page-transition relative flex h-full min-w-0">
-        <div className="flex min-w-0 flex-1 flex-col pr-1">
-          {controller.isLoadingHistory ? (
-            <ChatLoadingSkeleton />
-          ) : (
-            <MessageTimeline
-              messages={controller.messages}
-              streamingMessageId={controller.streamingMessageId}
-              scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
-              scrollTargetQuery={controller.scrollTarget?.query ?? null}
-              onScrollTargetHandled={controller.handleScrollTargetHandled}
-              onSendMcpAppMessage={controller.handleSend}
-            />
-          )}
-
-          <AnimatePresence
-            initial={false}
-            onExitComplete={() => setIsLoadingIndicatorMounted(false)}
+      <div className="page-transition relative flex h-full min-w-0 gap-3 bg-dot-grid p-3">
+        <div className="flex min-w-0 flex-1 flex-col gap-3">
+          <div
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-surface-card",
+              shouldOverlapComposer && "pb-0",
+            )}
           >
-            {shouldShowLoadingIndicator ? (
-              <LoadingGoose
-                key="loading-indicator"
-                chatState={
-                  controller.chatState as
-                    | "thinking"
-                    | "streaming"
-                    | "waiting"
-                    | "compacting"
+            {controller.isLoadingHistory ? (
+              <ChatLoadingSkeleton />
+            ) : (
+              <MessageTimeline
+                messages={controller.messages}
+                streamingMessageId={controller.streamingMessageId}
+                scrollTargetMessageId={
+                  controller.scrollTarget?.messageId ?? null
                 }
+                scrollTargetQuery={controller.scrollTarget?.query ?? null}
+                onScrollTargetHandled={controller.handleScrollTargetHandled}
+                onSendMcpAppMessage={controller.handleSend}
               />
-            ) : null}
-          </AnimatePresence>
+            )}
+
+            <AnimatePresence
+              initial={false}
+              onExitComplete={() => setIsLoadingIndicatorMounted(false)}
+            >
+              {shouldShowLoadingIndicator ? (
+                <LoadingGoose
+                  key="loading-indicator"
+                  chatState={
+                    controller.chatState as
+                      | "thinking"
+                      | "streaming"
+                      | "waiting"
+                      | "compacting"
+                  }
+                />
+              ) : null}
+            </AnimatePresence>
+          </div>
 
           <ChatInput
             className={shouldOverlapComposer ? "-mt-4" : undefined}
