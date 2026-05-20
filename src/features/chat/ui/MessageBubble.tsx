@@ -136,7 +136,7 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
   const flushToolChain = () => {
     if (currentToolChain.length > 0) {
       sections.push({
-        key: currentToolChain.map((item) => item.key).join(":"),
+        key: currentToolChain[0]?.key ?? "tool-chain",
         type: "toolChain",
         items: [...currentToolChain],
       });

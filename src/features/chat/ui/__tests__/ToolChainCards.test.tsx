@@ -161,6 +161,58 @@ describe("ToolChainCards", () => {
     expect(completedHeader).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("keeps a manually expanded completed chain open when a new step arrives", async () => {
+    const user = userEvent.setup();
+    const a = pair("Edit · src/a.ts");
+    const b = pair("Edit · src/b.ts");
+    const c = pair("Edit · src/c.ts");
+    const { rerender } = render(<ToolChainCards toolItems={[a, b]} />);
+
+    let header = screen.getByRole("button", {
+      name: /updating files.*2 steps/i,
+    });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+
+    await user.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "true");
+
+    rerender(<ToolChainCards toolItems={[a, b, c]} />);
+
+    header = screen.getByRole("button", {
+      name: /updating files.*3 steps/i,
+    });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps a manually collapsed active chain closed when a new step arrives", async () => {
+    const user = userEvent.setup();
+    const a = pair("Edit · src/a.ts");
+    const b = pair("Edit · src/b.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const c = pair("Edit · src/c.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(<ToolChainCards toolItems={[a, b]} />);
+
+    let header = screen.getByRole("button", {
+      name: /working through 2 steps/i,
+    });
+    expect(header).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(header);
+    expect(header).toHaveAttribute("aria-expanded", "false");
+
+    rerender(<ToolChainCards toolItems={[a, b, c]} />);
+
+    header = screen.getByRole("button", {
+      name: /working through 3 steps/i,
+    });
+    expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("surfaces error status as a data attribute on the chain wrapper", () => {
     const { container } = render(
       <ToolChainCards

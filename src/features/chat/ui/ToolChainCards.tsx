@@ -167,6 +167,9 @@ function partitionToolSteps(toolItems: ToolChainItem[]) {
 export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   const { t } = useTranslation("chat");
   const [showInternalSteps, setShowInternalSteps] = useState(false);
+  const [chainExpansionIntent, setChainExpansionIntent] = useState<
+    "auto" | "manual"
+  >("auto");
   const { primaryItems, hiddenItems } = partitionToolSteps(toolItems);
   const grouped = shouldRenderAsGroupedChain(toolItems);
   const aggregateStatus = getChainAggregateStatus(toolItems);
@@ -180,13 +183,20 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const wasActiveChainRef = useRef(isActiveChain);
   useEffect(() => {
-    if (wasActiveChainRef.current && !isActiveChain) {
+    if (chainExpansionIntent === "auto" && isActiveChain) {
+      setChainExpanded(true);
+    }
+    if (
+      chainExpansionIntent === "auto" &&
+      wasActiveChainRef.current &&
+      !isActiveChain
+    ) {
       setChainExpanded(false);
       setExpandedKeys(new Set());
       setShowInternalSteps(false);
     }
     wasActiveChainRef.current = isActiveChain;
-  }, [isActiveChain]);
+  }, [chainExpansionIntent, isActiveChain]);
 
   const handleOpenChange = (key: string, open: boolean) => {
     setExpandedKeys((prev) => {
@@ -322,6 +332,7 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
       <button
         type="button"
         onClick={() => {
+          setChainExpansionIntent("manual");
           if (chainExpanded) {
             setExpandedKeys(new Set());
             setShowInternalSteps(false);
