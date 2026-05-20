@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { type LocalePreference, useLocale } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -13,12 +13,7 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { ButtonGroup } from "@/shared/ui/button-group";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import { Check, MonitorSmartphone, Moon, Search, Sun } from "lucide-react";
-import {
-  isLightTheme,
-  SYNTAX_THEMES,
-  type SyntaxThemeName,
-} from "@/shared/theme/theme-loader";
+import { Check, MonitorSmartphone, Moon, Sun } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
@@ -30,13 +25,6 @@ const DENSITY_OPTIONS = [
   { value: "comfortable" },
   { value: "spacious" },
 ] as const;
-
-function formatThemeLabel(name: string) {
-  return name
-    .split("-")
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(" ");
-}
 
 interface AboutAppInfo {
   name: string;
@@ -108,10 +96,7 @@ export function GeneralSettings() {
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const {
-    selectedThemeName,
     themeMode,
-    usingSystemTheme,
-    setTheme,
     setThemeMode,
     primaryColor,
     customPrimaryColor,
@@ -120,27 +105,7 @@ export function GeneralSettings() {
     density,
     setDensity,
   } = useTheme();
-  const [themeSearch, setThemeSearch] = useState("");
-  const didScrollThemeRef = useRef(false);
   const gooseIcon = getProviderIcon("goose", "size-6");
-
-  const filteredThemes = useMemo(() => {
-    const query = themeSearch.toLowerCase().trim();
-    if (!query) {
-      return SYNTAX_THEMES;
-    }
-
-    return SYNTAX_THEMES.filter((themeName) => themeName.includes(query));
-  }, [themeSearch]);
-
-  const activeThemeRef = (node: HTMLButtonElement | null) => {
-    if (!node || didScrollThemeRef.current) {
-      return;
-    }
-
-    didScrollThemeRef.current = true;
-    node.scrollIntoView({ block: "center" });
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -255,7 +220,7 @@ export function GeneralSettings() {
                 },
               ] as const
             ).map((option) => {
-              const selected = usingSystemTheme && themeMode === option.value;
+              const selected = themeMode === option.value;
               const ThemeIcon = option.icon;
 
               return (
@@ -287,61 +252,6 @@ export function GeneralSettings() {
                 </button>
               );
             })}
-          </div>
-
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <input
-              className="w-full rounded-lg border border-border/70 bg-background/70 py-2 pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus"
-              data-testid="theme-search-input"
-              onChange={(event) => {
-                didScrollThemeRef.current = false;
-                setThemeSearch(event.target.value);
-              }}
-              placeholder={t("appearance.theme.searchPlaceholder")}
-              type="text"
-              value={themeSearch}
-            />
-          </div>
-
-          <div className="max-h-72 overflow-y-auto rounded-lg border border-border/70 bg-background/70">
-            {filteredThemes.length === 0 ? (
-              <p className="px-3 py-4 text-center text-sm text-muted-foreground">
-                {t("appearance.theme.empty")}
-              </p>
-            ) : (
-              filteredThemes.map((themeName) => {
-                const selected = selectedThemeName === themeName;
-                const ThemeIcon = isLightTheme(themeName) ? Sun : Moon;
-
-                return (
-                  <button
-                    aria-pressed={selected}
-                    className={cn(
-                      "flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring-focus",
-                      selected
-                        ? "bg-background-primary/10 text-foreground"
-                        : "text-muted-foreground hover:bg-background-hover hover:text-text-hover",
-                    )}
-                    data-testid={`theme-option-${themeName}`}
-                    key={themeName}
-                    onClick={() => {
-                      setTheme(themeName as SyntaxThemeName);
-                    }}
-                    ref={selected ? activeThemeRef : undefined}
-                    type="button"
-                  >
-                    <ThemeIcon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">
-                      {formatThemeLabel(themeName)}
-                    </span>
-                    {selected ? (
-                      <Check className="h-4 w-4 shrink-0 text-text-primary" />
-                    ) : null}
-                  </button>
-                );
-              })
-            )}
           </div>
         </div>
 

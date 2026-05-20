@@ -212,7 +212,7 @@ export function SkillsView({
       <>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={openFilePicker}
           leftIcon={<IconUpload />}
@@ -221,7 +221,7 @@ export function SkillsView({
         </Button>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={handleNewSkill}
           leftIcon={<IconPlus />}

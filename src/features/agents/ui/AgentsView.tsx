@@ -303,7 +303,7 @@ export function AgentsView({
       <>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={() => void handleImportPicker()}
           leftIcon={<IconUpload />}
@@ -312,7 +312,7 @@ export function AgentsView({
         </Button>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={() => openPersonaEditor()}
           leftIcon={<IconPlus />}

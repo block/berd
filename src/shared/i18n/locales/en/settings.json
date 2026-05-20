@@ -27,14 +27,12 @@
       }
     },
     "theme": {
-      "darkDescription": "Always uses Goose's default dark Shiki theme.",
+      "darkDescription": "Always uses Goose's default dark theme.",
       "darkLabel": "Dark · Goose Dark",
-      "description": "Use Goose's default light, dark, or system-matched theme, or pick a specific Shiki theme.",
-      "empty": "No themes match your search.",
+      "description": "Use Goose's default light, dark, or system-matched theme.",
       "label": "Theme",
-      "lightDescription": "Always uses Goose's default light Shiki theme.",
+      "lightDescription": "Always uses Goose's default light theme.",
       "lightLabel": "Light · Goose Light",
-      "searchPlaceholder": "Search themes...",
       "systemDescription": "Uses the default Goose light or dark theme based on your device settings.",
       "systemLabel": "System · Goose Default"
     },

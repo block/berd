@@ -548,7 +548,7 @@ export function SessionHistoryView({
     setTopBarActions(
       <Button
         type="button"
-        variant="outline-flat"
+        variant="page-header"
         size="xs"
         onClick={handleTriggerImport}
         leftIcon={<IconUpload />}

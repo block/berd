@@ -133,7 +133,7 @@ export function SessionCard({
   return (
     <div
       className={cn(
-        "group relative flex h-20 flex-col justify-between gap-1 rounded-card-chat bg-surface-card p-3 text-left transition-shadow",
+        "group relative flex min-h-20 flex-col justify-between gap-1 rounded-card-chat bg-surface-card p-3 text-left transition-shadow",
         "hover:shadow-card",
         selected && "ring-1 ring-inset ring-text-default",
         archivedAt && "opacity-60",

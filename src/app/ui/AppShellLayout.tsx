@@ -36,7 +36,7 @@ export function AppShellLayout({
 
       <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">
         <div
-          className="flex-shrink-0 h-full overflow-hidden"
+          className="flex-shrink-0 h-2/3 overflow-hidden"
           style={{
             width: sidebarOuterWidth,
             opacity: sidebarCollapsed ? 0 : 1,
@@ -47,7 +47,7 @@ export function AppShellLayout({
           }}
           aria-hidden={sidebarCollapsed || undefined}
         >
-          <div className="h-full pt-[var(--spacing-app-panel-gutter-top)] pb-3 pl-3">
+          <div className="h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
             <Sidebar {...sidebar} />
           </div>
         </div>

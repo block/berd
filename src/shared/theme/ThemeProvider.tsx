@@ -1,30 +1,19 @@
 import * as React from "react";
 
 import { createThemeVars, normalizeHexColor } from "./adaptive-theme";
-import {
-  extractThemeInfo,
-  isSyntaxThemeName,
-  loadThemeData,
-  type SyntaxThemeName,
-} from "./theme-loader";
 
 type Density = "compact" | "comfortable" | "spacious";
 type ThemeMode = "system" | "light" | "dark";
 
 type ThemeProviderProps = {
   children: React.ReactNode;
-  defaultTheme?: SyntaxThemeName | "system";
 };
 
 type ThemeProviderState = {
-  selectedThemeName: SyntaxThemeName | null;
   themeMode: ThemeMode;
-  usingSystemTheme: boolean;
   resolvedTheme: "light" | "dark";
-  resolvedThemeName: SyntaxThemeName;
   isDark: boolean;
   isLoading: boolean;
-  setTheme: (themeName: SyntaxThemeName | null) => void;
   setThemeMode: (themeMode: ThemeMode) => void;
   primaryColor: string;
   themePrimaryColor: string;
@@ -37,7 +26,6 @@ type ThemeProviderState = {
 
 type CachedThemeState = {
   isDark: boolean;
-  resolvedThemeName: SyntaxThemeName;
   primaryColor: string;
   themePrimaryColor: string;
   vars: Record<string, string>;
@@ -54,15 +42,9 @@ type FallbackThemeInfo = {
 
 const LEGACY_THEME_STORAGE_KEY = "goose-theme";
 const THEME_MODE_STORAGE_KEY = "goose-theme-mode";
-const CUSTOM_THEME_STORAGE_KEY = "goose-custom-theme";
 const THEME_CACHE_STORAGE_KEY = "goose-theme-cache-v3";
 const PRIMARY_COLOR_STORAGE_KEY = "goose-primary-color";
 const DENSITY_STORAGE_KEY = "goose-density";
-
-const DEFAULT_SYSTEM_THEMES = {
-  light: "github-light",
-  dark: "github-dark",
-} as const;
 
 const DENSITIES = ["compact", "comfortable", "spacious"] as const;
 const THEME_MODES = ["system", "light", "dark"] as const;
@@ -102,7 +84,7 @@ function readSystemThemePreference() {
   return window.matchMedia("(prefers-color-scheme: dark)").matches;
 }
 
-function getResolvedDefaultMode(
+function getResolvedMode(
   themeMode: ThemeMode,
   systemPrefersDark: boolean,
 ): "light" | "dark" {
@@ -111,20 +93,6 @@ function getResolvedDefaultMode(
   }
 
   return systemPrefersDark ? "dark" : "light";
-}
-
-function getResolvedThemeName(
-  selectedThemeName: SyntaxThemeName | null,
-  themeMode: ThemeMode,
-  systemPrefersDark: boolean,
-): SyntaxThemeName {
-  if (selectedThemeName) {
-    return selectedThemeName;
-  }
-
-  return DEFAULT_SYSTEM_THEMES[
-    getResolvedDefaultMode(themeMode, systemPrefersDark)
-  ];
 }
 
 function applyResolvedMode(isDark: boolean) {
@@ -161,41 +129,17 @@ function applyDensityAttribute(root: HTMLElement, density: Density) {
   }
 }
 
-function readInitialThemeState(
-  defaultTheme: SyntaxThemeName | "system",
-): SyntaxThemeName | null {
-  const storedCustomTheme = window.localStorage.getItem(
-    CUSTOM_THEME_STORAGE_KEY,
-  );
-  const legacyTheme = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
-
-  if (isSyntaxThemeName(storedCustomTheme)) {
-    return storedCustomTheme;
-  }
-
-  if (isSyntaxThemeName(legacyTheme)) {
-    return legacyTheme;
-  }
-
-  if (
-    legacyTheme === "light" ||
-    legacyTheme === "dark" ||
-    legacyTheme === "system"
-  ) {
-    return null;
-  }
-
-  return defaultTheme === "system" ? null : defaultTheme;
-}
-
 function readInitialThemeMode(): ThemeMode {
   const storedThemeMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
-  const legacyTheme = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
 
   if (isThemeMode(storedThemeMode)) {
     return storedThemeMode;
   }
 
+  // Best-effort migration from the legacy "goose-theme" key when its value was
+  // one of system/light/dark. Legacy named (shiki) presets are intentionally
+  // ignored; stale storage keys are left in place.
+  const legacyTheme = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
   if (isThemeMode(legacyTheme)) {
     return legacyTheme;
   }
@@ -203,72 +147,35 @@ function readInitialThemeMode(): ThemeMode {
   return "system";
 }
 
-async function loadResolvedTheme(
-  resolvedThemeName: SyntaxThemeName,
-  customPrimaryColor: string | null,
-  options: { useGooseLightSurfaces?: boolean } = {},
-): Promise<CachedThemeState> {
-  const themeData = await loadThemeData(resolvedThemeName);
-  const info = extractThemeInfo(resolvedThemeName, themeData);
-  const themePrimaryColor =
-    normalizeHexColor(info.primary) ?? normalizeHexColor(info.fg) ?? "#3b82f6";
-  const primaryColor = customPrimaryColor ?? themePrimaryColor;
-  const { isDark, vars } = createThemeVars(
-    info.bg,
-    info.fg,
-    info.comment,
-    {
-      added: info.added,
-      deleted: info.deleted,
-      modified: info.modified,
-    },
-    primaryColor,
-    {
-      popoverBackgroundColor: options.useGooseLightSurfaces
-        ? info.bg
-        : undefined,
-    },
-  );
-
-  return {
-    isDark,
-    primaryColor,
-    resolvedThemeName,
-    themePrimaryColor,
-    vars,
-  };
-}
-
-function createFallbackTheme(
+function buildTheme(
   themeMode: ThemeMode,
   systemPrefersDark: boolean,
   customPrimaryColor: string | null,
 ): CachedThemeState {
-  const fallbackMode = getResolvedDefaultMode(themeMode, systemPrefersDark);
-  const resolvedThemeName = DEFAULT_SYSTEM_THEMES[fallbackMode];
-  const fallbackTheme = BUILTIN_FALLBACK_THEMES[fallbackMode];
-  const themePrimaryColor = normalizeHexColor(fallbackTheme.fg) ?? "#3b82f6";
+  const resolvedMode = getResolvedMode(themeMode, systemPrefersDark);
+  const theme = BUILTIN_FALLBACK_THEMES[resolvedMode];
+  const themePrimaryColor = normalizeHexColor(theme.fg) ?? "#3b82f6";
   const primaryColor = customPrimaryColor ?? themePrimaryColor;
   const { isDark, vars } = createThemeVars(
-    fallbackTheme.bg,
-    fallbackTheme.fg,
-    fallbackTheme.comment,
+    theme.bg,
+    theme.fg,
+    theme.comment,
     {
-      added: fallbackTheme.added,
-      deleted: fallbackTheme.deleted,
-      modified: fallbackTheme.modified,
+      added: theme.added,
+      deleted: theme.deleted,
+      modified: theme.modified,
     },
     primaryColor,
     {
-      popoverBackgroundColor:
-        fallbackMode === "light" ? fallbackTheme.bg : undefined,
+      // Light mode keeps the background as the popover surface for parity
+      // with the previous Goose-light treatment.
+      popoverBackgroundColor: resolvedMode === "light" ? theme.bg : undefined,
     },
   );
 
   return {
     isDark,
     primaryColor,
-    resolvedThemeName,
     themePrimaryColor,
     vars,
   };
@@ -283,17 +190,8 @@ function commitTheme(theme: CachedThemeState) {
   window.localStorage.setItem(THEME_CACHE_STORAGE_KEY, JSON.stringify(theme));
 }
 
-export function ThemeProvider({
-  children,
-  defaultTheme = "system",
-}: ThemeProviderProps) {
+export function ThemeProvider({ children }: ThemeProviderProps) {
   const cachedTheme = React.useMemo(() => applyCachedTheme(), []);
-  const initialSelectedTheme = React.useMemo(
-    () => readInitialThemeState(defaultTheme),
-    [defaultTheme],
-  );
-  const [selectedThemeName, setSelectedThemeName] =
-    React.useState<SyntaxThemeName | null>(initialSelectedTheme);
   const [themeMode, setThemeModeState] =
     React.useState<ThemeMode>(readInitialThemeMode);
   const [systemPrefersDark, setSystemPrefersDark] = React.useState(
@@ -320,21 +218,6 @@ export function ThemeProvider({
     return isDensity(storedDensity) ? storedDensity : "comfortable";
   });
 
-  const usingSystemTheme = selectedThemeName === null;
-  const resolvedThemeName = React.useMemo(
-    () => getResolvedThemeName(selectedThemeName, themeMode, systemPrefersDark),
-    [selectedThemeName, systemPrefersDark, themeMode],
-  );
-  const themeLoadSignature = `${selectedThemeName ?? "default"}:${themeMode}:${resolvedThemeName}:${systemPrefersDark}:${customPrimaryColor ?? "theme-primary"}`;
-  const latestThemeLoadSignatureRef = React.useRef(themeLoadSignature);
-  const themeLoadGenerationRef = React.useRef(0);
-
-  if (latestThemeLoadSignatureRef.current !== themeLoadSignature) {
-    latestThemeLoadSignatureRef.current = themeLoadSignature;
-    themeLoadGenerationRef.current += 1;
-  }
-  const themeLoadGeneration = themeLoadGenerationRef.current;
-
   const resolvedTheme: "light" | "dark" = isDark ? "dark" : "light";
   const primaryColor = customPrimaryColor ?? themePrimaryColor;
 
@@ -348,16 +231,6 @@ export function ThemeProvider({
     mediaQuery.addEventListener("change", onChange);
     return () => mediaQuery.removeEventListener("change", onChange);
   }, []);
-
-  React.useEffect(() => {
-    if (selectedThemeName) {
-      window.localStorage.setItem(CUSTOM_THEME_STORAGE_KEY, selectedThemeName);
-    } else {
-      window.localStorage.removeItem(CUSTOM_THEME_STORAGE_KEY);
-    }
-
-    window.localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
-  }, [selectedThemeName]);
 
   React.useEffect(() => {
     window.localStorage.setItem(THEME_MODE_STORAGE_KEY, themeMode);
@@ -380,64 +253,23 @@ export function ThemeProvider({
 
   React.useEffect(() => {
     setIsLoading(true);
-
-    void (async () => {
-      let nextTheme: CachedThemeState;
-      let shouldClearSelectedTheme = false;
-
-      try {
-        nextTheme = await loadResolvedTheme(
-          resolvedThemeName,
-          customPrimaryColor,
-          {
-            useGooseLightSurfaces:
-              selectedThemeName === null &&
-              resolvedThemeName === DEFAULT_SYSTEM_THEMES.light,
-          },
-        );
-      } catch {
-        nextTheme = createFallbackTheme(
-          themeMode,
-          systemPrefersDark,
-          customPrimaryColor,
-        );
-        shouldClearSelectedTheme = selectedThemeName !== null;
-      }
-
-      if (themeLoadGenerationRef.current !== themeLoadGeneration) {
-        return;
-      }
-
-      if (shouldClearSelectedTheme) {
-        setSelectedThemeName(null);
-        window.localStorage.removeItem(CUSTOM_THEME_STORAGE_KEY);
-      }
-
-      commitTheme(nextTheme);
-      setIsDark(nextTheme.isDark);
-      setThemePrimaryColor(nextTheme.themePrimaryColor);
-      setIsLoading(false);
-    })();
-  }, [
-    customPrimaryColor,
-    resolvedThemeName,
-    selectedThemeName,
-    systemPrefersDark,
-    themeMode,
-    themeLoadGeneration,
-  ]);
+    const nextTheme = buildTheme(
+      themeMode,
+      systemPrefersDark,
+      customPrimaryColor,
+    );
+    commitTheme(nextTheme);
+    setIsDark(nextTheme.isDark);
+    setThemePrimaryColor(nextTheme.themePrimaryColor);
+    setIsLoading(false);
+  }, [customPrimaryColor, systemPrefersDark, themeMode]);
 
   React.useLayoutEffect(() => {
     applyDensityAttribute(window.document.documentElement, density);
   }, [density]);
 
-  const setTheme = React.useCallback((themeName: SyntaxThemeName | null) => {
-    setSelectedThemeName(themeName);
-  }, []);
-
   const setThemeMode = React.useCallback((nextThemeMode: ThemeMode) => {
     setThemeModeState(nextThemeMode);
-    setSelectedThemeName(null);
   }, []);
 
   const setPrimaryColor = React.useCallback((color: string) => {
@@ -457,14 +289,10 @@ export function ThemeProvider({
 
   const value = React.useMemo(
     () => ({
-      selectedThemeName,
       themeMode,
-      usingSystemTheme,
       resolvedTheme,
-      resolvedThemeName,
       isDark,
       isLoading,
-      setTheme,
       setThemeMode,
       primaryColor,
       themePrimaryColor,
@@ -482,15 +310,11 @@ export function ThemeProvider({
       primaryColor,
       resetPrimaryColor,
       resolvedTheme,
-      resolvedThemeName,
       setDensity,
       setPrimaryColor,
-      setTheme,
       setThemeMode,
-      selectedThemeName,
       themePrimaryColor,
       themeMode,
-      usingSystemTheme,
     ],
   );
 

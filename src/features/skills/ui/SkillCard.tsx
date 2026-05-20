@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { IconDots, IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconDots } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -26,8 +26,10 @@ interface SkillCardProps {
  * Skills tile. Layout matches Figma 1022:3419:
  *   - Small colored name pill (pastel, deterministic from skill name)
  *   - Multi-line muted description below
- *   - Subtle card chrome (background + soft border, no shadow) — tile is the click target
- *   - Hover-revealed `…` overflow menu top-right (Edit + Delete), mirrors PersonaCard
+ *   - White card surface (`bg-surface-card`) with hover-only shadow elevation,
+ *     mirroring the session-history tile redesign (PR #140)
+ *   - Hover-revealed `…` overflow menu top-right (Edit + Delete) → opens the
+ *     inverse (dark) DropdownMenuContent variant, same as session history
  */
 export function SkillCard({
   skill,
@@ -61,8 +63,8 @@ export function SkillCard({
       onClick={() => !menuOpen && onSelect(skill)}
       onKeyDown={handleCardKeyDown}
       className={cn(
-        "group relative flex w-full cursor-pointer flex-col items-start gap-3 rounded-tile border border-surface-card-soft bg-surface-card-soft p-4 text-left",
-        "transition-colors duration-200 hover:bg-surface-card",
+        "group relative flex w-full cursor-pointer flex-col items-start gap-3 rounded-tile bg-surface-card p-4 text-left",
+        "transition-shadow duration-200 hover:shadow-card",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
     >
@@ -92,19 +94,23 @@ export function SkillCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "rounded-full bg-background/70 text-muted-foreground backdrop-blur-sm hover:bg-background hover:text-foreground",
+                  "size-5 rounded-full transition-colors hover:bg-text-default hover:text-text-on-popover-inverse",
                   menuOpen
-                    ? "opacity-100"
-                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                    ? "opacity-100 bg-text-default text-text-on-popover-inverse"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
                 )}
               >
                 <IconDots className="size-3.5" />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
+            <DropdownMenuContent
+              variant="inverse"
+              align="start"
+              alignOffset={-4}
+              sideOffset={4}
+            >
               {onEdit && isEditable ? (
                 <DropdownMenuItem onSelect={() => onEdit(skill)}>
-                  <IconPencil className="size-3.5" />
                   {t("common:actions.edit")}
                 </DropdownMenuItem>
               ) : null}
@@ -113,7 +119,6 @@ export function SkillCard({
                   variant="destructive"
                   onSelect={() => onDelete(skill)}
                 >
-                  <IconTrash className="size-3.5" />
                   {t("common:actions.delete")}
                 </DropdownMenuItem>
               ) : null}

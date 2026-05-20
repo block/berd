@@ -27,14 +27,12 @@
       }
     },
     "theme": {
-      "darkDescription": "Usa siempre el tema oscuro predeterminado de Shiki en Goose.",
+      "darkDescription": "Usa siempre el tema oscuro predeterminado de Goose.",
       "darkLabel": "Oscuro · Goose oscuro",
-      "description": "Usa el tema predeterminado claro, oscuro o según el sistema de Goose, o elige un tema específico de Shiki.",
-      "empty": "Ningún tema coincide con tu búsqueda.",
+      "description": "Usa el tema predeterminado claro, oscuro o según el sistema de Goose.",
       "label": "Tema",
-      "lightDescription": "Usa siempre el tema claro predeterminado de Shiki en Goose.",
+      "lightDescription": "Usa siempre el tema claro predeterminado de Goose.",
       "lightLabel": "Claro · Goose claro",
-      "searchPlaceholder": "Buscar temas...",
       "systemDescription": "Usa el tema claro u oscuro predeterminado de Goose según la configuración de tu dispositivo.",
       "systemLabel": "Sistema · Goose predeterminado"
     },

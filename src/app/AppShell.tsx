@@ -1510,7 +1510,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onMoveToProject: handleMoveToProject,
         onReorderProject: reorderProjects,
         onSelectSession: handleSelectSession,
-        onSelectSearchResult: handleSelectSearchResult,
         activeView,
         activeSettingsSection,
         activeDesignSystemSection,

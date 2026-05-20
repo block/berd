@@ -8,11 +8,6 @@ import { Plus, Search } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import {
-  isLightTheme,
-  SYNTAX_THEMES,
-  type SyntaxThemeName,
-} from "@/shared/theme/theme-loader";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import {
   Accordion,
@@ -1239,6 +1234,20 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       textIcon: "--foreground",
     },
   ],
+  "page-header": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--color-white",
+      textIcon: "--text-default (70%)",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--color-white",
+      textIcon: "--text-default",
+    },
+  ],
   toolbar: [
     {
       anatomy: "Button",
@@ -2115,13 +2124,6 @@ const typographyInventory = [
   { className: "tracking-tight", count: "12", role: "Headings" },
 ];
 
-function formatThemeLabel(name: string) {
-  return name
-    .split("-")
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
 function useRuntimeTokens(tokenNames: string[]) {
   const theme = useTheme();
   const [values, setValues] = useState<Record<string, string>>({});
@@ -2130,8 +2132,7 @@ function useRuntimeTokens(tokenNames: string[]) {
     theme.isLoading,
     theme.primaryColor,
     theme.resolvedTheme,
-    theme.resolvedThemeName,
-    theme.selectedThemeName,
+    theme.themeMode,
   ].join(":");
 
   useEffect(() => {
@@ -2152,9 +2153,7 @@ function useRuntimeTokens(tokenNames: string[]) {
 
 function ThemeControls() {
   const {
-    selectedThemeName,
     themeMode,
-    setTheme,
     setThemeMode,
     primaryColor,
     setPrimaryColor,
@@ -2165,36 +2164,18 @@ function ThemeControls() {
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background-card px-3 py-2">
       <Select
-        value={selectedThemeName ?? `default-${themeMode}`}
+        value={themeMode}
         onValueChange={(value) => {
-          if (value === "default-system") {
-            setThemeMode("system");
-            return;
-          }
-          if (value === "default-light") {
-            setThemeMode("light");
-            return;
-          }
-          if (value === "default-dark") {
-            setThemeMode("dark");
-            return;
-          }
-          setTheme(value as SyntaxThemeName);
+          setThemeMode(value as "system" | "light" | "dark");
         }}
       >
         <SelectTrigger className="w-56" size="sm" aria-label="Theme">
           <SelectValue placeholder="Theme" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="default-system">System · Goose Default</SelectItem>
-          <SelectItem value="default-light">Light · Goose Light</SelectItem>
-          <SelectItem value="default-dark">Dark · Goose Dark</SelectItem>
-          {SYNTAX_THEMES.map((themeName) => (
-            <SelectItem key={themeName} value={themeName}>
-              {isLightTheme(themeName) ? "Light" : "Dark"} ·{" "}
-              {formatThemeLabel(themeName)}
-            </SelectItem>
-          ))}
+          <SelectItem value="system">System · Goose Default</SelectItem>
+          <SelectItem value="light">Light · Goose Light</SelectItem>
+          <SelectItem value="dark">Dark · Goose Dark</SelectItem>
         </SelectContent>
       </Select>
 

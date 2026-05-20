@@ -601,8 +601,8 @@ function AutomationOverviewRow({
     <button
       type="button"
       className={cn(
-        "group grid w-full gap-3 rounded-md px-3 py-3.5 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
-        selected && "bg-muted text-foreground",
+        "group grid w-full gap-3 rounded-card-chat bg-surface-card px-3 py-3.5 text-left transition-shadow hover:shadow-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        selected && "ring-1 ring-inset ring-text-default",
       )}
       onClick={onOpenDetail}
       aria-label={title}
@@ -856,7 +856,7 @@ function AutomationHistoryFeed({
           "grid gap-4 xl:grid-cols-[minmax(300px,460px)_minmax(0,1fr)]",
       )}
     >
-      <div className="space-y-1">
+      <div className="space-y-2">
         {runs.map(({ automation, result, runKey }) => (
           <HistoryRunRow
             key={`${automation.id}:${runKey}`}
@@ -926,8 +926,8 @@ function HistoryRunRow({
       type="button"
       onClick={onSelect}
       className={cn(
-        "grid w-full gap-1.5 rounded-md px-3 py-3 text-left transition-colors hover:bg-muted/55 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
-        selected && "bg-muted text-foreground",
+        "grid w-full gap-1.5 rounded-card-chat bg-surface-card px-3 py-3 text-left transition-shadow hover:shadow-card focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
+        selected && "ring-1 ring-inset ring-text-default",
       )}
       aria-pressed={selected}
       aria-label={showAutomationTitle ? `${title}, ${runTimeLabel}` : undefined}
@@ -1047,7 +1047,7 @@ function AutomationsOverview({
   return (
     <div className="space-y-8">
       <section aria-label={t("overview.title")}>
-        <div className="space-y-1">
+        <div className="space-y-2">
           {automations.map((tile) => {
             const key =
               tile.id ??
@@ -1990,7 +1990,7 @@ export function AutomationsWorkbench({
       <>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={() => refetchAutomations()}
           aria-label={t("actions.refresh")}
@@ -2001,7 +2001,7 @@ export function AutomationsWorkbench({
         </Button>
         <Button
           type="button"
-          variant="outline-flat"
+          variant="page-header"
           size="xs"
           onClick={openBuilder}
           aria-label={t("actions.add")}

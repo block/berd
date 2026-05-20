@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { renderWithProviders } from "@/test/render";
@@ -12,52 +12,6 @@ describe("GeneralSettings appearance section", () => {
     document.documentElement.removeAttribute("data-density");
     document.documentElement.style.removeProperty("--density-spacing");
     document.documentElement.style.removeProperty("--spacing");
-    HTMLElement.prototype.scrollIntoView = vi.fn();
-  });
-
-  it("filters and selects adaptive syntax themes", async () => {
-    const user = userEvent.setup();
-
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
-
-    expect(screen.getByTestId("theme-option-system")).toBeVisible();
-
-    await user.type(screen.getByTestId("theme-search-input"), "dracula");
-    expect(screen.getByTestId("theme-option-dracula")).toBeVisible();
-    expect(
-      screen.queryByTestId("theme-option-github-light"),
-    ).not.toBeInTheDocument();
-
-    await user.click(screen.getByTestId("theme-option-dracula"));
-
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-custom-theme")).toBe("dracula");
-    });
-  });
-
-  it("returns adaptive theming to system mode", async () => {
-    const user = userEvent.setup();
-    localStorage.setItem("goose-custom-theme", "dracula");
-
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
-
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-custom-theme")).toBe("dracula");
-    });
-
-    await user.click(screen.getByTestId("theme-option-system"));
-
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-custom-theme")).toBeNull();
-    });
   });
 
   it("selects default light and dark theme modes", async () => {

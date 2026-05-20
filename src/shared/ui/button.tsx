@@ -33,6 +33,8 @@ const buttonVariants = cva(
           "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
         toolbar:
           "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-background-hover hover:text-text-hover active:bg-background-hover active:text-text-hover data-[state=open]:bg-background-hover data-[state=open]:text-text-hover aria-expanded:bg-background-hover aria-expanded:text-text-hover",
+        "page-header":
+          "bg-white text-text-default/70 shadow-none hover:bg-white hover:text-text-default focus-visible:text-text-default active:text-text-default [&_svg]:opacity-70 hover:[&_svg]:opacity-100 focus-visible:[&_svg]:opacity-100 active:[&_svg]:opacity-100",
         back: "justify-start text-muted-foreground hover:text-foreground",
         link: "text-text-primary underline-offset-4 hover:underline",
       },
@@ -53,6 +55,12 @@ const buttonVariants = cva(
       },
     },
     compoundVariants: [
+      {
+        variant: "page-header",
+        size: "xs",
+        className:
+          "!h-[30px] !gap-[5px] !px-3 !text-[14px] !leading-[15px] [&_svg]:!size-3.5",
+      },
       {
         variant: "toolbar",
         size: "xs",

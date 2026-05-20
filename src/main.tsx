@@ -32,7 +32,7 @@ ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
       <I18nProvider>
-        <ThemeProvider defaultTheme="system">
+        <ThemeProvider>
           <UpdaterProvider>
             <App />
           </UpdaterProvider>
