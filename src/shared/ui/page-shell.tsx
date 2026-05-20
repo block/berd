@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
+import { BottomFade } from "./BottomFade";
 import { MainPanelLayout } from "./MainPanelLayout";
 
 interface ShellProps {
@@ -7,6 +8,7 @@ interface ShellProps {
   className?: string;
   contentClassName?: string;
   contentWidth?: "default" | "narrow" | "full";
+  showBottomFade?: boolean;
 }
 
 const SHELL_WIDTH_CLASSES = {
@@ -35,6 +37,7 @@ export function PageShell({
   className,
   contentClassName,
   contentWidth = "default",
+  showBottomFade = true,
 }: ShellProps) {
   const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
 
@@ -43,12 +46,15 @@ export function PageShell({
       <div className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto flex w-full flex-col gap-8 px-6 py-8 page-transition",
+            "mx-auto flex w-full flex-col px-6 pt-8 page-transition",
+            showBottomFade ? "pb-app-page-bottom" : "pb-8",
             widthClassName,
-            contentClassName,
           )}
         >
-          {children}
+          <div className={cn("flex w-full flex-col gap-8", contentClassName)}>
+            {children}
+          </div>
+          {showBottomFade ? <BottomFade className="-mt-64" /> : null}
         </div>
       </div>
     </MainPanelLayout>
@@ -60,6 +66,7 @@ export function DetailPageShell({
   className,
   contentClassName,
   contentWidth = "default",
+  showBottomFade = true,
 }: ShellProps) {
   const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
 
@@ -68,12 +75,15 @@ export function DetailPageShell({
       <div className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto flex w-full flex-col gap-8 px-6 py-8 page-transition",
+            "mx-auto flex w-full flex-col px-6 pt-8 page-transition",
+            showBottomFade ? "pb-app-page-bottom" : "pb-8",
             widthClassName,
-            contentClassName,
           )}
         >
-          {children}
+          <div className={cn("flex w-full flex-col gap-8", contentClassName)}>
+            {children}
+          </div>
+          {showBottomFade ? <BottomFade className="-mt-64" /> : null}
         </div>
       </div>
     </MainPanelLayout>

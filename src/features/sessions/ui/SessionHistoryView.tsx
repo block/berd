@@ -7,6 +7,7 @@ import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
+import { BottomFade } from "@/shared/ui/BottomFade";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SearchBar } from "@/shared/ui/SearchBar";
@@ -696,7 +697,7 @@ export function SessionHistoryView({
       >
         <div
           ref={pageContentRef}
-          className="page-transition mx-auto flex w-full max-w-none flex-col gap-5 px-6 py-8"
+          className="page-transition mx-auto flex w-full max-w-none flex-col gap-5 px-6 pb-app-page-bottom pt-8"
         >
           <div className={SESSION_GRID_COLS}>
             <div className="col-span-full sm:col-span-2">
@@ -826,6 +827,7 @@ export function SessionHistoryView({
                 : t("history.loadingMoreSessions")}
             </div>
           )}
+          <BottomFade className="-mt-64" />
         </div>
       </div>
 
