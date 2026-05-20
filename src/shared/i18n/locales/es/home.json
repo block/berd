@@ -4,6 +4,20 @@
     "evening": "Buenas noches",
     "morning": "Buenos días"
   },
+  "widgetLayer": {
+    "loading": "Cargando widgets...",
+    "error": {
+      "title": "No se pudieron cargar los widgets.",
+      "retry": "Reintentar",
+      "copyDetails": "Copiar detalles"
+    },
+    "toasts": {
+      "conflict": "El diseño de inicio cambió en otro lugar. Tu cambio local de widget no se conservó.",
+      "saveFailed": "No se pudo guardar el diseño de widgets.",
+      "copySuccess": "Detalles del error copiados.",
+      "copyFailed": "No se pudieron copiar los detalles del error."
+    }
+  },
   "widgets": {
     "clock": {
       "label": "Reloj",

@@ -4,6 +4,20 @@
     "evening": "Good evening",
     "morning": "Good morning"
   },
+  "widgetLayer": {
+    "loading": "Loading widgets...",
+    "error": {
+      "title": "Widgets could not be loaded.",
+      "retry": "Retry",
+      "copyDetails": "Copy details"
+    },
+    "toasts": {
+      "conflict": "Home layout changed elsewhere. Your local widget change was not kept.",
+      "saveFailed": "Widget layout could not be saved.",
+      "copySuccess": "Copied error details.",
+      "copyFailed": "Error details could not be copied."
+    }
+  },
   "widgets": {
     "clock": {
       "label": "Clock",

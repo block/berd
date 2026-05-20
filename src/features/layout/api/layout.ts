@@ -2,7 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const HOME_LAYOUT_ID = "home";
 
-export type LayoutItemKind = "session" | "project" | "persona";
+export type LayoutItemKind =
+  | "session"
+  | "project"
+  | "persona"
+  | "clock"
+  | "automation";
 
 export interface LayoutConstraints {
   minCenter: number;
@@ -49,6 +54,7 @@ export type LayoutMutationResult =
 export interface SaveLayoutItemsRequest {
   layoutId: string;
   expectedRevision: number;
+  replaceKinds: LayoutItemKind[];
   items: LayoutItem[];
 }
 

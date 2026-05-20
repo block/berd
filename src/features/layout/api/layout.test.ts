@@ -7,6 +7,7 @@ import {
   saveLayoutCamera,
   saveLayoutItems,
   type Layout,
+  type SaveLayoutItemsRequest,
 } from "./layout";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -54,9 +55,10 @@ describe("layout API", () => {
 
   it("saves layout items through Tauri", async () => {
     const result = { ok: true, layout } as const;
-    const request = {
+    const request: SaveLayoutItemsRequest = {
       layoutId: HOME_LAYOUT_ID,
       expectedRevision: 1,
+      replaceKinds: ["session"],
       items: [
         {
           id: "00000000-0000-0000-0000-000000000001",

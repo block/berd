@@ -115,6 +115,8 @@ pub enum LayoutItemKind {
     Session,
     Project,
     Persona,
+    Clock,
+    Automation,
 }
 
 impl LayoutItemKind {
@@ -123,6 +125,23 @@ impl LayoutItemKind {
             Self::Session => "session",
             Self::Project => "project",
             Self::Persona => "persona",
+            Self::Clock => "clock",
+            Self::Automation => "automation",
+        }
+    }
+}
+
+impl TryFrom<&str> for LayoutItemKind {
+    type Error = String;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        match value {
+            "session" => Ok(Self::Session),
+            "project" => Ok(Self::Project),
+            "persona" => Ok(Self::Persona),
+            "clock" => Ok(Self::Clock),
+            "automation" => Ok(Self::Automation),
+            _ => Err(format!("Unknown layout item kind: {value}")),
         }
     }
 }
@@ -192,6 +211,7 @@ pub enum LayoutMutationConflictReason {
 pub struct SaveLayoutItemsRequest {
     layout_id: String,
     expected_revision: i64,
+    replace_kinds: Vec<LayoutItemKind>,
     items: Vec<LayoutItem>,
 }
 
@@ -380,7 +400,7 @@ async fn save_layout_items_in_pool(
     request: SaveLayoutItemsRequest,
 ) -> Result<LayoutMutationResult, String> {
     let layout_id = require_supported_layout_id(request.layout_id)?;
-    let items = validate_items(request.items)?;
+    let (replace_kinds, items) = validate_save_items_request(request.replace_kinds, request.items)?;
     let mut conn = begin_immediate(pool).await?;
     let (item_revision, next_sort_seq) =
         match read_item_revision_for_update(&mut conn, &layout_id).await {
@@ -413,13 +433,16 @@ async fn save_layout_items_in_pool(
         assigned_items.push((item, sort_seq));
     }
 
-    if let Err(error) = sqlx::query("DELETE FROM layout_items WHERE layout_id = ?")
-        .bind(&layout_id)
-        .execute(&mut *conn)
-        .await
-        .map_err(db_error)
-    {
-        return rollback_with_error(conn, error).await;
+    for kind in replace_kinds {
+        if let Err(error) = sqlx::query("DELETE FROM layout_items WHERE layout_id = ? AND kind = ?")
+            .bind(&layout_id)
+            .bind(kind.as_str())
+            .execute(&mut *conn)
+            .await
+            .map_err(db_error)
+        {
+            return rollback_with_error(conn, error).await;
+        }
     }
 
     for (item, sort_seq) in assigned_items {
@@ -627,6 +650,21 @@ async fn read_layout(pool: &SqlitePool, layout_id: &str) -> Result<Layout, Strin
     .await
     .map_err(db_error)?;
 
+    let mut skipped_unknown_kinds = 0;
+    let mut items = Vec::with_capacity(item_rows.len());
+    for row in item_rows {
+        match layout_item_from_row(row) {
+            Ok(Some(item)) => items.push(item),
+            Ok(None) => skipped_unknown_kinds += 1,
+            Err(error) => return Err(error),
+        }
+    }
+    if skipped_unknown_kinds > 0 {
+        log::warn!(
+            "Skipped {skipped_unknown_kinds} layout item rows with unknown kind for layout_id={layout_id}"
+        );
+    }
+
     Ok(Layout {
         layout_id: layout_id.to_string(),
         item_revision: state.item_revision,
@@ -637,10 +675,7 @@ async fn read_layout(pool: &SqlitePool, layout_id: &str) -> Result<Layout, Strin
             zoom_bps: i32::try_from(state.zoom_bps)
                 .map_err(|_| "Stored zoom is outside the supported range".to_string())?,
         },
-        items: item_rows
-            .into_iter()
-            .map(LayoutItem::try_from)
-            .collect::<Result<Vec<_>, _>>()?,
+        items,
         constraints: constraints(),
     })
 }
@@ -705,6 +740,30 @@ async fn read_existing_sort_sequences(
         .into_iter()
         .map(|row| (row.get("id"), row.get("sort_seq")))
         .collect())
+}
+
+fn validate_save_items_request(
+    replace_kinds: Vec<LayoutItemKind>,
+    items: Vec<LayoutItem>,
+) -> Result<(Vec<LayoutItemKind>, Vec<LayoutItem>), String> {
+    if replace_kinds.is_empty() {
+        return Err("Layout replaceKinds cannot be empty".to_string());
+    }
+    let mut replace_kind_set = HashSet::with_capacity(replace_kinds.len());
+    for kind in &replace_kinds {
+        if !replace_kind_set.insert(kind.clone()) {
+            return Err("Layout replaceKinds must be unique".to_string());
+        }
+    }
+
+    let items = validate_items(items)?;
+    for item in &items {
+        if !replace_kind_set.contains(&item.kind) {
+            return Err("Layout item kind must be included in replaceKinds".to_string());
+        }
+    }
+
+    Ok((replace_kinds, items))
 }
 
 fn validate_items(items: Vec<LayoutItem>) -> Result<Vec<LayoutItem>, String> {
@@ -798,28 +857,24 @@ fn constraints() -> LayoutConstraints {
     }
 }
 
-impl TryFrom<LayoutItemRow> for LayoutItem {
-    type Error = String;
+fn layout_item_from_row(row: LayoutItemRow) -> Result<Option<LayoutItem>, String> {
+    let kind = match LayoutItemKind::try_from(row.kind.as_str()) {
+        Ok(kind) => kind,
+        Err(_) => return Ok(None),
+    };
 
-    fn try_from(row: LayoutItemRow) -> Result<Self, Self::Error> {
-        Ok(Self {
-            id: row.id,
-            kind: match row.kind.as_str() {
-                "session" => LayoutItemKind::Session,
-                "project" => LayoutItemKind::Project,
-                "persona" => LayoutItemKind::Persona,
-                _ => return Err("Stored layout item kind is invalid".to_string()),
-            },
-            target_id: row.target_id,
-            center_x: row.center_x,
-            center_y: row.center_y,
-            width: row.width,
-            height: row.height,
-            z_index: i32::try_from(row.z_index)
-                .map_err(|_| "Stored zIndex is outside the supported range".to_string())?,
-            title_override: row.title_override,
-        })
-    }
+    Ok(Some(LayoutItem {
+        id: row.id,
+        kind,
+        target_id: row.target_id,
+        center_x: row.center_x,
+        center_y: row.center_y,
+        width: row.width,
+        height: row.height,
+        z_index: i32::try_from(row.z_index)
+            .map_err(|_| "Stored zIndex is outside the supported range".to_string())?,
+        title_override: row.title_override,
+    }))
 }
 
 fn db_error(error: sqlx::Error) -> String {
@@ -900,6 +955,16 @@ mod tests {
         }
     }
 
+    fn all_known_kinds() -> Vec<LayoutItemKind> {
+        vec![
+            LayoutItemKind::Session,
+            LayoutItemKind::Project,
+            LayoutItemKind::Persona,
+            LayoutItemKind::Clock,
+            LayoutItemKind::Automation,
+        ]
+    }
+
     async fn test_state() -> TestState {
         test_state_with_max_connections(5).await
     }
@@ -931,6 +996,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![item(
                     "00000000-0000-0000-0000-000000000001",
                     LayoutItemKind::Session,
@@ -1003,6 +1069,50 @@ mod tests {
         assert_eq!(row.get::<i64, _>("camera_revision"), 0);
         assert_eq!(row.get::<i64, _>("zoom_bps"), i64::from(DEFAULT_ZOOM_BPS));
         assert_eq!(row.get::<i64, _>("next_sort_seq"), 1);
+    }
+
+    #[tokio::test]
+    async fn migration_allows_future_layout_item_kinds() {
+        let state = test_state().await;
+
+        sqlx::query(
+            "INSERT INTO layout_items (
+                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override
+             ) VALUES (?, ?, 'future-kind', 'future-1', 10, 20, 100, 80, 1, 1, NULL)",
+        )
+        .bind(HOME_LAYOUT_ID)
+        .bind("00000000-0000-0000-0000-000000000001")
+        .execute(&state.pool)
+        .await
+        .expect("future kind insert");
+    }
+
+    #[tokio::test]
+    async fn read_layout_skips_unknown_item_kinds() {
+        let state = test_state().await;
+
+        sqlx::query(
+            "INSERT INTO layout_items (
+                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override
+             ) VALUES
+                (?, ?, 'future-kind', 'future-1', 10, 20, 100, 80, 1, 1, NULL),
+                (?, ?, 'session', 'session-1', 10, 20, 100, 80, 2, 2, NULL)",
+        )
+        .bind(HOME_LAYOUT_ID)
+        .bind("00000000-0000-0000-0000-000000000001")
+        .bind(HOME_LAYOUT_ID)
+        .bind("00000000-0000-0000-0000-000000000002")
+        .execute(&state.pool)
+        .await
+        .expect("items");
+
+        let layout = read_layout(&state.pool, HOME_LAYOUT_ID)
+            .await
+            .expect("layout");
+
+        assert_eq!(layout.items.len(), 1);
+        assert_eq!(layout.items[0].kind, LayoutItemKind::Session);
+        assert_eq!(layout.items[0].target_id, "session-1");
     }
 
     #[tokio::test]
@@ -1098,6 +1208,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![
                     item(first_id, LayoutItemKind::Session, "session-1", 1),
                     item(second_id, LayoutItemKind::Project, "project-1", 1),
@@ -1112,6 +1223,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 1,
+                replace_kinds: all_known_kinds(),
                 items: vec![
                     item(third_id, LayoutItemKind::Persona, "persona-1", 1),
                     item(first_id, LayoutItemKind::Session, "session-1", 1),
@@ -1145,6 +1257,219 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_layout_items_preserves_rows_outside_replace_kinds() {
+        let state = test_state().await;
+        let session_id = "00000000-0000-0000-0000-000000000001";
+        let project_id = "00000000-0000-0000-0000-000000000002";
+        let next_session_id = "00000000-0000-0000-0000-000000000003";
+
+        save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: all_known_kinds(),
+                items: vec![
+                    item(session_id, LayoutItemKind::Session, "session-1", 1),
+                    item(project_id, LayoutItemKind::Project, "project-1", 2),
+                ],
+            },
+        )
+        .await
+        .expect("initial save");
+
+        let result = save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 1,
+                replace_kinds: vec![LayoutItemKind::Session],
+                items: vec![item(
+                    next_session_id,
+                    LayoutItemKind::Session,
+                    "session-2",
+                    3,
+                )],
+            },
+        )
+        .await
+        .expect("scoped save");
+
+        let LayoutMutationResult::Saved { layout } = result else {
+            panic!("expected save");
+        };
+        assert_eq!(
+            layout
+                .items
+                .iter()
+                .map(|item| (item.kind.clone(), item.target_id.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (LayoutItemKind::Project, "project-1"),
+                (LayoutItemKind::Session, "session-2"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn save_layout_items_preserves_unknown_rows_outside_replace_kinds() {
+        let state = test_state().await;
+
+        sqlx::query(
+            "INSERT INTO layout_items (
+                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override
+             ) VALUES (?, ?, 'future-kind', 'future-1', 10, 20, 100, 80, 1, 1, NULL)",
+        )
+        .bind(HOME_LAYOUT_ID)
+        .bind("00000000-0000-0000-0000-000000000001")
+        .execute(&state.pool)
+        .await
+        .expect("future row");
+
+        save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: vec![LayoutItemKind::Session],
+                items: vec![item(
+                    "00000000-0000-0000-0000-000000000002",
+                    LayoutItemKind::Session,
+                    "session-1",
+                    2,
+                )],
+            },
+        )
+        .await
+        .expect("scoped save");
+
+        let future_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM layout_items WHERE kind = 'future-kind'")
+                .fetch_one(&state.pool)
+                .await
+                .expect("future count");
+        assert_eq!(future_count, 1);
+    }
+
+    #[tokio::test]
+    async fn save_layout_items_deletes_scoped_kind_when_no_items_submitted_for_it() {
+        let state = test_state().await;
+
+        save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: all_known_kinds(),
+                items: vec![
+                    item(
+                        "00000000-0000-0000-0000-000000000001",
+                        LayoutItemKind::Session,
+                        "session-1",
+                        1,
+                    ),
+                    item(
+                        "00000000-0000-0000-0000-000000000002",
+                        LayoutItemKind::Project,
+                        "project-1",
+                        2,
+                    ),
+                ],
+            },
+        )
+        .await
+        .expect("initial save");
+
+        let result = save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 1,
+                replace_kinds: vec![LayoutItemKind::Session],
+                items: vec![],
+            },
+        )
+        .await
+        .expect("scoped delete");
+
+        let LayoutMutationResult::Saved { layout } = result else {
+            panic!("expected save");
+        };
+        assert_eq!(layout.items.len(), 1);
+        assert_eq!(layout.items[0].kind, LayoutItemKind::Project);
+    }
+
+    #[tokio::test]
+    async fn save_layout_items_rejects_items_outside_replace_kinds() {
+        let state = test_state().await;
+
+        let error = save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: vec![LayoutItemKind::Session],
+                items: vec![item(
+                    "00000000-0000-0000-0000-000000000001",
+                    LayoutItemKind::Persona,
+                    "persona-1",
+                    1,
+                )],
+            },
+        )
+        .await
+        .expect_err("mismatched replace kind");
+
+        assert!(error.contains("included in replaceKinds"));
+        let layout = read_layout(&state.pool, HOME_LAYOUT_ID)
+            .await
+            .expect("layout");
+        assert_eq!(layout.item_revision, 0);
+    }
+
+    #[tokio::test]
+    async fn clock_and_automation_items_round_trip() {
+        let state = test_state().await;
+
+        let result = save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: vec![LayoutItemKind::Clock, LayoutItemKind::Automation],
+                items: vec![
+                    item(
+                        "00000000-0000-0000-0000-000000000001",
+                        LayoutItemKind::Clock,
+                        "widget:00000000-0000-0000-0000-000000000001",
+                        1,
+                    ),
+                    item(
+                        "00000000-0000-0000-0000-000000000002",
+                        LayoutItemKind::Automation,
+                        "automation-1",
+                        2,
+                    ),
+                ],
+            },
+        )
+        .await
+        .expect("save");
+
+        let LayoutMutationResult::Saved { layout } = result else {
+            panic!("expected save");
+        };
+        assert_eq!(
+            layout
+                .items
+                .iter()
+                .map(|item| item.kind.clone())
+                .collect::<Vec<_>>(),
+            vec![LayoutItemKind::Clock, LayoutItemKind::Automation]
+        );
+    }
+
+    #[tokio::test]
     async fn stale_save_layout_items_returns_latest_layout_without_mutating() {
         let state = test_state().await;
         let first_id = "00000000-0000-0000-0000-000000000001";
@@ -1156,6 +1481,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![
                     item(first_id, LayoutItemKind::Session, "session-1", 1),
                     item(second_id, LayoutItemKind::Project, "project-1", 2),
@@ -1170,6 +1496,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![item(stale_id, LayoutItemKind::Persona, "persona-1", 3)],
             },
         )
@@ -1223,6 +1550,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items,
             },
         )
@@ -1256,6 +1584,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![item(
                     "00000000-0000-0000-0000-000000000001",
                     LayoutItemKind::Session,
@@ -1304,6 +1633,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![item(
                     "00000000-0000-0000-0000-000000000001",
                     LayoutItemKind::Session,
@@ -1349,6 +1679,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: HOME_LAYOUT_ID.to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![item(
                     "00000000-0000-0000-0000-000000000001",
                     LayoutItemKind::Session,
@@ -1412,6 +1743,7 @@ mod tests {
             SaveLayoutItemsRequest {
                 layout_id: "project-1".to_string(),
                 expected_revision: 0,
+                replace_kinds: all_known_kinds(),
                 items: vec![],
             },
         )
@@ -1478,6 +1810,39 @@ mod tests {
                 .await
                 .expect("next sort seq");
         assert_eq!(next_sort_seq, 2);
+    }
+
+    #[tokio::test]
+    async fn reset_deletes_unknown_future_kinds() {
+        let state = test_state().await;
+
+        sqlx::query(
+            "INSERT INTO layout_items (
+                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override
+             ) VALUES (?, ?, 'future-kind', 'future-1', 10, 20, 100, 80, 1, 1, NULL)",
+        )
+        .bind(HOME_LAYOUT_ID)
+        .bind("00000000-0000-0000-0000-000000000001")
+        .execute(&state.pool)
+        .await
+        .expect("future row");
+
+        reset_layout_in_pool(
+            &state.pool,
+            ResetLayoutRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_item_revision: 0,
+                expected_camera_revision: 0,
+            },
+        )
+        .await
+        .expect("reset");
+
+        let item_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM layout_items")
+            .fetch_one(&state.pool)
+            .await
+            .expect("item count");
+        assert_eq!(item_count, 0);
     }
 
     #[tokio::test]
@@ -1609,6 +1974,33 @@ mod tests {
         let validated = validate_items(vec![with_title]).expect("validated");
         assert_eq!(validated[0].target_id, "target");
         assert_eq!(validated[0].title_override.as_deref(), Some("A title"));
+    }
+
+    #[test]
+    fn save_items_validation_rejects_empty_duplicate_or_mismatched_replace_kinds() {
+        let session_item = item(
+            "00000000-0000-0000-0000-000000000001",
+            LayoutItemKind::Session,
+            "target",
+            1,
+        );
+
+        assert!(
+            validate_save_items_request(vec![], vec![session_item.clone()])
+                .unwrap_err()
+                .contains("cannot be empty")
+        );
+        assert!(validate_save_items_request(
+            vec![LayoutItemKind::Session, LayoutItemKind::Session],
+            vec![session_item.clone()],
+        )
+        .unwrap_err()
+        .contains("must be unique"));
+        assert!(
+            validate_save_items_request(vec![LayoutItemKind::Project], vec![session_item])
+                .unwrap_err()
+                .contains("included in replaceKinds")
+        );
     }
 
     #[test]
