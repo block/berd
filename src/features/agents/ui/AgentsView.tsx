@@ -1,17 +1,11 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-  IconArrowsSort,
-  IconLayoutGrid,
-  IconPlus,
-  IconSearch,
-  IconUpload,
-} from "@tabler/icons-react";
+import { IconPlus, IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button, buttonVariants } from "@/shared/ui/button";
-import { PageHeader, PageShell } from "@/shared/ui/page-shell";
+import { PageShell } from "@/shared/ui/page-shell";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,7 +69,6 @@ export function AgentsView({
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
   const isActivePersonaControlled = activePersonaId !== undefined;
-  const [search, setSearch] = useState("");
   const [deletingPersona, setDeletingPersona] = useState<Persona | null>(null);
   const [internalActivePersonaId, setInternalActivePersonaId] = useState<
     string | null
@@ -96,7 +89,6 @@ export function AgentsView({
     refreshFromDisk,
   } = usePersonas();
 
-  const lowerSearch = search.toLowerCase();
   const currentActivePersonaId = isActivePersonaControlled
     ? activePersonaId
     : internalActivePersonaId;
@@ -129,16 +121,6 @@ export function AgentsView({
     personasLoading,
     setActivePersona,
   ]);
-
-  const filteredPersonas = useMemo(
-    () =>
-      personas.filter(
-        (p) =>
-          p.displayName.toLowerCase().includes(lowerSearch) ||
-          p.systemPrompt.toLowerCase().includes(lowerSearch),
-      ),
-    [personas, lowerSearch],
-  );
 
   const handleSavePersona = useCallback(
     async (data: CreatePersonaRequest | UpdatePersonaRequest) => {
@@ -274,6 +256,8 @@ export function AgentsView({
     [handleImportContents, t],
   );
 
+  const setTopBarActions = useSetTopBarActions();
+
   const handleImportPicker = useCallback(async () => {
     try {
       const selected = await open({
@@ -309,6 +293,42 @@ export function AgentsView({
       toast.error(formatAgentError(err, t("view.importFailed")));
     }
   }, [handleImportContents, t, validateImportFile]);
+
+  useEffect(() => {
+    if (activePersona) {
+      setTopBarActions(null);
+      return;
+    }
+    setTopBarActions(
+      <>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={() => void handleImportPicker()}
+          leftIcon={<IconUpload />}
+        >
+          {t("common:actions.import")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={() => openPersonaEditor()}
+          leftIcon={<IconPlus />}
+        >
+          {t("view.newPersona")}
+        </Button>
+      </>,
+    );
+    return () => setTopBarActions(null);
+  }, [
+    activePersona,
+    handleImportPicker,
+    openPersonaEditor,
+    setTopBarActions,
+    t,
+  ]);
 
   const dialogs = (
     <>
@@ -372,75 +392,9 @@ export function AgentsView({
 
   return (
     <PageShell contentWidth="full">
-      <PageHeader
-        title={t("view.title")}
-        description={t("view.description")}
-        titleClassName="font-normal text-foreground"
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled
-              aria-label="Search agents"
-              title="Search (coming soon)"
-            >
-              <IconSearch aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled
-              aria-label="Toggle view"
-              title="View options (coming soon)"
-            >
-              <IconLayoutGrid aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              disabled
-              aria-label="Sort agents"
-              title="Sort (coming soon)"
-            >
-              <IconArrowsSort aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="outline-flat"
-              size="xs"
-              onClick={() => void handleImportPicker()}
-              leftIcon={<IconUpload />}
-            >
-              {t("common:actions.import")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline-flat"
-              size="xs"
-              onClick={() => openPersonaEditor()}
-              leftIcon={<IconPlus />}
-            >
-              {t("view.newPersona")}
-            </Button>
-          </>
-        }
-      />
-
-      <SearchBar
-        value={search}
-        onChange={setSearch}
-        placeholder={t("view.searchPlaceholder")}
-        aria-label={t("view.searchPlaceholder")}
-      />
-
       <section aria-labelledby="personas-heading">
         <PersonaGallery
-          personas={filteredPersonas}
-          hasAnyPersonas={personas.length > 0}
+          personas={personas}
           onSelectPersona={(p) => setActivePersona(p.id)}
           onEditPersona={(p) => openPersonaEditor(p, "edit")}
           onDuplicatePersona={handleDuplicatePersona}

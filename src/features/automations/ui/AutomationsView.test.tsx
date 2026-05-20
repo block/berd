@@ -11,8 +11,17 @@ import {
   getAutomationTiles,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
+import {
+  TopBarActionsProvider,
+  useTopBarActions,
+} from "@/app/contexts/TopBarActionsContext";
 import { AutomationsWorkbench as AutomationsView } from "./AutomationsView";
 import type { AutomationNavigationRoute } from "@/app/types/appNavigation";
+
+function TopBarActionsOutlet() {
+  const actions = useTopBarActions();
+  return <div data-testid="topbar-actions-outlet">{actions}</div>;
+}
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
@@ -70,7 +79,10 @@ function renderAutomationsView(props?: {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <AutomationsView {...props} />
+      <TopBarActionsProvider>
+        <TopBarActionsOutlet />
+        <AutomationsView {...props} />
+      </TopBarActionsProvider>
     </QueryClientProvider>,
   );
 }

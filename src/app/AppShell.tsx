@@ -1467,6 +1467,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   return (
     <AppShellLayout
       topBar={{
+        activeView,
+        chatSessionTitle: activeSession?.title,
         sidebarCollapsed,
         canGoBack: navigationAvailability.canGoBack,
         canGoForward: navigationAvailability.canGoForward,

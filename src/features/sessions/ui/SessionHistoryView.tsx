@@ -4,11 +4,12 @@ import {
   type Range,
   useVirtualizer,
 } from "@tanstack/react-virtual";
-import { History, Upload } from "lucide-react";
+import { History } from "lucide-react";
+import { IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
-import { SearchBar } from "@/shared/ui/SearchBar";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SessionCard } from "./SessionCard";
@@ -568,6 +569,26 @@ export function SessionHistoryView({
     [loadSessions],
   );
 
+  const setTopBarActions = useSetTopBarActions();
+  const handleTriggerImport = useCallback(() => {
+    fileInputRef.current?.click();
+  }, []);
+
+  useEffect(() => {
+    setTopBarActions(
+      <Button
+        type="button"
+        variant="outline-flat"
+        size="xs"
+        onClick={handleTriggerImport}
+        leftIcon={<IconUpload />}
+      >
+        {t("common:actions.import")}
+      </Button>,
+    );
+    return () => setTopBarActions(null);
+  }, [setTopBarActions, t, handleTriggerImport]);
+
   const handleSelectResult = useCallback(
     (sessionId: string, messageId?: string) => {
       if (messageId) {
@@ -702,36 +723,21 @@ export function SessionHistoryView({
           ref={pageContentRef}
           className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-8"
         >
-          <div className="flex flex-wrap items-end justify-between gap-3">
-            <div>
-              <h1 className="font-display text-lg font-semibold tracking-tight">
-                {t("history.title")}
-              </h1>
-              <p className="text-xs text-muted-foreground">
-                {t("history.subtitle")}
-              </p>
-            </div>
-            <Button
-              type="button"
-              variant="outline-flat"
-              size="xs"
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <Upload className="size-3.5" />
-              {t("common:actions.import")}
-            </Button>
-          </div>
-
-          <SearchBar
+          <input
+            type="search"
+            autoComplete="off"
+            spellCheck={false}
             value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder={t("history.searchPlaceholder")}
+            onChange={(event) => setSearchQuery(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === "Enter") {
                 event.preventDefault();
                 void submitSearch();
               }
             }}
+            placeholder={t("history.searchPlaceholder")}
+            aria-label={t("history.searchPlaceholder")}
+            className="focus-override w-full appearance-none border-0 bg-transparent font-sans text-[56px] font-light leading-[0.96] tracking-normal text-text-title shadow-none outline-none ring-0 placeholder:text-text-title placeholder:opacity-10 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
           />
 
           {searchError && (

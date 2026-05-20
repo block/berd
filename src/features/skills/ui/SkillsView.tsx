@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { Button } from "@/shared/ui/button";
-import { PageHeader, PageShell } from "@/shared/ui/page-shell";
+import { PageShell } from "@/shared/ui/page-shell";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { revealInFileManager } from "@/shared/lib/fileManager";
 import { useSkillImportExport } from "../hooks/useSkillImportExport";
 import { SkillDetailPage } from "./SkillDetailPage";
@@ -200,6 +201,38 @@ export function SkillsView({
   const { fileInputRef, handleFileChange, openFilePicker, handleExport } =
     useSkillImportExport(refreshSkills);
 
+  const setTopBarActions = useSetTopBarActions();
+
+  useEffect(() => {
+    if (activeSkill) {
+      setTopBarActions(null);
+      return;
+    }
+    setTopBarActions(
+      <>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={openFilePicker}
+          leftIcon={<IconUpload />}
+        >
+          {t("common:actions.import")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={handleNewSkill}
+          leftIcon={<IconPlus />}
+        >
+          {t("view.newSkill")}
+        </Button>
+      </>,
+    );
+    return () => setTopBarActions(null);
+  }, [activeSkill, handleNewSkill, openFilePicker, setTopBarActions, t]);
+
   const handleShare = useCallback(
     (skill: SkillInfo) => {
       if (skill.readonly) {
@@ -246,32 +279,6 @@ export function SkillsView({
 
   return (
     <PageShell contentWidth="full">
-      <PageHeader
-        title={t("view.title")}
-        titleClassName="sr-only"
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline-flat"
-              size="xs"
-              onClick={openFilePicker}
-              leftIcon={<IconUpload />}
-            >
-              {t("common:actions.import")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline-flat"
-              size="xs"
-              onClick={handleNewSkill}
-              leftIcon={<IconPlus />}
-            >
-              {t("view.newSkill")}
-            </Button>
-          </>
-        }
-      />
       <section aria-labelledby="skills-heading">
         <SkillsGrid
           skills={skills}

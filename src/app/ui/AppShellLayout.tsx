@@ -29,7 +29,7 @@ export function AppShellLayout({
   topBar,
 }: AppShellLayoutProps) {
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground">
       <TopBar {...topBar} />
 
       <div className="goose-zoom-scope flex flex-1 min-h-0 overflow-hidden">

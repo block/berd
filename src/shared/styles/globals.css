@@ -712,7 +712,7 @@
   --shadow-date-field-focus: var(--shadow-date-field-focus);
 
   /* Spacing — app chrome dimensions */
-  --spacing-app-top-bar: 40px;
+  --spacing-app-top-bar: 56px;
   --spacing-app-top-bar-leading: 96px;
   --spacing-app-top-bar-control: 24px;
   --spacing-app-panel-gutter-top: 4px;

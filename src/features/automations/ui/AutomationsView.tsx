@@ -66,7 +66,8 @@ import { Spinner } from "@/shared/ui/spinner";
 import { Switch } from "@/shared/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { Textarea } from "@/shared/ui/textarea";
-import { PageHeader, PageShell } from "@/shared/ui/page-shell";
+import { PageShell } from "@/shared/ui/page-shell";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import type {
   AppNavigationUpdateOptions,
@@ -1971,38 +1972,54 @@ export function AutomationsWorkbench({
     };
   }, []);
 
-  const openBuilder = () => {
+  const openBuilder = useCallback(() => {
     setBuilderOpen(true);
     setNavigationRoute({ surface: "overview" }, { replace: true });
     setMutationError(null);
-  };
+  }, [setNavigationRoute]);
 
-  const headerActions = (
-    <>
-      <Button
-        type="button"
-        variant="outline-flat"
-        size="xs"
-        onClick={() => automationsQuery.refetch()}
-        aria-label={t("actions.refresh")}
-        title={t("actions.refresh")}
-        leftIcon={<IconRefresh aria-hidden="true" />}
-      >
-        {t("actions.refreshShort")}
-      </Button>
-      <Button
-        type="button"
-        variant="outline-flat"
-        size="xs"
-        onClick={openBuilder}
-        aria-label={t("actions.add")}
-        title={t("actions.add")}
-        leftIcon={<IconPlus aria-hidden="true" />}
-      >
-        {t("actions.add")}
-      </Button>
-    </>
-  );
+  const { refetch: refetchAutomations } = automationsQuery;
+  const setTopBarActions = useSetTopBarActions();
+
+  useEffect(() => {
+    if (detailAutomationId) {
+      setTopBarActions(null);
+      return;
+    }
+    setTopBarActions(
+      <>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={() => refetchAutomations()}
+          aria-label={t("actions.refresh")}
+          title={t("actions.refresh")}
+          leftIcon={<IconRefresh aria-hidden="true" />}
+        >
+          {t("actions.refreshShort")}
+        </Button>
+        <Button
+          type="button"
+          variant="outline-flat"
+          size="xs"
+          onClick={openBuilder}
+          aria-label={t("actions.add")}
+          title={t("actions.add")}
+          leftIcon={<IconPlus aria-hidden="true" />}
+        >
+          {t("actions.add")}
+        </Button>
+      </>,
+    );
+    return () => setTopBarActions(null);
+  }, [
+    detailAutomationId,
+    openBuilder,
+    refetchAutomations,
+    setTopBarActions,
+    t,
+  ]);
 
   return (
     <>
@@ -2022,15 +2039,6 @@ export function AutomationsWorkbench({
         />
       ) : (
         <PageShell contentClassName="gap-6">
-          {!detailAutomationId ? (
-            <PageHeader
-              title={t("title")}
-              description={t("subtitle")}
-              titleClassName="font-normal text-foreground"
-              actions={headerActions}
-            />
-          ) : null}
-
           {detailAutomationId ? (
             detailQuery.isLoading && !detailTile ? (
               <div className="space-y-4">
