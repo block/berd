@@ -135,6 +135,21 @@ write_stamp() {
   } >"$stamp_file"
 }
 
+stamp_matches_current_build() {
+  [[ -f "$stamp_file" ]] || return 1
+  # shellcheck disable=SC1090
+  source "$stamp_file"
+  [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || return 1
+  [[ "${STAMP_REF:-${STAMP_BRANCH:-}}" == "$pinned_ref" ]] || return 1
+  [[ "${STAMP_COMMIT:-}" == "$pinned_commit" ]] || return 1
+  [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || return 1
+  [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || return 1
+  [[ -x "${STAMP_BIN:-}" ]] || return 1
+  local local_head
+  local_head="$(git -C "$goose_repo" rev-parse HEAD)"
+  [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || return 1
+}
+
 ensure_checkout_exists() {
   if [[ -d "$goose_repo/.git" ]]; then
     return 0
@@ -156,17 +171,7 @@ if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]
 fi
 
 if [[ "$action" == "check" ]]; then
-  [[ -f "$stamp_file" ]] || fail_or_skip "No local goose build stamp found. Rerun just setup."
-  # shellcheck disable=SC1090
-  source "$stamp_file"
-  [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || fail_or_skip "Managed goose checkout changed. Rerun just setup."
-  [[ "${STAMP_REF:-${STAMP_BRANCH:-}}" == "$pinned_ref" ]] || fail_or_skip "Pinned Goose ref changed to $pinned_ref. Rerun just setup."
-  [[ "${STAMP_COMMIT:-}" == "$pinned_commit" ]] || fail_or_skip "Pinned Goose commit changed to $pinned_commit. Rerun just setup."
-  [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || fail_or_skip "Pinned Goose package changed to $goose_package. Rerun just setup."
-  [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || fail_or_skip "Pinned Goose binary name changed to $goose_bin. Rerun just setup."
-  [[ -x "${STAMP_BIN:-}" ]] || fail_or_skip "Local goose binary not found at ${STAMP_BIN:-unknown}. Rerun just setup."
-  local_head="$(git -C "$goose_repo" rev-parse HEAD)"
-  [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || fail_or_skip "Managed goose checkout changed after last build. Rerun just setup."
+  stamp_matches_current_build || fail_or_skip "Local Goose binary is not ready for $pinned_ref at $pinned_commit. Rerun just setup."
   [[ "$print_bin" == "1" ]] && printf '%s\n' "$STAMP_BIN"
   exit 0
 fi
@@ -174,6 +179,14 @@ fi
 if [[ -z "$pinned_commit" ]]; then
   pinned_commit="$(resolve_ref_to_commit "$pinned_ref")"
   [[ -n "$pinned_commit" ]] || fail_or_skip "Could not resolve Goose ref $remote/$pinned_ref for managed checkout at $goose_repo."
+fi
+
+if stamp_matches_current_build; then
+  log "Local Goose binary already matches $pinned_ref at $pinned_commit."
+  if [[ "$print_bin" == "1" ]]; then
+    printf '%s\n' "$STAMP_BIN"
+  fi
+  exit 0
 fi
 
 log "Fetching pinned Goose ref $pinned_ref."

@@ -12,12 +12,18 @@ default:
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
+# Install and fetch Git LFS avatar assets needed by local dev/builds.
+lfs-assets:
+    git config --local --get filter.lfs.process >/dev/null || git lfs install --local
+    git lfs pull --include="src/shared/assets/avatars/webm/**,src/shared/assets/avatars/hevc/**"
+
 # Install dependencies and build workspace packages.
 setup:
+    just lfs-assets
     pnpm install
     cd sdk && pnpm build
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
-    lefthook install
+    lefthook install --force
 
 # ── Build & Check ────────────────────────────────────────────
 
@@ -126,6 +132,8 @@ dev:
     export VITE_PORT
     export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
+
+    pnpm check:avatars
 
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"

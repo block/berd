@@ -119,7 +119,7 @@ if (filesByFormat[selectedFormat].length === 0) {
 for (const filePath of [...filesByFormat.webm, ...filesByFormat.hevc]) {
   if (isLfsPointer(filePath)) {
     failures.push(
-      `${relative(rootDir, filePath)} is an LFS pointer file. Run git lfs pull before building.`,
+      `${relative(rootDir, filePath)} is an LFS pointer file. Run just lfs-assets before building.`,
     );
   }
 }
