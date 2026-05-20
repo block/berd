@@ -957,6 +957,8 @@
     transparent var(--dot-size)
   );
   background-size: var(--dot-spacing) var(--dot-spacing);
+  background-position: 0 0;
+  background-attachment: fixed;
   transition:
     background-color 240ms ease,
     background-image 240ms ease;
