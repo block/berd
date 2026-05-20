@@ -58,9 +58,7 @@
     "createAria": "Create new agent",
     "dropFile": "or drop a file",
     "loading": "Loading agents",
-    "new": "New Agent",
-    "noResults": "No agents found",
-    "noResultsDescription": "Try adjusting your search."
+    "new": "New Agent"
   },
   "statuses": {
     "error": "Error",
@@ -74,9 +72,6 @@
     "deleteDescription": "This agent and its configuration will be permanently removed.",
     "deleteTitle": "Delete \"{{name}}\" permanently?",
     "deleted": "\"{{name}}\" deleted.",
-    "description": "Custom agent configurations for specific workflows",
-    "emptyAgentsDescription": "Create an agent to get started.",
-    "emptyAgentsTitle": "No agents yet",
     "exportFailed": "Failed to export agent.",
     "exportedTo": "Exported to {{filename}}",
     "importInvalidExtension": "Unsupported file type. Choose a .persona.md or .json file.",

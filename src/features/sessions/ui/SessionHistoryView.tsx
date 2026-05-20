@@ -10,6 +10,7 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SessionCard } from "./SessionCard";
@@ -47,6 +48,9 @@ import {
 } from "../lib/flattenSessionRows";
 import { useGridColumnCount } from "../hooks/useGridColumnCount";
 import type { SessionSearchDisplayResult } from "../lib/buildSessionSearchResults";
+
+const SESSION_GRID_COLS =
+  "grid grid-cols-1 gap-x-8 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-[repeat(4,minmax(0,235px))] 2xl:grid-cols-[repeat(5,minmax(0,235px))] xl:justify-evenly";
 
 interface SessionHistoryViewProps {
   onSelectSession?: (sessionId: string) => void;
@@ -673,14 +677,19 @@ export function SessionHistoryView({
     (row: GroupedSessionRow) => {
       if (row.kind === "header") {
         return (
-          <h2 className="bg-background py-1 text-sm font-medium text-muted-foreground">
-            {row.label}
+          <h2
+            className={cn(
+              SESSION_GRID_COLS,
+              "bg-background py-1 text-sm font-medium text-muted-foreground",
+            )}
+          >
+            <span>{row.label}</span>
           </h2>
         );
       }
 
       return (
-        <div className="grid grid-cols-1 gap-3 pb-3 pt-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        <div className={cn(SESSION_GRID_COLS, "gap-y-10 pb-3 pt-2")}>
           {row.sessions.map((session) => renderSessionCard(session))}
         </div>
       );
@@ -690,7 +699,7 @@ export function SessionHistoryView({
 
   const renderSearchRow = useCallback(
     (row: FlatSessionRow<SessionSearchDisplayResult>) => (
-      <div className="grid grid-cols-1 gap-3 pb-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+      <div className={cn(SESSION_GRID_COLS, "gap-y-10 pb-3")}>
         {row.items.map((result) =>
           renderSessionCard(result.session, {
             snippet: result.snippet,
@@ -721,24 +730,26 @@ export function SessionHistoryView({
       >
         <div
           ref={pageContentRef}
-          className="page-transition mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-8"
+          className="page-transition mx-auto flex w-full max-w-none flex-col gap-5 px-6 py-8"
         >
-          <input
-            type="search"
-            autoComplete="off"
-            spellCheck={false}
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                event.preventDefault();
-                void submitSearch();
-              }
-            }}
-            placeholder={t("history.searchPlaceholder")}
-            aria-label={t("history.searchPlaceholder")}
-            className="focus-override w-full appearance-none border-0 bg-transparent font-sans text-[56px] font-light leading-[0.96] tracking-normal text-text-title shadow-none outline-none ring-0 placeholder:text-text-title placeholder:opacity-10 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
-          />
+          <div className={SESSION_GRID_COLS}>
+            <input
+              type="search"
+              autoComplete="off"
+              spellCheck={false}
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void submitSearch();
+                }
+              }}
+              placeholder={t("history.searchPlaceholder")}
+              aria-label={t("history.searchPlaceholder")}
+              className="focus-override col-span-full w-full appearance-none border-0 bg-transparent font-sans text-[56px] font-light leading-[0.96] tracking-normal text-text-title shadow-none outline-none ring-0 placeholder:text-text-title placeholder:opacity-10 focus:border-0 focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0"
+            />
+          </div>
 
           {searchError && (
             <p className="text-xs text-text-danger">
@@ -753,7 +764,10 @@ export function SessionHistoryView({
           <div
             ref={columnProbeRef}
             aria-hidden="true"
-            className="pointer-events-none invisible grid h-0 grid-cols-1 gap-3 overflow-hidden sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+            className={cn(
+              SESSION_GRID_COLS,
+              "pointer-events-none invisible h-0 gap-y-10 overflow-hidden",
+            )}
           />
 
           {submittedQuery ? (

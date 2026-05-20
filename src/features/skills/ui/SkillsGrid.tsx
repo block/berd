@@ -16,8 +16,12 @@ interface SkillsGridProps {
   onDeleteSkill?: (skill: SkillInfo) => void;
 }
 
+// Cards stay a fixed size when the sidebar collapses; `justify-evenly`
+// distributes the extra width between and around them.
 const gridClass = cn(
-  "grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+  "grid gap-x-8 gap-y-10",
+  "grid-cols-2 sm:grid-cols-3",
+  "xl:grid-cols-[repeat(4,minmax(0,16rem))] xl:justify-evenly",
 );
 
 function SkeletonTile() {

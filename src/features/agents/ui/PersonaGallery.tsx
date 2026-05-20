@@ -25,7 +25,6 @@ interface PersonaGalleryProps {
   maxImportBytes?: number;
   importTooLargeMessage?: string;
   isLoading?: boolean;
-  hasAnyPersonas?: boolean;
 }
 
 function SkeletonCard() {
@@ -56,7 +55,6 @@ export function PersonaGallery({
   maxImportBytes,
   importTooLargeMessage,
   isLoading = false,
-  hasAnyPersonas = personas.length > 0,
 }: PersonaGalleryProps) {
   const { t } = useTranslation("agents");
   const { fileInputRef, isDragOver, dropHandlers, handleFileChange } =
@@ -78,10 +76,12 @@ export function PersonaGallery({
     return [...builtins, ...custom];
   }, [personas]);
 
-  // Figma 916:17681 ("more than 5") lays five agents across at 1440px. We
-  // mirror that at 2xl and step down responsively for narrower viewports.
+  // Cards stay a fixed size when the sidebar collapses; `justify-evenly`
+  // distributes the extra width between and around them. Mirrors SkillsGrid.
   const gridClass = cn(
-    "grid grid-cols-2 gap-x-8 gap-y-10 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5",
+    "grid gap-x-8 gap-y-10",
+    "grid-cols-2 sm:grid-cols-3",
+    "xl:grid-cols-[repeat(4,minmax(0,16rem))] xl:justify-evenly",
   );
 
   if (isLoading) {
@@ -108,18 +108,9 @@ export function PersonaGallery({
           isDragOver && "border-border bg-muted/30",
         )}
       >
-        <p className="text-sm font-medium text-foreground">
-          {hasAnyPersonas ? t("gallery.noResults") : t("view.emptyAgentsTitle")}
-        </p>
-        <p className="mt-1 max-w-sm text-xs leading-5 text-muted-foreground">
-          {hasAnyPersonas
-            ? t("gallery.noResultsDescription")
-            : t("view.emptyAgentsDescription")}
-        </p>
         <Button
           type="button"
           size="sm"
-          className="mt-5"
           aria-label={t("gallery.createAria")}
           onClick={onCreatePersona}
           leftIcon={<IconPlus />}

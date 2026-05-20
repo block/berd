@@ -58,9 +58,7 @@
     "createAria": "Crear nuevo agente",
     "dropFile": "o suelta un archivo",
     "loading": "Cargando agentes",
-    "new": "Nuevo agente",
-    "noResults": "No se encontraron agentes",
-    "noResultsDescription": "Intenta ajustar tu búsqueda."
+    "new": "Nuevo agente"
   },
   "statuses": {
     "error": "Error",
@@ -74,9 +72,6 @@
     "deleteDescription": "Este agente y su configuración se eliminarán de forma permanente.",
     "deleteTitle": "¿Eliminar \"{{name}}\" de forma permanente?",
     "deleted": "Se eliminó \"{{name}}\".",
-    "description": "Configuraciones de agente personalizadas para flujos de trabajo específicos",
-    "emptyAgentsDescription": "Crea un agente para empezar.",
-    "emptyAgentsTitle": "Aún no hay agentes",
     "exportFailed": "No se pudo exportar el agente.",
     "exportedTo": "Exportado a {{filename}}",
     "importInvalidExtension": "Tipo de archivo no compatible. Elige un archivo .persona.md o .json.",
