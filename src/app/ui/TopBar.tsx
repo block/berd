@@ -159,7 +159,7 @@ export function TopBar({
         className="whitespace-nowrap font-sans text-[24px] font-light leading-[0.96] tracking-[-0.04em] text-text-title"
       >
         {/* i18n-check-ignore */}
-        Tulsi's World
+        Goose
         {pageLabel ? (
           <>
             <span className="text-text-breadcrumb-separator">{" / "}</span>

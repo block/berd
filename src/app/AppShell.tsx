@@ -1518,6 +1518,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         projects,
         className: "h-full rounded-xl",
       }}
+      sidebarCollapsed={sidebarCollapsed}
       sidebarOuterWidth={sidebarOuterWidth}
       isResizing={isResizing}
       resizeHandleWidth={resizeHandleWidth}

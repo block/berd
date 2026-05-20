@@ -45,6 +45,7 @@ import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { useSessionSearch } from "@/features/sessions/hooks/useSessionSearch";
 import { SIDE_PANEL_DEFAULT_WIDTH } from "@/shared/constants/panels";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import { SidebarPinnedSection } from "./SidebarPinnedSection";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarNavItem } from "./SidebarNavItem";
@@ -496,6 +497,7 @@ export function Sidebar({
       }),
     );
   };
+
   return (
     <div
       className={cn(
@@ -503,9 +505,9 @@ export function Sidebar({
         !isResizing && "transition-[width] duration-300 ease-in-out",
         className,
       )}
-      style={{ width: collapsed ? 54 : width }}
+      style={{ width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-background">
+      <div className="flex h-full flex-col overflow-hidden rounded-xl border border-border bg-surface-chrome backdrop-blur-md">
         <div
           className={cn(
             "flex-shrink-0 pt-[8px]",
@@ -538,6 +540,12 @@ export function Sidebar({
                 "relative h-full overflow-y-auto overflow-x-hidden px-1.5 py-1 pt-1 scrollbar-none",
                 collapsed ? "pb-16" : "pb-[72px]",
               )}
+              style={{
+                maskImage:
+                  "linear-gradient(to bottom, black calc(100% - 5rem), transparent 100%)",
+                WebkitMaskImage:
+                  "linear-gradient(to bottom, black calc(100% - 5rem), transparent 100%)",
+              }}
               aria-label={t("navigation.main")}
             >
               <div className="relative z-10 space-y-0.5">
@@ -606,6 +614,8 @@ export function Sidebar({
                   );
                 })}
               </div>
+
+              {!collapsed && <SidebarPinnedSection />}
 
               {!collapsed &&
                 (submittedSidebarSearchQuery ? (
@@ -706,14 +716,10 @@ export function Sidebar({
 
             <div
               className={cn(
-                "absolute inset-x-0 bottom-0 z-20 bg-background",
+                "absolute inset-x-0 bottom-0 z-20",
                 "px-1.5 py-1.5",
               )}
             >
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-x-0 -top-8 h-8 bg-gradient-to-b from-background/0 to-background"
-              />
               <Button
                 type="button"
                 variant="ghost"
@@ -861,7 +867,7 @@ export function Sidebar({
                 )}
               </div>
             </nav>
-            <div className={cn("flex-shrink-0 bg-background", "px-1.5 py-1.5")}>
+            <div className={cn("flex-shrink-0", "px-1.5 py-1.5")}>
               <Button
                 type="button"
                 variant="ghost"

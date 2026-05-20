@@ -12,14 +12,11 @@ const SIDEBAR_DEFAULT_WIDTH = SIDE_PANEL_DEFAULT_WIDTH;
 const SIDEBAR_MIN_WIDTH = 220;
 const SIDEBAR_MAX_WIDTH = 380;
 const SIDEBAR_SNAP_COLLAPSE_THRESHOLD = 100;
-const SIDEBAR_COLLAPSED_WIDTH = 48;
 const APP_SHELL_HORIZONTAL_CHROME_WIDTH = 28;
 const MIN_MAIN_CONTENT_WIDTH = 532;
 const MIN_WINDOW_HEIGHT = 600;
 const COLLAPSED_WINDOW_MIN_WIDTH =
-  SIDEBAR_COLLAPSED_WIDTH +
-  APP_SHELL_HORIZONTAL_CHROME_WIDTH +
-  MIN_MAIN_CONTENT_WIDTH;
+  APP_SHELL_HORIZONTAL_CHROME_WIDTH + MIN_MAIN_CONTENT_WIDTH;
 
 function getExpandedSidebarFitWidth(sidebarWidth: number) {
   return (
@@ -59,7 +56,7 @@ export function useResizableSidebar() {
   const [isResizing, setIsResizing] = useState(false);
 
   const sidebarOuterWidth = sidebarCollapsed
-    ? SIDEBAR_COLLAPSED_WIDTH + SIDEBAR_OUTER_GUTTER_WIDTH
+    ? 0
     : sidebarWidth + SIDEBAR_OUTER_GUTTER_WIDTH;
 
   const expandSidebar = useCallback(async () => {
@@ -92,9 +89,7 @@ export function useResizableSidebar() {
       event.preventDefault();
       setIsResizing(true);
       const startX = event.clientX;
-      const startWidth = sidebarCollapsed
-        ? SIDEBAR_COLLAPSED_WIDTH
-        : sidebarWidth;
+      const startWidth = sidebarCollapsed ? 0 : sidebarWidth;
       let shouldCollapse = false;
 
       const onMouseMove = (moveEvent: MouseEvent) => {
