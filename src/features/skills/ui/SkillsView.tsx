@@ -161,10 +161,24 @@ export function SkillsView({
     setEditingSkill(undefined);
   };
 
-  const handleNewSkill = () => {
+  // Wire Delete from inside the SkillEditor footer: close the editor sheet,
+  // then surface the existing AlertDialog delete confirmation.
+  const handleDeleteFromEditor = useCallback(
+    (editing: EditingSkill) => {
+      const match = skills.find((skill) => skill.path === editing.path);
+      setDialogOpen(false);
+      setEditingSkill(undefined);
+      if (match) {
+        setDeletingSkill(match);
+      }
+    },
+    [skills],
+  );
+
+  const handleNewSkill = useCallback(() => {
     setEditingSkill(undefined);
     setDialogOpen(true);
-  };
+  }, []);
 
   const handleSkillSaved = useCallback(
     async (savedSkill?: SkillInfo) => {
@@ -209,6 +223,7 @@ export function SkillsView({
       deletingSkill={deletingSkill}
       onDeletingSkillChange={setDeletingSkill}
       onConfirmDelete={handleConfirmDeleteSkill}
+      onDeleteFromEditor={handleDeleteFromEditor}
     />
   );
 
@@ -257,13 +272,14 @@ export function SkillsView({
           </>
         }
       />
-
       <section aria-labelledby="skills-heading">
         <SkillsGrid
           skills={skills}
           isLoading={loading}
           onSelectSkill={handleSelectSkill}
           onCreateSkill={handleNewSkill}
+          onEditSkill={handleEdit}
+          onDeleteSkill={handleDelete}
         />
       </section>
 

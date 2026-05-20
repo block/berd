@@ -1,16 +1,12 @@
 import { useState, useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import { Copy, Sparkles, Trash2 } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -19,6 +15,10 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import {
+  resolveSkillPillTone,
+  skillPillToneClass,
+} from "@/features/skills/lib/resolveSkillPillTone";
 import {
   createSkill,
   updateSkill,
@@ -31,11 +31,25 @@ import { getRenamedSkillFileLocation } from "../lib/skillsPath";
 /** Sentinel value for the "Global" option in the save-location picker. */
 const GLOBAL_VALUE = "__global__";
 
+// Shared visual constants for create/edit sheets. Mirrored in PersonaEditor —
+// extract to a shared primitive once a third surface adopts the IA.
+const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
+const HERO_HEIGHT_CLASS = "h-[280px]";
+const PILL_INPUT_CLASS =
+  "h-10 rounded-full border-none bg-surface-overlay px-4 text-sm";
+const FIELD_INPUT_CLASS =
+  "h-10 rounded-[10px] border-none bg-surface-overlay px-4 text-sm";
+const INSTRUCTIONS_TEXTAREA_CLASS =
+  "min-h-[200px] resize-none rounded-[10px] border-none bg-surface-overlay px-4 py-3 font-mono text-xs leading-relaxed";
+const FIELD_LABEL_CLASS = "text-[10px] text-muted-foreground";
+const SECTION_GAP_CLASS = "space-y-1";
+
 interface SkillEditorProps {
   isOpen: boolean;
   onClose: () => void;
   onSaved?: (savedSkill?: SkillInfo) => void | Promise<void>;
   editingSkill?: EditingSkill;
+  onDelete?: (editingSkill: EditingSkill) => void;
 }
 
 export function SkillEditor({
@@ -43,6 +57,7 @@ export function SkillEditor({
   onClose,
   onSaved,
   editingSkill,
+  onDelete,
 }: SkillEditorProps) {
   const { t } = useTranslation(["skills", "common"]);
   const [name, setName] = useState("");
@@ -54,21 +69,22 @@ export function SkillEditor({
 
   const projects = useProjectStore((s) => s.projects);
 
-  // Only projects with working directories can hold skills
+  // Only projects with working directories can hold skills.
   const projectsWithDirs = useMemo(
     () => projects.filter((p) => p.workingDirs.length > 0),
     [projects],
   );
 
   const isEditing = !!editingSkill;
+  const titleText = isEditing ? t("dialog.editTitle") : t("dialog.newTitle");
 
-  // Pre-fill fields when editing
+  // Pre-fill fields when editing.
   useEffect(() => {
     if (isOpen && editingSkill) {
       setName(editingSkill.name);
       setDescription(editingSkill.description);
       setInstructions(editingSkill.instructions);
-      setSaveLocation(GLOBAL_VALUE); // location is fixed for existing skills
+      setSaveLocation(GLOBAL_VALUE);
       setError(null);
     } else if (isOpen) {
       setName("");
@@ -130,128 +146,194 @@ export function SkillEditor({
     }
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="shrink-0 px-5 py-4">
-          <DialogTitle className="text-sm">
-            {isEditing ? t("dialog.editTitle") : t("dialog.newTitle")}
-          </DialogTitle>
-        </DialogHeader>
+  // Pill-tone hero: deterministic from the current name (or "new" when empty
+  // in create mode) so the color is stable across renders.
+  const heroToneSeed = name || editingSkill?.name || "new";
+  const heroToneClass = skillPillToneClass(resolveSkillPillTone(heroToneSeed));
 
+  // Skills don't yet carry source metadata in this UI — the Figma "Built in"
+  // tag is reserved for a later iteration. Hide until the model surfaces it.
+  const isBuiltIn = false;
+
+  return (
+    <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <SheetContent
+        className={SHEET_CONTENT_CLASS}
+        aria-describedby={undefined}
+      >
         <form
           id="skill-form"
           onSubmit={handleSave}
-          className="min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pb-5"
+          className="flex h-full min-h-0 flex-col"
         >
-          {/* Name */}
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.name")} <span className="text-text-danger">*</span>
-            </Label>
-            <Input
-              value={name}
-              onChange={(e) => handleNameChange(e.target.value)}
-              placeholder={t("dialog.namePlaceholder")}
-            />
-            {name.length > 0 && !nameValid && (
-              <p className="text-xs text-text-danger">
-                {t("dialog.nameValidation")}
-              </p>
+          {/* Header: title + Built-in tag at top-left. Sheet renders its own
+              close X in top-right. */}
+          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+            <SheetTitle className="truncate text-sm font-normal text-foreground">
+              {titleText}
+            </SheetTitle>
+            {isBuiltIn ? (
+              <span className="rounded-full bg-surface-overlay px-1.5 py-0.5 text-[11px] text-foreground">
+                {t("dialog.builtIn")}
+              </span>
+            ) : null}
+          </div>
+
+          {/* Hero: solid pill-tone block. Customize pill anchored bottom-right. */}
+          <div
+            className={cn(
+              "relative shrink-0 overflow-hidden",
+              HERO_HEIGHT_CLASS,
+              heroToneClass,
             )}
-          </div>
-
-          {/* Save location — only shown when creating */}
-          {!isEditing && projectsWithDirs.length > 0 && (
-            <div className="space-y-1">
-              <Label className="text-xs font-medium text-muted-foreground">
-                {t("dialog.saveLocation")}
-              </Label>
-              <Select value={saveLocation} onValueChange={setSaveLocation}>
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={GLOBAL_VALUE}>
-                    {t("dialog.global")}
-                  </SelectItem>
-                  {projectsWithDirs.map((project) => (
-                    <SelectItem key={project.id} value={project.id}>
-                      {project.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground">
-                {saveLocation === GLOBAL_VALUE
-                  ? t("dialog.globalHint")
-                  : t("dialog.projectHint")}
-              </p>
-            </div>
-          )}
-
-          {/* Description */}
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.description")}{" "}
-              <span className="text-text-danger">*</span>
-            </Label>
-            <Input
-              value={description}
-              onChange={(e) => {
-                setDescription(e.target.value);
-                setError(null);
-              }}
-              placeholder={t("dialog.descriptionPlaceholder")}
-            />
-          </div>
-
-          {isEditing && editingSkill ? (
-            <p className="-mt-2 break-all text-[11px] text-muted-foreground">
-              {t("dialog.pathOnDisk")}:{" "}
-              {getRenamedSkillFileLocation(editingSkill.fileLocation, name)}
-            </p>
-          ) : null}
-
-          {/* Instructions */}
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.instructions")}
-            </Label>
-            <Textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              rows={10}
-              placeholder={t("dialog.instructionsPlaceholder")}
-              className="text-xs font-mono leading-relaxed"
-            />
-          </div>
-
-          {/* Error */}
-          {error && <p className="text-xs text-text-danger">{error}</p>}
-        </form>
-
-        <DialogFooter className="shrink-0 border-t px-5 py-4">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleClose}
-            disabled={saving}
           >
-            {t("common:actions.cancel")}
-          </Button>
-          <Button type="submit" form="skill-form" size="sm" disabled={!canSave}>
-            {saving
-              ? isEditing
-                ? t("dialog.saving")
-                : t("dialog.creating")
-              : isEditing
-                ? t("common:actions.saveChanges")
-                : t("dialog.createSkill")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+            <button
+              type="button"
+              disabled
+              title={t("dialog.customizeComingSoon")}
+              className="absolute right-4 bottom-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-surface-overlay px-3 text-sm text-foreground opacity-90 disabled:cursor-not-allowed"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              {t("dialog.customize")}
+            </button>
+          </div>
+
+          {/* Scrollable form body. */}
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted px-5 py-5">
+            <div className={SECTION_GAP_CLASS}>
+              <Label className={FIELD_LABEL_CLASS}>
+                {t("dialog.name")} <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={name}
+                onChange={(e) => handleNameChange(e.target.value)}
+                placeholder={t("dialog.namePlaceholder")}
+                className={PILL_INPUT_CLASS}
+              />
+              {name.length > 0 && !nameValid ? (
+                <p className="text-[11px] text-destructive">
+                  {t("dialog.nameValidation")}
+                </p>
+              ) : null}
+            </div>
+
+            <div className={SECTION_GAP_CLASS}>
+              <Label className={FIELD_LABEL_CLASS}>
+                {t("dialog.description")}{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={description}
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  setError(null);
+                }}
+                placeholder={t("dialog.descriptionPlaceholder")}
+                className={FIELD_INPUT_CLASS}
+              />
+            </div>
+
+            {isEditing && editingSkill ? (
+              <p className="-mt-2 break-all text-[11px] text-muted-foreground">
+                {t("dialog.pathOnDisk")}:{" "}
+                {getRenamedSkillFileLocation(editingSkill.fileLocation, name)}
+              </p>
+            ) : null}
+
+            {!isEditing && projectsWithDirs.length > 0 ? (
+              <div className={SECTION_GAP_CLASS}>
+                <Label className={FIELD_LABEL_CLASS}>
+                  {t("dialog.saveLocation")}
+                </Label>
+                <Select value={saveLocation} onValueChange={setSaveLocation}>
+                  <SelectTrigger className={cn(FIELD_INPUT_CLASS, "w-full")}>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={GLOBAL_VALUE}>
+                      {t("dialog.global")}
+                    </SelectItem>
+                    {projectsWithDirs.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {project.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground">
+                  {saveLocation === GLOBAL_VALUE
+                    ? t("dialog.globalHint")
+                    : t("dialog.projectHint")}
+                </p>
+              </div>
+            ) : null}
+
+            <div className={SECTION_GAP_CLASS}>
+              <Label className={FIELD_LABEL_CLASS}>
+                {t("dialog.instructions")}
+              </Label>
+              <Textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                rows={10}
+                placeholder={t("dialog.instructionsPlaceholder")}
+                className={INSTRUCTIONS_TEXTAREA_CLASS}
+              />
+            </div>
+
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          </div>
+
+          {/* Footer: Delete + Duplicate (left, edit mode only) + Save
+              Changes/Create (right). */}
+          <div className="flex shrink-0 items-center justify-between gap-2 bg-muted px-5 pb-5">
+            <div className="flex items-center gap-2">
+              {isEditing && editingSkill && onDelete ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onDelete(editingSkill)}
+                  aria-label={t("common:actions.delete")}
+                  className="h-8 rounded-full px-3 text-destructive hover:bg-surface-overlay hover:text-destructive"
+                >
+                  <Trash2 className="h-3 w-3" />
+                  {t("common:actions.delete")}
+                </Button>
+              ) : null}
+              {/* Duplicate isn't yet wired through the skills API — render the
+                  pill as a visual scaffold only in edit mode, disabled. */}
+              {isEditing ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled
+                  title={t("dialog.customizeComingSoon")}
+                  className="h-8 rounded-full bg-surface-overlay px-3 text-foreground hover:bg-surface-overlay/90"
+                >
+                  <Copy className="h-3 w-3" />
+                  {t("dialog.duplicate")}
+                </Button>
+              ) : null}
+            </div>
+            <Button
+              type="submit"
+              form="skill-form"
+              size="sm"
+              disabled={!canSave}
+              className="h-8 rounded-full px-4"
+            >
+              {saving
+                ? isEditing
+                  ? t("dialog.saving")
+                  : t("dialog.creating")
+                : isEditing
+                  ? t("common:actions.saveChanges")
+                  : t("dialog.createSkill")}
+            </Button>
+          </div>
+        </form>
+      </SheetContent>
+    </Sheet>
   );
 }

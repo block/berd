@@ -30,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
+import { useExclusiveMenu } from "@/shared/ui/useExclusiveMenu";
 
 interface SessionCardProps {
   id: string;
@@ -86,7 +87,7 @@ export function SessionCard({
 }: SessionCardProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useExclusiveMenu();
   const [editing, setEditing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const displayTitle = getDisplaySessionTitle(

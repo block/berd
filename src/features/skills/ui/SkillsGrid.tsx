@@ -12,6 +12,8 @@ interface SkillsGridProps {
   isLoading?: boolean;
   onSelectSkill: (skill: SkillInfo) => void;
   onCreateSkill: () => void;
+  onEditSkill?: (skill: SkillInfo) => void;
+  onDeleteSkill?: (skill: SkillInfo) => void;
 }
 
 const gridClass = cn(
@@ -33,6 +35,8 @@ export function SkillsGrid({
   isLoading = false,
   onSelectSkill,
   onCreateSkill,
+  onEditSkill,
+  onDeleteSkill,
 }: SkillsGridProps) {
   const { t } = useTranslation(["skills", "common"]);
 
@@ -65,7 +69,13 @@ export function SkillsGrid({
         <IconPlus className="size-8 stroke-[1.25]" aria-hidden="true" />
       </button>
       {sorted.map((skill) => (
-        <SkillCard key={skill.id} skill={skill} onSelect={onSelectSkill} />
+        <SkillCard
+          key={skill.id}
+          skill={skill}
+          onSelect={onSelectSkill}
+          onEdit={onEditSkill}
+          onDelete={onDeleteSkill}
+        />
       ))}
     </div>
   );

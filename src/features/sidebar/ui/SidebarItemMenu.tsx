@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconDots } from "@tabler/icons-react";
 import { Pencil, Trash2 } from "lucide-react";
@@ -11,6 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
+import { useExclusiveMenu } from "@/shared/ui/useExclusiveMenu";
 
 interface SidebarItemMenuProps {
   label: string;
@@ -26,7 +26,7 @@ export function SidebarItemMenu({
   onArchive,
 }: SidebarItemMenuProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useExclusiveMenu();
   const handleOpenChange = (nextOpen: boolean) => {
     setOpen(nextOpen);
     onOpenChange?.(nextOpen);
@@ -51,7 +51,7 @@ export function SidebarItemMenu({
           <IconDots className="size-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={4}>
+      <DropdownMenuContent side="right" align="start" sideOffset={8}>
         {onEdit && (
           <DropdownMenuItem onClick={onEdit}>
             <Pencil className="size-3.5" />

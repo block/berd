@@ -41,7 +41,7 @@ async function fillSystemPrompt(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe("PersonaEditor", () => {
-  it("selects a bundled avatar for new personas", async () => {
+  it("omits avatar for new personas without a custom URL", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
 
@@ -49,16 +49,13 @@ describe("PersonaEditor", () => {
       <PersonaEditor isOpen onClose={vi.fn()} onSave={onSave} />,
     );
 
-    expect(screen.getByRole("button", { name: /gloopies/i })).toBeVisible();
-    await user.click(screen.getByRole("button", { name: /gloopies/i }));
-    await user.click(screen.getByRole("button", { name: "Gloopy 1" }));
     await fillDisplayName(user);
     await fillSystemPrompt(user);
     await user.click(screen.getByRole("button", { name: /^create$/i }));
 
     expect(onSave).toHaveBeenCalledWith(
       expect.objectContaining({
-        avatar: "app-avatar:gloopy-1",
+        avatar: undefined,
         displayName: "Scout",
         systemPrompt: "Research.",
       }),
@@ -129,7 +126,7 @@ describe("PersonaEditor", () => {
     );
   });
 
-  it("resets bundled avatar selection when the open editor switches personas", async () => {
+  it("preserves non-url avatar sources when the open editor switches personas", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
 
@@ -158,11 +155,6 @@ describe("PersonaEditor", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /gloopies/i }));
-    expect(screen.getByRole("button", { name: "Gloopy 1" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     expect(onSave).toHaveBeenCalledWith(
@@ -187,7 +179,7 @@ describe("PersonaEditor", () => {
       />,
     );
 
-    await user.click(screen.getByLabelText(/remove avatar/i));
+    await user.clear(screen.getByLabelText(/custom avatar url/i));
     await user.click(screen.getByRole("button", { name: /save changes/i }));
 
     expect(onSave).toHaveBeenCalledWith(

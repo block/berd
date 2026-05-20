@@ -2,8 +2,18 @@
   "dialog": {
     "addDirectory": "Add directory",
     "addDirectoryDialogTitle": "Select directory",
+    "chooseColor": "Choose a project color",
     "color": "Color",
     "colorAria": "Color {{color}}",
+    "describePlaceholder": "Describe your project, goals, subject etc",
+    "describeLabel": "What are you trying to achieve?",
+    "folderLabel": "Where do you want to work from?",
+    "folderPlaceholder": "Choose a folder",
+    "modelLabel": "Which model should be the default?",
+    "modelPlaceholder": "Goose",
+    "nameLabel": "What are you working on?",
+    "nameInlinePlaceholder": "Project Alpha",
+    "newTitleShort": "Create a project",
     "createProject": "Create project",
     "creating": "Creating...",
     "customIcon": "Custom icon",
@@ -46,6 +56,8 @@
     "useWorktrees": "Use Git worktrees for branch isolation"
   },
   "view": {
+    "deleteConfirmBody": "Are you sure you want to delete your project? This can't be undone and you will lose all context and memory associated with this project.",
+    "deleteConfirmYes": "Yes, delete",
     "deleteDescription": "This project and all its data will be permanently removed.",
     "deleteTitle": "Delete \"{{name}}\" permanently?",
     "description": "Organize your work into focused project contexts",

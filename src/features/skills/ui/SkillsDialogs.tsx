@@ -21,6 +21,7 @@ interface SkillsDialogsProps {
   deletingSkill: SkillInfo | null;
   onDeletingSkillChange: (skill: SkillInfo | null) => void;
   onConfirmDelete: () => void | Promise<void>;
+  onDeleteFromEditor?: (editingSkill: EditingSkill) => void;
 }
 
 export function SkillsDialogs({
@@ -31,6 +32,7 @@ export function SkillsDialogs({
   deletingSkill,
   onDeletingSkillChange,
   onConfirmDelete,
+  onDeleteFromEditor,
 }: SkillsDialogsProps) {
   const { t } = useTranslation(["skills", "common"]);
 
@@ -41,6 +43,7 @@ export function SkillsDialogs({
         onClose={onDialogClose}
         onSaved={onSaved}
         editingSkill={editingSkill}
+        onDelete={onDeleteFromEditor}
       />
 
       <AlertDialog

@@ -1,5 +1,14 @@
 import { useTranslation } from "react-i18next";
+import { IconDots, IconPencil, IconTrash } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
+import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
+import { useExclusiveMenu } from "@/shared/ui/useExclusiveMenu";
 import {
   resolveSkillPillTone,
   skillPillToneClass,
@@ -9,26 +18,51 @@ import type { SkillInfo } from "../api/skills";
 interface SkillCardProps {
   skill: SkillInfo;
   onSelect: (skill: SkillInfo) => void;
+  onEdit?: (skill: SkillInfo) => void;
+  onDelete?: (skill: SkillInfo) => void;
 }
 
 /**
- * Chromeless Skills tile. Layout matches Figma 1022:3419:
+ * Skills tile. Layout matches Figma 1022:3419:
  *   - Small colored name pill (pastel, deterministic from skill name)
  *   - Multi-line muted description below
- *   - No card background / border / shadow — tile is the click target
+ *   - Subtle card chrome (background + soft border, no shadow) — tile is the click target
+ *   - Hover-revealed `…` overflow menu top-right (Edit + Delete), mirrors PersonaCard
  */
-export function SkillCard({ skill, onSelect }: SkillCardProps) {
-  const { t } = useTranslation(["skills"]);
+export function SkillCard({
+  skill,
+  onSelect,
+  onEdit,
+  onDelete,
+}: SkillCardProps) {
+  const { t } = useTranslation(["skills", "common"]);
   const tone = resolveSkillPillTone(skill.name);
+  const [menuOpen, setMenuOpen] = useExclusiveMenu();
+  const isEditable = skill.sourceKind !== "builtin";
+  const isDeletable = skill.sourceKind !== "builtin";
+  const showMenu = Boolean((onEdit && isEditable) || (onDelete && isDeletable));
+
+  const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target !== event.currentTarget || menuOpen) {
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect(skill);
+    }
+  };
 
   return (
-    <button
-      type="button"
-      onClick={() => onSelect(skill)}
+    // biome-ignore lint/a11y/useSemanticElements: card contains a nested menu button, so a native button is not valid here
+    <div
+      role="button"
+      tabIndex={0}
       aria-label={t("view.openDetails", { name: skill.name })}
+      onClick={() => !menuOpen && onSelect(skill)}
+      onKeyDown={handleCardKeyDown}
       className={cn(
-        "group flex w-full flex-col items-start gap-3 rounded-tile p-2 text-left",
-        "transition-colors duration-200",
+        "group relative flex w-full cursor-pointer flex-col items-start gap-3 rounded-tile border border-surface-card-soft bg-surface-card-soft p-4 text-left",
+        "transition-colors duration-200 hover:bg-surface-card",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
     >
@@ -45,6 +79,48 @@ export function SkillCard({ skill, onSelect }: SkillCardProps) {
           {skill.description}
         </p>
       ) : null}
-    </button>
+
+      {showMenu ? (
+        <div className="absolute right-2 top-2 z-20">
+          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("view.more")}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(event) => event.stopPropagation()}
+                className={cn(
+                  "rounded-full bg-background/70 text-muted-foreground backdrop-blur-sm hover:bg-background hover:text-foreground",
+                  menuOpen
+                    ? "opacity-100"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+                )}
+              >
+                <IconDots className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" sideOffset={4}>
+              {onEdit && isEditable ? (
+                <DropdownMenuItem onSelect={() => onEdit(skill)}>
+                  <IconPencil className="size-3.5" />
+                  {t("common:actions.edit")}
+                </DropdownMenuItem>
+              ) : null}
+              {onDelete && isDeletable ? (
+                <DropdownMenuItem
+                  variant="destructive"
+                  onSelect={() => onDelete(skill)}
+                >
+                  <IconTrash className="size-3.5" />
+                  {t("common:actions.delete")}
+                </DropdownMenuItem>
+              ) : null}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      ) : null}
+    </div>
   );
 }

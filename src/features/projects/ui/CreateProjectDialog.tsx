@@ -1,18 +1,12 @@
 import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconFolderOpen } from "@tabler/icons-react";
+import { IconFolderPlus } from "@tabler/icons-react";
+import { cn } from "@/shared/lib/cn";
 import { getHomeDir } from "@/shared/api/system";
 import { Button } from "@/shared/ui/button";
-import { Checkbox } from "@/shared/ui/checkbox";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/shared/ui/dialog";
+import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -26,18 +20,28 @@ import {
   type ProjectInfo,
 } from "../api/projects";
 import { discoverAcpProviders, type AcpProvider } from "@/shared/api/acp";
-import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import {
   buildEditorText,
   hasEquivalentWorkingDir,
-  insertWorkingDir,
   parseEditorText,
 } from "../lib/projectPromptText";
-import { PromptEditor } from "./PromptEditor";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
-import { ProjectIconPicker } from "./ProjectIconPicker";
+import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
+import { pillBgClass, type PillTone } from "../lib/pillTones";
+import { ProjectColorPicker } from "./ProjectColorPicker";
 
-const DEFAULT_PROJECT_COLOR = "#64748b";
+// Shared visual constants — mirrored from PersonaEditor / SkillEditor.
+// Extract to a shared primitive once a fourth surface adopts this IA.
+const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
+const HERO_HEIGHT_CLASS = "h-[280px]";
+const PILL_INPUT_CLASS =
+  "h-10 rounded-full border-none bg-surface-overlay px-4 text-sm";
+const FIELD_INPUT_CLASS =
+  "h-10 rounded-[10px] border-none bg-surface-overlay px-4 text-sm";
+const DESCRIPTION_TEXTAREA_CLASS =
+  "w-full resize-none rounded-[10px] border-none bg-surface-overlay px-4 py-3 text-sm outline-none placeholder:text-placeholder focus:outline-none";
+const FIELD_LABEL_CLASS = "text-[10px] font-normal text-muted-foreground";
+const SECTION_GAP_CLASS = "space-y-1.5";
 
 function getDefaultProjectName(path: string | null | undefined): string {
   const trimmed = path?.trim();
@@ -68,24 +72,24 @@ export function CreateProjectDialog({
   const { t } = useTranslation(["projects", "common"]);
   const [name, setName] = useState("");
   const [prompt, setPrompt] = useState("");
-  const {
-    icon,
-    iconCandidates,
-    iconScanPending,
-    iconError,
-    chooseIcon,
-    chooseCustomIcon,
-    resetIcon,
-  } = useProjectIconSelection({ isOpen, prompt });
-  const [color, setColor] = useState(DEFAULT_PROJECT_COLOR);
+  const [workingDirs, setWorkingDirs] = useState<string[]>([]);
+  const [color, setColor] = useState<string>(DEFAULT_PROJECT_COLOR);
   const [preferredProvider, setPreferredProvider] = useState<string | null>(
     null,
   );
   const preferredModel: string | null = null;
-  const [useWorktrees, setUseWorktrees] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acpProviders, setAcpProviders] = useState<AcpProvider[]>([]);
+  // Icon picker UI is removed from the redesigned form, but ProjectInfo.icon
+  // is still consumed elsewhere. We carry the icon value through the form
+  // (defaulting to DEFAULT_PROJECT_ICON for new projects, preserving the
+  // existing value when editing) so we don't accidentally clobber it.
+  const [icon, setIcon] = useState<string>(DEFAULT_PROJECT_ICON);
+  // First working directory selected via the folder picker. Edits write
+  // through to the prompt text (via insertWorkingDir) so the underlying
+  // include-directives storage stays the source of truth.
+  const [workingDir, setWorkingDir] = useState<string>("");
 
   const isEditing = !!editingProject;
 
@@ -106,24 +110,23 @@ export function CreateProjectDialog({
       if (selected && typeof selected === "string") {
         const homeDir = await getHomeDir().catch(() => null);
 
-        setPrompt((prev) => {
-          if (hasEquivalentWorkingDir(prev, selected, homeDir)) {
+        setWorkingDir(selected);
+        setWorkingDirs((prev) => {
+          if (
+            hasEquivalentWorkingDir(
+              buildEditorText(prev, prompt),
+              selected,
+              homeDir,
+            )
+          ) {
             return prev;
           }
-
-          return insertWorkingDir(prev, selected);
+          return [...prev, selected];
         });
       }
     } catch {
       // Dialog plugin not available
     }
-  };
-
-  const handleChooseCustomIcon = async () => {
-    await chooseCustomIcon({
-      title: t("dialog.customIconDialogTitle"),
-      filterName: t("dialog.iconFileFilter"),
-    });
   };
 
   // Pre-fill fields when the dialog opens or when the project identity changes,
@@ -142,39 +145,36 @@ export function CreateProjectDialog({
 
     if (editingProject) {
       setName(editingProject.name);
-      setPrompt(
-        buildEditorText(editingProject.workingDirs, editingProject.prompt),
-      );
-      resetIcon(editingProject.icon);
-      setColor(editingProject.color);
+      setPrompt(editingProject.prompt);
+      setWorkingDirs(editingProject.workingDirs);
+      setIcon(editingProject.icon || DEFAULT_PROJECT_ICON);
+      setColor(editingProject.color || DEFAULT_PROJECT_COLOR);
       setPreferredProvider(editingProject.preferredProvider ?? null);
-      setUseWorktrees(editingProject.useWorktrees);
+      setWorkingDir(editingProject.workingDirs[0] ?? "");
       setError(null);
     } else {
+      const seedDir = initialWorkingDir?.trim() ?? "";
       setName(getDefaultProjectName(initialWorkingDir));
-      setPrompt(
-        buildEditorText(
-          initialWorkingDir?.trim() ? [initialWorkingDir.trim()] : [],
-          "",
-        ),
-      );
-      resetIcon(DEFAULT_PROJECT_ICON);
+      setPrompt("");
+      setWorkingDirs(seedDir ? [seedDir] : []);
+      setIcon(DEFAULT_PROJECT_ICON);
       setColor(DEFAULT_PROJECT_COLOR);
       setPreferredProvider(null);
-      setUseWorktrees(false);
+      setWorkingDir(seedDir);
       setError(null);
     }
-  }, [isOpen, editingProject, initialWorkingDir, resetIcon]);
+  }, [isOpen, editingProject, initialWorkingDir]);
 
   const canSave = name.trim().length > 0 && !saving;
 
   const handleClose = () => {
     setName("");
     setPrompt("");
-    resetIcon(DEFAULT_PROJECT_ICON);
+    setWorkingDirs([]);
+    setIcon(DEFAULT_PROJECT_ICON);
     setColor(DEFAULT_PROJECT_COLOR);
     setPreferredProvider(null);
-    setUseWorktrees(false);
+    setWorkingDir("");
     setError(null);
     onClose();
   };
@@ -184,20 +184,31 @@ export function CreateProjectDialog({
     if (!canSave) return;
     setSaving(true);
     setError(null);
-    const { prompt: parsedPrompt, workingDirs } = parseEditorText(prompt);
+    // Prompt buffer is the source of truth for workingDirs (encoded as
+    // `include:` directives). If the folder picker captured a dir but the
+    // prompt buffer hasn't been seeded yet (e.g. user picked then edited
+    // the prompt), the prompt buffer wins.
+    const { prompt: parsedPrompt, workingDirs: parsedWorkingDirs } =
+      parseEditorText(prompt);
+    const savedWorkingDirs = [...workingDirs];
+    for (const directory of parsedWorkingDirs) {
+      if (!savedWorkingDirs.includes(directory)) {
+        savedWorkingDirs.push(directory);
+      }
+    }
     try {
       let savedProject: ProjectInfo;
       if (isEditing) {
         savedProject = await updateProject(editingProject, {
           name: name.trim(),
-          description: "",
+          description: editingProject.description ?? "",
           prompt: parsedPrompt,
           icon,
           color,
           preferredProvider: preferredProvider || null,
           preferredModel,
-          workingDirs,
-          useWorktrees,
+          workingDirs: savedWorkingDirs,
+          useWorktrees: editingProject.useWorktrees,
         });
       } else {
         savedProject = await createProject(
@@ -208,8 +219,8 @@ export function CreateProjectDialog({
           color,
           preferredProvider || null,
           preferredModel,
-          workingDirs,
-          useWorktrees,
+          savedWorkingDirs,
+          false,
         );
       }
       onCreated(savedProject);
@@ -221,138 +232,174 @@ export function CreateProjectDialog({
     }
   };
 
-  return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="max-w-lg max-h-[85vh] flex flex-col gap-0 p-0">
-        <DialogHeader className="shrink-0 px-5 py-4">
-          <DialogTitle className="text-sm">
-            {isEditing ? t("dialog.editTitle") : t("dialog.newTitle")}
-          </DialogTitle>
-        </DialogHeader>
+  const folderDisplay = workingDir
+    ? workingDir.split(/[\\/]/).filter(Boolean).pop()
+    : null;
 
+  // Hero tone block — previews the selected pill tone as a large solid color.
+  // Falls back to DEFAULT_PROJECT_COLOR if `color` is a legacy hex.
+  const heroToneClass =
+    pillBgClass(color) ?? pillBgClass(DEFAULT_PROJECT_COLOR) ?? "";
+
+  const titleText = isEditing
+    ? t("dialog.editTitle")
+    : t("dialog.newTitleShort");
+
+  return (
+    <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
+      <SheetContent
+        className={SHEET_CONTENT_CLASS}
+        aria-describedby={undefined}
+      >
         <form
           id="project-form"
           onSubmit={handleSave}
-          className="min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pb-5"
+          className="flex h-full min-h-0 flex-col"
         >
-          {/* Name */}
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.name")} <span className="text-text-danger">*</span>
-            </Label>
-            <Input
-              value={name}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError(null);
-              }}
-              placeholder={t("dialog.namePlaceholder")}
-            />
+          {/* Header: title at top-left. Sheet renders its own close X. */}
+          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+            <SheetTitle className="truncate text-sm font-normal text-foreground">
+              {titleText}
+            </SheetTitle>
           </div>
 
-          <div className="space-y-1">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.instructions")}
-            </Label>
-            <PromptEditor
-              value={prompt}
-              onChange={setPrompt}
-              ariaLabel={t("dialog.instructions")}
-              placeholder={t("dialog.instructionsPlaceholder")}
-            />
+          {/* Hero: solid pill-tone preview block. Color picker pill anchored
+              bottom-right, matching SkillEditor's "Customize" affordance. */}
+          <div
+            className={cn(
+              "relative shrink-0 overflow-hidden",
+              HERO_HEIGHT_CLASS,
+              heroToneClass,
+            )}
+          >
+            <div className="absolute right-4 bottom-4">
+              <ProjectColorPicker
+                value={color}
+                onChange={(tone: PillTone) => setColor(tone)}
+              />
+            </div>
+          </div>
+
+          {/* Scrollable form body. */}
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted px-5 py-5">
+            <div className={SECTION_GAP_CLASS}>
+              <Label className={cn(FIELD_LABEL_CLASS, "text-foreground")}>
+                {t("dialog.nameLabel")}{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <Input
+                value={name}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setError(null);
+                }}
+                placeholder={t("dialog.nameInlinePlaceholder")}
+                className={PILL_INPUT_CLASS}
+              />
+            </div>
+
+            <div className={SECTION_GAP_CLASS}>
+              <Label className={FIELD_LABEL_CLASS}>
+                {t("dialog.describeLabel")}
+              </Label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={t("dialog.describePlaceholder")}
+                rows={4}
+                className={DESCRIPTION_TEXTAREA_CLASS}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className={SECTION_GAP_CLASS}>
+                <Label className={FIELD_LABEL_CLASS}>
+                  {t("dialog.folderLabel")}
+                </Label>
+                <button
+                  type="button"
+                  onClick={handleAddDirectory}
+                  className={cn(
+                    FIELD_INPUT_CLASS,
+                    "flex w-full items-center gap-2 text-left",
+                  )}
+                >
+                  <IconFolderPlus
+                    className="size-3.5 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                  <span
+                    className={
+                      folderDisplay
+                        ? "truncate text-foreground"
+                        : "truncate text-placeholder opacity-70"
+                    }
+                  >
+                    {folderDisplay ?? t("dialog.folderPlaceholder")}
+                  </span>
+                </button>
+              </div>
+
+              <div className={SECTION_GAP_CLASS}>
+                <Label className={FIELD_LABEL_CLASS}>
+                  {t("dialog.modelLabel")}
+                </Label>
+                <Select
+                  value={preferredProvider ?? "__none__"}
+                  onValueChange={(v) =>
+                    setPreferredProvider(v === "__none__" ? null : v)
+                  }
+                >
+                  <SelectTrigger className={cn(FIELD_INPUT_CLASS, "w-full")}>
+                    <SelectValue placeholder={t("dialog.modelPlaceholder")} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">
+                      {t("dialog.noneUseDefault")}
+                    </SelectItem>
+                    {acpProviders.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {error ? <p className="text-xs text-destructive">{error}</p> : null}
+          </div>
+
+          {/* Footer: Cancel (left) + Save/Create (right). */}
+          <div className="flex shrink-0 items-center justify-end gap-2 bg-muted px-5 pb-5">
             <Button
               type="button"
-              variant="outline"
-              size="xs"
-              onClick={handleAddDirectory}
-              className="mt-1.5"
+              variant="ghost"
+              size="sm"
+              onClick={handleClose}
+              disabled={saving}
+              className="h-8 rounded-full px-3"
             >
-              <IconFolderOpen className="size-3.5" />
-              {t("dialog.addDirectory")}
+              {t("common:actions.cancel")}
+            </Button>
+            <Button
+              type="submit"
+              form="project-form"
+              size="sm"
+              disabled={!canSave}
+              className="h-8 rounded-full px-4"
+            >
+              {saving
+                ? isEditing
+                  ? t("dialog.saving")
+                  : t("dialog.creating")
+                : isEditing
+                  ? t("common:actions.saveChanges")
+                  : t("dialog.createProject")}
             </Button>
           </div>
-
-          <ProjectIconPicker
-            icon={icon}
-            iconCandidates={iconCandidates}
-            iconScanPending={iconScanPending}
-            error={iconError}
-            onChooseIcon={chooseIcon}
-            onChooseCustomIcon={handleChooseCustomIcon}
-          />
-
-          {/* Provider */}
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-muted-foreground">
-              {t("dialog.provider")}
-            </Label>
-            <Select
-              value={preferredProvider ?? "__none__"}
-              onValueChange={(v) =>
-                setPreferredProvider(v === "__none__" ? null : v)
-              }
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue placeholder={t("dialog.noneUseDefault")} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none__">
-                  {t("dialog.noneUseDefault")}
-                </SelectItem>
-                {acpProviders.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>
-                    {p.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Use Worktrees */}
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="use-worktrees"
-              checked={useWorktrees}
-              onCheckedChange={(checked) => setUseWorktrees(checked === true)}
-            />
-            <Label
-              htmlFor="use-worktrees"
-              className="text-xs font-medium text-muted-foreground cursor-pointer"
-            >
-              {t("dialog.useWorktrees")}
-            </Label>
-          </div>
-
-          {/* Error */}
-          {error && <p className="text-xs text-text-danger">{error}</p>}
         </form>
-
-        <DialogFooter className="shrink-0 border-t px-5 py-4">
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={handleClose}
-            disabled={saving}
-          >
-            {t("common:actions.cancel")}
-          </Button>
-          <Button
-            type="submit"
-            form="project-form"
-            size="sm"
-            disabled={!canSave}
-          >
-            {saving
-              ? isEditing
-                ? t("dialog.saving")
-                : t("dialog.creating")
-              : isEditing
-                ? t("common:actions.saveChanges")
-                : t("dialog.createProject")}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      </SheetContent>
+    </Sheet>
   );
 }

@@ -2,8 +2,18 @@
   "dialog": {
     "addDirectory": "Añadir directorio",
     "addDirectoryDialogTitle": "Seleccionar directorio",
+    "chooseColor": "Elegir un color del proyecto",
     "color": "Color",
     "colorAria": "Color {{color}}",
+    "describePlaceholder": "Describe tu proyecto, objetivos, tema, etc.",
+    "describeLabel": "¿Qué intentas lograr?",
+    "folderLabel": "¿Desde dónde quieres trabajar?",
+    "folderPlaceholder": "Elegir una carpeta",
+    "modelLabel": "¿Qué modelo debe ser el predeterminado?",
+    "modelPlaceholder": "Goose",
+    "nameLabel": "¿En qué estás trabajando?",
+    "nameInlinePlaceholder": "Proyecto Alfa",
+    "newTitleShort": "Crear un proyecto",
     "createProject": "Crear proyecto",
     "creating": "Creando...",
     "customIcon": "Icono personalizado",
@@ -46,6 +56,8 @@
     "useWorktrees": "Usar git worktrees para aislar ramas"
   },
   "view": {
+    "deleteConfirmBody": "¿Seguro que quieres eliminar tu proyecto? No se puede deshacer y perderás todo el contexto y la memoria asociados con este proyecto.",
+    "deleteConfirmYes": "Sí, eliminar",
     "deleteDescription": "Este proyecto y todos sus datos se eliminarán de forma permanente.",
     "deleteTitle": "¿Eliminar \"{{name}}\" de forma permanente?",
     "description": "Organiza tu trabajo en contextos de proyecto enfocados",

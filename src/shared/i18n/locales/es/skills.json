@@ -1,8 +1,12 @@
 {
   "dialog": {
+    "builtIn": "Integrado",
     "createSkill": "Crear skill",
     "creating": "Creando...",
+    "customize": "Personalizar",
+    "customizeComingSoon": "Personalizar (próximamente)",
     "description": "Descripción",
+    "duplicate": "Duplicar",
     "descriptionPlaceholder": "Qué hace y cuándo usarla...",
     "editTitle": "Editar skill",
     "instructions": "Instrucciones",
