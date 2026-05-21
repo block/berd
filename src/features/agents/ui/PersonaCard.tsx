@@ -94,7 +94,7 @@ export const PersonaCard = memo(function PersonaCard({
             lazy
             loadingStrategy="visible-video"
             className={cn(
-              "pointer-events-none object-contain transition-transform duration-300",
+              "object-contain transition-transform duration-300",
               "group-hover:scale-[1.02]",
             )}
           />

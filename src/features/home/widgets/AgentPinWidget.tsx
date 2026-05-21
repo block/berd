@@ -52,7 +52,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
                 media={avatarMedia}
                 alt=""
                 loadingStrategy="visible-video"
-                className="pointer-events-none object-contain"
+                className="object-contain"
               />
             </span>
             <span className="max-w-full truncate text-base leading-5">

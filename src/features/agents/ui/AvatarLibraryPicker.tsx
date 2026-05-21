@@ -93,6 +93,7 @@ export function AvatarLibraryPicker({
               alt=""
               lazy
               loadingStrategy="visible-video"
+              playback="always"
               className="max-h-full max-w-full object-contain"
               onError={onPreviewError}
             />
@@ -185,6 +186,7 @@ export function AvatarLibraryPicker({
                 media={cachedCoverMedia}
                 alt=""
                 loadingStrategy="visible-video"
+                playback="always"
                 className="h-full w-full object-contain p-1"
                 onError={onPreviewError}
               />
