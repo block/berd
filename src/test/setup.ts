@@ -44,6 +44,13 @@ Object.defineProperty(window, "matchMedia", {
   }),
 });
 
+// jsdom exposes media methods but reports them as not implemented when called.
+Object.assign(HTMLMediaElement.prototype, {
+  load: () => {},
+  pause: () => {},
+  play: () => Promise.resolve(),
+});
+
 function createInMemoryStorage(): Storage {
   const store = new Map<string, string>();
   return {

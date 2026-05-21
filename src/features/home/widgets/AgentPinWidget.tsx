@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconUser } from "@tabler/icons-react";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -11,7 +12,7 @@ function getAgentId(state: Record<string, unknown> | undefined): string | null {
   return typeof state?.agentId === "string" ? state.agentId : null;
 }
 
-export function AgentPinWidget({
+export const AgentPinWidget = memo(function AgentPinWidget({
   instance,
   shouldIgnoreActivation,
   onOpenAgent,
@@ -50,7 +51,7 @@ export function AgentPinWidget({
               <AvatarMedia
                 media={avatarMedia}
                 alt=""
-                lazy
+                loadingStrategy="visible-video"
                 className="pointer-events-none object-contain"
               />
             </span>
@@ -70,4 +71,4 @@ export function AgentPinWidget({
       </button>
     </div>
   );
-}
+});

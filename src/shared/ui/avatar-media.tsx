@@ -18,6 +18,16 @@ interface AvatarMediaProps {
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
 }
 
+function stopVideo(video: HTMLVideoElement) {
+  if (!video.hasAttribute("src") && !video.currentSrc) {
+    return;
+  }
+
+  video.pause();
+  video.removeAttribute("src");
+  video.load();
+}
+
 export const AvatarMedia = memo(function AvatarMedia({
   media,
   alt = "",
@@ -66,12 +76,34 @@ export const AvatarMedia = memo(function AvatarMedia({
     return () => observer.disconnect();
   }, [loadingStrategy, media.mediaType, media.src]);
 
+  useEffect(() => {
+    if (media.mediaType !== "video") {
+      return;
+    }
+
+    const video = videoRef.current;
+    if (!video) {
+      return;
+    }
+
+    if (!shouldLoadVideo) {
+      stopVideo(video);
+      return;
+    }
+
+    if (video.getAttribute("src") !== media.src) {
+      video.setAttribute("src", media.src);
+    }
+
+    void video.play().catch(() => {});
+
+    return () => stopVideo(video);
+  }, [media.mediaType, media.src, shouldLoadVideo]);
+
   if (media.mediaType === "video") {
     return (
       <video
         ref={videoRef}
-        src={shouldLoadVideo ? media.src : undefined}
-        autoPlay
         loop
         muted
         poster={poster}
