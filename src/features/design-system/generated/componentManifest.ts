@@ -2441,7 +2441,11 @@ export const designSystemComponentManifest = [
       "tooltip-trigger",
     ],
     cva: [],
-    tokenClasses: ["bg-primary", "fill-primary", "text-primary-foreground"],
+    tokenClasses: [
+      "bg-background-popover-inverse",
+      "fill-background-popover-inverse",
+      "text-text-on-popover-inverse",
+    ],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",
@@ -2451,10 +2455,6 @@ export const designSystemComponentManifest = [
       "data-[state=closed]:fade-out-0",
       "data-[state=closed]:zoom-out-95",
     ],
-    sourceTokenClasses: [
-      "bg-primary",
-      "fill-primary",
-      "text-primary-foreground",
-    ],
+    sourceTokenClasses: [],
   },
 ] as const satisfies readonly DesignSystemComponentManifestItem[];
