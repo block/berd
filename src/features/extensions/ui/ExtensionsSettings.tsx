@@ -143,10 +143,7 @@ export function ExtensionsSettings() {
 
       {showDisabledBanner ? (
         <Alert variant="default" className="my-6 pr-10">
-          <IconAlertTriangle
-            aria-hidden="true"
-            className="text-text-warning!"
-          />
+          <IconAlertTriangle aria-hidden="true" className="text-warning!" />
           <AlertTitle>{t("extensions.disabledBanner.title")}</AlertTitle>
           <AlertDescription>
             <p>
@@ -203,7 +200,7 @@ export function ExtensionsSettings() {
           {[1, 2, 3, 4, 5, 6].map((i) => (
             <div
               key={i}
-              className="h-20 animate-pulse border-b border-border-soft-divider py-4"
+              className="h-20 animate-pulse border-b border-border/70 py-4"
             >
               <div className="h-4 w-2/5 rounded bg-muted/50" />
               <div className="mt-2 h-3 w-3/5 rounded bg-muted/40" />

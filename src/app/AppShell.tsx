@@ -1560,7 +1560,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   if (!startup.ready) {
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-        <Spinner className="size-5 text-text-primary" />
+        <Spinner className="size-5 text-primary" />
       </div>
     );
   }
@@ -1580,7 +1580,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       return (
         <div className="flex h-screen w-screen items-center justify-center bg-background px-6 text-foreground">
           <div className="flex max-w-md flex-col items-center gap-3 text-center">
-            <h1 className="text-base font-medium text-text-primary">
+            <h1 className="text-base font-medium text-primary">
               {t("common:migration.error.title")}
             </h1>
             <p className="text-sm text-muted-foreground">
@@ -1602,7 +1602,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-        <Spinner className="size-5 text-text-primary" />
+        <Spinner className="size-5 text-primary" />
       </div>
     );
   }

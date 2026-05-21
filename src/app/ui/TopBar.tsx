@@ -91,7 +91,10 @@ export function TopBar({
   const ContextPanelIcon = contextPanelOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
-  const toolbarButtonClassName = "size-[var(--spacing-app-top-bar-control)]";
+  const toolbarButtonClassName = cn(
+    "size-[var(--spacing-app-top-bar-control)]",
+    "text-muted-foreground hover:text-foreground active:text-foreground focus-visible:text-foreground",
+  );
   const toolbarIconClassName = "size-[18px]";
   const leadingSpaceClassName =
     chromeInsets.leading === "trafficLights"

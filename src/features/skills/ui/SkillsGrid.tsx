@@ -70,7 +70,7 @@ export function SkillsGrid({
         className={cn(
           "group flex h-full w-full items-center justify-center rounded-tile border border-transparent p-4",
           "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
-          "hover:border-surface-card-soft hover:bg-surface-card-soft hover:text-foreground hover:backdrop-blur-sm",
+          "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
         )}
       >

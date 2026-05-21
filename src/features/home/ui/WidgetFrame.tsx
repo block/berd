@@ -110,7 +110,7 @@ export function WidgetFrame({
           onClickCapture={gestureHandlers.onClickCapture}
           onClick={commitZLift}
           onKeyDown={handleFrameKeyDown}
-          className="m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring-focus focus-visible:ring-offset-2 focus-visible:ring-offset-background active:cursor-grabbing"
+          className="m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:cursor-grabbing"
         >
           <Component
             instance={instance}

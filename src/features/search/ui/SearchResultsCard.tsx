@@ -24,7 +24,7 @@ export function SearchResultsCard({
   children,
 }: SearchResultsCardProps) {
   return (
-    <section className="relative h-full min-h-[220px] w-[259px] flex-none animate-fade-in overflow-hidden rounded-card bg-surface-card motion-reduce:animate-none">
+    <section className="relative h-full min-h-[220px] w-[259px] flex-none animate-fade-in overflow-hidden rounded-card bg-card motion-reduce:animate-none">
       <h2
         className={cn(
           "absolute left-5 top-[21px] inline-flex h-5 items-center rounded-pill px-[6px] pb-[3px] text-[14px]",
@@ -40,7 +40,7 @@ export function SearchResultsCard({
 
       <BottomFade
         className="absolute bottom-0 left-0 h-20"
-        surface="var(--surface-card)"
+        surface="var(--card)"
       />
     </section>
   );

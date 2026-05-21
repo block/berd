@@ -64,7 +64,7 @@ export function ComponentPlayground({
         ) : null}
       </div>
 
-      <div className="grid overflow-hidden rounded-md border border-border bg-background-card md:grid-cols-[minmax(0,1fr)_280px]">
+      <div className="grid overflow-hidden rounded-md border border-border bg-background md:grid-cols-[minmax(0,1fr)_280px]">
         <div className="flex min-h-52 items-center justify-center p-6">
           {preview}
         </div>
@@ -143,7 +143,7 @@ function PlaygroundControlField({ control }: { control: PlaygroundControl }) {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background-card px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background px-3 py-2">
       <Label
         htmlFor={controlId}
         className={cn(

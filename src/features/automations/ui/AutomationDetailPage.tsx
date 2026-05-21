@@ -42,7 +42,7 @@ const WEEKDAY_OPTIONS = [
   { value: "6", labelKey: "edit.weekdays.saturday" },
 ] as const;
 
-const FIELD_CLASS = "rounded-card-chat border-transparent bg-surface-card";
+const FIELD_CLASS = "rounded-card-chat border-transparent bg-card";
 
 function formatTimeLabel(hhmm: string): string {
   const [hRaw, mRaw] = hhmm.split(":");
@@ -299,7 +299,7 @@ export function AutomationDetailPage({
   return (
     <section className="min-w-0 space-y-8">
       {currentError ? (
-        <div className="rounded-md border border-border-danger/40 bg-background-danger px-3 py-2 text-sm text-text-danger">
+        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {currentError}
         </div>
       ) : null}
@@ -324,7 +324,7 @@ export function AutomationDetailPage({
             <aside className="space-y-6">
               <section className="space-y-6">
                 <label className="block text-sm" htmlFor="detail-name">
-                  <span className="mb-2 block text-xs text-text-muted">
+                  <span className="mb-2 block text-xs text-muted-foreground">
                     {t("edit.fields.title")}
                   </span>
                   <Input
@@ -346,7 +346,7 @@ export function AutomationDetailPage({
                   className="block text-sm"
                   htmlFor="detail-schedule-preset"
                 >
-                  <span className="mb-2 block text-xs text-text-muted">
+                  <span className="mb-2 block text-xs text-muted-foreground">
                     {t("edit.fields.scheduleRepeats")}
                   </span>
                   <Select
@@ -360,7 +360,7 @@ export function AutomationDetailPage({
                   >
                     <SelectTrigger
                       id="detail-schedule-preset"
-                      className="w-full rounded-card-chat border-transparent bg-surface-card"
+                      className="w-full rounded-card-chat border-transparent bg-card"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -392,7 +392,7 @@ export function AutomationDetailPage({
                     className="block text-sm"
                     htmlFor="detail-schedule-day"
                   >
-                    <span className="mb-2 block text-xs text-text-muted">
+                    <span className="mb-2 block text-xs text-muted-foreground">
                       {t("edit.fields.scheduleDay")}
                     </span>
                     <Select
@@ -405,7 +405,7 @@ export function AutomationDetailPage({
                     >
                       <SelectTrigger
                         id="detail-schedule-day"
-                        className="w-full rounded-card-chat border-transparent bg-surface-card"
+                        className="w-full rounded-card-chat border-transparent bg-card"
                       >
                         <SelectValue />
                       </SelectTrigger>
@@ -427,7 +427,7 @@ export function AutomationDetailPage({
                     className="block text-sm"
                     htmlFor="detail-schedule-time"
                   >
-                    <span className="mb-2 block text-xs text-text-muted">
+                    <span className="mb-2 block text-xs text-muted-foreground">
                       {t("edit.fields.scheduleTime")}
                     </span>
                     <Select
@@ -460,7 +460,7 @@ export function AutomationDetailPage({
                     className="block text-sm"
                     htmlFor="detail-schedule-custom"
                   >
-                    <span className="mb-2 block text-xs text-text-muted">
+                    <span className="mb-2 block text-xs text-muted-foreground">
                       {t("edit.fields.scheduleCustom")}
                     </span>
                     <Input
@@ -472,13 +472,13 @@ export function AutomationDetailPage({
                       onBlur={() => saveSchedule({ customSchedule })}
                       placeholder={t("edit.fields.schedulePlaceholder")}
                       disabled={isSaving}
-                      className="rounded-card-chat border-transparent bg-surface-card"
+                      className="rounded-card-chat border-transparent bg-card"
                     />
                   </label>
                 ) : null}
 
                 <label className="block text-sm" htmlFor="detail-timezone">
-                  <span className="mb-2 block text-xs text-text-muted">
+                  <span className="mb-2 block text-xs text-muted-foreground">
                     {t("details.timeZone")}
                   </span>
                   <SearchableSelect
@@ -489,12 +489,12 @@ export function AutomationDetailPage({
                     disabled={isSaving}
                     searchPlaceholder={t("edit.fields.timeZoneSearch")}
                     emptyLabel={t("edit.fields.timeZoneEmpty")}
-                    className="rounded-card-chat border-transparent bg-surface-card"
+                    className="rounded-card-chat border-transparent bg-card"
                   />
                 </label>
 
                 <label className="block text-sm" htmlFor="detail-notifications">
-                  <span className="mb-2 block text-xs text-text-muted">
+                  <span className="mb-2 block text-xs text-muted-foreground">
                     {t("edit.fields.notifications")}
                   </span>
                   <Select
@@ -527,7 +527,7 @@ export function AutomationDetailPage({
             <div className="min-w-0 space-y-4">
               <AutomationLatestResultCard tile={tile} />
 
-              <section className="space-y-4 rounded-card-chat bg-surface-card p-4">
+              <section className="space-y-4 rounded-card-chat bg-card p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="text-sm font-medium text-foreground">
                     {t("details.instructions")}
@@ -589,7 +589,7 @@ export function AutomationDetailPage({
                     {instructionsText}
                   </div>
                 ) : (
-                  <div className="text-sm text-text-muted">
+                  <div className="text-sm text-muted-foreground">
                     {t("details.noInstructions")}
                   </div>
                 )}

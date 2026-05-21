@@ -17,7 +17,7 @@ function renderLines(text: string): string {
       // only the leading include block is treated as working directory metadata.
       const match = line.match(INCLUDE_RE);
       if (match) {
-        return `<div><span class="bg-blue-500/15 text-blue-600 dark:text-blue-400 rounded px-1.5 py-0.5 font-mono text-xs">${escapeHtml(line)}</span></div>`;
+        return `<div><span class="bg-info/10 text-info rounded px-1.5 py-0.5 font-mono text-xs">${escapeHtml(line)}</span></div>`;
       }
       // Use <br> inside empty divs so the line is still editable
       return `<div>${line === "" ? "<br>" : escapeHtml(line)}</div>`;
@@ -212,7 +212,7 @@ export function PromptEditor({
       data-placeholder={placeholder}
       className={cn(
         "w-full overflow-y-auto resize-y rounded-lg border border-input bg-background px-3 py-2 text-xs font-mono leading-relaxed",
-        "focus:outline-none focus:ring-1 focus:ring-ring-focus transition-colors",
+        "focus:outline-none focus:ring-1 focus:ring-ring transition-colors",
         "whitespace-pre-wrap min-h-[120px]",
         showPlaceholder &&
           "empty:before:content-[attr(data-placeholder)] empty:before:text-muted-foreground",

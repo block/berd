@@ -206,7 +206,7 @@ export function ExtensionModal({
                       variant="ghost"
                       size="icon-xs"
                       onClick={() => form.removeEnvVar(env.id)}
-                      className="shrink-0 hover:text-text-danger"
+                      className="shrink-0 hover:text-destructive"
                       aria-label={t("extensions.fields.removeEnvVar")}
                     >
                       <IconTrash className="size-3.5" />
@@ -233,7 +233,7 @@ export function ExtensionModal({
                 variant="ghost"
                 onClick={() => setIsDeleteDialogOpen(true)}
                 disabled={isSaving || isDeleting}
-                className="mr-auto text-text-danger hover:text-text-danger hover:bg-background-danger"
+                className="mr-auto text-destructive hover:text-destructive hover:bg-destructive/10"
               >
                 <IconTrash className="size-4" />
                 {t("extensions.deleteExtension")}

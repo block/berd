@@ -80,7 +80,7 @@ export function SidebarProjectList({
             key={project.id}
             title={project.name}
             onClick={() => onNavigate?.("projects")}
-            className="rounded-lg text-foreground hover:bg-transparent hover:text-foreground"
+            className="rounded-lg text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground"
           >
             <ProjectIcon
               icon={project.icon}
@@ -143,7 +143,7 @@ export function SidebarProjectList({
         >
           {dropTargetProjectId === project.id &&
             draggedProjectId !== project.id && (
-              <div className="absolute top-0 left-3 right-3 h-0.5 rounded-full bg-foreground" />
+              <div className="absolute top-0 left-3 right-3 h-0.5 rounded-full bg-sidebar-foreground" />
             )}
           <SidebarProjectSection
             project={project}

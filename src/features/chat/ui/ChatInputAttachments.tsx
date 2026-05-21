@@ -36,7 +36,7 @@ function DraftImageAttachment({
           <img
             src={attachment.previewUrl}
             alt={t("attachments.alt", { index: index + 1 })}
-            className="h-16 w-16 rounded-card-sm border border-border-soft object-cover"
+            className="h-16 w-16 rounded-card-sm border border-border/80 object-cover"
           />
         </button>
         <button

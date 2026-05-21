@@ -94,7 +94,7 @@ describe("AgentPinWidget", () => {
     const button = screen.getByRole("button", { name: "Open Agent One" });
 
     await waitFor(() => expect(button).toHaveClass("bg-transparent"));
-    expect(button).not.toHaveClass("bg-surface-card");
+    expect(button).not.toHaveClass("bg-card");
     expect(screen.getByText("Agent One")).toBeInTheDocument();
     expect(container.querySelector(media)).toBeInTheDocument();
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
@@ -106,7 +106,7 @@ describe("AgentPinWidget", () => {
     expect(screen.getByRole("button", { name: "Open Agent One" })).toHaveClass(
       "h-24",
       "w-[200px]",
-      "bg-surface-card",
+      "bg-card",
     );
     expect(screen.getByText("Agent")).toBeInTheDocument();
     expect(screen.getByText("Agent One")).toBeInTheDocument();

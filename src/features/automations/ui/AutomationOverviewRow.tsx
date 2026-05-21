@@ -18,15 +18,15 @@ function activityDotClass(status: string | number | undefined) {
     normalized.includes("input") ||
     normalized.includes("configuration")
   ) {
-    return "bg-text-danger";
+    return "bg-destructive";
   }
   if (normalized.includes("success") || normalized.includes("active")) {
-    return "bg-text-success";
+    return "bg-success";
   }
   if (normalized.includes("running") || normalized.includes("pending")) {
-    return "bg-text-info";
+    return "bg-info";
   }
-  return "bg-text-muted";
+  return "bg-muted-foreground";
 }
 
 export function AutomationActivityLabel({
@@ -54,7 +54,7 @@ export function AutomationActivityLabel({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-xs text-text-muted",
+        "inline-flex items-center gap-1.5 text-xs text-muted-foreground",
         className,
       )}
     >
@@ -99,8 +99,8 @@ export function AutomationOverviewRow({
     <button
       type="button"
       className={cn(
-        "group grid min-h-[86px] w-full gap-3 rounded-card-chat bg-surface-card px-6 py-5 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border-soft focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
-        selected && "ring-1 ring-inset ring-text-default",
+        "group grid min-h-[86px] w-full gap-3 rounded-card-chat bg-card px-6 py-5 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        selected && "ring-1 ring-inset ring-foreground",
       )}
       onClick={onOpenDetail}
       aria-label={title}
@@ -119,12 +119,12 @@ export function AutomationOverviewRow({
         </span>
 
         {latestResultSummary ? (
-          <span className="mt-2 block truncate text-sm text-text-muted">
+          <span className="mt-2 block truncate text-sm text-muted-foreground">
             {latestResultSummary}
           </span>
         ) : null}
 
-        <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-muted">
+        <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
           <span className="truncate md:hidden">{schedule}</span>
           <span className="md:hidden" aria-hidden="true">
             ·
@@ -133,7 +133,7 @@ export function AutomationOverviewRow({
         </span>
       </span>
 
-      <span className="hidden max-w-56 truncate text-right text-sm text-text-muted md:block">
+      <span className="hidden max-w-56 truncate text-right text-sm text-muted-foreground md:block">
         {schedule}
       </span>
     </button>

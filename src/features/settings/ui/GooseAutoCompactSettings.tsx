@@ -109,7 +109,7 @@ export function GooseAutoCompactSettings() {
         </p>
 
         {thresholdError ? (
-          <p className="text-[11px] text-text-danger">{thresholdError}</p>
+          <p className="text-[11px] text-destructive">{thresholdError}</p>
         ) : null}
       </div>
     </div>

@@ -290,7 +290,7 @@ export const SpeechInput = ({
       {isListening &&
         [0, 1, 2].map((index) => (
           <div
-            className="absolute inset-0 animate-ping rounded-full border-2 border-red-400/30"
+            className="absolute inset-0 animate-ping rounded-full border-2 border-destructive/30"
             key={index}
             style={{
               animationDelay: `${index * 0.3}s`,
@@ -304,8 +304,8 @@ export const SpeechInput = ({
         className={cn(
           "relative z-10 rounded-full transition-all duration-300",
           isListening
-            ? "bg-background-danger-strong text-text-on-danger-strong hover:bg-background-danger-strong/80 hover:text-text-on-danger-strong"
-            : "bg-background-primary text-text-on-primary hover:bg-background-primary/80 hover:text-text-on-primary",
+            ? "bg-destructive text-destructive-foreground hover:bg-destructive/80 hover:text-destructive-foreground"
+            : "bg-primary text-primary-foreground hover:bg-primary/80 hover:text-primary-foreground",
           className,
         )}
         disabled={isDisabled}

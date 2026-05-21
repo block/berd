@@ -29,7 +29,7 @@ function ContextualTip({
       role="status"
       aria-live="polite"
       className={cn(
-        "inline-flex min-h-8 w-fit max-w-full origin-bottom items-center gap-1.5 rounded-full border border-border-soft bg-background px-1.5 py-1 text-xs text-foreground shadow-mini transition-[box-shadow,border-color] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none",
+        "inline-flex min-h-8 w-fit max-w-full origin-bottom items-center gap-1.5 rounded-full border border-border/80 bg-background px-1.5 py-1 text-xs text-foreground shadow-mini transition-[box-shadow,border-color] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none",
         className,
       )}
       {...props}

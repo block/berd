@@ -211,7 +211,7 @@ export function ContextPanel({
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
       className="flex h-full min-w-0 flex-1 flex-col gap-0"
     >
-      <div className="shrink-0 border-b border-border-soft px-3 pb-2 pt-2.5">
+      <div className="shrink-0 border-b border-border/80 px-3 pb-2 pt-2.5">
         <TabsList variant="buttons">
           <TabsTrigger value="details" variant="buttons">
             {t("contextPanel.tabs.details")}

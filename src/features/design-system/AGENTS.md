@@ -80,17 +80,23 @@ not turn the preview into a remote-controlled demo.
 - Prefer explicit values over vague values like `inherited`,
   `state-dependent`, or `disabled opacity`.
 - Disabled states should name the base token plus opacity, for example
-  `--text-default / 50%`.
+  `--foreground / 50%`.
 
-## Source vs Semantic Tokens
+## Token Usage
 
-Component source should use semantic tokens, not source-token utility names like
-`bg-background`, `text-foreground`, `bg-muted`, `text-muted-foreground`,
-`border-input`, or `bg-border`.
+Component source should use the shadcn semantic token contract first:
+`bg-background`, `text-foreground`, `bg-card`, `bg-popover`, `bg-muted`,
+`text-muted-foreground`, `bg-accent`, `bg-primary`, `bg-destructive`,
+`border-border`, `border-input`, and `ring-ring`.
 
-If a component needs a token that does not exist yet, propose or add a semantic
-token first, then use it in the component. Do not add app-specific source tokens
-for a one-off component state.
+Use Goose extension tokens only for product-specific surfaces and identities,
+such as `bg-surface-composer`, `bg-canvas-base`, chip colors, status colors,
+and composer placeholder color. Use shadcn's `bg-sidebar` token for the app
+chrome/sidebar/context-panel glass.
+
+Do not use raw palette utilities like `bg-gray-100`, direct hex colors, or
+component-specific one-off color tokens without first adding them to the design
+system.
 
 ## Validation
 

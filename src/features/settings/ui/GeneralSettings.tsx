@@ -229,10 +229,10 @@ export function GeneralSettings() {
                 <button
                   aria-pressed={selected}
                   className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus",
+                    "flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     selected
-                      ? "border-border-primary/30 bg-background-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-background-hover hover:text-text-hover",
+                      ? "border-primary/30 bg-primary/10 text-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
                   )}
                   data-testid={`theme-option-${option.value}`}
                   key={option.value}
@@ -249,7 +249,7 @@ export function GeneralSettings() {
                     </div>
                   </div>
                   {selected ? (
-                    <Check className="h-4 w-4 shrink-0 text-text-primary" />
+                    <Check className="h-4 w-4 shrink-0 text-primary" />
                   ) : null}
                 </button>
               );
@@ -337,7 +337,7 @@ export function GeneralSettings() {
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-1 rounded-full bg-background-success px-2 py-1 text-xxs font-medium text-text-success">
+          <div className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-xxs font-medium text-success">
             <IconCheck className="size-3.5" />
             <span>{t("compaction.goose.builtIn")}</span>
           </div>

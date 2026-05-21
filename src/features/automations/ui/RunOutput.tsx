@@ -11,7 +11,7 @@ import { Spinner } from "@/shared/ui/spinner";
 
 export function JsonPreview({ value }: { value: unknown }) {
   return (
-    <pre className="max-h-64 overflow-auto rounded-md border border-border-soft bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+    <pre className="max-h-64 overflow-auto rounded-md border border-border/80 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
       {JSON.stringify(value, null, 2)}
     </pre>
   );
@@ -19,7 +19,7 @@ export function JsonPreview({ value }: { value: unknown }) {
 
 export function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border-soft px-6 text-center">
+    <div className="flex min-h-48 flex-col items-center justify-center rounded-lg border border-dashed border-border/80 px-6 text-center">
       <p className="text-sm font-medium text-foreground">{title}</p>
       <p className="mt-1 max-w-md text-sm text-muted-foreground">{body}</p>
     </div>
@@ -47,7 +47,7 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
               {t("history.runOutput")}
             </h4>
             {result.sessionId ? (
-              <span className="truncate text-xs text-text-muted">
+              <span className="truncate text-xs text-muted-foreground">
                 {result.sessionId}
               </span>
             ) : null}
@@ -67,7 +67,7 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
               {t("history.sessionHistory")}
             </h4>
             {result.sessionId ? (
-              <span className="truncate text-xs text-text-muted">
+              <span className="truncate text-xs text-muted-foreground">
                 {result.sessionId}
               </span>
             ) : null}
@@ -79,7 +79,7 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
             </p>
           ) : sessionQuery.isLoading ? (
             <div className="flex min-h-32 items-center justify-center">
-              <Spinner className="size-5 text-text-primary" />
+              <Spinner className="size-5 text-primary" />
             </div>
           ) : sessionQuery.error ? (
             <EmptyState
@@ -87,7 +87,7 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
               body={sessionQuery.error.message}
             />
           ) : messages.length ? (
-            <div className="h-[34rem] overflow-hidden rounded-lg border border-border-soft bg-background">
+            <div className="h-[34rem] overflow-hidden rounded-lg border border-border/80 bg-background">
               <MessageTimeline messages={messages} className="h-full" />
             </div>
           ) : (

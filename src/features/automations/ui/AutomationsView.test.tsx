@@ -430,7 +430,7 @@ describe("AutomationsView", () => {
 
     expect(await screen.findAllByText("Daily at 9:00 AM")).not.toHaveLength(0);
     expect(screen.getAllByText(/Last ran/)[0].closest("span")).toHaveClass(
-      "text-text-muted",
+      "text-muted-foreground",
     );
 
     await user.click(

@@ -83,7 +83,7 @@ export const PersonaCard = memo(function PersonaCard({
         "rounded-card bg-transparent p-2",
         "transition-colors duration-200",
         "focus-visible:outline-none",
-        isActive && "bg-background-muted/40",
+        isActive && "bg-muted/40",
       )}
     >
       <div className="relative aspect-square w-full overflow-hidden rounded-card-sm">
@@ -121,10 +121,10 @@ export const PersonaCard = memo(function PersonaCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "size-5 rounded-full transition-colors hover:text-text-default",
+                  "size-5 rounded-full transition-colors hover:text-foreground",
                   menuOpen
-                    ? "opacity-100 text-text-default"
-                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
+                    ? "opacity-100 text-foreground"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-foreground/40",
                 )}
               >
                 <IconDots className="size-3.5" />
@@ -165,7 +165,7 @@ export const PersonaCard = memo(function PersonaCard({
       </div>
 
       <div className="flex flex-col gap-3 px-1">
-        <div className="h-px w-full bg-border-soft" />
+        <div className="h-px w-full bg-border/80" />
 
         <div className="flex items-center">
           <span className="inline-flex h-5 items-center rounded-full bg-background px-1.5 py-0.5 text-sm leading-[15px] text-foreground">

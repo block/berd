@@ -53,7 +53,7 @@ const WEEKDAY_OPTIONS = [
   { value: "6", labelKey: "edit.weekdays.saturday" },
 ] as const;
 
-const FIELD_CLASS = "rounded-card-chat border-transparent bg-surface-card-soft";
+const FIELD_CLASS = "rounded-card-chat border-transparent bg-card/40";
 
 function formatTimeLabel(hhmm: string): string {
   const [hRaw, mRaw] = hhmm.split(":");
@@ -173,42 +173,42 @@ export function AutomationDraftRail({
   return (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-card bg-surface-card p-5 lg:w-[337px]",
+        "flex min-h-0 w-full flex-col rounded-card bg-card p-5 lg:w-[337px]",
         className,
       )}
       aria-label={t("builder.previewAriaLabel")}
     >
-      <div className="flex items-center justify-between rounded-pill bg-surface-card-soft px-4 py-3 text-sm text-foreground">
+      <div className="flex items-center justify-between rounded-pill bg-card/40 px-4 py-3 text-sm text-foreground">
         <span className="flex min-w-0 items-center gap-2">
-          <IconSparkles className="size-4 shrink-0 text-text-default" />
+          <IconSparkles className="size-4 shrink-0 text-foreground" />
           <span className="truncate">{t("builder.previewEyebrow")}</span>
         </span>
-        <IconChevronDown className="size-4 shrink-0 text-text-muted" />
+        <IconChevronDown className="size-4 shrink-0 text-muted-foreground" />
       </div>
 
       <div className="mt-5 min-h-0 flex-1 overflow-y-auto">
         {draftState.blockedToolRequest && !draft ? (
-          <section className="rounded-card-chat border border-border-danger/40 bg-background-danger p-3">
+          <section className="rounded-card-chat border border-destructive/40 bg-destructive/10 p-3">
             <div className="flex items-start gap-2">
-              <IconAlertTriangle className="mt-0.5 size-4 text-text-danger" />
+              <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
               <div>
                 <h3 className="text-sm font-normal text-foreground">
                   {t("builder.blockedTitle")}
                 </h3>
-                <p className="mt-1 text-sm text-text-muted">
+                <p className="mt-1 text-sm text-muted-foreground">
                   {t("builder.blockedBody")}
                 </p>
               </div>
             </div>
           </section>
         ) : !draft ? (
-          <section className="rounded-card-chat bg-surface-card-soft p-4 text-sm text-text-muted">
+          <section className="rounded-card-chat bg-card/40 p-4 text-sm text-muted-foreground">
             {t("builder.previewEmptyBody")}
           </section>
         ) : (
           <div className="space-y-4">
             <label className="block text-sm" htmlFor="draft-title">
-              <span className="mb-2 block text-xs text-text-muted">
+              <span className="mb-2 block text-xs text-muted-foreground">
                 {t("edit.fields.title")}
               </span>
               <Input
@@ -223,7 +223,7 @@ export function AutomationDraftRail({
             </label>
 
             <label className="block text-sm" htmlFor="draft-schedule-preset">
-              <span className="mb-2 block text-xs text-text-muted">
+              <span className="mb-2 block text-xs text-muted-foreground">
                 {t("edit.fields.scheduleRepeats")}
               </span>
               <Select
@@ -264,7 +264,7 @@ export function AutomationDraftRail({
 
             {schedule.preset === "weekly" ? (
               <label className="block text-sm" htmlFor="draft-schedule-day">
-                <span className="mb-2 block text-xs text-text-muted">
+                <span className="mb-2 block text-xs text-muted-foreground">
                   {t("edit.fields.scheduleDay")}
                 </span>
                 <Select
@@ -293,7 +293,7 @@ export function AutomationDraftRail({
             schedule.preset !== "hourly" &&
             schedule.preset !== "custom" ? (
               <label className="block text-sm" htmlFor="draft-schedule-time">
-                <span className="mb-2 block text-xs text-text-muted">
+                <span className="mb-2 block text-xs text-muted-foreground">
                   {t("edit.fields.scheduleTime")}
                 </span>
                 <Select
@@ -320,7 +320,7 @@ export function AutomationDraftRail({
 
             {schedule.preset === "custom" ? (
               <label className="block text-sm" htmlFor="draft-schedule-custom">
-                <span className="mb-2 block text-xs text-text-muted">
+                <span className="mb-2 block text-xs text-muted-foreground">
                   {t("edit.fields.scheduleCustom")}
                 </span>
                 <Input
@@ -337,7 +337,7 @@ export function AutomationDraftRail({
             ) : null}
 
             <label className="block text-sm" htmlFor="draft-timezone">
-              <span className="mb-2 block text-xs text-text-muted">
+              <span className="mb-2 block text-xs text-muted-foreground">
                 {t("edit.fields.timeZone")}
               </span>
               <SearchableSelect
@@ -353,7 +353,7 @@ export function AutomationDraftRail({
             </label>
 
             <label className="block text-sm" htmlFor="draft-notifications">
-              <span className="mb-2 block text-xs text-text-muted">
+              <span className="mb-2 block text-xs text-muted-foreground">
                 {t("edit.fields.notifications")}
               </span>
               <Select
@@ -383,7 +383,7 @@ export function AutomationDraftRail({
             </label>
 
             <label className="block text-sm" htmlFor="draft-instructions">
-              <span className="mb-2 block text-xs text-text-muted">
+              <span className="mb-2 block text-xs text-muted-foreground">
                 {t("edit.fields.instructions")}
               </span>
               <Textarea
@@ -408,7 +408,7 @@ export function AutomationDraftRail({
         )}
 
         {error ? (
-          <div className="mt-4 rounded-card-chat border border-border-danger/40 bg-background-danger p-3 text-sm text-text-danger">
+          <div className="mt-4 rounded-card-chat border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         ) : null}
@@ -428,11 +428,11 @@ export function AutomationDraftRail({
             {isSubmitting ? t("builder.processing") : t("builder.create")}
           </Button>
         ) : null}
-        <div className="flex min-h-4 items-center gap-2 text-xs text-text-muted">
+        <div className="flex min-h-4 items-center gap-2 text-xs text-muted-foreground">
           <span>{statusText}</span>
         </div>
         {sessionId ? (
-          <div className="flex items-center gap-2 text-xs text-text-muted">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <IconPlayerStop className="size-3.5" aria-hidden="true" />
             <span className="shrink-0">{t("builder.sessionId")}</span>
             <span className="truncate">{sessionId}</span>

@@ -6,7 +6,7 @@ import { Input } from "@/shared/ui/input";
 const searchBarSizes = {
   compact: {
     wrapper:
-      "rounded-md border border-border-soft px-2 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
+      "rounded-md border border-border/80 px-2 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
     icon: "left-2.5 size-3",
     input:
       "h-auto border-none bg-transparent px-0 pl-5 pr-0 text-[11px] font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
@@ -15,7 +15,7 @@ const searchBarSizes = {
   },
   small: {
     wrapper:
-      "rounded-md border border-border-soft px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
+      "rounded-md border border-border/80 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
     icon: "left-3 size-3.5",
     input:
       "h-auto border-none bg-transparent px-0 pl-6 pr-0 text-xs font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
@@ -26,15 +26,15 @@ const searchBarSizes = {
     wrapper: "",
     icon: "left-3 size-4",
     input:
-      "rounded-lg border-border-soft bg-background pr-3 pl-9 text-sm font-normal hover:border-border-soft focus-visible:border-border-focus",
+      "rounded-lg border-border/80 bg-background pr-3 pl-9 text-sm font-normal hover:border-border/80 focus-visible:border-ring",
     inputVariant: "default" as const,
     hideIcon: false,
   },
   pill: {
-    wrapper: "rounded-full bg-background-input-pill px-4 py-2.5",
+    wrapper: "rounded-full bg-muted px-4 py-2.5",
     icon: "",
     input:
-      "h-auto border-none bg-transparent px-0 text-sm font-normal text-text-default shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-text-default! placeholder:opacity-40",
+      "h-auto border-none bg-transparent px-0 text-sm font-normal text-foreground shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-foreground! placeholder:opacity-40",
     inputVariant: "ghost" as const,
     hideIcon: true,
   },
@@ -76,7 +76,7 @@ export function SearchBar({
       {!styles.hideIcon && (
         <Search
           className={cn(
-            "pointer-events-none absolute top-1/2 -translate-y-1/2 text-placeholder",
+            "pointer-events-none absolute top-1/2 -translate-y-1/2 text-muted-foreground",
             styles.icon,
           )}
         />
@@ -94,7 +94,7 @@ export function SearchBar({
         onKeyDown={onKeyDown}
         placeholder={placeholder}
         aria-label={ariaLabel}
-        className={cn("w-full placeholder:text-placeholder", styles.input)}
+        className={cn("w-full placeholder:text-muted-foreground", styles.input)}
       />
     </div>
   );

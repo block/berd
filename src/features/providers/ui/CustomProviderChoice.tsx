@@ -62,7 +62,7 @@ export function CustomProviderChoice({
         })}
         onClick={onDelete}
         disabled={deleting}
-        className="text-text-danger hover:text-text-danger"
+        className="text-destructive hover:text-destructive"
       >
         <IconTrash className="size-3.5" />
       </Button>

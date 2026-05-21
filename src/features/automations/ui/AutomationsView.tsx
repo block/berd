@@ -548,9 +548,9 @@ export function AutomationsWorkbench({
             <TabsContent value="overview" className="mt-6">
               {automationsQuery.isLoading ? (
                 <div className="space-y-3">
-                  <div className="h-[86px] rounded-card-chat bg-surface-card" />
-                  <div className="h-[86px] rounded-card-chat bg-surface-card" />
-                  <div className="h-[86px] rounded-card-chat bg-surface-card" />
+                  <div className="h-[86px] rounded-card-chat bg-card" />
+                  <div className="h-[86px] rounded-card-chat bg-card" />
+                  <div className="h-[86px] rounded-card-chat bg-card" />
                 </div>
               ) : automationsQuery.error ? (
                 <EmptyState

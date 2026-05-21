@@ -647,7 +647,7 @@ export function SessionHistoryView({
           <h2
             className={cn(
               SESSION_GRID_COLS,
-              "pt-10 pb-3 text-base text-text-default",
+              "pt-10 pb-3 text-base text-foreground",
             )}
           >
             <span>{row.label}</span>
@@ -718,7 +718,7 @@ export function SessionHistoryView({
           </div>
 
           {searchError && (
-            <p className="text-xs text-text-danger">
+            <p className="text-xs text-destructive">
               {t("history.searchError")}
             </p>
           )}

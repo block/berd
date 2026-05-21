@@ -290,10 +290,10 @@ function renderContentBlock(
           className={cn(
             "rounded-md border p-2 text-xs",
             isError
-              ? "border-border-danger/30 bg-background-danger text-text-danger"
+              ? "border-destructive/30 bg-destructive/10 text-destructive"
               : isCompaction
-                ? "inline-flex items-center justify-center gap-2 border-border-success/30 bg-background-success font-medium text-text-success"
-                : "border-border bg-background-hover text-muted-foreground",
+                ? "inline-flex items-center justify-center gap-2 border-success/30 bg-success/10 font-medium text-success"
+                : "border-border bg-accent text-muted-foreground",
           )}
         >
           {isCompaction ? <Check className="size-3.5 shrink-0" /> : null}
@@ -436,7 +436,7 @@ export const MessageBubble = memo(function MessageBubble({
             className={cn(
               "min-w-0 text-sm leading-relaxed",
               isUser
-                ? "rounded-lg bg-surface-user-bubble px-4 py-2 leading-normal"
+                ? "rounded-lg bg-message-user-bg px-4 py-2 leading-normal"
                 : "w-full",
             )}
             onClick={handleContentClick}
@@ -478,7 +478,7 @@ export const MessageBubble = memo(function MessageBubble({
               );
             })}
             {pathNotice && (
-              <p className="mt-2 text-xs text-text-danger" role="status">
+              <p className="mt-2 text-xs text-destructive" role="status">
                 {pathNotice}
               </p>
             )}

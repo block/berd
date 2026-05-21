@@ -37,15 +37,15 @@ const STEP_BULLET_CLASS: Record<
 function ChainStepBullet({ status }: { status: ToolCallStatus }) {
   if (status === "failed") {
     return (
-      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-red-600" />
+      <span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full bg-destructive"
+      />
     );
   }
   if (status === "stopped") {
     return (
-      <span
-        aria-hidden
-        className="size-1.5 shrink-0 rounded-full bg-orange-600"
-      />
+      <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-warning" />
     );
   }
   const Icon = STEP_BULLET_ICON[status];

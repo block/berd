@@ -16,7 +16,7 @@ import {
  * Codifies the column-layout pattern that every create/edit modal in the app
  * consumes: a sticky compact header, a scrollable body that owns the form,
  * and a `border-t`-divided footer pinned to the bottom. All padding and
- * geometry comes from tokens (`rounded-modal`, `--surface-card` via the
+ * geometry comes from tokens (`rounded-modal`, `--card` via the
  * dialog default) — feature code only owns the content.
  *
  * Usage:
@@ -68,7 +68,7 @@ function EditDialogContent({
       className={cn(
         // Reset shadcn defaults the Dialog primitive applies (gap-4, p-6),
         // then re-establish the create/edit column layout.
-        "flex max-h-[85vh] flex-col gap-0 overflow-hidden bg-surface-overlay p-0",
+        "flex max-h-[85vh] flex-col gap-0 overflow-hidden bg-popover p-0",
         SIZE_TO_MAX_W[size],
         className,
       )}
@@ -139,10 +139,7 @@ function EditDialogFooter({
 }: React.ComponentProps<"div">) {
   return (
     <DialogFooter
-      className={cn(
-        "shrink-0 border-t border-border-soft px-5 py-4",
-        className,
-      )}
+      className={cn("shrink-0 border-t border-border/80 px-5 py-4", className)}
       {...props}
     />
   );

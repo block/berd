@@ -211,7 +211,7 @@ describe("AgentModelPicker", () => {
     });
 
     const selectedDuplicateRows = duplicateModelRows.filter((row) =>
-      row.classList.contains("bg-muted/60"),
+      row.classList.contains("bg-accent"),
     );
     expect(selectedDuplicateRows).toHaveLength(1);
 
@@ -264,7 +264,7 @@ describe("AgentModelPicker", () => {
     });
 
     expect(
-      duplicateModelRows.filter((row) => row.classList.contains("bg-muted/60")),
+      duplicateModelRows.filter((row) => row.classList.contains("bg-accent")),
     ).toHaveLength(1);
   });
 

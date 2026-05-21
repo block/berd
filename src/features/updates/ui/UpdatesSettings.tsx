@@ -99,7 +99,7 @@ export function UpdatesSettings() {
           <p
             className={cn(
               "mt-4 text-xs leading-4 text-muted-foreground",
-              status === "error" && "text-text-danger",
+              status === "error" && "text-destructive",
             )}
           >
             {status === "error" && errorMessage

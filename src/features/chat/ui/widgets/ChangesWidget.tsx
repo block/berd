@@ -119,9 +119,9 @@ export function ChangesWidget({
       {isLoading && <Spinner className="size-3" />}
       {hasChanges && (
         <span className="shrink-0 font-mono text-xxs tabular-nums">
-          <span className="text-text-success">+{totals.additions}</span>{" "}
+          <span className="text-success">+{totals.additions}</span>{" "}
           {/* i18n-check-ignore — mathematical symbol, not translatable */}
-          <span className="text-text-danger">&minus;{totals.deletions}</span>
+          <span className="text-destructive">&minus;{totals.deletions}</span>
         </span>
       )}
     </div>
@@ -154,7 +154,7 @@ export function ChangesWidget({
           ))}
         </div>
       ) : (
-        <p className="px-3 text-sm text-text-muted">
+        <p className="px-3 text-sm text-muted-foreground">
           {t("contextPanel.empty.noChanges")}
         </p>
       )}

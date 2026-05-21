@@ -161,7 +161,7 @@ export function RecommendedModelList({
           <button
             type="button"
             onClick={onShowAll}
-            className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="flex w-full items-center gap-1.5 rounded-sm px-2 py-1.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <IconSearch className="size-3.5" />
             <span>{t("toolbar.showAllModels")}</span>
@@ -210,7 +210,7 @@ export function AllModelsList({
         <button
           type="button"
           onClick={onBack}
-          className="flex shrink-0 items-center rounded-sm p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          className="flex shrink-0 items-center rounded-sm p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           aria-label={t("toolbar.model")}
         >
           <IconChevronLeft className="size-4" />

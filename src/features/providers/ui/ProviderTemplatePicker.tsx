@@ -102,7 +102,7 @@ export function ProviderTemplatePicker({
               type="button"
               onClick={() => onSelect(template.id)}
               disabled={disabled}
-              className="flex min-h-12 w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-background-hover/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus disabled:pointer-events-none disabled:opacity-50"
+              className="flex min-h-12 w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
             >
               <IconLayoutGrid className="size-4 shrink-0 text-muted-foreground" />
               <span className="min-w-0 flex-1">

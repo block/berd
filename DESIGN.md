@@ -2,29 +2,25 @@
 name: Goose Internal
 description: A desktop agent workspace documented from the actual Goose Internal design-system tokens.
 colors:
-  bg-background-primary: "#1a1a1a"
-  text-text-on-primary: "#ffffff"
+  bg-primary: "#1a1a1a"
+  text-primary-foreground: "#ffffff"
   bg-background: "#ffffff"
-  text-foreground: "#1a1a1a"
-  bg-background-card: "#ffffff"
-  bg-sidebar-nav-bg-hover: "#f5f5f5"
-  bg-sidebar-nav-bg-selected: "#f5f5f5"
-  bg-background-muted: "#f0f0f0"
+  text-foreground: "#242424"
+  bg-card: "#ffffff"
+  bg-sidebar-accent: "#f5f5f5"
   bg-muted: "#f0f0f0"
-  text-text-muted: "#999999"
-  text-muted-foreground: "#999999"
+  text-muted-foreground: "#7f7f7f"
   text-placeholder: "#cccccc"
   border-border: "#e8e8e8"
   border-input: "#e5e5e5"
-  border-border-input-hover: "#cccccc"
-  border-border-strong: "#1a1a1a"
-  bg-background-danger: "color-mix(in oklab, #dc2626 12%, transparent)"
-  bg-background-danger-strong: "#dc2626"
-  text-text-danger: "#dc2626"
-  text-text-on-danger-strong: "#ffffff"
-  text-text-success: "#73b468"
-  text-text-info: "#5c98f9"
-  text-text-warning: "#fbcd44"
+  border-foreground: "#242424"
+  bg-destructive: "#dc2626"
+  bg-destructive-10: "color-mix(in oklab, #dc2626 10%, transparent)"
+  text-destructive: "#dc2626"
+  text-destructive-foreground: "#ffffff"
+  text-success: "#73b468"
+  text-info: "#5c98f9"
+  text-warning: "#fbcd44"
 typography:
   display:
     fontFamily: "font-display"
@@ -82,8 +78,8 @@ spacing:
   py-8: "2rem"
 components:
   button-primary:
-    backgroundColor: "{colors.bg-background-primary}"
-    textColor: "{colors.text-text-on-primary}"
+    backgroundColor: "{colors.bg-primary}"
+    textColor: "{colors.text-primary-foreground}"
     rounded: "{rounded.rounded-full}"
     height: "{spacing.h-9}"
     padding: "0 1rem"
@@ -105,12 +101,12 @@ components:
     rounded: "{rounded.rounded-2xl}"
     padding: "1rem"
   card-default:
-    backgroundColor: "{colors.bg-background-card}"
+    backgroundColor: "{colors.bg-card}"
     textColor: "{colors.text-foreground}"
     rounded: "{rounded.rounded-card}"
     padding: "1.5rem"
   nav-item-active:
-    backgroundColor: "{colors.bg-sidebar-nav-bg-selected}"
+    backgroundColor: "{colors.bg-sidebar-accent}"
     textColor: "{colors.text-foreground}"
     rounded: "6px"
     padding: "0.375rem 0.75rem"
@@ -147,41 +143,40 @@ The source palette is a semantic token system backed by a gray scale and small s
 
 ### Primary
 
-- **`--brand`**: Primary action, selected context, and accent source. In light mode it resolves to `--color-gray-900`; in dark mode it resolves to `--color-white`.
-- **`--brand-foreground`**: Foreground color on `--brand`.
-- **`--foreground`**: Public foreground alias used by Tailwind class `text-foreground`; it resolves to `--text-default`.
-- **`--background-accent`, `--border-accent`, `--text-accent`**: Accent aliases that resolve to `--brand`.
+- **`--primary`**: Primary action, selected context, and accent source. In light mode it resolves to `--color-gray-900`; in dark mode it resolves to `--color-white`.
+- **`--primary-foreground`**: Foreground color on `--primary`.
+- **`--foreground`**: Public foreground alias used by Tailwind class `text-foreground`; it resolves to `--foreground`.
+- **`--accent`, `--accent-foreground`**: Hover and low-emphasis interactive fill tokens.
 
 ### Secondary
 
-- **`--background-default`**: Default app, card, popover, dialog, and composer surface.
-- **`--background-card`**: Card and panel surface.
-- **`--background-muted`**: Muted surface for badges, tabs, queued rows, and low-emphasis controls.
-- **`--background-medium`**: Stronger neutral fill used sparingly.
-- **`--background-inverse`**: Inverse surface, not a license to make the product feel like a terminal.
+- **`--background`**: Default app surface.
+- **`--card`**: Card and panel surface.
+- **`--muted`**: Muted surface for badges, tabs, queued rows, and low-emphasis controls.
+- **`--secondary`**: Stronger neutral fill used sparingly.
+- **`--popover-inverse`**: Inverse menu surface for narrow cases, not a license to make the product feel like a terminal.
 
 ### Tertiary
 
-- **`--background-danger`, `--text-danger`**: Soft danger and failure states; use these as a pair.
-- **`--background-danger-strong`, `--text-on-danger-strong`**: Filled destructive action states; use these as a pair.
-- **`--border-danger`**: Danger and failure boundaries.
-- **`--background-success`, `--border-success`, `--text-success`**: Success and ready states.
-- **`--background-info`, `--border-info`, `--text-info`**: Informational state and system feedback.
-- **`--background-warning`, `--border-warning`, `--text-warning`**: Warning state.
+- **`--destructive`, `--destructive-foreground`**: Danger, failure boundaries, and filled destructive action states.
+- **`--success / 10%`, `--success`, `--success`**: Success and ready states.
+- **`--info / 10%`, `--info`, `--info`**: Informational state and system feedback.
+- **`--warning / 10%`, `--warning`, `--warning`**: Warning state.
 
 ### Neutral
 
-- **`--border-default`, `--border-soft`, `--border-soft-divider`**: General structure, dividers, and low-emphasis separation.
-- **`--border-input`, `--border-input-hover`**: Form and control boundaries.
-- **`--border-strong`, `--border-card`, `--border-inverse`**: Stronger or contextual boundaries.
-- **`--text-default`, `--text-on-card`, `--text-on-popover`, `--text-on-primary`, `--text-on-secondary`, `--text-muted`, `--text-alt`, `--text-placeholder`, `--text-inverse`**: Lower-level semantic text values.
-- **`--sidebar-nav-bg-hover`, `--sidebar-nav-bg-selected`, `--sidebar-nav-fg`**: Left navigation row states. Hover and selected change only the fill; text and icons keep the same foreground.
+- **`--border`, `--border / 80%`**: General structure, dividers, and low-emphasis separation.
+- **`--input`**: Form and control boundaries.
+- **`--foreground`, `--card-foreground`, `--popover-foreground`, `--primary-foreground`, `--secondary-foreground`, `--muted-foreground`, `--text-placeholder`**: Lower-level semantic text values.
+- **`--sidebar-accent`, `--sidebar-accent-foreground`**: Left navigation row states. Hover and selected change only the fill; text and icons keep the same foreground.
 - **`--foreground`, `--muted-foreground`, `--card-foreground`, `--popover-foreground`, `--primary-foreground`, `--secondary-foreground`**: Source text inputs that semantic text tokens consume.
-- **`--ring`, `--border-focus`, `--ring-focus`**: Theme focus input and semantic focus tokens.
+- **`--ring`**: Focus border/ring color. Keep it a quiet neutral gray so focus is visible without becoming a black outline.
 
 ### Named Rules
 
-**The Token Contract Rule.** Use the existing CSS variables and Tailwind aliases. In feature code, prefer classes like `text-foreground`, `text-muted-foreground`, `bg-background`, and `border-border`; in token work, understand that these map back to variables such as `--foreground`, `--muted-foreground`, `--background`, and `--border`, which in turn resolve to semantic values like `--text-default`.
+**The Token Contract Rule.** Use the existing CSS variables and Tailwind aliases. In feature code, prefer classes like `text-foreground`, `text-muted-foreground`, `bg-background`, and `border-border`; in token work, understand that these map back to variables such as `--foreground`, `--muted-foreground`, `--background`, and `--border`, which in turn resolve to semantic values like `--foreground`.
+
+**The Theme Provider Rule.** `ThemeProvider` may apply light/dark mode, density, and the explicit primary color override. It should not generate or overwrite the full shadcn token palette at runtime.
 
 **The State Color Rule.** Red, green, blue, and yellow are for state, not decoration. If a color does not communicate status or selected context, remove it.
 
@@ -240,7 +235,7 @@ Goose Internal uses semantic shadow tokens plus borders and tonal layering. Most
 Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
 
 - **Shape:** `rounded-full` for ordinary buttons.
-- **Primary:** `bg-background-primary text-text-on-primary`, mapping through semantic primary surface and readable-on-primary text tokens.
+- **Primary:** `bg-primary text-primary-foreground`, mapping through semantic primary surface and readable-on-primary text tokens.
 - **Sizing:** Use the `Button` `size` prop. Current variants map to `h-7`, `h-8`, `h-9`, and `h-10`.
 - **Ghost icon buttons:** No hover fill for `variant="ghost"` plus icon sizes; they shift from muted text to foreground text.
 - **Rule:** Add variants to `Button` when a reusable button treatment is missing.
@@ -258,8 +253,8 @@ Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), 
 Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
 
 - **Shape:** `rounded-card`, with `rounded-card-sm` and `rounded-card-lg` for system-level variants.
-- **Color:** `bg-background-card text-text-on-card`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
-- **Border:** `border-border`, mapping to `--border-default`.
+- **Color:** `bg-card text-card-foreground`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
+- **Border:** `border-border`, mapping to `--border`.
 - **Shadow:** `hover:shadow-card` only when the card is interactive.
 - **Rule:** Do not use cards as the default page layout, and never nest cards.
 
@@ -268,9 +263,9 @@ Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) onl
 Use [Input](/Users/morganm/Development/goose-internal/src/shared/ui/input.tsx), shared textareas, or shared selector components.
 
 - **Shape:** `rounded-input` for default inputs.
-- **Color:** `border-input`, `hover:border-border-input-hover`, `text-foreground`, and `placeholder:text-placeholder`.
-- **Focus:** `focus-visible:border-border-focus` and `focus-visible:ring-ring-focus`, using semantic focus tokens.
-- **Error / Disabled:** `aria-invalid:border-border-danger`; disabled controls reduce opacity and preserve layout.
+- **Color:** `border-input`, `hover:border-foreground/20`, `text-foreground`, and `placeholder:text-placeholder`.
+- **Focus:** `focus-visible:border-ring` and `focus-visible:ring-ring`, using semantic focus tokens.
+- **Error / Disabled:** `aria-invalid:border-destructive`; disabled controls reduce opacity and preserve layout.
 
 ### Navigation
 
@@ -295,7 +290,7 @@ The composer is the signature component and should receive the most craft.
 Use Radix-backed shared primitives for dialogs, sheets, drawers, dropdowns, popovers, and tooltips.
 
 - **Shape:** `rounded-overlay` for popovers and dropdowns, `rounded-modal` for dialogs.
-- **Color:** `bg-background-popover text-text-on-popover` or `bg-background text-foreground`.
+- **Color:** `bg-popover text-popover-foreground` or `bg-background text-foreground`.
 - **Motion:** Use existing open/close animations and durations (`--duration-fast`, `--duration-normal`, `--duration-slow`).
 - **Modal Use:** Dialogs are for blocking decisions, destructive confirmation, or workflows that cannot remain inline.
 

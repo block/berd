@@ -331,15 +331,13 @@ function InspectorOutline({
   return (
     <div
       aria-hidden="true"
-      className="pointer-events-none fixed z-[110] rounded-sm border border-border-focus bg-background-info/10 shadow-mini"
+      className="pointer-events-none fixed z-[110] rounded-sm border border-ring bg-info/10 shadow-mini"
       style={{
         top: rect.top - 2,
         left: rect.left - 2,
         width: rect.width + 4,
         height: rect.height + 4,
-        outline: locked
-          ? "2px solid var(--border-primary)"
-          : "1px solid transparent",
+        outline: locked ? "2px solid var(--primary)" : "1px solid transparent",
       }}
     />
   );
@@ -361,14 +359,11 @@ function InspectorPanel({
   );
 
   return (
-    <aside className="fixed top-16 right-4 bottom-16 z-[120] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-overlay border border-border bg-background-popover text-text-on-popover shadow-popover">
+    <aside className="fixed top-16 right-4 bottom-16 z-[120] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-overlay border border-border bg-popover text-foreground shadow-popover">
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <Component
-              className="size-4 text-text-primary"
-              aria-hidden="true"
-            />
+            <Component className="size-4 text-primary" aria-hidden="true" />
             <h2 className="truncate text-sm font-medium">{inspection.label}</h2>
             {locked ? <Badge variant="secondary">locked</Badge> : null}
           </div>
@@ -437,7 +432,7 @@ function InspectorPanel({
                 {classPreview.map((className) => (
                   <span
                     key={className}
-                    className="rounded-sm bg-background-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                    className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
                   >
                     {className}
                   </span>
@@ -511,8 +506,8 @@ function FindingList({
             <Icon
               className={
                 finding.tone === "warning"
-                  ? "mt-0.5 size-3.5 shrink-0 text-text-warning"
-                  : "mt-0.5 size-3.5 shrink-0 text-text-success"
+                  ? "mt-0.5 size-3.5 shrink-0 text-warning"
+                  : "mt-0.5 size-3.5 shrink-0 text-success"
               }
               aria-hidden="true"
             />

@@ -17,15 +17,15 @@ function statusDotClass(status: string | number | undefined) {
     normalized.includes("input") ||
     normalized.includes("configuration")
   ) {
-    return "bg-text-danger";
+    return "bg-destructive";
   }
   if (normalized.includes("success") || normalized.includes("active")) {
-    return "bg-text-success";
+    return "bg-success";
   }
   if (normalized.includes("running") || normalized.includes("pending")) {
-    return "bg-text-info";
+    return "bg-info";
   }
-  return "bg-text-muted";
+  return "bg-muted-foreground";
 }
 
 export function AutomationLatestResultCard({ tile }: { tile: AutomationTile }) {
@@ -46,8 +46,8 @@ export function AutomationLatestResultCard({ tile }: { tile: AutomationTile }) {
   });
 
   return (
-    <section className="space-y-3 rounded-card-chat bg-surface-card p-4">
-      <div className="flex flex-wrap items-center gap-1.5 text-xs text-text-muted">
+    <section className="space-y-3 rounded-card-chat bg-card p-4">
+      <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <span
           className={cn(
             "size-[7px] shrink-0 rounded-full",
@@ -67,7 +67,9 @@ export function AutomationLatestResultCard({ tile }: { tile: AutomationTile }) {
       ) : tile.latestRenderedData ? (
         <JsonPreview value={tile.latestRenderedData} />
       ) : (
-        <p className="text-sm text-text-muted">{t("details.noLatestResult")}</p>
+        <p className="text-sm text-muted-foreground">
+          {t("details.noLatestResult")}
+        </p>
       )}
     </section>
   );

@@ -20,7 +20,7 @@ export function AutomationBuilderView({
     <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
       <div className="relative flex min-w-0 flex-1 flex-col">
         <section
-          className="relative mb-20 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card bg-surface-card"
+          className="relative mb-20 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card bg-card"
           aria-label={t("builder.chatAriaLabel")}
         >
           <div className="min-h-0 flex-1">
@@ -33,7 +33,7 @@ export function AutomationBuilderView({
             ) : (
               <div className="flex h-full items-center justify-center p-6 text-center">
                 <div>
-                  <IconSparkles className="mx-auto size-4 text-text-default" />
+                  <IconSparkles className="mx-auto size-4 text-foreground" />
                   <h3 className="mt-3 text-sm font-medium text-foreground">
                     {t("builder.emptyTitle")}
                   </h3>

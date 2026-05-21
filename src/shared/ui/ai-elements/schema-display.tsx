@@ -45,9 +45,9 @@ const SchemaDisplayContext = createContext<SchemaDisplayContextType>({
 const methodStyles: Record<HttpMethod, string> = {
   DELETE: "bg-status-deleted/10 text-status-deleted",
   GET: "bg-status-added/10 text-status-added",
-  PATCH: "bg-background-warning text-text-warning",
-  POST: "bg-background-primary/10 text-text-primary",
-  PUT: "bg-background-warning text-text-warning",
+  PATCH: "bg-warning/10 text-warning",
+  POST: "bg-primary/10 text-primary",
+  PUT: "bg-warning/10 text-warning",
 };
 
 export type SchemaDisplayHeaderProps = HTMLAttributes<HTMLDivElement>;
@@ -101,7 +101,7 @@ export const SchemaDisplayPath = ({
       {children ??
         parts.map((part, i) =>
           part.startsWith("{") ? (
-            <span key={i} className="text-text-primary">
+            <span key={i} className="text-primary">
               {part}
             </span>
           ) : (

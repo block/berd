@@ -16,7 +16,7 @@ import { SidebarItemMenu } from "./SidebarItemMenu";
 const MAX_VISIBLE_PROJECT_CHATS = 5;
 const MAX_EXPANDED_PROJECT_CHATS = 20;
 const PROJECT_ROW_TEXT_CLASS =
-  "text-foreground hover:bg-transparent hover:text-foreground";
+  "text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground";
 
 export interface SidebarSessionItem {
   id: string;
@@ -134,8 +134,8 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt",
-          menuOpen && "bg-background-alt",
+          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+          menuOpen && "bg-sidebar-accent",
         )}
       >
         <Button
@@ -148,7 +148,7 @@ export function SidebarProjectSection({
             PROJECT_ROW_TEXT_CLASS,
           )}
         >
-          <span className="relative flex h-4 w-4 flex-shrink-0 items-center justify-center text-foreground">
+          <span className="relative flex h-4 w-4 flex-shrink-0 items-center justify-center text-sidebar-foreground">
             <span className="absolute group-hover:opacity-0">
               <ProjectIcon
                 icon={project.icon}
@@ -182,7 +182,7 @@ export function SidebarProjectSection({
           }}
           title={t("actions.newChatInProject")}
           className={cn(
-            "mr-1 size-6 flex-shrink-0 rounded-md",
+            "mr-1 size-6 flex-shrink-0 rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
             menuOpen
               ? "visible opacity-100"
               : "invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
@@ -192,7 +192,7 @@ export function SidebarProjectSection({
         </Button>
 
         {dragOver && (
-          <div className="absolute bottom-0 left-3 right-3 h-px bg-foreground" />
+          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
         )}
       </div>
 
@@ -232,7 +232,7 @@ export function SidebarProjectSection({
               variant="ghost"
               size="xs"
               onClick={() => setShowExpandedChats(true)}
-              className="h-auto w-full justify-start gap-1.5 rounded-md py-1 pl-8 pr-3 text-[11px] text-foreground hover:text-foreground"
+              className="h-auto w-full justify-start gap-1.5 rounded-md py-1 pl-8 pr-3 text-[11px] text-sidebar-foreground hover:text-sidebar-foreground"
             >
               <IconChevronRight className="size-3" />
               {t("viewMoreChats")}
@@ -244,7 +244,7 @@ export function SidebarProjectSection({
               variant="ghost"
               size="xs"
               onClick={() => onNavigate("session-history")}
-              className="h-auto w-full justify-start rounded-md py-1 pl-8 pr-3 text-[11px] text-muted-foreground hover:text-foreground"
+              className="h-auto w-full justify-start rounded-md py-1 pl-8 pr-3 text-[11px] text-muted-foreground hover:text-sidebar-foreground"
             >
               {t("olderChatsInHistory")}
             </Button>

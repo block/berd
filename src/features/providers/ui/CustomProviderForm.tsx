@@ -130,7 +130,7 @@ export function CustomProviderForm({
     }
 
     return (
-      <div role="alert" className="space-y-0.5 text-xs text-text-danger">
+      <div role="alert" className="space-y-0.5 text-xs text-destructive">
         {issues.map((issue) => (
           <p key={`${issue.key}-${issue.index ?? "field"}`}>
             {t(translationKey(issue.key))}
@@ -342,7 +342,7 @@ export function CustomProviderForm({
       </fieldset>
 
       {error ? (
-        <p role="alert" className="text-xs text-text-danger">
+        <p role="alert" className="text-xs text-destructive">
           {error}
         </p>
       ) : null}
@@ -356,7 +356,7 @@ export function CustomProviderForm({
             onClick={onDelete}
             disabled={disabled}
             leftIcon={<IconTrash />}
-            className="text-text-danger hover:text-text-danger"
+            className="text-destructive hover:text-destructive"
           >
             {deleting
               ? t("providers.custom.actions.deleting")

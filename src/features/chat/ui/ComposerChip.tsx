@@ -5,13 +5,11 @@ import { cn } from "@/shared/lib/cn";
 type ComposerChipTone = "file" | "agent" | "skill" | "automation";
 
 const toneClasses: Record<ComposerChipTone, string> = {
-  file: "bg-gray-100/70 text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-400 dark:hover:bg-gray-700",
-  agent:
-    "bg-blue-100/20 text-blue-700 hover:bg-blue-100/30 dark:bg-blue-100/10 dark:text-blue-100 dark:hover:bg-blue-100/15",
-  skill:
-    "bg-yellow-100/25 text-yellow-700 hover:bg-yellow-100/35 dark:bg-yellow-100/10 dark:text-yellow-100 dark:hover:bg-yellow-100/15",
+  file: "bg-chip-file-bg text-chip-file-fg hover:bg-chip-file-bg",
+  agent: "bg-chip-agent-bg text-chip-agent-fg hover:bg-chip-agent-bg",
+  skill: "bg-chip-skill-bg text-chip-skill-fg hover:bg-chip-skill-bg",
   automation:
-    "bg-green-100/20 text-green-700 hover:bg-green-100/30 dark:bg-green-100/10 dark:text-green-100 dark:hover:bg-green-100/15",
+    "bg-chip-automation-bg text-chip-automation-fg hover:bg-chip-automation-bg",
 };
 
 interface ComposerChipProps {
@@ -45,7 +43,7 @@ export function ComposerChip({
       <button
         type="button"
         onClick={onRemove}
-        className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus"
+        className="group/remove relative flex size-3.5 shrink-0 items-center justify-center rounded-full text-current focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
         aria-label={removeLabel}
       >
         {leading ? (

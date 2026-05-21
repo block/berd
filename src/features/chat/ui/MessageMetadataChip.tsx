@@ -3,13 +3,10 @@ import { cn } from "@/shared/lib/cn";
 import type { MessageChip } from "@/shared/types/messages";
 
 const messageChipClasses: Record<MessageChip["type"], string> = {
-  skill:
-    "bg-yellow-100/25 text-yellow-700 dark:bg-yellow-100/10 dark:text-yellow-100",
-  extension:
-    "bg-blue-100/20 text-blue-700 dark:bg-blue-100/10 dark:text-blue-100",
-  recipe:
-    "bg-green-100/20 text-green-700 dark:bg-green-100/10 dark:text-green-100",
-  agent: "bg-blue-100/20 text-blue-700 dark:bg-blue-100/10 dark:text-blue-100",
+  skill: "bg-chip-skill-bg text-chip-skill-fg",
+  extension: "bg-chip-automation-bg text-chip-automation-fg",
+  recipe: "bg-chip-file-bg text-chip-file-fg",
+  agent: "bg-chip-agent-bg text-chip-agent-fg",
 };
 
 export function MessageMetadataChip({ chip }: { chip: MessageChip }) {

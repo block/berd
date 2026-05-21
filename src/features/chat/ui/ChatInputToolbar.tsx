@@ -433,7 +433,7 @@ export function ChatInputToolbar({
                   }
                   className={cn(
                     voiceRecording &&
-                      "bg-background-danger-strong text-text-on-danger-strong hover:bg-background-danger-strong/90 hover:text-text-on-danger-strong",
+                      "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground",
                     voiceTranscribing && "animate-pulse",
                   )}
                 >
@@ -460,7 +460,7 @@ export function ChatInputToolbar({
               onClick={onStop}
               variant="ghost"
               size="icon-sm"
-              className="rounded-full bg-background-danger-strong text-text-on-danger-strong hover:bg-background-danger-strong/90 hover:text-text-on-danger-strong"
+              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground"
               aria-label={t("toolbar.stopGeneration")}
               title={t("toolbar.stopGeneration")}
             >
@@ -480,7 +480,7 @@ export function ChatInputToolbar({
                       "shadow-none",
                       canSend
                         ? "bg-foreground text-background hover:bg-foreground/90"
-                        : "cursor-default bg-foreground/10 text-muted-foreground disabled:opacity-100",
+                        : "cursor-default bg-accent text-muted-foreground disabled:opacity-100",
                     )}
                     aria-label={sendButtonTooltip ?? t("toolbar.sendMessage")}
                   >

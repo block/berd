@@ -13,30 +13,30 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "bg-background-primary text-text-on-primary shadow-none hover:bg-background-primary/90",
+          "bg-primary text-primary-foreground shadow-none hover:bg-primary/90",
         destructive:
-          "bg-background-danger-strong text-text-on-danger-strong shadow-none hover:bg-background-danger-strong/90",
+          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
         "destructive-flat":
-          "bg-background-danger-strong text-text-on-danger-strong shadow-none hover:bg-background-danger-strong/90",
+          "bg-destructive text-destructive-foreground shadow-none hover:bg-destructive/90",
         outline:
-          "border border-border-input bg-background shadow-none hover:bg-background-hover hover:text-text-hover",
+          "border border-input bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
         "outline-flat":
-          "border border-border-soft bg-background shadow-none hover:bg-background-hover hover:text-text-hover",
+          "border border-border/80 bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
         secondary:
-          "bg-background-medium text-text-on-secondary hover:bg-background-medium/80",
-        ghost: "hover:bg-background-hover hover:text-text-hover",
+          "border border-input bg-accent text-accent-foreground hover:bg-accent",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
         "ghost-light":
-          "font-normal hover:bg-background-hover hover:text-text-hover",
+          "font-normal hover:bg-accent hover:text-accent-foreground",
         "inline-subtle":
           "rounded-md bg-transparent font-normal text-muted-foreground shadow-none hover:bg-muted/70 hover:text-foreground",
         quiet:
           "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
         toolbar:
-          "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-background-hover hover:text-text-hover active:bg-background-hover active:text-text-hover data-[state=open]:bg-background-hover data-[state=open]:text-text-hover aria-expanded:bg-background-hover aria-expanded:text-text-hover",
+          "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
         "page-header":
-          "bg-surface-overlay text-text-default shadow-none hover:bg-surface-overlay hover:text-text-default focus-visible:text-text-default active:text-text-default",
+          "bg-background text-muted-foreground shadow-none hover:bg-background hover:text-foreground focus-visible:text-foreground active:text-foreground",
         back: "justify-start text-muted-foreground hover:text-foreground",
-        link: "text-text-primary underline-offset-4 hover:underline",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         xxs: "h-6 gap-1.5 px-2 text-[11px] [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",

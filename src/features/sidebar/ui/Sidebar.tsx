@@ -128,7 +128,7 @@ function SidebarInspectorToggleNavItem({
   return (
     <div
       className={cn(
-        "flex w-full items-center rounded-md text-sm font-light text-muted-foreground transition-colors duration-200 hover:bg-background-alt hover:text-foreground",
+        "flex w-full items-center rounded-md text-sm font-light text-sidebar-foreground transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground",
         collapsed
           ? "justify-center px-3 py-2"
           : "justify-between gap-2.5 px-3 py-1.5",
@@ -461,7 +461,7 @@ export function Sidebar({
       )}
       style={{ width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-chrome border border-border-soft bg-surface-chrome backdrop-blur-md">
+      <div className="flex h-full flex-col overflow-hidden rounded-chrome border border-sidebar-border/80 bg-sidebar backdrop-blur-md">
         <div
           className={cn(
             "flex-shrink-0",
@@ -476,13 +476,13 @@ export function Sidebar({
           >
             <button
               type="button"
-              className="inline-flex border-0 bg-transparent p-0 text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus"
+              className="inline-flex border-0 bg-transparent p-0 text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               onClick={() => onNavigate?.("home")}
               aria-label={t("navigation.gooseHome")}
               title={t("navigation.gooseHome")}
             >
               <span className="inline-flex">
-                <GooseIcon className="text-foreground" />
+                <GooseIcon className="text-sidebar-foreground" />
               </span>
             </button>
           </div>
@@ -595,7 +595,7 @@ export function Sidebar({
                 size={collapsed ? "icon-sm" : "default"}
                 onClick={onSettingsClick}
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-muted-foreground hover:bg-background-alt hover:text-foreground active:bg-background-alt",
+                  "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",
@@ -691,7 +691,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-foreground/25",
+                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-sidebar-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -720,7 +720,7 @@ export function Sidebar({
                     {!collapsed && (
                       <div
                         className={cn(
-                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-foreground/25",
+                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-sidebar-foreground/25",
                           labelTransition,
                           labelVisible
                             ? "opacity-100"
@@ -761,7 +761,7 @@ export function Sidebar({
                   isSettingsSurface ? onSettingsBack : onDesignSystemBack
                 }
                 className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-muted-foreground hover:bg-background-alt hover:text-foreground active:bg-background-alt",
+                  "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
                   collapsed
                     ? "justify-center p-3"
                     : "justify-start gap-2.5 px-3 py-2.5",

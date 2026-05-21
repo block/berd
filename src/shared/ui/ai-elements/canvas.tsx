@@ -20,7 +20,7 @@ export const Canvas = ({ children, ...props }: CanvasProps) => (
     zoomOnDoubleClick={false}
     {...props}
   >
-    <Background bgColor="var(--background-default)" />
+    <Background bgColor="var(--background)" />
     {children}
   </ReactFlow>
 );

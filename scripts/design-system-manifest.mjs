@@ -15,23 +15,33 @@ const manifestPath = path.join(
 );
 
 const sourceTokenNames = new Set([
+  "accent",
+  "accent-foreground",
   "background",
-  "foreground",
+  "border",
   "card",
   "card-foreground",
-  "popover",
-  "popover-foreground",
+  "destructive",
+  "destructive-foreground",
+  "foreground",
+  "input",
   "muted",
   "muted-foreground",
-  "hover",
-  "hover-foreground",
-  "secondary",
-  "secondary-foreground",
+  "popover",
+  "popover-foreground",
   "primary",
   "primary-foreground",
-  "border",
-  "input",
   "ring",
+  "secondary",
+  "secondary-foreground",
+  "sidebar",
+  "sidebar-accent",
+  "sidebar-accent-foreground",
+  "sidebar-border",
+  "sidebar-foreground",
+  "sidebar-primary",
+  "sidebar-primary-foreground",
+  "sidebar-ring",
 ]);
 
 const colorUtilityPrefixes = new Set([
@@ -55,12 +65,20 @@ const statePrefixes = [
 ];
 
 const semanticTokenPrefixes = [
-  "background-",
-  "border-",
-  "ring-",
+  "canvas-",
+  "chart-",
+  "chip-",
+  "clock-",
+  "dark-",
+  "info",
+  "message-",
+  "placeholder-composer",
+  "popover-inverse",
   "shadow-",
   "status-",
-  "text-",
+  "success",
+  "surface-",
+  "warning",
 ];
 
 function sortValues(values) {

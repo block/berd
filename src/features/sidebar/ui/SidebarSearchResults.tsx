@@ -24,8 +24,8 @@ export function SidebarSearchResults({
 
   if (results.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-border-soft px-3 py-6 text-center text-xs font-light text-muted-foreground">
-        <p className="text-foreground/80">
+      <div className="rounded-md border border-dashed border-sidebar-border/80 px-3 py-6 text-center text-xs font-light text-muted-foreground">
+        <p className="text-sidebar-foreground/80">
           {t("sessions:history.emptyNoMatches")}
         </p>
         <p className="mt-1">{t("sessions:history.emptyNoMatchesHint")}</p>
@@ -55,13 +55,15 @@ export function SidebarSearchResults({
             variant="ghost"
             onClick={() => onSelectResult?.(session.id, result.messageId)}
             className={cn(
-              "h-auto w-full items-start justify-start rounded-md border border-transparent px-3 py-2 text-left font-light hover:bg-background-alt",
+              "h-auto w-full items-start justify-start rounded-md border border-transparent px-3 py-2 text-left font-light hover:bg-sidebar-accent",
               activeSessionId === session.id &&
-                "border-border-soft bg-background-alt",
+                "border-sidebar-border/80 bg-sidebar-accent",
             )}
           >
             <div className="min-w-0 flex-1 space-y-1">
-              <p className="truncate text-sm text-foreground">{displayTitle}</p>
+              <p className="truncate text-sm text-sidebar-foreground">
+                {displayTitle}
+              </p>
 
               {(personaName || projectName) && (
                 <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
@@ -87,7 +89,7 @@ export function SidebarSearchResults({
               )}
 
               {typeof result.matchCount === "number" && (
-                <p className="text-[11px] text-foreground/80">
+                <p className="text-[11px] text-sidebar-foreground/80">
                   {t("sessions:search.messageMatches", {
                     count: result.matchCount,
                     displayCount: result.matchCount,

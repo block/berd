@@ -36,11 +36,11 @@ const GLOBAL_VALUE = "__global__";
 const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
 const HERO_HEIGHT_CLASS = "h-[280px]";
 const PILL_INPUT_CLASS =
-  "h-10 rounded-full border-none bg-surface-overlay px-4 text-sm";
+  "h-10 rounded-full border-none bg-popover px-4 text-sm";
 const FIELD_INPUT_CLASS =
-  "h-10 rounded-[10px] border-none bg-surface-overlay px-4 text-sm";
+  "h-10 rounded-[10px] border-none bg-popover px-4 text-sm";
 const INSTRUCTIONS_TEXTAREA_CLASS =
-  "min-h-[200px] resize-none rounded-[10px] border-none bg-surface-overlay px-4 py-3 font-mono text-xs leading-relaxed";
+  "min-h-[200px] resize-none rounded-[10px] border-none bg-popover px-4 py-3 font-mono text-xs leading-relaxed";
 const FIELD_LABEL_CLASS = "text-[10px] text-muted-foreground";
 const SECTION_GAP_CLASS = "space-y-1";
 
@@ -175,7 +175,7 @@ export function SkillEditor({
               {titleText}
             </SheetTitle>
             {isBuiltIn ? (
-              <span className="rounded-full bg-surface-overlay px-1.5 py-0.5 text-[11px] text-foreground">
+              <span className="rounded-full bg-popover px-1.5 py-0.5 text-[11px] text-foreground">
                 {t("dialog.builtIn")}
               </span>
             ) : null}
@@ -193,7 +193,7 @@ export function SkillEditor({
               type="button"
               disabled
               title={t("dialog.customizeComingSoon")}
-              className="absolute right-4 bottom-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-surface-overlay px-3 text-sm text-foreground opacity-90 disabled:cursor-not-allowed"
+              className="absolute right-4 bottom-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-popover px-3 text-sm text-foreground opacity-90 disabled:cursor-not-allowed"
             >
               <Sparkles className="h-3.5 w-3.5" />
               {t("dialog.customize")}
@@ -297,7 +297,7 @@ export function SkillEditor({
                   size="sm"
                   onClick={() => onDelete(editingSkill)}
                   aria-label={t("common:actions.delete")}
-                  className="h-8 rounded-full px-3 text-destructive hover:bg-surface-overlay hover:text-destructive"
+                  className="h-8 rounded-full px-3 text-destructive hover:bg-popover hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
                   {t("common:actions.delete")}
@@ -311,7 +311,7 @@ export function SkillEditor({
                   size="sm"
                   disabled
                   title={t("dialog.customizeComingSoon")}
-                  className="h-8 rounded-full bg-surface-overlay px-3 text-foreground hover:bg-surface-overlay/90"
+                  className="h-8 rounded-full bg-popover px-3 text-foreground hover:bg-popover/90"
                 >
                   <Copy className="h-3 w-3" />
                   {t("dialog.duplicate")}

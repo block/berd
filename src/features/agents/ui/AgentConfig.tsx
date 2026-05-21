@@ -95,7 +95,7 @@ export function AgentConfig({
       {/* Name */}
       <div className="space-y-1">
         <Label className="text-xs font-medium text-muted-foreground">
-          {t("config.name")} <span className="text-text-danger">*</span>
+          {t("config.name")} <span className="text-destructive">*</span>
         </Label>
         <Input
           value={name}

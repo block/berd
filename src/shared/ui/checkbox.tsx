@@ -24,7 +24,7 @@ function Checkbox({
       })}
       data-slot="checkbox"
       className={cn(
-        "peer border-input data-[state=checked]:bg-background-primary data-[state=checked]:text-text-on-primary data-[state=checked]:border-border-inverse focus-visible:border-border-focus focus-visible:ring-ring-focus/50 aria-invalid:ring-border-danger/20 aria-invalid:border-border-danger size-4 shrink-0 rounded-[4px] border transition-shadow outline-none focus-visible:ring-[1px] disabled:cursor-not-allowed disabled:opacity-50",
+        "peer border-input data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground data-[state=checked]:border-background focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 aria-invalid:border-destructive size-4 shrink-0 rounded-[4px] border transition-shadow outline-none focus-visible:ring-[1px] disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}

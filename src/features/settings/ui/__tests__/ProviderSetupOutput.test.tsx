@@ -69,9 +69,8 @@ describe("ProviderSetupOutput", () => {
     );
 
     const output = container.querySelector(".font-mono");
-    expect(output).toHaveClass("bg-background-muted");
-    expect(output).toHaveClass("text-text-subtle");
-    expect(output).not.toHaveClass("text-muted-foreground");
+    expect(output).toHaveClass("bg-muted");
+    expect(output).toHaveClass("text-muted-foreground");
     expect(output).not.toHaveClass("text-xxs");
   });
 });

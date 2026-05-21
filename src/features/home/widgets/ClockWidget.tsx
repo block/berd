@@ -57,7 +57,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
           className="absolute inset-0 z-0"
           style={{ transform: `rotate(${minuteAngle}deg)` }}
         >
-          <span className="absolute left-1/2 top-[9%] h-[41%] w-[2px] -translate-x-1/2 rounded-full bg-red-500" />
+          <span className="absolute left-1/2 top-[9%] h-[41%] w-[2px] -translate-x-1/2 rounded-full bg-clock-hand" />
         </div>
 
         {/* Hour hand */}
@@ -65,7 +65,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
           className="absolute inset-0 z-0"
           style={{ transform: `rotate(${hourAngle}deg)` }}
         >
-          <span className="absolute left-1/2 top-[22%] h-[28%] w-[2px] -translate-x-1/2 rounded-full bg-red-500" />
+          <span className="absolute left-1/2 top-[22%] h-[28%] w-[2px] -translate-x-1/2 rounded-full bg-clock-hand" />
         </div>
 
         {/* Center hub */}

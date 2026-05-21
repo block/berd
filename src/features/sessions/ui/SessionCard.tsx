@@ -142,9 +142,9 @@ export function SessionCard({
   return (
     <div
       className={cn(
-        "group relative flex min-h-20 flex-col justify-between gap-1 rounded-card-chat bg-surface-card p-3 text-left transition-shadow",
+        "group relative flex min-h-20 flex-col justify-between gap-1 rounded-card-chat bg-card p-3 text-left transition-shadow",
         "hover:shadow-card",
-        selected && "ring-1 ring-inset ring-text-default",
+        selected && "ring-1 ring-inset ring-foreground",
         archivedAt && "opacity-60",
       )}
     >
@@ -188,13 +188,13 @@ export function SessionCard({
           className="relative z-10 text-sm"
         />
       ) : (
-        <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-text-default">
+        <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-foreground">
           {displayTitle}
         </p>
       )}
 
       {hasSubtitle && (
-        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-text-default/40">
+        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-foreground/40">
           {projectName && (
             <span className="inline-flex shrink-0 items-center justify-center">
               {projectColor ? (
@@ -223,7 +223,7 @@ export function SessionCard({
       )}
 
       {workingDir && !hasSubtitle && (
-        <div className="relative z-0 truncate text-[10px] leading-none text-text-default/40">
+        <div className="relative z-0 truncate text-[10px] leading-none text-foreground/40">
           {workingDir}
         </div>
       )}
@@ -254,10 +254,10 @@ export function SessionCard({
             aria-label={t("card.optionsFor", { title: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:text-text-default",
+              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:text-foreground",
               menuOpen
-                ? "visible opacity-100 text-text-default"
-                : "invisible group-hover:visible opacity-0 group-hover:opacity-100 text-text-default/40",
+                ? "visible opacity-100 text-foreground"
+                : "invisible group-hover:visible opacity-0 group-hover:opacity-100 text-foreground/40",
             )}
           >
             <MoreHorizontal className="size-3.5" />

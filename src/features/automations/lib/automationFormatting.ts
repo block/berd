@@ -76,7 +76,7 @@ export function overviewActivityIcon(value: string | number | undefined) {
   if (!normalized) {
     return createElement(IconClock, {
       className: "size-3.5 shrink-0",
-      style: { color: "var(--text-muted)" },
+      style: { color: "var(--muted-foreground)" },
       "aria-hidden": "true",
     });
   }
@@ -87,20 +87,20 @@ export function overviewActivityIcon(value: string | number | undefined) {
   ) {
     return createElement(IconAlertTriangle, {
       className: "size-3.5 shrink-0",
-      style: { color: "var(--text-danger)" },
+      style: { color: "var(--destructive)" },
       "aria-hidden": "true",
     });
   }
   if (normalized.includes("success") || normalized.includes("active")) {
     return createElement(IconCheck, {
       className: "size-3.5 shrink-0",
-      style: { color: "var(--text-success)" },
+      style: { color: "var(--success)" },
       "aria-hidden": "true",
     });
   }
   return createElement(IconClock, {
     className: "size-3.5 shrink-0",
-    style: { color: "var(--text-muted)" },
+    style: { color: "var(--muted-foreground)" },
     "aria-hidden": "true",
   });
 }

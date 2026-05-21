@@ -26,7 +26,7 @@ interface SkillCardProps {
  * Skills tile. Layout matches Figma 1022:3419:
  *   - Small colored name pill (pastel, deterministic from skill name)
  *   - Multi-line muted description below
- *   - White card surface (`bg-surface-card`) with hover-only shadow elevation,
+ *   - White card surface (`bg-card`) with hover-only shadow elevation,
  *     mirroring the session-history tile redesign (PR #140)
  *   - Hover-revealed `…` overflow menu top-right (Edit + Delete) → opens the
  *     inverse (dark) DropdownMenuContent variant, same as session history
@@ -63,14 +63,14 @@ export function SkillCard({
       onClick={() => !menuOpen && onSelect(skill)}
       onKeyDown={handleCardKeyDown}
       className={cn(
-        "group relative flex w-full cursor-pointer flex-col items-start gap-3 rounded-tile bg-surface-card p-4 text-left",
+        "group relative flex w-full cursor-pointer flex-col items-start gap-3 rounded-tile bg-card p-4 text-left",
         "transition-shadow duration-200 hover:shadow-card",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
     >
       <span
         className={cn(
-          "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-text-title",
+          "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-foreground",
           skillPillToneClass(tone),
         )}
       >
@@ -94,10 +94,10 @@ export function SkillCard({
                 onClick={(e) => e.stopPropagation()}
                 onKeyDown={(event) => event.stopPropagation()}
                 className={cn(
-                  "size-5 rounded-full transition-colors hover:text-text-default",
+                  "size-5 rounded-full transition-colors hover:text-foreground",
                   menuOpen
-                    ? "opacity-100 text-text-default"
-                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-text-default/40",
+                    ? "opacity-100 text-foreground"
+                    : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-foreground/40",
                 )}
               >
                 <IconDots className="size-3.5" />

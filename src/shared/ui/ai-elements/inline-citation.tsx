@@ -36,10 +36,7 @@ export const InlineCitationText = ({
   ...props
 }: InlineCitationTextProps) => (
   <span
-    className={cn(
-      "transition-colors group-hover:bg-background-hover",
-      className,
-    )}
+    className={cn("transition-colors group-hover:bg-accent", className)}
     {...props}
   />
 );
@@ -137,7 +134,7 @@ export const InlineCitationCarouselHeader = ({
 }: InlineCitationCarouselHeaderProps) => (
   <div
     className={cn(
-      "flex items-center justify-between gap-2 rounded-t-md bg-background-medium p-2",
+      "flex items-center justify-between gap-2 rounded-t-md bg-secondary p-2",
       className,
     )}
     {...props}

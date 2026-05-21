@@ -7,10 +7,11 @@
   "scripts": {
     "dev": "vite",
     "design-system:audit": "node ./scripts/design-system-audit.mjs",
-    "design-system:check": "pnpm design-system:manifest-check && pnpm design-system:audit && pnpm design-system:coverage -- --strict",
+    "design-system:check": "pnpm design-system:manifest-check && pnpm design-system:tokens && pnpm design-system:audit && pnpm design-system:coverage -- --strict",
     "design-system:coverage": "node ./scripts/design-system-coverage.mjs",
     "design-system:generate": "node ./scripts/design-system-manifest.mjs",
     "design-system:manifest-check": "node ./scripts/design-system-manifest.mjs --check",
+    "design-system:tokens": "node ./scripts/design-system-tokens.mjs",
     "build": "tsc && vite build",
     "typecheck": "tsc --noEmit",
     "avatars:manifest": "node ./scripts/avatar-manifest.mjs manifest",

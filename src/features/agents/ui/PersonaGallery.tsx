@@ -104,7 +104,7 @@ export function PersonaGallery({
       <div
         {...dropHandlers}
         className={cn(
-          "flex min-h-72 flex-col items-center justify-center rounded-card border border-dashed border-border-soft bg-muted/10 px-6 text-center",
+          "flex min-h-72 flex-col items-center justify-center rounded-card border border-dashed border-border/80 bg-muted/10 px-6 text-center",
           isDragOver && "border-border bg-muted/30",
         )}
       >

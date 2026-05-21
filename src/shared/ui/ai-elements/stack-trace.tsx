@@ -241,7 +241,7 @@ export const StackTraceError = memo(
       )}
       {...props}
     >
-      <AlertTriangleIcon className="size-4 shrink-0 text-text-danger" />
+      <AlertTriangleIcon className="size-4 shrink-0 text-destructive" />
       {children}
     </div>
   ),
@@ -255,7 +255,7 @@ export const StackTraceErrorType = memo(
 
     return (
       <span
-        className={cn("shrink-0 font-semibold text-text-danger", className)}
+        className={cn("shrink-0 font-semibold text-destructive", className)}
         {...props}
       >
         {children ?? trace.errorType}
@@ -448,7 +448,7 @@ const FilePathButton = memo(
     return (
       <button
         className={cn(
-          "underline decoration-dotted hover:text-text-primary",
+          "underline decoration-dotted hover:text-primary",
           onFilePathClick && "cursor-pointer",
         )}
         disabled={!onFilePathClick}

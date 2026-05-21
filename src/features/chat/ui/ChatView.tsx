@@ -82,12 +82,12 @@ export function ChatView({
     >
       <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <div className="relative mb-20 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-surface-card">
+          <div className="relative mb-20 flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-card">
             {controller.isLoadingHistory ? (
               <ChatLoadingSkeleton />
             ) : controller.messages.length === 0 ? (
               <div className="flex h-full w-full items-center justify-center px-6">
-                <p className="text-3xl font-light text-text-title">
+                <p className="text-3xl font-light text-foreground">
                   {t("emptyState.startAConversation")}
                 </p>
               </div>

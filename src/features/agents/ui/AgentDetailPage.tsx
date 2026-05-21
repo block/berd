@@ -131,7 +131,7 @@ export function AgentDetailPage({
           variant="detail"
           title={
             <span className="inline-flex min-w-0 items-center gap-3">
-              <AvatarRoot className="size-12 shrink-0 border border-border-soft bg-muted/30">
+              <AvatarRoot className="size-12 shrink-0 border border-border/80 bg-muted/30">
                 {avatarMedia?.mediaType === "video" ? (
                   <AvatarMedia media={avatarMedia} alt={persona.displayName} />
                 ) : (

@@ -37,7 +37,7 @@ function Calendar({
         day: cn(
           "relative p-0 text-center text-sm focus-within:relative focus-within:z-20",
           props.mode === "range"
-            ? "[&:has([aria-selected]):not(:has(.day-range-start)):not(:has(.day-range-end))]:bg-muted first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full [&:has(>.day-range-start)]:[background:linear-gradient(to_right,transparent_50%,var(--color-background-muted)_50%)] [&:has(>.day-range-end)]:[background:linear-gradient(to_left,transparent_50%,var(--color-background-muted)_50%)]"
+            ? "[&:has([aria-selected]):not(:has(.day-range-start)):not(:has(.day-range-end))]:bg-muted first:[&:has([aria-selected])]:rounded-l-full last:[&:has([aria-selected])]:rounded-r-full [&:has(>.day-range-start)]:[background:linear-gradient(to_right,transparent_50%,var(--color-muted)_50%)] [&:has(>.day-range-end)]:[background:linear-gradient(to_left,transparent_50%,var(--color-muted)_50%)]"
             : "[&:has([aria-selected])]:rounded-full [&:has([aria-selected])]:bg-muted",
         ),
         day_button: cn(
@@ -45,11 +45,11 @@ function Calendar({
           "relative z-10 size-8 p-0 font-normal aria-selected:opacity-100",
         ),
         range_start:
-          "day-range-start rounded-full aria-selected:bg-background-primary aria-selected:text-text-on-primary",
+          "day-range-start rounded-full aria-selected:bg-primary aria-selected:text-primary-foreground",
         range_end:
-          "day-range-end rounded-full aria-selected:bg-background-primary aria-selected:text-text-on-primary",
+          "day-range-end rounded-full aria-selected:bg-primary aria-selected:text-primary-foreground",
         selected:
-          "bg-background-primary text-text-on-primary hover:bg-background-primary hover:text-text-on-primary focus:bg-background-primary focus:text-text-on-primary",
+          "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
         today: "bg-muted text-muted-foreground",
         outside:
           "day-outside text-muted-foreground aria-selected:text-muted-foreground",

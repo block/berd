@@ -105,12 +105,12 @@ const statusIconComponents: Record<ToolPart["state"], LucideIcon> = {
 };
 
 const statusIconClasses: Record<ToolPart["state"], string> = {
-  "approval-requested": "text-text-warning",
-  "approval-responded": "text-text-primary",
+  "approval-requested": "text-warning",
+  "approval-responded": "text-primary",
   "input-available": "animate-pulse",
   "input-streaming": "",
   "output-available": "text-status-added",
-  "output-denied": "text-text-warning",
+  "output-denied": "text-warning",
   "output-error": "text-status-deleted",
 };
 
@@ -239,7 +239,7 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 min-w-0 max-w-full space-y-2 py-2 text-text-on-popover outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 min-w-0 max-w-full space-y-2 py-2 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
       className,
     )}
     {...props}
@@ -279,7 +279,7 @@ export const ToolSurface = ({
     className={cn(
       "overflow-hidden rounded-md text-xs [&_pre]:whitespace-pre-wrap [&_pre]:break-words",
       destructive
-        ? "bg-background-danger text-text-danger"
+        ? "bg-destructive/10 text-destructive"
         : tone === "outline"
           ? "border border-border bg-background text-foreground"
           : "bg-muted/50 text-foreground",
@@ -517,7 +517,7 @@ export const ToolOutput = ({
             <pre
               className={cn(
                 plainTextClasses,
-                errorText ? "text-text-danger" : "text-muted-foreground",
+                errorText ? "text-destructive" : "text-muted-foreground",
               )}
             >
               {plainOutput}

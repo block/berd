@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ArrowLeft, ChevronRight, Search } from "lucide-react";
 import {
@@ -18,6 +18,7 @@ import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { Persona } from "@/shared/types/agents";
 import { cn } from "@/shared/lib/cn";
+import { Input } from "@/shared/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/shared/ui/popover";
 import {
   HOME_WIDGET_CATALOG,
@@ -247,6 +248,7 @@ export function WidgetPicker({
   onSelect,
 }: WidgetPickerProps) {
   const { t } = useTranslation("home");
+  const searchInputId = useId();
   const [activePanel, setActivePanel] = useState<WidgetCategory | null>(null);
   const [query, setQuery] = useState("");
   const [automations, setAutomations] = useState<AutomationTile[]>([]);
@@ -412,7 +414,7 @@ export function WidgetPicker({
         onWheelCapture={(event) => event.stopPropagation()}
         onOpenAutoFocus={(event) => event.preventDefault()}
         className={cn(
-          "overflow-hidden rounded-chrome border border-border-soft bg-surface-chrome p-1.5 text-foreground backdrop-blur-md",
+          "overflow-hidden rounded-chrome border border-border/80 bg-sidebar p-1.5 text-foreground backdrop-blur-md",
           activePanel ? "w-72" : "w-36",
         )}
       >
@@ -423,7 +425,7 @@ export function WidgetPicker({
                 type="button"
                 aria-label={t("widgets.picker.back")}
                 onClick={closePanel}
-                className="rounded-tile p-1.5 text-muted-foreground transition-colors hover:bg-surface-tile hover:text-foreground"
+                className="rounded-tile p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
               >
                 <ArrowLeft className="size-4" aria-hidden="true" />
               </button>
@@ -433,15 +435,20 @@ export function WidgetPicker({
             </div>
 
             {isEntityCategory(activePanel) ? (
-              <label className="flex h-8 items-center gap-2 rounded-tile border border-border-soft bg-background px-2 text-muted-foreground">
+              <label
+                htmlFor={searchInputId}
+                className="flex h-8 items-center gap-2 rounded-tile border border-border/80 bg-background px-2 text-muted-foreground transition-colors focus-within:border-ring"
+              >
                 <Search className="size-3.5 shrink-0" aria-hidden="true" />
-                <input
-                  ref={searchInputRef}
+                <Input
+                  id={searchInputId}
+                  inputRef={searchInputRef}
+                  variant="ghost"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   aria-label={searchPlaceholder}
                   placeholder={searchPlaceholder}
-                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                  className="h-auto min-w-0 flex-1 p-0 focus-visible:ring-0 focus-visible:ring-offset-0"
                 />
               </label>
             ) : null}
@@ -451,7 +458,7 @@ export function WidgetPicker({
                 <button
                   type="button"
                   onClick={() => onSelect("clock")}
-                  className="flex w-full items-start justify-between gap-3 rounded-tile bg-surface-tile px-3 py-2.5 text-left transition-colors hover:bg-surface-tile/50"
+                  className="flex w-full items-start justify-between gap-3 rounded-tile bg-muted px-3 py-2.5 text-left transition-colors hover:bg-muted/50"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-sm text-foreground">
@@ -475,7 +482,7 @@ export function WidgetPicker({
                     "flex w-full items-start justify-between gap-3 rounded-tile px-3 py-2.5 text-left transition-colors",
                     option.pinned
                       ? "cursor-not-allowed text-muted-foreground opacity-60"
-                      : "bg-surface-tile hover:bg-surface-tile/50",
+                      : "bg-muted hover:bg-muted/50",
                   )}
                 >
                   <span className="min-w-0">
@@ -509,7 +516,7 @@ export function WidgetPicker({
                 key={category}
                 type="button"
                 onClick={() => selectCategory(category)}
-                className="flex w-full items-center justify-between rounded-tile px-3 py-2 text-left text-sm transition-colors hover:bg-surface-tile/50"
+                className="flex w-full items-center justify-between rounded-tile px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50"
               >
                 <span>{t(`widgets.picker.sections.${category}`)}</span>
                 <ChevronRight className="size-3.5 text-muted-foreground" />

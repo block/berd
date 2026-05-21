@@ -44,11 +44,11 @@ function resolveCardState(
 function StatusDot({ state }: { state: CardState }) {
   const dotClass = cn(
     "size-2 rounded-full shrink-0",
-    state === "success" && "bg-text-success",
-    state === "failed" && "bg-text-danger",
-    state === "running" && "bg-text-info animate-pulse",
-    (state === "never-run" || state === "paused") && "bg-border-strong",
-    state === "paused" && "bg-transparent ring-1 ring-border-strong ring-inset",
+    state === "success" && "bg-success",
+    state === "failed" && "bg-destructive",
+    state === "running" && "bg-info animate-pulse",
+    (state === "never-run" || state === "paused") && "bg-foreground",
+    state === "paused" && "bg-transparent ring-1 ring-foreground ring-inset",
   );
   return <span className={dotClass} aria-hidden="true" />;
 }
@@ -111,7 +111,7 @@ export function AutomationOutputWidget({
 
   if (!tile) {
     return (
-      <div className="flex h-full w-full items-center justify-center rounded-card bg-surface-card p-4">
+      <div className="flex h-full w-full items-center justify-center rounded-card bg-card p-4">
         <span className="text-[13px] italic text-muted-foreground">
           {t("widgets.automationOutputPin.fallbackTitle")}
         </span>
@@ -132,12 +132,12 @@ export function AutomationOutputWidget({
       type="button"
       onClick={handleClick}
       aria-label={title}
-      className="flex h-full w-full flex-col rounded-card bg-surface-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-surface-tile cursor-pointer"
+      className="flex h-full w-full flex-col rounded-card bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
     >
       <div className="flex items-start justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1.5">
           <IconBolt
-            className="size-3.5 shrink-0 text-foreground-subtle"
+            className="size-3.5 shrink-0 text-muted-foreground"
             aria-hidden="true"
           />
           <span className="truncate text-[14px] text-foreground">{title}</span>
@@ -157,7 +157,7 @@ export function AutomationOutputWidget({
               "text-[14px] font-light leading-[1.4] line-clamp-3",
               cardState === "failed"
                 ? "text-muted-foreground"
-                : "text-foreground-subtle",
+                : "text-muted-foreground",
             )}
           >
             {outputSummary}

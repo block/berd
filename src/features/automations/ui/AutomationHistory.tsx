@@ -39,7 +39,7 @@ export function AutomationHistory({
   if (historyQuery.isLoading) {
     return (
       <div className="flex min-h-48 items-center justify-center">
-        <Spinner className="size-5 text-text-primary" />
+        <Spinner className="size-5 text-primary" />
       </div>
     );
   }

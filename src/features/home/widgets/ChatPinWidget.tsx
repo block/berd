@@ -65,7 +65,7 @@ export function ChatPinWidget({
       type="button"
       onClick={handleClick}
       aria-label={t("widgets.chatPin.openAria", { title })}
-      className="flex h-full w-full flex-col rounded-card-chat border border-border-soft bg-surface-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-surface-tile cursor-pointer"
+      className="flex h-full w-full flex-col rounded-card-chat border border-border/80 bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
     >
       <span className="flex min-w-0 items-center gap-2 text-[13px] text-foreground">
         <IconMessageCircle

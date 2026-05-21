@@ -36,7 +36,7 @@ export const TerminalHeader = ({
 }: TerminalHeaderProps) => (
   <div
     className={cn(
-      "flex items-center justify-between border-zinc-800 border-b px-4 py-2",
+      "flex items-center justify-between border-popover-inverse-muted-foreground/25 border-b px-4 py-2",
       className,
     )}
     {...props}
@@ -56,7 +56,10 @@ export const TerminalTitle = ({
 
   return (
     <div
-      className={cn("flex items-center gap-2 text-sm text-zinc-400", className)}
+      className={cn(
+        "flex items-center gap-2 text-sm text-popover-inverse-muted-foreground",
+        className,
+      )}
       {...props}
     >
       <TerminalIcon className="size-4" />
@@ -80,7 +83,10 @@ export const TerminalStatus = ({
 
   return (
     <div
-      className={cn("flex items-center gap-2 text-xs text-zinc-400", className)}
+      className={cn(
+        "flex items-center gap-2 text-popover-inverse-muted-foreground text-xs",
+        className,
+      )}
       {...props}
     >
       {children}
@@ -148,7 +154,7 @@ export const TerminalCopyButton = ({
     <Button
       aria-label={t("components.terminal.copyLabel")}
       className={cn(
-        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        "size-7 shrink-0 text-popover-inverse-muted-foreground hover:bg-popover-inverse-muted-foreground/20 hover:text-popover-inverse-foreground",
         className,
       )}
       onClick={copyToClipboard}
@@ -180,7 +186,7 @@ export const TerminalClearButton = ({
     <Button
       aria-label={t("components.terminal.clearLabel")}
       className={cn(
-        "size-7 shrink-0 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-100",
+        "size-7 shrink-0 text-popover-inverse-muted-foreground hover:bg-popover-inverse-muted-foreground/20 hover:text-popover-inverse-foreground",
         className,
       )}
       onClick={onClear}
@@ -223,7 +229,7 @@ export const TerminalContent = ({
         <pre className="whitespace-pre-wrap break-words">
           <Ansi>{output}</Ansi>
           {isStreaming && (
-            <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-zinc-100" />
+            <span className="ml-0.5 inline-block h-4 w-2 animate-pulse bg-popover-inverse-foreground" />
           )}
         </pre>
       )}
@@ -256,7 +262,7 @@ export const Terminal = ({
     <TerminalContext.Provider value={contextValue}>
       <div
         className={cn(
-          "flex flex-col overflow-hidden rounded-lg border bg-zinc-950 text-zinc-100",
+          "flex flex-col overflow-hidden rounded-lg border bg-popover-inverse text-popover-inverse-foreground",
           className,
         )}
         {...props}

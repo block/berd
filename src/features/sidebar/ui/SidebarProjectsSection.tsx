@@ -49,7 +49,8 @@ interface SidebarProjectsSectionProps {
   onToggleRecentsSection: () => void;
 }
 
-const SECTION_HEADER_TEXT_CLASS = "text-[10px] font-light text-foreground/25";
+const SECTION_HEADER_TEXT_CLASS =
+  "text-[10px] font-light text-muted-foreground";
 
 export function SidebarProjectsSection({
   projects,
@@ -99,7 +100,7 @@ export function SidebarProjectsSection({
   return (
     <div
       className={cn(
-        "relative z-10 mt-4 border-t border-border-soft",
+        "relative z-10 mt-4 border-t border-border/80",
         labelTransition,
         labelVisible
           ? "opacity-100 max-h-[2000px]"
@@ -130,7 +131,7 @@ export function SidebarProjectsSection({
           >
             <IconChevronDown
               className={cn(
-                "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
                 !projectsSectionOpen && "-rotate-90",
               )}
             />
@@ -255,7 +256,7 @@ export function SidebarProjectsSection({
               >
                 <IconChevronDown
                   className={cn(
-                    "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                    "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
                     !recentsSectionOpen && "-rotate-90",
                   )}
                 />

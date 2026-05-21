@@ -292,7 +292,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     if (isBuiltIn || isReady) {
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
-          <IconCheck className="size-4 text-text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
+          <IconCheck className="size-4 text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
         </div>
       );
     }
@@ -300,7 +300,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     if (setupError) {
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
-          <IconAlertTriangle className="size-4 text-text-danger" />
+          <IconAlertTriangle className="size-4 text-destructive" />
         </div>
       );
     }
@@ -418,7 +418,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     return (
       <div className="mt-3 space-y-2 border-t pt-3">
         <div className="flex items-center gap-2">
-          <Spinner className="size-3.5 text-text-primary" />
+          <Spinner className="size-3.5 text-primary" />
           <div className="min-w-0 flex-1">
             <span className="text-xs font-medium">{phaseLabel}</span>
             {stepInfo && (
@@ -441,7 +441,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     <div
       className={cn(
         "flex flex-col rounded-lg border bg-background p-3 transition-colors",
-        isActive && "border-border-primary/50 bg-background-primary/10",
+        isActive && "border-primary/50 bg-primary/10",
       )}
     >
       <div className="flex items-start justify-between">
@@ -470,9 +470,9 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
                   className={cn(
                     "size-1.5 rounded-full",
                     setupError
-                      ? "bg-background-danger-strong"
+                      ? "bg-destructive"
                       : isActive
-                        ? "bg-background-primary animate-pulse"
+                        ? "bg-primary animate-pulse"
                         : "bg-muted-foreground/40",
                   )}
                 />
@@ -490,7 +490,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
 
       {setupError && !isActive && (
         <div className="mt-3 space-y-2 border-t pt-3">
-          <p className="text-xs text-text-danger">{setupError}</p>
+          <p className="text-xs text-destructive">{setupError}</p>
           {renderSetupOutput()}
         </div>
       )}

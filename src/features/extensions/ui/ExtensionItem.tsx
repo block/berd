@@ -44,7 +44,7 @@ export function ExtensionItem({
   return (
     <div
       className={cn(
-        "flex min-h-20 items-center justify-between gap-3 border-b border-border-soft-divider py-4",
+        "flex min-h-20 items-center justify-between gap-3 border-b border-border/70 py-4",
         className,
       )}
     >
@@ -58,7 +58,7 @@ export function ExtensionItem({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {showAlwaysOnWarning && (
-          <span className="inline-flex items-center gap-1 text-xs text-text-warning">
+          <span className="inline-flex items-center gap-1 text-xs text-warning">
             <IconAlertTriangle className="size-3.5" aria-hidden="true" />
             {t("extensions.alwaysOn.label")}
           </span>

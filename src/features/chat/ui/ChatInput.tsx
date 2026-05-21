@@ -485,7 +485,7 @@ export function ChatInput({
                 actionLabel={t("agentToolsTip.turnOff")}
                 dismissLabel={t("agentToolsTip.dismiss")}
                 icon={<IconCheck className="size-4" />}
-                iconClassName="bg-transparent text-text-success"
+                iconClassName="bg-transparent text-success"
                 onAction={() => agentToolsTipsPreference.setEnabled(false)}
                 onDismiss={() => setDismissedAgentToolsTipId(agentToolsTip.id)}
               >
@@ -509,7 +509,7 @@ export function ChatInput({
               onDrop={handleDrop}
             >
               {isAttachmentDragOver && (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border-soft bg-surface-card/60">
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border/80 bg-card/60">
                   <Badge variant="secondary" className="px-3 py-1 text-sm">
                     {t("attachments.dropToAttach")}
                   </Badge>
@@ -541,7 +541,7 @@ export function ChatInput({
               />
 
               {queuedMessage && (
-                <div className="mb-2 flex items-center gap-2 rounded-card-sm bg-surface-tile px-3 py-1.5">
+                <div className="mb-2 flex items-center gap-2 rounded-card-sm bg-muted px-3 py-1.5">
                   <span className="flex-1 truncate text-xs text-muted-foreground">
                     {t("queue.label", { text: queuedMessage.text })}
                   </span>
@@ -566,7 +566,7 @@ export function ChatInput({
                   placeholder={inputPlaceholder}
                   disabled={disabled}
                   rows={1}
-                  className="mb-3 min-h-[36px] max-h-[200px] w-full resize-none bg-transparent px-1 text-base leading-relaxed text-foreground placeholder:font-light placeholder:text-text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
+                  className="mb-3 min-h-[36px] max-h-[200px] w-full resize-none bg-transparent px-1 text-base leading-relaxed text-foreground placeholder:font-light placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
                   aria-label={t("input.ariaLabel")}
                 />
               </PopoverAnchor>

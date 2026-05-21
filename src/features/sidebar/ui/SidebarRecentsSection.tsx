@@ -93,7 +93,7 @@ export function SidebarRecentsSection({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
     <div
-      className="mt-4 border-t border-border-soft"
+      className="mt-4 border-t border-sidebar-border/80"
       onDragOver={handleRecentsDragOver}
       onDragLeave={handleRecentsDragLeave}
       onDrop={handleRecentsDrop}
@@ -101,7 +101,7 @@ export function SidebarRecentsSection({
       <div
         className={cn(
           "relative group/chats-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
+          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pl-3 pr-0 pt-3 pb-1.5",
         )}
       >
         {!collapsed && (
@@ -110,7 +110,7 @@ export function SidebarRecentsSection({
             onClick={onToggleOpen}
             aria-expanded={isOpen}
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-sidebar-foreground",
               "-ml-3",
               labelTransition,
               labelVisible
@@ -120,7 +120,7 @@ export function SidebarRecentsSection({
           >
             <IconChevronDown
               className={cn(
-                "size-3 shrink-0 text-text-muted transition-transform duration-150",
+                "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
                 !isOpen && "-rotate-90",
               )}
             />
@@ -138,7 +138,7 @@ export function SidebarRecentsSection({
             aria-label={t("actions.newChat")}
             title={t("actions.newChat")}
             className={cn(
-              "mr-1 size-6 flex-shrink-0 rounded-md",
+              "mr-1 size-6 flex-shrink-0 rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
               "opacity-0 pointer-events-none group-hover/chats-header:opacity-100 group-hover/chats-header:pointer-events-auto group-focus-within/chats-header:opacity-100 group-focus-within/chats-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto",
             )}
           >
@@ -147,7 +147,7 @@ export function SidebarRecentsSection({
         )}
 
         {recentsDragOver && (
-          <div className="absolute bottom-0 left-3 right-3 h-px bg-foreground" />
+          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
         )}
       </div>
 
@@ -194,8 +194,8 @@ export function SidebarRecentsSection({
               className={cn(
                 "relative rounded-lg",
                 activeSessionId === session.id
-                  ? "bg-transparent text-foreground hover:bg-transparent"
-                  : "text-foreground hover:text-foreground",
+                  ? "bg-transparent text-sidebar-foreground hover:bg-transparent"
+                  : "text-sidebar-foreground hover:text-sidebar-foreground",
               )}
             >
               <IconMessage className="size-4" />

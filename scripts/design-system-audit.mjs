@@ -8,41 +8,16 @@ const repoRoot = path.resolve(
   "..",
 );
 
-const coveredComponents = {
-  Button: {
-    allowedSourceTokenClasses: [
-      "active:text-foreground",
-      "aria-expanded:text-foreground",
-      "bg-background",
-      "data-[state=open]:text-foreground",
-      "hover:bg-muted/70",
-      "hover:text-foreground",
-      "text-foreground",
-      "text-muted-foreground",
-    ],
-  },
-  "Button Group": {
-    allowedSourceTokenClasses: [],
-  },
-  Badge: {
-    allowedSourceTokenClasses: [],
-  },
-  Alert: {
-    allowedSourceTokenClasses: [],
-  },
-  Tabs: {
-    allowedSourceTokenClasses: [],
-  },
-  "Toggle Group": {
-    allowedSourceTokenClasses: [],
-  },
-  Select: {
-    allowedSourceTokenClasses: [],
-  },
-  "Dropdown Menu": {
-    allowedSourceTokenClasses: [],
-  },
-};
+const coveredComponents = [
+  "Button",
+  "Button Group",
+  "Badge",
+  "Alert",
+  "Tabs",
+  "Toggle Group",
+  "Select",
+  "Dropdown Menu",
+];
 
 const paletteUtilityPattern =
   /\b(?:bg|border|text|ring|fill|stroke)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}(?:\/\d{1,3})?\b/g;
@@ -66,9 +41,7 @@ function findMatches({ sourceText, pattern, source, label }) {
 function runAudit() {
   const manifest = buildDesignSystemManifest();
   const findings = [];
-  const warnings = [];
-
-  for (const [componentName, config] of Object.entries(coveredComponents)) {
+  for (const componentName of coveredComponents) {
     const item = manifest.find((component) => component.name === componentName);
     if (!item) {
       findings.push({
@@ -96,40 +69,6 @@ function runAudit() {
         source: item.source,
         label: "raw color value",
       }),
-    );
-
-    const allowed = new Set(config.allowedSourceTokenClasses);
-    const unexpectedSourceTokens = item.sourceTokenClasses.filter(
-      (className) => !allowed.has(className),
-    );
-
-    for (const className of unexpectedSourceTokens) {
-      findings.push({
-        source: item.source,
-        line: 1,
-        label: "source token utility in covered component",
-        value: className,
-      });
-    }
-
-    const allowedButStillPresent = item.sourceTokenClasses.filter((className) =>
-      allowed.has(className),
-    );
-    if (allowedButStillPresent.length > 0) {
-      warnings.push({
-        componentName,
-        source: item.source,
-        values: allowedButStillPresent,
-      });
-    }
-  }
-
-  for (const warning of warnings) {
-    console.warn(
-      [
-        `${warning.source}: source-token utilities are still grandfathered for ${warning.componentName}:`,
-        ...warning.values.map((value) => `  - ${value}`),
-      ].join("\n"),
     );
   }
 

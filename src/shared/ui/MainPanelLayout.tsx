@@ -9,7 +9,7 @@ import { cn } from "@/shared/lib/cn";
  */
 export function MainPanelLayout({
   children,
-  backgroundColor = "bg-background",
+  backgroundColor,
   className,
 }: {
   children: ReactNode;

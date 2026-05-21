@@ -84,7 +84,7 @@ export function PageColumns({
         withHandle
         variant="subtle"
         indicator="arrows"
-        className="data-[separator=active]:bg-border-default hover:bg-border"
+        className="data-[separator=active]:bg-border hover:bg-border"
       />
       <ResizablePanel
         id={`${pageColumnsId}-content`}

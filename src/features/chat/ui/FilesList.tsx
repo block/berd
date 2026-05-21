@@ -41,7 +41,7 @@ function TreeStatusRow({
   return (
     <div
       className={`px-2 py-1 text-xs ${
-        destructive ? "text-text-danger" : "text-muted-foreground"
+        destructive ? "text-destructive" : "text-muted-foreground"
       }`}
     >
       {text}

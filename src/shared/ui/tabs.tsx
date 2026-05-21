@@ -6,11 +6,11 @@ import { cn } from "@/shared/lib/cn";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 const tabsListVariants = cva(
-  "text-text-muted inline-flex w-fit items-center justify-center",
+  "text-muted-foreground inline-flex w-fit items-center justify-center",
   {
     variants: {
       variant: {
-        default: "h-9 rounded-lg bg-background-muted p-[3px]",
+        default: "h-9 rounded-lg bg-muted p-[3px]",
         buttons: "h-auto gap-1 bg-transparent p-0",
         weight: "h-auto gap-6 bg-transparent p-0",
       },
@@ -27,11 +27,11 @@ const tabsTriggerVariants = cva(
     variants: {
       variant: {
         default:
-          "data-[state=active]:bg-background-default dark:data-[state=active]:text-text-default dark:data-[state=active]:border-border-input dark:data-[state=active]:bg-background-muted/30 h-[calc(100%-1px)] rounded-md border border-transparent px-2 py-1 text-sm text-text-default dark:text-text-muted",
+          "data-[state=active]:bg-background dark:data-[state=active]:text-foreground dark:data-[state=active]:border-input dark:data-[state=active]:bg-muted/30 h-[calc(100%-1px)] rounded-md border border-transparent px-2 py-1 text-sm text-foreground dark:text-muted-foreground",
         buttons:
-          "h-8 rounded-md px-3 py-1 text-xs font-medium text-text-default hover:bg-background-hover hover:text-text-hover data-[state=active]:bg-background-muted data-[state=active]:text-text-default",
+          "h-8 rounded-md px-3 py-1 text-xs font-medium text-foreground hover:bg-accent hover:text-accent-foreground data-[state=active]:bg-muted data-[state=active]:text-foreground",
         weight:
-          "h-auto px-0 py-1 text-sm font-light text-text-muted hover:text-text-default data-[state=active]:font-normal data-[state=active]:text-text-default transition-[color,font-weight]",
+          "h-auto px-0 py-1 text-sm font-light text-muted-foreground transition-[color,font-weight] hover:text-foreground data-[state=active]:font-normal data-[state=active]:text-foreground",
       },
     },
     defaultVariants: {

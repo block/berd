@@ -382,7 +382,7 @@ export function ModelProviderRow({
           )}
           {authenticating ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Spinner className="size-3.5 text-text-primary" />
+              <Spinner className="size-3.5 text-primary" />
               <span>{t("providers.waitingForSignIn")}</span>
             </div>
           ) : null}
@@ -392,7 +392,7 @@ export function ModelProviderRow({
           />
           <ProviderSetupOutput lines={setupOutput} />
           {setupError ? (
-            <p className="text-xs text-text-danger">{setupError}</p>
+            <p className="text-xs text-destructive">{setupError}</p>
           ) : null}
         </div>
       );
@@ -465,7 +465,7 @@ export function ModelProviderRow({
         onClick={handleToggle}
         aria-expanded={expanded}
         disabled={authenticating}
-        className="flex w-full items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:bg-background-hover/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus disabled:cursor-default disabled:hover:bg-transparent"
+        className="flex w-full items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
       >
         {icon ? (
           <div className="flex size-6 flex-shrink-0 items-center justify-center">
@@ -482,13 +482,13 @@ export function ModelProviderRow({
         <span className="min-w-0 flex-1 text-sm">{provider.displayName}</span>
 
         {isConnected ? (
-          <IconCheck className="size-4 flex-shrink-0 text-text-success" />
+          <IconCheck className="size-4 flex-shrink-0 text-success" />
         ) : null}
         {inventorySyncing ? (
-          <Spinner className="size-3.5 flex-shrink-0 text-text-primary" />
+          <Spinner className="size-3.5 flex-shrink-0 text-primary" />
         ) : null}
         {!isConnected && authenticating ? (
-          <Spinner className="size-3.5 flex-shrink-0 text-text-primary" />
+          <Spinner className="size-3.5 flex-shrink-0 text-primary" />
         ) : null}
       </button>
 

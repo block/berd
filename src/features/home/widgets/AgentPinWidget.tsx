@@ -42,7 +42,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
           "flex flex-col rounded-card-chat p-4 text-foreground transition-colors duration-150 cursor-pointer",
           avatarMedia
             ? "h-full w-full items-center justify-center gap-2 border border-transparent bg-transparent text-center hover:bg-transparent"
-            : "h-24 w-[200px] border border-border-soft bg-surface-card text-left hover:bg-surface-tile",
+            : "h-24 w-[200px] border border-border/80 bg-card text-left hover:bg-muted",
         )}
       >
         {avatarMedia ? (

@@ -26,12 +26,12 @@ const breadcrumbListVariants: Record<BreadcrumbListVariant, string> = {
   default:
     "text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm break-words sm:gap-2.5",
   "top-bar":
-    "flex flex-nowrap items-center gap-0 break-normal whitespace-nowrap font-sans text-[24px] font-light leading-[0.96] tracking-normal text-text-title",
+    "flex flex-nowrap items-center gap-0 break-normal whitespace-nowrap font-sans text-[24px] font-light leading-[0.96] tracking-normal text-foreground",
 };
 
 const breadcrumbTopBarToneClassNames: Record<BreadcrumbTopBarTone, string> = {
-  title: "text-text-title",
-  current: "text-text-muted",
+  title: "text-foreground",
+  current: "text-muted-foreground",
 };
 
 const breadcrumbTopBarToneTransitionClassName =
@@ -87,7 +87,10 @@ function BreadcrumbLink({
           ? breadcrumbTopBarToneTransitionClassName
           : "transition-colors",
         variant === "top-bar"
-          ? cn(breadcrumbTopBarToneClassNames[tone], "hover:text-text-hover")
+          ? cn(
+              breadcrumbTopBarToneClassNames[tone],
+              "hover:text-accent-foreground",
+            )
           : "hover:text-foreground",
         className,
       )}

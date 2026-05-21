@@ -737,7 +737,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
           <button
             type="button"
             tabIndex={expanded ? -1 : 0}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-surface-button"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent"
             aria-label={t("toolbar.voiceInput")}
             title={t("toolbar.voiceInput")}
           >
@@ -747,7 +747,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
             type="button"
             tabIndex={expanded ? -1 : 0}
             onClick={handleSend}
-            className="flex h-8 w-10 items-center justify-center rounded-full bg-surface-button"
+            className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
             aria-label={t("toolbar.sendMessage")}
           >
             <IconArrowUp className="size-4 text-foreground" />
@@ -769,7 +769,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
             onClick={() => {
               void handleAttachFiles();
             }}
-            className="flex h-8 w-10 items-center justify-center rounded-full bg-surface-button"
+            className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
             aria-label={t("attachments.chooseFilesDialogTitle")}
           >
             <IconPlus className="size-4 text-foreground" />
@@ -780,7 +780,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               <button
                 type="button"
                 tabIndex={expanded ? 0 : -1}
-                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-surface-button"
+                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-accent"
                 aria-label={t("toolbar.selectModel")}
               >
                 <span className="max-w-[140px] truncate">
@@ -821,7 +821,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
                             }}
                             className={cn(
                               "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                              isSelected && "bg-muted",
+                              isSelected && "bg-accent",
                             )}
                           >
                             <span className="truncate">{model.modelName}</span>
@@ -843,7 +843,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               <button
                 type="button"
                 tabIndex={expanded ? 0 : -1}
-                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-surface-button"
+                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-accent"
                 aria-label={t("toolbar.selectProject")}
               >
                 <span className="max-w-[120px] truncate">
@@ -862,7 +862,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
                   }}
                   className={cn(
                     "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                    selectedProjectId === null && "bg-muted",
+                    selectedProjectId === null && "bg-accent",
                   )}
                 >
                   <span>{t("toolbar.noProject")}</span>
@@ -880,7 +880,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
                     }}
                     className={cn(
                       "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                      selectedProjectId === project.id && "bg-muted",
+                      selectedProjectId === project.id && "bg-accent",
                     )}
                   >
                     <span className="truncate">{project.name}</span>
@@ -900,13 +900,13 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               disabled={!dictation.isRecording && !dictation.isEnabled}
               onClick={dictation.toggleRecording}
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full bg-surface-button transition-colors",
+                "flex h-8 w-8 items-center justify-center rounded-full bg-accent transition-colors",
                 dictation.isRecording &&
                   "bg-destructive/12 text-destructive hover:bg-destructive/16",
                 dictation.isTranscribing && "animate-pulse",
                 !dictation.isRecording &&
                   !dictation.isEnabled &&
-                  "opacity-50 hover:bg-surface-button",
+                  "opacity-50 hover:bg-accent",
               )}
               aria-label={
                 dictation.isRecording
@@ -930,7 +930,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               type="button"
               tabIndex={expanded ? 0 : -1}
               onClick={handleSend}
-              className="flex h-8 w-10 items-center justify-center rounded-full bg-surface-button"
+              className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
               aria-label={t("toolbar.sendMessage")}
             >
               <IconArrowUp className="size-4 text-foreground" />

@@ -50,11 +50,11 @@ export const PackageInfoName = ({
 };
 
 const changeTypeStyles: Record<ChangeType, string> = {
-  added: "bg-background-primary/10 text-text-primary",
+  added: "bg-primary/10 text-primary",
   major: "bg-status-deleted/10 text-status-deleted",
-  minor: "bg-background-warning text-text-warning",
+  minor: "bg-warning/10 text-warning",
   patch: "bg-status-added/10 text-status-added",
-  removed: "bg-gray-100 text-gray-700 dark:bg-gray-900/30 dark:text-gray-400",
+  removed: "bg-muted text-muted-foreground",
 };
 
 const changeTypeIcons: Record<ChangeType, React.ReactNode> = {

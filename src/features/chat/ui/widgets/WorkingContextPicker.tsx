@@ -205,7 +205,7 @@ export function WorkingContextPicker({
             className={cn(
               "flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2",
               "text-sm text-foreground transition-colors",
-              "hover:bg-background-hover focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
+              "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
             )}
             aria-label={t("contextPanel.picker.selectContext")}
           >
@@ -214,7 +214,7 @@ export function WorkingContextPicker({
               <span className="block truncate font-normal text-foreground">
                 {activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet")}
               </span>
-              <span className="block truncate text-xs text-text-muted">
+              <span className="block truncate text-xs text-muted-foreground">
                 {t("contextPanel.picker.checkedOutBranch", {
                   branch: activeBranchLabel,
                 })}
@@ -250,7 +250,7 @@ export function WorkingContextPicker({
                     <span className="block truncate font-normal text-foreground">
                       {worktreeName(wt.path)}
                     </span>
-                    <span className="block truncate text-xs text-text-muted">
+                    <span className="block truncate text-xs text-muted-foreground">
                       {t("contextPanel.picker.checkedOutBranch", {
                         branch: wt.branch ?? t("contextPanel.states.detached"),
                       })}

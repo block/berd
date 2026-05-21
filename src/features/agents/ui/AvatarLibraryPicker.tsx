@@ -74,12 +74,12 @@ export function AvatarLibraryPicker({
           key={entry.id}
           type="button"
           className={cn(
-            "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-card-sm bg-surface-overlay p-2",
-            "border border-border-soft transition-colors hover:border-border",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus",
+            "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-card-sm bg-popover p-2",
+            "border border-border/80 transition-colors hover:border-border",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             !selectable &&
-              "cursor-not-allowed opacity-60 hover:border-border-soft",
-            selected && "border-border-focus ring-2 ring-ring-focus/25",
+              "cursor-not-allowed opacity-60 hover:border-border/80",
+            selected && "border-ring ring-2 ring-ring/25",
           )}
           aria-label={entry.label}
           aria-pressed={selected}
@@ -113,7 +113,7 @@ export function AvatarLibraryPicker({
             </span>
           )}
           {selected ? (
-            <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-background-primary text-text-on-primary">
+            <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
               <Check className="size-3" />
             </span>
           ) : null}
@@ -171,9 +171,9 @@ export function AvatarLibraryPicker({
           key={collection.id}
           type="button"
           className={cn(
-            "flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-surface-overlay p-3 text-center",
-            "border border-border-soft transition-colors hover:border-border hover:bg-background-hover",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring-focus",
+            "flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-popover p-3 text-center",
+            "border border-border/80 transition-colors hover:border-border hover:bg-accent",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
           )}
           onClick={() => {
             setSelectedCollectionId(collection.id);
@@ -218,7 +218,7 @@ export function AvatarLibraryPicker({
   const renderCollectionSkeleton = (index: number) => (
     <div
       key={index}
-      className="flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-surface-overlay p-3 text-center"
+      className="flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-popover p-3 text-center"
     >
       <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-card-sm bg-background">
         <Spinner className="size-4 text-muted-foreground" />
@@ -237,7 +237,7 @@ export function AvatarLibraryPicker({
       )}
     >
       {library.error ? (
-        <div className="flex items-center justify-between gap-2 rounded-card-sm bg-surface-overlay px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
           <span>{t("editor.avatarCatalogUnavailable")}</span>
           <Button
             type="button"
@@ -267,7 +267,7 @@ export function AvatarLibraryPicker({
             </p>
           </div>
           {library.failedCollectionIds.has(selectedCollection.id) ? (
-            <div className="flex items-center justify-between gap-2 rounded-card-sm bg-surface-overlay px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
               <span>{t("avatar.loadFailed")}</span>
               <Button
                 type="button"

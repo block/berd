@@ -316,23 +316,19 @@ export function SkillsView({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem
-              className={
-                skillScope === "all" ? "bg-background-muted" : undefined
-              }
+              className={skillScope === "all" ? "bg-muted" : undefined}
               onSelect={() => setSkillScope("all")}
             >
               {t("view.scope.all")}
             </DropdownMenuItem>
             <DropdownMenuItem
-              className={
-                skillScope === "global" ? "bg-background-muted" : undefined
-              }
+              className={skillScope === "global" ? "bg-muted" : undefined}
               onSelect={() => setSkillScope("global")}
             >
               {t("view.scope.global")}
             </DropdownMenuItem>
             {projectsWithSkillDirs.length > 0 ? (
-              <DropdownMenuLabel className="pt-2 text-xs text-text-placeholder">
+              <DropdownMenuLabel className="pt-2 text-xs text-muted-foreground">
                 {t("view.scope.projects")}
               </DropdownMenuLabel>
             ) : null}
@@ -341,7 +337,7 @@ export function SkillsView({
                 key={project.id}
                 className={
                   skillScope === `project:${project.id}`
-                    ? "bg-background-muted"
+                    ? "bg-muted"
                     : undefined
                 }
                 onSelect={() => setSkillScope(`project:${project.id}`)}

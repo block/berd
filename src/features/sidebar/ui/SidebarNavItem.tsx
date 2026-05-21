@@ -26,11 +26,11 @@ export function SidebarNavItem({
   labelTransitionDelay,
 }: SidebarNavItemProps) {
   const className = cn(
-    "flex items-center w-full text-sm font-light transition-colors duration-200 rounded-md",
+    "flex items-center w-full text-sm font-light transition-colors duration-200 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
     Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",
     isActive
-      ? "bg-background-alt text-foreground"
-      : "text-muted-foreground hover:bg-background-alt hover:text-foreground",
+      ? "bg-sidebar-accent text-sidebar-foreground"
+      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
   );
 
   return (

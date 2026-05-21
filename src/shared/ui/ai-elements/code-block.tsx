@@ -442,7 +442,7 @@ export const CodeBlockContent = ({
     <div
       className={cn(
         "relative min-w-0 max-w-full overflow-auto rounded-[0.625rem]",
-        !transparentBackground && "border border-border-soft bg-background",
+        !transparentBackground && "border border-border/80 bg-background",
         viewportClassName,
       )}
     >

@@ -258,8 +258,8 @@ export const WebPreviewConsole = ({
               <div
                 className={cn(
                   "text-xs",
-                  log.level === "error" && "text-text-danger",
-                  log.level === "warn" && "text-yellow-600",
+                  log.level === "error" && "text-destructive",
+                  log.level === "warn" && "text-warning",
                   log.level === "log" && "text-foreground",
                 )}
                 key={`${log.timestamp.getTime()}-${log.level}-${log.message}`}

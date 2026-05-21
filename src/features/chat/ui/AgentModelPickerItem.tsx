@@ -19,9 +19,9 @@ export function PickerItem({
       disabled={disabled}
       className={cn(
         "flex min-w-0 w-full items-center gap-2 overflow-hidden rounded-sm px-2 py-1.5 text-left text-sm transition-colors",
-        "hover:bg-muted focus-visible:bg-muted focus:outline-none",
+        "hover:bg-accent focus-visible:bg-accent focus:outline-none",
         "disabled:pointer-events-none disabled:opacity-50",
-        selected && "bg-muted/60",
+        selected && "bg-accent",
         className,
       )}
       {...rest}

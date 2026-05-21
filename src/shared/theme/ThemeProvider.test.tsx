@@ -4,46 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import globalsCss from "../styles/globals.css?raw";
 import { ThemeProvider, useTheme } from "./ThemeProvider";
 
-const { mockCreateThemeVars } = vi.hoisted(() => ({
-  mockCreateThemeVars: vi.fn(),
-}));
-
-vi.mock("./adaptive-theme", () => ({
-  createThemeVars: mockCreateThemeVars,
-  hexToHsl: vi.fn((hex: string) => {
-    const normalized = hex.toLowerCase();
-    if (normalized === "#ffffff") {
-      return "0 0% 100%";
-    }
-    if (normalized === "#000000") {
-      return "0 0% 0%";
-    }
-    if (normalized === "#ef4444") {
-      return "0 84.2% 60.2%";
-    }
-    if (normalized === "#22c55e") {
-      return "142.1 70.6% 45.3%";
-    }
-    return "217.2 91.2% 59.8%";
-  }),
-  normalizeHexColor: vi.fn((color: string | null) => {
-    const value = color?.trim();
-    if (!value) return null;
-    const hex = value.startsWith("#") ? value.slice(1) : value;
-    if (/^[0-9a-fA-F]{3}$/.test(hex)) {
-      return `#${hex
-        .split("")
-        .map((char) => char + char)
-        .join("")
-        .toLowerCase()}`;
-    }
-    if (/^[0-9a-fA-F]{6}$/.test(hex)) {
-      return `#${hex.toLowerCase()}`;
-    }
-    return null;
-  }),
-}));
-
 function createMediaQueryList(initialMatches: boolean) {
   let matches = initialMatches;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
@@ -140,23 +100,6 @@ describe("ThemeProvider", () => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("data-density");
     document.documentElement.removeAttribute("style");
-
-    mockCreateThemeVars.mockImplementation(
-      (bg: string, _fg, _comment, _git, primary = "#2188ff") => ({
-        isDark: bg !== "#ffffff",
-        vars: {
-          "--background": bg === "#ffffff" ? "0 0% 100%" : "224 71% 4%",
-          "--foreground": bg === "#ffffff" ? "224 71% 4%" : "0 0% 100%",
-          "--primary":
-            primary === "#22c55e"
-              ? "142.1 70.6% 45.3%"
-              : primary === "#ff79c6"
-                ? "326 100% 74%"
-                : "210 50% 50%",
-          "--primary-foreground": "0 0% 100%",
-        },
-      }),
-    );
   });
 
   it("defaults to system mode and resolves through the OS preference", async () => {
@@ -278,9 +221,7 @@ describe("ThemeProvider", () => {
     });
   });
 
-  it("applies the cached dark class on mount when a dark theme was persisted", () => {
-    // Persisted cache indicates dark; system preference also dark so the
-    // post-mount derivation lines up with the cached dark mode.
+  it("ignores and clears legacy cached theme vars", async () => {
     localStorage.setItem(
       "goose-theme-cache-v3",
       JSON.stringify({
@@ -293,7 +234,7 @@ describe("ThemeProvider", () => {
         },
       }),
     );
-    createMediaQueryList(true);
+    createMediaQueryList(false);
 
     render(
       <ThemeProvider>
@@ -301,8 +242,13 @@ describe("ThemeProvider", () => {
       </ThemeProvider>,
     );
 
-    expect(document.documentElement).toHaveClass("dark");
-    expect(screen.getByTestId("is-dark")).toHaveTextContent("true");
+    await waitFor(() => {
+      expect(localStorage.getItem("goose-theme-cache-v3")).toBeNull();
+      expect(document.documentElement).toHaveClass("light");
+    });
+    expect(
+      document.documentElement.style.getPropertyValue("--background"),
+    ).toBe("");
   });
 
   it("sets and resets a custom primary color override", async () => {
@@ -326,8 +272,11 @@ describe("ThemeProvider", () => {
       );
     });
     expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
-      "142.1 70.6% 45.3%",
+      "#22c55e",
     );
+    expect(
+      document.documentElement.style.getPropertyValue("--primary-foreground"),
+    ).toBe("#000000");
 
     await user.click(screen.getByRole("button", { name: "Reset Primary" }));
 
@@ -335,6 +284,9 @@ describe("ThemeProvider", () => {
       expect(localStorage.getItem("goose-primary-color")).toBeNull();
       expect(screen.getByTestId("custom-primary-color")).toHaveTextContent(
         "theme",
+      );
+      expect(document.documentElement.style.getPropertyValue("--primary")).toBe(
+        "",
       );
     });
   });

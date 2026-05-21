@@ -145,7 +145,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
     <div className="mt-1.5 ml-1 space-y-1.5">
       {renderLocationButton(
         primary,
-        "h-auto max-w-full justify-start rounded-md border-border-hover/45 bg-background px-2.5 py-1 text-xs text-text-hover hover:bg-background-hover/55",
+        "h-auto max-w-full justify-start rounded-md border-accent/45 bg-background px-2.5 py-1 text-xs text-accent-foreground hover:bg-accent/55",
         "h-3.5 w-3.5 shrink-0",
       )}
 
@@ -175,7 +175,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
                 >
                   {renderLocationButton(
                     location,
-                    "h-auto max-w-full justify-start rounded-md border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:bg-background-hover hover:text-foreground",
+                    "h-auto max-w-full justify-start rounded-md border-border bg-background px-2 py-1 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground",
                     "h-3 w-3 shrink-0",
                   )}
                 </div>
@@ -185,7 +185,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
         </div>
       )}
 
-      {openError && <p className="text-[11px] text-text-danger">{openError}</p>}
+      {openError && <p className="text-[11px] text-destructive">{openError}</p>}
     </div>
   );
 }

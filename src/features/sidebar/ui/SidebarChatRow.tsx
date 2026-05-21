@@ -28,11 +28,11 @@ import { Input } from "@/shared/ui/input";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 
 const INACTIVE_CHAT_ROW_CLASS =
-  "text-foreground hover:bg-background-alt hover:text-foreground";
+  "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground";
 const ACTIVE_CHAT_ROW_CLASS =
-  "bg-background-alt text-foreground hover:bg-background-alt hover:text-foreground";
+  "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground";
 const SELECTED_CHAT_ROW_CLASS =
-  "bg-background-alt text-foreground ring-1 ring-inset ring-border-soft hover:bg-background-alt hover:text-foreground";
+  "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground";
 
 interface SidebarChatRowProps {
   id: string;
@@ -188,12 +188,12 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-background-alt focus-within:bg-background-alt active:cursor-grabbing",
+        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent active:cursor-grabbing",
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
-          "bg-background-alt",
+          "bg-sidebar-accent",
         selected && SELECTED_CHAT_ROW_CLASS,
-        dragging && "bg-background-alt opacity-40",
+        dragging && "bg-sidebar-accent opacity-40",
         className,
       )}
     >
@@ -254,10 +254,10 @@ export function SidebarChatRow({
             aria-label={t("menu.optionsFor", { label: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-1 size-5 rounded-full transition-colors hover:text-text-default",
+              "absolute right-1 size-5 rounded-full transition-colors hover:text-sidebar-foreground",
               menuOpen
-                ? "visible opacity-100 text-text-default"
-                : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-text-default/40",
+                ? "visible opacity-100 text-sidebar-foreground"
+                : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-sidebar-foreground/40",
             )}
           >
             <MoreHorizontal className="size-3.5" />

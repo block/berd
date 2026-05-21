@@ -145,22 +145,43 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-  /* Brand accent */
-  --brand: var(--color-gray-900);
-  --brand-foreground: var(--color-white);
+  /* shadcn core tokens. Keep current Goose neutral values, but use the
+     standard shadcn names as the app's authoring contract. */
+  --background: var(--color-white);
+  --foreground: #242424;
+  --card: var(--color-white);
+  --card-foreground: var(--foreground);
+  --popover: var(--color-white);
+  --popover-foreground: var(--foreground);
+  --primary: var(--color-gray-900);
+  --primary-foreground: var(--color-white);
+  --secondary: var(--color-gray-400);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--color-gray-100);
+  --muted-foreground: #7f7f7f;
+  --accent: var(--color-gray-50);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--color-red-600);
+  --destructive-foreground: var(--color-white);
+  --border: var(--color-gray-200);
+  --input: var(--color-gray-300);
+  --ring: var(--color-gray-400);
 
-  /* Canvas + surfaces (Alex Q2 2026) */
+  /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
+  --sidebar: rgba(255, 255, 255, 0.8);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Goose canvas + composer extensions. */
   --canvas-base: #f5f5f5;
   --canvas-project-tint: #d6dde7; /* slight cool tilt for project chats */
-  --surface-chrome: rgba(255, 255, 255, 0.8);
-  --surface-card: var(--color-white);
-  --surface-card-soft: rgba(255, 255, 255, 0.4);
-  --surface-overlay: var(--color-white);
-  --surface-tile: var(--color-gray-50);
   --surface-composer: rgba(255, 255, 255, 0.2);
-  --surface-button: var(--color-gray-50);
-  --surface-install: var(--canvas-base);
-  --surface-user-bubble: var(--color-gray-75);
+  --message-user-bg: var(--color-gray-75);
 
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
      Separate from --surface-composer (which is the chat-area composer fill).
@@ -186,7 +207,7 @@
 
   /* Composer chip tones — file/chat/project/agent/skill/automation identity
      colors. Each tone gets a bg + fg pair. Light values; dark block redefines. */
-  --chip-file-bg: var(--surface-tile);
+  --chip-file-bg: var(--accent);
   --chip-file-fg: var(--color-gray-600);
   --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 18%, transparent);
   --chip-chat-fg: var(--color-indigo-700);
@@ -219,66 +240,19 @@
     transparent
   );
 
-  /* Semantic backgrounds (broader app — includes status colors) */
-  --background-default: var(--color-white);
-  --background-alt: var(--color-gray-50);
-  --background-medium: var(--color-gray-400);
-  --background-muted: var(--color-gray-100);
-  --background-hover: var(--color-gray-100);
-  --background-primary: var(--brand);
-  --background-inverse: var(--color-black);
-  --background-danger: color-mix(
-    in oklab,
-    var(--status-deleted) 12%,
-    transparent
-  );
-  --background-danger-strong: var(--status-deleted);
-  --background-success: var(--color-green-200);
-  --background-info: var(--color-blue-200);
-  --background-warning: var(--color-yellow-200);
-
-  /* Semantic borders */
-  --border-default: var(--color-gray-200);
-  --border-soft: color-mix(in srgb, var(--border-default) 80%, transparent);
-  --border-soft-divider: color-mix(
-    in srgb,
-    var(--border-default) 70%,
-    transparent
-  );
-  --border-input: var(--color-gray-300);
-  --border-input-hover: var(--color-gray-400);
-  --border-strong: var(--color-gray-900);
-  --border-card: var(--color-gray-200);
-  --border-inverse: var(--color-black);
-  --border-danger: var(--color-red-200);
-  --border-success: var(--color-green-300);
-  --border-warning: var(--color-yellow-200);
-  --border-info: var(--color-blue-200);
-
-  /* Semantic text */
-  --text-default: #242424;
-  --text-subtle: var(--color-gray-600);
-  --text-muted: #7f7f7f;
-  --text-breadcrumb-separator: #afafaf;
-  --text-alt: var(--color-gray-600);
-  --text-title: #19191a;
-  --text-placeholder: var(--color-gray-500);
-  --text-on-primary: var(--brand-foreground);
-  --text-on-secondary: var(--color-gray-900);
-  --text-hover: var(--text-default);
-  --text-inverse: var(--color-white);
-  --text-danger: var(--status-deleted);
-  --text-on-danger-strong: var(--color-white);
-  --text-success: var(--color-green-300);
-  --text-warning: var(--color-yellow-200);
-  --text-info: var(--color-blue-200);
+  /* Goose status extensions. Use text-success and bg-success/10, matching
+     shadcn's destructive pattern without adding broad background-* aliases. */
+  --success: var(--color-green-600);
+  --success-foreground: var(--color-white);
+  --warning: var(--color-yellow-600);
+  --warning-foreground: var(--foreground);
+  --info: var(--color-blue-600);
+  --info-foreground: var(--color-white);
 
   /* Widget: clock face — always-dark surface regardless of theme.
      Intentionally slightly warmer than --color-gray-900 per Figma spec. */
   --clock-face: #1c1c1c;
-
-  /* Focus ring */
-  --ring: color-mix(in oklab, var(--brand) 42%, transparent);
+  --clock-hand: var(--color-red-500);
 
   /* Alpha utility (text-on-canvas overlays) */
   --dark-04: rgba(26, 26, 26, 0.04);
@@ -296,21 +270,19 @@
   --shadow-btn: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-card: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-elevated: 0 3px 12px rgba(76, 76, 76, 0.22);
-  --shadow-popover: none;
+  --shadow-popover:
+    0 1px 1px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.06),
+    0 16px 32px rgba(0, 0, 0, 0.03);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
 
-  /* Inverse popover — dark menu on light surface (Alex tile menu).
+  /* Goose inverse popover — dark menu on light surface (Alex tile menu).
      Reuses gray-900 / white so the chain stays inside the existing palette. */
-  --background-popover-inverse: var(--color-gray-900);
-  --text-on-popover-inverse: var(--color-white);
-  --text-on-popover-inverse-muted: rgba(255, 255, 255, 0.4);
-
-  /* Pill input fill — darker than the muted page canvas so search pills
-     read against the dotted backdrop without needing a border. */
-  --background-input-pill: #dedede;
+  --popover-inverse: var(--color-gray-900);
+  --popover-inverse-foreground: var(--color-white);
+  --popover-inverse-muted-foreground: rgba(255, 255, 255, 0.4);
 
   /* Charts */
   --chart-1: #f6b44a;
@@ -319,42 +291,10 @@
   --chart-4: #d185e0;
   --chart-5: #91cb80;
 
-  /* shadcn aliases — old component code consumes these. Forward to semantic. */
-  --background: var(--background-default);
-  --foreground: var(--text-default);
-  --card: var(--surface-card);
-  --card-foreground: var(--text-default);
-  --popover: var(--surface-overlay);
-  --popover-foreground: var(--text-default);
-  --primary: var(--brand);
-  --primary-foreground: var(--brand-foreground);
-  --secondary: var(--background-muted);
-  --secondary-foreground: var(--text-default);
-  --muted: var(--background-muted);
-  --muted-foreground: var(--text-muted);
-  --accent: color-mix(in oklab, var(--brand) 12%, var(--background-muted));
-  --accent-foreground: var(--text-default);
-  --destructive: var(--background-danger-strong);
-  --destructive-foreground: var(--text-on-danger-strong);
-  --border: var(--border-default);
-  --input: var(--border-input);
-
-  --sidebar: var(--surface-chrome);
-  --sidebar-foreground: var(--text-default);
-  --sidebar-primary: var(--brand);
-  --sidebar-primary-foreground: var(--brand-foreground);
-  --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: var(--text-default);
-  --sidebar-border: var(--border-default);
-  --sidebar-ring: var(--border-default);
-
   /* Status overlays (diff views etc.) */
   --status-added: var(--color-green-600);
   --status-deleted: var(--color-red-600);
   --status-modified: var(--color-yellow-600);
-  --ui-warning: var(--color-yellow-600);
-  --ui-warning-bg: rgba(202, 138, 4, 0.12);
-
   /* ═══ Typography scale — magazine for marketing/editorial,
         Alex role-named tokens for app chrome ═══ */
 
@@ -425,21 +365,40 @@
 
 [data-theme="dark"],
 .dark {
-  --brand: var(--color-white);
-  --brand-foreground: var(--color-black);
+  --background: var(--color-black);
+  --foreground: var(--color-white);
+  --card: var(--color-gray-800);
+  --card-foreground: var(--foreground);
+  --popover: var(--color-gray-800);
+  --popover-foreground: var(--foreground);
+  --primary: var(--color-white);
+  --primary-foreground: var(--color-black);
+  --secondary: var(--color-gray-700);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--color-gray-800);
+  --muted-foreground: var(--color-gray-500);
+  --accent: var(--color-gray-800);
+  --accent-foreground: var(--foreground);
+  --destructive: var(--color-red-400);
+  --destructive-foreground: var(--color-black);
+  --border: var(--color-gray-700);
+  --input: var(--color-gray-700);
+  --ring: var(--color-gray-400);
 
-  /* Canvas + surfaces — inverted */
+  --sidebar: rgba(0, 0, 0, 0.8);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--accent);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
+
+  /* Goose canvas + composer extensions — inverted. */
   --canvas-base: #1a1a1a;
   --canvas-project-tint: #1a1d22;
-  --surface-chrome: rgba(0, 0, 0, 0.8);
-  --surface-card: var(--color-gray-800);
-  --surface-card-soft: rgba(255, 255, 255, 0.08);
-  --surface-overlay: var(--color-gray-800);
-  --surface-tile: var(--color-gray-800);
   --surface-composer: rgba(255, 255, 255, 0.06);
-  --surface-button: var(--color-gray-800);
-  --surface-install: var(--canvas-base);
-  --surface-user-bubble: var(--color-gray-700);
+  --message-user-bg: var(--color-gray-700);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
      outline flips to white-alpha so it doesn't disappear over dark canvas. */
@@ -479,55 +438,12 @@
     transparent
   );
 
-  /* Semantic backgrounds */
-  --background-default: var(--color-black);
-  --background-alt: var(--color-gray-800);
-  --background-medium: var(--color-gray-700);
-  --background-muted: var(--color-gray-800);
-  --background-hover: var(--color-gray-700);
-  --background-primary: var(--brand);
-  --background-inverse: var(--color-white);
-  --background-danger: color-mix(
-    in oklab,
-    var(--status-deleted) 18%,
-    transparent
-  );
-  --background-danger-strong: var(--status-deleted);
-  --background-success: var(--color-green-100);
-  --background-info: var(--color-blue-100);
-  --background-warning: var(--color-yellow-100);
-
-  /* Semantic borders */
-  --border-default: var(--color-gray-700);
-  --border-input: var(--color-gray-700);
-  --border-input-hover: var(--color-gray-600);
-  --border-strong: var(--color-white);
-  --border-card: var(--color-gray-700);
-  --border-inverse: var(--color-white);
-  --border-danger: var(--color-red-200);
-  --border-success: var(--color-green-200);
-  --border-warning: var(--color-yellow-200);
-  --border-info: var(--color-blue-200);
-
-  /* Semantic text */
-  --text-default: var(--color-white);
-  --text-subtle: var(--color-gray-400);
-  --text-muted: var(--color-gray-500);
-  --text-breadcrumb-separator: var(--color-gray-400);
-  --text-alt: var(--color-gray-500);
-  --text-title: var(--color-white);
-  --text-placeholder: var(--color-gray-600);
-  --text-on-primary: var(--brand-foreground);
-  --text-on-secondary: var(--color-white);
-  --text-hover: var(--text-default);
-  --text-inverse: var(--color-black);
-  --text-danger: var(--status-deleted);
-  --text-on-danger-strong: var(--color-black);
-  --text-success: var(--color-green-100);
-  --text-warning: var(--color-yellow-100);
-  --text-info: var(--color-blue-100);
-
-  --ring: color-mix(in oklab, var(--brand) 52%, transparent);
+  --success: var(--color-green-400);
+  --success-foreground: var(--color-black);
+  --warning: var(--color-yellow-500);
+  --warning-foreground: var(--color-black);
+  --info: var(--color-blue-400);
+  --info-foreground: var(--color-black);
 
   --dark-04: rgba(242, 242, 242, 0.04);
   --dark-10: rgba(242, 242, 242, 0.1);
@@ -541,25 +457,22 @@
   --shadow-btn: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 3px 12px rgba(0, 0, 0, 0.5);
-  --shadow-popover: none;
+  --shadow-popover:
+    0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 22px rgba(0, 0, 0, 0.36),
+    0 2px 6px rgba(0, 0, 0, 0.24);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
 
   /* Inverse popover — light menu on dark surface (inverted for dark theme). */
-  --background-popover-inverse: var(--color-gray-50);
-  --text-on-popover-inverse: var(--color-gray-900);
-  --text-on-popover-inverse-muted: rgba(26, 26, 26, 0.4);
-
-  /* Pill input fill — lighter than the canvas in dark theme. */
-  --background-input-pill: rgba(255, 255, 255, 0.08);
+  --popover-inverse: var(--color-gray-50);
+  --popover-inverse-foreground: var(--color-gray-900);
+  --popover-inverse-muted-foreground: rgba(26, 26, 26, 0.4);
 
   --status-added: var(--color-green-400);
   --status-deleted: var(--color-red-400);
   --status-modified: var(--color-yellow-500);
-  --ui-warning: var(--color-yellow-500);
-  --ui-warning-bg: rgba(234, 179, 8, 0.16);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -578,14 +491,13 @@
 
 /* ═══════════════════════════════════════════════════════════
    TAILWIND UTILITY BRIDGE — exposes runtime custom-props as
-   Tailwind class generators (e.g. `bg-canvas-base`, `text-muted`).
+   Tailwind class generators (e.g. `bg-canvas-base`, `text-muted-foreground`).
    ═══════════════════════════════════════════════════════════ */
 
 @theme inline {
   /* shadcn-standard mappings */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-foreground-subtle: var(--text-subtle);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
@@ -596,7 +508,6 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-placeholder: var(--text-placeholder);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
@@ -605,23 +516,12 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
-  /* Brand */
-  --color-brand: var(--brand);
-  --color-brand-foreground: var(--brand-foreground);
-
-  /* Canvas + Alex surfaces */
+  /* Goose canvas + composer extensions */
   --color-canvas-base: var(--canvas-base);
   --color-canvas-project-tint: var(--canvas-project-tint);
-  --color-surface-chrome: var(--surface-chrome);
-  --color-surface-card: var(--surface-card);
-  --color-surface-card-soft: var(--surface-card-soft);
-  --color-surface-overlay: var(--surface-overlay);
-  --color-surface-tile: var(--surface-tile);
   --color-surface-composer: var(--surface-composer);
   --color-surface-composer-glass: var(--surface-composer-glass);
-  --color-surface-button: var(--surface-button);
-  --color-surface-install: var(--surface-install);
-  --color-surface-user-bubble: var(--surface-user-bubble);
+  --color-message-user-bg: var(--message-user-bg);
 
   /* Composer chip tones */
   --color-chip-file-bg: var(--chip-file-bg);
@@ -637,80 +537,37 @@
   --color-chip-automation-bg: var(--chip-automation-bg);
   --color-chip-automation-fg: var(--chip-automation-fg);
 
-  --color-text-placeholder-composer: var(--text-placeholder-composer);
+  --color-placeholder-composer: var(--text-placeholder-composer);
 
-  /* Semantic backgrounds */
-  --color-background-default: var(--background-default);
-  --color-background-alt: var(--background-alt);
-  --color-background-medium: var(--background-medium);
-  --color-background-muted: var(--background-muted);
-  --color-background-hover: var(--background-hover);
-  --color-background-primary: var(--background-primary);
-  --color-background-inverse: var(--background-inverse);
-  --color-background-popover-inverse: var(--background-popover-inverse);
-  --color-background-input-pill: var(--background-input-pill);
-  --color-background-danger: var(--background-danger);
-  --color-background-danger-strong: var(--background-danger-strong);
-  --color-background-success: var(--background-success);
-  --color-background-info: var(--background-info);
-  --color-background-warning: var(--background-warning);
-  --color-background-accent: var(--brand);
-
-  /* Semantic borders */
-  --color-border-default: var(--border-default);
-  --color-border-soft: var(--border-soft);
-  --color-border-soft-divider: var(--border-soft-divider);
-  --color-border-input: var(--border-input);
-  --color-border-input-hover: var(--border-input-hover);
-  --color-border-strong: var(--border-strong);
-  --color-border-card: var(--border-card);
-  --color-border-inverse: var(--border-inverse);
-  --color-border-danger: var(--border-danger);
-  --color-border-success: var(--border-success);
-  --color-border-warning: var(--border-warning);
-  --color-border-info: var(--border-info);
-  --color-border-accent: var(--brand);
-
-  /* Semantic text */
-  --color-text-default: var(--text-default);
-  --color-text-subtle: var(--text-subtle);
-  --color-text-muted: var(--text-muted);
-  --color-text-breadcrumb-separator: var(--text-breadcrumb-separator);
-  --color-text-alt: var(--text-alt);
-  --color-text-title: var(--text-title);
-  --color-text-placeholder: var(--text-placeholder);
-  --color-text-on-primary: var(--text-on-primary);
-  --color-text-on-secondary: var(--text-on-secondary);
-  --color-text-hover: var(--text-hover);
-  --color-text-inverse: var(--text-inverse);
-  --color-text-on-popover-inverse: var(--text-on-popover-inverse);
-  --color-text-on-popover-inverse-muted: var(--text-on-popover-inverse-muted);
-  --color-text-danger: var(--text-danger);
-  --color-text-on-danger-strong: var(--text-on-danger-strong);
-  --color-text-success: var(--text-success);
-  --color-text-warning: var(--text-warning);
-  --color-text-info: var(--text-info);
-  --color-text-accent: var(--brand);
+  /* Goose status extensions */
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-popover-inverse: var(--popover-inverse);
+  --color-popover-inverse-foreground: var(--popover-inverse-foreground);
+  --color-popover-inverse-muted-foreground: var(
+    --popover-inverse-muted-foreground
+  );
 
   /* Skill pills — primitives in @theme generate bg-pill-* utilities directly,
      no bridge layer needed (would be a self-reference tautology). */
 
   /* Widget tokens */
   --color-clock-face: var(--clock-face);
+  --color-clock-hand: var(--clock-hand);
 
   /* Alpha overlays */
   --color-dark-04: var(--dark-04);
   --color-dark-10: var(--dark-10);
   --color-dark-40: var(--dark-40);
 
-  /* Status overlays */
+  /* Diff/status text colors */
   --color-status-added: var(--status-added);
   --color-status-deleted: var(--status-deleted);
   --color-status-modified: var(--status-modified);
-  --color-warning: var(--ui-warning);
-  --color-warning-bg: var(--ui-warning-bg);
-
-  --color-danger: var(--destructive);
 
   /* Sidebar */
   --color-sidebar: var(--sidebar);
@@ -1040,8 +897,8 @@ body,
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--brand) 60%, transparent);
-    color: var(--brand-foreground);
+    background: color-mix(in oklab, var(--primary) 60%, transparent);
+    color: var(--primary-foreground);
   }
 
   ::-webkit-scrollbar {
@@ -1132,7 +989,7 @@ body,
   grid-column: 1;
   align-items: flex-end;
   min-height: 1.75rem;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
   font-size: 11px;
   line-height: 1rem;
 }
@@ -1170,9 +1027,9 @@ body,
 [data-streamdown="code-block"] > [data-streamdown="code-block-body"] {
   grid-column: 1 / -1;
   padding: 0.75rem;
-  border-color: var(--border-soft);
+  border-color: color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: 0.625rem;
-  background: var(--background-default);
+  background: var(--background);
   font-size: 13px;
   line-height: 1.25rem;
 }
@@ -1196,7 +1053,7 @@ code[data-streamdown="inline-code"],
 [data-streamdown] :not(pre) > code {
   border: 0;
   border-radius: 0.375rem;
-  background: color-mix(in oklab, var(--background-muted) 82%, transparent);
+  background: color-mix(in oklab, var(--muted) 82%, transparent);
   padding: 0.05rem calc(0.22rem + 1px);
   color: var(--foreground);
   font-size: calc(1em - 1px);

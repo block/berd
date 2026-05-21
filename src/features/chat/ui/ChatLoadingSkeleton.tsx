@@ -17,9 +17,9 @@ export function ChatLoadingSkeleton() {
       <div className="mx-auto w-full max-w-3xl py-4 space-y-6 px-4">
         {/* Date separator skeleton */}
         <div className="flex items-center gap-3">
-          <div className="h-px flex-1 bg-border-soft" />
+          <div className="h-px flex-1 bg-border/80" />
           <Skeleton className="h-3 w-16 rounded-pill" />
-          <div className="h-px flex-1 bg-border-soft" />
+          <div className="h-px flex-1 bg-border/80" />
         </div>
 
         {/* User message */}

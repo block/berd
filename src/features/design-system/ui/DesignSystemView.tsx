@@ -674,88 +674,90 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-primary",
-      textIcon: "--text-on-primary",
+      background: "--primary",
+      textIcon: "--primary-foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-primary / 90%",
-      textIcon: "--text-on-primary",
+      background: "--primary / 90%",
+      textIcon: "--primary-foreground",
     },
   ],
   destructive: [
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-danger-strong",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive",
+      textIcon: "--destructive-foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive / 90%",
+      textIcon: "--destructive-foreground",
     },
   ],
   "destructive-flat": [
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-danger-strong",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive",
+      textIcon: "--destructive-foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive / 90%",
+      textIcon: "--destructive-foreground",
     },
   ],
   secondary: [
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-medium",
-      textIcon: "--text-on-secondary",
+      background: "--accent",
+      textIcon: "--accent-foreground",
+      border: "--input",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-medium / 80%",
-      textIcon: "--text-on-secondary",
+      background: "--accent",
+      textIcon: "--accent-foreground",
+      border: "--input",
     },
   ],
   outline: [
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-default",
-      textIcon: "--text-default",
-      border: "--border-input",
+      background: "--background",
+      textIcon: "--foreground",
+      border: "--input",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-hover",
-      textIcon: "--text-hover",
-      border: "--border-input",
+      background: "--accent",
+      textIcon: "--accent-foreground",
+      border: "--input",
     },
   ],
   "outline-flat": [
     {
       anatomy: "Button",
       state: "Default",
-      background: "--background-default",
-      textIcon: "--text-default",
-      border: "--border-soft",
+      background: "--background",
+      textIcon: "--foreground",
+      border: "--border / 80%",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-hover",
-      textIcon: "--text-hover",
-      border: "--border-soft",
+      background: "--accent",
+      textIcon: "--accent-foreground",
+      border: "--border / 80%",
     },
   ],
   ghost: [
@@ -763,13 +765,13 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       anatomy: "Button",
       state: "Default",
       background: "transparent",
-      textIcon: "--text-default",
+      textIcon: "--foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-hover",
-      textIcon: "--text-hover",
+      background: "--accent",
+      textIcon: "--accent-foreground",
     },
   ],
   "ghost-light": [
@@ -777,13 +779,13 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       anatomy: "Button",
       state: "Default",
       background: "transparent",
-      textIcon: "--text-default",
+      textIcon: "--foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-hover",
-      textIcon: "--text-hover",
+      background: "--accent",
+      textIcon: "--accent-foreground",
     },
   ],
   "inline-subtle": [
@@ -824,14 +826,14 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
     {
       anatomy: "Button",
       state: "Default",
-      background: "--color-white",
-      textIcon: "--text-default (70%)",
+      background: "--background",
+      textIcon: "--muted-foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--color-white",
-      textIcon: "--text-default",
+      background: "--background",
+      textIcon: "--foreground",
     },
   ],
   toolbar: [
@@ -844,14 +846,14 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--background-hover",
-      textIcon: "--text-hover",
+      background: "--accent",
+      textIcon: "--accent-foreground",
     },
     {
       anatomy: "Button",
       state: "Open",
-      background: "--background-hover",
-      textIcon: "--text-hover",
+      background: "--accent",
+      textIcon: "--accent-foreground",
     },
   ],
   back: [
@@ -873,16 +875,37 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       anatomy: "Button",
       state: "Default",
       background: "transparent",
-      textIcon: "--text-primary",
+      textIcon: "--primary",
     },
     {
       anatomy: "Button",
       state: "Hover",
       background: "transparent",
-      textIcon: "--text-primary",
+      textIcon: "--primary",
     },
   ],
 };
+
+const buttonIconGhostColorRows: TokenColorRow[] = [
+  {
+    anatomy: "Button",
+    state: "Default",
+    background: "transparent",
+    textIcon: "--muted-foreground",
+  },
+  {
+    anatomy: "Button",
+    state: "Hover",
+    background: "transparent",
+    textIcon: "--foreground",
+  },
+  {
+    anatomy: "Button",
+    state: "Open",
+    background: "transparent",
+    textIcon: "--foreground",
+  },
+];
 
 function withDisabledOpacity(value?: string) {
   if (!value || value === "none") {
@@ -906,7 +929,10 @@ function getButtonTokenDetails({
   colorRows: TokenColorRow[];
   textRows: TokenTextRow[];
 } {
-  const colorRows = buttonVariantColorRows[variant];
+  const colorRows =
+    variant === "ghost" && isIconButtonSize(size)
+      ? buttonIconGhostColorRows
+      : buttonVariantColorRows[variant];
   const defaultRow = colorRows.find((row) => row.state === "Default");
 
   return {
@@ -948,13 +974,13 @@ function getSwitchTokenDetails({
     {
       anatomy: "Track",
       state,
-      background: `${checked ? "--background-primary" : "--background-medium"}${opacitySuffix}`,
+      background: `${checked ? "--primary" : "--secondary"}${opacitySuffix}`,
       border: "transparent",
     },
     {
       anatomy: "Thumb",
       state,
-      background: `--text-on-primary${opacitySuffix}`,
+      background: `--primary-foreground${opacitySuffix}`,
     },
   ];
 
@@ -962,7 +988,7 @@ function getSwitchTokenDetails({
     colorRows.push({
       anatomy: "Label",
       state: disabled ? "Disabled" : "Default",
-      textIcon: disabled ? "--text-default / 50%" : "--text-default",
+      textIcon: disabled ? "--foreground / 50%" : "--foreground",
     });
   }
 
@@ -1005,7 +1031,7 @@ function getAccordionTokenDetails({
         state: "Focus",
         background: "transparent",
         textIcon: "--foreground",
-        border: "--border-focus",
+        border: "--ring",
       },
       {
         anatomy: "Indicator",
@@ -1082,12 +1108,12 @@ function getAlertDialogTokenDetails({
   const actionDefault =
     actionTone === "destructive"
       ? {
-          background: "--background-danger-strong",
-          textIcon: "--text-on-danger-strong",
+          background: "--destructive",
+          textIcon: "--destructive-foreground",
         }
       : {
-          background: "--background-primary",
-          textIcon: "--text-on-primary",
+          background: "--primary",
+          textIcon: "--primary-foreground",
         };
 
   return {
@@ -1116,9 +1142,9 @@ function getAlertDialogTokenDetails({
       {
         anatomy: "Cancel action",
         state: "Default",
-        background: "--background-default",
-        textIcon: "--text-default",
-        border: "--border-input",
+        background: "--background",
+        textIcon: "--foreground",
+        border: "--input",
       },
       {
         anatomy: "Primary action",
@@ -1168,35 +1194,35 @@ function getButtonGroupTokenDetails({ showText }: { showText: boolean }): {
       {
         anatomy: "Button",
         state: "Default",
-        background: "--background-default",
-        textIcon: "--text-default",
-        border: "--border-input",
+        background: "--background",
+        textIcon: "--foreground",
+        border: "--input",
       },
       {
         anatomy: "Button",
         state: "Hover",
-        background: "--background-hover",
-        textIcon: "--text-hover",
-        border: "--border-input",
+        background: "--accent",
+        textIcon: "--accent-foreground",
+        border: "--input",
       },
       {
         anatomy: "Button",
         state: "Selected",
-        background: "--background-medium",
-        textIcon: "--text-on-secondary",
+        background: "--secondary",
+        textIcon: "--secondary-foreground",
       },
       {
         anatomy: "Button",
         state: "Disabled default",
-        background: "--background-default / 50%",
-        textIcon: "--text-default / 50%",
-        border: "--border-input / 50%",
+        background: "--background / 50%",
+        textIcon: "--foreground / 50%",
+        border: "--input / 50%",
       },
       {
         anatomy: "Button",
         state: "Disabled selected",
-        background: "--background-medium / 50%",
-        textIcon: "--text-on-secondary / 50%",
+        background: "--secondary / 50%",
+        textIcon: "--secondary-foreground / 50%",
         border: "none",
       },
       ...(showText
@@ -1204,8 +1230,8 @@ function getButtonGroupTokenDetails({ showText }: { showText: boolean }): {
             {
               anatomy: "Label segment",
               state: "Default",
-              background: "--background-muted",
-              textIcon: "--text-default",
+              background: "--muted",
+              textIcon: "--foreground",
               border: "--border",
             } satisfies TokenColorRow,
           ]
@@ -1235,15 +1261,15 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
     {
       anatomy: "Badge",
       state: "Default",
-      background: "--background-primary",
-      textIcon: "--text-on-primary",
+      background: "--primary",
+      textIcon: "--primary-foreground",
       border: "transparent",
     },
     {
       anatomy: "Badge",
       state: "Clickable hover",
-      background: "--background-primary / 90%",
-      textIcon: "--text-on-primary",
+      background: "--primary / 90%",
+      textIcon: "--primary-foreground",
       border: "transparent",
     },
   ],
@@ -1251,15 +1277,15 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
     {
       anatomy: "Badge",
       state: "Default",
-      background: "--background-muted",
-      textIcon: "--text-default",
+      background: "--muted",
+      textIcon: "--foreground",
       border: "transparent",
     },
     {
       anatomy: "Badge",
       state: "Clickable hover",
-      background: "--background-muted / 90%",
-      textIcon: "--text-default",
+      background: "--muted / 90%",
+      textIcon: "--foreground",
       border: "transparent",
     },
   ],
@@ -1267,15 +1293,15 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
     {
       anatomy: "Badge",
       state: "Default",
-      background: "--background-danger-strong",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive",
+      textIcon: "--destructive-foreground",
       border: "transparent",
     },
     {
       anatomy: "Badge",
       state: "Clickable hover",
-      background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger-strong",
+      background: "--destructive / 90%",
+      textIcon: "--destructive-foreground",
       border: "transparent",
     },
   ],
@@ -1284,15 +1310,15 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
       anatomy: "Badge",
       state: "Default",
       background: "transparent",
-      textIcon: "--text-default",
-      border: "--border-default",
+      textIcon: "--foreground",
+      border: "--border",
     },
     {
       anatomy: "Badge",
       state: "Clickable hover",
-      background: "--background-muted",
-      textIcon: "--text-muted",
-      border: "--border-default",
+      background: "--muted",
+      textIcon: "--muted-foreground",
+      border: "--border",
     },
   ],
 };
@@ -1326,28 +1352,28 @@ function getAlertTokenDetails({ variant }: { variant: AlertVariant }): {
             {
               anatomy: "Alert",
               state: "Default",
-              background: "--background-default",
-              textIcon: "--text-danger",
-              border: "--border-default",
+              background: "--background",
+              textIcon: "--destructive",
+              border: "--border",
             },
             {
               anatomy: "Description",
               state: "Default",
-              textIcon: "--text-danger / 90%",
+              textIcon: "--destructive / 90%",
             },
           ]
         : [
             {
               anatomy: "Alert",
               state: "Default",
-              background: "--background-default",
-              textIcon: "--text-default",
-              border: "--border-default",
+              background: "--background",
+              textIcon: "--foreground",
+              border: "--border",
             },
             {
               anatomy: "Description",
               state: "Default",
-              textIcon: "--text-muted",
+              textIcon: "--muted-foreground",
             },
           ],
     textRows: [
@@ -1376,31 +1402,31 @@ function getTabsTokenDetails({ variant }: { variant: TabsVariant }): {
           anatomy: "Tab list",
           state: "Default",
           background: "transparent",
-          textIcon: "--text-muted",
+          textIcon: "--muted-foreground",
         },
         {
           anatomy: "Tab trigger",
           state: "Default",
           background: "transparent",
-          textIcon: "--text-muted",
+          textIcon: "--muted-foreground",
         },
         {
           anatomy: "Tab trigger",
           state: "Hover",
           background: "transparent",
-          textIcon: "--text-default",
+          textIcon: "--foreground",
         },
         {
           anatomy: "Tab trigger",
           state: "Active",
           background: "transparent",
-          textIcon: "--text-default",
+          textIcon: "--foreground",
         },
         {
           anatomy: "Tab trigger",
           state: "Disabled",
           background: "transparent",
-          textIcon: "--text-muted / 50%",
+          textIcon: "--muted-foreground / 50%",
         },
       ],
       textRows: [
@@ -1421,59 +1447,59 @@ function getTabsTokenDetails({ variant }: { variant: TabsVariant }): {
               anatomy: "Tab list",
               state: "Default",
               background: "transparent",
-              textIcon: "--text-muted",
+              textIcon: "--muted-foreground",
             },
             {
               anatomy: "Tab trigger",
               state: "Default",
               background: "transparent",
-              textIcon: "--text-default",
+              textIcon: "--foreground",
             },
             {
               anatomy: "Tab trigger",
               state: "Hover",
-              background: "--background-hover",
-              textIcon: "--text-hover",
+              background: "--accent",
+              textIcon: "--accent-foreground",
             },
             {
               anatomy: "Tab trigger",
               state: "Active",
-              background: "--background-muted",
-              textIcon: "--text-default",
+              background: "--muted",
+              textIcon: "--foreground",
             },
             {
               anatomy: "Tab trigger",
               state: "Disabled",
               background: "transparent",
-              textIcon: "--text-default / 50%",
+              textIcon: "--foreground / 50%",
             },
           ]
         : [
             {
               anatomy: "Tab list",
               state: "Default",
-              background: "--background-muted",
-              textIcon: "--text-muted",
+              background: "--muted",
+              textIcon: "--muted-foreground",
             },
             {
               anatomy: "Tab trigger",
               state: "Default",
               background: "transparent",
-              textIcon: "--text-default",
+              textIcon: "--foreground",
               border: "transparent",
             },
             {
               anatomy: "Tab trigger",
               state: "Active",
-              background: "--background-default",
-              textIcon: "--text-default",
+              background: "--background",
+              textIcon: "--foreground",
               border: "transparent",
             },
             {
               anatomy: "Tab trigger",
               state: "Disabled",
               background: "transparent",
-              textIcon: "--text-default / 50%",
+              textIcon: "--foreground / 50%",
               border: "transparent",
             },
           ],
@@ -1506,7 +1532,7 @@ function getBreadcrumbTokenDetails({
           anatomy: showCurrent ? "Root link" : "Root page",
           state: "Default",
           background: "transparent",
-          textIcon: "--text-title",
+          textIcon: "--foreground",
         },
         ...(showCurrent
           ? [
@@ -1514,13 +1540,14 @@ function getBreadcrumbTokenDetails({
                 anatomy: "Root link",
                 state: "Hover",
                 background: "transparent",
-                textIcon: "--text-hover",
+                textIcon: "--accent-foreground",
               } satisfies TokenColorRow,
               {
                 anatomy: "Separator",
                 state: depth === "detail" ? "Intermediate" : "Current",
                 background: "transparent",
-                textIcon: depth === "detail" ? "--text-title" : "--text-muted",
+                textIcon:
+                  depth === "detail" ? "--foreground" : "--muted-foreground",
               } satisfies TokenColorRow,
               ...(depth === "detail"
                 ? [
@@ -1528,7 +1555,7 @@ function getBreadcrumbTokenDetails({
                       anatomy: "Separator",
                       state: "Current",
                       background: "transparent",
-                      textIcon: "--text-muted",
+                      textIcon: "--muted-foreground",
                     } satisfies TokenColorRow,
                   ]
                 : []),
@@ -1536,7 +1563,8 @@ function getBreadcrumbTokenDetails({
                 anatomy: depth === "detail" ? "Section link" : "Current page",
                 state: "Default",
                 background: "transparent",
-                textIcon: depth === "detail" ? "--text-title" : "--text-muted",
+                textIcon:
+                  depth === "detail" ? "--foreground" : "--muted-foreground",
               } satisfies TokenColorRow,
               ...(depth === "detail"
                 ? [
@@ -1544,7 +1572,7 @@ function getBreadcrumbTokenDetails({
                       anatomy: "Current page",
                       state: "Default",
                       background: "transparent",
-                      textIcon: "--text-muted",
+                      textIcon: "--muted-foreground",
                     } satisfies TokenColorRow,
                   ]
                 : []),
@@ -1618,29 +1646,29 @@ function getToggleGroupTokenDetails({
         anatomy: "Toggle item",
         state: "Default",
         background: "transparent",
-        textIcon: "--text-muted",
-        border: variant === "outline" ? "--border-input" : "none",
+        textIcon: "--muted-foreground",
+        border: variant === "outline" ? "--input" : "none",
       },
       {
         anatomy: "Toggle item",
         state: "Hover",
-        background: "--background-hover",
-        textIcon: "--text-default",
-        border: variant === "outline" ? "--border-input" : "none",
+        background: "--accent",
+        textIcon: "--foreground",
+        border: variant === "outline" ? "--input" : "none",
       },
       {
         anatomy: "Toggle item",
         state: "Selected",
-        background: "--background-muted",
-        textIcon: "--text-default",
-        border: variant === "outline" ? "--border-input" : "none",
+        background: "--muted",
+        textIcon: "--foreground",
+        border: variant === "outline" ? "--input" : "none",
       },
       {
         anatomy: "Toggle item",
         state: "Disabled",
         background: "transparent",
-        textIcon: "--text-muted / 50%",
-        border: variant === "outline" ? "--border-input / 50%" : "none",
+        textIcon: "--muted-foreground / 50%",
+        border: variant === "outline" ? "--input / 50%" : "none",
       },
     ],
     textRows: [
@@ -1669,43 +1697,43 @@ function getSelectTokenDetails({
         anatomy: "Trigger",
         state: "Default",
         background: "transparent",
-        textIcon: "--text-default",
-        border: "--border-input",
+        textIcon: "--foreground",
+        border: "--input",
       },
       {
         anatomy: "Trigger",
         state: "Focus",
         background: "transparent",
-        textIcon: "--text-default",
-        border: "--border-focus",
+        textIcon: "--foreground",
+        border: "--ring",
       },
       {
         anatomy: "Trigger",
         state: "Disabled",
         background: "transparent",
-        textIcon: "--text-default / 50%",
-        border: "--border-input / 50%",
+        textIcon: "--foreground / 50%",
+        border: "--input / 50%",
       },
       ...(open
         ? [
             {
               anatomy: "Menu surface",
               state: "Open",
-              background: "--surface-overlay",
-              textIcon: "--text-default",
-              border: "--border-default",
+              background: "--popover",
+              textIcon: "--foreground",
+              border: "--border",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Default",
               background: "transparent",
-              textIcon: "--text-default",
+              textIcon: "--foreground",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Focus",
-              background: "--background-muted",
-              textIcon: "--text-default",
+              background: "--muted",
+              textIcon: "--foreground",
             } satisfies TokenColorRow,
           ]
         : []),
@@ -1746,39 +1774,37 @@ function getDropdownMenuTokenDetails({
       {
         anatomy: "Trigger button",
         state: "Default",
-        background: "--background-default",
-        textIcon: "--text-default",
-        border: "--border-input",
+        background: "--background",
+        textIcon: "--foreground",
+        border: "--input",
       },
       {
         anatomy: "Trigger button",
         state: "Hover",
-        background: "--background-hover",
-        textIcon: "--text-hover",
-        border: "--border-input",
+        background: "--accent",
+        textIcon: "--accent-foreground",
+        border: "--input",
       },
       ...(open
         ? [
             {
               anatomy: "Menu surface",
               state: "Open",
-              background: "--surface-overlay",
-              textIcon: "--text-default",
-              border: "--border-default",
+              background: "--popover",
+              textIcon: "--foreground",
+              border: "--border",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Default",
               background: "transparent",
-              textIcon: isDestructive ? "--text-danger" : "--text-default",
+              textIcon: isDestructive ? "--destructive" : "--foreground",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Focus",
-              background: isDestructive
-                ? "--background-danger"
-                : "--background-muted",
-              textIcon: isDestructive ? "--text-danger" : "--text-default",
+              background: isDestructive ? "--destructive / 10%" : "--muted",
+              textIcon: isDestructive ? "--destructive" : "--foreground",
             } satisfies TokenColorRow,
           ]
         : []),
@@ -1838,7 +1864,7 @@ function ComponentTokenDetails({
           </p>
           <div className="overflow-hidden rounded-md border border-border">
             <table className="w-full border-collapse text-left text-xs">
-              <thead className="border-b border-border bg-background-muted text-[10px] uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b border-border bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">Anatomy</th>
                   <th className="px-3 py-2 font-medium">State</th>
@@ -1876,7 +1902,7 @@ function ComponentTokenDetails({
           </p>
           <div className="overflow-hidden rounded-md border border-border">
             <table className="w-full border-collapse text-left text-xs">
-              <thead className="border-b border-border bg-background-muted text-[10px] uppercase tracking-wide text-muted-foreground">
+              <thead className="border-b border-border bg-muted text-[10px] uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">Anatomy</th>
                   <th className="px-3 py-2 font-medium">Size</th>
@@ -1952,7 +1978,7 @@ function ThemeControls() {
   } = useTheme();
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
       <Select
         value={themeMode}
         onValueChange={(value) => {
@@ -1970,7 +1996,7 @@ function ThemeControls() {
       </Select>
 
       <label
-        className="relative inline-flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background-muted hover:text-text-default focus-within:outline-none focus-within:ring-2 focus-within:ring-ring"
+        className="relative inline-flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-within:outline-none focus-within:ring-2 focus-within:ring-ring"
         htmlFor="design-system-primary-color"
       >
         <span
@@ -2060,13 +2086,13 @@ function ComponentSpec({ name }: { name: string }) {
       description="Pulled from the generated component manifest so source, variants, slots, and tokens stay aligned with code."
     >
       <dl className="grid gap-3 text-sm md:grid-cols-3">
-        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">Source</dt>
           <dd className="mt-1 truncate font-mono text-xs text-foreground">
             {item.source}
           </dd>
         </div>
-        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">
             Variants
           </dt>
@@ -2074,7 +2100,7 @@ function ComponentSpec({ name }: { name: string }) {
             {formatManifestVariants(item)}
           </dd>
         </div>
-        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">Slots</dt>
           <dd className="mt-1 text-foreground">{formatManifestSlots(item)}</dd>
         </div>
@@ -2171,7 +2197,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   "Aspect Ratio": () => (
     <AspectRatio
       ratio={16 / 9}
-      className="w-72 overflow-hidden rounded-md border border-border bg-surface-card"
+      className="w-72 overflow-hidden rounded-md border border-border bg-card"
     >
       <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
         16:9 preview
@@ -2217,7 +2243,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
       <CarouselContent>
         {["One", "Two", "Three"].map((label) => (
           <CarouselItem key={label}>
-            <div className="flex h-28 items-center justify-center rounded-md border border-border bg-surface-card text-sm text-muted-foreground">
+            <div className="flex h-28 items-center justify-center rounded-md border border-border bg-card text-sm text-muted-foreground">
               {label}
             </div>
           </CarouselItem>
@@ -2226,11 +2252,11 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     </Carousel>
   ),
   "Chart Container": () => (
-    <div className="grid h-36 w-72 grid-cols-6 items-end gap-2 rounded-md border border-border bg-surface-card p-4">
+    <div className="grid h-36 w-72 grid-cols-6 items-end gap-2 rounded-md border border-border bg-card p-4">
       {[40, 70, 52, 88, 64, 96].map((height, index) => (
         <div
           key={height}
-          className="rounded-t-sm bg-background-primary"
+          className="rounded-t-sm bg-primary"
           style={{ height: `${height}%`, opacity: 0.45 + index * 0.08 }}
         />
       ))}
@@ -2314,7 +2340,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
             actions.
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-md border border-border bg-surface-card p-3 text-sm text-muted-foreground">
+        <div className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
           Dialog body content sits inside the shared modal shell.
         </div>
         <DialogFooter>
@@ -2380,7 +2406,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     </HoverCard>
   ),
   "Image Lightbox": () => (
-    <div className="flex size-32 items-center justify-center rounded-md border border-border bg-surface-card text-sm text-muted-foreground">
+    <div className="flex size-32 items-center justify-center rounded-md border border-border bg-card text-sm text-muted-foreground">
       Image preview
     </div>
   ),
@@ -2436,10 +2462,10 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   ),
   "Page Columns": () => (
     <div className="grid w-80 grid-cols-[110px_1fr] gap-3 rounded-md border border-border p-3">
-      <div className="rounded-md bg-background-muted p-3 text-xs text-muted-foreground">
+      <div className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
         Sidebar
       </div>
-      <div className="rounded-md bg-surface-card p-3 text-xs text-muted-foreground">
+      <div className="rounded-md bg-card p-3 text-xs text-muted-foreground">
         Content
       </div>
     </div>
@@ -2593,11 +2619,11 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   ),
   Sidebar: () => (
     <div className="h-40 w-56 rounded-md border border-border bg-background p-3">
-      <div className="mb-3 h-6 w-6 rounded bg-background-muted" />
+      <div className="mb-3 h-6 w-6 rounded bg-muted" />
       <div className="space-y-2">
         <div className="h-7 rounded-md bg-sidebar-accent" />
-        <div className="h-7 rounded-md bg-surface-card" />
-        <div className="h-7 rounded-md bg-surface-card" />
+        <div className="h-7 rounded-md bg-card" />
+        <div className="h-7 rounded-md bg-card" />
       </div>
     </div>
   ),
@@ -2691,13 +2717,13 @@ function GenericComponentPreview({ name }: { name: string }) {
         <Badge variant="outline">Manifest</Badge>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border border-border bg-surface-card p-3">
+        <div className="rounded-md border border-border bg-card p-3">
           <p className="text-[11px] font-medium text-muted-foreground">Slots</p>
           <p className="mt-1 text-lg font-medium text-foreground">
             {slotCount}
           </p>
         </div>
-        <div className="rounded-md border border-border bg-surface-card p-3">
+        <div className="rounded-md border border-border bg-card p-3">
           <p className="text-[11px] font-medium text-muted-foreground">
             Variant groups
           </p>
@@ -2757,7 +2783,7 @@ function TokenGrid({
       {tokenItems.map((token) => (
         <div
           key={token.name}
-          className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-surface-card p-3"
+          className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-card p-3"
         >
           <TokenPreview token={token.name} kind={kind} />
           <div className="min-w-0">
@@ -2830,7 +2856,7 @@ function TokenPreview({
   if (kind === "shape") {
     return (
       <span
-        className="size-8 shrink-0 border border-border bg-background-medium"
+        className="size-8 shrink-0 border border-border bg-secondary"
         style={{ borderRadius: `var(${token})` }}
       />
     );
@@ -2840,7 +2866,7 @@ function TokenPreview({
     return (
       <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-border bg-background">
         <span
-          className="block max-h-6 min-h-1 w-3 rounded-sm bg-background-primary"
+          className="block max-h-6 min-h-1 w-3 rounded-sm bg-primary"
           style={{ height: `min(var(${token}), 1.5rem)` }}
         />
       </span>
@@ -4725,16 +4751,13 @@ function getColorTokenScope(selector: string) {
 function isColorTokenName(token: string) {
   if (
     token.startsWith("--color-") ||
-    token.startsWith("--background-") ||
     token.startsWith("--surface-") ||
     token.startsWith("--canvas-") ||
-    token.startsWith("--border-") ||
     token.startsWith("--chip-") ||
     token.startsWith("--chart-") ||
     token.startsWith("--sidebar") ||
-    token.startsWith("--brand") ||
     token.startsWith("--status") ||
-    token.startsWith("--ui-warning") ||
+    token.startsWith("--warning") ||
     token.startsWith("--clock") ||
     token.startsWith("--dark-")
   ) {
@@ -4743,6 +4766,7 @@ function isColorTokenName(token: string) {
 
   if (
     [
+      "--background",
       "--foreground",
       "--card",
       "--card-foreground",
@@ -4762,21 +4786,19 @@ function isColorTokenName(token: string) {
       "--ring",
       "--dot-color-base",
       "--project-tint",
+      "--text-placeholder-composer",
+      "--success",
+      "--success-foreground",
+      "--warning",
+      "--warning-foreground",
+      "--info",
+      "--info-foreground",
     ].includes(token)
   ) {
     return true;
   }
 
-  return (
-    token.startsWith("--text-") &&
-    ![
-      "--text-xxs",
-      "--text-label-alex",
-      "--text-body-alex",
-      "--text-input-alex",
-      "--text-title-alex",
-    ].includes(token)
-  );
+  return false;
 }
 
 function ShapePage() {
@@ -4834,7 +4856,7 @@ function TypographyPage() {
           {typographyInventory.map((item) => (
             <div
               key={item.className}
-              className="rounded-md border border-border bg-surface-card p-3"
+              className="rounded-md border border-border bg-card p-3"
             >
               <div className="flex items-center justify-between gap-3">
                 <p className="font-mono text-xs text-foreground">
@@ -4897,7 +4919,7 @@ function AuditPage() {
           ].map(([title, description]) => (
             <div
               key={title}
-              className="rounded-md border border-border bg-surface-card p-3"
+              className="rounded-md border border-border bg-card p-3"
             >
               <p className="text-sm font-medium text-foreground">{title}</p>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -5060,7 +5082,7 @@ export function DesignSystemView({
   activeSection: DesignSystemSection;
 }) {
   return (
-    <MainPanelLayout>
+    <MainPanelLayout backgroundColor="bg-background">
       <div className="flex min-h-0 flex-1 overflow-hidden bg-background">
         <div className="min-w-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
           <div className="mx-auto flex w-full max-w-5xl flex-col gap-5 px-6 py-6 page-transition">

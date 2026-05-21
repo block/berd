@@ -311,7 +311,7 @@ const fileStatusStyles = {
   added: "text-status-added",
   deleted: "text-status-deleted",
   modified: "text-status-modified",
-  renamed: "text-text-primary",
+  renamed: "text-primary",
 };
 
 const fileStatusLabels = {

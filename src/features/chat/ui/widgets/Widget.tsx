@@ -13,7 +13,7 @@ interface WidgetProps {
 }
 
 const SECTION_HEADER_TEXT_CLASS =
-  "min-w-0 overflow-hidden text-[11px] font-medium uppercase tracking-[0.08em] text-text-muted";
+  "min-w-0 overflow-hidden text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
 
 export function Widget({
   title,
@@ -29,12 +29,12 @@ export function Widget({
       {onToggleOpen ? (
         <IconChevronDown
           className={cn(
-            "size-3 shrink-0 text-text-muted transition-transform duration-150",
+            "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
             !isOpen && "-rotate-90",
           )}
         />
       ) : null}
-      <span className="shrink-0 text-text-muted">{icon}</span>
+      <span className="shrink-0 text-muted-foreground">{icon}</span>
       <div className={SECTION_HEADER_TEXT_CLASS}>{title}</div>
     </>
   );

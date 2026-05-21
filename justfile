@@ -41,7 +41,7 @@ design-system-generate:
     pnpm design-system:generate
 
 # Check generated design-system facts, token/style guardrails, and explorer coverage.
-design-system-check: design-system-manifest-check design-system-audit design-system-coverage
+design-system-check: design-system-manifest-check design-system-tokens design-system-audit design-system-coverage
 
 # Check that the generated design-system component manifest is up to date.
 design-system-manifest-check:
@@ -50,6 +50,10 @@ design-system-manifest-check:
 # Audit covered components for custom color styling and source-token drift.
 design-system-audit:
     pnpm design-system:audit
+
+# Check that app color usage follows the shadcn + Goose token contract.
+design-system-tokens:
+    pnpm design-system:tokens
 
 # Check that curated explorer component pages follow the page contract.
 design-system-coverage:

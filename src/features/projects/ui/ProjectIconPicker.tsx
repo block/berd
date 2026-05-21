@@ -52,7 +52,7 @@ export function ProjectIconPicker({
                 "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
                 icon === candidate.icon
                   ? "border-foreground"
-                  : "border-border-soft",
+                  : "border-border/80",
               )}
               title={t("dialog.iconCandidateTitle", {
                 sourceDir: candidate.sourceDir,
@@ -77,7 +77,7 @@ export function ProjectIconPicker({
                   "flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted",
                   icon === tablerIcon.value
                     ? "border-foreground"
-                    : "border-border-soft",
+                    : "border-border/80",
                 )}
                 title={label}
                 aria-label={t("dialog.iconAria", { icon: label })}
@@ -91,7 +91,7 @@ export function ProjectIconPicker({
             onClick={onChooseCustomIcon}
             className={cn(
               "col-span-2 flex h-9 min-w-[88px] items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
-              selectedCustomIcon ? "border-foreground" : "border-border-soft",
+              selectedCustomIcon ? "border-foreground" : "border-border/80",
             )}
             title={
               selectedCustomIcon
@@ -109,7 +109,7 @@ export function ProjectIconPicker({
           </button>
         </div>
       </div>
-      {error && <p className="text-xs text-text-danger">{error}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

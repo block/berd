@@ -21,15 +21,15 @@ function statusDotClass(status: string | number | undefined) {
     normalized.includes("input") ||
     normalized.includes("configuration")
   ) {
-    return "bg-text-danger";
+    return "bg-destructive";
   }
   if (normalized.includes("success") || normalized.includes("active")) {
-    return "bg-text-success";
+    return "bg-success";
   }
   if (normalized.includes("running") || normalized.includes("pending")) {
-    return "bg-text-info";
+    return "bg-info";
   }
-  return "bg-text-muted";
+  return "bg-muted-foreground";
 }
 
 export function ExpandableHistoryRow({
@@ -60,12 +60,12 @@ export function ExpandableHistoryRow({
   return (
     <Accordion.Item
       value={value}
-      className="w-full overflow-hidden rounded-card-chat border-b-0 bg-surface-card"
+      className="w-full overflow-hidden rounded-card-chat border-b-0 bg-card"
     >
       <Accordion.Header className="flex">
         <Accordion.Trigger
           className={cn(
-            "group/accordion-trigger flex min-h-[117px] w-full items-start px-6 py-5 text-left hover:no-underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring-focus",
+            "group/accordion-trigger flex min-h-[117px] w-full items-start px-6 py-5 text-left hover:no-underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
           )}
           aria-label={
             showAutomationTitle ? `${title}, ${runTimeLabel}` : undefined
@@ -77,7 +77,7 @@ export function ExpandableHistoryRow({
                 <span className="block truncate text-base font-normal text-foreground">
                   {showAutomationTitle ? title : runTimeLabel}
                 </span>
-                <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-text-muted">
+                <span className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
                   <span
                     className={cn(
                       "size-[7px] shrink-0 rounded-full",
@@ -90,15 +90,17 @@ export function ExpandableHistoryRow({
                 </span>
               </span>
               <IconChevronRight
-                className="mt-7 size-4 shrink-0 text-text-muted transition-transform group-data-[state=open]/accordion-trigger:rotate-90"
+                className="mt-7 size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]/accordion-trigger:rotate-90"
                 aria-hidden="true"
               />
             </span>
-            <span className="line-clamp-2 text-sm text-text-muted">
+            <span className="line-clamp-2 text-sm text-muted-foreground">
               {summary ?? result.sessionId ?? t("history.noSessionId")}
             </span>
             {showAutomationTitle ? (
-              <span className="text-xs text-text-muted">{statusLabel}</span>
+              <span className="text-xs text-muted-foreground">
+                {statusLabel}
+              </span>
             ) : null}
           </span>
         </Accordion.Trigger>
