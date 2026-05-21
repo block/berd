@@ -49,6 +49,37 @@ stage-sidecar`. Staging creates `src-tauri/binaries/goosed-<rust-host-triple>`,
 matching the `"externalBin": ["binaries/goosed"]` entry in
 `src-tauri/tauri.conf.json`.
 
+## Publishing avatar assets
+
+Avatar media publishes as immutable catalog releases. Source files must be:
+
+```text
+/path/to/avatars/
+  webm/<collection>/<avatar-id>.webm
+  hevc/<collection>/<avatar-id>.mp4
+```
+
+Each avatar needs matching WebM and HEVC basenames. The basename becomes the
+`app-avatar:<avatar-id>` ref and does not need a legacy prefix such as `fuzzy-*`.
+
+```bash
+export ARTIFACTORY_IDENTITY_TOKEN=...
+just avatars-publish /path/to/avatars
+```
+
+Publish prints the generated timestamp version and does not update
+`latest.json`. Promote that version explicitly:
+
+```bash
+just avatars-promote 20260521T121530123Z
+```
+
+To generate a local manifest without uploading:
+
+```bash
+just avatars-manifest /path/to/avatars 20260521T121530123Z
+```
+
 ## Useful commands
 
 - `just check` — Biome/i18n/type checks

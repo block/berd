@@ -193,6 +193,15 @@ clean:
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
 
+avatars-manifest source version:
+    pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"
+
+avatars-publish source:
+    pnpm avatars:publish -- --source="{{ source }}"
+
+avatars-promote version:
+    pnpm avatars:promote -- --version="{{ version }}"
+
 # Delete the silent migration marker(s) so the next launch re-runs the migration.
 reset-migration:
     #!/usr/bin/env bash
