@@ -28,7 +28,7 @@ Thumbs.db
 
 # Scratch / working files
 .scratch/
-/avatar-manifest.json
+avatar-manifest.json
 
 # Playwright artifacts
 playwright-report/
