@@ -17,7 +17,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     id: "agentPin",
     category: "agent",
     labelKey: "widgets.agentPin.label",
-    defaultSize: { width: 200, height: 96 },
+    defaultSize: { width: 240, height: 240 },
     Component: AgentPinWidget,
   },
   {
