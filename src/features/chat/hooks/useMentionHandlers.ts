@@ -23,6 +23,7 @@ interface MentionHandlersOptions {
   setText: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onPersonaChange?: ((id: string | null) => void) | undefined;
+  onPersonaMentionInvoked?: (persona: Persona) => void;
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
 }
 
@@ -76,6 +77,7 @@ export function useMentionHandlers({
   setText,
   textareaRef,
   onPersonaChange,
+  onPersonaMentionInvoked,
   onSkillMentionSelect,
 }: MentionHandlersOptions) {
   const { getAllSessionArtifacts } = useArtifactPolicyContext();
@@ -234,6 +236,7 @@ export function useMentionHandlers({
       setText(newText);
       closeMention();
       onPersonaChange?.(persona.id);
+      onPersonaMentionInvoked?.(persona);
     },
     [
       text,
@@ -241,6 +244,7 @@ export function useMentionHandlers({
       mentionQuery,
       closeMention,
       onPersonaChange,
+      onPersonaMentionInvoked,
       setText,
     ],
   );

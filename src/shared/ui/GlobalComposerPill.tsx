@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
   IconArrowUp,
@@ -10,6 +10,13 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { selectPersonas } from "@/features/agents/stores/agentSelectors";
+import { useMentionHandlers } from "@/features/chat/hooks/useMentionHandlers";
+import { ChatInputSelectionChips } from "@/features/chat/ui/ChatInputSelectionChips";
+import { MentionAutocomplete } from "@/features/chat/ui/MentionAutocomplete";
+import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
+import type { ChatSkillDraft } from "@/features/chat/types";
+import { PopoverAnchor } from "@/shared/ui/popover";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import type { ModelOption } from "@/features/chat/types";
@@ -34,6 +41,7 @@ import type {
   ChatAttachmentDraft,
   ChatFileAttachmentDraft,
   ChatImageAttachmentDraft,
+  MessageChip,
 } from "@/shared/types/messages";
 
 export interface GlobalComposeOptions {
@@ -42,6 +50,9 @@ export interface GlobalComposeOptions {
   modelName?: string;
   projectId?: string | null;
   attachments?: ChatAttachmentDraft[];
+  personaId?: string | null;
+  skillDrafts?: ChatSkillDraft[];
+  chips?: MessageChip[];
 }
 
 interface GlobalComposerPillProps {
@@ -253,6 +264,53 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   );
   const [gooseDefaultSelection, setGooseDefaultSelection] =
     useState<ModelSelection | null>(null);
+  const [selectedPersonaId, setSelectedPersonaId] = useState<string | null>(
+    null,
+  );
+  const [selectedSkills, setSelectedSkills] = useState<ChatSkillDraft[]>([]);
+  const personas = useAgentStore(selectPersonas);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleSkillMentionSelected = useCallback((skill: SkillMentionItem) => {
+    setSelectedSkills((current) =>
+      current.some((selected) => selected.id === skill.id)
+        ? current
+        : [...current, skill],
+    );
+  }, []);
+
+  const selectedPersona = useMemo(
+    () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
+    [personas, selectedPersonaId],
+  );
+
+  const handleRemoveSelectedSkill = useCallback((skillId: string) => {
+    setSelectedSkills((current) =>
+      current.filter((skill) => skill.id !== skillId),
+    );
+  }, []);
+
+  const {
+    mentionOpen,
+    mentionSelectedIndex,
+    filteredPersonas,
+    filteredSkills,
+    filteredFiles,
+    detectMention,
+    closeMention,
+    navigateMention,
+    confirmMention,
+    handleMentionConfirm,
+  } = useMentionHandlers({
+    personas,
+    skillsEnabled: true,
+    fileMentionsEnabled: false,
+    text,
+    setText,
+    textareaRef,
+    onPersonaChange: setSelectedPersonaId,
+    onSkillMentionSelect: handleSkillMentionSelected,
+  });
 
   const placeholder = t("globalPill.placeholder");
 
@@ -360,6 +418,22 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       if (selectedProjectId) {
         options.projectId = selectedProjectId;
       }
+      if (selectedPersonaId) {
+        options.personaId = selectedPersonaId;
+      }
+      if (selectedSkills.length > 0) {
+        options.skillDrafts = selectedSkills;
+      }
+      const chips: MessageChip[] = [];
+      for (const skill of selectedSkills) {
+        chips.push({ label: skill.name, type: "skill" });
+      }
+      if (selectedPersona) {
+        chips.push({ label: selectedPersona.displayName, type: "agent" });
+      }
+      if (chips.length > 0) {
+        options.chips = chips;
+      }
 
       if (Object.keys(options).length > 0) {
         onSend(trimmed, options);
@@ -370,9 +444,19 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       clearAttachments();
       setModelOverride(null);
       setSelectedProjectId(null);
+      setSelectedPersonaId(null);
+      setSelectedSkills([]);
       return true;
     },
-    [attachments, clearAttachments, modelOverride, onSend, selectedProjectId],
+    [
+      attachments,
+      clearAttachments,
+      modelOverride,
+      onSend,
+      selectedProjectId,
+      selectedPersonaId,
+      selectedSkills,
+    ],
   );
 
   const dictation = useVoiceDictation({
@@ -541,6 +625,16 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
         WebkitBackdropFilter: "blur(24px) saturate(180%) brightness(1.05)",
       }}
     >
+      {(selectedPersona || selectedSkills.length > 0) && (
+        <div className="px-2">
+          <ChatInputSelectionChips
+            persona={selectedPersona}
+            skills={selectedSkills}
+            onClearPersona={() => setSelectedPersonaId(null)}
+            onRemoveSkill={handleRemoveSelectedSkill}
+          />
+        </div>
+      )}
       {attachments.length > 0 ? (
         <div className="mb-2 flex flex-wrap gap-2 px-2">
           {attachments.map((attachment) => (
@@ -567,19 +661,71 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       ) : null}
 
       <div className="flex items-center gap-3 px-2">
-        <input
-          type="text"
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleSend();
+        <Popover open={mentionOpen}>
+          <PopoverAnchor asChild>
+            <textarea
+              ref={textareaRef}
+              value={text}
+              rows={1}
+              onChange={(event) => {
+                const value = event.target.value;
+                setText(value);
+                const cursor = event.target.selectionStart ?? value.length;
+                detectMention(value, cursor);
+              }}
+              onKeyDown={(event) => {
+                if (mentionOpen) {
+                  if (event.key === "Escape") {
+                    event.preventDefault();
+                    closeMention();
+                    return;
+                  }
+                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    navigateMention(event.key === "ArrowDown" ? "down" : "up");
+                    return;
+                  }
+                  if (event.key === "Enter" || event.key === "Tab") {
+                    const item = confirmMention();
+                    if (item) {
+                      event.preventDefault();
+                      handleMentionConfirm(item);
+                      return;
+                    }
+                  }
+                }
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing &&
+                  event.nativeEvent.keyCode !== 229
+                ) {
+                  event.preventDefault();
+                  handleSend();
+                }
+              }}
+              placeholder={effectivePlaceholder}
+              className="focus-override h-10 flex-1 resize-none appearance-none overflow-hidden border-0 bg-transparent py-2.5 text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
+            />
+          </PopoverAnchor>
+          <MentionAutocomplete
+            isOpen={mentionOpen}
+            filteredPersonas={filteredPersonas}
+            filteredSkills={filteredSkills}
+            filteredFiles={filteredFiles}
+            selectedIndex={mentionSelectedIndex}
+            onClose={closeMention}
+            onSelectPersona={(persona) =>
+              handleMentionConfirm({ type: "persona", persona })
             }
-          }}
-          placeholder={effectivePlaceholder}
-          className="focus-override h-10 flex-1 appearance-none border-0 bg-transparent text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
-        />
+            onSelectSkill={(skill) =>
+              handleMentionConfirm({ type: "skill", skill })
+            }
+            onSelectFile={(file) =>
+              handleMentionConfirm({ type: "file", file })
+            }
+          />
+        </Popover>
 
         <div
           aria-hidden={expanded}

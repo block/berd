@@ -680,7 +680,9 @@ describe("ChatInput", () => {
     await user.type(input, "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined);
+    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined, {
+      chips: [{ label: "Reviewer", type: "agent" }],
+    });
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 });

@@ -9,6 +9,7 @@ import {
 import { X } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import type { Persona } from "@/shared/types/agents";
 import {
   attachmentSnapshotsMatch,
   skillDraftSnapshotsMatch,
@@ -146,6 +147,7 @@ export function ChatInput({
   attachmentsRef.current = attachments;
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
+  const personaInvocationRef = useRef<Persona | null>(null);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -225,6 +227,9 @@ export function ChatInput({
     setText,
     textareaRef,
     onPersonaChange,
+    onPersonaMentionInvoked: (persona) => {
+      personaInvocationRef.current = persona;
+    },
     onSkillMentionSelect: handleSkillMentionAdded,
   });
 
@@ -253,6 +258,7 @@ export function ChatInput({
     attachmentsRef,
     selectedSkillsRef,
     selectedPersonaId,
+    personaInvocationRef,
     onSend,
     setSelectedSkills,
     resolveSkillSlashCommand,
@@ -306,6 +312,7 @@ export function ChatInput({
     }
     setText("");
     setSelectedSkills([]);
+    personaInvocationRef.current = null;
     clearAttachments();
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";

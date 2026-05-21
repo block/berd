@@ -1,7 +1,12 @@
 import type { SkillCommandMatch } from "@/features/skills/lib/skillChatPrompt";
 import { isPromiseLike } from "@/shared/lib/isPromiseLike";
-import type { ChatAttachmentDraft } from "@/shared/types/messages";
-import type { ChatInputSendHandler, ChatSkillDraft } from "../types";
+import type { Persona } from "@/shared/types/agents";
+import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type {
+  ChatInputSendHandler,
+  ChatSendOptions,
+  ChatSkillDraft,
+} from "../types";
 import { buildSkillSendPayload } from "./skillSendPayload";
 
 interface SubmitComposerMessageOptions {
@@ -9,6 +14,7 @@ interface SubmitComposerMessageOptions {
   attachments: ChatAttachmentDraft[];
   skills: ChatSkillDraft[];
   selectedPersonaId?: string | null;
+  personaInvocation?: Persona | null;
   onSend: ChatInputSendHandler;
   resolveSkillSlashCommand: (
     message: string,
@@ -20,6 +26,7 @@ export async function submitComposerMessage({
   attachments,
   skills,
   selectedPersonaId,
+  personaInvocation,
   onSend,
   resolveSkillSlashCommand,
 }: SubmitComposerMessageOptions) {
@@ -30,13 +37,26 @@ export async function submitComposerMessage({
     skills,
     slashSkillCommand,
   );
+
+  let finalSendOptions: ChatSendOptions | undefined = sendOptions;
+  if (personaInvocation) {
+    const personaChip: MessageChip = {
+      label: personaInvocation.displayName,
+      type: "agent",
+    };
+    finalSendOptions = {
+      ...(sendOptions ?? {}),
+      chips: [...(sendOptions?.chips ?? []), personaChip],
+    };
+  }
+
   const submittedAttachments = attachments.length > 0 ? attachments : undefined;
-  const sendResult = sendOptions
+  const sendResult = finalSendOptions
     ? onSend(
         messageText,
         selectedPersonaId ?? undefined,
         submittedAttachments,
-        sendOptions,
+        finalSendOptions,
       )
     : onSend(
         messageText.trim(),

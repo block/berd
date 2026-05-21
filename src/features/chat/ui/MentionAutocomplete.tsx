@@ -117,10 +117,10 @@ export function MentionAutocomplete({
             role="option"
             aria-selected={index === selectedIndex}
             className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+              "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-text-default transition-colors",
               index === selectedIndex
-                ? "bg-background-hover text-foreground"
-                : "text-muted-foreground hover:bg-background-hover/50",
+                ? "bg-background-muted"
+                : "hover:bg-background-muted/60",
             )}
             onClick={() => handleSelect({ type: "persona", persona })}
             onMouseEnter={() => setInternalIndex(index)}
@@ -158,10 +158,10 @@ export function MentionAutocomplete({
               role="option"
               aria-selected={globalIndex === selectedIndex}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
+                "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-text-default transition-colors",
                 globalIndex === selectedIndex
-                  ? "bg-background-hover text-foreground"
-                  : "text-muted-foreground hover:bg-background-hover/50",
+                  ? "bg-background-muted"
+                  : "hover:bg-background-muted/60",
               )}
               onClick={() => handleSelect({ type: "skill", skill })}
               onMouseEnter={() => setInternalIndex(globalIndex)}
@@ -198,10 +198,10 @@ export function MentionAutocomplete({
               role="option"
               aria-selected={globalIndex === selectedIndex}
               className={cn(
-                "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
+                "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-text-default transition-colors",
                 globalIndex === selectedIndex
-                  ? "bg-background-hover text-foreground"
-                  : "text-muted-foreground hover:bg-background-hover/50",
+                  ? "bg-background-muted"
+                  : "hover:bg-background-muted/60",
               )}
               onClick={() => handleSelect({ type: "file", file })}
               onMouseEnter={() => setInternalIndex(globalIndex)}

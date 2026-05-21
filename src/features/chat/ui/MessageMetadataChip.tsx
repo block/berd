@@ -9,6 +9,7 @@ const messageChipClasses: Record<MessageChip["type"], string> = {
     "bg-blue-100/20 text-blue-700 dark:bg-blue-100/10 dark:text-blue-100",
   recipe:
     "bg-green-100/20 text-green-700 dark:bg-green-100/10 dark:text-green-100",
+  agent: "bg-blue-100/20 text-blue-700 dark:bg-blue-100/10 dark:text-blue-100",
 };
 
 export function MessageMetadataChip({ chip }: { chip: MessageChip }) {

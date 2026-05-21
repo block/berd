@@ -201,7 +201,7 @@ export interface MessageAttachment {
 
 export interface MessageChip {
   label: string;
-  type: "skill" | "extension" | "recipe";
+  type: "skill" | "extension" | "recipe" | "agent";
 }
 
 export interface MessageMetadata {

@@ -61,7 +61,7 @@ export function useMentionDetection(
     const q = mentionState.query.toLowerCase();
     const matchesSkill = (skill: SkillMentionItem) =>
       fuzzyMatch(q, skill.name.toLowerCase()) ||
-      fuzzyMatch(q, skill.description.toLowerCase()) ||
+      skill.description.toLowerCase().includes(q) ||
       fuzzyMatch(q, skill.sourceLabel.toLowerCase());
     const matchingSkills = q ? skills.filter(matchesSkill) : skills;
 

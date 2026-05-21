@@ -386,133 +386,139 @@ export const MessageBubble = memo(function MessageBubble({
   );
 
   return (
-    <div
-      className={cn(
-        "flex px-4 py-1",
-        "animate-in fade-in duration-200 motion-reduce:animate-none",
-        isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row",
-      )}
-      data-role={isUser ? "user-message" : "assistant-message"}
-    >
+    <>
       <div
         className={cn(
-          "group relative min-w-0 flex flex-col gap-1 pb-8",
-          isUser
-            ? "max-w-[640px] items-end"
-            : hasMcpApp
-              ? "w-full items-start"
-              : "max-w-[85%] items-start",
+          "flex px-4 py-1",
+          "animate-in fade-in duration-200 motion-reduce:animate-none",
+          isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row",
         )}
+        data-role={isUser ? "user-message" : "assistant-message"}
       >
-        {showAssistantIdentity ? (
-          <div className="mb-0.5 flex items-center gap-1 text-xs">
-            {personaAvatarMedia ? (
-              <AvatarMedia
-                media={personaAvatarMedia}
-                alt=""
-                className="h-5 w-5 rounded-full"
-              />
-            ) : assistantProviderIcon ? (
-              <span className="flex h-5 w-5 items-center justify-center">
-                {assistantProviderIcon}
-              </span>
-            ) : (
-              <span className="flex h-5 w-5 items-center justify-center">
-                <IconRobot size={14} className="text-muted-foreground" />
-              </span>
+        <div
+          className={cn(
+            "group relative min-w-0 flex flex-col gap-1 pb-8",
+            isUser
+              ? "max-w-[640px] items-end"
+              : hasMcpApp
+                ? "w-full items-start"
+                : "max-w-[85%] items-start",
+          )}
+        >
+          {showAssistantIdentity ? (
+            <div className="mb-0.5 flex items-center gap-1 text-xs">
+              {personaAvatarMedia ? (
+                <AvatarMedia
+                  media={personaAvatarMedia}
+                  alt=""
+                  className="h-5 w-5 rounded-full"
+                />
+              ) : assistantProviderIcon ? (
+                <span className="flex h-5 w-5 items-center justify-center">
+                  {assistantProviderIcon}
+                </span>
+              ) : (
+                <span className="flex h-5 w-5 items-center justify-center">
+                  <IconRobot size={14} className="text-muted-foreground" />
+                </span>
+              )}
+              {assistantDisplayName ? (
+                <span className="font-normal text-foreground">
+                  {assistantDisplayName}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
+
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated link handler */}
+          {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated link handler */}
+          <div
+            className={cn(
+              "w-full min-w-0 text-sm leading-relaxed",
+              isUser && "rounded-2xl bg-muted p-3",
             )}
-            {assistantDisplayName ? (
-              <span className="font-normal text-foreground">
-                {assistantDisplayName}
-              </span>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* biome-ignore lint/a11y/useKeyWithClickEvents: delegated link handler */}
-        {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated link handler */}
-        <div
-          className={cn(
-            "w-full min-w-0 text-sm leading-relaxed",
-            isUser && "rounded-2xl bg-muted p-3",
-          )}
-          onClick={handleContentClick}
-        >
-          {isUser && messageChips.length > 0 && (
-            <div className="mb-1.5 flex flex-wrap gap-1.5">
-              {messageChips.map((chip) => (
-                <MessageMetadataChip
-                  key={`${chip.type}-${chip.label}`}
-                  chip={chip}
-                />
-              ))}
-            </div>
-          )}
-          {messageAttachments.length > 0 && (
-            <div className="mb-2 flex flex-wrap gap-2">
-              {messageAttachments.map((attachment) => (
-                <MessageAttachmentRow
-                  key={`${attachment.type}-${attachment.path ?? attachment.name}`}
-                  attachment={attachment}
-                />
-              ))}
-            </div>
-          )}
-          {groupContentSections(content).map((section, sectionIdx) => {
-            if (section.type === "toolChain") {
-              const toolItems = section.items as ToolChainItem[];
-              return <ToolChainCards key={section.key} toolItems={toolItems} />;
-            }
-            const block = section.items[0] as MessageContent;
-            return (
-              <div key={`${message.id}-${section.key}`}>
-                {renderContentBlock(
-                  block,
-                  sectionIdx,
-                  {
-                    defaultImageAlt: t("message.defaultImageAlt"),
-                    redactedThinking: t("message.redactedThinking"),
-                    contentBlocks: content,
-                    onSendMcpAppMessage,
-                    onMcpAppAutoScroll,
-                  },
-                  isStreaming,
-                  isUser,
-                )}
+            onClick={handleContentClick}
+          >
+            {messageAttachments.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {messageAttachments.map((attachment) => (
+                  <MessageAttachmentRow
+                    key={`${attachment.type}-${attachment.path ?? attachment.name}`}
+                    attachment={attachment}
+                  />
+                ))}
               </div>
-            );
-          })}
-          {pathNotice && (
-            <p className="mt-2 text-xs text-text-danger" role="status">
-              {pathNotice}
-            </p>
-          )}
-        </div>
+            )}
+            {groupContentSections(content).map((section, sectionIdx) => {
+              if (section.type === "toolChain") {
+                const toolItems = section.items as ToolChainItem[];
+                return (
+                  <ToolChainCards key={section.key} toolItems={toolItems} />
+                );
+              }
+              const block = section.items[0] as MessageContent;
+              return (
+                <div key={`${message.id}-${section.key}`}>
+                  {renderContentBlock(
+                    block,
+                    sectionIdx,
+                    {
+                      defaultImageAlt: t("message.defaultImageAlt"),
+                      redactedThinking: t("message.redactedThinking"),
+                      contentBlocks: content,
+                      onSendMcpAppMessage,
+                      onMcpAppAutoScroll,
+                    },
+                    isStreaming,
+                    isUser,
+                  )}
+                </div>
+              );
+            })}
+            {pathNotice && (
+              <p className="mt-2 text-xs text-text-danger" role="status">
+                {pathNotice}
+              </p>
+            )}
+          </div>
 
-        <div
-          data-role="message-actions"
-          data-copy-confirmed={isCopyConfirmed ? "true" : "false"}
-          className={cn(
-            "absolute bottom-0 transition-opacity duration-150 ease-out",
-            "opacity-0 pointer-events-none",
-            "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
-            "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
-            isCopyConfirmed && "opacity-100 pointer-events-auto",
-            isUser ? "right-0" : "left-0",
-          )}
-        >
-          <MessageBubbleActions
-            isUser={isUser}
-            messageId={message.id}
-            timestamp={timestamp}
-            textContent={textContent}
-            copied={isCopyConfirmed}
-            onCopy={() => copyToClipboard(textContent)}
-            onRetryMessage={onRetryMessage}
-            onEditMessage={onEditMessage}
-          />
+          <div
+            data-role="message-actions"
+            data-copy-confirmed={isCopyConfirmed ? "true" : "false"}
+            className={cn(
+              "absolute bottom-0 transition-opacity duration-150 ease-out",
+              "opacity-0 pointer-events-none",
+              "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
+              "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+              isCopyConfirmed && "opacity-100 pointer-events-auto",
+              isUser ? "right-0" : "left-0",
+            )}
+          >
+            <MessageBubbleActions
+              isUser={isUser}
+              messageId={message.id}
+              timestamp={timestamp}
+              textContent={textContent}
+              copied={isCopyConfirmed}
+              onCopy={() => copyToClipboard(textContent)}
+              onRetryMessage={onRetryMessage}
+              onEditMessage={onEditMessage}
+            />
+          </div>
         </div>
       </div>
-    </div>
+      {isUser && messageChips.length > 0 && (
+        <div className="flex px-4 py-1 animate-in fade-in duration-200 motion-reduce:animate-none">
+          <div className="flex flex-wrap gap-1.5">
+            {messageChips.map((chip) => (
+              <MessageMetadataChip
+                key={`${chip.type}-${chip.label}`}
+                chip={chip}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+    </>
   );
 });
