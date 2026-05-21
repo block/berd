@@ -34,7 +34,7 @@ const buttonVariants = cva(
         toolbar:
           "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-background-hover hover:text-text-hover active:bg-background-hover active:text-text-hover data-[state=open]:bg-background-hover data-[state=open]:text-text-hover aria-expanded:bg-background-hover aria-expanded:text-text-hover",
         "page-header":
-          "bg-white text-text-default/70 shadow-none hover:bg-white hover:text-text-default focus-visible:text-text-default active:text-text-default [&_svg]:opacity-70 hover:[&_svg]:opacity-100 focus-visible:[&_svg]:opacity-100 active:[&_svg]:opacity-100",
+          "bg-surface-overlay text-text-default shadow-none hover:bg-surface-overlay hover:text-text-default focus-visible:text-text-default active:text-text-default",
         back: "justify-start text-muted-foreground hover:text-foreground",
         link: "text-text-primary underline-offset-4 hover:underline",
       },

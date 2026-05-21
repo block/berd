@@ -222,6 +222,7 @@
   --background-alt: var(--color-gray-50);
   --background-medium: var(--color-gray-400);
   --background-muted: var(--color-gray-100);
+  --background-hover: var(--color-gray-100);
   --background-primary: var(--brand);
   --background-inverse: var(--color-black);
   --background-danger: color-mix(
@@ -261,6 +262,8 @@
   --text-title: #19191a;
   --text-placeholder: var(--color-gray-500);
   --text-on-primary: var(--brand-foreground);
+  --text-on-secondary: var(--color-gray-900);
+  --text-hover: var(--text-default);
   --text-inverse: var(--color-white);
   --text-danger: var(--status-deleted);
   --text-on-danger-strong: var(--color-white);
@@ -478,6 +481,7 @@
   --background-alt: var(--color-gray-800);
   --background-medium: var(--color-gray-700);
   --background-muted: var(--color-gray-800);
+  --background-hover: var(--color-gray-700);
   --background-primary: var(--brand);
   --background-inverse: var(--color-white);
   --background-danger: color-mix(
@@ -511,6 +515,8 @@
   --text-title: var(--color-white);
   --text-placeholder: var(--color-gray-600);
   --text-on-primary: var(--brand-foreground);
+  --text-on-secondary: var(--color-white);
+  --text-hover: var(--text-default);
   --text-inverse: var(--color-black);
   --text-danger: var(--status-deleted);
   --text-on-danger-strong: var(--color-black);
@@ -634,6 +640,7 @@
   --color-background-alt: var(--background-alt);
   --color-background-medium: var(--background-medium);
   --color-background-muted: var(--background-muted);
+  --color-background-hover: var(--background-hover);
   --color-background-primary: var(--background-primary);
   --color-background-inverse: var(--background-inverse);
   --color-background-popover-inverse: var(--background-popover-inverse);
@@ -669,6 +676,8 @@
   --color-text-title: var(--text-title);
   --color-text-placeholder: var(--text-placeholder);
   --color-text-on-primary: var(--text-on-primary);
+  --color-text-on-secondary: var(--text-on-secondary);
+  --color-text-hover: var(--text-hover);
   --color-text-inverse: var(--text-inverse);
   --color-text-on-popover-inverse: var(--text-on-popover-inverse);
   --color-text-on-popover-inverse-muted: var(--text-on-popover-inverse-muted);
