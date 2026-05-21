@@ -1,0 +1,91 @@
+import { useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
+import * as Accordion from "@radix-ui/react-accordion";
+import { useTranslation } from "react-i18next";
+import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
+import { getAutomationTileResults } from "@/features/automations/api/kgooseAutomations";
+import { keyAutomationResults } from "@/features/automations/lib/automationFormatting";
+import { Spinner } from "@/shared/ui/spinner";
+import { ExpandableHistoryRow } from "@/features/automations/ui/ExpandableHistoryRow";
+import { EmptyState, RunOutput } from "@/features/automations/ui/RunOutput";
+
+const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
+
+export function AutomationHistory({
+  tile,
+  tileId,
+  selectedRunKey,
+  onSelectRun,
+}: {
+  tile: AutomationTile;
+  tileId: string;
+  selectedRunKey: string | null;
+  onSelectRun: (runKey: string | null) => void;
+}) {
+  const { t } = useTranslation("automations");
+  const historyQuery = useQuery({
+    queryKey: ["automationTileResults", tileId],
+    queryFn: () => getAutomationTileResults(tileId),
+    refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
+  });
+  const results = keyAutomationResults(historyQuery.data?.tilesResults ?? []);
+  const selectedRun = results.find((item) => item.runKey === selectedRunKey);
+  const scrollSelectedRow = useCallback((node: HTMLDivElement | null) => {
+    node?.scrollIntoView({
+      block: "nearest",
+    });
+  }, []);
+
+  if (historyQuery.isLoading) {
+    return (
+      <div className="flex min-h-48 items-center justify-center">
+        <Spinner className="size-5 text-text-primary" />
+      </div>
+    );
+  }
+
+  if (historyQuery.error) {
+    return (
+      <EmptyState
+        title={t("history.loadErrorTitle")}
+        body={historyQuery.error.message}
+      />
+    );
+  }
+
+  if (!results.length) {
+    return (
+      <EmptyState
+        title={t("history.emptyTitle")}
+        body={t("history.emptyBody")}
+      />
+    );
+  }
+
+  return (
+    <Accordion.Root
+      type="single"
+      collapsible
+      value={selectedRun?.runKey ?? ""}
+      onValueChange={(value) => {
+        onSelectRun(value || null);
+      }}
+      className="space-y-4"
+    >
+      {results.map(({ result, runKey }) => (
+        <div
+          key={runKey}
+          ref={runKey === selectedRun?.runKey ? scrollSelectedRow : undefined}
+        >
+          <ExpandableHistoryRow
+            automation={tile}
+            result={result}
+            value={runKey}
+          >
+            <RunOutput result={result} />
+          </ExpandableHistoryRow>
+        </div>
+      ))}
+    </Accordion.Root>
+  );
+}

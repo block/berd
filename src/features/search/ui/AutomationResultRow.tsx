@@ -1,4 +1,5 @@
 import type { AutomationTile } from "@/features/automations/api/kgooseAutomations";
+import { automationTitle } from "@/features/automations/lib/automationFormatting";
 import { ResultRow } from "./ResultRow";
 
 interface AutomationResultRowProps {
@@ -30,7 +31,7 @@ export function AutomationResultRow({
   }
   return (
     <ResultRow
-      title={automation.title?.trim() || fallbackTitle}
+      title={automationTitle(automation, fallbackTitle)}
       meta={buildMeta(automation)}
       ariaLabel={ariaLabel}
       onClick={() => onSelect(id)}

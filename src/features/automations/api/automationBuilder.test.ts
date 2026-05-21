@@ -4,6 +4,7 @@ import {
   asStreamResponse,
   buildAutomationApprovalRequest,
   buildAutomationBuilderUserMessageRequest,
+  buildAutomationPreferencePrompt,
   buildCreateAutomationTileRequest,
   buildTileApprovalAcknowledgementRequest,
   findAutomationDraftState,
@@ -18,6 +19,8 @@ describe("automation builder api helpers", () => {
   it("builds regular chat requests with hidden automation-only instructions and no space", () => {
     const request =
       buildAutomationBuilderUserMessageRequest("send daily sales");
+    const hiddenPrompt =
+      request.messages[0].messageContents[0].text?.text ?? "";
 
     expect(request.chatContext).toMatchObject({
       source: "SOURCE_REGULAR_CHAT",
@@ -38,7 +41,9 @@ describe("automation builder api helpers", () => {
           expect.objectContaining({
             type: "MESSAGE_TYPE_TEXT",
             text: expect.objectContaining({
-              text: "The user came from the Create Automation UI. Only create an automation; dashboard tiles and builderbot automations are not supported in this app. For previews, use tile__render_tile with render_type='automation' and tile_type='summary'. Before calling render_tile, always call tile__describe_tile('summary') FIRST and shape the data argument to that schema exactly. render_type='automation' does not change the summary schema: data must be exactly { title: string, summary: string, details: string }, with details as a markdown string. Do not use any other tile_type. Do not set space_id or spaceId; external systems persist the accepted summary preview as an automation outside the dashboard. The automation instructions you generate must end with a step that explicitly says to call tile__render_tile with render_type='automation', tile_type='summary', schema-valid summary data, and schedule.",
+              text: expect.stringContaining(
+                "The user came from the Create Automation UI.",
+              ),
             }),
           }),
         ],
@@ -52,6 +57,29 @@ describe("automation builder api helpers", () => {
         ],
       },
     ]);
+    expect(hiddenPrompt).toContain("The user's current local time is");
+    expect(hiddenPrompt).toContain(
+      "When the user does not specify a time of day for the schedule",
+    );
+  });
+
+  it("builds local-time schedule default guidance into the hidden prompt", () => {
+    const now = new Date("2026-05-21T16:30:00Z");
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const localTime = new Intl.DateTimeFormat("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
+    }).format(now);
+    const prompt = buildAutomationPreferencePrompt(now);
+
+    expect(prompt).toContain(
+      `The user's current local time is ${localTime} in time zone ${timeZone}.`,
+    );
+    expect(prompt).toContain(
+      `default the schedule's hour and minute to this current local time (${localTime})`,
+    );
   });
 
   it("builds approval responses for the automation create tool path", () => {

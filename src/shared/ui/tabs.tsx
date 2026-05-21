@@ -12,6 +12,7 @@ const tabsListVariants = cva(
       variant: {
         default: "h-9 rounded-lg bg-background-muted p-[3px]",
         buttons: "h-auto gap-1 bg-transparent p-0",
+        weight: "h-auto gap-6 bg-transparent p-0",
       },
     },
     defaultVariants: {
@@ -29,6 +30,8 @@ const tabsTriggerVariants = cva(
           "data-[state=active]:bg-background-default dark:data-[state=active]:text-text-default dark:data-[state=active]:border-border-input dark:data-[state=active]:bg-background-muted/30 h-[calc(100%-1px)] rounded-md border border-transparent px-2 py-1 text-sm text-text-default dark:text-text-muted",
         buttons:
           "h-8 rounded-md px-3 py-1 text-xs font-medium text-text-default hover:bg-background-hover hover:text-text-hover data-[state=active]:bg-background-muted data-[state=active]:text-text-default",
+        weight:
+          "h-auto px-0 py-1 text-sm font-light text-text-muted hover:text-text-default data-[state=active]:font-normal data-[state=active]:text-text-default transition-[color,font-weight]",
       },
     },
     defaultVariants: {

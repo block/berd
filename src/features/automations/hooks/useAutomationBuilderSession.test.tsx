@@ -418,6 +418,158 @@ describe("useAutomationBuilderSession", () => {
     expect(onAutomationCreated).toHaveBeenCalledWith("automation-1");
     expect(result.current.draftState.created).toBe(true);
   });
+
+  it("persists edited legacy automation previews through the create endpoint", async () => {
+    const { result } = renderHook(() => useAutomationBuilderSession());
+
+    await act(async () => {
+      await result.current.sendMessage("create a daily sales automation");
+    });
+    emitStreamEvent({
+      streamId: "automation-builder-00000000-0000-4000-8000-000000000000",
+      sessionId: "session-1",
+      event: "messages",
+      data: {
+        get_messages_response: {
+          status: "CHAT_SESSION_STATUS_NEED_CLIENT_INPUT",
+          messages: [
+            {
+              id: "assistant-1",
+              role: "ROLE_ASSISTANT",
+              content: [
+                {
+                  type: "MESSAGE_TYPE_TOOL_REQUEST",
+                  toolRequest: {
+                    id: "preview-tool",
+                    value: {
+                      name: "tile__preview_automation",
+                      arguments: JSON.stringify({
+                        title: "Original title",
+                        schedule: "0 9 * * *",
+                        instructions: ["Original instructions."],
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    act(() => {
+      result.current.setDraftOverride({
+        title: "Edited title",
+        schedule: "30 16 * * 1-5",
+        instructions: ["Edited instructions."],
+        humanReadableInstructions: ["Edited instructions."],
+        timeZone: "America/New_York",
+        enableNotifications: true,
+      });
+    });
+    await act(async () => {
+      await result.current.approveDraft();
+    });
+
+    expect(mocks.createAutomationTileFromDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        toolRequestId: "preview-tool",
+        creationMode: "approveTool",
+        title: "Edited title",
+        schedule: "30 16 * * 1-5",
+        instructions: ["Edited instructions."],
+        humanReadableInstructions: ["Edited instructions."],
+        timeZone: "America/New_York",
+        enableNotifications: true,
+      }),
+    );
+    expect(mocks.approveAutomationDraft).not.toHaveBeenCalled();
+    expect(mocks.acknowledgeAutomationTileDraft).toHaveBeenCalledWith(
+      "session-1",
+      "preview-tool",
+    );
+  });
+
+  it("clears draft overrides when a new tool request arrives", async () => {
+    const { result } = renderHook(() => useAutomationBuilderSession());
+
+    await act(async () => {
+      await result.current.sendMessage("create a daily sales automation");
+    });
+    emitStreamEvent({
+      streamId: "automation-builder-00000000-0000-4000-8000-000000000000",
+      sessionId: "session-1",
+      event: "messages",
+      data: {
+        get_messages_response: {
+          status: "CHAT_SESSION_STATUS_NEED_CLIENT_INPUT",
+          messages: [
+            {
+              id: "assistant-1",
+              role: "ROLE_ASSISTANT",
+              content: [
+                {
+                  type: "MESSAGE_TYPE_TOOL_REQUEST",
+                  toolRequest: {
+                    id: "tool-1",
+                    value: {
+                      name: "tile__render_tile",
+                      arguments: JSON.stringify({
+                        render_type: "automation",
+                        tile_type: "summary",
+                        title: "First draft",
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+    act(() => {
+      result.current.setDraftOverride({ title: "Edited first draft" });
+    });
+
+    expect(result.current.draftState.draft?.title).toBe("Edited first draft");
+
+    emitStreamEvent({
+      streamId: "automation-builder-00000000-0000-4000-8000-000000000000",
+      sessionId: "session-1",
+      event: "messages",
+      data: {
+        get_messages_response: {
+          status: "CHAT_SESSION_STATUS_NEED_CLIENT_INPUT",
+          messages: [
+            {
+              id: "assistant-2",
+              role: "ROLE_ASSISTANT",
+              content: [
+                {
+                  type: "MESSAGE_TYPE_TOOL_REQUEST",
+                  toolRequest: {
+                    id: "tool-2",
+                    value: {
+                      name: "tile__render_tile",
+                      arguments: JSON.stringify({
+                        render_type: "automation",
+                        tile_type: "summary",
+                        title: "Second draft",
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.current.draftState.draft?.title).toBe("Second draft");
+  });
 });
 
 function getMessageText(message: Message) {

@@ -29,8 +29,21 @@ const AUTOMATION_BUILDER_MODEL = {
   provider: DATABRICKS_MODEL_PROVIDER,
 };
 
-const AUTOMATION_PREFERENCE_PROMPT =
+const AUTOMATION_PREFERENCE_PROMPT_BASE =
   "The user came from the Create Automation UI. Only create an automation; dashboard tiles and builderbot automations are not supported in this app. For previews, use tile__render_tile with render_type='automation' and tile_type='summary'. Before calling render_tile, always call tile__describe_tile('summary') FIRST and shape the data argument to that schema exactly. render_type='automation' does not change the summary schema: data must be exactly { title: string, summary: string, details: string }, with details as a markdown string. Do not use any other tile_type. Do not set space_id or spaceId; external systems persist the accepted summary preview as an automation outside the dashboard. The automation instructions you generate must end with a step that explicitly says to call tile__render_tile with render_type='automation', tile_type='summary', schema-valid summary data, and schedule.";
+
+export function buildAutomationPreferencePrompt(
+  now: Date = new Date(),
+): string {
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const hhmm = new Intl.DateTimeFormat("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(now);
+  return `${AUTOMATION_PREFERENCE_PROMPT_BASE} The user's current local time is ${hhmm} in time zone ${timeZone}. When the user does not specify a time of day for the schedule, default the schedule's hour and minute to this current local time (${hhmm}); do not invent another default time.`;
+}
 
 export type AutomationBuilderStatus = KgooseSessionStatus;
 
@@ -300,7 +313,7 @@ export function buildAutomationBuilderUserMessageRequest(
           messageContents: [
             {
               type: "MESSAGE_TYPE_TEXT",
-              text: { text: AUTOMATION_PREFERENCE_PROMPT },
+              text: { text: buildAutomationPreferencePrompt() },
             },
           ],
         },

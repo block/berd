@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   acknowledgeAutomationTileDraft,
   applyAutomationBuilderDelta,
-  approveAutomationDraft,
   automationBuilderErrorMessage,
   asStreamResponse,
   cancelAutomationBuilderMessage,
@@ -13,6 +12,7 @@ import {
   startAutomationBuilderStream,
   stopAutomationBuilderStream,
   type AutomationBuilderStatus,
+  type AutomationDraft,
 } from "@/features/automations/api/automationBuilder";
 import {
   createUserMessage,
@@ -130,6 +130,10 @@ export function useAutomationBuilderSession({
     null,
   );
   const listenerReadyRef = useRef(createDeferred());
+  const [draftOverrideState, setDraftOverrideState] = useState<{
+    toolRequestId: string | null;
+    overrides: Partial<AutomationDraft>;
+  }>({ toolRequestId: null, overrides: {} });
 
   const setSessionIdValue = useCallback((value: string | null) => {
     sessionIdRef.current = value;
@@ -168,18 +172,67 @@ export function useAutomationBuilderSession({
     };
   }, [draftState, locallyCreatedAutomation]);
 
+  const activeDraftToolRequestId =
+    effectiveDraftState.draft?.toolRequestId ?? null;
+  const activeDraftOverrides =
+    activeDraftToolRequestId &&
+    draftOverrideState.toolRequestId === activeDraftToolRequestId
+      ? draftOverrideState.overrides
+      : {};
+
+  const setDraftOverride = useCallback(
+    (overrides: Partial<AutomationDraft>) => {
+      setDraftOverrideState((current) => ({
+        toolRequestId: activeDraftToolRequestId,
+        overrides:
+          current.toolRequestId === activeDraftToolRequestId
+            ? { ...current.overrides, ...overrides }
+            : overrides,
+      }));
+    },
+    [activeDraftToolRequestId],
+  );
+
+  const mergedDraftState = useMemo(() => {
+    if (!effectiveDraftState.draft) return effectiveDraftState;
+    return {
+      ...effectiveDraftState,
+      draft: {
+        ...effectiveDraftState.draft,
+        ...activeDraftOverrides,
+      },
+    };
+  }, [effectiveDraftState, activeDraftOverrides]);
+
   useEffect(() => {
-    if (!effectiveDraftState.created) return;
+    setDraftOverrideState((current) =>
+      current.toolRequestId === activeDraftToolRequestId
+        ? current
+        : { toolRequestId: activeDraftToolRequestId, overrides: {} },
+    );
+  }, [activeDraftToolRequestId]);
+
+  useEffect(() => {
+    if (mergedDraftState.created) {
+      setDraftOverrideState((current) => ({
+        ...current,
+        overrides: {},
+      }));
+    }
+  }, [mergedDraftState.created]);
+
+  useEffect(() => {
+    if (!mergedDraftState.created) return;
 
     const createdKey =
-      effectiveDraftState.createdAutomationId ??
-      effectiveDraftState.draft?.toolRequestId ??
+      mergedDraftState.createdAutomationId ??
+      mergedDraftState.draft?.toolRequestId ??
       "created";
     if (createdNotifiedRef.current !== createdKey) {
       createdNotifiedRef.current = createdKey;
-      onAutomationCreated?.(effectiveDraftState.createdAutomationId);
+      onAutomationCreated?.(mergedDraftState.createdAutomationId);
     }
-  }, [effectiveDraftState, onAutomationCreated]);
+  }, [mergedDraftState, onAutomationCreated]);
 
   const openStream = useCallback(async (nextSessionId: string) => {
     if (reconnectTimeoutRef.current) {
@@ -395,7 +448,7 @@ export function useAutomationBuilderSession({
     const currentSessionId = sessionIdRef.current;
     if (
       !currentSessionId ||
-      !effectiveDraftState.draft ||
+      !mergedDraftState.draft ||
       isSubmitting ||
       operationInFlightRef.current
     ) {
@@ -406,30 +459,26 @@ export function useAutomationBuilderSession({
     setIsSubmitting(true);
     setError(null);
     try {
-      const draft = effectiveDraftState.draft;
+      const draft = mergedDraftState.draft;
       let shouldOpenStream = true;
-      if (draft.creationMode === "createTile") {
-        const result = await createAutomationTileFromDraft(draft);
-        if (result.success !== true || !result.tileId) {
-          throw new Error(result.errorMsg || "Failed to create automation.");
-        }
-        setLocallyCreatedAutomation({
-          toolRequestId: draft.toolRequestId,
-          automationId: result.tileId,
-        });
+      const result = await createAutomationTileFromDraft(draft);
+      if (result.success !== true || !result.tileId) {
+        throw new Error(result.errorMsg || "Failed to create automation.");
+      }
+      setLocallyCreatedAutomation({
+        toolRequestId: draft.toolRequestId,
+        automationId: result.tileId,
+      });
 
-        try {
-          await acknowledgeAutomationTileDraft(
-            currentSessionId,
-            draft.toolRequestId,
-          );
-        } catch (acknowledgementError) {
-          const message = automationBuilderErrorMessage(acknowledgementError);
-          setMessages((current) => [...current, message]);
-          shouldOpenStream = false;
-        }
-      } else {
-        await approveAutomationDraft(currentSessionId, draft.toolRequestId);
+      try {
+        await acknowledgeAutomationTileDraft(
+          currentSessionId,
+          draft.toolRequestId,
+        );
+      } catch (acknowledgementError) {
+        const message = automationBuilderErrorMessage(acknowledgementError);
+        setMessages((current) => [...current, message]);
+        shouldOpenStream = false;
       }
       if (shouldOpenStream) {
         await markTurnProcessing(currentSessionId);
@@ -447,7 +496,7 @@ export function useAutomationBuilderSession({
   }, [
     addErrorMessage,
     clearPendingTurn,
-    effectiveDraftState.draft,
+    mergedDraftState.draft,
     isSubmitting,
     markTurnProcessing,
     setStatusValue,
@@ -477,7 +526,9 @@ export function useAutomationBuilderSession({
     isStreaming: status === "processing" || Boolean(streamingMessageId),
     streamingMessageId,
     error,
-    draftState: effectiveDraftState,
+    draftState: mergedDraftState,
+    draftOverrides: activeDraftOverrides,
+    setDraftOverride,
     sendMessage,
     approveDraft,
     cancel,

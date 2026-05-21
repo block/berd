@@ -1718,7 +1718,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onOpenAutomation={handleOpenAutomationFromSearch}
             onOpenSkill={handleOpenSkillFromSearch}
           />
-          {activeView !== "chat" ? (
+          {activeView !== "chat" &&
+          !(
+            activeView === "automations" &&
+            automationsRoute.surface === "builder"
+          ) ? (
             <GlobalComposerPill onSend={handleGlobalCompose} />
           ) : null}
         </>

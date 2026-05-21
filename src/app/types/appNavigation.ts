@@ -20,6 +20,7 @@ export type AutomationRunLocation = {
 
 export type AutomationNavigationRoute =
   | { surface: "overview" }
+  | { surface: "builder" }
   | {
       surface: "history";
       selectedRun: AutomationRunLocation | null;

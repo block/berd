@@ -41,8 +41,8 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   deleteAutomationTile: vi.fn(),
 }));
 
-vi.mock("@/features/automations/ui/AutomationBuilderPanel", () => ({
-  AutomationBuilderPanel: ({
+vi.mock("@/features/automations/ui/AutomationBuilderView", () => ({
+  AutomationBuilderView: ({
     onClose,
     onAutomationCreated,
   }: {
@@ -227,7 +227,7 @@ describe("AutomationsView", () => {
     );
     expect(
       screen
-        .getByText("Latest result")
+        .getByText("Revenue was up.")
         .compareDocumentPosition(instructionsText) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -430,18 +430,16 @@ describe("AutomationsView", () => {
 
     expect(await screen.findAllByText("Daily at 9:00 AM")).not.toHaveLength(0);
     expect(screen.getAllByText(/Last ran/)[0].closest("span")).toHaveClass(
-      "text-placeholder",
+      "text-text-muted",
     );
 
     await user.click(
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
 
-    expect(screen.getByLabelText("Time")).toHaveValue("09:00");
+    expect(screen.getByLabelText("Time")).toHaveTextContent("9:00 AM");
     expect(screen.queryByText(/^Runs /)).not.toBeInTheDocument();
-    expect(screen.getByText(/Last ran/).closest("span")).toHaveClass(
-      "text-placeholder",
-    );
+    expect(screen.getByText("Revenue was up.")).toBeInTheDocument();
     expect(screen.queryByText("Status")).not.toBeInTheDocument();
   });
 
@@ -629,7 +627,7 @@ describe("AutomationsView", () => {
     expect(screen.getByText(formatDateTime(older))).toBeInTheDocument();
   });
 
-  it("groups destructive detail actions under the more menu", async () => {
+  it("exposes detail actions in the top bar", async () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
@@ -639,14 +637,14 @@ describe("AutomationsView", () => {
     await screen.findByText(/Pull revenue\s+Send a summary/);
 
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-
-    const deleteIcon = screen
-      .getByRole("menuitem", { name: "Delete" })
-      .querySelector("svg");
-
-    expect(deleteIcon).toHaveClass("size-3.5");
+    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Refresh automations" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Duplicate" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("shows historical run output from kgoose tile results", async () => {
@@ -655,26 +653,55 @@ describe("AutomationsView", () => {
 
     await user.click(screen.getByRole("tab", { name: "History" }));
 
-    expect(screen.queryByText("Session history")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run output")).not.toBeInTheDocument();
 
     await user.click(
       await screen.findByRole("button", { name: /Daily revenue digest/i }),
     );
+    await user.click(screen.getByRole("button", { name: "Go to automation" }));
+
+    expect(await screen.findByText("Run output")).toBeInTheDocument();
+    expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
+    expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");
+    expect(screen.queryByText("Run now")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Fetched 3 Slack messages from #revenue."),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("The automation finished."),
+    ).not.toBeInTheDocument();
+    expect(getAutomationSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("falls back to session messages when a historical run has no tile output", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getAutomationTileResults).mockResolvedValue({
+      tilesResults: [
+        {
+          sessionId: "session-1",
+          tileId: "automation-1",
+          created: "1714568400000",
+          runStatus: "TILE_RUN_STATUS_SUCCESS",
+        },
+      ],
+    });
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await user.click(screen.getByRole("tab", { name: "History" }));
+
+    const rowSummary = await screen.findByText("session-1");
+    const rowButton = rowSummary.closest("button");
+    expect(rowButton).not.toBeNull();
+    await user.click(rowButton as HTMLButtonElement);
 
     expect(await screen.findByText("Session history")).toBeInTheDocument();
-    expect(screen.getAllByText("session-1").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
-    expect(screen.getByText("Run now")).toBeInTheDocument();
-    expect(
-      screen.getByText("Fetched 3 Slack messages from #revenue."),
-    ).toBeInTheDocument();
-    const slackToolButton = screen.getByText("slack").closest("button");
-    expect(slackToolButton).not.toBeNull();
-    await user.click(slackToolButton as HTMLButtonElement);
-    expect(screen.getByText(/"channel": "revenue"/)).toBeInTheDocument();
-    expect(screen.getByText("The automation finished.")).toBeInTheDocument();
-    expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");
     expect(getAutomationSessionMessages).toHaveBeenCalledWith("session-1");
+    expect(
+      await screen.findByText("Fetched 3 Slack messages from #revenue."),
+    ).toBeInTheDocument();
   });
 
   it("opens global history runs in place before navigating to the automation", async () => {
@@ -686,20 +713,25 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: /Daily revenue digest/i }),
     );
 
-    expect(await screen.findByText("Session history")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "Go to automation" }),
+    ).toBeInTheDocument();
     expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
     expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Go to automation" }));
 
-    expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue(
-      "Daily revenue digest",
-    );
+    expect(await screen.findByText("Run output")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "History" })).toHaveAttribute(
       "data-state",
       "active",
     );
     expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole("tab", { name: "Details" }));
+    expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue(
+      "Daily revenue digest",
+    );
   });
 
   it("selects the clicked run when session ids repeat", async () => {
@@ -735,9 +767,10 @@ describe("AutomationsView", () => {
       name: /Daily revenue digest/i,
     });
     await user.click(runButtons[1]);
+    await user.click(screen.getByRole("button", { name: "Go to automation" }));
 
     const output = (
-      await screen.findByRole("heading", { name: "Session history" })
+      await screen.findByRole("heading", { name: "Run output" })
     ).closest("section");
     expect(output).not.toBeNull();
     expect(
@@ -826,7 +859,9 @@ describe("AutomationsView", () => {
     );
     await user.click(screen.getByRole("button", { name: "Finish automation" }));
 
-    expect(await screen.findAllByText("New automation")).not.toHaveLength(0);
+    expect(await screen.findByRole("textbox", { name: "Title" })).toHaveValue(
+      "New automation",
+    );
     expect(
       screen.queryByRole("heading", { name: "Add automation" }),
     ).toBeNull();
@@ -880,6 +915,15 @@ describe("AutomationsView", () => {
         expect.anything(),
       );
     });
+    const scheduleUpdate = vi
+      .mocked(updateAutomationTile)
+      .mock.calls.find(
+        ([request]) =>
+          request.updateSchedule === true && request.schedule === "0 9 * * 1-5",
+      )?.[0];
+    expect(scheduleUpdate).toBeDefined();
+    expect(scheduleUpdate).not.toHaveProperty("title");
+    expect(scheduleUpdate).not.toHaveProperty("instructions");
 
     await user.click(screen.getByRole("combobox", { name: "Time zone" }));
     await user.type(
@@ -925,8 +969,7 @@ describe("AutomationsView", () => {
     await user.click(
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
 
     expect(
       screen.getByText(/Delete "Daily revenue digest"/),
@@ -949,8 +992,7 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
     await screen.findByText(/Pull revenue\s+Send a summary/);
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Duplicate" }));
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
 
     expect(createAutomationTile).toHaveBeenCalledWith({
       type: "TILE_TYPE_SUMMARY",
@@ -984,8 +1026,7 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
     await screen.findByText(/Pull revenue\s+Send a summary/);
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Duplicate" }));
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
 
     expect(createAutomationTile).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1019,12 +1060,8 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
     await screen.findByText(/Pull revenue\s+Send a summary/);
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.getByRole("menuitem", { name: "Duplicate" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
-    await user.click(screen.getByRole("menuitem", { name: "Duplicate" }));
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Duplicate" }));
     expect(createAutomationTile).not.toHaveBeenCalled();
   });
 
@@ -1048,11 +1085,7 @@ describe("AutomationsView", () => {
       await screen.findByRole("button", { name: "Daily revenue digest" }),
     );
     await screen.findByText(/Pull revenue\s+Send a summary/);
-    await user.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.getByRole("menuitem", { name: "Duplicate" })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    expect(screen.getByRole("button", { name: "Duplicate" })).toBeDisabled();
     expect(createAutomationTile).not.toHaveBeenCalled();
   });
 });

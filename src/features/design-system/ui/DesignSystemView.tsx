@@ -1369,6 +1369,50 @@ function getTabsTokenDetails({ variant }: { variant: TabsVariant }): {
   colorRows: TokenColorRow[];
   textRows: TokenTextRow[];
 } {
+  if (variant === "weight") {
+    return {
+      colorRows: [
+        {
+          anatomy: "Tab list",
+          state: "Default",
+          background: "transparent",
+          textIcon: "--text-muted",
+        },
+        {
+          anatomy: "Tab trigger",
+          state: "Default",
+          background: "transparent",
+          textIcon: "--text-muted",
+        },
+        {
+          anatomy: "Tab trigger",
+          state: "Hover",
+          background: "transparent",
+          textIcon: "--text-default",
+        },
+        {
+          anatomy: "Tab trigger",
+          state: "Active",
+          background: "transparent",
+          textIcon: "--text-default",
+        },
+        {
+          anatomy: "Tab trigger",
+          state: "Disabled",
+          background: "transparent",
+          textIcon: "--text-muted / 50%",
+        },
+      ],
+      textRows: [
+        {
+          anatomy: "Tab trigger label",
+          size: "text-sm",
+          weight: "font-light to font-normal",
+        },
+      ],
+    };
+  }
+
   return {
     colorRows:
       variant === "buttons"

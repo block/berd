@@ -2248,7 +2248,7 @@ export const designSystemComponentManifest = [
       {
         name: "tabsListVariants",
         variants: {
-          variant: ["default", "buttons"],
+          variant: ["default", "buttons", "weight"],
         },
         defaultVariants: {
           variant: "default",
@@ -2261,7 +2261,7 @@ export const designSystemComponentManifest = [
       {
         name: "tabsTriggerVariants",
         variants: {
-          variant: ["default", "buttons"],
+          variant: ["default", "buttons", "weight"],
         },
         defaultVariants: {
           variant: "default",
@@ -2276,16 +2276,20 @@ export const designSystemComponentManifest = [
           "data-[state=active]:bg-background-muted",
           "data-[state=active]:text-text-default",
           "hover:bg-background-hover",
+          "hover:text-text-default",
           "hover:text-text-hover",
           "text-text-default",
+          "text-text-muted",
         ],
         stateClasses: [
           "data-[state=active]:bg-background-default",
           "data-[state=active]:bg-background-muted",
+          "data-[state=active]:font-normal",
           "data-[state=active]:text-text-default",
           "disabled:opacity-50",
           "disabled:pointer-events-none",
           "hover:bg-background-hover",
+          "hover:text-text-default",
           "hover:text-text-hover",
         ],
         sourceTokenClasses: [],
@@ -2301,6 +2305,7 @@ export const designSystemComponentManifest = [
       "data-[state=active]:bg-background-muted",
       "data-[state=active]:text-text-default",
       "hover:bg-background-hover",
+      "hover:text-text-default",
       "hover:text-text-hover",
       "text-text-default",
       "text-text-muted",
@@ -2308,10 +2313,12 @@ export const designSystemComponentManifest = [
     stateClasses: [
       "data-[state=active]:bg-background-default",
       "data-[state=active]:bg-background-muted",
+      "data-[state=active]:font-normal",
       "data-[state=active]:text-text-default",
       "disabled:opacity-50",
       "disabled:pointer-events-none",
       "hover:bg-background-hover",
+      "hover:text-text-default",
       "hover:text-text-hover",
     ],
     sourceTokenClasses: [],

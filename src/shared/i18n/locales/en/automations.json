@@ -35,7 +35,7 @@
     "creating": "Creating",
     "draft": "Draft",
     "emptyBody": "Describe the automation you want kgoose to build. The builder will only approve automation-shaped tool output.",
-    "emptyTitle": "Describe the automation",
+    "emptyTitle": "Make an automation",
     "failed": "Failed",
     "previewEmptyBody": "A draft appears here after kgoose proposes an automation.",
     "previewEmptyTitle": "No draft yet",

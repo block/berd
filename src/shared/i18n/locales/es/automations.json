@@ -35,7 +35,7 @@
     "creating": "Creando",
     "draft": "Borrador",
     "emptyBody": "Describe la automatizacion que quieres que kgoose cree. El creador solo aprobara resultados con forma de automatizacion.",
-    "emptyTitle": "Describe la automatizacion",
+    "emptyTitle": "Crear una automatizacion",
     "failed": "Fallida",
     "previewAriaLabel": "Vista previa del borrador de automatizacion",
     "previewEmptyBody": "Aparecera un borrador aqui cuando kgoose proponga una automatizacion.",

@@ -7,10 +7,10 @@ import {
   getAutomationTiles,
 } from "@/features/automations/api/kgooseAutomations";
 import {
-  AutomationActivityLabel,
   getOutputSummary,
   latestRunTimestampFromTile,
-} from "@/features/automations/ui/AutomationsView";
+} from "@/features/automations/lib/automationFormatting";
+import { AutomationActivityLabel } from "@/features/automations/ui/AutomationOverviewRow";
 import { cn } from "@/shared/lib/cn";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import type { WidgetRenderProps } from "./types";
