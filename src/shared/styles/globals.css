@@ -55,6 +55,7 @@
 
   /* monochromatic gray scale */
   --color-gray-50: #f5f5f5;
+  --color-gray-75: #f1f1f1;
   --color-gray-100: #f0f0f0;
   --color-gray-200: #e8e8e8;
   --color-gray-300: #e5e5e5;
@@ -159,6 +160,7 @@
   --surface-composer: rgba(255, 255, 255, 0.2);
   --surface-button: var(--color-gray-50);
   --surface-install: var(--canvas-base);
+  --surface-user-bubble: var(--color-gray-75);
 
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
      Separate from --surface-composer (which is the chat-area composer fill).
@@ -437,6 +439,7 @@
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-button: var(--color-gray-800);
   --surface-install: var(--canvas-base);
+  --surface-user-bubble: var(--color-gray-700);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
      outline flips to white-alpha so it doesn't disappear over dark canvas. */
@@ -618,6 +621,7 @@
   --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-button: var(--surface-button);
   --color-surface-install: var(--surface-install);
+  --color-surface-user-bubble: var(--surface-user-bubble);
 
   /* Composer chip tones */
   --color-chip-file-bg: var(--chip-file-bg);

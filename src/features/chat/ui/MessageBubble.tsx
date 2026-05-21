@@ -434,8 +434,10 @@ export const MessageBubble = memo(function MessageBubble({
           {/* biome-ignore lint/a11y/noStaticElementInteractions: delegated link handler */}
           <div
             className={cn(
-              "w-full min-w-0 text-sm leading-relaxed",
-              isUser && "rounded-2xl bg-muted p-3",
+              "min-w-0 text-sm leading-relaxed",
+              isUser
+                ? "rounded-lg bg-surface-user-bubble px-4 py-2 leading-normal"
+                : "w-full",
             )}
             onClick={handleContentClick}
           >

@@ -151,14 +151,14 @@ describe("MessageBubble", () => {
     expect(container.querySelector(".text-text-success")).toBeInTheDocument();
   });
 
-  it("renders user text inside a muted bubble shell", () => {
+  it("renders user text inside a bubble shell", () => {
     const { container } = render(
       <MessageBubble message={userMessage("hello world")} />,
     );
 
     expect(
       container.querySelector(
-        '[data-role="user-message"] .rounded-2xl.bg-muted',
+        '[data-role="user-message"] .rounded-lg.bg-surface-user-bubble',
       ),
     ).toBeInTheDocument();
   });
