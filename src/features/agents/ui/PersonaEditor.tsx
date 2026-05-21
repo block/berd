@@ -53,9 +53,8 @@ interface PersonaEditorProps {
   isPending?: boolean;
 }
 
-const AGENT_PANEL_COLOR = "#d9d9d9";
 const SHEET_CONTENT_CLASS =
-  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(217,217,217,0.42)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
+  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-surface-editor-panel p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
 const CLOSE_BUTTON_CLASS =
   "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50";
 const HERO_HEIGHT_CLASS = "h-[400px]";
@@ -334,7 +333,7 @@ export function PersonaEditor({
         closeButtonClassName={CLOSE_BUTTON_CLASS}
         overlayClassName="bg-transparent"
         style={{
-          backgroundColor: `color-mix(in oklab, ${AGENT_PANEL_COLOR} 40%, transparent)`,
+          backgroundColor: "var(--surface-editor-panel)",
         }}
         aria-describedby={undefined}
       >

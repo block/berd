@@ -81,6 +81,7 @@ owns the shadcn token values.
 | App canvas/dot-grid background | `canvas-base`, `canvas-project-tint`, `dot-*` |
 | Sidebar/app chrome glass | `sidebar` |
 | Composer surface | `surface-composer`, `surface-composer-glass` |
+| Slide-out editor panel glass | `surface-editor-panel` |
 | Composer placeholder | `text-placeholder-composer` |
 | File/chat/project/agent/skill/automation chips | `chip-*-bg`, `chip-*-fg` |
 | Non-destructive status | `success`, `warning`, `info` |

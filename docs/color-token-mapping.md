@@ -48,6 +48,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `canvas-base`, `canvas-project-tint` | Goose's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
 | `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
 | `surface-composer`, `surface-composer-glass` | Composer-specific translucent surfaces. | `bg-surface-composer` |
+| `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |
 | `message-user-bg` | User message bubble fill is a chat-specific surface that should not become a broad card or muted token. | `bg-message-user-bg` |
 | `text-placeholder-composer` | Composer placeholder needs a denser value than normal muted text. | `placeholder:text-placeholder-composer` |
 | `chip-*-bg`, `chip-*-fg` | File/chat/project/agent/skill/automation identity chips. | `bg-chip-agent-bg text-chip-agent-fg` |

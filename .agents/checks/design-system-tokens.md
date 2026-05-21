@@ -18,8 +18,8 @@ be chosen. The short version:
   `sidebar-ring`.
 - Goose-specific tokens are allowed only for product-specific surfaces that do
   not map cleanly to shadcn, such as `canvas-*`, `surface-composer`,
-  `message-user-bg`, `chip-*-bg`, `chip-*-fg`, `success`, `warning`, `info`,
-  and clock/status/chart tokens.
+  `surface-editor-panel`, `message-user-bg`, `chip-*-bg`, `chip-*-fg`,
+  `success`, `warning`, `info`, and clock/status/chart tokens.
 
 ## What to flag
 
