@@ -36,6 +36,9 @@ const panEnd = { clientX: 124, clientY: 96 };
 type HookOptions = Parameters<typeof useHomeCanvasViewport>[0];
 type HookResult = ReturnType<typeof useHomeCanvasViewport>;
 type Point = { x: number; y: number };
+type WebkitSelectionStyle = CSSStyleDeclaration & {
+  webkitUserSelect?: string;
+};
 
 function pointerEvent({
   button = 0,
@@ -163,6 +166,14 @@ function advanceCameraSaveTimer() {
   });
 }
 
+function setWebkitUserSelect(style: CSSStyleDeclaration, value: string) {
+  (style as WebkitSelectionStyle).webkitUserSelect = value;
+}
+
+function webkitUserSelect(style: CSSStyleDeclaration) {
+  return (style as WebkitSelectionStyle).webkitUserSelect;
+}
+
 describe("useHomeCanvasViewport", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -173,6 +184,12 @@ describe("useHomeCanvasViewport", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    document.body.style.userSelect = "";
+    document.body.style.removeProperty("-webkit-user-select");
+    setWebkitUserSelect(document.body.style, "");
+    document.documentElement.style.userSelect = "";
+    document.documentElement.style.removeProperty("-webkit-user-select");
+    setWebkitUserSelect(document.documentElement.style, "");
   });
 
   it("does not capture the pointer until widget movement crosses the drag threshold", () => {
@@ -312,6 +329,79 @@ describe("useHomeCanvasViewport", () => {
     });
 
     expect(saveCamera).not.toHaveBeenCalled();
+  });
+
+  it("disables document text selection only while a canvas gesture is active", () => {
+    const captureElement = document.createElement("div");
+    document.body.style.userSelect = "text";
+    setWebkitUserSelect(document.body.style, "text");
+    document.documentElement.style.userSelect = "text";
+    setWebkitUserSelect(document.documentElement.style, "text");
+    const { result } = renderViewportHook();
+
+    act(() => {
+      result.current.beginPan(
+        pointerEvent({
+          ...panStart,
+          currentTarget: captureElement,
+        }),
+      );
+    });
+
+    expect(document.body.style.userSelect).toBe("none");
+    expect(webkitUserSelect(document.body.style)).toBe("none");
+    expect(document.documentElement.style.userSelect).toBe("none");
+    expect(webkitUserSelect(document.documentElement.style)).toBe("none");
+
+    act(() => {
+      result.current.finishPointerGesture(pointerEvent(panStart));
+    });
+
+    expect(document.body.style.userSelect).toBe("text");
+    expect(webkitUserSelect(document.body.style)).toBe("text");
+    expect(document.documentElement.style.userSelect).toBe("text");
+    expect(webkitUserSelect(document.documentElement.style)).toBe("text");
+  });
+
+  it("does not disable document text selection for click-like widget gestures", () => {
+    const captureElement = document.createElement("div");
+    document.body.style.userSelect = "text";
+    const { result } = renderViewportHook();
+
+    act(() => {
+      beginWidgetDrag(result.current, captureElement);
+    });
+
+    expect(document.body.style.userSelect).toBe("text");
+
+    act(() => {
+      result.current.finishPointerGesture(pointerEvent(widgetStart));
+    });
+
+    expect(document.body.style.userSelect).toBe("text");
+  });
+
+  it("disables document text selection only while a widget is dragging", () => {
+    const captureElement = document.createElement("div");
+    document.body.style.userSelect = "text";
+    const { result } = renderViewportHook();
+
+    act(() => {
+      beginWidgetDrag(result.current, captureElement);
+      result.current.handlePointerMove(
+        pointerEvent({ clientX: 30, clientY: 34 }),
+      );
+    });
+
+    expect(document.body.style.userSelect).toBe("none");
+
+    act(() => {
+      result.current.finishPointerGesture(
+        pointerEvent({ clientX: 30, clientY: 34 }),
+      );
+    });
+
+    expect(document.body.style.userSelect).toBe("text");
   });
 
   it("clears a pending wheel save before committing a pan camera", () => {

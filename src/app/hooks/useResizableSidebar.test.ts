@@ -13,6 +13,10 @@ describe("useResizableSidebar", () => {
     expect(result.current.sidebarOuterWidth).toBeGreaterThan(
       result.current.sidebarWidth,
     );
+    expect(result.current.sidebarHeight).toBeGreaterThan(0);
+    expect(result.current.sidebarOuterHeight).toBe(
+      result.current.sidebarHeight,
+    );
   });
 
   it("exposes a fully-collapsed state when toggled closed", () => {
@@ -72,5 +76,47 @@ describe("useResizableSidebar", () => {
       expect(result.current.isCollapsed).toBe(false);
     });
     expect(result.current.sidebarWidth).toBe(resizedWidth);
+  });
+
+  it("resizes height from the bottom edge", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+    const initialHeight = result.current.sidebarHeight;
+
+    act(() => {
+      result.current.handleHeightResizeStart({
+        clientX: 0,
+        clientY: 0,
+        preventDefault: vi.fn(),
+      } as unknown as ReactMouseEvent);
+    });
+    act(() => {
+      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 80 }));
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+
+    expect(result.current.sidebarHeight).toBeGreaterThan(initialHeight);
+  });
+
+  it("resizes width and height from the bottom-right corner", () => {
+    const { result } = renderHook(() => useResizableSidebar());
+    const initialWidth = result.current.sidebarWidth;
+    const initialHeight = result.current.sidebarHeight;
+
+    act(() => {
+      result.current.handleCornerResizeStart({
+        clientX: 0,
+        clientY: 0,
+        preventDefault: vi.fn(),
+      } as unknown as ReactMouseEvent);
+    });
+    act(() => {
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 60, clientY: 80 }),
+      );
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+
+    expect(result.current.sidebarWidth).toBeGreaterThan(initialWidth);
+    expect(result.current.sidebarHeight).toBeGreaterThan(initialHeight);
   });
 });

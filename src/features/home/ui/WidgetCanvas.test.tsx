@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  createEvent,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -326,6 +332,24 @@ describe("WidgetCanvas", () => {
 
     expect(moveWidget).not.toHaveBeenCalled();
     expect(HTMLElement.prototype.setPointerCapture).not.toHaveBeenCalled();
+  });
+
+  it("prevents native browser drags inside the widget canvas", () => {
+    const { container } = renderCanvas({
+      instances: [widget()],
+    });
+
+    const clockNode = container.querySelector("[data-home-widget-node]");
+    expect(clockNode).not.toBeNull();
+
+    const dragStart = createEvent.dragStart(clockNode as Element, {
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(clockNode as Element, dragStart);
+
+    expect(dragStart.defaultPrevented).toBe(true);
+    expect((clockNode as HTMLElement).draggable).toBe(false);
   });
 
   it("moves dragged widgets to the front with a single mutation", async () => {

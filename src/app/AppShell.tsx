@@ -191,11 +191,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const { t } = useTranslation(["chat", "common"]);
   const {
     expandSidebar,
+    handleCornerResizeDoubleClick,
+    handleCornerResizeStart,
+    handleHeightResizeDoubleClick,
+    handleHeightResizeStart,
     handleResizeDoubleClick,
     handleResizeStart,
     isCollapsed: sidebarCollapsed,
     isResizing,
+    resizeHandleHeight,
     resizeHandleWidth,
+    sidebarOuterHeight,
     sidebarOuterWidth,
     sidebarWidth,
     toggleCollapse: toggleSidebar,
@@ -1650,9 +1656,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       sidebarCollapsed={sidebarCollapsed}
       sidebarOuterWidth={sidebarOuterWidth}
       isResizing={isResizing}
+      resizeHandleHeight={resizeHandleHeight}
       resizeHandleWidth={resizeHandleWidth}
+      sidebarOuterHeight={sidebarOuterHeight}
       onResizeStart={handleResizeStart}
       onResizeDoubleClick={handleResizeDoubleClick}
+      onHeightResizeStart={handleHeightResizeStart}
+      onHeightResizeDoubleClick={handleHeightResizeDoubleClick}
+      onCornerResizeStart={handleCornerResizeStart}
+      onCornerResizeDoubleClick={handleCornerResizeDoubleClick}
+      contentUnderSidebar={activeView === "home"}
       showDesignSystemInspector={designSystemInspectorVisible}
       createProjectDialog={{
         isOpen: createProjectOpen,

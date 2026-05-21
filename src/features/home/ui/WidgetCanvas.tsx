@@ -172,6 +172,11 @@ export function WidgetCanvas({
     [beginPan],
   );
 
+  const preventNativeDrag = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
   const renderedInstances = instances.filter(
     (instance) => HOME_WIDGET_CATALOG_BY_ID[instance.type]?.Component,
   );
@@ -185,8 +190,9 @@ export function WidgetCanvas({
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerGesture}
       onPointerCancel={finishPointerGesture}
+      onDragStartCapture={preventNativeDrag}
       onWheel={handleWheel}
-      className="relative h-full w-full overflow-hidden bg-dot-grid touch-none"
+      className="relative h-full w-full overflow-hidden bg-dot-grid select-none touch-none"
     >
       <div
         className="absolute left-0 top-0 size-0"
@@ -202,10 +208,13 @@ export function WidgetCanvas({
             y: instance.y,
           };
           return (
+            // biome-ignore lint/a11y/noStaticElementInteractions: freeform widget node captures canvas drag gestures; WidgetFrame owns semantics.
             <div
               key={instance.id}
               data-home-widget-node
+              draggable={false}
               onPointerDown={(event) => beginWidgetDrag(event, instance)}
+              onDragStart={preventNativeDrag}
               style={{
                 position: "absolute",
                 left: position.x,

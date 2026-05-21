@@ -869,6 +869,11 @@ const spacingTokens: RuntimeToken[] = [
     description: "Top gutter between app chrome and panels.",
   },
   {
+    name: "--spacing-app-panel-gutter-bottom",
+    description:
+      "Bottom gutter between resizable app panels and the window edge.",
+  },
+  {
     name: "--spacing-input",
     description: "Default form control height.",
   },

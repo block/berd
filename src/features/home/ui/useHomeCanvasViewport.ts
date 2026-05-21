@@ -48,6 +48,17 @@ type WidgetDragEnd = {
   offset: CanvasPoint;
 };
 
+type SelectionLockSnapshot = {
+  bodyUserSelect: string;
+  bodyWebkitUserSelect: string;
+  documentElementUserSelect: string;
+  documentElementWebkitUserSelect: string;
+};
+
+type WebkitSelectionStyle = CSSStyleDeclaration & {
+  webkitUserSelect?: string;
+};
+
 interface UseHomeCanvasViewportOptions {
   camera: LayoutCamera;
   constraints: LayoutConstraints;
@@ -63,6 +74,41 @@ function viewportSize(element: HTMLElement | null) {
     width: rect?.width ?? 0,
     height: rect?.height ?? 0,
   };
+}
+
+function restoreStyleProperty(
+  style: CSSStyleDeclaration,
+  property: string,
+  value: string,
+): void {
+  if (value) {
+    style.setProperty(property, value);
+    return;
+  }
+
+  style.removeProperty(property);
+}
+
+function webkitUserSelect(style: CSSStyleDeclaration): string {
+  return (style as WebkitSelectionStyle).webkitUserSelect ?? "";
+}
+
+function setSelectionDisabled(style: CSSStyleDeclaration): void {
+  style.setProperty("user-select", "none");
+  style.setProperty("-webkit-user-select", "none");
+  (style as WebkitSelectionStyle).webkitUserSelect = "none";
+}
+
+function restoreWebkitUserSelect(
+  style: CSSStyleDeclaration,
+  value: string,
+): void {
+  if (value) {
+    style.setProperty("-webkit-user-select", value);
+  } else {
+    style.removeProperty("-webkit-user-select");
+  }
+  (style as WebkitSelectionStyle).webkitUserSelect = value;
 }
 
 function releasePointerCapture({
@@ -112,6 +158,7 @@ export function useHomeCanvasViewport({
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const activePointerRef = useRef<ActivePointer | null>(null);
   const cameraSaveTimerRef = useRef<number | null>(null);
+  const documentSelectionLockRef = useRef<SelectionLockSnapshot | null>(null);
   const [viewport, setViewport] = useState<CanvasViewport>(() =>
     layoutCameraToCanvasViewport(camera, { width: 0, height: 0 }, constraints),
   );
@@ -155,6 +202,51 @@ export function useHomeCanvasViewport({
     [clearScheduledCameraSave, commitCamera],
   );
 
+  const lockDocumentSelection = useCallback(() => {
+    if (documentSelectionLockRef.current !== null) {
+      return;
+    }
+
+    documentSelectionLockRef.current = {
+      bodyUserSelect: document.body.style.getPropertyValue("user-select"),
+      bodyWebkitUserSelect: webkitUserSelect(document.body.style),
+      documentElementUserSelect:
+        document.documentElement.style.getPropertyValue("user-select"),
+      documentElementWebkitUserSelect: webkitUserSelect(
+        document.documentElement.style,
+      ),
+    };
+    setSelectionDisabled(document.documentElement.style);
+    setSelectionDisabled(document.body.style);
+    document.getSelection()?.removeAllRanges();
+  }, []);
+
+  const unlockDocumentSelection = useCallback(() => {
+    if (documentSelectionLockRef.current === null) {
+      return;
+    }
+
+    restoreStyleProperty(
+      document.documentElement.style,
+      "user-select",
+      documentSelectionLockRef.current.documentElementUserSelect,
+    );
+    restoreWebkitUserSelect(
+      document.documentElement.style,
+      documentSelectionLockRef.current.documentElementWebkitUserSelect,
+    );
+    restoreStyleProperty(
+      document.body.style,
+      "user-select",
+      documentSelectionLockRef.current.bodyUserSelect,
+    );
+    restoreWebkitUserSelect(
+      document.body.style,
+      documentSelectionLockRef.current.bodyWebkitUserSelect,
+    );
+    documentSelectionLockRef.current = null;
+  }, []);
+
   useEffect(() => {
     const nextCamera = clampLayoutCamera(camera, constraints);
     setViewport(
@@ -173,8 +265,9 @@ export function useHomeCanvasViewport({
       if (activePointer) {
         releasePointerCapture(activePointer);
       }
+      unlockDocumentSelection();
     },
-    [clearScheduledCameraSave],
+    [clearScheduledCameraSave, unlockDocumentSelection],
   );
 
   const clearWidgetDragPosition = useCallback(
@@ -197,6 +290,7 @@ export function useHomeCanvasViewport({
 
   const beginPan = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
+      lockDocumentSelection();
       event.currentTarget.setPointerCapture(event.pointerId);
       onViewportGestureStart?.();
       activePointerRef.current = {
@@ -207,7 +301,7 @@ export function useHomeCanvasViewport({
         startViewport: viewport,
       };
     },
-    [onViewportGestureStart, viewport],
+    [lockDocumentSelection, onViewportGestureStart, viewport],
   );
 
   const beginWidgetDrag = useCallback(
@@ -258,6 +352,7 @@ export function useHomeCanvasViewport({
         return;
       }
       if (!activePointer.didDrag) {
+        lockDocumentSelection();
         markWidgetDragStarted(activePointer, onWidgetDragStart, true);
       }
 
@@ -267,7 +362,7 @@ export function useHomeCanvasViewport({
         [activePointer.widgetId]: nextPosition,
       }));
     },
-    [onWidgetDragStart],
+    [lockDocumentSelection, onWidgetDragStart],
   );
 
   const finishPointerGesture = useCallback(
@@ -278,6 +373,7 @@ export function useHomeCanvasViewport({
       }
 
       activePointerRef.current = null;
+      unlockDocumentSelection();
       if (activePointer.kind === "pan" || activePointer.hasCapture) {
         releasePointerCapture(activePointer);
       }
@@ -333,6 +429,7 @@ export function useHomeCanvasViewport({
       commitCamera,
       onWidgetDragEnd,
       onWidgetDragStart,
+      unlockDocumentSelection,
     ],
   );
 

@@ -95,6 +95,7 @@ export function WidgetFrame({
         <fieldset
           aria-label={t(catalogEntry.labelKey)}
           aria-keyshortcuts="Delete Backspace"
+          draggable={false}
           // biome-ignore lint/a11y/noNoninteractiveTabindex: widget frames are keyboard-focusable groups so non-interactive widgets can be removed.
           tabIndex={0}
           onPointerDownCapture={gestureHandlers.onPointerDownCapture}
@@ -105,6 +106,7 @@ export function WidgetFrame({
             resetVisualLift();
           }}
           onContextMenu={commitZLift}
+          onDragStart={(event) => event.preventDefault()}
           onClickCapture={gestureHandlers.onClickCapture}
           onClick={commitZLift}
           onKeyDown={handleFrameKeyDown}
