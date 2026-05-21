@@ -68,7 +68,10 @@ export function luminance(hex: string): number {
 }
 
 function getContrastColor(hexColor: string): string {
-  return luminance(hexColor) > 0.5 ? "#000000" : "#ffffff";
+  const colorLuminance = luminance(hexColor);
+  const contrastWithBlack = (colorLuminance + 0.05) / 0.05;
+  const contrastWithWhite = 1.05 / (colorLuminance + 0.05);
+  return contrastWithBlack > contrastWithWhite ? "#000000" : "#ffffff";
 }
 
 function mix(hex1: string, hex2: string, factor: number): string {
@@ -262,7 +265,7 @@ export function createThemeVars(
     isDark,
   );
   const primaryForeground = hexToHsl(getContrastColor(primaryColor));
-  const textOnDanger = getContrastColor(statusRed);
+  const textOnDangerStrong = getContrastColor(statusRed);
 
   return {
     isDark,
@@ -287,7 +290,7 @@ export function createThemeVars(
       "--status-added": statusGreen,
       "--status-deleted": statusRed,
       "--status-modified": statusOrange,
-      "--text-on-danger": textOnDanger,
+      "--text-on-danger-strong": textOnDangerStrong,
     },
   };
 }

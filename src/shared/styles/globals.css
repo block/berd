@@ -224,7 +224,12 @@
   --background-muted: var(--color-gray-100);
   --background-primary: var(--brand);
   --background-inverse: var(--color-black);
-  --background-danger: var(--color-red-200);
+  --background-danger: color-mix(
+    in oklab,
+    var(--status-deleted) 12%,
+    transparent
+  );
+  --background-danger-strong: var(--status-deleted);
   --background-success: var(--color-green-200);
   --background-info: var(--color-blue-200);
   --background-warning: var(--color-yellow-200);
@@ -257,7 +262,8 @@
   --text-placeholder: var(--color-gray-500);
   --text-on-primary: var(--brand-foreground);
   --text-inverse: var(--color-white);
-  --text-danger: var(--color-red-200);
+  --text-danger: var(--status-deleted);
+  --text-on-danger-strong: var(--color-white);
   --text-success: var(--color-green-300);
   --text-warning: var(--color-yellow-200);
   --text-info: var(--color-blue-200);
@@ -323,8 +329,8 @@
   --muted-foreground: var(--text-muted);
   --accent: color-mix(in oklab, var(--brand) 12%, var(--background-muted));
   --accent-foreground: var(--text-default);
-  --destructive: var(--background-danger);
-  --destructive-foreground: var(--color-white);
+  --destructive: var(--background-danger-strong);
+  --destructive-foreground: var(--text-on-danger-strong);
   --border: var(--border-default);
   --input: var(--border-input);
 
@@ -474,7 +480,12 @@
   --background-muted: var(--color-gray-800);
   --background-primary: var(--brand);
   --background-inverse: var(--color-white);
-  --background-danger: var(--color-red-100);
+  --background-danger: color-mix(
+    in oklab,
+    var(--status-deleted) 18%,
+    transparent
+  );
+  --background-danger-strong: var(--status-deleted);
   --background-success: var(--color-green-100);
   --background-info: var(--color-blue-100);
   --background-warning: var(--color-yellow-100);
@@ -501,7 +512,8 @@
   --text-placeholder: var(--color-gray-600);
   --text-on-primary: var(--brand-foreground);
   --text-inverse: var(--color-black);
-  --text-danger: var(--color-red-100);
+  --text-danger: var(--status-deleted);
+  --text-on-danger-strong: var(--color-black);
   --text-success: var(--color-green-100);
   --text-warning: var(--color-yellow-100);
   --text-info: var(--color-blue-100);
@@ -627,6 +639,7 @@
   --color-background-popover-inverse: var(--background-popover-inverse);
   --color-background-input-pill: var(--background-input-pill);
   --color-background-danger: var(--background-danger);
+  --color-background-danger-strong: var(--background-danger-strong);
   --color-background-success: var(--background-success);
   --color-background-info: var(--background-info);
   --color-background-warning: var(--background-warning);
@@ -660,6 +673,7 @@
   --color-text-on-popover-inverse: var(--text-on-popover-inverse);
   --color-text-on-popover-inverse-muted: var(--text-on-popover-inverse-muted);
   --color-text-danger: var(--text-danger);
+  --color-text-on-danger-strong: var(--text-on-danger-strong);
   --color-text-success: var(--text-success);
   --color-text-warning: var(--text-warning);
   --color-text-info: var(--text-info);

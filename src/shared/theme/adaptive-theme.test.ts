@@ -26,7 +26,7 @@ describe("adaptive-theme", () => {
     expect(result.vars["--background"]).toBe(hexToHsl("#111827"));
     expect(result.vars["--foreground"]).toBe(hexToHsl("#f9fafb"));
     expect(result.vars["--muted-foreground"]).toBe(hexToHsl("#94a3b8"));
-    expect(result.vars["--text-on-danger"]).toBe("#ffffff");
+    expect(result.vars["--text-on-danger-strong"]).toBe("#000000");
     expect(result.vars["--status-added"]).toBe("#22c55e");
     expect(result.vars["--status-deleted"]).toBe("#ef4444");
     expect(result.vars["--status-modified"]).toBe("#f59e0b");
@@ -38,7 +38,7 @@ describe("adaptive-theme", () => {
     expect(result.isDark).toBe(false);
     expect(result.vars["--foreground"]).toBe(hexToHsl("#0f172a"));
     expect(result.vars["--muted-foreground"]).toBe(hexToHsl("#64748b"));
-    expect(result.vars["--text-on-danger"]).toBe("#ffffff");
+    expect(result.vars["--text-on-danger-strong"]).toBe("#ffffff");
     expect(result.vars["--status-added"]).toBe("#1a7f37");
     expect(result.vars["--status-deleted"]).toBe("#cf222e");
     expect(result.vars["--status-modified"]).toBe("#9a6700");

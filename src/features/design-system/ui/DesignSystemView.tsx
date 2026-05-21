@@ -4,7 +4,7 @@ import {
   IconChevronDown,
   IconSparkles,
 } from "@tabler/icons-react";
-import { Plus, Search } from "lucide-react";
+import { Plus, RefreshCw, Search } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { useTheme } from "@/shared/theme/ThemeProvider";
@@ -180,6 +180,7 @@ import {
   type DesignSystemSection,
 } from "./designSystemSections";
 import { ComponentPlayground } from "./explorer/ComponentPlayground";
+import globalsCssSource from "../../../shared/styles/globals.css?raw";
 
 type ButtonVariant = NonNullable<
   React.ComponentProps<typeof Button>["variant"]
@@ -415,415 +416,6 @@ type RuntimeToken = {
   layer?: string;
 };
 
-const shikiSourceColorTokens: RuntimeToken[] = [
-  {
-    name: "--background",
-    description: "Base app canvas, derived from editor.background.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--foreground",
-    description: "Default text color, derived from editor.foreground.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--card",
-    description: "Panel surface derived from the theme base.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--card-foreground",
-    description: "Readable text on card and alternate surfaces.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--popover",
-    description: "Floating surface derived from the theme.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--popover-foreground",
-    description: "Text on floating surfaces.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--muted",
-    description: "Subtle surface generated from the theme background.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--muted-foreground",
-    description:
-      "Muted text, derived from the Shiki comment color or generated from foreground when comments do not provide a distinct value.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--secondary",
-    description: "Neutral interactive surface generated from hover color.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--secondary-foreground",
-    description: "Text on secondary surfaces.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--hover",
-    description: "Neutral hover surface generated from the theme background.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--hover-foreground",
-    description: "Text on hover surfaces.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--border",
-    description: "Default border generated from the theme background.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--input",
-    description: "Input border generated from the theme background.",
-    layer: "Shiki input",
-  },
-  {
-    name: "--ring",
-    description: "Focus ring color.",
-    layer: "Shiki input",
-  },
-];
-
-const primaryAndStatusColorTokens: RuntimeToken[] = [
-  {
-    name: "--primary",
-    description: "Theme-derived main action and emphasis color.",
-    layer: "Theme primary",
-  },
-  {
-    name: "--primary-foreground",
-    description: "Readable text color on the primary color.",
-    layer: "Theme primary",
-  },
-  {
-    name: "--status-added",
-    description:
-      "Git added state pulled from Shiki theme metadata when present.",
-    layer: "Shiki status",
-  },
-  {
-    name: "--status-deleted",
-    description:
-      "Git deleted state pulled from Shiki theme metadata when present.",
-    layer: "Shiki status",
-  },
-  {
-    name: "--status-modified",
-    description:
-      "Git modified state pulled from Shiki theme metadata when present.",
-    layer: "Shiki status",
-  },
-];
-
-const colorThemeInputTokens = [
-  ...shikiSourceColorTokens,
-  ...primaryAndStatusColorTokens,
-];
-
-const gooseSemanticColorTokens: RuntimeToken[] = [
-  {
-    name: "--background-default",
-    description: "Default product surface.",
-    definition: "hsl(var(--background))",
-    sources: ["--background"],
-  },
-  {
-    name: "--background-card",
-    description: "Card and panel surface.",
-    definition: "hsl(var(--card))",
-    sources: ["--card"],
-  },
-  {
-    name: "--background-popover",
-    description: "Floating menu, tooltip, and overlay surface.",
-    definition: "hsl(var(--popover))",
-    sources: ["--popover"],
-  },
-  {
-    name: "--text-on-card",
-    description: "Readable text on card and panel surfaces.",
-    definition: "hsl(var(--card-foreground))",
-    sources: ["--card-foreground"],
-  },
-  {
-    name: "--text-on-popover",
-    description:
-      "Readable text on floating menu, tooltip, and overlay surfaces.",
-    definition: "hsl(var(--popover-foreground))",
-    sources: ["--popover-foreground"],
-  },
-  {
-    name: "--background-medium",
-    description: "Medium emphasis neutral surface.",
-    definition: "hsl(var(--secondary))",
-    sources: ["--secondary"],
-  },
-  {
-    name: "--background-muted",
-    description: "Quiet neutral surface.",
-    definition: "hsl(var(--muted))",
-    sources: ["--muted"],
-  },
-  {
-    name: "--background-inverse",
-    description: "High contrast inverse surface.",
-    definition: "hsl(var(--foreground))",
-    sources: ["--foreground"],
-  },
-  {
-    name: "--background-danger",
-    description: "Danger feedback surface.",
-    definition: "color-mix(in srgb, var(--status-deleted) 14-18%, transparent)",
-    sources: ["--status-deleted"],
-  },
-  {
-    name: "--background-danger-strong",
-    description: "Filled danger action surface.",
-    definition: "var(--status-deleted)",
-    sources: ["--status-deleted"],
-  },
-  {
-    name: "--background-success",
-    description: "Success feedback surface.",
-    definition: "color-mix(in srgb, var(--status-added) 14-16%, transparent)",
-    sources: ["--status-added"],
-  },
-  {
-    name: "--background-info",
-    description: "Informational feedback surface.",
-    definition: "color-mix(in srgb, hsl(var(--primary)) 14-16%, transparent)",
-    sources: ["--primary"],
-  },
-  {
-    name: "--background-warning",
-    description: "Warning feedback surface.",
-    definition:
-      "color-mix(in srgb, var(--status-modified) 10-12%, transparent)",
-    sources: ["--status-modified"],
-  },
-  {
-    name: "--background-hover",
-    description: "Hover surface.",
-    definition: "hsl(var(--hover))",
-    sources: ["--hover"],
-  },
-  {
-    name: "--background-primary",
-    description: "Primary emphasis surface.",
-    definition: "hsl(var(--primary))",
-    sources: ["--primary"],
-  },
-  {
-    name: "--border-default",
-    description: "Default product border.",
-    definition: "hsl(var(--border))",
-    sources: ["--border"],
-  },
-  {
-    name: "--border-soft",
-    description: "Soft divider or low-emphasis border.",
-    definition: "color-mix(in srgb, var(--border-default) 80%, transparent)",
-    sources: ["--border-default"],
-  },
-  {
-    name: "--border-soft-divider",
-    description: "Divider border that is quieter than the default border.",
-    definition: "color-mix(in srgb, var(--border-default) 70%, transparent)",
-    sources: ["--border-default"],
-  },
-  {
-    name: "--border-input",
-    description: "Input and form control border.",
-    definition: "hsl(var(--input))",
-    sources: ["--input"],
-  },
-  {
-    name: "--border-input-hover",
-    description: "Input and form control border on hover.",
-    definition:
-      "color-mix(in srgb, hsl(var(--input)) 72-75%, hsl(var(--foreground)))",
-    sources: ["--input", "--foreground"],
-  },
-  {
-    name: "--border-focus",
-    description: "Focused control boundary color.",
-    definition: "hsl(var(--ring))",
-    sources: ["--ring"],
-  },
-  {
-    name: "--border-strong",
-    description: "High contrast border.",
-    definition: "hsl(var(--foreground))",
-    sources: ["--foreground"],
-  },
-  {
-    name: "--border-card",
-    description: "Card boundary color.",
-    definition: "hsl(var(--border))",
-    sources: ["--border"],
-  },
-  {
-    name: "--border-inverse",
-    description: "Border for inverse surfaces.",
-    definition: "hsl(var(--background))",
-    sources: ["--background"],
-  },
-  {
-    name: "--border-danger",
-    description: "Danger border.",
-    definition: "var(--status-deleted)",
-    sources: ["--status-deleted"],
-  },
-  {
-    name: "--border-success",
-    description: "Success border.",
-    definition: "var(--status-added)",
-    sources: ["--status-added"],
-  },
-  {
-    name: "--border-warning",
-    description: "Warning border.",
-    definition: "var(--status-modified)",
-    sources: ["--status-modified"],
-  },
-  {
-    name: "--border-hover",
-    description: "Hover border.",
-    definition: "hsl(var(--hover))",
-    sources: ["--hover"],
-  },
-  {
-    name: "--border-primary",
-    description: "Primary emphasis border.",
-    definition: "hsl(var(--primary))",
-    sources: ["--primary"],
-  },
-  {
-    name: "--border-info",
-    description: "Informational border.",
-    definition: "hsl(var(--primary))",
-    sources: ["--primary"],
-  },
-  {
-    name: "--text-default",
-    description: "Default product text.",
-    definition: "hsl(var(--foreground))",
-    sources: ["--foreground"],
-  },
-  {
-    name: "--text-muted",
-    description: "Muted labels and secondary metadata.",
-    definition: "hsl(var(--muted-foreground))",
-    sources: ["--muted-foreground"],
-  },
-  {
-    name: "--text-alt",
-    description: "Alternate muted text alias.",
-    definition: "hsl(var(--muted-foreground))",
-    sources: ["--muted-foreground"],
-  },
-  {
-    name: "--text-inverse",
-    description: "Text on inverse surfaces.",
-    definition: "hsl(var(--background))",
-    sources: ["--background"],
-  },
-  {
-    name: "--text-danger",
-    description: "Danger text.",
-    definition: "var(--status-deleted)",
-    sources: ["--status-deleted"],
-  },
-  {
-    name: "--text-on-danger",
-    description: "Text on filled danger surfaces.",
-    definition: "Contrast text generated from var(--status-deleted)",
-    sources: ["--status-deleted"],
-  },
-  {
-    name: "--text-success",
-    description: "Success text.",
-    definition: "var(--status-added)",
-    sources: ["--status-added"],
-  },
-  {
-    name: "--text-warning",
-    description: "Warning text.",
-    definition: "var(--status-modified)",
-    sources: ["--status-modified"],
-  },
-  {
-    name: "--text-info",
-    description: "Informational text.",
-    definition: "hsl(var(--primary))",
-    sources: ["--primary"],
-  },
-  {
-    name: "--text-placeholder",
-    description: "Placeholder text.",
-    definition: "light: var(--color-gray-500); dark: var(--color-gray-600)",
-    sources: ["--color-gray-500", "--color-gray-600"],
-  },
-  {
-    name: "--sidebar-nav-bg-hover",
-    description: "Left navigation row fill on hover and focus.",
-    definition: "hsl(var(--hover))",
-    sources: ["--hover"],
-  },
-  {
-    name: "--sidebar-nav-bg-selected",
-    description: "Left navigation row fill for the selected destination.",
-    definition: "hsl(var(--hover))",
-    sources: ["--hover"],
-  },
-  {
-    name: "--sidebar-nav-fg",
-    description: "Left navigation row text and icon color.",
-    definition: "hsl(var(--foreground))",
-    sources: ["--foreground"],
-  },
-  {
-    name: "--text-hover",
-    description: "Text on hover surfaces.",
-    definition: "hsl(var(--hover-foreground))",
-    sources: ["--hover-foreground"],
-  },
-  {
-    name: "--text-primary",
-    description: "Primary emphasis text.",
-    definition: "hsl(var(--primary))",
-    sources: ["--primary"],
-  },
-  {
-    name: "--text-on-primary",
-    description: "Readable text on primary emphasis surfaces.",
-    definition: "hsl(var(--primary-foreground))",
-    sources: ["--primary-foreground"],
-  },
-  {
-    name: "--text-on-secondary",
-    description: "Readable text on secondary neutral surfaces.",
-    definition: "hsl(var(--secondary-foreground))",
-    sources: ["--secondary-foreground"],
-  },
-  {
-    name: "--ring-focus",
-    description: "Focus ring color.",
-    definition: "hsl(var(--ring))",
-    sources: ["--ring"],
-  },
-];
-
 const shapeTokens: RuntimeToken[] = [
   {
     name: "--radius",
@@ -918,26 +510,6 @@ const typographyTokens = [
   "--label-font-size",
   "--label-letter-spacing",
 ];
-
-const sourceColorTokenNames = new Set([
-  "--background",
-  "--foreground",
-  "--card",
-  "--card-foreground",
-  "--popover",
-  "--popover-foreground",
-  "--muted",
-  "--muted-foreground",
-  "--hover",
-  "--hover-foreground",
-  "--secondary",
-  "--secondary-foreground",
-  "--primary",
-  "--primary-foreground",
-  "--border",
-  "--input",
-  "--ring",
-]);
 
 function getManifestItem(name: string) {
   return designSystemComponentManifest.find(
@@ -1117,13 +689,13 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       anatomy: "Button",
       state: "Default",
       background: "--background-danger-strong",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
     },
     {
       anatomy: "Button",
       state: "Hover",
       background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
     },
   ],
   "destructive-flat": [
@@ -1131,13 +703,13 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       anatomy: "Button",
       state: "Default",
       background: "--background-danger-strong",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
     },
     {
       anatomy: "Button",
       state: "Hover",
       background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
     },
   ],
   secondary: [
@@ -1511,7 +1083,7 @@ function getAlertDialogTokenDetails({
     actionTone === "destructive"
       ? {
           background: "--background-danger-strong",
-          textIcon: "--text-on-danger",
+          textIcon: "--text-on-danger-strong",
         }
       : {
           background: "--background-primary",
@@ -1696,14 +1268,14 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
       anatomy: "Badge",
       state: "Default",
       background: "--background-danger-strong",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
       border: "transparent",
     },
     {
       anatomy: "Badge",
       state: "Clickable hover",
       background: "--background-danger-strong / 90%",
-      textIcon: "--text-on-danger",
+      textIcon: "--text-on-danger-strong",
       border: "transparent",
     },
   ],
@@ -2075,15 +1647,15 @@ function getSelectTokenDetails({
             {
               anatomy: "Menu surface",
               state: "Open",
-              background: "--background-popover",
-              textIcon: "--text-on-popover",
+              background: "--surface-overlay",
+              textIcon: "--text-default",
               border: "--border-default",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Default",
               background: "transparent",
-              textIcon: "--text-on-popover",
+              textIcon: "--text-default",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
@@ -2146,15 +1718,15 @@ function getDropdownMenuTokenDetails({
             {
               anatomy: "Menu surface",
               state: "Open",
-              background: "--background-popover",
-              textIcon: "--text-on-popover",
+              background: "--surface-overlay",
+              textIcon: "--text-default",
               border: "--border-default",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
               state: "Default",
               background: "transparent",
-              textIcon: isDestructive ? "--text-danger" : "--text-on-popover",
+              textIcon: isDestructive ? "--text-danger" : "--text-default",
             } satisfies TokenColorRow,
             {
               anatomy: "Menu item",
@@ -2336,7 +1908,7 @@ function ThemeControls() {
   } = useTheme();
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-background-card px-3 py-2">
+    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-surface-card px-3 py-2">
       <Select
         value={themeMode}
         onValueChange={(value) => {
@@ -2354,7 +1926,7 @@ function ThemeControls() {
       </Select>
 
       <label
-        className="relative inline-flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background-hover hover:text-text-hover focus-within:outline-none focus-within:ring-2 focus-within:ring-ring-focus"
+        className="relative inline-flex h-8 cursor-pointer items-center gap-2 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-background-muted hover:text-text-default focus-within:outline-none focus-within:ring-2 focus-within:ring-ring"
         htmlFor="design-system-primary-color"
       >
         <span
@@ -2444,13 +2016,13 @@ function ComponentSpec({ name }: { name: string }) {
       description="Pulled from the generated component manifest so source, variants, slots, and tokens stay aligned with code."
     >
       <dl className="grid gap-3 text-sm md:grid-cols-3">
-        <div className="min-w-0 rounded-md border border-border bg-background-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">Source</dt>
           <dd className="mt-1 truncate font-mono text-xs text-foreground">
             {item.source}
           </dd>
         </div>
-        <div className="min-w-0 rounded-md border border-border bg-background-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">
             Variants
           </dt>
@@ -2458,7 +2030,7 @@ function ComponentSpec({ name }: { name: string }) {
             {formatManifestVariants(item)}
           </dd>
         </div>
-        <div className="min-w-0 rounded-md border border-border bg-background-card p-3">
+        <div className="min-w-0 rounded-md border border-border bg-surface-card p-3">
           <dt className="text-xs font-medium text-muted-foreground">Slots</dt>
           <dd className="mt-1 text-foreground">{formatManifestSlots(item)}</dd>
         </div>
@@ -2555,7 +2127,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
   "Aspect Ratio": () => (
     <AspectRatio
       ratio={16 / 9}
-      className="w-72 overflow-hidden rounded-md border border-border bg-background-card"
+      className="w-72 overflow-hidden rounded-md border border-border bg-surface-card"
     >
       <div className="flex size-full items-center justify-center text-sm text-muted-foreground">
         16:9 preview
@@ -2601,7 +2173,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
       <CarouselContent>
         {["One", "Two", "Three"].map((label) => (
           <CarouselItem key={label}>
-            <div className="flex h-28 items-center justify-center rounded-md border border-border bg-background-card text-sm text-muted-foreground">
+            <div className="flex h-28 items-center justify-center rounded-md border border-border bg-surface-card text-sm text-muted-foreground">
               {label}
             </div>
           </CarouselItem>
@@ -2610,7 +2182,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     </Carousel>
   ),
   "Chart Container": () => (
-    <div className="grid h-36 w-72 grid-cols-6 items-end gap-2 rounded-md border border-border bg-background-card p-4">
+    <div className="grid h-36 w-72 grid-cols-6 items-end gap-2 rounded-md border border-border bg-surface-card p-4">
       {[40, 70, 52, 88, 64, 96].map((height, index) => (
         <div
           key={height}
@@ -2698,7 +2270,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
             actions.
           </DialogDescription>
         </DialogHeader>
-        <div className="rounded-md border border-border bg-background-card p-3 text-sm text-muted-foreground">
+        <div className="rounded-md border border-border bg-surface-card p-3 text-sm text-muted-foreground">
           Dialog body content sits inside the shared modal shell.
         </div>
         <DialogFooter>
@@ -2764,7 +2336,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     </HoverCard>
   ),
   "Image Lightbox": () => (
-    <div className="flex size-32 items-center justify-center rounded-md border border-border bg-background-card text-sm text-muted-foreground">
+    <div className="flex size-32 items-center justify-center rounded-md border border-border bg-surface-card text-sm text-muted-foreground">
       Image preview
     </div>
   ),
@@ -2823,7 +2395,7 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
       <div className="rounded-md bg-background-muted p-3 text-xs text-muted-foreground">
         Sidebar
       </div>
-      <div className="rounded-md bg-background-card p-3 text-xs text-muted-foreground">
+      <div className="rounded-md bg-surface-card p-3 text-xs text-muted-foreground">
         Content
       </div>
     </div>
@@ -2979,9 +2551,9 @@ const componentPreviewRenderers: Record<string, () => React.ReactNode> = {
     <div className="h-40 w-56 rounded-md border border-border bg-background p-3">
       <div className="mb-3 h-6 w-6 rounded bg-background-muted" />
       <div className="space-y-2">
-        <div className="h-7 rounded-md bg-sidebar-nav-bg-selected" />
-        <div className="h-7 rounded-md bg-background-card" />
-        <div className="h-7 rounded-md bg-background-card" />
+        <div className="h-7 rounded-md bg-sidebar-accent" />
+        <div className="h-7 rounded-md bg-surface-card" />
+        <div className="h-7 rounded-md bg-surface-card" />
       </div>
     </div>
   ),
@@ -3075,13 +2647,13 @@ function GenericComponentPreview({ name }: { name: string }) {
         <Badge variant="outline">Manifest</Badge>
       </div>
       <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-md border border-border bg-background-card p-3">
+        <div className="rounded-md border border-border bg-surface-card p-3">
           <p className="text-[11px] font-medium text-muted-foreground">Slots</p>
           <p className="mt-1 text-lg font-medium text-foreground">
             {slotCount}
           </p>
         </div>
-        <div className="rounded-md border border-border bg-background-card p-3">
+        <div className="rounded-md border border-border bg-surface-card p-3">
           <p className="text-[11px] font-medium text-muted-foreground">
             Variant groups
           </p>
@@ -3126,20 +2698,14 @@ function GenericComponentPage({ name }: { name: string }) {
 function TokenGrid({
   tokens,
   kind = "color",
-  showConsumers = false,
 }: {
   tokens: Array<string | RuntimeToken>;
   kind?: "color" | "shape" | "spacing" | "elevation";
-  showConsumers?: boolean;
 }) {
   const tokenItems = tokens.map((token) =>
     typeof token === "string" ? { name: token } : token,
   );
-  const tokenNames = Array.from(
-    new Set(
-      tokenItems.flatMap((token) => [token.name, ...(token.sources ?? [])]),
-    ),
-  );
+  const tokenNames = Array.from(new Set(tokenItems.map((token) => token.name)));
   const values = useRuntimeTokens(tokenNames);
 
   return (
@@ -3147,7 +2713,7 @@ function TokenGrid({
       {tokenItems.map((token) => (
         <div
           key={token.name}
-          className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-background-card p-3"
+          className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-surface-card p-3"
         >
           <TokenPreview token={token.name} kind={kind} />
           <div className="min-w-0">
@@ -3157,16 +2723,6 @@ function TokenGrid({
             <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
               {values[token.name] || "not set"}
             </p>
-            {token.sources?.length ? (
-              <TokenSources
-                token={token.name}
-                sources={token.sources}
-                values={values}
-              />
-            ) : null}
-            {showConsumers ? (
-              <TokenConsumers consumers={getTokenConsumers(token.name)} />
-            ) : null}
             {token.definition ? (
               <div className="mt-2 rounded-md border border-border bg-background px-2 py-1.5">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -3189,172 +2745,6 @@ function TokenGrid({
   );
 }
 
-function getTokenConsumers(token: string) {
-  return gooseSemanticColorTokens
-    .filter((semanticToken) => semanticToken.sources?.includes(token))
-    .map((semanticToken) => semanticToken.name);
-}
-
-function tokenMatchesSearch(
-  token: RuntimeToken,
-  query: string,
-  extraTerms: string[] = [],
-) {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) return true;
-
-  return [
-    token.name,
-    token.description,
-    token.definition,
-    token.layer,
-    ...(token.sources ?? []),
-    ...extraTerms,
-  ]
-    .filter(Boolean)
-    .some((term) => term?.toLowerCase().includes(normalizedQuery));
-}
-
-function ColorThemeInputTable({ tokens }: { tokens: RuntimeToken[] }) {
-  const values = useRuntimeTokens(tokens.map((token) => token.name));
-
-  return (
-    <div className="overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[760px] text-left text-sm">
-        <thead className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="w-32 px-3 py-2 font-medium">Layer</th>
-            <th className="w-56 px-3 py-2 font-medium">Theme input</th>
-            <th className="w-48 px-3 py-2 font-medium">Resolved</th>
-            <th className="px-3 py-2 font-medium">Used by semantic tokens</th>
-            <th className="w-64 px-3 py-2 font-medium">Meaning</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tokens.length ? (
-            tokens.map((token) => (
-              <tr
-                key={token.name}
-                className="border-b border-border last:border-0"
-              >
-                <td className="px-3 py-3 align-top">
-                  <span className="text-xs text-muted-foreground">
-                    {token.layer}
-                  </span>
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <TokenNameWithSwatch token={token.name} />
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <RuntimeTokenValue value={values[token.name]} />
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <TokenConsumerPills
-                    consumers={getTokenConsumers(token.name)}
-                  />
-                </td>
-                <td className="px-3 py-3 align-top text-xs leading-relaxed text-muted-foreground">
-                  {token.description}
-                </td>
-              </tr>
-            ))
-          ) : (
-            <tr>
-              <td
-                colSpan={5}
-                className="px-3 py-8 text-center text-sm text-muted-foreground"
-              >
-                No tokens match.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function SemanticTokenTable({ tokens }: { tokens: RuntimeToken[] }) {
-  const tokenNames = Array.from(
-    new Set(tokens.flatMap((token) => [token.name, ...(token.sources ?? [])])),
-  );
-  const values = useRuntimeTokens(tokenNames);
-
-  return (
-    <div className="overflow-x-auto rounded-md border border-border">
-      <table className="w-full min-w-[980px] text-left text-sm">
-        <thead className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
-          <tr>
-            <th className="w-28 px-3 py-2 font-medium">Role</th>
-            <th className="w-56 px-3 py-2 font-medium">Semantic token</th>
-            <th className="w-52 px-3 py-2 font-medium">Description</th>
-            <th className="w-40 px-3 py-2 font-medium">Source/theme input</th>
-            <th className="px-3 py-2 font-medium">Defined as</th>
-            <th className="w-48 px-3 py-2 font-medium">Resolved</th>
-          </tr>
-        </thead>
-        <tbody>
-          {tokens.length ? (
-            tokens.map((token) => (
-              <tr
-                key={token.name}
-                className="border-b border-border last:border-0"
-              >
-                <td className="px-3 py-3 align-top text-xs text-muted-foreground">
-                  {getSemanticTokenRole(token.name)}
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <TokenNameWithSwatch token={token.name} />
-                </td>
-                <td className="px-3 py-3 align-top text-xs leading-relaxed text-muted-foreground">
-                  {token.description}
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <div className="flex flex-wrap gap-1.5">
-                    {(token.sources ?? []).map((source) => (
-                      <TokenSourcePill
-                        key={source}
-                        token={source}
-                        value={values[source]}
-                      />
-                    ))}
-                  </div>
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <p className="break-words font-mono text-[11px] leading-relaxed text-foreground">
-                    {token.definition}
-                  </p>
-                </td>
-                <td className="px-3 py-3 align-top">
-                  <RuntimeTokenValue value={values[token.name]} />
-                </td>
-              </tr>
-            ))
-          ) : (
-            <tr>
-              <td
-                colSpan={6}
-                className="px-3 py-8 text-center text-sm text-muted-foreground"
-              >
-                No tokens match.
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function getSemanticTokenRole(token: string) {
-  if (token.startsWith("--background-")) return "surface";
-  if (token.startsWith("--border-")) return "border";
-  if (token.startsWith("--text-")) return "text";
-  if (token.startsWith("--ring-")) return "focus";
-
-  return "semantic";
-}
-
 function TokenNameWithSwatch({ token }: { token: string }) {
   return (
     <div className="flex min-w-0 items-center gap-2">
@@ -3373,93 +2763,6 @@ function RuntimeTokenValue({ value }: { value?: string }) {
   return (
     <span className="block max-w-48 truncate font-mono text-[11px] text-muted-foreground">
       {value || "not set"}
-    </span>
-  );
-}
-
-function TokenConsumerPills({ consumers }: { consumers: string[] }) {
-  if (!consumers.length) {
-    return <span className="font-mono text-xs text-text-danger">N/A</span>;
-  }
-
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {consumers.map((consumer) => (
-        <span
-          key={consumer}
-          className="rounded-full border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-foreground"
-        >
-          {consumer}
-        </span>
-      ))}
-    </div>
-  );
-}
-
-function TokenSources({
-  token,
-  sources,
-  values,
-}: {
-  token: string;
-  sources: string[];
-  values: Record<string, string>;
-}) {
-  return (
-    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-      {sources.map((source, index) => (
-        <div key={source} className="flex items-center gap-1.5">
-          {index > 0 ? (
-            <span className="text-[11px] text-muted-foreground">+</span>
-          ) : null}
-          <TokenSourcePill token={source} value={values[source]} />
-        </div>
-      ))}
-      <span className="text-[11px] text-muted-foreground">→</span>
-      <span className="rounded-full border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-foreground">
-        {token}
-      </span>
-    </div>
-  );
-}
-
-function TokenConsumers({ consumers }: { consumers: string[] }) {
-  return (
-    <div className="mt-2 rounded-md border border-border bg-background px-2 py-1.5">
-      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-        Used by semantic tokens
-      </p>
-      {consumers.length ? (
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          {consumers.map((consumer) => (
-            <span
-              key={consumer}
-              className="rounded-full border border-border bg-background-card px-2 py-0.5 font-mono text-[11px] text-foreground"
-            >
-              {consumer}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-1 text-xs text-muted-foreground">
-          No semantic token in this map uses it yet.
-        </p>
-      )}
-    </div>
-  );
-}
-
-function TokenSourcePill({ token, value }: { token: string; value?: string }) {
-  return (
-    <span
-      className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
-      title={value ? `${token}: ${value}` : token}
-    >
-      <span
-        className="size-2.5 shrink-0 rounded-full border border-border"
-        style={{ background: getTokenColorPaint(token) }}
-      />
-      <span className="truncate">{token}</span>
     </span>
   );
 }
@@ -3509,10 +2812,6 @@ function TokenPreview({
 }
 
 function getTokenColorPaint(token: string) {
-  if (sourceColorTokenNames.has(token)) {
-    return `hsl(var(${token}))`;
-  }
-
   return `var(${token})`;
 }
 
@@ -5029,131 +4328,410 @@ function TooltipPage() {
   return <GenericComponentPage name="Tooltip" />;
 }
 
+type LiveColorTokenDeclaration = {
+  scope: string;
+  value: string;
+};
+
+type LiveColorTokenRow = {
+  name: string;
+  declarations: LiveColorTokenDeclaration[];
+  dependencies: string[];
+};
+
+type LiveColorTokenTab = "app" | "raw" | "classes" | "all";
+
+const liveColorTokenTabs = [
+  { value: "app", label: "App tokens" },
+  { value: "raw", label: "Raw colors" },
+  { value: "classes", label: "Tailwind classes" },
+  { value: "all", label: "All" },
+] satisfies Array<{ value: LiveColorTokenTab; label: string }>;
+
 function ColorPage() {
-  const [activeTab, setActiveTab] = useState("semantic");
+  const [activeTab, setActiveTab] = useState<LiveColorTokenTab>("app");
   const [searchQuery, setSearchQuery] = useState("");
-  const filteredSemanticTokens = useMemo(
-    () =>
-      gooseSemanticColorTokens.filter((token) =>
-        tokenMatchesSearch(token, searchQuery, [
-          getSemanticTokenRole(token.name),
+  const [scanVersion, setScanVersion] = useState(0);
+  const colorTokenRows = useMemo(() => {
+    void scanVersion;
+    return parseLiveColorTokens(globalsCssSource);
+  }, [scanVersion]);
+  const filteredRows = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const rowsForTab = colorTokenRows.filter((row) =>
+      liveColorTokenMatchesTab(row, activeTab),
+    );
+    if (!normalizedQuery) return rowsForTab;
+
+    return rowsForTab.filter((row) =>
+      [
+        row.name,
+        ...row.dependencies,
+        ...row.declarations.flatMap((declaration) => [
+          declaration.scope,
+          declaration.value,
         ]),
-      ),
-    [searchQuery],
-  );
-  const filteredThemeInputTokens = useMemo(
-    () =>
-      colorThemeInputTokens.filter((token) => {
-        const consumers = getTokenConsumers(token.name);
-        return tokenMatchesSearch(token, searchQuery, [
-          ...consumers,
-          consumers.length ? "" : "N/A",
-        ]);
-      }),
-    [searchQuery],
-  );
-  const searchInput = (
-    <div className="relative w-full md:w-72">
-      <Search
-        aria-hidden="true"
-        className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-      />
-      <Input
-        aria-label="Search color tokens"
-        className="pl-9"
-        onChange={(event) => setSearchQuery(event.target.value)}
-        placeholder={
-          activeTab === "semantic"
-            ? "Search semantic tokens"
-            : "Search source tokens"
-        }
-        type="search"
-        value={searchQuery}
-      />
-    </div>
-  );
+      ].some((term) => term.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [activeTab, colorTokenRows, searchQuery]);
 
   return (
     <>
       <PageIntro
         title="Color tokens"
-        description="A table-first map of the color system. Scan left to right to see each token, what it resolves to, what it uses, and what depends on it."
+        description="Live from src/shared/styles/globals.css."
       />
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList variant="buttons">
-          <TabsTrigger value="semantic" variant="buttons">
-            Semantic tokens
-          </TabsTrigger>
-          <TabsTrigger value="source" variant="buttons">
-            Source/theme inputs
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="semantic" className="mt-4 space-y-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h3 className="text-base font-medium text-foreground">
-                Semantic tokens
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                These are the product-facing roles. This table makes the
-                source/theme input connection explicit instead of hiding it
-                inside the final computed color.
-              </p>
-            </div>
-            {searchInput}
-          </div>
-          <SemanticTokenTable tokens={filteredSemanticTokens} />
-        </TabsContent>
-        <TabsContent value="source" className="mt-4 space-y-3">
-          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-            <div>
-              <h3 className="text-base font-medium text-foreground">
-                Source/theme inputs
-              </h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                These are the lower-level color inputs from Shiki themes and
-                state metadata. The dependency column shows which semantic roles
-                each one feeds.
-              </p>
-            </div>
-            {searchInput}
-          </div>
-          <ColorThemeInputTable tokens={filteredThemeInputTokens} />
-        </TabsContent>
-      </Tabs>
-      <Surface title="What this is showing us">
-        <div className="grid gap-3 md:grid-cols-2">
-          {[
-            [
-              "Primary is canonical",
-              "Theme loading now sets primary directly, and semantic primary roles reference it with one vocabulary.",
-            ],
-            [
-              "Hover is a state",
-              "Neutral hover naming now matches the state it is for, so components can use it only for hover behavior.",
-            ],
-            [
-              "Semantic roles are the authoring layer",
-              "Source/theme inputs explain the theme machinery; product code should move toward background, border, and text roles.",
-            ],
-            [
-              "This page should guide cleanup",
-              "Before renaming anything, we can use this inventory to decide which names should be the preferred authoring layer.",
-            ],
-          ].map(([title, description]) => (
-            <div
-              key={title}
-              className="rounded-md border border-border bg-background-card p-3"
-            >
-              <p className="text-sm font-medium text-foreground">{title}</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {description}
-              </p>
-            </div>
-          ))}
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="relative w-full md:w-80">
+          <Search
+            aria-hidden="true"
+            className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            aria-label="Search color tokens"
+            className="pl-9"
+            onChange={(event) => setSearchQuery(event.target.value)}
+            placeholder="Search tokens"
+            type="search"
+            value={searchQuery}
+          />
         </div>
-      </Surface>
+        <Button
+          size="sm"
+          type="button"
+          variant="outline-flat"
+          onClick={() => setScanVersion((version) => version + 1)}
+        >
+          <RefreshCw aria-hidden="true" className="size-4" />
+          Refresh
+        </Button>
+      </div>
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => setActiveTab(value as LiveColorTokenTab)}
+      >
+        <TabsList variant="buttons">
+          {liveColorTokenTabs.map((tab) => (
+            <TabsTrigger key={tab.value} value={tab.value} variant="buttons">
+              {tab.label}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
+      <LiveColorTokenTable rows={filteredRows} refreshKey={scanVersion} />
     </>
+  );
+}
+
+function LiveColorTokenTable({
+  rows,
+  refreshKey,
+}: {
+  rows: LiveColorTokenRow[];
+  refreshKey: number;
+}) {
+  const tokenNames = useMemo(() => rows.map((row) => row.name), [rows]);
+  const values = useLiveRuntimeTokens(tokenNames, refreshKey);
+
+  return (
+    <div className="mt-3 overflow-x-auto rounded-md border border-border">
+      <table className="w-full min-w-[1180px] table-fixed text-left text-sm">
+        <thead className="border-b border-border bg-muted/30 text-[11px] uppercase tracking-wide text-muted-foreground">
+          <tr>
+            <th className="w-[280px] px-3 py-2 font-medium">Token</th>
+            <th className="w-[220px] px-3 py-2 font-medium">Resolved</th>
+            <th className="w-[470px] px-3 py-2 font-medium">Code</th>
+            <th className="w-[210px] px-3 py-2 font-medium">Uses</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length ? (
+            rows.map((row) => (
+              <tr
+                key={row.name}
+                className="border-b border-border last:border-0"
+              >
+                <td className="px-3 py-3 align-top">
+                  <TokenNameWithSwatch token={row.name} />
+                </td>
+                <td className="px-3 py-3 align-top">
+                  <RuntimeTokenValue value={values[row.name]} />
+                </td>
+                <td className="px-3 py-3 align-top">
+                  <div className="space-y-1">
+                    {row.declarations.map((declaration) => (
+                      <div
+                        key={`${row.name}:${declaration.scope}:${declaration.value}`}
+                        className="rounded-md border border-border bg-background px-2 py-1.5"
+                      >
+                        <span className="mb-1 block font-mono text-[10px] uppercase tracking-wide text-muted-foreground">
+                          {declaration.scope}
+                        </span>
+                        <span className="block overflow-x-auto whitespace-pre font-mono text-[11px] leading-relaxed text-foreground">
+                          {declaration.value}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-3 align-top">
+                  {row.dependencies.length ? (
+                    <div className="flex flex-wrap gap-1.5">
+                      {row.dependencies.map((dependency) => (
+                        <span
+                          key={dependency}
+                          className="rounded-full border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                        >
+                          {dependency}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="font-mono text-[11px] text-muted-foreground">
+                      —
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td
+                colSpan={4}
+                className="px-3 py-8 text-center text-sm text-muted-foreground"
+              >
+                No tokens match.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function liveColorTokenMatchesTab(
+  row: LiveColorTokenRow,
+  activeTab: LiveColorTokenTab,
+) {
+  if (activeTab === "all") return true;
+  if (activeTab === "raw") {
+    return row.declarations.some(
+      (declaration) => declaration.scope === "@theme",
+    );
+  }
+  if (activeTab === "classes") {
+    return row.declarations.some(
+      (declaration) => declaration.scope === "@theme inline",
+    );
+  }
+
+  return row.declarations.some(
+    (declaration) =>
+      declaration.scope === ":root" || declaration.scope === "dark",
+  );
+}
+
+function useLiveRuntimeTokens(tokenNames: string[], refreshKey: number) {
+  const theme = useTheme();
+  const [values, setValues] = useState<Record<string, string>>({});
+  const tokenKey = tokenNames.join("|");
+  const themeKey = [
+    theme.density,
+    theme.isLoading,
+    theme.primaryColor,
+    theme.resolvedTheme,
+    theme.themeMode,
+  ].join(":");
+
+  useEffect(() => {
+    void tokenKey;
+    void themeKey;
+    void refreshKey;
+    const styles = getComputedStyle(document.documentElement);
+    setValues(
+      Object.fromEntries(
+        tokenNames.map((token) => [
+          token,
+          styles.getPropertyValue(token).trim(),
+        ]),
+      ),
+    );
+  }, [tokenKey, themeKey, refreshKey, tokenNames]);
+
+  return values;
+}
+
+function parseLiveColorTokens(cssSource: string): LiveColorTokenRow[] {
+  const declarationsByToken = new Map<string, LiveColorTokenDeclaration[]>();
+
+  for (const block of getTopLevelCssBlocks(cssSource)) {
+    const scope = getColorTokenScope(block.selector);
+    if (!scope) continue;
+
+    for (const declaration of getTopLevelCssDeclarations(block.body)) {
+      if (!isColorTokenName(declaration.name)) continue;
+
+      const declarations = declarationsByToken.get(declaration.name) ?? [];
+      declarations.push({
+        scope,
+        value: declaration.value,
+      });
+      declarationsByToken.set(declaration.name, declarations);
+    }
+  }
+
+  return Array.from(declarationsByToken.entries()).map(
+    ([name, declarations]) => ({
+      name,
+      declarations,
+      dependencies: Array.from(
+        new Set(
+          declarations.flatMap((declaration) =>
+            Array.from(
+              declaration.value.matchAll(/var\((--[a-z0-9-]+)/g),
+              (match) => match[1],
+            ),
+          ),
+        ),
+      ),
+    }),
+  );
+}
+
+function getTopLevelCssBlocks(cssSource: string) {
+  const blocks: Array<{ selector: string; body: string }> = [];
+  let index = 0;
+
+  while (index < cssSource.length) {
+    const openIndex = cssSource.indexOf("{", index);
+    if (openIndex === -1) break;
+
+    const selector = cssSource.slice(index, openIndex).trim();
+    let depth = 1;
+    let cursor = openIndex + 1;
+
+    while (cursor < cssSource.length && depth > 0) {
+      const char = cssSource[cursor];
+      if (char === "{") depth += 1;
+      if (char === "}") depth -= 1;
+      cursor += 1;
+    }
+
+    blocks.push({
+      selector,
+      body: cssSource.slice(openIndex + 1, cursor - 1),
+    });
+    index = cursor;
+  }
+
+  return blocks;
+}
+
+function getTopLevelCssDeclarations(blockBody: string) {
+  const declarations: Array<{ name: string; value: string }> = [];
+  let depth = 0;
+  let buffer = "";
+
+  for (const char of blockBody) {
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth > 0) continue;
+
+    if (char === ";") {
+      const match = buffer.match(/(--[a-z0-9-]+)\s*:\s*([\s\S]+)/);
+      if (match) {
+        declarations.push({
+          name: match[1],
+          value: match[2].replace(/\s+/g, " ").trim(),
+        });
+      }
+      buffer = "";
+      continue;
+    }
+
+    buffer += char;
+  }
+
+  return declarations;
+}
+
+function getColorTokenScope(selector: string) {
+  const normalizedSelector = selector.replace(/\/\*[\s\S]*?\*\//g, "").trim();
+
+  if (normalizedSelector.endsWith("@theme inline")) return "@theme inline";
+  if (normalizedSelector.endsWith("@theme")) return "@theme";
+  if (normalizedSelector.endsWith(":root")) return ":root";
+  if (
+    normalizedSelector.includes('[data-theme="dark"]') ||
+    normalizedSelector.includes(".dark")
+  ) {
+    return "dark";
+  }
+
+  return null;
+}
+
+function isColorTokenName(token: string) {
+  if (
+    token.startsWith("--color-") ||
+    token.startsWith("--background-") ||
+    token.startsWith("--surface-") ||
+    token.startsWith("--canvas-") ||
+    token.startsWith("--border-") ||
+    token.startsWith("--chip-") ||
+    token.startsWith("--chart-") ||
+    token.startsWith("--sidebar") ||
+    token.startsWith("--brand") ||
+    token.startsWith("--status") ||
+    token.startsWith("--ui-warning") ||
+    token.startsWith("--clock") ||
+    token.startsWith("--dark-")
+  ) {
+    return true;
+  }
+
+  if (
+    [
+      "--foreground",
+      "--card",
+      "--card-foreground",
+      "--popover",
+      "--popover-foreground",
+      "--primary",
+      "--primary-foreground",
+      "--secondary",
+      "--secondary-foreground",
+      "--muted",
+      "--muted-foreground",
+      "--accent",
+      "--accent-foreground",
+      "--destructive",
+      "--destructive-foreground",
+      "--input",
+      "--ring",
+      "--dot-color-base",
+      "--project-tint",
+    ].includes(token)
+  ) {
+    return true;
+  }
+
+  return (
+    token.startsWith("--text-") &&
+    ![
+      "--text-xxs",
+      "--text-label-alex",
+      "--text-body-alex",
+      "--text-input-alex",
+      "--text-title-alex",
+    ].includes(token)
   );
 }
 
@@ -5212,7 +4790,7 @@ function TypographyPage() {
           {typographyInventory.map((item) => (
             <div
               key={item.className}
-              className="rounded-md border border-border bg-background-card p-3"
+              className="rounded-md border border-border bg-surface-card p-3"
             >
               <div className="flex items-center justify-between gap-3">
                 <p className="font-mono text-xs text-foreground">
@@ -5275,7 +4853,7 @@ function AuditPage() {
           ].map(([title, description]) => (
             <div
               key={title}
-              className="rounded-md border border-border bg-background-card p-3"
+              className="rounded-md border border-border bg-surface-card p-3"
             >
               <p className="text-sm font-medium text-foreground">{title}</p>
               <p className="mt-1 text-sm text-muted-foreground">

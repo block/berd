@@ -18,9 +18,10 @@ colors:
   border-input: "#e5e5e5"
   border-border-input-hover: "#cccccc"
   border-border-strong: "#1a1a1a"
-  bg-background-danger-strong: "#f94b4b"
-  text-text-on-danger: "#ffffff"
-  text-text-danger: "#f94b4b"
+  bg-background-danger: "color-mix(in oklab, #dc2626 12%, transparent)"
+  bg-background-danger-strong: "#dc2626"
+  text-text-danger: "#dc2626"
+  text-text-on-danger-strong: "#ffffff"
   text-text-success: "#73b468"
   text-text-info: "#5c98f9"
   text-text-warning: "#fbcd44"
@@ -161,7 +162,9 @@ The source palette is a semantic token system backed by a gray scale and small s
 
 ### Tertiary
 
-- **`--background-danger`, `--background-danger-strong`, `--border-danger`, `--text-danger`**: Danger and failure states.
+- **`--background-danger`, `--text-danger`**: Soft danger and failure states; use these as a pair.
+- **`--background-danger-strong`, `--text-on-danger-strong`**: Filled destructive action states; use these as a pair.
+- **`--border-danger`**: Danger and failure boundaries.
 - **`--background-success`, `--border-success`, `--text-success`**: Success and ready states.
 - **`--background-info`, `--border-info`, `--text-info`**: Informational state and system feedback.
 - **`--background-warning`, `--border-warning`, `--text-warning`**: Warning state.

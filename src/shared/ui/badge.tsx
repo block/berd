@@ -15,7 +15,7 @@ const badgeVariants = cva(
         secondary:
           "border-transparent bg-background-muted text-text-default [a&]:hover:bg-background-muted/90",
         destructive:
-          "border-transparent bg-background-danger-strong text-text-on-danger [a&]:hover:bg-background-danger-strong/90 focus-visible:ring-border-danger/20 dark:focus-visible:ring-border-danger/40 dark:bg-background-danger-strong/60",
+          "border-transparent bg-background-danger-strong text-text-on-danger-strong [a&]:hover:bg-background-danger-strong/90 focus-visible:ring-border-danger/20 dark:focus-visible:ring-border-danger/40",
         outline:
           "text-text-default [a&]:hover:bg-background-muted [a&]:hover:text-text-muted",
       },

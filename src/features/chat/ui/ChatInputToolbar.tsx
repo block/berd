@@ -433,7 +433,7 @@ export function ChatInputToolbar({
                   }
                   className={cn(
                     voiceRecording &&
-                      "bg-background-danger text-text-danger hover:bg-background-danger hover:text-text-danger",
+                      "bg-background-danger-strong text-text-on-danger-strong hover:bg-background-danger-strong/90 hover:text-text-on-danger-strong",
                     voiceTranscribing && "animate-pulse",
                   )}
                 >
@@ -460,7 +460,7 @@ export function ChatInputToolbar({
               onClick={onStop}
               variant="ghost"
               size="icon-sm"
-              className="rounded-full bg-background-danger text-text-danger hover:bg-background-danger hover:text-text-danger"
+              className="rounded-full bg-background-danger-strong text-text-on-danger-strong hover:bg-background-danger-strong/90 hover:text-text-on-danger-strong"
               aria-label={t("toolbar.stopGeneration")}
               title={t("toolbar.stopGeneration")}
             >
