@@ -1,0 +1,247 @@
+import { useCallback, useEffect, useState } from "react";
+import {
+  cachedAssetToMedia,
+  ensureAvatarCollection,
+  getAvatarCatalog,
+  getCachedAvatarCollections,
+} from "@/shared/api/avatars";
+import type {
+  AvatarCatalog,
+  AvatarCollection,
+  CachedAvatarCollection,
+  ResolvedAvatarMedia,
+} from "@/shared/avatars/catalog";
+
+interface CachedAvatarMediaEntry {
+  catalogVersion: string;
+  media: ResolvedAvatarMedia;
+}
+
+export interface AvatarLibraryState {
+  catalog: AvatarCatalog | null;
+  cachedAvatarMediaById: Record<string, CachedAvatarMediaEntry>;
+  loading: boolean;
+  cacheChecking: boolean;
+  error: boolean;
+  downloadingCollectionId: string | null;
+  failedCollectionIds: Set<string>;
+  retryCatalog: () => void;
+  openCollection: (collection: AvatarCollection) => Promise<void>;
+  isCollectionCached: (collection: AvatarCollection) => boolean;
+}
+
+function mergeCachedCollectionsForCatalog(
+  current: Record<string, CachedAvatarMediaEntry>,
+  collections: CachedAvatarCollection[],
+  catalogVersion: string,
+): Record<string, CachedAvatarMediaEntry> {
+  const next = { ...current };
+  for (const collection of collections) {
+    if (collection.catalogVersion !== catalogVersion) {
+      continue;
+    }
+    for (const asset of collection.assets) {
+      next[asset.id] = {
+        catalogVersion,
+        media: cachedAssetToMedia(asset),
+      };
+    }
+  }
+  return next;
+}
+
+function hasCachedCollectionAssets({
+  cachedAvatarMediaById,
+  catalogVersion,
+  collection,
+  cachedCollection,
+}: {
+  cachedAvatarMediaById: Record<string, CachedAvatarMediaEntry>;
+  catalogVersion: string;
+  collection: AvatarCollection;
+  cachedCollection: CachedAvatarCollection;
+}): boolean {
+  const ensuredAssetIds =
+    cachedCollection.catalogVersion === catalogVersion
+      ? new Set(cachedCollection.assets.map((asset) => asset.id))
+      : new Set<string>();
+
+  return collection.avatarIds.every(
+    (avatarId) =>
+      ensuredAssetIds.has(avatarId) ||
+      cachedAvatarMediaById[avatarId]?.catalogVersion === catalogVersion,
+  );
+}
+
+export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
+  const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
+  const [catalogRetryToken, setCatalogRetryToken] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [cacheChecking, setCacheChecking] = useState(false);
+  const [error, setError] = useState(false);
+  const [downloadingCollectionId, setDownloadingCollectionId] = useState<
+    string | null
+  >(null);
+  const [failedCollectionIds, setFailedCollectionIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [cachedAvatarMediaById, setCachedAvatarMediaById] = useState<
+    Record<string, CachedAvatarMediaEntry>
+  >({});
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: catalogRetryToken intentionally retriggers catalog loading when Retry is clicked.
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    setCacheChecking(false);
+    setError(false);
+
+    const loadCachedAvatarCollections = async (nextCatalog: AvatarCatalog) => {
+      try {
+        setCacheChecking(true);
+        const cachedCollections = await getCachedAvatarCollections({
+          catalog: nextCatalog,
+        });
+        if (cancelled) {
+          return;
+        }
+
+        setCachedAvatarMediaById((current) =>
+          mergeCachedCollectionsForCatalog(
+            current,
+            cachedCollections,
+            nextCatalog.catalogVersion,
+          ),
+        );
+      } catch (loadError) {
+        console.warn("Failed to inspect cached avatar collections:", loadError);
+      } finally {
+        if (!cancelled) {
+          setCacheChecking(false);
+        }
+      }
+    };
+
+    const loadAvatarCatalog = async () => {
+      try {
+        const nextCatalog = await getAvatarCatalog();
+        if (!cancelled) {
+          setCatalog(nextCatalog);
+          setCachedAvatarMediaById({});
+          setFailedCollectionIds(new Set());
+          setError(false);
+        }
+        void loadCachedAvatarCollections(nextCatalog);
+      } catch (loadError) {
+        console.warn("Failed to load avatar catalog:", loadError);
+        if (!cancelled) {
+          setCatalog(null);
+          setError(true);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadAvatarCatalog();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogRetryToken, enabled]);
+
+  const isCollectionCached = useCallback(
+    (collection: AvatarCollection) =>
+      collection.avatarIds.every(
+        (avatarId) =>
+          cachedAvatarMediaById[avatarId]?.catalogVersion ===
+          catalog?.catalogVersion,
+      ),
+    [catalog?.catalogVersion, cachedAvatarMediaById],
+  );
+
+  const openCollection = useCallback(
+    async (collection: AvatarCollection) => {
+      if (!catalog) {
+        return;
+      }
+
+      if (isCollectionCached(collection)) {
+        setFailedCollectionIds((current) => {
+          if (!current.has(collection.id)) {
+            return current;
+          }
+          const next = new Set(current);
+          next.delete(collection.id);
+          return next;
+        });
+        return;
+      }
+
+      setDownloadingCollectionId(collection.id);
+
+      try {
+        const cachedCollection = await ensureAvatarCollection({
+          catalogVersion: catalog.catalogVersion,
+          collectionId: collection.id,
+        });
+        setCachedAvatarMediaById((current) =>
+          mergeCachedCollectionsForCatalog(
+            current,
+            [cachedCollection],
+            catalog.catalogVersion,
+          ),
+        );
+        const failedAssetIds = cachedCollection.failedAssetIds ?? [];
+        const collectionCachedAfterEnsure = hasCachedCollectionAssets({
+          cachedAvatarMediaById,
+          catalogVersion: catalog.catalogVersion,
+          collection,
+          cachedCollection,
+        });
+        setFailedCollectionIds((current) => {
+          const next = new Set(current);
+          if (failedAssetIds.length > 0 || !collectionCachedAfterEnsure) {
+            next.add(collection.id);
+          } else {
+            next.delete(collection.id);
+          }
+          return next;
+        });
+      } catch (downloadError) {
+        console.warn("Failed to download avatar collection:", downloadError);
+        setFailedCollectionIds((current) =>
+          new Set(current).add(collection.id),
+        );
+      } finally {
+        setDownloadingCollectionId((current) =>
+          current === collection.id ? null : current,
+        );
+      }
+    },
+    [cachedAvatarMediaById, catalog, isCollectionCached],
+  );
+
+  const retryCatalog = useCallback(() => {
+    setCatalogRetryToken((value) => value + 1);
+  }, []);
+
+  return {
+    catalog,
+    cachedAvatarMediaById,
+    loading,
+    cacheChecking,
+    error,
+    downloadingCollectionId,
+    failedCollectionIds,
+    retryCatalog,
+    openCollection,
+    isCollectionCached,
+  };
+}

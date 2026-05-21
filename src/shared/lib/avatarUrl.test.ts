@@ -24,14 +24,12 @@ describe("avatarUrl", () => {
     expect(normalizeAvatarRef("app-avatar:gloopy-2")).toBe(
       "app-avatar:gloopy-2",
     );
-    expect(resolveAvatarSrc("app-avatar:gloopy-1")).toContain("gloopy-1.webm");
-    expect(resolveAvatarMedia("app-avatar:gloopy-1")).toMatchObject({
-      mediaType: "video",
-    });
+    expect(resolveAvatarSrc("app-avatar:gloopy-1")).toBeUndefined();
+    expect(resolveAvatarMedia("app-avatar:gloopy-1")).toBeUndefined();
   });
 
-  it("rejects unknown bundled avatar refs", () => {
-    expect(normalizeAvatarUrl("app-avatar:unknown")).toBeUndefined();
+  it("accepts unknown but safe app avatar refs", () => {
+    expect(normalizeAvatarUrl("app-avatar:unknown")).toBe("app-avatar:unknown");
     expect(resolveAvatarSrc("app-avatar:../gloopy-1")).toBeUndefined();
   });
 

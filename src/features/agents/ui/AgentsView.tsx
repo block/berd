@@ -115,6 +115,20 @@ export function AgentsView({
     [isActivePersonaControlled, onActivePersonaIdChange],
   );
 
+  const handleSelectPersona = useCallback(
+    (persona: Persona) => setActivePersona(persona.id),
+    [setActivePersona],
+  );
+
+  const handleEditPersona = useCallback(
+    (persona: Persona) => openPersonaEditor(persona, "edit"),
+    [openPersonaEditor],
+  );
+
+  const handleCreatePersona = useCallback(() => {
+    openPersonaEditor();
+  }, [openPersonaEditor]);
+
   useEffect(() => {
     if (
       currentActivePersonaId &&
@@ -405,12 +419,12 @@ export function AgentsView({
       <section aria-labelledby="personas-heading">
         <PersonaGallery
           personas={personas}
-          onSelectPersona={(p) => setActivePersona(p.id)}
-          onEditPersona={(p) => openPersonaEditor(p, "edit")}
+          onSelectPersona={handleSelectPersona}
+          onEditPersona={handleEditPersona}
           onDuplicatePersona={handleDuplicatePersona}
           onDeletePersona={handleDeletePersona}
           onExportPersona={handleExportPersona}
-          onCreatePersona={() => openPersonaEditor()}
+          onCreatePersona={handleCreatePersona}
           onImportFile={handleImportFileBytes}
           validateImportFile={validateImportFile}
           onImportError={handleImportError}

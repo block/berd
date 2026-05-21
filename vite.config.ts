@@ -11,47 +11,14 @@ const packageJson = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 ) as { version: string };
 
-type AvatarFormat = "webm" | "hevc";
-
-function isDarwinTarget(): boolean {
-  return (
-    process.env.TAURI_ENV_PLATFORM === "darwin" ||
-    process.env.TAURI_ENV_TARGET_TRIPLE?.endsWith("-darwin") === true
-  );
-}
-
-function resolveAvatarFormat(): AvatarFormat {
-  const explicitFormat = process.env.GOOSE_AVATAR_FORMAT?.toLowerCase();
-  if (explicitFormat === "webm" || explicitFormat === "hevc") {
-    return explicitFormat;
-  }
-  if (explicitFormat) {
-    throw new Error(
-      `Unsupported GOOSE_AVATAR_FORMAT "${explicitFormat}". Expected "webm" or "hevc".`,
-    );
-  }
-
-  return isDarwinTarget() ? "hevc" : "webm";
-}
-
 export default defineConfig(async () => {
-  const avatarFormat = resolveAvatarFormat();
-
   return {
     plugins: [react()],
-    assetsInclude: ["**/*.mov", "**/*.mp4"],
     define: {
       "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
     },
     resolve: {
       alias: [
-        {
-          find: "@/shared/avatars/catalog-assets",
-          replacement: resolve(
-            rootDir,
-            `src/shared/avatars/catalog-assets.${avatarFormat}.ts`,
-          ),
-        },
         {
           find: "@",
           replacement: resolve(rootDir, "src"),

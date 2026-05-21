@@ -238,6 +238,7 @@ function MentionAvatar({ persona }: { persona: Persona }) {
       <AvatarMedia
         media={avatarMedia}
         alt={persona.displayName}
+        loadingStrategy="visible-video"
         className="h-7 w-7 rounded-full object-cover"
       />
     );

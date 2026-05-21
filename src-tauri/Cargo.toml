@@ -29,6 +29,7 @@ reqwest = { version = "0.13.3", default-features = false, features = ["json", "r
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
+sha2 = "0.10"
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "sqlite", "migrate", "macros"] }
 tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-app-test-driver = { path = "plugins/app-test-driver" }

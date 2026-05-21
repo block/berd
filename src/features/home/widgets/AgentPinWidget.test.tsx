@@ -1,5 +1,8 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getCachedAvatarForRef } from "@/shared/api/avatars";
 import type { Persona } from "@/shared/types/agents";
 import type { WidgetInstance } from "./types";
 import { AgentPinWidget } from "./AgentPinWidget";
@@ -10,6 +13,16 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
   useAgentStore: (selector: (store: { personas: Persona[] }) => unknown) =>
     selector(state),
 }));
+
+vi.mock("@/shared/api/avatars", () => ({
+  cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
+    src: `asset://${asset.path}`,
+    mediaType: asset.mimeType.startsWith("video/") ? "video" : "image",
+  }),
+  getCachedAvatarForRef: vi.fn(),
+}));
+
+const getCachedAvatarForRefMock = vi.mocked(getCachedAvatarForRef);
 
 const instance: WidgetInstance = {
   id: "agent-pin-1",
@@ -32,31 +45,55 @@ function persona(overrides: Partial<Persona> = {}): Persona {
 }
 
 function renderPin() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+  function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  }
+
   return render(
     <AgentPinWidget
       instance={instance}
       onUpdateState={vi.fn()}
       onOpenAgent={vi.fn()}
     />,
+    { wrapper: Wrapper },
   );
 }
 
 describe("AgentPinWidget", () => {
   beforeEach(() => {
     state.personas = [persona()];
+    getCachedAvatarForRefMock.mockReset();
+    getCachedAvatarForRefMock.mockResolvedValue({
+      catalogVersion: "v1",
+      collectionId: "gloopies",
+      asset: {
+        id: "gloopy-1",
+        path: "/tmp/goose/avatars/v1/hevc/gloopies/gloopy-1.mp4",
+        mimeType: "video/mp4",
+      },
+    });
     vi.clearAllMocks();
   });
 
   it.each([
     ["remote", "https://example.test/scout.png", 'img[src$="scout.png"]'],
     ["bundled", "app-avatar:gloopy-1", "video"],
-  ])("renders %s avatars as a transparent visual tile", (_, avatar, media) => {
+  ])("renders %s avatars as a transparent visual tile", async (_, avatar, media) => {
     state.personas = [persona({ avatar })];
 
     const { container } = renderPin();
     const button = screen.getByRole("button", { name: "Open Agent One" });
 
-    expect(button).toHaveClass("bg-transparent");
+    await waitFor(() => expect(button).toHaveClass("bg-transparent"));
     expect(button).not.toHaveClass("bg-surface-card");
     expect(screen.getByText("Agent One")).toBeInTheDocument();
     expect(container.querySelector(media)).toBeInTheDocument();

@@ -207,6 +207,7 @@ function PersonaAvatar({
       <AvatarMedia
         media={avatarMedia}
         alt={persona?.displayName ?? ""}
+        loadingStrategy="visible-video"
         className={cn(dim, "rounded-full object-cover")}
       />
     );

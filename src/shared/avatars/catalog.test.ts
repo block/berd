@@ -1,80 +1,125 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import {
+  avatarRef,
+  isAppAvatarRef,
+  parseAvatarCatalog,
+  parseAvatarRef,
+} from "./catalog";
 
-const catalogAssetsModule = "@/shared/avatars/catalog-assets";
-
-const webmModules = {
-  "../assets/avatars/webm/fuzzies/fuzzy-1.webm": "/assets/fuzzy-1.webm",
-  "../assets/avatars/webm/gloopies/gloopy-1.webm": "/assets/gloopy-1.webm",
+const validCatalog = {
+  schemaVersion: 1,
+  catalogVersion: "v1",
+  collections: [
+    {
+      id: "gloopies",
+      label: "Gloopies",
+      coverAvatarId: "gloopy-1",
+      avatarIds: ["gloopy-1"],
+    },
+  ],
+  assets: [
+    {
+      id: "gloopy-1",
+      label: "Gloopy 1",
+      collectionId: "gloopies",
+      variants: {
+        webm: {
+          path: "webm/gloopies/gloopy-1.webm",
+          mimeType: "video/webm",
+          byteSize: 100,
+          sha256: "a".repeat(64),
+        },
+        hevc: {
+          path: "hevc/gloopies/gloopy-1.mp4",
+          mimeType: "video/mp4",
+          byteSize: 200,
+          sha256: "b".repeat(64),
+        },
+      },
+    },
+  ],
 };
-
-const hevcModules = {
-  "../assets/avatars/hevc/fuzzies/fuzzy-1.mov": "/assets/fuzzy-1.mov",
-  "../assets/avatars/hevc/gloopies/gloopy-1.mov": "/assets/gloopy-1.mov",
-};
-
-const hevcMp4Modules = {
-  "../assets/avatars/hevc/fuzzies/fuzzy-1.mp4": "/assets/fuzzy-1.mp4",
-  "../assets/avatars/hevc/gloopies/gloopy-1.mp4": "/assets/gloopy-1.mp4",
-};
-
-type AvatarFormat = "webm" | "hevc";
-
-async function loadCatalog(
-  format: AvatarFormat,
-  modules: Record<string, string>,
-) {
-  vi.resetModules();
-  vi.doMock(catalogAssetsModule, () => ({
-    avatarAssetFormat: format,
-    avatarModules: modules,
-  }));
-
-  return import("./catalog");
-}
-
-afterEach(() => {
-  vi.doUnmock(catalogAssetsModule);
-  vi.resetModules();
-});
 
 describe("avatar catalog", () => {
-  it("builds matching avatar ids for WebM and HEVC modules", async () => {
-    const webmCatalog = await loadCatalog("webm", webmModules);
-    const webmIds = webmCatalog.avatarCatalog.map((entry) => entry.id);
-
-    const hevcCatalog = await loadCatalog("hevc", hevcModules);
-    const hevcIds = hevcCatalog.avatarCatalog.map((entry) => entry.id);
-
-    expect(webmIds).toEqual(hevcIds);
-  });
-
-  it("resolves bundled avatar refs to WebM when the WebM module is selected", async () => {
-    const catalog = await loadCatalog("webm", webmModules);
-
-    expect(catalog.avatarCatalogFormat).toBe("webm");
-    expect(catalog.resolveBundledAvatarMedia("app-avatar:gloopy-1")).toEqual({
-      src: "/assets/gloopy-1.webm",
-      mediaType: "video",
+  it("parses a schema v1 remote catalog", () => {
+    expect(parseAvatarCatalog(validCatalog)).toMatchObject({
+      schemaVersion: 1,
+      catalogVersion: "v1",
+      collections: [{ id: "gloopies" }],
+      assets: [{ id: "gloopy-1" }],
     });
   });
 
-  it("resolves bundled avatar refs to MOV when the HEVC module is selected", async () => {
-    const catalog = await loadCatalog("hevc", hevcModules);
-
-    expect(catalog.avatarCatalogFormat).toBe("hevc");
-    expect(catalog.resolveBundledAvatarMedia("app-avatar:gloopy-1")).toEqual({
-      src: "/assets/gloopy-1.mov",
-      mediaType: "video",
-    });
+  it("rejects unsupported schemas and unsafe paths", () => {
+    expect(() =>
+      parseAvatarCatalog({ ...validCatalog, schemaVersion: 2 }),
+    ).toThrow(/schema/);
+    expect(() =>
+      parseAvatarCatalog({
+        ...validCatalog,
+        assets: [
+          {
+            ...validCatalog.assets[0],
+            variants: {
+              webm: {
+                ...validCatalog.assets[0].variants.webm,
+                path: "../gloopy-1.webm",
+              },
+            },
+          },
+        ],
+      }),
+    ).toThrow(/contents/);
   });
 
-  it("resolves bundled avatar refs to MP4 when HEVC MP4 assets are selected", async () => {
-    const catalog = await loadCatalog("hevc", hevcMp4Modules);
+  it("rejects catalogs missing either platform variant", () => {
+    expect(() =>
+      parseAvatarCatalog({
+        ...validCatalog,
+        assets: [
+          {
+            ...validCatalog.assets[0],
+            variants: {
+              webm: validCatalog.assets[0].variants.webm,
+            },
+          },
+        ],
+      }),
+    ).toThrow(/contents/);
 
-    expect(catalog.avatarCatalogFormat).toBe("hevc");
-    expect(catalog.resolveBundledAvatarMedia("app-avatar:gloopy-1")).toEqual({
-      src: "/assets/gloopy-1.mp4",
-      mediaType: "video",
-    });
+    expect(() =>
+      parseAvatarCatalog({
+        ...validCatalog,
+        assets: [
+          {
+            ...validCatalog.assets[0],
+            variants: {
+              hevc: validCatalog.assets[0].variants.hevc,
+            },
+          },
+        ],
+      }),
+    ).toThrow(/contents/);
+  });
+
+  it("rejects catalogs with invalid collection references", () => {
+    expect(() =>
+      parseAvatarCatalog({
+        ...validCatalog,
+        collections: [
+          {
+            ...validCatalog.collections[0],
+            avatarIds: ["missing-avatar"],
+          },
+        ],
+      }),
+    ).toThrow(/contents/);
+  });
+
+  it("normalizes app-avatar references by syntax", () => {
+    expect(avatarRef("gloopy-99")).toBe("app-avatar:gloopy-99");
+    expect(parseAvatarRef(" app-avatar:gloopy-99 ")).toBe("gloopy-99");
+    expect(isAppAvatarRef("app-avatar:unknown-but-safe")).toBe(true);
+    expect(parseAvatarRef("app-avatar:../gloopy-1")).toBeUndefined();
   });
 });

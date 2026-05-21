@@ -41,7 +41,7 @@
       },
       "assetProtocol": {
         "enable": true,
-        "scope": ["$HOME/.goose/avatars/**"]
+        "scope": ["$APPDATA/avatars/media/**/*", "$HOME/**/*", "$TEMP/**/*"]
       }
     }
   },

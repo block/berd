@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconCopy,
@@ -43,7 +43,7 @@ interface PersonaCardProps {
  *
  * The avatar is a deterministic 1-of-4 PNG keyed off persona.id.
  */
-export function PersonaCard({
+export const PersonaCard = memo(function PersonaCard({
   persona,
   onSelect,
   onEdit,
@@ -92,6 +92,7 @@ export function PersonaCard({
             media={avatarMedia}
             alt={persona.displayName}
             lazy
+            loadingStrategy="visible-video"
             className={cn(
               "pointer-events-none object-contain transition-transform duration-300",
               "group-hover:scale-[1.02]",
@@ -178,4 +179,4 @@ export function PersonaCard({
       </div>
     </div>
   );
-}
+});

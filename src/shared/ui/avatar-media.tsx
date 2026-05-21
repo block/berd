@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactEventHandler } from "react";
+import {
+  memo,
+  useEffect,
+  useRef,
+  useState,
+  type ReactEventHandler,
+} from "react";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
 import { cn } from "@/shared/lib/cn";
 
@@ -7,21 +13,27 @@ interface AvatarMediaProps {
   alt?: string;
   className?: string;
   lazy?: boolean;
+  loadingStrategy?: "eager" | "lazy-once" | "visible-video";
+  poster?: string;
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
 }
 
-export function AvatarMedia({
+export const AvatarMedia = memo(function AvatarMedia({
   media,
   alt = "",
   className,
   lazy = false,
+  loadingStrategy = lazy ? "lazy-once" : "eager",
+  poster,
   onError,
 }: AvatarMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [shouldLoadVideo, setShouldLoadVideo] = useState(!lazy);
+  const [shouldLoadVideo, setShouldLoadVideo] = useState(
+    loadingStrategy === "eager",
+  );
 
   useEffect(() => {
-    if (media.mediaType !== "video" || !lazy) {
+    if (media.mediaType !== "video" || loadingStrategy === "eager") {
       setShouldLoadVideo(true);
       return;
     }
@@ -40,7 +52,11 @@ export function AvatarMedia({
       ([entry]) => {
         if (entry?.isIntersecting) {
           setShouldLoadVideo(true);
-          observer.disconnect();
+          if (loadingStrategy === "lazy-once") {
+            observer.disconnect();
+          }
+        } else if (loadingStrategy === "visible-video") {
+          setShouldLoadVideo(false);
         }
       },
       { rootMargin: "160px" },
@@ -48,7 +64,7 @@ export function AvatarMedia({
 
     observer.observe(video);
     return () => observer.disconnect();
-  }, [lazy, media.mediaType, media.src]);
+  }, [loadingStrategy, media.mediaType, media.src]);
 
   if (media.mediaType === "video") {
     return (
@@ -58,8 +74,9 @@ export function AvatarMedia({
         autoPlay
         loop
         muted
+        poster={poster}
         playsInline
-        preload={lazy ? "none" : "metadata"}
+        preload={loadingStrategy === "eager" ? "metadata" : "none"}
         role={alt ? "img" : undefined}
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}
@@ -77,4 +94,4 @@ export function AvatarMedia({
       onError={onError}
     />
   );
-}
+});
