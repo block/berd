@@ -17,6 +17,10 @@
     "title": "About"
   },
   "appearance": {
+    "animatedAvatars": {
+      "description": "Loop video avatars in chats, agent lists, and previews.",
+      "label": "Animated avatars"
+    },
     "density": {
       "description": "Adjust spacing throughout the app.",
       "label": "Interface density",

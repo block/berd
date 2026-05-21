@@ -111,4 +111,30 @@ describe("GeneralSettings appearance section", () => {
     });
     expect(switchControl).toBeChecked();
   });
+
+  it("restores animated avatar playback", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem("goose:animated-avatars-enabled", "false");
+
+    renderWithProviders(
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>,
+    );
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Animated avatars",
+    });
+
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(localStorage.getItem("goose:animated-avatars-enabled")).toBe(
+        "true",
+      );
+    });
+    expect(switchControl).toBeChecked();
+  });
 });

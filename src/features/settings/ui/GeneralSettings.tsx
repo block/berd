@@ -19,6 +19,7 @@ import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
+import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 
 const DENSITY_OPTIONS = [
   { value: "compact" },
@@ -95,6 +96,7 @@ export function GeneralSettings() {
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
+  const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const {
     themeMode,
     setThemeMode,
@@ -254,6 +256,17 @@ export function GeneralSettings() {
             })}
           </div>
         </div>
+
+        <SettingRow
+          label={t("appearance.animatedAvatars.label")}
+          description={t("appearance.animatedAvatars.description")}
+        >
+          <Switch
+            checked={animatedAvatarsPreference.enabled}
+            onCheckedChange={animatedAvatarsPreference.setEnabled}
+            aria-label={t("appearance.animatedAvatars.label")}
+          />
+        </SettingRow>
 
         <SettingRow
           label={t("appearance.primary.label")}

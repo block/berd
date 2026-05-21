@@ -1,11 +1,14 @@
 import {
   memo,
+  useCallback,
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactEventHandler,
 } from "react";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
+import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { cn } from "@/shared/lib/cn";
 
 interface AvatarMediaProps {
@@ -18,6 +21,23 @@ interface AvatarMediaProps {
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
 }
 
+function getVideoPreload(
+  animatedAvatarsEnabled: boolean,
+  shouldLoadVideo: boolean,
+  loadingStrategy: AvatarMediaProps["loadingStrategy"],
+) {
+  if (!animatedAvatarsEnabled && shouldLoadVideo) {
+    // No poster asset today, so load the video to paint frame 0.
+    return "auto";
+  }
+
+  if (loadingStrategy === "eager") {
+    return "metadata";
+  }
+
+  return "none";
+}
+
 function stopVideo(video: HTMLVideoElement) {
   if (!video.hasAttribute("src") && !video.currentSrc) {
     return;
@@ -26,6 +46,34 @@ function stopVideo(video: HTMLVideoElement) {
   video.pause();
   video.removeAttribute("src");
   video.load();
+}
+
+function getReducedMotionMediaQuery() {
+  if (typeof window.matchMedia !== "function") {
+    return null;
+  }
+
+  return window.matchMedia("(prefers-reduced-motion: reduce)");
+}
+
+function usePrefersReducedMotion() {
+  const subscribe = useCallback((onStoreChange: () => void) => {
+    const mediaQuery = getReducedMotionMediaQuery();
+    if (!mediaQuery) {
+      return () => {};
+    }
+
+    mediaQuery.addEventListener("change", onStoreChange);
+    return () => {
+      mediaQuery.removeEventListener("change", onStoreChange);
+    };
+  }, []);
+
+  return useSyncExternalStore(
+    subscribe,
+    () => getReducedMotionMediaQuery()?.matches ?? false,
+    () => false,
+  );
 }
 
 export const AvatarMedia = memo(function AvatarMedia({
@@ -38,6 +86,9 @@ export const AvatarMedia = memo(function AvatarMedia({
   onError,
 }: AvatarMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
+  const prefersReducedMotion = usePrefersReducedMotion();
+  const shouldAnimateVideo = animatedAvatarsEnabled && !prefersReducedMotion;
   const [shouldLoadVideo, setShouldLoadVideo] = useState(
     loadingStrategy === "eager",
   );
@@ -95,20 +146,30 @@ export const AvatarMedia = memo(function AvatarMedia({
       video.setAttribute("src", media.src);
     }
 
-    void video.play().catch(() => {});
+    if (shouldAnimateVideo) {
+      void video.play().catch(() => {});
+    } else {
+      video.pause();
+    }
 
     return () => stopVideo(video);
-  }, [media.mediaType, media.src, shouldLoadVideo]);
+  }, [media.mediaType, media.src, shouldAnimateVideo, shouldLoadVideo]);
 
   if (media.mediaType === "video") {
+    const preload = getVideoPreload(
+      shouldAnimateVideo,
+      shouldLoadVideo,
+      loadingStrategy,
+    );
+
     return (
       <video
         ref={videoRef}
-        loop
+        loop={shouldAnimateVideo}
         muted
         poster={poster}
         playsInline
-        preload={loadingStrategy === "eager" ? "metadata" : "none"}
+        preload={preload}
         role={alt ? "img" : undefined}
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}

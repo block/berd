@@ -17,6 +17,10 @@
     "title": "Acerca de"
   },
   "appearance": {
+    "animatedAvatars": {
+      "description": "Reproduce avatares de video en bucle en chats, listas de agentes y vistas previas.",
+      "label": "Avatares animados"
+    },
     "density": {
       "description": "Ajusta el espaciado de los elementos de la interfaz",
       "label": "Densidad de la interfaz",
