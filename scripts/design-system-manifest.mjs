@@ -1,9 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
+const require = createRequire(import.meta.url);
 const repoRoot = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -12,6 +14,12 @@ const sharedUiDir = path.join(repoRoot, "src/shared/ui");
 const manifestPath = path.join(
   repoRoot,
   "src/features/design-system/generated/componentManifest.ts",
+);
+const biomePackagePath = require.resolve("@biomejs/biome/package.json");
+const biomePackage = JSON.parse(fs.readFileSync(biomePackagePath, "utf8"));
+const biomeBinPath = path.join(
+  path.dirname(biomePackagePath),
+  biomePackage.bin.biome,
 );
 
 const sourceTokenNames = new Set([
@@ -413,11 +421,9 @@ export type DesignSystemComponentManifestItem = {
 export const designSystemComponentManifest = ${JSON.stringify(manifest, null, 2)} as const satisfies readonly DesignSystemComponentManifestItem[];
 `;
 
-  const formatted = execFileSync(
-    "pnpm",
+  return execFileSync(
+    biomeBinPath,
     [
-      "exec",
-      "biome",
       "format",
       "--stdin-file-path",
       "src/features/design-system/generated/componentManifest.ts",
@@ -428,12 +434,6 @@ export const designSystemComponentManifest = ${JSON.stringify(manifest, null, 2)
       encoding: "utf8",
     },
   );
-  return formatted
-    .split("\n")
-    .filter(
-      (line) => !(line.includes("WARN") && line.includes("pnpm.overrides")),
-    )
-    .join("\n");
 }
 
 function writeManifest({ check = false } = {}) {
