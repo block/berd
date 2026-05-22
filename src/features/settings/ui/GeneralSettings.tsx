@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { type LocalePreference, useLocale } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -13,13 +14,15 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { ButtonGroup } from "@/shared/ui/button-group";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import { Check, MonitorSmartphone, Moon, Sun } from "lucide-react";
+import { Check, MonitorSmartphone, Moon, Sun, Trash2 } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
+import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
+import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 
 const DENSITY_OPTIONS = [
   { value: "compact" },
@@ -95,6 +98,8 @@ export function GeneralSettings() {
   const { t } = useTranslation("settings");
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
+  const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
+  const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const {
@@ -145,6 +150,20 @@ export function GeneralSettings() {
   }, []);
 
   const aboutFallback = t("about.unavailable");
+
+  async function handleClearMediaCache() {
+    setClearingCache(true);
+    try {
+      await clearLocalMediaCaches();
+      toast.success(t("storage.cachedMedia.success"));
+      setClearCacheDialogOpen(false);
+    } catch (error) {
+      console.warn("Failed to clear local media caches:", error);
+      toast.error(t("storage.cachedMedia.error"));
+    } finally {
+      setClearingCache(false);
+    }
+  }
 
   return (
     <SettingsPage title={t("general.title")} contentClassName="space-y-8 pt-8">
@@ -323,6 +342,22 @@ export function GeneralSettings() {
         </SettingRow>
       </SettingsSection>
 
+      <SettingsSection title={t("storage.title")}>
+        <SettingRow
+          label={t("storage.cachedMedia.label")}
+          description={t("storage.cachedMedia.description")}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setClearCacheDialogOpen(true)}
+          >
+            <Trash2 className="size-4" />
+            {t("storage.cachedMedia.clear")}
+          </Button>
+        </SettingRow>
+      </SettingsSection>
+
       <SettingsSection title={t("compaction.title")}>
         <div className="flex items-start justify-between gap-4 px-4 py-4">
           <div className="min-w-0 flex-1">
@@ -375,6 +410,18 @@ export function GeneralSettings() {
         />
         <AboutInfoRow label={t("about.fields.license")} value="Apache-2.0" />
       </SettingsSection>
+
+      <ConfirmDialog
+        open={clearCacheDialogOpen}
+        onOpenChange={setClearCacheDialogOpen}
+        title={t("storage.cachedMedia.confirmTitle")}
+        description={t("storage.cachedMedia.confirmDescription")}
+        cancelLabel={t("common:actions.cancel")}
+        confirmLabel={t("storage.cachedMedia.confirm")}
+        loadingLabel={t("storage.cachedMedia.clearing")}
+        isLoading={clearingCache}
+        onConfirm={handleClearMediaCache}
+      />
     </SettingsPage>
   );
 }

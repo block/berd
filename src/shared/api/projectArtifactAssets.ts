@@ -1,5 +1,9 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 
+export const PROJECT_ARTIFACT_ASSETS_QUERY_KEY = [
+  "project-artifact-assets",
+] as const;
+
 interface RawProjectArtifactAssets {
   catalogVersion: string;
   imagePaths: string[];

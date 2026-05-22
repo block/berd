@@ -69,6 +69,19 @@ pub async fn warm_project_artifact_assets_cache(app: AppHandle) -> Result<(), St
     ensure_project_artifact_assets(app).await.map(|_| ())
 }
 
+pub async fn clear_project_artifact_assets_cache(app: AppHandle) -> Result<(), String> {
+    let _cache_guard = project_asset_cache_lock().lock().await;
+    let paths = project_asset_cache_paths(&app)?;
+    clear_project_artifact_assets_cache_paths(&paths).await
+}
+
+async fn clear_project_artifact_assets_cache_paths(
+    paths: &ProjectAssetCachePaths,
+) -> Result<(), String> {
+    remove_dir_all_if_exists(&paths.meta, "project artifact metadata").await?;
+    remove_dir_all_if_exists(&paths.media, "project artifact media").await
+}
+
 async fn ensure_project_artifact_assets(app: AppHandle) -> Result<ProjectArtifactAssets, String> {
     let _cache_guard = project_asset_cache_lock().lock().await;
     let paths = project_asset_cache_paths(&app)?;
@@ -793,6 +806,14 @@ fn delete_file_if_exists(path: &Path) -> Result<(), String> {
     }
 }
 
+async fn remove_dir_all_if_exists(path: &Path, label: &str) -> Result<(), String> {
+    match tokio::fs::remove_dir_all(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Failed to delete {label} cache: {error}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1057,5 +1078,39 @@ mod tests {
 
         server.await.unwrap();
         assert_eq!(fs::read(&target).unwrap(), bytes);
+    }
+
+    #[tokio::test]
+    async fn clear_project_artifact_assets_cache_deletes_meta_and_media_roots() {
+        let (_dir, paths) = temp_paths();
+        fs::create_dir_all(paths.meta.join("20260521T121530123Z")).unwrap();
+        fs::create_dir_all(paths.media.join("20260521T121530123Z/images")).unwrap();
+        fs::write(paths.meta.join("20260521T121530123Z/manifest.json"), b"{}").unwrap();
+        fs::write(
+            paths
+                .media
+                .join("20260521T121530123Z/images/memory-01.webp"),
+            b"asset",
+        )
+        .unwrap();
+
+        clear_project_artifact_assets_cache_paths(&paths)
+            .await
+            .unwrap();
+
+        assert!(!paths.meta.exists());
+        assert!(!paths.media.exists());
+    }
+
+    #[tokio::test]
+    async fn clear_project_artifact_assets_cache_succeeds_when_roots_are_missing() {
+        let (_dir, paths) = temp_paths();
+
+        clear_project_artifact_assets_cache_paths(&paths)
+            .await
+            .unwrap();
+
+        assert!(!paths.meta.exists());
+        assert!(!paths.media.exists());
     }
 }

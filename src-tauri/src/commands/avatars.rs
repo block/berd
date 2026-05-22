@@ -209,6 +209,17 @@ pub async fn ensure_avatar_collection(
     })
 }
 
+pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
+    let _cache_guard = avatar_cache_lock().lock().await;
+    let paths = avatar_cache_paths(&app)?;
+    clear_avatar_cache_paths(&paths).await
+}
+
+async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String> {
+    remove_dir_all_if_exists(&paths.meta, "avatar metadata").await?;
+    remove_dir_all_if_exists(&paths.media, "avatar media").await
+}
+
 async fn current_catalog(paths: &AvatarCachePaths) -> Result<AvatarCatalog, String> {
     if let Some(catalog) = read_cached_catalog(paths)? {
         if !is_catalog_cache_stale(paths) {
@@ -1054,6 +1065,14 @@ fn delete_file_if_exists(path: &Path) -> Result<(), String> {
     }
 }
 
+async fn remove_dir_all_if_exists(path: &Path, label: &str) -> Result<(), String> {
+    match tokio::fs::remove_dir_all(path).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("Failed to delete {label} cache: {error}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1431,5 +1450,33 @@ mod tests {
         std::env::set_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY", "0");
         assert_eq!(avatar_download_concurrency(), 8);
         std::env::remove_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY");
+    }
+
+    #[tokio::test]
+    async fn clear_avatar_cache_deletes_meta_and_media_roots() {
+        let (_dir, paths) = temp_paths();
+        fs::create_dir_all(paths.meta.join("v1")).unwrap();
+        fs::create_dir_all(paths.media.join("v1/webm/gloopies")).unwrap();
+        fs::write(paths.meta.join("v1/manifest.json"), b"{}").unwrap();
+        fs::write(
+            paths.media.join("v1/webm/gloopies/gloopy-1.webm"),
+            b"avatar",
+        )
+        .unwrap();
+
+        clear_avatar_cache_paths(&paths).await.unwrap();
+
+        assert!(!paths.meta.exists());
+        assert!(!paths.media.exists());
+    }
+
+    #[tokio::test]
+    async fn clear_avatar_cache_succeeds_when_roots_are_missing() {
+        let (_dir, paths) = temp_paths();
+
+        clear_avatar_cache_paths(&paths).await.unwrap();
+
+        assert!(!paths.meta.exists());
+        assert!(!paths.media.exists());
     }
 }

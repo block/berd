@@ -4,6 +4,7 @@ import {
   cachedAssetToMedia,
   getCachedAvatarForRef,
 } from "@/shared/api/avatars";
+import { listenLocalMediaCachesCleared } from "@/shared/api/localMediaCaches";
 import { isAppAvatarRef } from "@/shared/avatars/catalog";
 import { resolveAvatarMedia, resolveAvatarSrc } from "@/shared/lib/avatarUrl";
 import type { Avatar } from "@/shared/types/agents";
@@ -49,6 +50,28 @@ export function useAvatarMediaState(
   const retry = useCallback(() => {
     setRetryToken((value) => value + 1);
   }, []);
+
+  useEffect(() => {
+    if (!shouldLoadCachedAvatar) {
+      return;
+    }
+
+    const unlisten = listenLocalMediaCachesCleared((payload) => {
+      if (!payload.avatars) {
+        return;
+      }
+      queryClient?.removeQueries({
+        queryKey: ["avatars", "cached-ref", avatarRef],
+      });
+      setRemoteMedia(undefined);
+      setUnavailable(false);
+      setRetryToken((value) => value + 1);
+    });
+
+    return () => {
+      void unlisten.then((cleanup) => cleanup());
+    };
+  }, [avatarRef, queryClient, shouldLoadCachedAvatar]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: retryToken intentionally retriggers the same cached lookup when retry is called.
   useEffect(() => {

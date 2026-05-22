@@ -3,6 +3,7 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import { App } from "@/app/App";
+import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
@@ -31,6 +32,7 @@ if (!root) throw new Error("Root element not found");
 ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <QueryClientProvider client={queryClient}>
+      <LocalMediaCacheEvents />
       <I18nProvider>
         <ThemeProvider>
           <UpdaterProvider>

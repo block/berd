@@ -1,13 +1,63 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { renderWithProviders } from "@/test/render";
+import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 import { GeneralSettings } from "../GeneralSettings";
+import { toast } from "sonner";
+
+vi.mock("@/shared/api/localMediaCaches", () => ({
+  clearLocalMediaCaches: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: vi.fn(),
+    success: vi.fn(),
+  },
+}));
+
+const clearLocalMediaCachesMock = vi.mocked(clearLocalMediaCaches);
+const toastErrorMock = vi.mocked(toast.error);
+const toastSuccessMock = vi.mocked(toast.success);
+
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+}
+
+function renderGeneralSettings(queryClient = createQueryClient()) {
+  renderWithProviders(
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>
+        <GeneralSettings />
+      </ThemeProvider>
+    </QueryClientProvider>,
+  );
+}
+
+function getClearCachedMediaButton() {
+  const buttons = screen.getAllByRole("button", {
+    name: "Clear cached media",
+  });
+  const button = buttons.at(-1);
+  if (!button) {
+    throw new Error("Clear cached media button not found");
+  }
+  return button;
+}
 
 describe("GeneralSettings appearance section", () => {
   beforeEach(() => {
+    vi.resetAllMocks();
     localStorage.clear();
     document.documentElement.removeAttribute("data-density");
     document.documentElement.style.removeProperty("--density-spacing");
@@ -17,11 +67,7 @@ describe("GeneralSettings appearance section", () => {
   it("selects default light and dark theme modes", async () => {
     const user = userEvent.setup();
 
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
+    renderGeneralSettings();
 
     await user.click(screen.getByTestId("theme-option-dark"));
 
@@ -39,11 +85,7 @@ describe("GeneralSettings appearance section", () => {
   it("sets and resets a custom primary color", async () => {
     const user = userEvent.setup();
 
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
+    renderGeneralSettings();
 
     fireEvent.change(screen.getByTestId("primary-color-input"), {
       target: { value: "#22c55e" },
@@ -63,11 +105,7 @@ describe("GeneralSettings appearance section", () => {
   it("updates interface density from the appearance controls", async () => {
     const user = userEvent.setup();
 
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
+    renderGeneralSettings();
 
     const compact = screen.getByRole("button", { name: "Compact" });
 
@@ -90,11 +128,7 @@ describe("GeneralSettings appearance section", () => {
     const user = userEvent.setup();
     localStorage.setItem("goose:agent-tools-tips-enabled", "false");
 
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
+    renderGeneralSettings();
 
     const switchControl = screen.getByRole("switch", {
       name: "Chat tips",
@@ -116,11 +150,7 @@ describe("GeneralSettings appearance section", () => {
     const user = userEvent.setup();
     localStorage.setItem("goose:animated-avatars-enabled", "false");
 
-    renderWithProviders(
-      <ThemeProvider>
-        <GeneralSettings />
-      </ThemeProvider>,
-    );
+    renderGeneralSettings();
 
     const switchControl = screen.getByRole("switch", {
       name: "Animated avatars",
@@ -136,5 +166,59 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("opens cached media confirmation and confirms cache clearing", async () => {
+    const user = userEvent.setup();
+    clearLocalMediaCachesMock.mockResolvedValue(undefined);
+    renderGeneralSettings();
+
+    await user.click(getClearCachedMediaButton());
+
+    expect(
+      screen.getByRole("heading", { name: "Clear cached media?" }),
+    ).toBeInTheDocument();
+
+    await user.click(getClearCachedMediaButton());
+
+    await waitFor(() => {
+      expect(clearLocalMediaCachesMock).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("shows success and closes the cached media confirmation after clearing succeeds", async () => {
+    const user = userEvent.setup();
+    const queryClient = createQueryClient();
+    clearLocalMediaCachesMock.mockResolvedValue(undefined);
+    renderGeneralSettings(queryClient);
+
+    await user.click(getClearCachedMediaButton());
+    await user.click(getClearCachedMediaButton());
+
+    await waitFor(() => {
+      expect(toastSuccessMock).toHaveBeenCalledWith("Cached media cleared.");
+    });
+    expect(
+      screen.queryByRole("heading", { name: "Clear cached media?" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows an error and leaves the cached media confirmation open when clearing fails", async () => {
+    const user = userEvent.setup();
+    clearLocalMediaCachesMock.mockRejectedValue(new Error("permission denied"));
+    renderGeneralSettings();
+
+    await user.click(getClearCachedMediaButton());
+    await user.click(getClearCachedMediaButton());
+
+    await waitFor(() => {
+      expect(toastErrorMock).toHaveBeenCalledWith(
+        "Couldn't clear cached media. Try again.",
+      );
+    });
+    expect(
+      screen.getByRole("heading", { name: "Clear cached media?" }),
+    ).toBeInTheDocument();
+    expect(getClearCachedMediaButton()).toBeEnabled();
   });
 });

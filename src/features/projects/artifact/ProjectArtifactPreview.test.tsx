@@ -7,6 +7,7 @@ import { ProjectArtifactPreview } from "./ProjectArtifactPreview";
 
 vi.mock("@/shared/api/projectArtifactAssets", () => ({
   getProjectArtifactAssets: vi.fn(),
+  PROJECT_ARTIFACT_ASSETS_QUERY_KEY: ["project-artifact-assets"],
 }));
 
 vi.mock("./ProjectArtifactRenderer", () => ({

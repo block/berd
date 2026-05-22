@@ -139,6 +139,7 @@ pub fn run() {
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::ensure_avatar_collection,
+            commands::cache::clear_local_media_caches,
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,
             commands::automations::get_automation_tile_results,

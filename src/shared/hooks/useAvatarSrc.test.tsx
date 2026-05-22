@@ -1,8 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCachedAvatarForRef } from "@/shared/api/avatars";
+import {
+  listenLocalMediaCachesCleared,
+  type LocalMediaCachesClearedPayload,
+} from "@/shared/api/localMediaCaches";
 import { useAvatarMediaState, useAvatarSrc } from "./useAvatarSrc";
 
 vi.mock("@/shared/api/avatars", () => ({
@@ -13,7 +17,17 @@ vi.mock("@/shared/api/avatars", () => ({
   getCachedAvatarForRef: vi.fn(),
 }));
 
+vi.mock("@/shared/api/localMediaCaches", () => ({
+  listenLocalMediaCachesCleared: vi.fn(),
+}));
+
 const getCachedAvatarForRefMock = vi.mocked(getCachedAvatarForRef);
+const listenLocalMediaCachesClearedMock = vi.mocked(
+  listenLocalMediaCachesCleared,
+);
+let localMediaCachesClearedHandler:
+  | ((payload: LocalMediaCachesClearedPayload) => void)
+  | undefined;
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -34,6 +48,12 @@ function createWrapper() {
 describe("useAvatarSrc", () => {
   beforeEach(() => {
     getCachedAvatarForRefMock.mockReset();
+    localMediaCachesClearedHandler = undefined;
+    listenLocalMediaCachesClearedMock.mockReset();
+    listenLocalMediaCachesClearedMock.mockImplementation((handler) => {
+      localMediaCachesClearedHandler = handler;
+      return Promise.resolve(vi.fn());
+    });
   });
 
   it("keeps URL avatar behavior unchanged", () => {
@@ -130,5 +150,78 @@ describe("useAvatarSrc", () => {
     });
 
     expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks resolved app-avatar refs after local media caches are cleared", async () => {
+    getCachedAvatarForRefMock
+      .mockResolvedValueOnce({
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+        asset: {
+          id: "gloopy-1",
+          path: "/tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+          mimeType: "video/webm",
+        },
+      })
+      .mockResolvedValueOnce(null);
+
+    const { result } = renderHook(
+      () => useAvatarMediaState("app-avatar:gloopy-1"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.media?.src).toBe(
+        "asset:///tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+      );
+    });
+
+    await act(async () => {
+      localMediaCachesClearedHandler?.({
+        avatars: true,
+        projectArtifactAssets: false,
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.unavailable).toBe(true);
+    });
+    expect(result.current.media).toBeUndefined();
+    expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not recheck resolved app-avatar refs when only project artifact caches are cleared", async () => {
+    getCachedAvatarForRefMock.mockResolvedValue({
+      catalogVersion: "v1",
+      collectionId: "gloopies",
+      asset: {
+        id: "gloopy-1",
+        path: "/tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+        mimeType: "video/webm",
+      },
+    });
+
+    const { result } = renderHook(
+      () => useAvatarMediaState("app-avatar:gloopy-1"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.media?.src).toBe(
+        "asset:///tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+      );
+    });
+
+    await act(async () => {
+      localMediaCachesClearedHandler?.({
+        avatars: false,
+        projectArtifactAssets: true,
+      });
+    });
+
+    expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(1);
+    expect(result.current.media?.src).toBe(
+      "asset:///tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+    );
   });
 });
