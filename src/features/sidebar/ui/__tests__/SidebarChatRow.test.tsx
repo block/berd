@@ -118,6 +118,19 @@ describe("SidebarChatRow", () => {
     ).toBeNull();
   });
 
+  it("does not advertise drag with the cursor", () => {
+    const { container } = render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    const row = container.querySelector("[draggable]");
+    expect(row).toHaveClass("cursor-default");
+    expect(row).not.toHaveClass("active:cursor-grabbing");
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass(
+      "cursor-default",
+    );
+  });
+
   it("toggles selection with command-click instead of selecting the row", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

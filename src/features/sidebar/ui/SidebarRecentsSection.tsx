@@ -6,6 +6,7 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarChatRow } from "./SidebarChatRow";
+import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 
 export function SidebarRecentsSection({
@@ -60,17 +61,29 @@ export function SidebarRecentsSection({
   sectionHeaderTextClass: string;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
+  const { draggingSession } = useSidebarChatDrag();
   const [recentsDragOver, setRecentsDragOver] = useState(false);
   const showContent = collapsed || isOpen;
 
-  const handleRecentsDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    const hasSession = e.dataTransfer.types.includes("text/x-session-id");
-    if (hasSession) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      setRecentsDragOver(true);
-    }
-  }, []);
+  // Recents only accepts chats that currently belong to a project (moving them
+  // back out). A chat already in Recents has nowhere to move here, so the drop
+  // zone stays inert instead of suggesting an action that does nothing.
+  const canAcceptDraggedSession =
+    draggingSession != null && draggingSession.fromProjectId != null;
+
+  const handleRecentsDragOver = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      if (
+        canAcceptDraggedSession &&
+        e.dataTransfer.types.includes("text/x-session-id")
+      ) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setRecentsDragOver(true);
+      }
+    },
+    [canAcceptDraggedSession],
+  );
 
   const handleRecentsDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -80,14 +93,15 @@ export function SidebarRecentsSection({
 
   const handleRecentsDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
       setRecentsDragOver(false);
+      if (!canAcceptDraggedSession) return;
+      e.preventDefault();
       const sessionId = e.dataTransfer.getData("text/x-session-id");
       if (sessionId) {
         onMoveToProject?.(sessionId, null);
       }
     },
-    [onMoveToProject],
+    [canAcceptDraggedSession, onMoveToProject],
   );
 
   return (
@@ -223,6 +237,7 @@ export function SidebarRecentsSection({
                 selectionEnabled={selectionEnabled}
                 selectionActionsDisabled={selectionActionsDisabled}
                 selectedSessionIds={selectedSessionIds}
+                currentProjectId={null}
                 onSelect={onSelectSession}
                 onSelectionClear={onSelectionClear}
                 onSelectionChange={onSelectionChange}

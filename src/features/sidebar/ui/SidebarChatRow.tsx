@@ -26,6 +26,7 @@ import {
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { useSidebarChatDrag } from "./SidebarChatDragContext";
 
 const INACTIVE_CHAT_ROW_CLASS =
   "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground";
@@ -46,6 +47,8 @@ interface SidebarChatRowProps {
   selectedSessionIds?: Set<string>;
   className?: string;
   nested?: boolean;
+  /** Project the chat currently lives in, or null when it sits in Recents. */
+  currentProjectId?: string | null;
   onSelect?: (id: string) => void;
   onSelectionClear?: () => void;
   onSelectionChange?: (id: string, selected: boolean) => void;
@@ -70,6 +73,7 @@ export function SidebarChatRow({
   selectedSessionIds,
   className,
   nested = false,
+  currentProjectId = null,
   onSelect,
   onSelectionClear,
   onSelectionChange,
@@ -82,6 +86,7 @@ export function SidebarChatRow({
   onMarkSelectedUnread,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
+  const { beginSessionDrag, endSessionDrag } = useSidebarChatDrag();
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -180,15 +185,20 @@ export function SidebarChatRow({
       onDragStart={(e) => {
         e.dataTransfer.setData("text/x-session-id", id);
         e.dataTransfer.effectAllowed = "move";
+        setMenuOpen(false);
         setDragging(true);
+        beginSessionDrag(id, currentProjectId);
       }}
-      onDragEnd={() => setDragging(false)}
+      onDragEnd={() => {
+        setDragging(false);
+        endSessionDrag();
+      }}
       onContextMenu={(e) => {
         e.preventDefault();
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent active:cursor-grabbing",
+        "relative flex cursor-default items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
           "bg-sidebar-accent",
@@ -218,7 +228,7 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light active:cursor-grabbing",
+          "flex-1 min-w-0 cursor-default justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light",
           nested ? "pl-9" : "pl-3",
           rowButtonStateClass,
         )}
@@ -255,9 +265,11 @@ export function SidebarChatRow({
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "absolute right-1 size-5 rounded-full transition-colors hover:text-sidebar-foreground",
-              menuOpen
-                ? "visible opacity-100 text-sidebar-foreground"
-                : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-sidebar-foreground/40",
+              dragging
+                ? "invisible opacity-0 pointer-events-none"
+                : menuOpen
+                  ? "visible opacity-100 text-sidebar-foreground"
+                  : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-sidebar-foreground/40",
             )}
           >
             <MoreHorizontal className="size-3.5" />

@@ -11,6 +11,7 @@ import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { SidebarChatRow } from "./SidebarChatRow";
+import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { SidebarItemMenu } from "./SidebarItemMenu";
 
 const MAX_VISIBLE_PROJECT_CHATS = 5;
@@ -79,9 +80,16 @@ export function SidebarProjectSection({
   hasMoreSessions?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
+  const { draggingSession } = useSidebarChatDrag();
   const [showExpandedChats, setShowExpandedChats] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Only a chat coming from a different group can be moved into this project.
+  // Dragging a chat that already lives here resolves to a no-op, so the project
+  // stays inert rather than advertising a drop that would not move anything.
+  const canAcceptDraggedSession =
+    draggingSession != null && draggingSession.fromProjectId !== project.id;
 
   useEffect(() => {
     if (!isExpanded) {
@@ -89,13 +97,19 @@ export function SidebarProjectSection({
     }
   }, [isExpanded]);
 
-  const handleDragOver = useCallback((e: DragEvent<HTMLDivElement>) => {
-    if (e.dataTransfer.types.includes("text/x-session-id")) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      setDragOver(true);
-    }
-  }, []);
+  const handleDragOver = useCallback(
+    (e: DragEvent<HTMLDivElement>) => {
+      if (
+        canAcceptDraggedSession &&
+        e.dataTransfer.types.includes("text/x-session-id")
+      ) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        setDragOver(true);
+      }
+    },
+    [canAcceptDraggedSession],
+  );
 
   const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
     if (!e.currentTarget.contains(e.relatedTarget as Node)) {
@@ -105,15 +119,22 @@ export function SidebarProjectSection({
 
   const handleDrop = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
-      e.preventDefault();
       setDragOver(false);
+      if (!canAcceptDraggedSession) return;
+      e.preventDefault();
       const sessionId = e.dataTransfer.getData("text/x-session-id");
       if (sessionId) {
         onMoveToProject?.(sessionId, project.id);
         if (!isExpanded) toggleProject(project.id);
       }
     },
-    [onMoveToProject, project.id, isExpanded, toggleProject],
+    [
+      canAcceptDraggedSession,
+      onMoveToProject,
+      project.id,
+      isExpanded,
+      toggleProject,
+    ],
   );
   const visibleChatLimit = showExpandedChats
     ? MAX_EXPANDED_PROJECT_CHATS
@@ -213,6 +234,7 @@ export function SidebarProjectSection({
                 selectionActionsDisabled={selectionActionsDisabled}
                 selectedSessionIds={selectedSessionIds}
                 nested
+                currentProjectId={project.id}
                 onSelect={onSelectSession}
                 onSelectionClear={onSelectionClear}
                 onSelectionChange={onSelectionChange}

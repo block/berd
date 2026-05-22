@@ -1083,6 +1083,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         return;
       }
 
+      // Ignore drops that would not change the chat's group (e.g. dropping a
+      // chat back onto a sibling in the same list) so we never fire a no-op
+      // move that looks like a failed drag.
+      if ((session.projectId ?? null) === projectId) {
+        return;
+      }
+
       void moveSessionToProject(sessionId, projectId, {
         providerId: selectedProvider,
         modelId: session.modelId,
