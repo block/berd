@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import { IconBolt } from "@tabler/icons-react";
 import {
   type GetAutomationTileResponse,
   getAutomationTile,
@@ -10,8 +9,8 @@ import {
   getOutputSummary,
   latestRunTimestampFromTile,
 } from "@/features/automations/lib/automationFormatting";
-import { AutomationActivityLabel } from "@/features/automations/ui/AutomationOverviewRow";
 import { cn } from "@/shared/lib/cn";
+import { useLocaleFormatting } from "@/shared/i18n";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import type { WidgetRenderProps } from "./types";
 
@@ -22,7 +21,11 @@ function getAutomationId(
 }
 
 /**
- * ACP gap (Tuesday Matt/Kalvin list): latestRunStatus can be "failed" but
+ * The widget renders five logical states; the upstream tile only exposes
+ * `latestRunStatus` (string|number) + `schedulePaused` + `lastSuccessAt`, so we
+ * normalize here to the four status-dot tokens the design system speaks.
+ *
+ * ACP gap (Tuesday Matt/Kalvin list): `latestRunStatus` can be "failed" but
  * there is currently no structured error message surfaced on AutomationTile.
  * We fall back to the empty-output i18n string until that field is added.
  */
@@ -41,37 +44,41 @@ function resolveCardState(
   return "never-run";
 }
 
-function StatusDot({ state }: { state: CardState }) {
-  const dotClass = cn(
-    "size-2 rounded-full shrink-0",
-    state === "success" && "bg-success",
-    state === "failed" && "bg-destructive",
-    state === "running" && "bg-info animate-pulse",
-    (state === "never-run" || state === "paused") && "bg-foreground",
-    state === "paused" && "bg-transparent ring-1 ring-foreground ring-inset",
-  );
-  return <span className={dotClass} aria-hidden="true" />;
+function statusDotClass(state: CardState): string {
+  switch (state) {
+    case "success":
+      return "bg-success";
+    case "failed":
+      return "bg-destructive";
+    case "running":
+      return "bg-info";
+    case "paused":
+    case "never-run":
+      return "bg-muted-foreground";
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
+  }
 }
 
-function StatusChip({ state }: { state: CardState }) {
-  const { t } = useTranslation("home");
-
-  if (state === "success" || state === "never-run") {
-    return null;
+function statusLabelKey(state: CardState): string {
+  switch (state) {
+    case "success":
+      return "widgets.automationOutputPin.states.completed";
+    case "failed":
+      return "widgets.automationOutputPin.states.failed";
+    case "running":
+      return "widgets.automationOutputPin.states.running";
+    case "paused":
+      return "widgets.automationOutputPin.states.paused";
+    case "never-run":
+      return "widgets.automationOutputPin.states.neverRun";
+    default: {
+      const exhaustive: never = state;
+      return exhaustive;
+    }
   }
-
-  const label =
-    state === "failed"
-      ? t("widgets.automationOutputPin.states.failed")
-      : state === "running"
-        ? t("widgets.automationOutputPin.states.running")
-        : t("widgets.automationOutputPin.states.paused");
-
-  return (
-    <span className="rounded-pill px-2 py-0.5 text-[13px] bg-chip-automation-bg text-chip-automation-fg">
-      {label}
-    </span>
-  );
 }
 
 export function AutomationOutputWidget({
@@ -80,6 +87,7 @@ export function AutomationOutputWidget({
   onOpenAutomation,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
+  const { formatRelativeTimeToNow } = useLocaleFormatting();
   const automationId = getAutomationId(instance.state);
 
   const tileQuery = useQuery<GetAutomationTileResponse>({
@@ -109,71 +117,74 @@ export function AutomationOutputWidget({
     if (tile?.id) onOpenAutomation?.(tile.id);
   });
 
+  const handleUnavailableClick = useWidgetActivationGuard(
+    shouldIgnoreActivation,
+    () => {
+      // No-op: nothing to open when the underlying automation is unavailable.
+    },
+  );
+
   if (!tile) {
     return (
-      <div className="flex h-full w-full items-center justify-center rounded-card bg-card p-4">
-        <span className="text-[13px] italic text-muted-foreground">
-          {t("widgets.automationOutputPin.fallbackTitle")}
+      <button
+        type="button"
+        onClick={handleUnavailableClick}
+        className="flex h-full w-full items-center justify-center bg-card text-muted-foreground rounded-card-chat cursor-pointer"
+      >
+        <span className="text-sm leading-[15px]">
+          {t("widgets.automationOutputPin.unavailable")}
         </span>
-      </div>
+      </button>
     );
   }
 
   const cardState = resolveCardState(tile);
   const outputSummary = getOutputSummary(tile.latestRenderedData);
-  const runStatus =
-    tile.latestRunStatus ?? (tile.lastSuccessAt ? "success" : undefined);
   const lastRunAt = latestRunTimestampFromTile(tile);
   const title =
     tile.title?.trim() || t("widgets.automationOutputPin.fallbackTitle");
+
+  const statusLabel = t(statusLabelKey(cardState));
+
+  const relativeTime = lastRunAt ? formatRelativeTimeToNow(lastRunAt) : null;
 
   return (
     <button
       type="button"
       onClick={handleClick}
       aria-label={title}
-      className="flex h-full w-full flex-col rounded-card bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col overflow-hidden rounded-card-chat bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
     >
-      <div className="flex items-start justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-1.5">
-          <IconBolt
-            className="size-3.5 shrink-0 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <span className="truncate text-[14px] text-foreground">{title}</span>
+      <div className="flex flex-col gap-1">
+        <span className="truncate text-sm leading-[15px] text-foreground">
+          {title}
         </span>
-        <StatusDot state={cardState} />
+        <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-foreground/40">
+          <span
+            aria-hidden="true"
+            className={cn(
+              "size-1.5 rounded-full shrink-0",
+              statusDotClass(cardState),
+              cardState === "running" && "animate-pulse",
+            )}
+          />
+          <span className="truncate">
+            {statusLabel}
+            {relativeTime ? ` • ${relativeTime}` : null}
+          </span>
+        </span>
       </div>
 
-      <div className="mt-2 flex-1 min-h-0">
-        {cardState === "failed" && (
-          <p className="mb-1 text-[13px] italic text-muted-foreground line-clamp-1">
-            {t("widgets.automationOutputPin.lastRunFailedPrefix")}
-          </p>
-        )}
+      <div className="mt-auto min-h-0 max-h-[calc(100%-3.5rem)] overflow-y-auto pt-4">
         {outputSummary ? (
-          <p
-            className={cn(
-              "text-[14px] font-light leading-[1.4] line-clamp-3",
-              cardState === "failed"
-                ? "text-muted-foreground"
-                : "text-muted-foreground",
-            )}
-          >
+          <p className="text-xs leading-[1.4] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
             {outputSummary}
           </p>
         ) : (
-          <p className="text-[13px] italic text-muted-foreground">
-            {cardState === "never-run"
-              ? t("widgets.automationOutputPin.states.neverRun")
-              : t("widgets.automationOutputPin.emptyOutput")}
+          <p className="text-xs italic text-muted-foreground">
+            {t("widgets.automationOutputPin.noOutput")}
           </p>
         )}
-      </div>
-
-      <div className="mt-auto flex items-center justify-between gap-2 text-[13px] text-muted-foreground pt-2">
-        <AutomationActivityLabel status={runStatus} timestamp={lastRunAt} />
-        <StatusChip state={cardState} />
       </div>
     </button>
   );

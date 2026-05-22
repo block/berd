@@ -41,25 +41,20 @@ function ProjectArtifactFallback({
       className={cn(
         "relative isolate flex h-full w-full items-center justify-center",
         isTile
-          ? "overflow-hidden rounded-card-chat bg-[#f7f6f1]"
+          ? "overflow-visible bg-transparent"
           : "overflow-hidden rounded-[28px] bg-transparent",
         className,
       )}
     >
-      <div
-        className={cn(
-          "absolute rounded-full transition-colors duration-700 ease-out",
-          isTile
-            ? "inset-0 rounded-none"
-            : "top-[9%] left-[18%] h-[72%] w-[64%] blur-3xl",
-        )}
-        style={{
-          background: isTile
-            ? `radial-gradient(circle at 50% 42%, ${state.accentCssColor} 0%, transparent 34%), radial-gradient(circle at 50% 58%, rgba(255,255,255,0.92) 0%, transparent 42%)`
-            : state.accentCssColor,
-          opacity: isTile ? 1 : 0.42,
-        }}
-      />
+      {isTile ? null : (
+        <div
+          className="absolute top-[9%] left-[18%] h-[72%] w-[64%] rounded-full blur-3xl transition-colors duration-700 ease-out"
+          style={{
+            background: state.accentCssColor,
+            opacity: 0.42,
+          }}
+        />
+      )}
       <div
         className="relative aspect-square w-[44%] rounded-[22%] bg-white/30 shadow-[0_26px_70px_rgba(15,23,42,0.16)] backdrop-blur-xl"
         aria-hidden="true"

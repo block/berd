@@ -3,11 +3,19 @@ import { Sidebar } from "@/features/sidebar/ui/Sidebar";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import { cn } from "@/shared/lib/cn";
 import { TopBar } from "./TopBar";
 
 interface AppShellLayoutProps {
   children: ReactNode;
   contentUnderSidebar?: boolean;
+  /**
+   * When true, the TopBar is positioned absolutely over the content so the
+   * main canvas can extend up to the viewport edge. Used by the home view so
+   * pinned widgets are reachable at all edges; the top-bar floats with no
+   * solid background and shares the dot-grid surface underneath.
+   */
+  contentUnderTopBar?: boolean;
   createProjectDialog: ComponentProps<typeof CreateProjectDialog>;
   isResizing: boolean;
   onCornerResizeDoubleClick: MouseEventHandler<HTMLDivElement>;
@@ -29,6 +37,7 @@ interface AppShellLayoutProps {
 export function AppShellLayout({
   children,
   contentUnderSidebar = false,
+  contentUnderTopBar = false,
   createProjectDialog,
   isResizing,
   onCornerResizeDoubleClick,
@@ -47,19 +56,27 @@ export function AppShellLayout({
   topBar,
 }: AppShellLayoutProps) {
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground">
-      <TopBar {...topBar} />
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground">
+      <TopBar
+        {...topBar}
+        className={
+          contentUnderTopBar ? "absolute top-0 left-0 right-0 z-30" : undefined
+        }
+      />
 
       <div className="goose-zoom-scope relative flex flex-1 min-h-0 overflow-hidden">
         <div
-          className={
+          className={cn(
             contentUnderSidebar
               ? "relative z-20 flex-shrink-0 overflow-visible select-none"
-              : "relative z-20 flex-shrink-0 overflow-visible"
-          }
+              : "relative z-20 flex-shrink-0 overflow-visible",
+            contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
+          )}
           style={{
             height: sidebarOuterHeight,
-            maxHeight: "calc(100% - var(--spacing-app-panel-gutter-bottom))",
+            maxHeight: contentUnderTopBar
+              ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
+              : "calc(100% - var(--spacing-app-panel-gutter-bottom))",
             width: sidebarOuterWidth,
             opacity: sidebarCollapsed ? 0 : 1,
             transition: isResizing
@@ -115,10 +132,15 @@ export function AppShellLayout({
         <div
           onMouseDown={onResizeStart}
           onDoubleClick={onResizeDoubleClick}
-          className="relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-hidden"
+          className={cn(
+            "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-hidden",
+            contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
+          )}
           style={{
             height: sidebarOuterHeight,
-            maxHeight: "calc(100% - var(--spacing-app-panel-gutter-bottom))",
+            maxHeight: contentUnderTopBar
+              ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
+              : "calc(100% - var(--spacing-app-panel-gutter-bottom))",
             width: sidebarCollapsed ? 0 : resizeHandleWidth,
             opacity: sidebarCollapsed ? 0 : 1,
             transition: isResizing

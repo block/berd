@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -118,7 +118,7 @@ describe("WidgetFrame", () => {
     expect(bumpZ).toHaveBeenCalledWith("clock-1");
   });
 
-  it("commits z-index changes when opening the context menu", () => {
+  it("commits z-index changes when opening the unpin pill", () => {
     const bumpZ = vi.fn();
 
     const { frame } = renderWidgetFrame({
@@ -131,12 +131,32 @@ describe("WidgetFrame", () => {
     expect(bumpZ).toHaveBeenCalledWith("clock-1");
   });
 
-  it("renders the context menu above widget frames", () => {
-    const { frame } = renderWidgetFrame();
+  it("prevents the canvas pin menu from opening when right-clicking a widget", () => {
+    const parentContextMenu = vi.fn();
+    const { container } = render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: test fixture stands in for the canvas's context-menu handler
+      <div onContextMenu={parentContextMenu}>
+        <WidgetFrame
+          instance={clockInstance}
+          currentMaxZ={1}
+          mutations={mutationHandlers()}
+        />
+      </div>,
+    );
 
-    fireEvent.contextMenu(frame);
+    const frame = container.querySelector("fieldset");
+    expect(frame).not.toBeNull();
 
-    expect(screen.getByRole("menu")).toHaveClass("z-[1000]");
+    const event = createEvent.contextMenu(frame as Element, {
+      clientX: 50,
+      clientY: 60,
+      bubbles: true,
+      cancelable: true,
+    });
+    fireEvent(frame as Element, event);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(parentContextMenu).not.toHaveBeenCalled();
   });
 
   it("resets visual z-index lift when the pointer is canceled", () => {
@@ -210,15 +230,15 @@ describe("WidgetFrame", () => {
     expect(onOpenAgent).not.toHaveBeenCalled();
   });
 
-  it("unpins the widget from the context menu", async () => {
+  it("unpins the widget via the unpin pill on right-click", async () => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
       mutations: mutationHandlers({ removeWidget }),
     });
 
-    fireEvent.contextMenu(frame);
-    await user.click(screen.getByRole("menuitem", { name: "Unpin" }));
+    fireEvent.contextMenu(frame, { clientX: 40, clientY: 50 });
+    await user.click(screen.getByRole("button", { name: "Unpin" }));
 
     expect(removeWidget).toHaveBeenCalledWith("clock-1");
   });

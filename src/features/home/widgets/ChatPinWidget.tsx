@@ -65,24 +65,24 @@ export function ChatPinWidget({
       type="button"
       onClick={handleClick}
       aria-label={t("widgets.chatPin.openAria", { title })}
-      className="flex h-full w-full flex-col rounded-card-chat border border-border/80 bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col rounded-card-chat bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
     >
-      <span className="flex min-w-0 items-center gap-2 text-[13px] text-foreground">
+      <span className="flex min-w-0 items-start gap-2 text-sm leading-[18px] text-foreground">
         <IconMessageCircle
-          className="size-4 shrink-0 text-muted-foreground"
+          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
         />
-        <span className="truncate">{title}</span>
+        <span className="min-w-0 break-words line-clamp-2">{title}</span>
       </span>
-      <span className="mt-auto flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
+      <span className="mt-auto flex min-w-0 items-center gap-1.5 text-[10px] text-foreground/40">
         {project ? (
           <ProjectIcon
             icon={project.icon}
-            className="size-3.5 shrink-0"
-            imageClassName="size-3.5 shrink-0"
+            className="size-3 shrink-0"
+            imageClassName="size-3 shrink-0"
           />
         ) : null}
-        <span className="truncate">{footerLabel}</span>
+        <span className="min-w-0 break-words line-clamp-2">{footerLabel}</span>
       </span>
     </button>
   );

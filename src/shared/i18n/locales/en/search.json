@@ -2,11 +2,11 @@
   "title": "Search",
   "placeholderDescription": "Search across chats, projects, skills, and agents.",
   "actions": {
-    "openAgent": "Open agent {{name}}",
+    "openAgent": "Start chat with {{name}}",
     "openAutomation": "Open automation {{name}}",
     "openExtension": "Open extension {{name}}",
     "openSession": "Open chat {{name}}",
-    "openSkill": "Open skill {{name}}"
+    "openSkill": "Start chat with {{name}}"
   },
   "heading": {
     "ariaLabel": "Universal search",

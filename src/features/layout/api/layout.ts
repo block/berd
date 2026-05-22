@@ -7,7 +7,8 @@ export type LayoutItemKind =
   | "project"
   | "persona"
   | "clock"
-  | "automation";
+  | "automation"
+  | "skill";
 
 export interface LayoutConstraints {
   minCenter: number;

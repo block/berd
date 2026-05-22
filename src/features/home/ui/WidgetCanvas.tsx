@@ -16,6 +16,15 @@ import { WidgetPicker } from "./WidgetPicker";
 import { useHomeCanvasViewport } from "./useHomeCanvasViewport";
 import { useWidgetDragSuppression } from "./useWidgetDragSuppression";
 
+/**
+ * Data attribute marking a pinned-widget DOM node. Used by the canvas to
+ * distinguish background right-clicks (open picker) from widget right-clicks
+ * (let the widget's own UnpinPill handle it), and by tests to locate widget
+ * nodes. Exported so call sites and tests share a single source of truth.
+ */
+export const HOME_WIDGET_NODE_ATTR = "data-home-widget-node";
+const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
+
 interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
   mutations: WidgetMutationHandlers;
@@ -49,14 +58,18 @@ const DEFAULT_CONSTRAINTS: LayoutConstraints = {
 /**
  * WidgetCanvas — the free-form widget layer.
  *
- * Double-clicking the canvas background opens the WidgetPicker at the cursor
- * position. Only instances whose catalog entry has a Component are rendered;
- * stubs are silently skipped until their Component is supplied.
+ * Right-clicking the canvas background opens the WidgetPicker at the cursor
+ * position. Pinned widgets stopPropagation on their own right-click so the
+ * canvas picker does not race the per-widget UnpinPill. Only instances whose
+ * catalog entry has a Component are rendered; stubs are silently skipped until
+ * their Component is supplied.
  */
 export function WidgetCanvas({
   instances,
   mutations,
   onOpenAgent,
+  onOpenProject,
+  onOpenSkill,
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
@@ -128,11 +141,16 @@ export function WidgetCanvas({
     },
   });
 
-  const handleCanvasDoubleClick = useCallback(
+  const handleCanvasContextMenu = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => {
-      if ((event.target as HTMLElement).closest("[data-home-widget-node]")) {
+      if ((event.target as HTMLElement).closest(HOME_WIDGET_NODE_SELECTOR)) {
+        // Pinned widgets own their own right-click handler (UnpinPill) and
+        // stopPropagation; if we still see one here it originated outside a
+        // pin. Either way, do not double-open menus.
         return;
       }
+
+      event.preventDefault();
 
       const rect = canvasRef.current?.getBoundingClientRect();
       if (!rect) {
@@ -163,7 +181,7 @@ export function WidgetCanvas({
     (event: React.PointerEvent<HTMLDivElement>) => {
       if (
         event.button !== 0 ||
-        (event.target as HTMLElement).closest("[data-home-widget-node]")
+        (event.target as HTMLElement).closest(HOME_WIDGET_NODE_SELECTOR)
       ) {
         return;
       }
@@ -186,7 +204,7 @@ export function WidgetCanvas({
     // biome-ignore lint/a11y/noStaticElementInteractions: freeform spatial canvas; child widgets and picker provide semantic controls
     <div
       ref={canvasRef}
-      onDoubleClick={handleCanvasDoubleClick}
+      onContextMenu={handleCanvasContextMenu}
       onPointerDown={handleCanvasPointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={finishPointerGesture}
@@ -212,7 +230,7 @@ export function WidgetCanvas({
             // biome-ignore lint/a11y/noStaticElementInteractions: freeform widget node captures canvas drag gestures; WidgetFrame owns semantics.
             <div
               key={instance.id}
-              data-home-widget-node
+              {...{ [HOME_WIDGET_NODE_ATTR]: "" }}
               draggable={false}
               onPointerDown={(event) => beginWidgetDrag(event, instance)}
               onDragStart={preventNativeDrag}
@@ -233,6 +251,8 @@ export function WidgetCanvas({
                 gestureHandlers={dragSuppression.frameHandlers}
                 onVisualLiftReset={handleVisualLiftReset}
                 onOpenAgent={onOpenAgent}
+                onOpenProject={onOpenProject}
+                onOpenSkill={onOpenSkill}
                 onSelectSession={onSelectSession}
                 onStartProjectChat={onStartProjectChat}
                 onOpenAutomation={onOpenAutomation}

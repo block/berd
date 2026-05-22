@@ -1,17 +1,17 @@
-import { useCallback, type KeyboardEvent } from "react";
-import { useTranslation } from "react-i18next";
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from "@/shared/ui/context-menu";
+  useCallback,
+  useState,
+  type KeyboardEvent,
+  type MouseEvent,
+} from "react";
+import { useTranslation } from "react-i18next";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   WidgetInstance,
   WidgetMutationHandlers,
   WidgetNavigationHandlers,
 } from "../widgets/types";
+import { UnpinPill } from "./UnpinPill";
 import type { WidgetFrameGestureHandlers } from "./useWidgetDragSuppression";
 
 interface WidgetFrameProps extends WidgetNavigationHandlers {
@@ -23,14 +23,20 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   onVisualLiftReset?: (id: string) => void;
 }
 
+interface UnpinPillState {
+  open: boolean;
+  x: number;
+  y: number;
+}
+
+const CLOSED_PILL: UnpinPillState = { open: false, x: 0, y: 0 };
+
 /**
- * WidgetFrame — widget body + context menu for a single canvas item.
+ * WidgetFrame — widget body + UnpinPill for a single canvas item.
  *
  * The canvas owns gesture disambiguation; the frame coordinates widget chrome,
- * stacking, and menu behavior.
- *
- * Returns null if the catalog entry is missing or has no Component (stubs
- * will be skipped; Task C populates the remaining widget types).
+ * stacking, and the right-click unpin affordance. Returns null if the catalog
+ * entry is missing or has no Component (stubs will be skipped).
  */
 export function WidgetFrame({
   instance,
@@ -40,6 +46,8 @@ export function WidgetFrame({
   gestureHandlers = {},
   onVisualLiftReset = () => {},
   onOpenAgent,
+  onOpenProject,
+  onOpenSkill,
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
@@ -47,6 +55,7 @@ export function WidgetFrame({
   const { t } = useTranslation("home");
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
   const { bumpZ, removeWidget, updateWidgetState } = mutations;
+  const [pill, setPill] = useState<UnpinPillState>(CLOSED_PILL);
 
   const handleUpdateState = useCallback(
     (next: Record<string, unknown>) => updateWidgetState(instance.id, next),
@@ -90,48 +99,66 @@ export function WidgetFrame({
     }
   };
 
+  // Mouse-only right-click trigger. Pre-Task-4 the Radix ContextMenuTrigger
+  // handled Shift+F10 / Menu-key natively; we dropped that path to match the
+  // spec's explicit "right-click" UX. If keyboard parity is needed later,
+  // wire a separate keydown handler — do not re-introduce Radix ContextMenu.
+  const handleContextMenu = (event: MouseEvent<HTMLFieldSetElement>) => {
+    // Suppress the native browser menu AND prevent the canvas-level
+    // onContextMenu from also opening the pin picker behind the pill.
+    event.preventDefault();
+    event.stopPropagation();
+    commitZLift();
+    setPill({ open: true, x: event.clientX, y: event.clientY });
+  };
+
+  const handlePillOpenChange = (open: boolean) => {
+    if (!open) {
+      setPill(CLOSED_PILL);
+    }
+  };
+
   return (
-    <ContextMenu>
-      <ContextMenuTrigger asChild>
-        <fieldset
-          aria-label={t(catalogEntry.labelKey)}
-          aria-keyshortcuts="Delete Backspace"
-          draggable={false}
-          // biome-ignore lint/a11y/noNoninteractiveTabindex: widget frames are keyboard-focusable groups so non-interactive widgets can be removed.
-          tabIndex={0}
-          onPointerDownCapture={gestureHandlers.onPointerDownCapture}
-          onPointerMoveCapture={gestureHandlers.onPointerMoveCapture}
-          onPointerUpCapture={gestureHandlers.onPointerUpCapture}
-          onPointerCancelCapture={(event) => {
-            gestureHandlers.onPointerCancelCapture?.(event);
-            resetVisualLift();
-          }}
-          onContextMenu={commitZLift}
-          onDragStart={(event) => event.preventDefault()}
-          onClickCapture={gestureHandlers.onClickCapture}
-          onClick={commitZLift}
-          onKeyDown={handleFrameKeyDown}
-          className="m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:cursor-grabbing"
-        >
-          <Component
-            instance={instance}
-            onUpdateState={handleUpdateState}
-            shouldIgnoreActivation={shouldIgnoreActivation}
-            onOpenAgent={onOpenAgent}
-            onSelectSession={onSelectSession}
-            onStartProjectChat={onStartProjectChat}
-            onOpenAutomation={onOpenAutomation}
-          />
-        </fieldset>
-      </ContextMenuTrigger>
-      <ContextMenuContent
-        className="z-[1000]"
-        onPointerDownCapture={(event) => event.stopPropagation()}
+    <>
+      <fieldset
+        aria-label={t(catalogEntry.labelKey)}
+        aria-keyshortcuts="Delete Backspace"
+        draggable={false}
+        // biome-ignore lint/a11y/noNoninteractiveTabindex: widget frames are keyboard-focusable groups so non-interactive widgets can be removed.
+        tabIndex={0}
+        onPointerDownCapture={gestureHandlers.onPointerDownCapture}
+        onPointerMoveCapture={gestureHandlers.onPointerMoveCapture}
+        onPointerUpCapture={gestureHandlers.onPointerUpCapture}
+        onPointerCancelCapture={(event) => {
+          gestureHandlers.onPointerCancelCapture?.(event);
+          resetVisualLift();
+        }}
+        onContextMenu={handleContextMenu}
+        onDragStart={(event) => event.preventDefault()}
+        onClickCapture={gestureHandlers.onClickCapture}
+        onClick={commitZLift}
+        onKeyDown={handleFrameKeyDown}
+        className="m-0 h-full w-full min-w-0 cursor-grab select-none border-0 p-0 [min-inline-size:0] touch-none outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:cursor-grabbing"
       >
-        <ContextMenuItem variant="destructive" onSelect={handleRemove}>
-          {t("widgets.actions.unpin")}
-        </ContextMenuItem>
-      </ContextMenuContent>
-    </ContextMenu>
+        <Component
+          instance={instance}
+          onUpdateState={handleUpdateState}
+          shouldIgnoreActivation={shouldIgnoreActivation}
+          onOpenAgent={onOpenAgent}
+          onOpenProject={onOpenProject}
+          onOpenSkill={onOpenSkill}
+          onSelectSession={onSelectSession}
+          onStartProjectChat={onStartProjectChat}
+          onOpenAutomation={onOpenAutomation}
+        />
+      </fieldset>
+      <UnpinPill
+        open={pill.open}
+        cursorClientX={pill.x}
+        cursorClientY={pill.y}
+        onUnpin={handleRemove}
+        onOpenChange={handlePillOpenChange}
+      />
+    </>
   );
 }

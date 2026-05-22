@@ -70,17 +70,27 @@ type PointerEventOptions = Parameters<typeof pointerEvent>[0];
 function wheelEvent({
   clientX,
   clientY,
+  deltaX = 0,
   deltaY,
+  ctrlKey = false,
+  metaKey = false,
 }: {
   clientX: number;
   clientY: number;
+  deltaX?: number;
   deltaY: number;
+  ctrlKey?: boolean;
+  metaKey?: boolean;
 }) {
   return {
     preventDefault: vi.fn(),
     clientX,
     clientY,
+    ctrlKey,
+    metaKey,
+    deltaX,
     deltaY,
+    deltaMode: 0,
   } as unknown as React.WheelEvent<HTMLElement>;
 }
 
@@ -152,7 +162,7 @@ function renderViewportWithPendingWheelSave(
 
   act(() => {
     hook.result.current.handleWheel(
-      wheelEvent({ clientX: 400, clientY: 300, deltaY: -120 }),
+      wheelEvent({ clientX: 400, clientY: 300, ctrlKey: true, deltaY: -120 }),
     );
   });
   expect(saveCamera).not.toHaveBeenCalled();
@@ -474,5 +484,28 @@ describe("useHomeCanvasViewport", () => {
     });
 
     expectWidgetDragEnd(onWidgetDragEnd, { x: 30, y: 30 }, { x: 10, y: 0 });
+  });
+
+  it("rebuilds the viewport from the persisted camera once canvas size is known", () => {
+    const persistedCamera = { ...camera, centerX: 120, centerY: -80 };
+    const { result, rerender } = renderHook(
+      ({ currentCamera }) =>
+        useHomeCanvasViewport({
+          camera: currentCamera,
+          constraints,
+          saveCamera: vi.fn(),
+        }),
+      { initialProps: { currentCamera: persistedCamera } },
+    );
+    const canvas = canvasElement();
+
+    attachCanvasRef(result.current.canvasRef, canvas);
+    rerender({ currentCamera: { ...persistedCamera } });
+
+    expect(result.current.viewport).toEqual({
+      x: 280,
+      y: 380,
+      zoom: 1,
+    });
   });
 });

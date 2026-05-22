@@ -29,7 +29,7 @@
       "description": "Pin an agent for quick access",
       "kicker": "Agent",
       "fallbackName": "Goose",
-      "openAria": "Open {{name}}"
+      "openAria": "Start chat with {{name}}"
     },
     "chatPin": {
       "label": "Pin a chat",
@@ -50,51 +50,61 @@
     "automationOutputPin": {
       "label": "Pin an automation",
       "description": "Pin the latest output of an automation",
-      "emptyOutput": "No output yet",
+      "noOutput": "No output yet",
+      "unavailable": "Unavailable",
       "states": {
+        "completed": "Completed",
         "failed": "Failed",
-        "running": "Running…",
+        "running": "Running",
         "paused": "Paused",
-        "neverRun": "Will run on schedule"
+        "neverRun": "Never run"
       },
-      "lastRunFailedPrefix": "Last run failed:",
       "fallbackTitle": "Untitled automation"
     },
-    "actions": {
-      "unpin": "Unpin"
+    "skillPin": {
+      "label": "Pin a skill",
+      "description": "Pin a skill for quick access",
+      "unavailable": "Unavailable",
+      "openAria": "Start chat with {{name}}"
+    },
+    "unpin": {
+      "label": "Unpin"
     },
     "picker": {
       "back": "Back",
       "loading": "Loading...",
       "loadFailed": "Could not load items.",
       "loadingMoreChats": "Loading more chats...",
-      "pinned": "Pinned",
-      "searchMore": "Search to find more.",
+      "header": "Pin",
       "sections": {
-        "clock": "Display",
-        "agent": "Agents",
-        "chat": "Chats",
-        "project": "Projects",
-        "automation": "Automations"
+        "clock": "Widgets",
+        "agent": "Agent",
+        "chat": "Chat",
+        "automation": "Automations",
+        "project": "Project",
+        "skill": "Skill"
       },
       "selectTitles": {
-        "clock": "Display",
-        "agent": "Pin an agent",
-        "chat": "Pin a chat",
-        "project": "Pin a project",
-        "automation": "Pin an automation"
+        "clock": "Pin a Widget",
+        "agent": "Pin an Agent",
+        "chat": "Pin a Chat",
+        "automation": "Pin an Automation",
+        "project": "Pin a Project",
+        "skill": "Pin a Skill"
       },
       "searchPlaceholders": {
-        "agent": "Search agents",
-        "chat": "Search chats",
-        "project": "Search projects",
-        "automation": "Search automations"
+        "agent": "Search",
+        "chat": "Search",
+        "automation": "Search",
+        "project": "Search",
+        "skill": "Search"
       },
       "empty": {
-        "agent": "No agents found.",
-        "chat": "No chats found.",
-        "project": "No projects found.",
-        "automation": "No automations found."
+        "agent": "Nothing to pin",
+        "chat": "Nothing to pin",
+        "automation": "Nothing to pin",
+        "project": "Nothing to pin",
+        "skill": "Nothing to pin"
       }
     }
   }

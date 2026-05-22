@@ -110,15 +110,25 @@ export function panCanvasViewport(
   };
 }
 
-export function zoomCanvasViewportAtPoint(
+export function panCanvasViewportByDelta(
+  viewport: CanvasViewport,
+  delta: CanvasPoint,
+): CanvasViewport {
+  return {
+    ...viewport,
+    x: viewport.x - delta.x,
+    y: viewport.y - delta.y,
+  };
+}
+
+export function zoomCanvasViewportByScaleAtPoint(
   viewport: CanvasViewport,
   screenPoint: CanvasPoint,
-  deltaY: number,
+  zoomFactor: number,
   constraints: LayoutConstraints,
 ): CanvasViewport {
   const minZoom = zoomBpsToViewportZoom(constraints.minZoomBps);
   const maxZoom = zoomBpsToViewportZoom(constraints.maxZoomBps);
-  const zoomFactor = Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY);
   const nextZoom = clamp(viewport.zoom * zoomFactor, minZoom, maxZoom);
   const worldPoint = screenToWorld(screenPoint, viewport);
 
@@ -127,4 +137,18 @@ export function zoomCanvasViewportAtPoint(
     x: screenPoint.x - worldPoint.x * nextZoom,
     y: screenPoint.y - worldPoint.y * nextZoom,
   };
+}
+
+export function zoomCanvasViewportAtPoint(
+  viewport: CanvasViewport,
+  screenPoint: CanvasPoint,
+  deltaY: number,
+  constraints: LayoutConstraints,
+): CanvasViewport {
+  return zoomCanvasViewportByScaleAtPoint(
+    viewport,
+    screenPoint,
+    Math.exp(-deltaY * WHEEL_ZOOM_SENSITIVITY),
+    constraints,
+  );
 }

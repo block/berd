@@ -1,9 +1,12 @@
 import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
+import type { SkillInfo } from "@/features/skills/api/skills";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import { WidgetCanvas } from "./WidgetCanvas";
 
 export interface HomeViewProps {
+  onOpenProject?: (projectId: string) => void;
+  onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
@@ -11,6 +14,8 @@ export interface HomeViewProps {
 }
 
 export function HomeView({
+  onOpenProject,
+  onOpenSkill,
   onOpenAgent,
   onSelectSession,
   onStartProjectChat,
@@ -32,6 +37,8 @@ export function HomeView({
         <WidgetCanvas
           instances={instances}
           mutations={widgetMutations}
+          onOpenProject={onOpenProject}
+          onOpenSkill={onOpenSkill}
           onOpenAgent={onOpenAgent}
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}

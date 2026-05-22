@@ -25,13 +25,14 @@ function layoutItem(overrides: Partial<LayoutItem>): LayoutItem {
 }
 
 describe("homeLayoutMapper", () => {
-  it("maps layout kinds to home widget types", () => {
+  it("maps layout kinds to home widget types including projects and skills", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "clock", targetId: "widget:clock-1" }),
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "session-1" }),
       layoutItem({ kind: "project", targetId: "project-1" }),
       layoutItem({ kind: "automation", targetId: "automation-1" }),
+      layoutItem({ kind: "skill", targetId: "skill-1" }),
     ]);
 
     expect(widgets.map((widget) => widget.type)).toEqual([
@@ -40,6 +41,7 @@ describe("homeLayoutMapper", () => {
       "chatPin",
       "projectArtifactPin",
       "automationOutputPin",
+      "skillPin",
     ]);
     expect(HOME_LAYOUT_REPLACE_KINDS).toEqual([
       "clock",
@@ -47,6 +49,7 @@ describe("homeLayoutMapper", () => {
       "session",
       "project",
       "automation",
+      "skill",
     ]);
   });
 
@@ -84,10 +87,10 @@ describe("homeLayoutMapper", () => {
     expect(item).toMatchObject({
       kind: "session",
       targetId: "session-1",
-      centerX: 144,
-      centerY: 96,
-      width: 240,
-      height: 96,
+      centerX: 118,
+      centerY: 88,
+      width: 188,
+      height: 80,
       zIndex: 5,
     });
   });

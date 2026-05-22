@@ -1740,7 +1740,7 @@ export function ProjectArtifactRenderer({
       className={cn(
         "relative isolate h-full w-full",
         variant === "tile"
-          ? "pointer-events-none overflow-hidden rounded-card-chat bg-[#f5f5f5]"
+          ? "pointer-events-none overflow-visible bg-transparent"
           : "overflow-hidden rounded-[28px] bg-transparent cursor-grab active:cursor-grabbing",
         className,
       )}
@@ -1796,15 +1796,6 @@ export function ProjectArtifactRenderer({
             />
           </Suspense>
         </Canvas>
-        {variant === "tile" ? (
-          <div
-            className="pointer-events-none absolute inset-0"
-            style={{
-              background: `radial-gradient(circle at 50% 46%, transparent 34%, ${state.accentColor}38 100%)`,
-              mixBlendMode: "multiply",
-            }}
-          />
-        ) : null}
       </div>
     </div>
   );

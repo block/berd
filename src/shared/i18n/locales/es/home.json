@@ -29,7 +29,7 @@
       "description": "Fija un agente para acceso rápido",
       "kicker": "Agente",
       "fallbackName": "Goose",
-      "openAria": "Abrir {{name}}"
+      "openAria": "Iniciar chat con {{name}}"
     },
     "chatPin": {
       "label": "Fijar un chat",
@@ -50,51 +50,61 @@
     "automationOutputPin": {
       "label": "Fijar una automatización",
       "description": "Fija el último resultado de una automatización",
-      "emptyOutput": "Sin resultados aún",
+      "noOutput": "Sin resultados aún",
+      "unavailable": "No disponible",
       "states": {
+        "completed": "Completado",
         "failed": "Falló",
-        "running": "Ejecutando…",
+        "running": "Ejecutando",
         "paused": "En pausa",
-        "neverRun": "Se ejecutará según el horario"
+        "neverRun": "Sin ejecutar"
       },
-      "lastRunFailedPrefix": "Última ejecución falló:",
       "fallbackTitle": "Automatización sin título"
     },
-    "actions": {
-      "unpin": "Desanclar"
+    "skillPin": {
+      "label": "Fijar una habilidad",
+      "description": "Fija una habilidad para acceso rápido",
+      "unavailable": "No disponible",
+      "openAria": "Iniciar chat con {{name}}"
+    },
+    "unpin": {
+      "label": "Desanclar"
     },
     "picker": {
       "back": "Volver",
       "loading": "Cargando...",
       "loadFailed": "No se pudieron cargar los elementos.",
       "loadingMoreChats": "Cargando más chats...",
-      "pinned": "Fijado",
-      "searchMore": "Busca para encontrar más.",
+      "header": "Fijar",
       "sections": {
-        "clock": "Pantalla",
-        "agent": "Agentes",
-        "chat": "Chats",
-        "project": "Proyectos",
-        "automation": "Automatizaciones"
+        "clock": "Widgets",
+        "agent": "Agente",
+        "chat": "Chat",
+        "automation": "Automatizaciones",
+        "project": "Proyecto",
+        "skill": "Habilidad"
       },
       "selectTitles": {
-        "clock": "Pantalla",
+        "clock": "Fijar un widget",
         "agent": "Fijar un agente",
         "chat": "Fijar un chat",
+        "automation": "Fijar una automatización",
         "project": "Fijar un proyecto",
-        "automation": "Fijar una automatización"
+        "skill": "Fijar una habilidad"
       },
       "searchPlaceholders": {
-        "agent": "Buscar agentes",
-        "chat": "Buscar chats",
-        "project": "Buscar proyectos",
-        "automation": "Buscar automatizaciones"
+        "agent": "Buscar",
+        "chat": "Buscar",
+        "automation": "Buscar",
+        "project": "Buscar",
+        "skill": "Buscar"
       },
       "empty": {
-        "agent": "No se encontraron agentes.",
-        "chat": "No se encontraron chats.",
-        "project": "No se encontraron proyectos.",
-        "automation": "No se encontraron automatizaciones."
+        "agent": "Nada que fijar",
+        "chat": "Nada que fijar",
+        "automation": "Nada que fijar",
+        "project": "Nada que fijar",
+        "skill": "Nada que fijar"
       }
     }
   }

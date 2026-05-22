@@ -117,6 +117,7 @@ pub enum LayoutItemKind {
     Persona,
     Clock,
     Automation,
+    Skill,
 }
 
 impl LayoutItemKind {
@@ -127,6 +128,7 @@ impl LayoutItemKind {
             Self::Persona => "persona",
             Self::Clock => "clock",
             Self::Automation => "automation",
+            Self::Skill => "skill",
         }
     }
 }
@@ -141,6 +143,7 @@ impl TryFrom<&str> for LayoutItemKind {
             "persona" => Ok(Self::Persona),
             "clock" => Ok(Self::Clock),
             "automation" => Ok(Self::Automation),
+            "skill" => Ok(Self::Skill),
             _ => Err(format!("Unknown layout item kind: {value}")),
         }
     }
@@ -962,6 +965,7 @@ mod tests {
             LayoutItemKind::Persona,
             LayoutItemKind::Clock,
             LayoutItemKind::Automation,
+            LayoutItemKind::Skill,
         ]
     }
 

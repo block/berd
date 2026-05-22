@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createEvent,
   fireEvent,
@@ -6,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   LayoutCamera,
@@ -16,7 +18,9 @@ import type {
   WidgetMutationHandlers,
   WidgetNavigationHandlers,
 } from "../widgets/types";
-import { WidgetCanvas } from "./WidgetCanvas";
+import { HOME_WIDGET_NODE_ATTR, WidgetCanvas } from "./WidgetCanvas";
+
+const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 
 const mocks = vi.hoisted(() => ({
   saveCamera: vi.fn(),
@@ -220,32 +224,52 @@ type RenderCanvasOptions = WidgetNavigationHandlers & {
   mutations?: Partial<WidgetMutationHandlers>;
 };
 
+function PickerTestProvider({ children }: { children: ReactNode }) {
+  // Fresh QueryClient per render so cached skill queries don't leak between
+  // tests. The picker only triggers a skill fetch when its skill panel opens.
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+}
+
 function renderCanvas({
   instances = [],
   mutations = {},
   ...navigation
 }: RenderCanvasOptions = {}) {
   return render(
-    <WidgetCanvas
-      instances={instances}
-      mutations={mutationHandlers(mutations)}
-      {...navigation}
-    />,
+    <PickerTestProvider>
+      <WidgetCanvas
+        instances={instances}
+        mutations={mutationHandlers(mutations)}
+        {...navigation}
+      />
+    </PickerTestProvider>,
   );
 }
+
+const PANEL_LABELS = {
+  widgets: /^widgets$/i,
+  agent: /^agent$/i,
+  chat: /^chat$/i,
+  project: /^project$/i,
+  skill: /^skill$/i,
+  automation: /^automations$/i,
+} as const;
 
 async function openPickerPanel(
   user: ReturnType<typeof userEvent.setup>,
   container: HTMLElement,
-  panel: "display" | "agents" | "chats" | "projects" | "automations",
+  panel: keyof typeof PANEL_LABELS,
 ) {
-  fireEvent.doubleClick(container.firstElementChild as Element, {
+  fireEvent.contextMenu(container.firstElementChild as Element, {
     clientX: 100,
     clientY: 120,
   });
-  await user.click(
-    screen.getByRole("button", { name: new RegExp(panel, "i") }),
-  );
+  await user.click(screen.getByRole("button", { name: PANEL_LABELS[panel] }));
 }
 
 describe("WidgetCanvas", () => {
@@ -328,7 +352,7 @@ describe("WidgetCanvas", () => {
     });
 
     const agentButton = screen.getByRole("button", { name: /agent one/i });
-    const agentNode = agentButton.closest("[data-home-widget-node]");
+    const agentNode = agentButton.closest(HOME_WIDGET_NODE_SELECTOR);
     expect(agentNode).not.toBeNull();
     fireEvent.pointerDown(agentNode as Element, {
       button: 2,
@@ -358,7 +382,7 @@ describe("WidgetCanvas", () => {
       instances: [widget()],
     });
 
-    const clockNode = container.querySelector("[data-home-widget-node]");
+    const clockNode = container.querySelector(HOME_WIDGET_NODE_SELECTOR);
     expect(clockNode).not.toBeNull();
 
     const dragStart = createEvent.dragStart(clockNode as Element, {
@@ -383,7 +407,7 @@ describe("WidgetCanvas", () => {
     });
 
     const canvas = container.firstElementChild as Element;
-    const clockNode = container.querySelector("[data-home-widget-node]");
+    const clockNode = container.querySelector(HOME_WIDGET_NODE_SELECTOR);
     expect(clockNode).not.toBeNull();
 
     await user.pointer([
@@ -445,7 +469,7 @@ describe("WidgetCanvas", () => {
     });
   });
 
-  it("saves the camera after wheel zoom settles", () => {
+  it("saves the camera after two-finger wheel pan settles", () => {
     vi.useFakeTimers();
     const { container } = renderCanvas();
     const canvas = container.firstElementChild as HTMLElement;
@@ -455,6 +479,31 @@ describe("WidgetCanvas", () => {
     fireEvent.wheel(canvas, {
       clientX: 400,
       clientY: 300,
+      deltaX: 16,
+      deltaY: 40,
+    });
+
+    expect(mocks.saveCamera).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(150);
+
+    expect(mocks.saveCamera).toHaveBeenCalledWith({
+      centerX: expect.any(Number),
+      centerY: expect.any(Number),
+      zoomBps: 10_000,
+    });
+  });
+
+  it("saves the camera after pinch-style wheel zoom settles", () => {
+    vi.useFakeTimers();
+    const { container } = renderCanvas();
+    const canvas = container.firstElementChild as HTMLElement;
+
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(canvasRect());
+
+    fireEvent.wheel(canvas, {
+      clientX: 400,
+      clientY: 300,
+      ctrlKey: true,
       deltaY: -120,
     });
 
@@ -469,35 +518,25 @@ describe("WidgetCanvas", () => {
     expect(mocks.saveCamera.mock.calls[0][0].zoomBps).toBeGreaterThan(10_000);
   });
 
-  it("adds a widget from the picker after double-clicking the canvas", async () => {
-    const user = userEvent.setup();
-    const addWidget = vi.fn();
-    mocks.homeWidgetState.camera = {
-      centerX: 200,
-      centerY: -100,
-      zoomBps: 12_500,
-    };
+  it("omits the Widgets/clock category from the picker", async () => {
     mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       canvasRect({ left: 25, top: 50, width: 1000, height: 800 }),
     );
 
-    const { container } = renderCanvas({ mutations: { addWidget } });
+    const { container } = renderCanvas({ mutations: {} });
 
-    fireEvent.doubleClick(container.firstElementChild as Element, {
+    fireEvent.contextMenu(container.firstElementChild as Element, {
       clientX: 345,
       clientY: 290,
     });
-    await user.click(screen.getByRole("button", { name: /display/i }));
-    await user.click(screen.getByRole("button", { name: /clock/i }));
 
-    expect(addWidget).toHaveBeenCalledWith(
-      "clock",
-      56,
-      -228,
-      undefined,
-      CANVAS_CONSTRAINTS,
-    );
+    expect(
+      screen.queryByRole("button", { name: /^widgets$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^clock$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("adds an agent pin with the selected agent id", async () => {
@@ -507,8 +546,8 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({ mutations: { addWidget } });
 
-    await openPickerPanel(user, container, "agents");
-    await user.type(screen.getByPlaceholderText("Search agents"), "two");
+    await openPickerPanel(user, container, "agent");
+    await user.type(screen.getByPlaceholderText("Search"), "two");
     await user.click(screen.getByRole("button", { name: /agent two/i }));
 
     expect(addWidget).toHaveBeenCalledWith(
@@ -526,7 +565,7 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({ mutations: { addWidget } });
 
-    await openPickerPanel(user, container, "chats");
+    await openPickerPanel(user, container, "chat");
 
     expect(screen.getByRole("button", { name: /first chat/i })).toBeEnabled();
     expect(screen.queryByRole("button", { name: /empty chat/i })).toBeNull();
@@ -549,23 +588,31 @@ describe("WidgetCanvas", () => {
 
     const { container, rerender } = renderCanvas();
 
-    await openPickerPanel(user, container, "chats");
+    await openPickerPanel(user, container, "chat");
     expect(mocks.loadMoreSessions).not.toHaveBeenCalled();
 
-    await user.type(screen.getByRole("textbox", { name: "Search chats" }), "x");
+    await user.type(screen.getByRole("textbox", { name: "Search" }), "x");
 
     await waitFor(() => {
       expect(mocks.loadMoreSessions).toHaveBeenCalledTimes(1);
     });
 
     mocks.isLoadingMoreSessions = true;
-    rerender(<WidgetCanvas instances={[]} mutations={mutationHandlers()} />);
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas instances={[]} mutations={mutationHandlers()} />
+      </PickerTestProvider>,
+    );
     mocks.isLoadingMoreSessions = false;
-    rerender(<WidgetCanvas instances={[]} mutations={mutationHandlers()} />);
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas instances={[]} mutations={mutationHandlers()} />
+      </PickerTestProvider>,
+    );
 
     expect(mocks.loadMoreSessions).toHaveBeenCalledTimes(1);
 
-    await user.type(screen.getByRole("textbox", { name: "Search chats" }), "y");
+    await user.type(screen.getByRole("textbox", { name: "Search" }), "y");
 
     await waitFor(() => {
       expect(mocks.loadMoreSessions).toHaveBeenCalledTimes(2);
@@ -577,8 +624,8 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas();
 
-    await openPickerPanel(user, container, "chats");
-    await user.type(screen.getByPlaceholderText("Search chats"), "alpha");
+    await openPickerPanel(user, container, "chat");
+    await user.type(screen.getByPlaceholderText("Search"), "alpha");
 
     expect(screen.getByRole("button", { name: /first chat/i })).toBeVisible();
     expect(screen.queryByText("Alpha Project")).toBeNull();
@@ -604,8 +651,8 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({ mutations: { addWidget } });
 
-    await openPickerPanel(user, container, "projects");
-    await user.type(screen.getByPlaceholderText("Search projects"), "beta");
+    await openPickerPanel(user, container, "project");
+    await user.type(screen.getByPlaceholderText("Search"), "beta");
     await user.click(screen.getByRole("button", { name: /beta project/i }));
 
     expect(addWidget).toHaveBeenCalledWith(
@@ -632,7 +679,7 @@ describe("WidgetCanvas", () => {
       mutations: { addWidget },
     });
 
-    await openPickerPanel(user, container, "projects");
+    await openPickerPanel(user, container, "project");
 
     const pinnedProject = screen
       .getAllByRole("button", { name: /alpha project/i })
@@ -652,7 +699,7 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas({ mutations: { addWidget } });
 
-    await openPickerPanel(user, container, "automations");
+    await openPickerPanel(user, container, "automation");
     await user.click(
       await screen.findByRole("button", { name: /daily pr summary/i }),
     );
@@ -671,13 +718,13 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas();
 
-    await openPickerPanel(user, container, "automations");
+    await openPickerPanel(user, container, "automation");
     expect(
       await screen.findByRole("button", { name: /daily pr summary/i }),
     ).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /back/i }));
-    await user.click(screen.getByRole("button", { name: /automations/i }));
+    await user.click(screen.getByRole("button", { name: /^automations$/i }));
 
     expect(mocks.getAutomationTiles).toHaveBeenCalledTimes(1);
     expect(
@@ -692,14 +739,13 @@ describe("WidgetCanvas", () => {
 
     const { container } = renderCanvas();
 
-    await openPickerPanel(user, container, "automations");
+    await openPickerPanel(user, container, "automation");
     expect(await screen.findByText("Could not load items.")).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /back/i }));
-    await user.click(screen.getByRole("button", { name: /display/i }));
+    await user.click(screen.getByRole("button", { name: /^project$/i }));
 
     expect(screen.queryByText("Could not load items.")).toBeNull();
-    expect(screen.getByRole("button", { name: /clock/i })).toBeVisible();
   });
 
   it("disables already pinned picker targets", async () => {
@@ -711,7 +757,7 @@ describe("WidgetCanvas", () => {
       mutations: { addWidget },
     });
 
-    await openPickerPanel(user, container, "agents");
+    await openPickerPanel(user, container, "agent");
 
     const pinnedAgent = screen
       .getAllByRole("button", { name: /agent one/i })
@@ -728,10 +774,11 @@ describe("WidgetCanvas", () => {
   it("unpins a widget from the context menu", async () => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
+    const moveWidget = vi.fn();
 
     renderCanvas({
       instances: [widget()],
-      mutations: { removeWidget },
+      mutations: { removeWidget, moveWidget },
     });
 
     await user.pointer({
@@ -741,6 +788,7 @@ describe("WidgetCanvas", () => {
     await user.click(screen.getByText("Unpin"));
 
     expect(removeWidget).toHaveBeenCalledWith("clock-widget");
-    expect(HTMLElement.prototype.setPointerCapture).not.toHaveBeenCalled();
+    // Right-click → Unpin must not start a widget drag.
+    expect(moveWidget).not.toHaveBeenCalled();
   });
 });

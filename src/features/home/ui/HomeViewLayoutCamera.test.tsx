@@ -1,5 +1,7 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Layout } from "@/features/layout/api/layout";
 import {
@@ -10,6 +12,22 @@ import {
 } from "@/features/layout/api/layout";
 import { resetHomeWidgetStoreForTests } from "../stores/homeWidgetStore";
 import { HomeView } from "./HomeView";
+
+// WidgetPicker uses react-query for its skill list; HomeView mounts it via
+// WidgetCanvas even when the picker is closed, so the provider has to be in
+// scope for these tests.
+function WithQueryClient({ children }: { children: ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  );
+}
+
+function renderHomeView() {
+  return render(<HomeView />, { wrapper: WithQueryClient });
+}
 
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
@@ -92,7 +110,7 @@ afterEach(() => {
 describe("HomeView layout camera persistence", () => {
   it("saves camera changes after background pan", async () => {
     const user = userEvent.setup();
-    const { container } = render(<HomeView />);
+    const { container } = renderHomeView();
 
     await screen.findByText(/wed|sun|mon|tue|thu|fri|sat/i);
     const canvas = container.querySelector(".bg-dot-grid");
@@ -128,7 +146,7 @@ describe("HomeView layout camera persistence", () => {
   });
 
   it("saves camera changes after wheel zoom", async () => {
-    const { container } = render(<HomeView />);
+    const { container } = renderHomeView();
 
     await screen.findByText(/wed|sun|mon|tue|thu|fri|sat/i);
     vi.useFakeTimers();
@@ -136,12 +154,15 @@ describe("HomeView layout camera persistence", () => {
     expect(canvas).toBeInstanceOf(HTMLElement);
     mockCanvasRect(canvas as HTMLElement);
 
-    await act(async () => {
+    act(() => {
       fireEvent.wheel(canvas as HTMLElement, {
         clientX: 400,
         clientY: 300,
+        ctrlKey: true,
         deltaY: -120,
       });
+    });
+    await act(async () => {
       await vi.advanceTimersByTimeAsync(150);
     });
 

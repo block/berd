@@ -917,6 +917,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [createNewProjectDraft, createNewTab, projects],
   );
 
+  const handleStartChatWithAgent = useCallback(
+    (agentId: string) => {
+      void createNewTab(DEFAULT_CHAT_TITLE)
+        .then((session) => {
+          patchSession(session.id, { personaId: agentId });
+        })
+        .catch((error) => {
+          console.error("Failed to start chat with agent:", error);
+        });
+    },
+    [createNewTab, patchSession],
+  );
+
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
       const project = options?.projectId
@@ -1165,28 +1178,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       handleSelectSession(sessionId);
     },
     [handleSelectSession],
-  );
-
-  const handleOpenAgentFromSearch = useCallback(
-    (agentId: string) => {
-      replaceNextNavigationEntryRef.current = false;
-      setAgentsPersonaId(agentId);
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("agents");
-    },
-    [setActiveSession],
-  );
-
-  const handleOpenSkillFromSearch = useCallback(
-    (skill: SkillInfo) => {
-      replaceNextNavigationEntryRef.current = false;
-      setSkillsSkillId(skill.id);
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("skills");
-    },
-    [setActiveSession],
   );
 
   const handleOpenExtensionFromSearch = useCallback(
@@ -1694,6 +1685,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       onCornerResizeStart={handleCornerResizeStart}
       onCornerResizeDoubleClick={handleCornerResizeDoubleClick}
       contentUnderSidebar={activeView === "home"}
+      contentUnderTopBar={activeView === "home"}
       showDesignSystemInspector={designSystemInspectorVisible}
       createProjectDialog={{
         isOpen: createProjectOpen,
@@ -1727,14 +1719,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onRenameChat={handleRenameChat}
             onSelectSession={handleSelectSession}
             onSelectSearchResult={handleSelectSearchResult}
+            onStartChatFromProjectId={handleStartProjectChat}
             onStartChatFromProject={handleStartChatFromProject}
             onStartProjectChat={handleStartProjectChat}
             onStartChatWithSkill={handleStartChatWithSkill}
             onExitSearch={handleExitSearch}
             onOpenExtension={handleOpenExtensionFromSearch}
-            onOpenAgent={handleOpenAgentFromSearch}
+            onOpenAgent={handleStartChatWithAgent}
             onOpenAutomation={handleOpenAutomationFromSearch}
-            onOpenSkill={handleOpenSkillFromSearch}
+            onOpenSkill={handleStartChatWithSkill}
           />
           {activeView !== "chat" &&
           !(

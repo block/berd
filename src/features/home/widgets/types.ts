@@ -1,12 +1,14 @@
 import type React from "react";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
+import type { SkillInfo } from "@/features/skills/api/skills";
 
 export type WidgetCategory =
   | "clock"
   | "agent"
   | "chat"
   | "project"
-  | "automation";
+  | "automation"
+  | "skill";
 
 export interface CanvasBounds {
   width: number;
@@ -36,6 +38,8 @@ export interface WidgetRenderProps {
   instance: WidgetInstance;
   onUpdateState: (next: Record<string, unknown>) => void;
   shouldIgnoreActivation?: () => boolean;
+  onOpenProject?: (projectId: string) => void;
+  onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
@@ -55,6 +59,8 @@ export interface WidgetCatalogEntry {
 }
 
 export interface WidgetNavigationHandlers {
+  onOpenProject?: (projectId: string) => void;
+  onOpenSkill?: (skill: SkillInfo) => void;
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
@@ -85,3 +91,4 @@ export type AgentPinState = { agentId: string };
 export type ChatPinState = { sessionId: string };
 export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };
+export type SkillPinState = { skillId: string };

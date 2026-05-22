@@ -141,8 +141,8 @@ export function ProjectArtifactWidget({
         project ? "hover:opacity-95" : "cursor-not-allowed opacity-70",
       )}
     >
-      <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-card-chat">
-        <div className="absolute top-1/2 left-1/2 h-[320px] w-[320px] -translate-x-1/2 -translate-y-1/2">
+      <div className="pointer-events-none absolute inset-0 overflow-visible">
+        <div className="absolute top-[47%] left-[49%] h-[320px] w-[320px] -translate-x-1/2 -translate-y-1/2">
           <ProjectArtifactPreview
             input={input}
             motionImpulse={motionImpulse}

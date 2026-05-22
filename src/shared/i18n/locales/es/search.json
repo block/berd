@@ -2,11 +2,11 @@
   "title": "Buscar",
   "placeholderDescription": "Busca en chats, proyectos, habilidades y agentes.",
   "actions": {
-    "openAgent": "Abrir agente {{name}}",
+    "openAgent": "Iniciar chat con {{name}}",
     "openAutomation": "Abrir automatización {{name}}",
     "openExtension": "Abrir extensión {{name}}",
     "openSession": "Abrir chat {{name}}",
-    "openSkill": "Abrir skill {{name}}"
+    "openSkill": "Iniciar chat con {{name}}"
   },
   "heading": {
     "ariaLabel": "Búsqueda universal",

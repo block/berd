@@ -1,15 +1,18 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
-import { IconUser } from "@tabler/icons-react";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
-import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import type { WidgetRenderProps } from "./types";
 
 function getAgentId(state: Record<string, unknown> | undefined): string | null {
   return typeof state?.agentId === "string" ? state.agentId : null;
+}
+
+function avatarInitial(label: string): string {
+  const trimmed = label.trim();
+  return trimmed ? trimmed.charAt(0).toUpperCase() : "?";
 }
 
 export const AgentPinWidget = memo(function AgentPinWidget({
@@ -38,36 +41,28 @@ export const AgentPinWidget = memo(function AgentPinWidget({
         type="button"
         onClick={handleClick}
         aria-label={t("widgets.agentPin.openAria", { name: label })}
-        className={cn(
-          "flex flex-col rounded-card-chat p-4 text-foreground transition-colors duration-150 cursor-pointer",
-          avatarMedia
-            ? "h-full w-full items-center justify-center gap-2 border border-transparent bg-transparent text-center hover:bg-transparent"
-            : "h-24 w-[200px] border border-border/80 bg-card text-left hover:bg-muted",
-        )}
+        className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-card-chat bg-transparent p-4 text-center text-foreground transition-colors duration-150 cursor-pointer hover:bg-transparent"
       >
-        {avatarMedia ? (
-          <>
-            <span className="flex aspect-square w-[min(80%,176px)] shrink-0 items-center justify-center overflow-hidden">
-              <AvatarMedia
-                media={avatarMedia}
-                alt=""
-                loadingStrategy="visible-video"
-                className="object-contain"
-              />
+        <span className="flex aspect-square w-[min(80%,176px)] shrink-0 items-center justify-center overflow-hidden">
+          {avatarMedia ? (
+            <AvatarMedia
+              media={avatarMedia}
+              alt=""
+              loadingStrategy="visible-video"
+              className="object-contain"
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="flex size-full items-center justify-center rounded-full bg-foreground text-[2.5rem] font-medium text-background"
+            >
+              {avatarInitial(label)}
             </span>
-            <span className="max-w-full truncate text-base leading-5">
-              {label}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-              <IconUser className="size-4" aria-hidden="true" />
-              {t("widgets.agentPin.kicker")}
-            </span>
-            <span className="mt-3 truncate text-base leading-5">{label}</span>
-          </>
-        )}
+          )}
+        </span>
+        <span className="max-w-full truncate text-sm leading-[15px]">
+          {label}
+        </span>
       </button>
     </div>
   );

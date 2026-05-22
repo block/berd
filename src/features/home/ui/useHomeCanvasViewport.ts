@@ -1,5 +1,11 @@
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import type {
   LayoutCamera,
   LayoutConstraints,
@@ -11,7 +17,9 @@ import {
   canvasViewportToLayoutCamera,
   layoutCameraToCanvasViewport,
   panCanvasViewport,
+  panCanvasViewportByDelta,
   screenToWorld,
+  zoomCanvasViewportByScaleAtPoint,
   zoomCanvasViewportAtPoint,
 } from "../lib/layoutCamera";
 import {
@@ -59,6 +67,12 @@ type WebkitSelectionStyle = CSSStyleDeclaration & {
   webkitUserSelect?: string;
 };
 
+type WebkitGestureEvent = Event & {
+  clientX?: number;
+  clientY?: number;
+  scale?: number;
+};
+
 interface UseHomeCanvasViewportOptions {
   camera: LayoutCamera;
   constraints: LayoutConstraints;
@@ -73,6 +87,19 @@ function viewportSize(element: HTMLElement | null) {
   return {
     width: rect?.width ?? 0,
     height: rect?.height ?? 0,
+  };
+}
+
+function wheelDeltaPixels(
+  event: React.WheelEvent<HTMLElement>,
+  viewport: ReturnType<typeof viewportSize>,
+): CanvasPoint {
+  const multiplier =
+    event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.height : 1;
+
+  return {
+    x: (event.deltaX ?? 0) * multiplier,
+    y: (event.deltaY ?? 0) * multiplier,
   };
 }
 
@@ -159,6 +186,7 @@ export function useHomeCanvasViewport({
   const activePointerRef = useRef<ActivePointer | null>(null);
   const cameraSaveTimerRef = useRef<number | null>(null);
   const documentSelectionLockRef = useRef<SelectionLockSnapshot | null>(null);
+  const gestureScaleRef = useRef<number | null>(null);
   const [viewport, setViewport] = useState<CanvasViewport>(() =>
     layoutCameraToCanvasViewport(camera, { width: 0, height: 0 }, constraints),
   );
@@ -247,16 +275,45 @@ export function useHomeCanvasViewport({
     documentSelectionLockRef.current = null;
   }, []);
 
-  useEffect(() => {
-    const nextCamera = clampLayoutCamera(camera, constraints);
+  const syncViewportToCamera = useCallback(() => {
+    const size = viewportSize(canvasRef.current);
+    if (size.width <= 0 || size.height <= 0) {
+      return;
+    }
+
     setViewport(
       layoutCameraToCanvasViewport(
-        nextCamera,
-        viewportSize(canvasRef.current),
+        clampLayoutCamera(camera, constraints),
+        size,
         constraints,
       ),
     );
   }, [camera, constraints]);
+
+  useLayoutEffect(() => {
+    syncViewportToCamera();
+  }, [syncViewportToCamera]);
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) {
+      return;
+    }
+
+    syncViewportToCamera();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", syncViewportToCamera);
+      return () => window.removeEventListener("resize", syncViewportToCamera);
+    }
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncViewportToCamera();
+    });
+    resizeObserver.observe(element);
+
+    return () => resizeObserver.disconnect();
+  }, [syncViewportToCamera]);
 
   useEffect(
     () => () => {
@@ -442,22 +499,86 @@ export function useHomeCanvasViewport({
         return;
       }
 
-      const nextViewport = zoomCanvasViewportAtPoint(
-        viewport,
-        {
-          x: event.clientX - rect.left,
-          y: event.clientY - rect.top,
-        },
-        event.deltaY,
-        constraints,
-      );
-
       onViewportGestureStart?.();
-      setViewport(nextViewport);
-      scheduleCameraSave(nextViewport);
+
+      setViewport((currentViewport) => {
+        const nextViewport =
+          event.ctrlKey || event.metaKey
+            ? zoomCanvasViewportAtPoint(
+                currentViewport,
+                {
+                  x: event.clientX - rect.left,
+                  y: event.clientY - rect.top,
+                },
+                event.deltaY,
+                constraints,
+              )
+            : panCanvasViewportByDelta(
+                currentViewport,
+                wheelDeltaPixels(event, rect),
+              );
+
+        scheduleCameraSave(nextViewport);
+        return nextViewport;
+      });
     },
-    [constraints, onViewportGestureStart, scheduleCameraSave, viewport],
+    [constraints, onViewportGestureStart, scheduleCameraSave],
   );
+
+  useEffect(() => {
+    const element = canvasRef.current;
+    if (!element) {
+      return;
+    }
+
+    const handleGestureStart = (event: WebkitGestureEvent) => {
+      event.preventDefault();
+      gestureScaleRef.current = event.scale ?? 1;
+      onViewportGestureStart?.();
+    };
+
+    const handleGestureChange = (event: WebkitGestureEvent) => {
+      event.preventDefault();
+
+      const rect = element.getBoundingClientRect();
+      const currentScale = event.scale ?? gestureScaleRef.current ?? 1;
+      const previousScale = gestureScaleRef.current ?? 1;
+      gestureScaleRef.current = currentScale;
+
+      if (currentScale <= 0 || previousScale <= 0) {
+        return;
+      }
+
+      const zoomFactor = currentScale / previousScale;
+      setViewport((currentViewport) => {
+        const nextViewport = zoomCanvasViewportByScaleAtPoint(
+          currentViewport,
+          {
+            x: (event.clientX ?? rect.left + rect.width / 2) - rect.left,
+            y: (event.clientY ?? rect.top + rect.height / 2) - rect.top,
+          },
+          zoomFactor,
+          constraints,
+        );
+        scheduleCameraSave(nextViewport);
+        return nextViewport;
+      });
+    };
+
+    const handleGestureEnd = () => {
+      gestureScaleRef.current = null;
+    };
+
+    element.addEventListener("gesturestart", handleGestureStart);
+    element.addEventListener("gesturechange", handleGestureChange);
+    element.addEventListener("gestureend", handleGestureEnd);
+
+    return () => {
+      element.removeEventListener("gesturestart", handleGestureStart);
+      element.removeEventListener("gesturechange", handleGestureChange);
+      element.removeEventListener("gestureend", handleGestureEnd);
+    };
+  }, [constraints, onViewportGestureStart, scheduleCameraSave]);
 
   return {
     canvasRef,

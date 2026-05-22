@@ -60,6 +60,7 @@ interface AppShellContentProps {
     messageId?: string,
     query?: string,
   ) => void;
+  onStartChatFromProjectId: (projectId: string) => void;
   onStartChatFromProject: (project: ProjectInfo) => void;
   onStartProjectChat: (projectId: string) => void;
   onStartChatWithSkill: (skill: SkillInfo, projectId?: string | null) => void;
@@ -92,6 +93,7 @@ export function AppShellContent({
   onRenameChat,
   onSelectSession,
   onSelectSearchResult,
+  onStartChatFromProjectId,
   onStartChatFromProject,
   onStartProjectChat,
   onStartChatWithSkill,
@@ -174,7 +176,9 @@ export function AppShellContent({
     case "home":
       return (
         <HomeView
-          onOpenAgent={(agentId) => onNavigateAgents(agentId)}
+          onOpenProject={onStartChatFromProjectId}
+          onOpenAgent={onOpenAgent}
+          onOpenSkill={onOpenSkill}
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={(automationId) =>

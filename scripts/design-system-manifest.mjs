@@ -413,7 +413,7 @@ export type DesignSystemComponentManifestItem = {
 export const designSystemComponentManifest = ${JSON.stringify(manifest, null, 2)} as const satisfies readonly DesignSystemComponentManifestItem[];
 `;
 
-  return execFileSync(
+  const formatted = execFileSync(
     "pnpm",
     [
       "exec",
@@ -428,6 +428,12 @@ export const designSystemComponentManifest = ${JSON.stringify(manifest, null, 2)
       encoding: "utf8",
     },
   );
+  return formatted
+    .split("\n")
+    .filter(
+      (line) => !(line.includes("WARN") && line.includes("pnpm.overrides")),
+    )
+    .join("\n");
 }
 
 function writeManifest({ check = false } = {}) {

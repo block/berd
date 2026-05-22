@@ -3,6 +3,7 @@ import { AutomationOutputWidget } from "./AutomationOutputWidget";
 import { ChatPinWidget } from "./ChatPinWidget";
 import { ClockWidget } from "./ClockWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
+import { SkillPinWidget } from "./SkillPinWidget";
 import type { WidgetCatalogEntry, WidgetCategory } from "./types";
 
 export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
@@ -25,7 +26,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     id: "chatPin",
     category: "chat",
     labelKey: "widgets.chatPin.label",
-    defaultSize: { width: 240, height: 96 },
+    defaultSize: { width: 188, height: 80 },
     Component: ChatPinWidget,
   },
   {
@@ -41,8 +42,15 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     category: "automation",
     labelKey: "widgets.automationOutputPin.label",
     descriptionKey: "widgets.automationOutputPin.description",
-    defaultSize: { width: 280, height: 180 },
+    defaultSize: { width: 244, height: 213 },
     Component: AutomationOutputWidget,
+  },
+  {
+    id: "skillPin",
+    category: "skill",
+    labelKey: "widgets.skillPin.label",
+    defaultSize: { width: 240, height: 96 },
+    Component: SkillPinWidget,
   },
 ];
 
@@ -55,4 +63,5 @@ export const HOME_WIDGET_CATEGORIES: WidgetCategory[] = [
   "chat",
   "project",
   "automation",
+  "skill",
 ];
