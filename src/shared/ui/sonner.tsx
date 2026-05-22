@@ -8,6 +8,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={isDark ? "dark" : "light"}
       className="toaster group"
+      position="bottom-right"
+      // Lift toasts above the global composer pill (bottom-3 right-3, ~64px
+      // tall) so they stack just over it instead of behind it; right edge
+      // aligns with the pill's right-3 gutter.
+      offset={{ bottom: 88, right: 12 }}
       style={
         {
           "--normal-bg": "hsl(var(--popover))",

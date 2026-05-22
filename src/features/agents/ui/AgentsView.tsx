@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { IconPlus, IconUpload } from "@tabler/icons-react";
@@ -78,6 +79,11 @@ export function AgentsView({
 
   const personas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
+  const shouldReduceMotion = useReducedMotion();
+  // Four or fewer agents fit in a single screen, so we float the grid in the
+  // vertical center; the fifth makes the grid taller, so it returns to the top
+  // and scrolls. The motion layout animation slides it up/down across that line.
+  const isVerticallyCentered = !personasLoading && personas.length <= 4;
   const personaEditorOpen = useAgentStore((s) => s.personaEditorOpen);
   const editingPersona = useAgentStore((s) => s.editingPersona);
   const personaEditorMode = useAgentStore((s) => s.personaEditorMode);
@@ -415,8 +421,19 @@ export function AgentsView({
   }
 
   return (
-    <PageShell contentWidth="full">
-      <section aria-labelledby="personas-heading">
+    <PageShell
+      contentWidth="full"
+      contentAlign={isVerticallyCentered ? "center" : "top"}
+    >
+      <motion.section
+        layout="position"
+        transition={
+          shouldReduceMotion
+            ? { duration: 0 }
+            : { type: "spring", bounce: 0, duration: 0.4 }
+        }
+        aria-labelledby="personas-heading"
+      >
         <PersonaGallery
           personas={personas}
           onSelectPersona={handleSelectPersona}
@@ -434,7 +451,7 @@ export function AgentsView({
           })}
           isLoading={personasLoading}
         />
-      </section>
+      </motion.section>
 
       {dialogs}
     </PageShell>

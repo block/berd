@@ -8,6 +8,7 @@ interface ShellProps {
   className?: string;
   contentClassName?: string;
   contentWidth?: "default" | "narrow" | "full";
+  contentAlign?: "top" | "center";
   showBottomFade?: boolean;
 }
 
@@ -37,6 +38,7 @@ export function PageShell({
   className,
   contentClassName,
   contentWidth = "default",
+  contentAlign = "top",
   showBottomFade = true,
 }: ShellProps) {
   const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
@@ -46,12 +48,21 @@ export function PageShell({
       <div className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
         <div
           className={cn(
-            "mx-auto flex w-full flex-col px-6 pt-8 page-transition",
+            "mx-auto flex min-h-full w-full flex-col px-6 pt-8 page-transition",
             showBottomFade ? "pb-app-page-bottom" : "pb-8",
             widthClassName,
           )}
         >
-          <div className={cn("flex w-full flex-col gap-8", contentClassName)}>
+          <div
+            className={cn(
+              "flex w-full flex-col gap-8",
+              // `my-auto` centers only the content; the BottomFade sibling keeps
+              // its place at the wrapper's bottom edge instead of floating up
+              // with the centered group.
+              contentAlign === "center" && "my-auto",
+              contentClassName,
+            )}
+          >
             {children}
           </div>
           {showBottomFade ? <BottomFade className="-mt-64" /> : null}
