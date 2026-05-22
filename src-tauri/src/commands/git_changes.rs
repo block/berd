@@ -1,7 +1,14 @@
 use serde::Serialize;
 use std::path::Path;
+use std::time::Duration;
+use tokio::time::timeout;
 
-use super::git::{is_git_repo, resolve_repo_path, run_git_success};
+use super::git::{
+    is_git_repo_async, resolve_repo_path, run_git_success_async, GIT_STATUS_COMMAND_TIMEOUT,
+};
+
+const CHANGED_FILES_OPERATION_TIMEOUT: Duration = Duration::from_secs(90);
+const MAX_LINE_COUNT_SIZE: u64 = 1024 * 1024;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -13,23 +20,39 @@ pub struct ChangedFile {
 }
 
 #[tauri::command]
-pub fn get_changed_files(path: String) -> Result<Vec<ChangedFile>, String> {
+pub async fn get_changed_files(path: String) -> Result<Vec<ChangedFile>, String> {
+    match timeout(
+        CHANGED_FILES_OPERATION_TIMEOUT,
+        get_changed_files_inner(path),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "Git changes timed out after {} seconds",
+            CHANGED_FILES_OPERATION_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+async fn get_changed_files_inner(path: String) -> Result<Vec<ChangedFile>, String> {
     let repo_path = resolve_repo_path(&path)?;
 
-    if !is_git_repo(&repo_path)? {
+    if !is_git_repo_async(&repo_path).await? {
         return Ok(Vec::new());
     }
 
-    let status_output = run_git_success(
+    let status_output = run_git_success_async(
         &repo_path,
         &["status", "--porcelain", "--untracked-files=all"],
-    )?;
+        GIT_STATUS_COMMAND_TIMEOUT,
+    )
+    .await?;
     if status_output.trim().is_empty() {
         return Ok(Vec::new());
     }
 
-    let head_numstat =
-        run_git_success(&repo_path, &["diff", "HEAD", "--numstat"]).unwrap_or_default();
+    let head_numstat = read_head_numstat(&repo_path).await?;
     let head_stats = parse_numstat(&head_numstat);
 
     let mut files: Vec<ChangedFile> = Vec::new();
@@ -54,10 +77,10 @@ pub fn get_changed_files(path: String) -> Result<Vec<ChangedFile>, String> {
 
         let status = parse_status_codes(index_status, worktree_status);
 
-        let (additions, deletions) = head_stats
-            .get(&file_path)
-            .copied()
-            .unwrap_or_else(|| count_file_lines(&repo_path, &file_path));
+        let (additions, deletions) = match head_stats.get(&file_path).copied() {
+            Some(stats) => stats,
+            None => count_file_lines(&repo_path, &file_path).await,
+        };
 
         files.push(ChangedFile {
             path: file_path,
@@ -69,6 +92,39 @@ pub fn get_changed_files(path: String) -> Result<Vec<ChangedFile>, String> {
 
     files.sort_by(|a, b| a.path.cmp(&b.path));
     Ok(files)
+}
+
+async fn read_head_numstat(repo_path: &Path) -> Result<String, String> {
+    match run_git_success_async(
+        repo_path,
+        &["diff", "HEAD", "--numstat"],
+        GIT_STATUS_COMMAND_TIMEOUT,
+    )
+    .await
+    {
+        Ok(output) => Ok(output),
+        Err(error) if is_missing_head_error(&error) => Ok(String::new()),
+        Err(error) => Err(error),
+    }
+}
+
+fn is_missing_head_error(error: &str) -> bool {
+    error.contains("ambiguous argument 'HEAD'") || error.contains("bad revision 'HEAD'")
+}
+
+async fn count_file_lines(repo_path: &Path, file_path: &str) -> (u32, u32) {
+    let full = repo_path.join(file_path);
+    let meta = match tokio::fs::metadata(&full).await {
+        Ok(meta) => meta,
+        Err(_) => return (0, 0),
+    };
+    if meta.len() > MAX_LINE_COUNT_SIZE {
+        return (0, 0);
+    }
+    match tokio::fs::read_to_string(&full).await {
+        Ok(contents) => (contents.lines().count() as u32, 0),
+        Err(_) => (0, 0),
+    }
 }
 
 fn parse_status_codes(index: u8, worktree: u8) -> String {
@@ -127,25 +183,5 @@ fn expand_rename_path(path: &str) -> String {
         path.split(" => ").last().unwrap_or(path).to_string()
     } else {
         path.to_string()
-    }
-}
-
-const MAX_LINE_COUNT_SIZE: u64 = 1024 * 1024;
-
-fn count_file_lines(repo_path: &Path, file_path: &str) -> (u32, u32) {
-    let full = repo_path.join(file_path);
-    let meta = match std::fs::metadata(&full) {
-        Ok(m) => m,
-        Err(_) => return (0, 0),
-    };
-    if meta.len() > MAX_LINE_COUNT_SIZE {
-        return (0, 0);
-    }
-    match std::fs::read_to_string(&full) {
-        Ok(contents) => {
-            let count = contents.lines().count() as u32;
-            (count, 0)
-        }
-        Err(_) => (0, 0),
     }
 }

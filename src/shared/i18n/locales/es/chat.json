@@ -56,7 +56,8 @@
       "noProjectAssigned": "No hay proyecto asignado"
     },
     "errors": {
-      "gitRead": "No se pudo leer el estado de git."
+      "gitRead": "El estado de git no está disponible en este momento.",
+      "gitChangesRead": "Los cambios de git no están disponibles en este momento."
     },
     "picker": {
       "selectContext": "Seleccionar árbol de trabajo o rama",

@@ -9,6 +9,7 @@ export function useChangedFiles(
     queryKey: ["changed-files", path],
     queryFn: () => getChangedFiles(path ?? ""),
     enabled: enabled && Boolean(path),
+    retry: false,
     staleTime: Number.POSITIVE_INFINITY,
     refetchOnWindowFocus: true,
   });

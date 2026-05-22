@@ -1,6 +1,9 @@
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::Output;
+use std::time::Duration;
+use tokio::process::Command as TokioCommand;
+use tokio::time::timeout;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,14 +33,29 @@ pub struct CreatedWorktree {
     pub branch: String,
 }
 
+pub(crate) const GIT_READ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
+pub(crate) const GIT_STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
+pub(crate) const GIT_MUTATING_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
+const GIT_STATE_OPERATION_TIMEOUT: Duration = Duration::from_secs(90);
+
 #[tauri::command]
-pub fn get_git_state(path: String) -> Result<GitState, String> {
+pub async fn get_git_state(path: String) -> Result<GitState, String> {
+    match timeout(GIT_STATE_OPERATION_TIMEOUT, get_git_state_inner(path)).await {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "Git status timed out after {} seconds",
+            GIT_STATE_OPERATION_TIMEOUT.as_secs()
+        )),
+    }
+}
+
+async fn get_git_state_inner(path: String) -> Result<GitState, String> {
     let repo_path = PathBuf::from(&path);
     if !repo_path.exists() {
         return Err(format!("Path does not exist: {}", path));
     }
 
-    if !is_git_repo(&repo_path)? {
+    if !is_git_repo_async(&repo_path).await? {
         return Ok(GitState {
             is_git_repo: false,
             current_branch: None,
@@ -50,32 +68,60 @@ pub fn get_git_state(path: String) -> Result<GitState, String> {
         });
     }
 
-    let current_root = trim_to_option(run_git_success(
-        &repo_path,
-        &["rev-parse", "--show-toplevel"],
-    )?)
+    let current_root = trim_to_option(
+        run_git_success_async(
+            &repo_path,
+            &["rev-parse", "--show-toplevel"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    )
     .ok_or("Could not determine repository root")?;
-    let current_branch =
-        trim_to_option(run_git_success(&repo_path, &["branch", "--show-current"])?);
-    let dirty_file_count = count_lines(&run_git_success(&repo_path, &["status", "--porcelain"])?);
-    let git_common_dir = trim_to_option(run_git_success(
-        &repo_path,
-        &["rev-parse", "--git-common-dir"],
-    )?);
+    let current_branch = trim_to_option(
+        run_git_success_async(
+            &repo_path,
+            &["branch", "--show-current"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    );
+    let dirty_file_count = count_lines(
+        &run_git_success_async(
+            &repo_path,
+            &["status", "--porcelain"],
+            GIT_STATUS_COMMAND_TIMEOUT,
+        )
+        .await?,
+    );
+    let git_common_dir = trim_to_option(
+        run_git_success_async(
+            &repo_path,
+            &["rev-parse", "--git-common-dir"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    );
     let main_worktree_path = git_common_dir
         .as_deref()
         .and_then(|git_common_dir| resolve_main_worktree_path(git_common_dir, &current_root))
         .as_deref()
         .map(normalize_path_string);
-    let worktrees_output = run_git_success(&repo_path, &["worktree", "list", "--porcelain"])?;
+    let worktrees_output = run_git_success_async(
+        &repo_path,
+        &["worktree", "list", "--porcelain"],
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
     let worktrees = parse_worktrees(&worktrees_output, main_worktree_path.as_deref());
     let is_worktree = main_worktree_path
         .as_deref()
         .map(|main_path| normalize_path_string(&current_root) != main_path)
         .unwrap_or(false);
-    let incoming_commit_count = count_incoming_commits(&repo_path).unwrap_or(0);
+    let incoming_commit_count = count_incoming_commits_async(&repo_path).await.unwrap_or(0);
 
-    let local_branches = list_local_branches(&repo_path).unwrap_or_default();
+    let local_branches = list_local_branches_async(&repo_path)
+        .await
+        .unwrap_or_default();
 
     Ok(GitState {
         is_git_repo: true,
@@ -90,54 +136,75 @@ pub fn get_git_state(path: String) -> Result<GitState, String> {
 }
 
 #[tauri::command]
-pub fn git_switch_branch(path: String, branch: String) -> Result<(), String> {
+pub async fn git_switch_branch(path: String, branch: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
-    run_git_success(&repo_path, &["switch", &branch])?;
+    run_git_success_async(
+        &repo_path,
+        &["switch", &branch],
+        GIT_MUTATING_COMMAND_TIMEOUT,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_stash(path: String) -> Result<(), String> {
+pub async fn git_stash(path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
-    run_git_success(&repo_path, &["stash"])?;
+    run_git_success_async(&repo_path, &["stash"], GIT_MUTATING_COMMAND_TIMEOUT).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_init(path: String) -> Result<(), String> {
+pub async fn git_init(path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
-    run_git_success(&repo_path, &["init"])?;
+    run_git_success_async(&repo_path, &["init"], GIT_MUTATING_COMMAND_TIMEOUT).await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_fetch(path: String) -> Result<(), String> {
+pub async fn git_fetch(path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
-    run_git_success(&repo_path, &["fetch", "--prune"])?;
+    run_git_success_async(
+        &repo_path,
+        &["fetch", "--prune"],
+        GIT_MUTATING_COMMAND_TIMEOUT,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_pull(path: String) -> Result<(), String> {
+pub async fn git_pull(path: String) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
-    run_git_success(&repo_path, &["pull", "--ff-only"])?;
+    run_git_success_async(
+        &repo_path,
+        &["pull", "--ff-only"],
+        GIT_MUTATING_COMMAND_TIMEOUT,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_create_branch(path: String, name: String, base_branch: String) -> Result<(), String> {
+pub async fn git_create_branch(
+    path: String,
+    name: String,
+    base_branch: String,
+) -> Result<(), String> {
     let repo_path = resolve_repo_path(&path)?;
     let branch_name = require_nonempty(&name, "Branch name")?;
     let base_branch = require_nonempty(&base_branch, "Base branch")?;
-    run_git_success(
+    run_git_success_async(
         &repo_path,
         &["switch", "-c", branch_name.as_str(), base_branch.as_str()],
-    )?;
+        GIT_MUTATING_COMMAND_TIMEOUT,
+    )
+    .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub fn git_create_worktree(
+pub async fn git_create_worktree(
     path: String,
     name: String,
     branch: String,
@@ -147,7 +214,7 @@ pub fn git_create_worktree(
     let repo_path = resolve_repo_path(&path)?;
     let worktree_name = validate_worktree_name(&name)?;
     let branch_name = require_nonempty(&branch, "Branch name")?;
-    let (_, main_worktree_path) = git_repo_context(&repo_path)?;
+    let (_, main_worktree_path) = git_repo_context_async(&repo_path).await?;
     let target_path = derive_worktree_path(
         main_worktree_path.as_deref().unwrap_or(path.as_str()),
         &worktree_name,
@@ -163,7 +230,7 @@ pub fn git_create_worktree(
     if create_branch {
         let base_branch =
             require_nonempty(base_branch.as_deref().unwrap_or_default(), "Base branch")?;
-        run_git_success(
+        run_git_success_async(
             &repo_path,
             &[
                 "worktree",
@@ -173,9 +240,11 @@ pub fn git_create_worktree(
                 target_path_string.as_str(),
                 base_branch.as_str(),
             ],
-        )?;
+            GIT_MUTATING_COMMAND_TIMEOUT,
+        )
+        .await?;
     } else {
-        run_git_success(
+        run_git_success_async(
             &repo_path,
             &[
                 "worktree",
@@ -183,7 +252,9 @@ pub fn git_create_worktree(
                 target_path_string.as_str(),
                 branch_name.as_str(),
             ],
-        )?;
+            GIT_MUTATING_COMMAND_TIMEOUT,
+        )
+        .await?;
     }
 
     Ok(CreatedWorktree {
@@ -192,13 +263,13 @@ pub fn git_create_worktree(
     })
 }
 
-pub(crate) fn is_git_repo(path: &Path) -> Result<bool, String> {
-    let output = Command::new("git")
-        .arg("rev-parse")
-        .arg("--is-inside-work-tree")
-        .current_dir(path)
-        .output()
-        .map_err(|error| format!("Failed to run git: {}", error))?;
+pub(crate) async fn is_git_repo_async(path: &Path) -> Result<bool, String> {
+    let output = run_git_output_async(
+        path,
+        &["rev-parse", "--is-inside-work-tree"],
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
 
     Ok(output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "true")
 }
@@ -211,12 +282,33 @@ pub(crate) fn resolve_repo_path(path: &str) -> Result<PathBuf, String> {
     Ok(repo_path)
 }
 
-pub(crate) fn run_git_success(path: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .args(args)
-        .current_dir(path)
-        .output()
-        .map_err(|error| format!("Failed to run git: {}", error))?;
+async fn run_git_output_async(
+    path: &Path,
+    args: &[&str],
+    command_timeout: Duration,
+) -> Result<Output, String> {
+    let rendered_args = args.join(" ");
+    let mut command = TokioCommand::new("git");
+    command.args(args).current_dir(path).kill_on_drop(true);
+
+    timeout(command_timeout, command.output())
+        .await
+        .map_err(|_| {
+            format!(
+                "git {} timed out after {} seconds",
+                rendered_args,
+                command_timeout.as_secs()
+            )
+        })?
+        .map_err(|error| format!("Failed to run git: {}", error))
+}
+
+pub(crate) async fn run_git_success_async(
+    path: &Path,
+    args: &[&str],
+    command_timeout: Duration,
+) -> Result<String, String> {
+    let output = run_git_output_async(path, args, command_timeout).await?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -256,23 +348,29 @@ fn count_lines(value: &str) -> u32 {
         .unwrap_or(u32::MAX)
 }
 
-fn count_incoming_commits(path: &Path) -> Result<u32, String> {
-    let has_upstream = Command::new("git")
-        .args([
+async fn count_incoming_commits_async(path: &Path) -> Result<u32, String> {
+    let has_upstream = run_git_output_async(
+        path,
+        &[
             "rev-parse",
             "--abbrev-ref",
             "--symbolic-full-name",
             "@{upstream}",
-        ])
-        .current_dir(path)
-        .output()
-        .map_err(|error| format!("Failed to run git: {}", error))?;
+        ],
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
 
     if !has_upstream.status.success() {
         return Ok(0);
     }
 
-    let output = run_git_success(path, &["rev-list", "--count", "HEAD..@{upstream}"])?;
+    let output = run_git_success_async(
+        path,
+        &["rev-list", "--count", "HEAD..@{upstream}"],
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
     let count = output
         .trim()
         .parse::<u32>()
@@ -297,10 +395,24 @@ fn resolve_main_worktree_path(git_common_dir: &str, current_root: &str) -> Optio
     }
 }
 
-fn git_repo_context(path: &Path) -> Result<(String, Option<String>), String> {
-    let current_root = trim_to_option(run_git_success(path, &["rev-parse", "--show-toplevel"])?)
-        .ok_or("Could not determine repository root")?;
-    let git_common_dir = trim_to_option(run_git_success(path, &["rev-parse", "--git-common-dir"])?);
+async fn git_repo_context_async(path: &Path) -> Result<(String, Option<String>), String> {
+    let current_root = trim_to_option(
+        run_git_success_async(
+            path,
+            &["rev-parse", "--show-toplevel"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    )
+    .ok_or("Could not determine repository root")?;
+    let git_common_dir = trim_to_option(
+        run_git_success_async(
+            path,
+            &["rev-parse", "--git-common-dir"],
+            GIT_READ_COMMAND_TIMEOUT,
+        )
+        .await?,
+    );
     let main_worktree_path = git_common_dir
         .as_deref()
         .and_then(|git_common_dir| resolve_main_worktree_path(git_common_dir, &current_root))
@@ -404,8 +516,8 @@ fn normalize_path_string(path: &str) -> String {
     path.replace('\\', "/").trim_end_matches('/').to_string()
 }
 
-fn list_local_branches(path: &Path) -> Result<Vec<String>, String> {
-    let output = run_git_success(
+async fn list_local_branches_async(path: &Path) -> Result<Vec<String>, String> {
+    let output = run_git_success_async(
         path,
         &[
             "for-each-ref",
@@ -413,7 +525,9 @@ fn list_local_branches(path: &Path) -> Result<Vec<String>, String> {
             "--format=%(refname:short)",
             "refs/heads",
         ],
-    )?;
+        GIT_READ_COMMAND_TIMEOUT,
+    )
+    .await?;
     Ok(output
         .lines()
         .map(|line| line.trim().to_string())

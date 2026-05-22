@@ -83,7 +83,10 @@ export function ContextPanel({
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
 
   const gitTargetPath =
-    activeContext?.path ?? sessionWorkingDir ?? projectDefaultWorkspaceRoot;
+    activeContext?.path ??
+    sessionWorkingDir ??
+    projectDefaultWorkspaceRoot ??
+    null;
   const {
     data: gitState,
     error,
@@ -94,6 +97,8 @@ export function ContextPanel({
 
   const {
     data: changedFiles,
+    error: changedFilesError,
+    isLoadingError: isChangedFilesLoadingError,
     isLoading: isFilesLoading,
     refetch: refetchFiles,
   } = useChangedFiles(gitTargetPath, activeTab === "details");
@@ -249,6 +254,8 @@ export function ContextPanel({
           <ChangesWidget
             files={changedFiles}
             isLoading={isFilesLoading}
+            error={changedFilesError}
+            isLoadingError={isChangedFilesLoadingError}
             currentBranch={gitState?.currentBranch ?? null}
             repoPath={gitTargetPath ?? ""}
             onOpenFile={handleOpenChangedFile}

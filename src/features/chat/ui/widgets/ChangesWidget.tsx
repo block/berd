@@ -67,6 +67,8 @@ function ChangedFileRow({
 interface ChangesWidgetProps {
   files: ChangedFile[] | undefined;
   isLoading: boolean;
+  error: Error | null;
+  isLoadingError: boolean;
   currentBranch: string | null;
   repoPath: string;
   onOpenFile: (path: string) => void;
@@ -77,6 +79,8 @@ interface ChangesWidgetProps {
 export function ChangesWidget({
   files,
   isLoading,
+  error,
+  isLoadingError,
   currentBranch,
   repoPath,
   onOpenFile,
@@ -97,6 +101,10 @@ export function ChangesWidget({
   }, [files]);
 
   const hasChanges = (files?.length ?? 0) > 0;
+  const errorMessage =
+    error instanceof Error
+      ? error.message
+      : t("contextPanel.errors.gitChangesRead");
 
   const titleContent = (
     <div className="flex min-w-0 items-center gap-1">
@@ -142,6 +150,8 @@ export function ChangesWidget({
           <Skeleton className="h-3 w-1/2" />
           <Skeleton className="h-3 w-2/3" />
         </div>
+      ) : error && isLoadingError ? (
+        <p className="px-3 text-sm text-destructive">{errorMessage}</p>
       ) : hasChanges ? (
         <div className="max-h-[300px] overflow-y-auto">
           {files?.map((file) => (

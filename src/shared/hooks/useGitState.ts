@@ -6,6 +6,7 @@ export function useGitState(path: string | null | undefined, enabled = true) {
     queryKey: ["git-state", path],
     queryFn: () => getGitState(path ?? ""),
     enabled: enabled && Boolean(path),
+    retry: false,
     staleTime: Number.POSITIVE_INFINITY,
   });
 }

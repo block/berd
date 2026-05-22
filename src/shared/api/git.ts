@@ -6,7 +6,7 @@ import type {
 } from "@/shared/types/git";
 
 export async function getGitState(path: string): Promise<GitState> {
-  return invoke("get_git_state", { path });
+  return invoke<GitState>("get_git_state", { path });
 }
 
 export async function switchBranch(
@@ -41,7 +41,7 @@ export async function createBranch(
 }
 
 export async function getChangedFiles(path: string): Promise<ChangedFile[]> {
-  return invoke("get_changed_files", { path });
+  return invoke<ChangedFile[]>("get_changed_files", { path });
 }
 
 export async function createWorktree(

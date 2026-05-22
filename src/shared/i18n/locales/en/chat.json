@@ -56,7 +56,8 @@
       "noProjectAssigned": "No project assigned"
     },
     "errors": {
-      "gitRead": "Couldn't read git status."
+      "gitRead": "Git status is unavailable right now.",
+      "gitChangesRead": "Git changes are unavailable right now."
     },
     "picker": {
       "selectContext": "Select worktree or branch",
