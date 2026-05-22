@@ -181,6 +181,7 @@ export function SidebarChatRow({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: wrapper handles drag and context menu, interactive content is the inner Button
     <div
+      data-session-id={id}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/x-session-id", id);

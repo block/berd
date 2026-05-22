@@ -97,6 +97,18 @@ export function SidebarProjectSection({
     }
   }, [isExpanded]);
 
+  const activeChatIndex = activeSessionId
+    ? projectChats.findIndex((session) => session.id === activeSessionId)
+    : -1;
+
+  // Reveal the rest of the project's chats when the active one is ranked beyond
+  // the collapsed top-N cutoff, so its row renders and can be scrolled into view.
+  useEffect(() => {
+    if (isExpanded && activeChatIndex >= MAX_VISIBLE_PROJECT_CHATS) {
+      setShowExpandedChats(true);
+    }
+  }, [isExpanded, activeChatIndex]);
+
   const handleDragOver = useCallback(
     (e: DragEvent<HTMLDivElement>) => {
       if (

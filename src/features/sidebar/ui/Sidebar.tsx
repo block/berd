@@ -92,6 +92,10 @@ interface SidebarProps {
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const MAX_RECENTS = 20;
+// Height of the nav's bottom fade mask. Shared by the mask style and the
+// scroll-into-view math so a row never lands underneath the fade.
+const BOTTOM_MASK_PX = 48;
+const BOTTOM_MASK = `linear-gradient(to bottom, black calc(100% - ${BOTTOM_MASK_PX}px), transparent 100%)`;
 type SidebarSectionVisibility = {
   projects: boolean;
   recents: boolean;
@@ -268,6 +272,7 @@ export function Sidebar({
   const { t } = useTranslation(["sidebar", "common", "settings"]);
   const [expanded, setExpanded] = useState(!collapsed);
   const prevCollapsed = useRef(collapsed);
+  const navRef = useRef<HTMLElement>(null);
   const [expandedProjects, setExpandedProjects] = useState<
     Record<string, boolean>
   >(() => {
@@ -407,6 +412,39 @@ export function Sidebar({
     });
   }, [activeProjectId, projectIds]);
 
+  // When the active chat changes (e.g. navigating in from elsewhere), bring its
+  // row into view if it's scrolled out of sight. Keyed on activeSessionId so it
+  // only fires on navigation — manual scrolling within the same chat is left alone.
+  useEffect(() => {
+    if (!activeSessionId || collapsed || isSecondarySurface) return;
+    let raf = 0;
+    // Navigating into a collapsed project takes a couple of renders to expand
+    // and reveal the row, so retry across a few frames until it mounts.
+    let attemptsLeft = 3;
+    const scrollActiveRowIntoView = () => {
+      const nav = navRef.current;
+      const row = nav?.querySelector<HTMLElement>(
+        `[data-session-id="${CSS.escape(activeSessionId)}"]`,
+      );
+      if (!nav || !row) {
+        if (attemptsLeft-- > 0)
+          raf = requestAnimationFrame(scrollActiveRowIntoView);
+        return;
+      }
+      const navRect = nav.getBoundingClientRect();
+      const rowRect = row.getBoundingClientRect();
+      const visibleTop = navRect.top;
+      const visibleBottom = navRect.bottom - BOTTOM_MASK_PX;
+      if (rowRect.top < visibleTop) {
+        nav.scrollTop += rowRect.top - visibleTop;
+      } else if (rowRect.bottom > visibleBottom) {
+        nav.scrollTop += rowRect.bottom - visibleBottom;
+      }
+    };
+    raf = requestAnimationFrame(scrollActiveRowIntoView);
+    return () => cancelAnimationFrame(raf);
+  }, [activeSessionId, collapsed, isSecondarySurface]);
+
   useEffect(() => {
     try {
       window.localStorage.setItem(
@@ -500,12 +538,11 @@ export function Sidebar({
             aria-hidden={isSecondarySurface}
           >
             <nav
+              ref={navRef}
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
               style={{
-                maskImage:
-                  "linear-gradient(to bottom, black calc(100% - 3rem), transparent 100%)",
-                WebkitMaskImage:
-                  "linear-gradient(to bottom, black calc(100% - 3rem), transparent 100%)",
+                maskImage: BOTTOM_MASK,
+                WebkitMaskImage: BOTTOM_MASK,
               }}
               aria-label={t("navigation.main")}
             >
@@ -634,10 +671,8 @@ export function Sidebar({
             <nav
               className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
               style={{
-                maskImage:
-                  "linear-gradient(to bottom, black calc(100% - 3rem), transparent 100%)",
-                WebkitMaskImage:
-                  "linear-gradient(to bottom, black calc(100% - 3rem), transparent 100%)",
+                maskImage: BOTTOM_MASK,
+                WebkitMaskImage: BOTTOM_MASK,
               }}
               aria-label={
                 isSettingsSurface
