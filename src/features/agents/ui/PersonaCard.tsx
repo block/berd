@@ -165,10 +165,10 @@ export const PersonaCard = memo(function PersonaCard({
       </div>
 
       <div className="flex flex-col gap-3 px-1">
-        <div className="h-px w-full bg-border/80" />
+        <div className="h-px w-full bg-muted-foreground" />
 
-        <div className="flex items-center">
-          <span className="inline-flex h-5 items-center rounded-full bg-background px-1.5 py-0.5 text-sm leading-[15px] text-foreground">
+        <div className="flex items-start">
+          <span className="inline-flex min-h-5 items-center rounded-2xl bg-card px-1.5 py-0.5 text-sm leading-snug text-foreground">
             {persona.displayName}
           </span>
         </div>
