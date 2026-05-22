@@ -227,10 +227,6 @@
       "unavailable": "Updates are only available in signed Tauri release builds.",
       "upToDate": "Goose is up to date."
     },
-    "indicator": {
-      "inProgress": "Update in progress",
-      "ready": "Restart to apply update"
-    },
     "progress": {
       "downloading": "Downloading",
       "installing": "Installing",

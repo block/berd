@@ -71,8 +71,8 @@ vi.mock("@/shared/api/pathResolver", () => ({
   }),
 }));
 
-vi.mock("@/features/updates/ui/UpdateIndicator", () => ({
-  UpdateIndicator: () => null,
+vi.mock("@/features/updates/ui/UpdateButton", () => ({
+  UpdateButton: () => null,
 }));
 
 vi.mock("./ui/AppShellContent", () => ({

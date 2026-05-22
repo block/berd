@@ -227,10 +227,6 @@
       "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
       "upToDate": "Goose está actualizado."
     },
-    "indicator": {
-      "inProgress": "Actualización en curso",
-      "ready": "Reiniciar para aplicar actualización"
-    },
     "progress": {
       "downloading": "Descargando",
       "installing": "Instalando",

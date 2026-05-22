@@ -11,7 +11,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { AppView } from "@/app/types/appNavigation";
-import { UpdateIndicator } from "@/features/updates/ui/UpdateIndicator";
 import { cn } from "@/shared/lib/cn";
 import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
@@ -187,7 +186,6 @@ export function TopBar({
         <div className="flex items-center gap-2">{viewActions}</div>
       ) : null}
       <div className="flex items-center gap-1">
-        <UpdateIndicator />
         <Button
           type="button"
           variant="ghost"

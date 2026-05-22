@@ -4,6 +4,7 @@ import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog"
 import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import { cn } from "@/shared/lib/cn";
+import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
 
 interface AppShellLayoutProps {
@@ -161,6 +162,8 @@ export function AppShellLayout({
           {children}
         </main>
       </div>
+
+      <UpdateButton />
 
       <CreateProjectDialog {...createProjectDialog} />
       {isDesignSystemExplorerEnabled() && showDesignSystemInspector ? (
