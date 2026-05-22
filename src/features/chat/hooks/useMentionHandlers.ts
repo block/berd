@@ -23,7 +23,6 @@ interface MentionHandlersOptions {
   setText: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onPersonaChange?: ((id: string | null) => void) | undefined;
-  onPersonaMentionInvoked?: (persona: Persona) => void;
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
 }
 
@@ -64,6 +63,25 @@ function sameStringArray(a: string[], b: string[]): boolean {
   return true;
 }
 
+function replaceMentionQuery(
+  text: string,
+  mentionStartIndex: number,
+  mentionQuery: string,
+  label: string,
+) {
+  const before = text.slice(0, mentionStartIndex);
+  const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
+  const inserted = `@${label.trim()}`;
+  const separator =
+    after.length === 0 || /^[^\s.,!?;:)]/.test(after) ? " " : "";
+  const newText = `${before}${inserted}${separator}${after}`;
+
+  return {
+    newText,
+    cursorPosition: before.length + inserted.length + separator.length,
+  };
+}
+
 /**
  * Combines persona + skill + file mention detection, filtering, and selection handlers.
  * Keeps ChatInput under the file-size limit by centralising mention logic.
@@ -77,7 +95,6 @@ export function useMentionHandlers({
   setText,
   textareaRef,
   onPersonaChange,
-  onPersonaMentionInvoked,
   onSkillMentionSelect,
 }: MentionHandlersOptions) {
   const { getAllSessionArtifacts } = useArtifactPolicyContext();
@@ -229,14 +246,16 @@ export function useMentionHandlers({
 
   const handlePersonaMentionSelect = useCallback(
     (persona: Persona) => {
-      const before = text.slice(0, mentionStartIndex);
-      const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
-      const newText = `${before}${after}`.trimStart();
-      pendingCursorRef.current = Math.min(before.length, newText.length);
+      const { newText, cursorPosition } = replaceMentionQuery(
+        text,
+        mentionStartIndex,
+        mentionQuery,
+        persona.displayName,
+      );
+      pendingCursorRef.current = cursorPosition;
       setText(newText);
       closeMention();
       onPersonaChange?.(persona.id);
-      onPersonaMentionInvoked?.(persona);
     },
     [
       text,
@@ -244,7 +263,6 @@ export function useMentionHandlers({
       mentionQuery,
       closeMention,
       onPersonaChange,
-      onPersonaMentionInvoked,
       setText,
     ],
   );
@@ -264,10 +282,13 @@ export function useMentionHandlers({
 
   const handleSkillMentionSelect = useCallback(
     (skill: SkillMentionItem) => {
-      const before = text.slice(0, mentionStartIndex);
-      const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
-      const newText = `${before}${after}`.trimStart();
-      pendingCursorRef.current = Math.min(before.length, newText.length);
+      const { newText, cursorPosition } = replaceMentionQuery(
+        text,
+        mentionStartIndex,
+        mentionQuery,
+        skill.name,
+      );
+      pendingCursorRef.current = cursorPosition;
       setText(newText);
       closeMention();
       onSkillMentionSelect?.(skill);

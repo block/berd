@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { ChatInput } from "./chatInputTestUtils";
+import type { ChatSkillDraft } from "../../types";
 
 const mockVoiceDictation = {
   isEnabled: true,
@@ -49,6 +51,13 @@ vi.mock("@/features/skills/api/skills", () => ({
   listSkills: (projectDirs?: string[]) => mockListSkills(projectDirs),
 }));
 
+const CODE_REVIEW_SKILL = {
+  id: "global:/skills/code-review",
+  name: "code-review",
+  description: "Reviews code",
+  sourceLabel: "Personal",
+};
+
 describe("ChatInput skill mentions", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -59,7 +68,7 @@ describe("ChatInput skill mentions", () => {
     mockVoiceDictation.isStarting.mockReturnValue(false);
   });
 
-  it("shows skills in @mention results and creates a skill chip", async () => {
+  it("shows skills in @mention results, completes the mention text, and creates a skill chip", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([
       {
@@ -85,7 +94,7 @@ describe("ChatInput skill mentions", () => {
       await screen.findByRole("option", { name: /code-review/i }),
     );
 
-    expect(input).toHaveValue("");
+    expect(input).toHaveValue("@code-review ");
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
@@ -181,6 +190,56 @@ describe("ChatInput skill mentions", () => {
         displayText: "check this diff",
       },
     );
+  });
+
+  it("clears selected skill chips when the session controller clears the draft during send", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+
+    function ControlledProjectChatInput() {
+      const [draft, setDraft] = useState("");
+      const [skills, setSkills] = useState<ChatSkillDraft[]>([
+        CODE_REVIEW_SKILL,
+      ]);
+
+      return (
+        <ChatInput
+          initialValue={draft}
+          onDraftChange={setDraft}
+          selectedSkills={skills}
+          onSkillsChange={setSkills}
+          onSend={async (...args) => {
+            onSend(...args);
+            setDraft("");
+            return true;
+          }}
+        />
+      );
+    }
+
+    render(<ControlledProjectChatInput />);
+
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "check this diff");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "check this diff",
+      undefined,
+      undefined,
+      {
+        assistantPrompt: "Use these skills for this request: code-review.",
+        chips: [{ label: "code-review", type: "skill" }],
+        displayText: "check this diff",
+      },
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("code-review")).not.toBeInTheDocument();
+    });
+    expect(input).toHaveValue("");
   });
 
   it("expands direct slash skill commands before sending", async () => {

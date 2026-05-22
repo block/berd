@@ -9,7 +9,6 @@ import {
 import { X } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import type { Persona } from "@/shared/types/agents";
 import {
   attachmentSnapshotsMatch,
   skillDraftSnapshotsMatch,
@@ -147,7 +146,6 @@ export function ChatInput({
   attachmentsRef.current = attachments;
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
-  const personaInvocationRef = useRef<Persona | null>(null);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -227,9 +225,6 @@ export function ChatInput({
     setText,
     textareaRef,
     onPersonaChange,
-    onPersonaMentionInvoked: (persona) => {
-      personaInvocationRef.current = persona;
-    },
     onSkillMentionSelect: handleSkillMentionAdded,
   });
 
@@ -258,7 +253,6 @@ export function ChatInput({
     attachmentsRef,
     selectedSkillsRef,
     selectedPersonaId,
-    personaInvocationRef,
     onSend,
     setSelectedSkills,
     resolveSkillSlashCommand,
@@ -303,17 +297,24 @@ export function ChatInput({
     if (!accepted) {
       return;
     }
-    const draftStillMatchesSubmission =
-      textRef.current === submittedText &&
-      skillDraftSnapshotsMatch(selectedSkillsRef.current, submittedSkills) &&
-      attachmentSnapshotsMatch(attachmentsRef.current, submittedAttachments);
-    if (!draftStillMatchesSubmission) {
-      return;
+    const textStillMatchesSubmission = textRef.current === submittedText;
+    const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
+      selectedSkillsRef.current,
+      submittedSkills,
+    );
+    const attachmentsStillMatchSubmission = attachmentSnapshotsMatch(
+      attachmentsRef.current,
+      submittedAttachments,
+    );
+    if (textStillMatchesSubmission) {
+      setText("");
     }
-    setText("");
-    setSelectedSkills([]);
-    personaInvocationRef.current = null;
-    clearAttachments();
+    if (skillsStillMatchSubmission) {
+      setSelectedSkills([]);
+    }
+    if (attachmentsStillMatchSubmission) {
+      clearAttachments();
+    }
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
     }

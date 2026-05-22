@@ -1,6 +1,5 @@
 import { useCallback, type RefObject } from "react";
 import type { SkillCommandMatch } from "@/features/skills/lib/skillChatPrompt";
-import type { Persona } from "@/shared/types/agents";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { skillDraftSnapshotsMatch } from "../lib/chatInputSnapshots";
 import { submitComposerMessage } from "../lib/submitComposerMessage";
@@ -10,7 +9,6 @@ interface UseChatInputSubmitOptions {
   attachmentsRef: RefObject<ChatAttachmentDraft[]>;
   selectedSkillsRef: RefObject<ChatSkillDraft[]>;
   selectedPersonaId?: string | null;
-  personaInvocationRef: RefObject<Persona | null>;
   onSend: ChatInputSendHandler;
   setSelectedSkills: (skills: ChatSkillDraft[]) => void;
   resolveSkillSlashCommand: (
@@ -22,7 +20,6 @@ export function useChatInputSubmit({
   attachmentsRef,
   selectedSkillsRef,
   selectedPersonaId,
-  personaInvocationRef,
   onSend,
   setSelectedSkills,
   resolveSkillSlashCommand,
@@ -38,11 +35,10 @@ export function useChatInputSubmit({
         attachments: submittedAttachments,
         skills: submittedSkills,
         selectedPersonaId,
-        personaInvocation: personaInvocationRef.current,
         onSend,
         resolveSkillSlashCommand,
       }),
-    [onSend, personaInvocationRef, resolveSkillSlashCommand, selectedPersonaId],
+    [onSend, resolveSkillSlashCommand, selectedPersonaId],
   );
 
   const handleVoiceAutoSubmit = useCallback(

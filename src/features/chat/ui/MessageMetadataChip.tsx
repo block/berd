@@ -6,7 +6,6 @@ const messageChipClasses: Record<MessageChip["type"], string> = {
   skill: "bg-chip-skill-bg text-chip-skill-fg",
   extension: "bg-chip-automation-bg text-chip-automation-fg",
   recipe: "bg-chip-file-bg text-chip-file-fg",
-  agent: "bg-chip-agent-bg text-chip-agent-fg",
 };
 
 export function MessageMetadataChip({ chip }: { chip: MessageChip }) {

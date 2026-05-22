@@ -12,14 +12,17 @@ import { useTranslation } from "react-i18next";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
 import { useMentionHandlers } from "@/features/chat/hooks/useMentionHandlers";
+import { buildSkillSendPayload } from "@/features/chat/lib/skillSendPayload";
 import { ChatInputSelectionChips } from "@/features/chat/ui/ChatInputSelectionChips";
 import { MentionAutocomplete } from "@/features/chat/ui/MentionAutocomplete";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
-import type { ChatSkillDraft } from "@/features/chat/types";
-import { PopoverAnchor } from "@/shared/ui/popover";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
-import type { ModelOption } from "@/features/chat/types";
+import type {
+  ChatSendOptions,
+  ChatSkillDraft,
+  ModelOption,
+} from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { getProviderInventory } from "@/features/providers/api/inventory";
 import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
@@ -36,12 +39,16 @@ import {
   formatProviderLabel,
   getProviderIcon,
 } from "@/shared/ui/icons/ProviderIcons";
-import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import {
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/shared/ui/popover";
 import type {
   ChatAttachmentDraft,
   ChatFileAttachmentDraft,
   ChatImageAttachmentDraft,
-  MessageChip,
 } from "@/shared/types/messages";
 
 export interface GlobalComposeOptions {
@@ -51,8 +58,7 @@ export interface GlobalComposeOptions {
   projectId?: string | null;
   attachments?: ChatAttachmentDraft[];
   personaId?: string | null;
-  skillDrafts?: ChatSkillDraft[];
-  chips?: MessageChip[];
+  sendOptions?: ChatSendOptions;
 }
 
 interface GlobalComposerPillProps {
@@ -290,28 +296,6 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     );
   }, []);
 
-  const {
-    mentionOpen,
-    mentionSelectedIndex,
-    filteredPersonas,
-    filteredSkills,
-    filteredFiles,
-    detectMention,
-    closeMention,
-    navigateMention,
-    confirmMention,
-    handleMentionConfirm,
-  } = useMentionHandlers({
-    personas,
-    skillsEnabled: true,
-    fileMentionsEnabled: false,
-    text,
-    setText,
-    textareaRef,
-    onPersonaChange: setSelectedPersonaId,
-    onSkillMentionSelect: handleSkillMentionSelected,
-  });
-
   const placeholder = t("globalPill.placeholder");
 
   const selectedAgentId =
@@ -395,6 +379,29 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   );
   const effectiveModelSelection = modelOverride ?? defaultModelSelection;
 
+  const {
+    mentionOpen,
+    mentionSelectedIndex,
+    filteredPersonas,
+    filteredSkills,
+    filteredFiles,
+    detectMention,
+    closeMention,
+    navigateMention,
+    confirmMention,
+    handleMentionConfirm,
+  } = useMentionHandlers({
+    personas,
+    projectWorkingDirs: selectedProject?.workingDirs,
+    skillsEnabled: true,
+    fileMentionsEnabled: false,
+    text,
+    setText,
+    textareaRef,
+    onPersonaChange: setSelectedPersonaId,
+    onSkillMentionSelect: handleSkillMentionSelected,
+  });
+
   const clearAttachments = useCallback(() => {
     setAttachments([]);
   }, []);
@@ -402,7 +409,11 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   const submitCompose = useCallback(
     (draftText: string) => {
       const trimmed = draftText.trim();
-      if (trimmed.length === 0 && attachments.length === 0) {
+      if (
+        trimmed.length === 0 &&
+        attachments.length === 0 &&
+        selectedSkills.length === 0
+      ) {
         return false;
       }
 
@@ -421,24 +432,19 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       if (selectedPersonaId) {
         options.personaId = selectedPersonaId;
       }
-      if (selectedSkills.length > 0) {
-        options.skillDrafts = selectedSkills;
-      }
-      const chips: MessageChip[] = [];
-      for (const skill of selectedSkills) {
-        chips.push({ label: skill.name, type: "skill" });
-      }
-      if (selectedPersona) {
-        chips.push({ label: selectedPersona.displayName, type: "agent" });
-      }
-      if (chips.length > 0) {
-        options.chips = chips;
+      const { messageText, sendOptions } = buildSkillSendPayload(
+        trimmed,
+        selectedSkills,
+        null,
+      );
+      if (sendOptions) {
+        options.sendOptions = sendOptions;
       }
 
       if (Object.keys(options).length > 0) {
-        onSend(trimmed, options);
+        onSend(messageText, options);
       } else {
-        onSend(trimmed);
+        onSend(messageText);
       }
       setText("");
       clearAttachments();
@@ -453,8 +459,8 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       clearAttachments,
       modelOverride,
       onSend,
-      selectedProjectId,
       selectedPersonaId,
+      selectedProjectId,
       selectedSkills,
     ],
   );
@@ -543,7 +549,9 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     dictation.isRecording ||
     dictation.isTranscribing ||
     text.trim().length > 0 ||
-    attachments.length > 0;
+    attachments.length > 0 ||
+    selectedPersona !== null ||
+    selectedSkills.length > 0;
 
   const effectivePlaceholder = dictation.isRecording
     ? t("toolbar.voiceInputRecording")

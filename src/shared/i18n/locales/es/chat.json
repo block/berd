@@ -114,7 +114,7 @@
   },
   "input": {
     "ariaLabel": "Entrada de mensaje del chat",
-    "placeholder": "Chatea con {{agent}} o usa @ para mencionar un agente"
+    "placeholder": "Chateando con {{agent}}... usa @ para mencionar un agente o habilidad y agregarlo"
   },
   "loading": {
     "compacting": "Compactando conversación...",

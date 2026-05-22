@@ -951,16 +951,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           if (options?.personaId) {
             patchSession(session.id, { personaId: options.personaId });
           }
-          if (options?.skillDrafts && options.skillDrafts.length > 0) {
-            useChatStore
-              .getState()
-              .setSkillDrafts(session.id, options.skillDrafts);
-          }
           useChatStore.getState().enqueueMessage(session.id, {
             text,
             attachments: options?.attachments,
-            ...(options?.chips && options.chips.length > 0
-              ? { sendOptions: { chips: options.chips } }
+            ...(options?.sendOptions
+              ? { sendOptions: options.sendOptions }
               : {}),
           });
         })
