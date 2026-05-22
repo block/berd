@@ -25,25 +25,27 @@ function layoutItem(overrides: Partial<LayoutItem>): LayoutItem {
 }
 
 describe("homeLayoutMapper", () => {
-  it("maps layout kinds to home widget types and skips projects", () => {
+  it("maps layout kinds to home widget types", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "clock", targetId: "widget:clock-1" }),
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "session-1" }),
-      layoutItem({ kind: "automation", targetId: "automation-1" }),
       layoutItem({ kind: "project", targetId: "project-1" }),
+      layoutItem({ kind: "automation", targetId: "automation-1" }),
     ]);
 
     expect(widgets.map((widget) => widget.type)).toEqual([
       "clock",
       "agentPin",
       "chatPin",
+      "projectArtifactPin",
       "automationOutputPin",
     ]);
     expect(HOME_LAYOUT_REPLACE_KINDS).toEqual([
       "clock",
       "persona",
       "session",
+      "project",
       "automation",
     ]);
   });
@@ -94,12 +96,14 @@ describe("homeLayoutMapper", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "widget:session-pin" }),
+      layoutItem({ kind: "project", targetId: "project-1" }),
       layoutItem({ kind: "automation", targetId: "automation-1" }),
     ]);
 
     expect(widgets[0].state).toEqual({ agentId: "agent-1" });
     expect(widgets[1].state).toBeUndefined();
-    expect(widgets[2].state).toEqual({ automationId: "automation-1" });
+    expect(widgets[2].state).toEqual({ projectId: "project-1" });
+    expect(widgets[3].state).toEqual({ automationId: "automation-1" });
   });
 
   it("uses synthetic targets for clocks and widgets without entity state", () => {
@@ -126,6 +130,38 @@ describe("homeLayoutMapper", () => {
       "widget:00000000-0000-0000-0000-000000000001",
       "widget:00000000-0000-0000-0000-000000000002",
     ]);
+  });
+
+  it("round-trips project artifact pins through project layout items", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "00000000-0000-0000-0000-000000000003",
+        type: "projectArtifactPin",
+        x: 20,
+        y: 30,
+        z: 4,
+        state: { projectId: "project-1" },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "project",
+      targetId: "project-1",
+      centerX: 130,
+      centerY: 140,
+      width: 220,
+      height: 220,
+      zIndex: 4,
+    });
+
+    const [widget] = layoutItemsToHomeWidgets([item]);
+    expect(widget).toMatchObject({
+      type: "projectArtifactPin",
+      state: { projectId: "project-1" },
+      x: 20,
+      y: 30,
+      z: 4,
+    });
   });
 
   it("creates a default clock widget and layout item with a uuid id", () => {

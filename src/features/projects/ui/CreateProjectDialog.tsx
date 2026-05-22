@@ -29,6 +29,7 @@ import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
 import { pillCssColor, type PillTone } from "../lib/pillTones";
 import { ProjectColorPicker } from "./ProjectColorPicker";
+import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 
 function getDefaultProjectName(path: string | null | undefined): string {
   const trimmed = path?.trim();
@@ -235,11 +236,11 @@ export function CreateProjectDialog({
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
-        className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-surface-editor-panel p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
+        className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.26)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
         closeButtonClassName="top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50"
         overlayClassName="bg-transparent"
         style={{
-          backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 40%, transparent)`,
+          backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
         }}
         aria-describedby={undefined}
       >
@@ -257,8 +258,18 @@ export function CreateProjectDialog({
 
           {/* Hero stays transparent so the glass panel reveals whatever sits
               underneath instead of painting a fake backdrop. */}
-          <div className="relative h-[400px] shrink-0 overflow-hidden">
-            <div className="absolute right-6 bottom-6 z-10">
+          <div className="relative h-[400px] shrink-0 overflow-hidden px-8 pb-4">
+            <ProjectArtifactPreview
+              input={{
+                projectId: editingProject?.id ?? null,
+                name,
+                prompt,
+                color,
+                workingDirs,
+              }}
+              className="h-full w-full"
+            />
+            <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
               <ProjectColorPicker
                 value={color}
                 onChange={(tone: PillTone) => setColor(tone)}

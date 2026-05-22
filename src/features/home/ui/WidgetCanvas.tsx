@@ -58,6 +58,7 @@ export function WidgetCanvas({
   mutations,
   onOpenAgent,
   onSelectSession,
+  onStartProjectChat,
   onOpenAutomation,
 }: WidgetCanvasProps) {
   const camera = useHomeWidgetStore((state) => state.camera) ?? DEFAULT_CAMERA;
@@ -233,6 +234,7 @@ export function WidgetCanvas({
                 onVisualLiftReset={handleVisualLiftReset}
                 onOpenAgent={onOpenAgent}
                 onSelectSession={onSelectSession}
+                onStartProjectChat={onStartProjectChat}
                 onOpenAutomation={onOpenAutomation}
               />
             </div>

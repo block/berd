@@ -4,6 +4,19 @@ import { access, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
+import {
+  fetchRemoteManifest,
+  generateCatalogVersion,
+  latestWritePrecondition,
+  MANIFEST_FILENAME,
+  putArtifact,
+  serializedJson,
+  validateCatalogVersion,
+  verifyRemoteAsset,
+  ensureRemoteMissing as ensureSharedRemoteMissing,
+} from "./asset-manifest.mjs";
+
+export { generateCatalogVersion };
 
 export const ARTIFACTORY_BASE =
   "https://global.block-artifacts.com/artifactory/goose-internal/avatars";
@@ -18,9 +31,6 @@ const COLLECTION_LABELS = {
   gloopies: "Gloopies",
   pollies: "Pollies",
 };
-const MANIFEST_FILENAME = "manifest.json";
-const CATALOG_VERSION_PATTERN = /^\d{8}T\d{9}Z$/;
-
 function optionValue(args, name) {
   const prefix = `${name}=`;
   const value = args.find((arg) => arg.startsWith(prefix));
@@ -46,18 +56,6 @@ function parseArgs(argv) {
     version: optionValue(args, "--version"),
     out: optionValue(args, "--out") ?? "avatar-manifest.json",
   };
-}
-
-export function generateCatalogVersion(now = new Date()) {
-  return now.toISOString().replace(/[-:.]/g, "");
-}
-
-function validateCatalogVersion(value) {
-  if (!CATALOG_VERSION_PATTERN.test(value)) {
-    throw new Error(
-      `Avatar catalog version must match YYYYMMDDTHHMMSSmmmZ: ${value}`,
-    );
-  }
 }
 
 function labelFromId(id) {
@@ -285,88 +283,8 @@ export function validateManifest(manifest) {
   }
 }
 
-function artifactUrl(baseUrl, path) {
-  return `${baseUrl.replace(/\/+$/, "")}/${path}`;
-}
-
-function serializedJson(value) {
-  return `${JSON.stringify(value, null, 2)}\n`;
-}
-
-function authHeaders() {
-  const token = process.env.ARTIFACTORY_IDENTITY_TOKEN;
-  if (!token) {
-    throw new Error("ARTIFACTORY_IDENTITY_TOKEN is required.");
-  }
-  return { Authorization: `Bearer ${token}` };
-}
-
-async function fetchArtifact(fetchImpl, baseUrl, path, init) {
-  return fetchImpl(artifactUrl(baseUrl, path), {
-    ...init,
-    headers: {
-      ...authHeaders(),
-      ...init?.headers,
-    },
-  });
-}
-
 async function ensureRemoteMissing(fetchImpl, baseUrl, path) {
-  const response = await fetchArtifact(fetchImpl, baseUrl, path, {
-    method: "HEAD",
-  });
-  if (response.ok) {
-    throw new Error(`Refusing to overwrite existing avatar artifact: ${path}`);
-  }
-  if (response.status !== 404) {
-    throw new Error(
-      `Failed to preflight ${path}: ${response.status} ${response.statusText}`,
-    );
-  }
-}
-
-async function putArtifact(
-  fetchImpl,
-  baseUrl,
-  path,
-  body,
-  contentType,
-  { createOnly = false, ifMatch } = {},
-) {
-  const response = await fetchArtifact(fetchImpl, baseUrl, path, {
-    method: "PUT",
-    headers: {
-      "Content-Type": contentType,
-      ...(createOnly ? { "If-None-Match": "*" } : {}),
-      ...(ifMatch ? { "If-Match": ifMatch } : {}),
-    },
-    body,
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to publish ${path}: ${response.status} ${response.statusText}`,
-    );
-  }
-}
-
-async function latestWritePrecondition(fetchImpl, baseUrl) {
-  const response = await fetchArtifact(fetchImpl, baseUrl, "latest.json", {
-    method: "HEAD",
-  });
-  if (response.status === 404) {
-    return { createOnly: true };
-  }
-  if (!response.ok) {
-    throw new Error(
-      `Failed to preflight latest.json: ${response.status} ${response.statusText}`,
-    );
-  }
-
-  const etag = response.headers.get("etag");
-  if (!etag) {
-    throw new Error("latest.json did not return an ETag for safe promotion.");
-  }
-  return { ifMatch: etag };
+  await ensureSharedRemoteMissing(fetchImpl, baseUrl, path, "avatar");
 }
 
 function manifestAssetPaths(manifest) {
@@ -385,7 +303,7 @@ export async function publishAvatars({
   onProgress = () => {},
 } = {}) {
   const version = generateCatalogVersion(now);
-  validateCatalogVersion(version);
+  validateCatalogVersion(version, "Avatar");
   onProgress({ type: "manifest:start", version });
   const manifest = await buildManifest({ source, version });
   const assetPaths = manifestAssetPaths(manifest);
@@ -444,108 +362,6 @@ export async function publishAvatars({
   return { version, manifest };
 }
 
-async function fetchRemoteManifest(fetchImpl, baseUrl, version) {
-  const path = `${version}/${MANIFEST_FILENAME}`;
-  const response = await fetchArtifact(fetchImpl, baseUrl, path, {
-    method: "GET",
-  });
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch avatar manifest ${path}: ${response.status} ${response.statusText}`,
-    );
-  }
-  const manifest = JSON.parse(await response.text());
-  validateManifest(manifest);
-  if (manifest.catalogVersion !== version) {
-    throw new Error(
-      `Remote manifest catalogVersion ${manifest.catalogVersion} does not match requested version ${version}.`,
-    );
-  }
-  return manifest;
-}
-
-function headerValue(headers, names) {
-  for (const name of names) {
-    const value = headers.get(name);
-    if (value) {
-      return value;
-    }
-  }
-  return null;
-}
-
-async function remoteAssetSha256(fetchImpl, baseUrl, version, path, head) {
-  const checksum = headerValue(head.headers, [
-    "x-checksum-sha256",
-    "x-artifactory-sha256",
-    "sha256",
-  ]);
-  if (checksum) {
-    return checksum.toLowerCase();
-  }
-
-  const response = await fetchArtifact(
-    fetchImpl,
-    baseUrl,
-    `${version}/${path}`,
-    {
-      method: "GET",
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Failed to fetch avatar asset ${version}/${path} for checksum: ${response.status} ${response.statusText}`,
-    );
-  }
-  const bytes = Buffer.from(await response.arrayBuffer());
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
-async function verifyRemoteAsset(
-  fetchImpl,
-  baseUrl,
-  version,
-  path,
-  byteSize,
-  sha256,
-) {
-  const response = await fetchArtifact(
-    fetchImpl,
-    baseUrl,
-    `${version}/${path}`,
-    {
-      method: "HEAD",
-    },
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Missing avatar asset ${version}/${path}: ${response.status} ${response.statusText}`,
-    );
-  }
-  const contentLength = response.headers.get("content-length");
-  if (
-    typeof byteSize === "number" &&
-    contentLength !== null &&
-    Number(contentLength) !== byteSize
-  ) {
-    throw new Error(
-      `Avatar asset ${version}/${path} byte size mismatch: expected ${byteSize}, got ${contentLength}.`,
-    );
-  }
-  const actualSha256 = await remoteAssetSha256(
-    fetchImpl,
-    baseUrl,
-    version,
-    path,
-    response,
-  );
-  if (actualSha256 !== sha256.toLowerCase()) {
-    throw new Error(
-      `Avatar asset ${version}/${path} checksum mismatch: expected ${sha256}, got ${actualSha256}.`,
-    );
-  }
-}
-
 export async function promoteAvatars({
   version,
   fetchImpl = fetch,
@@ -554,9 +370,15 @@ export async function promoteAvatars({
   if (!version) {
     throw new Error("--version is required for avatar promotion.");
   }
-  validateCatalogVersion(version);
+  validateCatalogVersion(version, "Avatar");
 
-  const manifest = await fetchRemoteManifest(fetchImpl, baseUrl, version);
+  const manifest = await fetchRemoteManifest({
+    fetchImpl,
+    baseUrl,
+    version,
+    validateManifest,
+    label: "avatar",
+  });
   for (const asset of manifest.assets) {
     await verifyRemoteAsset(
       fetchImpl,
@@ -565,6 +387,7 @@ export async function promoteAvatars({
       asset.variants.webm.path,
       asset.variants.webm.byteSize,
       asset.variants.webm.sha256,
+      "avatar",
     );
     await verifyRemoteAsset(
       fetchImpl,
@@ -573,6 +396,7 @@ export async function promoteAvatars({
       asset.variants.hevc.path,
       asset.variants.hevc.byteSize,
       asset.variants.hevc.sha256,
+      "avatar",
     );
   }
 

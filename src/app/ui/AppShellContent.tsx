@@ -61,6 +61,7 @@ interface AppShellContentProps {
     query?: string,
   ) => void;
   onStartChatFromProject: (project: ProjectInfo) => void;
+  onStartProjectChat: (projectId: string) => void;
   onStartChatWithSkill: (skill: SkillInfo, projectId?: string | null) => void;
   onExitSearch: () => void;
   onOpenExtension: (entry: ExtensionEntry) => void;
@@ -92,6 +93,7 @@ export function AppShellContent({
   onSelectSession,
   onSelectSearchResult,
   onStartChatFromProject,
+  onStartProjectChat,
   onStartChatWithSkill,
   onExitSearch,
   onOpenExtension,
@@ -174,6 +176,7 @@ export function AppShellContent({
         <HomeView
           onOpenAgent={(agentId) => onNavigateAgents(agentId)}
           onSelectSession={onSelectSession}
+          onStartProjectChat={onStartProjectChat}
           onOpenAutomation={(automationId) =>
             onNavigateAutomations({
               surface: "detail",

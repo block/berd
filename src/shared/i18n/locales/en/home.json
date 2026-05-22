@@ -39,6 +39,14 @@
       "emptyDescription": "Pin a chat to see it here",
       "openAria": "Open chat: {{title}}"
     },
+    "projectArtifactPin": {
+      "label": "Pin a project",
+      "description": "Pin a project artifact",
+      "kicker": "Project",
+      "openAria": "Start chat in {{name}}",
+      "unavailableTitle": "Project unavailable",
+      "unavailableDescription": "Unpin or restore this project"
+    },
     "automationOutputPin": {
       "label": "Pin an automation",
       "description": "Pin the latest output of an automation",
@@ -66,22 +74,26 @@
         "clock": "Display",
         "agent": "Agents",
         "chat": "Chats",
+        "project": "Projects",
         "automation": "Automations"
       },
       "selectTitles": {
         "clock": "Display",
         "agent": "Pin an agent",
         "chat": "Pin a chat",
+        "project": "Pin a project",
         "automation": "Pin an automation"
       },
       "searchPlaceholders": {
         "agent": "Search agents",
         "chat": "Search chats",
+        "project": "Search projects",
         "automation": "Search automations"
       },
       "empty": {
         "agent": "No agents found.",
         "chat": "No chats found.",
+        "project": "No projects found.",
         "automation": "No automations found."
       }
     }

@@ -29,6 +29,9 @@ Thumbs.db
 # Scratch / working files
 .scratch/
 avatar-manifest.json
+project-artifacts-manifest.json
+src/features/projects/artifact/assets/images/*.webp
+src/features/projects/artifact/assets/hdri/studio_soft.exr
 
 # Playwright artifacts
 playwright-report/

@@ -885,6 +885,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [createNewProjectDraft],
   );
 
+  const handleStartProjectChat = useCallback(
+    (projectId: string) => {
+      const project = projects.find((candidate) => candidate.id === projectId);
+      if (project) {
+        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+      }
+    },
+    [createNewProjectDraft, projects],
+  );
+
   const handleStartChatWithSkill = useCallback(
     (skill: SkillInfo, projectId?: string | null) => {
       const project = projectId
@@ -1718,6 +1728,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             onSelectSession={handleSelectSession}
             onSelectSearchResult={handleSelectSearchResult}
             onStartChatFromProject={handleStartChatFromProject}
+            onStartProjectChat={handleStartProjectChat}
             onStartChatWithSkill={handleStartChatWithSkill}
             onExitSearch={handleExitSearch}
             onOpenExtension={handleOpenExtensionFromSearch}

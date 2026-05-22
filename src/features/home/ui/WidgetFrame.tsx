@@ -41,6 +41,7 @@ export function WidgetFrame({
   onVisualLiftReset = () => {},
   onOpenAgent,
   onSelectSession,
+  onStartProjectChat,
   onOpenAutomation,
 }: WidgetFrameProps) {
   const { t } = useTranslation("home");
@@ -118,6 +119,7 @@ export function WidgetFrame({
             shouldIgnoreActivation={shouldIgnoreActivation}
             onOpenAgent={onOpenAgent}
             onSelectSession={onSelectSession}
+            onStartProjectChat={onStartProjectChat}
             onOpenAutomation={onOpenAutomation}
           />
         </fieldset>

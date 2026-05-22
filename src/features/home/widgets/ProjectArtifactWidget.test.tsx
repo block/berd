@@ -1,0 +1,139 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProjectInfo } from "@/features/projects/api/projects";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import type { WidgetInstance } from "./types";
+import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
+
+const state = vi.hoisted(() => ({
+  projects: [] as ProjectInfo[],
+  sessions: [] as ChatSession[],
+}));
+
+vi.mock("@/features/projects/stores/projectStore", () => ({
+  useProjectStore: (
+    selector: (store: { projects: ProjectInfo[] }) => unknown,
+  ) => selector(state),
+}));
+
+vi.mock("@/features/chat/stores/chatSessionStore", () => ({
+  useChatSessionStore: (
+    selector: (store: { sessions: ChatSession[] }) => unknown,
+  ) => selector(state),
+}));
+
+vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
+  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
+    <div data-testid="project-artifact-preview">{input.name}</div>
+  ),
+}));
+
+const instance: WidgetInstance = {
+  id: "project-artifact-1",
+  type: "projectArtifactPin",
+  x: 20,
+  y: 30,
+  z: 1,
+  state: { projectId: "project-1" },
+};
+
+function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
+  return {
+    id: "project-1",
+    path: "/tmp/projects/project-1.md",
+    name: "Alpha Project",
+    description: "",
+    prompt: "Ship Alpha",
+    icon: "tabler:code",
+    color: "olive",
+    preferredProvider: null,
+    preferredModel: null,
+    workingDirs: ["/tmp/alpha"],
+    useWorktrees: false,
+    order: 0,
+    archivedAt: null,
+    ...overrides,
+  };
+}
+
+function renderWidget(
+  overrides: {
+    onStartProjectChat?: (projectId: string) => void;
+    shouldIgnoreActivation?: () => boolean;
+  } = {},
+) {
+  return render(
+    <ProjectArtifactWidget
+      instance={instance}
+      onUpdateState={vi.fn()}
+      {...overrides}
+    />,
+  );
+}
+
+describe("ProjectArtifactWidget", () => {
+  beforeEach(() => {
+    state.projects = [project()];
+    state.sessions = [];
+    vi.clearAllMocks();
+  });
+
+  it("renders the project artifact with a hover-only project name", () => {
+    renderWidget();
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveTextContent(
+      "Alpha Project",
+    );
+    expect(
+      screen.getByTestId("project-artifact-hover-label"),
+    ).toHaveTextContent("Alpha Project");
+    expect(screen.getByTestId("project-artifact-hover-label")).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+    );
+    expect(screen.queryByText("Project")).not.toBeInTheDocument();
+  });
+
+  it("starts a project chat when activated", () => {
+    const onStartProjectChat = vi.fn();
+    renderWidget({ onStartProjectChat });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start chat in Alpha Project" }),
+    );
+
+    expect(onStartProjectChat).toHaveBeenCalledWith("project-1");
+  });
+
+  it("suppresses activation when the drag guard is active", () => {
+    const onStartProjectChat = vi.fn();
+    renderWidget({
+      onStartProjectChat,
+      shouldIgnoreActivation: () => true,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Start chat in Alpha Project" }),
+    );
+
+    expect(onStartProjectChat).not.toHaveBeenCalled();
+  });
+
+  it("renders a non-crashing unavailable state when the project is missing", () => {
+    const onStartProjectChat = vi.fn();
+    state.projects = [];
+
+    renderWidget({ onStartProjectChat });
+
+    expect(screen.getAllByText("Project unavailable").length).toBeGreaterThan(
+      0,
+    );
+    expect(
+      screen.queryByText("Unpin or restore this project"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Project unavailable" }),
+    );
+    expect(onStartProjectChat).not.toHaveBeenCalled();
+  });
+});

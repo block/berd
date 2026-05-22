@@ -2,6 +2,7 @@ import { AgentPinWidget } from "./AgentPinWidget";
 import { AutomationOutputWidget } from "./AutomationOutputWidget";
 import { ChatPinWidget } from "./ChatPinWidget";
 import { ClockWidget } from "./ClockWidget";
+import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import type { WidgetCatalogEntry, WidgetCategory } from "./types";
 
 export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
@@ -28,6 +29,14 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     Component: ChatPinWidget,
   },
   {
+    id: "projectArtifactPin",
+    category: "project",
+    labelKey: "widgets.projectArtifactPin.label",
+    descriptionKey: "widgets.projectArtifactPin.description",
+    defaultSize: { width: 220, height: 220 },
+    Component: ProjectArtifactWidget,
+  },
+  {
     id: "automationOutputPin",
     category: "automation",
     labelKey: "widgets.automationOutputPin.label",
@@ -44,5 +53,6 @@ export const HOME_WIDGET_CATEGORIES: WidgetCategory[] = [
   "clock",
   "agent",
   "chat",
+  "project",
   "automation",
 ];

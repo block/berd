@@ -6,12 +6,14 @@ import { WidgetCanvas } from "./WidgetCanvas";
 export interface HomeViewProps {
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
 }
 
 export function HomeView({
   onOpenAgent,
   onSelectSession,
+  onStartProjectChat,
   onOpenAutomation,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
@@ -32,6 +34,7 @@ export function HomeView({
           mutations={widgetMutations}
           onOpenAgent={onOpenAgent}
           onSelectSession={onSelectSession}
+          onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}
         />
       ) : null}

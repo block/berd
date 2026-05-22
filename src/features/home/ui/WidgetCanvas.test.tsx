@@ -77,7 +77,20 @@ const mocks = vi.hoisted(() => ({
     {
       id: "project-1",
       name: "Alpha Project",
+      description: "Alpha description",
+      prompt: "Plan Alpha",
       icon: "tabler:code",
+      color: "olive",
+      workingDirs: ["/tmp/alpha"],
+    },
+    {
+      id: "project-2",
+      name: "Beta Project",
+      description: "Beta description",
+      prompt: "Plan Beta",
+      icon: "tabler:rocket",
+      color: "pink",
+      workingDirs: ["/tmp/beta"],
     },
   ],
 }));
@@ -123,6 +136,12 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
 vi.mock("@/features/projects/stores/projectStore", () => ({
   useProjectStore: (selector: (state: unknown) => unknown) =>
     selector({ projects: mocks.projects }),
+}));
+
+vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
+  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
+    <div data-testid="project-artifact-preview">{input.name}</div>
+  ),
 }));
 
 const CANVAS_CONSTRAINTS: LayoutConstraints = {
@@ -218,7 +237,7 @@ function renderCanvas({
 async function openPickerPanel(
   user: ReturnType<typeof userEvent.setup>,
   container: HTMLElement,
-  panel: "display" | "agents" | "chats" | "automations",
+  panel: "display" | "agents" | "chats" | "projects" | "automations",
 ) {
   fireEvent.doubleClick(container.firstElementChild as Element, {
     clientX: 100,
@@ -576,6 +595,55 @@ describe("WidgetCanvas", () => {
 
     expect(screen.getByText("First chat")).toBeVisible();
     expect(screen.getByText(/Alpha Project/)).toBeVisible();
+  });
+
+  it("adds a project artifact pin with the selected project id", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({ mutations: { addWidget } });
+
+    await openPickerPanel(user, container, "projects");
+    await user.type(screen.getByPlaceholderText("Search projects"), "beta");
+    await user.click(screen.getByRole("button", { name: /beta project/i }));
+
+    expect(addWidget).toHaveBeenCalledWith(
+      "projectArtifactPin",
+      100,
+      120,
+      { projectId: "project-2" },
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
+  it("disables already pinned project targets", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+
+    const { container } = renderCanvas({
+      instances: [
+        widget({
+          id: "project-widget",
+          type: "projectArtifactPin",
+          state: { projectId: "project-1" },
+        }),
+      ],
+      mutations: { addWidget },
+    });
+
+    await openPickerPanel(user, container, "projects");
+
+    const pinnedProject = screen
+      .getAllByRole("button", { name: /alpha project/i })
+      .find((button) => button.hasAttribute("disabled"));
+    if (!pinnedProject) {
+      throw new Error("Expected pinned project picker row");
+    }
+    expect(pinnedProject).toBeDisabled();
+    await user.click(pinnedProject);
+
+    expect(addWidget).not.toHaveBeenCalled();
   });
 
   it("loads and adds automation pins from the picker", async () => {

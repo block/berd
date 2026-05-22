@@ -198,6 +198,15 @@ avatars-publish source:
 avatars-promote version:
     pnpm avatars:promote -- --version="{{ version }}"
 
+project-artifacts-manifest source version:
+    pnpm project-artifacts:manifest -- --source="{{ source }}" --version="{{ version }}"
+
+project-artifacts-publish source:
+    pnpm project-artifacts:publish -- --source="{{ source }}"
+
+project-artifacts-promote version:
+    pnpm project-artifacts:promote -- --version="{{ version }}"
+
 # Delete the silent migration marker(s) so the next launch re-runs the migration.
 reset-migration:
     #!/usr/bin/env bash

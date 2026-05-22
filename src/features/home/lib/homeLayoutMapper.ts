@@ -7,6 +7,7 @@ export const HOME_LAYOUT_REPLACE_KINDS = [
   "clock",
   "persona",
   "session",
+  "project",
   "automation",
 ] as const satisfies LayoutItemKind[];
 
@@ -19,6 +20,7 @@ const KIND_TO_WIDGET_TYPE = {
   clock: "clock",
   persona: "agentPin",
   session: "chatPin",
+  project: "projectArtifactPin",
   automation: "automationOutputPin",
 } as const satisfies Record<HomeLayoutKind, string>;
 
@@ -26,6 +28,7 @@ const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   clock: "clock",
   agentPin: "persona",
   chatPin: "session",
+  projectArtifactPin: "project",
   automationOutputPin: "automation",
 };
 
@@ -34,10 +37,9 @@ function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
     case "clock":
     case "persona":
     case "session":
+    case "project":
     case "automation":
       return true;
-    case "project":
-      return false;
     default: {
       const exhaustive: never = kind;
       return exhaustive;
@@ -63,11 +65,11 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
       return { agentId: item.targetId };
     case "session":
       return { sessionId: item.targetId };
+    case "project":
+      return { projectId: item.targetId };
     case "automation":
       return { automationId: item.targetId };
     case "clock":
-      return undefined;
-    case "project":
       return undefined;
     default: {
       const exhaustive: never = item.kind;
@@ -93,6 +95,10 @@ function targetIdForWidget(
     case "session":
       return (
         nonEmptyStateString(state.sessionId) ?? syntheticTarget(instance.id)
+      );
+    case "project":
+      return (
+        nonEmptyStateString(state.projectId) ?? syntheticTarget(instance.id)
       );
     case "automation":
       return (

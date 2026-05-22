@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -61,6 +61,12 @@ vi.mock("../../api/projects", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue(null),
+}));
+
+vi.mock("../../artifact/ProjectArtifactPreview", () => ({
+  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
+    <div data-testid="project-artifact-preview">{input.name}</div>
+  ),
 }));
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -257,6 +263,22 @@ describe("CreateProjectDialog", () => {
       expect(
         screen.getByRole("button", { name: "Create project" }),
       ).toBeInTheDocument();
+    });
+
+    it("renders a live artifact preview without pinning on save", async () => {
+      const user = userEvent.setup();
+      render(<CreateProjectDialog {...defaultProps} isOpen={true} />);
+
+      await user.type(screen.getByPlaceholderText("Project Alpha"), "Launch");
+
+      expect(screen.getByTestId("project-artifact-preview")).toHaveTextContent(
+        "Launch",
+      );
+
+      await user.click(screen.getByRole("button", { name: "Create project" }));
+
+      await waitFor(() => expect(createProject).toHaveBeenCalledOnce());
+      expect(defaultProps.onCreated).toHaveBeenCalledOnce();
     });
 
     it("saves the describe field as the project prompt", async () => {

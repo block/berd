@@ -35,8 +35,8 @@ interface WidgetPickerProps {
   onSelect: (type: string, state?: Record<string, unknown>) => void;
 }
 
-type EntityCategory = "agent" | "chat" | "automation";
-type EntityStateKey = "agentId" | "sessionId" | "automationId";
+type EntityCategory = "agent" | "chat" | "project" | "automation";
+type EntityStateKey = "agentId" | "sessionId" | "projectId" | "automationId";
 
 interface PickerOption {
   id: string;
@@ -56,6 +56,7 @@ const VISIBLE_WIDGET_CATEGORIES = HOME_WIDGET_CATEGORIES.filter((category) =>
 const PIN_CONFIG = {
   agent: { stateKey: "agentId", widgetType: "agentPin" },
   chat: { stateKey: "sessionId", widgetType: "chatPin" },
+  project: { stateKey: "projectId", widgetType: "projectArtifactPin" },
   automation: {
     stateKey: "automationId",
     widgetType: "automationOutputPin",
@@ -69,7 +70,10 @@ function isEntityCategory(
   category: WidgetCategory,
 ): category is EntityCategory {
   return (
-    category === "agent" || category === "chat" || category === "automation"
+    category === "agent" ||
+    category === "chat" ||
+    category === "project" ||
+    category === "automation"
   );
 }
 
@@ -147,6 +151,21 @@ function chatOptions(
   }));
 }
 
+function projectOptions(projects: ProjectInfo[], pinnedIds: Set<string>) {
+  return projects.map((project) => ({
+    id: project.id,
+    title: project.name,
+    searchText: [
+      project.prompt,
+      project.description,
+      Array.isArray(project.workingDirs) ? project.workingDirs.join(" ") : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+    pinned: pinnedIds.has(project.id),
+  }));
+}
+
 function automationOptions(
   automations: AutomationTile[],
   pinnedIds: Set<string>,
@@ -212,6 +231,9 @@ function useWidgetPickerOptions({
           projects,
           personas,
         );
+        break;
+      case "project":
+        nextOptions = projectOptions(projects, pinnedIds);
         break;
       case "automation":
         nextOptions = automationOptions(

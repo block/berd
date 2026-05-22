@@ -1,7 +1,12 @@
 import type React from "react";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
 
-export type WidgetCategory = "clock" | "agent" | "chat" | "automation";
+export type WidgetCategory =
+  | "clock"
+  | "agent"
+  | "chat"
+  | "project"
+  | "automation";
 
 export interface CanvasBounds {
   width: number;
@@ -33,6 +38,7 @@ export interface WidgetRenderProps {
   shouldIgnoreActivation?: () => boolean;
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
 }
 
@@ -51,6 +57,7 @@ export interface WidgetCatalogEntry {
 export interface WidgetNavigationHandlers {
   onOpenAgent?: (agentId: string) => void;
   onSelectSession?: (sessionId: string) => void;
+  onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
 }
 
@@ -76,4 +83,5 @@ export interface WidgetMutationHandlers {
 
 export type AgentPinState = { agentId: string };
 export type ChatPinState = { sessionId: string };
+export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };

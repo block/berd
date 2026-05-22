@@ -39,6 +39,14 @@
       "emptyDescription": "Fija un chat para verlo aquí",
       "openAria": "Abrir chat: {{title}}"
     },
+    "projectArtifactPin": {
+      "label": "Fijar un proyecto",
+      "description": "Fija un artefacto de proyecto",
+      "kicker": "Proyecto",
+      "openAria": "Iniciar chat en {{name}}",
+      "unavailableTitle": "Proyecto no disponible",
+      "unavailableDescription": "Desancla o restaura este proyecto"
+    },
     "automationOutputPin": {
       "label": "Fijar una automatización",
       "description": "Fija el último resultado de una automatización",
@@ -66,22 +74,26 @@
         "clock": "Pantalla",
         "agent": "Agentes",
         "chat": "Chats",
+        "project": "Proyectos",
         "automation": "Automatizaciones"
       },
       "selectTitles": {
         "clock": "Pantalla",
         "agent": "Fijar un agente",
         "chat": "Fijar un chat",
+        "project": "Fijar un proyecto",
         "automation": "Fijar una automatización"
       },
       "searchPlaceholders": {
         "agent": "Buscar agentes",
         "chat": "Buscar chats",
+        "project": "Buscar proyectos",
         "automation": "Buscar automatizaciones"
       },
       "empty": {
         "agent": "No se encontraron agentes.",
         "chat": "No se encontraron chats.",
+        "project": "No se encontraron proyectos.",
         "automation": "No se encontraron automatizaciones."
       }
     }
