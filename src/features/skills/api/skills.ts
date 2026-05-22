@@ -1,5 +1,6 @@
 import type { SourceEntry } from "@aaif/goose-sdk";
 import { getClient } from "@/shared/api/acpConnection";
+import { isPillTone, type PillTone } from "@/features/projects/lib/pillTones";
 import {
   basename,
   deriveProjectRoot,
@@ -28,11 +29,15 @@ export interface SkillInfo {
   sourceLabel: string;
   projectLinks: SkillProjectLink[];
   readonly: boolean;
+  /** User-chosen pill tone, persisted to frontmatter as `color`. Null for
+   *  legacy skills created before the picker existed — consumers fall back
+   *  to the deterministic hash-from-name tone in that case. */
+  color: PillTone | null;
 }
 
 export type EditingSkill = Pick<
   SkillInfo,
-  "name" | "description" | "instructions" | "path" | "fileLocation"
+  "name" | "description" | "instructions" | "path" | "fileLocation" | "color"
 >;
 
 type FilesystemSkillSourceEntry = SourceEntry & {
@@ -69,6 +74,7 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
       sourceLabel: "Built in",
       projectLinks: [],
       readonly: true,
+      color: readStoredColor(source.properties),
     };
   }
 
@@ -111,7 +117,15 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
       sourceKind === "global" ? "Personal" : projectName || "Project",
     projectLinks,
     readonly: props.gooseInternalBundled === true,
+    color: readStoredColor(source.properties),
   };
+}
+
+function readStoredColor(
+  properties: SourceEntry["properties"] | undefined,
+): PillTone | null {
+  const raw = (properties as Record<string, unknown> | undefined)?.color;
+  return typeof raw === "string" && isPillTone(raw) ? raw : null;
 }
 
 function uniqueProjectDirs(projectDirs: string[]) {
@@ -128,6 +142,7 @@ export async function createSkill(
   name: string,
   description: string,
   instructions: string,
+  color: PillTone,
   options: CreateSkillOptions = {},
 ): Promise<void> {
   const client = await getClient();
@@ -138,6 +153,7 @@ export async function createSkill(
     content: instructions,
     global: !options.projectId,
     ...(options.projectId ? { projectId: options.projectId } : {}),
+    properties: { color },
   });
 }
 
@@ -212,14 +228,19 @@ export async function updateSkill(
   name: string,
   description: string,
   instructions: string,
+  color: PillTone,
 ): Promise<SkillInfo> {
   const client = await getClient();
+  // properties replaces the full bag, so only send fields skills own
+  // client-side. projectDir/projectName/gooseInternalBundled are derived
+  // by the backend at list time, not persisted through this path.
   const response = await client.goose.GooseSourcesUpdate({
     type: SKILL_SOURCE_TYPE,
     path,
     name,
     description,
     content: instructions,
+    properties: { color },
   });
 
   if (!isFilesystemSkillSource(response.source)) {

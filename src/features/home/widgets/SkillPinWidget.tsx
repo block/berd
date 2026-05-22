@@ -123,6 +123,7 @@ function skillFallbackFromId(skillId: string | null): SkillInfo | undefined {
           : "Personal",
     projectLinks: [],
     readonly: true,
+    color: null,
   };
 }
 
@@ -144,7 +145,7 @@ export const SkillPinWidget = memo(function SkillPinWidget({
 
   const skill = findSkillById(skills, skillId) ?? skillFallbackFromId(skillId);
   const label = skill?.name ?? t("widgets.skillPin.unavailable");
-  const tone = resolveSkillPillTone(skill?.name ?? "");
+  const tone = resolveSkillPillTone(skill?.name ?? "", skill?.color);
 
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (skill) {

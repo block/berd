@@ -1,6 +1,6 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Sparkles, Trash2 } from "lucide-react";
+import { Copy, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import { ProjectColorPicker } from "@/features/projects/ui/ProjectColorPicker";
+import type { PillTone } from "@/features/projects/lib/pillTones";
 import {
   resolveSkillPillTone,
   skillPillToneClass,
@@ -33,16 +35,25 @@ const GLOBAL_VALUE = "__global__";
 
 // Shared visual constants for create/edit sheets. Mirrored in PersonaEditor —
 // extract to a shared primitive once a third surface adopts the IA.
-const SHEET_CONTENT_CLASS = "flex h-full flex-col gap-0 p-0 sm:max-w-[440px]";
-const HERO_HEIGHT_CLASS = "h-[280px]";
-const PILL_INPUT_CLASS =
-  "h-10 rounded-full border-none bg-popover px-4 text-sm";
+const SHEET_CONTENT_CLASS =
+  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-surface-editor-panel p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
+const CLOSE_BUTTON_CLASS =
+  "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50";
+const HERO_HEIGHT_CLASS = "h-[200px]";
 const FIELD_INPUT_CLASS =
-  "h-10 rounded-[10px] border-none bg-popover px-4 text-sm";
+  "h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+const SELECT_TRIGGER_CLASS =
+  "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+// Instructions stay monospace because the field holds markdown the agent
+// reads literally — divergence from PersonaEditor's natural-language textarea
+// is functional, not stylistic. Height comes from the parent section's
+// flex-grow so the textarea owns whatever vertical space the form body has
+// after the other fields, falling back to a 215px floor on short windows.
 const INSTRUCTIONS_TEXTAREA_CLASS =
-  "min-h-[200px] resize-none rounded-[10px] border-none bg-popover px-4 py-3 font-mono text-xs leading-relaxed";
-const FIELD_LABEL_CLASS = "text-[10px] text-muted-foreground";
-const SECTION_GAP_CLASS = "space-y-1";
+  "h-full min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] font-mono text-[13px] leading-relaxed text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
+const FIELD_LABEL_CLASS =
+  "text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100";
+const SECTION_GAP_CLASS = "group/field space-y-2";
 
 interface SkillEditorProps {
   isOpen: boolean;
@@ -68,6 +79,13 @@ export function SkillEditor({
   const [saveLocation, setSaveLocation] = useState(GLOBAL_VALUE);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [formHasScrollBelow, setFormHasScrollBelow] = useState(false);
+  // null = "no explicit pick yet"; the hero falls through to the deterministic
+  // name-hash tone so the editor still has visual identity before the user
+  // clicks a swatch. Once they pick (or edit a skill with a stored color),
+  // this holds the chosen tone and name renames no longer shift the hero.
+  const [color, setColor] = useState<PillTone | null>(null);
+  const formBodyRef = useRef<HTMLDivElement>(null);
 
   const projects = useProjectStore((s) => s.projects);
 
@@ -87,12 +105,17 @@ export function SkillEditor({
       setDescription(editingSkill.description);
       setInstructions(editingSkill.instructions);
       setSaveLocation(GLOBAL_VALUE);
+      // Load stored color if present; otherwise leave null so the hero
+      // tracks the deterministic name-hash and the user sees the same color
+      // the cards in SkillsView show.
+      setColor(editingSkill.color ?? null);
       setError(null);
     } else if (isOpen) {
       setName("");
       setDescription("");
       setInstructions("");
       setSaveLocation(initialProjectId ?? GLOBAL_VALUE);
+      setColor(null);
       setError(null);
     }
   }, [isOpen, editingSkill, initialProjectId]);
@@ -110,9 +133,17 @@ export function SkillEditor({
     setDescription("");
     setInstructions("");
     setSaveLocation(GLOBAL_VALUE);
+    setColor(null);
     setError(null);
     onClose();
   };
+
+  // Effective tone: user pick wins, otherwise derive from the seed. Same
+  // resolver used by SkillsView cards so an unpicked skill shows identical
+  // color in both surfaces.
+  const heroToneSeed = name || editingSkill?.name || "new";
+  const effectiveTone = resolveSkillPillTone(heroToneSeed, color);
+  const heroToneClass = skillPillToneClass(effectiveTone);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,31 +158,76 @@ export function SkillEditor({
           name,
           description.trim(),
           instructions,
+          effectiveTone,
         );
       } else {
         const projectId =
           saveLocation !== GLOBAL_VALUE ? saveLocation : undefined;
-        await createSkill(name, description.trim(), instructions, {
-          projectId,
-        });
+        await createSkill(
+          name,
+          description.trim(),
+          instructions,
+          effectiveTone,
+          { projectId },
+        );
       }
       setName("");
       setDescription("");
       setInstructions("");
       setSaveLocation(GLOBAL_VALUE);
+      setColor(null);
       await onSaved?.(savedSkill);
       onClose();
     } catch (err) {
-      setError(String(err));
+      // JSON-RPC errors from goose-serve put the human-readable reason on
+      // `.data` (e.g. "A source named 'X' already exists"). Surface that
+      // directly when present instead of the generic "Invalid params".
+      const data = (err as { data?: unknown })?.data;
+      if (typeof data === "string" && data.trim().length > 0) {
+        setError(data);
+      } else if (data) {
+        setError(`${String(err)} — ${JSON.stringify(data)}`);
+      } else {
+        setError(String(err));
+      }
     } finally {
       setSaving(false);
     }
   };
 
-  // Pill-tone hero: deterministic from the current name (or "new" when empty
-  // in create mode) so the color is stable across renders.
-  const heroToneSeed = name || editingSkill?.name || "new";
-  const heroToneClass = skillPillToneClass(resolveSkillPillTone(heroToneSeed));
+  const updateFooterDivider = useCallback(() => {
+    const formBody = formBodyRef.current;
+    if (!formBody) {
+      setFormHasScrollBelow(false);
+      return;
+    }
+
+    setFormHasScrollBelow(
+      formBody.scrollHeight - formBody.scrollTop - formBody.clientHeight > 1,
+    );
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setFormHasScrollBelow(false);
+      return;
+    }
+
+    const frameId = window.requestAnimationFrame(updateFooterDivider);
+    window.addEventListener("resize", updateFooterDivider);
+    const formBody = formBodyRef.current;
+    let mutationObserver: MutationObserver | null = null;
+    if (formBody) {
+      mutationObserver = new MutationObserver(updateFooterDivider);
+      mutationObserver.observe(formBody, { childList: true, subtree: true });
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener("resize", updateFooterDivider);
+      mutationObserver?.disconnect();
+    };
+  }, [isOpen, updateFooterDivider]);
 
   // Skills don't yet carry source metadata in this UI — the Figma "Built in"
   // tag is reserved for a later iteration. Hide until the model surfaces it.
@@ -161,6 +237,11 @@ export function SkillEditor({
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
         className={SHEET_CONTENT_CLASS}
+        closeButtonClassName={CLOSE_BUTTON_CLASS}
+        overlayClassName="bg-transparent"
+        style={{
+          backgroundColor: "var(--surface-editor-panel)",
+        }}
         aria-describedby={undefined}
       >
         <form
@@ -170,18 +251,19 @@ export function SkillEditor({
         >
           {/* Header: title + Built-in tag at top-left. Sheet renders its own
               close X in top-right. */}
-          <div className="flex items-center gap-2 px-5 pt-5 pb-3">
+          <div className="flex items-center gap-2 px-8 pt-5 pb-2">
             <SheetTitle className="truncate text-sm font-normal text-foreground">
               {titleText}
             </SheetTitle>
             {isBuiltIn ? (
-              <span className="rounded-full bg-popover px-1.5 py-0.5 text-[11px] text-foreground">
+              <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] text-[#242424]">
                 {t("dialog.builtIn")}
               </span>
             ) : null}
           </div>
 
-          {/* Hero: solid pill-tone block. Customize pill anchored bottom-right. */}
+          {/* Hero: pill-tone block with a swatch picker anchored bottom-center,
+              mirroring CreateProjectDialog's color picker layout. */}
           <div
             className={cn(
               "relative shrink-0 overflow-hidden",
@@ -189,19 +271,21 @@ export function SkillEditor({
               heroToneClass,
             )}
           >
-            <button
-              type="button"
-              disabled
-              title={t("dialog.customizeComingSoon")}
-              className="absolute right-4 bottom-4 inline-flex h-8 items-center gap-1.5 rounded-full bg-popover px-3 text-sm text-foreground opacity-90 disabled:cursor-not-allowed"
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("dialog.customize")}
-            </button>
+            <div className="absolute inset-x-0 bottom-4 flex justify-center">
+              <ProjectColorPicker
+                variant="swatches"
+                value={effectiveTone}
+                onChange={(tone) => setColor(tone)}
+              />
+            </div>
           </div>
 
           {/* Scrollable form body. */}
-          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto bg-muted px-5 py-5">
+          <div
+            ref={formBodyRef}
+            onScroll={updateFooterDivider}
+            className="flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8"
+          >
             <div className={SECTION_GAP_CLASS}>
               <Label className={FIELD_LABEL_CLASS}>
                 {t("dialog.name")} <span className="text-destructive">*</span>
@@ -210,7 +294,7 @@ export function SkillEditor({
                 value={name}
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder={t("dialog.namePlaceholder")}
-                className={PILL_INPUT_CLASS}
+                className={FIELD_INPUT_CLASS}
               />
               {name.length > 0 && !nameValid ? (
                 <p className="text-[11px] text-destructive">
@@ -248,7 +332,7 @@ export function SkillEditor({
                   {t("dialog.saveLocation")}
                 </Label>
                 <Select value={saveLocation} onValueChange={setSaveLocation}>
-                  <SelectTrigger className={cn(FIELD_INPUT_CLASS, "w-full")}>
+                  <SelectTrigger className={cn(SELECT_TRIGGER_CLASS, "w-full")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -270,14 +354,15 @@ export function SkillEditor({
               </div>
             ) : null}
 
-            <div className={SECTION_GAP_CLASS}>
+            <div
+              className={cn(SECTION_GAP_CLASS, "flex min-h-0 flex-1 flex-col")}
+            >
               <Label className={FIELD_LABEL_CLASS}>
                 {t("dialog.instructions")}
               </Label>
               <Textarea
                 value={instructions}
                 onChange={(e) => setInstructions(e.target.value)}
-                rows={10}
                 placeholder={t("dialog.instructionsPlaceholder")}
                 className={INSTRUCTIONS_TEXTAREA_CLASS}
               />
@@ -288,8 +373,15 @@ export function SkillEditor({
 
           {/* Footer: Delete + Duplicate (left, edit mode only) + Save
               Changes/Create (right). */}
-          <div className="flex shrink-0 items-center justify-between gap-2 bg-muted px-5 pb-5">
-            <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              "flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-transparent px-6 pt-4 pb-7 transition-[border-color,box-shadow] duration-200 sm:px-8",
+              formHasScrollBelow
+                ? "border-[#242424]/10 shadow-[0_-12px_24px_rgba(36,36,36,0.06)]"
+                : "border-transparent shadow-none",
+            )}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
               {isEditing && editingSkill && onDelete ? (
                 <Button
                   type="button"
@@ -297,7 +389,7 @@ export function SkillEditor({
                   size="sm"
                   onClick={() => onDelete(editingSkill)}
                   aria-label={t("common:actions.delete")}
-                  className="h-8 rounded-full px-3 text-destructive hover:bg-popover hover:text-destructive"
+                  className="h-10 rounded-full px-4 text-sm text-destructive hover:bg-white/50 hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
                   {t("common:actions.delete")}
@@ -311,28 +403,40 @@ export function SkillEditor({
                   size="sm"
                   disabled
                   title={t("dialog.customizeComingSoon")}
-                  className="h-8 rounded-full bg-popover px-3 text-foreground hover:bg-popover/90"
+                  className="h-10 rounded-full bg-white px-4 text-sm text-[#242424] hover:bg-white/90"
                 >
                   <Copy className="h-3 w-3" />
                   {t("dialog.duplicate")}
                 </Button>
               ) : null}
             </div>
-            <Button
-              type="submit"
-              form="skill-form"
-              size="sm"
-              disabled={!canSave}
-              className="h-8 rounded-full px-4"
-            >
-              {saving
-                ? isEditing
-                  ? t("dialog.saving")
-                  : t("dialog.creating")
-                : isEditing
-                  ? t("common:actions.saveChanges")
-                  : t("dialog.createSkill")}
-            </Button>
+            <div className="ml-auto flex items-center justify-end gap-3">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleClose}
+                disabled={saving}
+                className="h-10 rounded-full px-4 text-sm hover:bg-white/50"
+              >
+                {t("common:actions.cancel")}
+              </Button>
+              <Button
+                type="submit"
+                form="skill-form"
+                size="sm"
+                disabled={!canSave}
+                className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
+              >
+                {saving
+                  ? isEditing
+                    ? t("dialog.saving")
+                    : t("dialog.creating")
+                  : isEditing
+                    ? t("common:actions.saveChanges")
+                    : t("dialog.createSkill")}
+              </Button>
+            </div>
           </div>
         </form>
       </SheetContent>

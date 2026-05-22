@@ -44,7 +44,7 @@ describe("resolveSkillPillTone", () => {
       "ship",
     ];
 
-    const seen = new Set(names.map(resolveSkillPillTone));
+    const seen = new Set(names.map((name) => resolveSkillPillTone(name)));
     // At least 3 distinct tones across the sample.
     expect(seen.size).toBeGreaterThanOrEqual(3);
   });

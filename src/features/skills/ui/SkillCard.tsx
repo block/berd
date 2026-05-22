@@ -38,7 +38,7 @@ export function SkillCard({
   onDelete,
 }: SkillCardProps) {
   const { t } = useTranslation(["skills", "common"]);
-  const tone = resolveSkillPillTone(skill.name);
+  const tone = resolveSkillPillTone(skill.name, skill.color);
   const [menuOpen, setMenuOpen] = useExclusiveMenu();
   const isEditable = skill.sourceKind !== "builtin";
   const isDeletable = skill.sourceKind !== "builtin";

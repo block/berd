@@ -59,7 +59,7 @@ interface PickerOption {
   /** Per-row rendering hint so the panel can show an icon / colored pill */
   leading?:
     | { kind: "projectIcon"; icon: string | null | undefined }
-    | { kind: "skillPill"; name: string }
+    | { kind: "skillPill"; name: string; color: string | null }
     | null;
 }
 
@@ -229,7 +229,7 @@ function skillOptions(
       id: skill.id,
       title: skill.name,
       pinned: pinnedIds.has(skill.id),
-      leading: { kind: "skillPill", name: skill.name },
+      leading: { kind: "skillPill", name: skill.name, color: skill.color },
     }));
 }
 
@@ -718,7 +718,9 @@ function PickerRow({ option, isLast, onSelect }: PickerRowProps) {
         <span
           className={cn(
             "shrink-0 rounded-pill px-2 py-0.5 text-xs text-foreground",
-            skillPillToneClass(resolveSkillPillTone(option.leading.name)),
+            skillPillToneClass(
+              resolveSkillPillTone(option.leading.name, option.leading.color),
+            ),
           )}
         >
           {option.title}

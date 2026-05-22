@@ -56,6 +56,7 @@ describe("SkillEditor", () => {
             instructions: "instr",
             path: "/mock/.agents/skills/my-skill",
             fileLocation: "/mock/.agents/skills/my-skill/SKILL.md",
+            color: null,
           }}
         />,
       );
@@ -137,6 +138,7 @@ describe("SkillEditor", () => {
       instructions: "Review the code carefully",
       path: "/mock/.agents/skills/code-review",
       fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+      color: null,
     };
 
     it("pre-fills fields with existing skill data", () => {
@@ -207,6 +209,7 @@ describe("SkillEditor", () => {
             instructions: "Existing instructions",
             path: "/mock/.agents/skills/double--hyphen",
             fileLocation: "/mock/.agents/skills/double--hyphen/SKILL.md",
+            color: null,
           }}
         />,
       );
@@ -244,6 +247,7 @@ describe("SkillEditor", () => {
         "my-skill",
         "A description",
         "Some instructions",
+        expect.any(String),
         { projectId: undefined },
       );
     });
@@ -259,6 +263,7 @@ describe("SkillEditor", () => {
             instructions: "Review carefully",
             path: "/mock/.agents/skills/code-review",
             fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
           }}
         />,
       );
@@ -277,6 +282,7 @@ describe("SkillEditor", () => {
         "code-review",
         "Updated description",
         "Review carefully",
+        expect.any(String),
       );
     });
 
@@ -291,6 +297,7 @@ describe("SkillEditor", () => {
             instructions: "Review carefully",
             path: "/mock/.agents/skills/code-review",
             fileLocation: "/mock/.agents/skills/code-review/SKILL.md",
+            color: null,
           }}
         />,
       );
@@ -306,6 +313,7 @@ describe("SkillEditor", () => {
         "renamed-skill",
         "Reviews code",
         "Review carefully",
+        expect.any(String),
       );
     });
 

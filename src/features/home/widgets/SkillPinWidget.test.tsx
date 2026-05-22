@@ -28,6 +28,7 @@ function skill(overrides: Partial<SkillInfo> = {}): SkillInfo {
     sourceLabel: "Personal",
     projectLinks: [],
     readonly: false,
+    color: null,
     ...overrides,
   };
 }

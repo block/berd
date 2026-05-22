@@ -13,14 +13,27 @@ export const SKILL_PILL_TONES = [
 
 export type SkillPillTone = (typeof SKILL_PILL_TONES)[number];
 
+function isSkillPillTone(value: unknown): value is SkillPillTone {
+  return (
+    typeof value === "string" &&
+    (SKILL_PILL_TONES as readonly string[]).includes(value)
+  );
+}
+
 /**
- * Deterministic DJB2 hash over the skill name, modulo the tone count.
- * Same skill name always resolves to the same tone — gives each skill a
- * stable color identity without persisting per-skill state.
+ * Resolve the pill tone for a skill. A user-chosen `stored` tone wins; if
+ * the skill predates the picker (or the value is unknown), fall back to a
+ * DJB2 hash of the name so the color stays stable across renders.
  *
  * Empty string is safe: the hash seed (5381) yields tone index 0.
  */
-export function resolveSkillPillTone(skillName: string): SkillPillTone {
+export function resolveSkillPillTone(
+  skillName: string,
+  stored?: string | null,
+): SkillPillTone {
+  if (isSkillPillTone(stored)) {
+    return stored;
+  }
   let hash = 5381;
   for (let i = 0; i < skillName.length; i += 1) {
     // hash * 33 + charCode, kept in 32-bit range via bitwise op

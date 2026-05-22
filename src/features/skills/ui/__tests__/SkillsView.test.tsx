@@ -34,6 +34,7 @@ const mockSkills: SkillInfo[] = [
     sourceLabel: "Personal",
     projectLinks: [],
     readonly: false,
+    color: null,
   },
   {
     id: "global:/path/code-review",
@@ -46,6 +47,7 @@ const mockSkills: SkillInfo[] = [
     sourceLabel: "Personal",
     projectLinks: [],
     readonly: false,
+    color: null,
   },
   {
     id: "project:/tmp/alpha/.goose/skills/test-writer",
@@ -57,6 +59,7 @@ const mockSkills: SkillInfo[] = [
     sourceKind: "project" as const,
     sourceLabel: "alpha",
     readonly: false,
+    color: null,
     projectLinks: [
       {
         id: "/tmp/alpha",
@@ -78,6 +81,7 @@ const builtinSkill: SkillInfo = {
   sourceLabel: "Built in",
   projectLinks: [],
   readonly: true,
+  color: null,
 };
 
 vi.mock("../../api/skills", () => ({
@@ -441,6 +445,7 @@ describe("SkillsView", () => {
         "renamed-review",
         "Reviews code",
         "Review the code...",
+        expect.any(String),
       );
     });
     await waitFor(() => {

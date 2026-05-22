@@ -231,6 +231,7 @@ export function SkillsView({
       instructions: skill.instructions,
       path: skill.path,
       fileLocation: skill.fileLocation,
+      color: skill.color,
     });
     setDialogOpen(true);
   };
