@@ -20,7 +20,7 @@ const SHELL_WIDTH_CLASSES = {
 
 interface PageHeaderProps {
   eyebrow?: ReactNode;
-  title: ReactNode;
+  title?: ReactNode;
   description?: ReactNode;
   actions?: ReactNode;
   titleElement?: "h1" | "div";
@@ -134,9 +134,11 @@ export function PageHeader({
         {eyebrow ? (
           <div className={cn("mb-3", eyebrowClassName)}>{eyebrow}</div>
         ) : null}
-        <TitleElement className={cn(titleVariantClassName, titleClassName)}>
-          {title}
-        </TitleElement>
+        {title ? (
+          <TitleElement className={cn(titleVariantClassName, titleClassName)}>
+            {title}
+          </TitleElement>
+        ) : null}
         {description ? (
           <p
             className={cn(

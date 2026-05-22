@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
@@ -6,11 +6,12 @@ import {
   IconPlus,
   IconX,
 } from "@tabler/icons-react";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { useMigrationStore } from "@/features/migration/stores/migrationStore";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { SearchBar } from "@/shared/ui/SearchBar";
-import { FilterRow, PageHeader } from "@/shared/ui/page-shell";
+import { FilterRow } from "@/shared/ui/page-shell";
 import { useExtensionsSettings } from "../hooks/useExtensionsSettings";
 import {
   EXTENSION_CATEGORIES,
@@ -46,6 +47,7 @@ function FilterButton({
 
 export function ExtensionsSettings() {
   const { t } = useTranslation("settings");
+  const setTopBarActions = useSetTopBarActions();
   const {
     extensions,
     isLoading,
@@ -59,6 +61,21 @@ export function ExtensionsSettings() {
     handleModalClose,
   } = useExtensionsSettings();
   const [searchTerm, setSearchTerm] = useState("");
+
+  useEffect(() => {
+    setTopBarActions(
+      <Button
+        type="button"
+        variant="page-header"
+        size="xs"
+        onClick={handleAdd}
+        leftIcon={<IconPlus />}
+      >
+        {t("extensions.addExtension")}
+      </Button>,
+    );
+    return () => setTopBarActions(null);
+  }, [handleAdd, setTopBarActions, t]);
   const [activeFilter, setActiveFilter] = useState<ExtensionFilter>("all");
   const [showGooseCapabilities, setShowGooseCapabilities] = useState(false);
   const disabledExtensions = useMigrationStore(
@@ -124,23 +141,6 @@ export function ExtensionsSettings() {
 
   return (
     <>
-      <PageHeader
-        title={t("extensions.title")}
-        description={t("extensions.description")}
-        titleClassName="font-normal text-foreground"
-        actions={
-          <Button
-            type="button"
-            variant="outline-flat"
-            size="xs"
-            onClick={handleAdd}
-          >
-            <IconPlus className="size-3.5" />
-            {t("extensions.addExtension")}
-          </Button>
-        }
-      />
-
       {showDisabledBanner ? (
         <Alert variant="default" className="my-6 pr-10">
           <IconAlertTriangle aria-hidden="true" className="text-warning!" />
@@ -169,6 +169,8 @@ export function ExtensionsSettings() {
 
       <div className="space-y-3">
         <SearchBar
+          size="pill"
+          className="max-w-lg"
           value={searchTerm}
           onChange={setSearchTerm}
           placeholder={t("extensions.search")}

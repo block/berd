@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { RefreshCw, ClipboardCopy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import {
@@ -91,6 +92,7 @@ export function formatDebugReport(report: DoctorReport): string {
 
 export function DoctorSettings() {
   const { t } = useTranslation(["settings", "common"]);
+  const setTopBarActions = useSetTopBarActions();
   const [report, setReport] = useState<DoctorReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -118,48 +120,47 @@ export function DoctorSettings() {
 
   const checkGroups = report ? groupDoctorChecks(report.checks) : [];
 
-  async function copyDebugInfo() {
+  const copyDebugInfo = useCallback(async () => {
     if (!report) return;
     await navigator.clipboard.writeText(formatDebugReport(report));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  }
+  }, [report]);
+
+  useEffect(() => {
+    if (loading) {
+      setTopBarActions(null);
+      return;
+    }
+    setTopBarActions(
+      <>
+        {report ? (
+          <Button
+            type="button"
+            variant="page-header"
+            size="xs"
+            onClick={copyDebugInfo}
+            leftIcon={copied ? <Check /> : <ClipboardCopy />}
+          >
+            {copied ? t("doctor.copied") : t("doctor.copyDetails")}
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          variant="page-header"
+          size="xs"
+          onClick={runChecks}
+          leftIcon={<RefreshCw />}
+        >
+          {t("doctor.rerun")}
+        </Button>
+      </>,
+    );
+    return () => setTopBarActions(null);
+  }, [copied, copyDebugInfo, loading, report, runChecks, setTopBarActions, t]);
 
   return (
-    <SettingsPage
-      title={t("doctor.title")}
-      actions={
-        <>
-          {report && !loading && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xxs"
-              onClick={copyDebugInfo}
-            >
-              {copied ? (
-                <Check className="size-3.5" />
-              ) : (
-                <ClipboardCopy className="size-3.5" />
-              )}
-              {copied ? t("doctor.copied") : t("doctor.copyDetails")}
-            </Button>
-          )}
-
-          {!loading && (
-            <Button
-              type="button"
-              variant="outline"
-              size="xxs"
-              onClick={runChecks}
-            >
-              <RefreshCw className="size-3.5" />
-              {t("doctor.rerun")}
-            </Button>
-          )}
-        </>
-      }
-    >
+    <SettingsPage>
       {loading ? (
         <div className="flex min-h-[160px] items-center justify-center gap-2 text-sm text-muted-foreground">
           <Spinner className="h-5 w-5" />

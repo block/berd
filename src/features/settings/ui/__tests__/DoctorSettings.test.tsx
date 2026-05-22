@@ -2,11 +2,29 @@ import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { renderWithProviders } from "@/test/render";
+import {
+  TopBarActionsProvider,
+  useTopBarActions,
+} from "@/app/contexts/TopBarActionsContext";
 import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 import {
   DoctorSettings,
   formatDebugReport,
 } from "@/features/settings/ui/DoctorSettings";
+
+function TopBarActionsSurface() {
+  const actions = useTopBarActions();
+  return <div data-testid="top-bar-actions">{actions}</div>;
+}
+
+function renderDoctor() {
+  return renderWithProviders(
+    <TopBarActionsProvider>
+      <DoctorSettings />
+      <TopBarActionsSurface />
+    </TopBarActionsProvider>,
+  );
+}
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -64,7 +82,7 @@ describe("DoctorSettings", () => {
       ]),
     );
 
-    renderWithProviders(<DoctorSettings />);
+    renderDoctor();
 
     expect(await screen.findByRole("heading", { name: "Tools" })).toBeVisible();
     expect(screen.getByText("Git")).toBeVisible();
@@ -93,7 +111,7 @@ describe("DoctorSettings", () => {
       ]),
     );
 
-    renderWithProviders(<DoctorSettings />);
+    renderDoctor();
     await screen.findByRole("heading", { name: "Permissions" });
 
     fireEvent.click(screen.getByRole("button", { name: /copy report/i }));
@@ -123,7 +141,7 @@ describe("DoctorSettings", () => {
       ]),
     );
 
-    renderWithProviders(<DoctorSettings />);
+    renderDoctor();
 
     await screen.findByText("Integration");
     const headings = screen.getAllByRole("heading", { level: 4 });
@@ -151,7 +169,7 @@ describe("DoctorSettings", () => {
       ]),
     );
 
-    renderWithProviders(<DoctorSettings />);
+    renderDoctor();
 
     expect(await screen.findByRole("heading", { name: "Tools" })).toBeVisible();
     expect(screen.queryByRole("heading", { name: "Agents" })).toBeNull();

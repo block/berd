@@ -192,7 +192,6 @@ describe("ProvidersSettings", () => {
 
     render(<ProvidersSettings />);
 
-    expect(screen.getByText("Providers")).toBeInTheDocument();
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
   });

@@ -166,7 +166,7 @@ export function GeneralSettings() {
   }
 
   return (
-    <SettingsPage title={t("general.title")} contentClassName="space-y-8 pt-8">
+    <SettingsPage contentClassName="space-y-8">
       <SettingsSection>
         <SettingRow
           label={t("general.language.label")}

@@ -54,7 +54,7 @@ export function UpdatesSettings() {
         : t("updates.actions.check");
 
   return (
-    <SettingsPage title={t("updates.title")} contentClassName="space-y-6 pt-8">
+    <SettingsPage contentClassName="space-y-6">
       <section className="overflow-hidden rounded-lg border border-border bg-background px-6 py-5">
         <div className="space-y-1">
           <h4 className="text-sm font-semibold leading-5">

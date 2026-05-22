@@ -335,7 +335,7 @@ export function ProvidersSettings() {
   }
 
   return (
-    <SettingsPage title={t("providers.title")}>
+    <SettingsPage>
       {catalogError && (
         <div
           role="alert"

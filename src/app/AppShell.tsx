@@ -9,6 +9,7 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import {
   DEFAULT_SETTINGS_SECTION,
   resolveSettingsSection,
+  SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
@@ -188,7 +189,7 @@ function getTopBarChromeInsets(
 }
 
 export function AppShell({ children }: { children?: React.ReactNode }) {
-  const { t } = useTranslation(["chat", "common"]);
+  const { t } = useTranslation(["chat", "common", "settings"]);
   const {
     expandSidebar,
     handleCornerResizeDoubleClick,
@@ -1481,8 +1482,31 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             : []),
         ];
       }
-      case "settings":
-        return [rootCrumb, current("settings", "Settings")];
+      case "settings": {
+        const settingsSection = SETTINGS_SECTIONS.find(
+          (section) => section.id === activeSettingsSection,
+        );
+        const showSettingsSection =
+          activeSettingsSection !== DEFAULT_SETTINGS_SECTION &&
+          Boolean(settingsSection);
+
+        return [
+          rootCrumb,
+          showSettingsSection
+            ? parent("settings", "Settings", () =>
+                openSettings(DEFAULT_SETTINGS_SECTION),
+              )
+            : current("settings", "Settings"),
+          ...(showSettingsSection && settingsSection
+            ? [
+                current(
+                  "settings-section",
+                  t(`settings:${settingsSection.labelKey}`),
+                ),
+              ]
+            : []),
+        ];
+      }
       case "projects":
         return [rootCrumb, current("projects", "Projects")];
       case "search":
@@ -1495,14 +1519,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [
     activeDesignSystemSection,
     activeSession?.title,
+    activeSettingsSection,
     activeView,
     agentsBreadcrumbLabel,
     agentsPersonaId,
     automationsBreadcrumbLabel,
     handleNavigate,
     openDesignSystem,
+    openSettings,
     skillsBreadcrumbLabel,
     skillsSkillId,
+    t,
   ]);
 
   useEffect(() => {
