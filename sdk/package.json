@@ -54,5 +54,12 @@
     "prettier": "^3.8.1",
     "tsx": "^4.21.0",
     "typescript": "~5.9.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "hono": ">=4.12.16",
+      "@hono/node-server": ">=1.19.13",
+      "path-to-regexp": ">=8.4.0"
+    }
   }
 }
