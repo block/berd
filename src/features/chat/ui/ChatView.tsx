@@ -143,7 +143,9 @@ export function ChatView({
                 tailPaddingPx={tailPaddingPx}
               />
             )}
+          </div>
 
+          <div className="pointer-events-none absolute inset-x-0 bottom-12 flex flex-col">
             <AnimatePresence initial={false}>
               {shouldShowLoadingIndicator ? (
                 <LoadingGoose
@@ -158,78 +160,77 @@ export function ChatView({
                 />
               ) : null}
             </AnimatePresence>
-          </div>
-
-          <div className="pointer-events-none absolute inset-x-0 bottom-12 flex justify-center px-4">
-            <div
-              ref={composerWrapperRef}
-              className="pointer-events-auto w-full max-w-3xl rounded-composer bg-surface-composer-glass ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
-              style={{
-                backdropFilter: "var(--backdrop-composer-glass)",
-                WebkitBackdropFilter: "var(--backdrop-composer-glass)",
-              }}
-            >
-              <ChatInput
-                composerActions={{
-                  onSend: controller.handleSend,
-                  disabled:
-                    controller.projectMetadataPending ||
-                    controller.isCompactingContext,
-                  sendDisabled: controller.session?.creationState != null,
-                  sendDisabledReason,
-                  queuedMessage: controller.queue.queuedMessage,
-                  onDismissQueue: controller.queue.dismiss,
-                  onStop: controller.stopStreaming,
-                  isStreaming:
-                    controller.chatState === "streaming" ||
-                    controller.chatState === "thinking",
+            <div className="px-4">
+              <div
+                ref={composerWrapperRef}
+                className="pointer-events-auto mx-auto w-full max-w-3xl rounded-composer bg-surface-composer-glass ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
+                style={{
+                  backdropFilter: "var(--backdrop-composer-glass)",
+                  WebkitBackdropFilter: "var(--backdrop-composer-glass)",
                 }}
-                initialValue={controller.draftValue}
-                onDraftChange={controller.handleDraftChange}
-                selectedSkills={controller.selectedSkills}
-                onSkillsChange={controller.handleSkillsChange}
-                personaPicker={{
-                  personas: controller.personas,
-                  selectedPersonaId: controller.selectedPersonaId,
-                  onPersonaChange: controller.handlePersonaChange,
-                }}
-                agentModelPicker={{
-                  providers: controller.pickerAgents,
-                  providersLoading: controller.providersLoading,
-                  selectedProvider: controller.selectedProvider,
-                  onProviderChange: controller.handleProviderChange,
-                  currentModelId: controller.currentModelId,
-                  currentModelProviderId: controller.currentModelProviderId,
-                  currentModel: controller.currentModelName ?? undefined,
-                  availableModels: controller.availableModels,
-                  modelsLoading: controller.modelsLoading,
-                  modelStatusMessage: controller.modelStatusMessage,
-                  onModelChange: controller.handleModelChange,
-                  onPickerOpen: controller.handlePickerOpen,
-                }}
-                projectPicker={{
-                  selectedProjectId: controller.selectedProjectId,
-                  availableProjects: controller.availableProjects,
-                  onProjectChange: controller.handleProjectChange,
-                  onCreateProject: (options) =>
-                    onCreateProject?.({
-                      onCreated: (projectId) => {
-                        controller.handleProjectChange(projectId);
-                        options?.onCreated?.(projectId);
-                      },
-                    }),
-                }}
-                contextUsage={{
-                  contextTokens: controller.tokenState.accumulatedTotal,
-                  contextLimit: controller.tokenState.contextLimit,
-                  isContextUsageReady: controller.isContextUsageReady,
-                  onCompactContext: controller.compactConversation,
-                  canCompactContext: controller.canCompactContext,
-                  isCompactingContext: controller.isCompactingContext,
-                  supportsCompactionControls:
-                    controller.supportsCompactionControls,
-                }}
-              />
+              >
+                <ChatInput
+                  composerActions={{
+                    onSend: controller.handleSend,
+                    disabled:
+                      controller.projectMetadataPending ||
+                      controller.isCompactingContext,
+                    sendDisabled: controller.session?.creationState != null,
+                    sendDisabledReason,
+                    queuedMessage: controller.queue.queuedMessage,
+                    onDismissQueue: controller.queue.dismiss,
+                    onStop: controller.stopStreaming,
+                    isStreaming:
+                      controller.chatState === "streaming" ||
+                      controller.chatState === "thinking",
+                  }}
+                  initialValue={controller.draftValue}
+                  onDraftChange={controller.handleDraftChange}
+                  selectedSkills={controller.selectedSkills}
+                  onSkillsChange={controller.handleSkillsChange}
+                  personaPicker={{
+                    personas: controller.personas,
+                    selectedPersonaId: controller.selectedPersonaId,
+                    onPersonaChange: controller.handlePersonaChange,
+                  }}
+                  agentModelPicker={{
+                    providers: controller.pickerAgents,
+                    providersLoading: controller.providersLoading,
+                    selectedProvider: controller.selectedProvider,
+                    onProviderChange: controller.handleProviderChange,
+                    currentModelId: controller.currentModelId,
+                    currentModelProviderId: controller.currentModelProviderId,
+                    currentModel: controller.currentModelName ?? undefined,
+                    availableModels: controller.availableModels,
+                    modelsLoading: controller.modelsLoading,
+                    modelStatusMessage: controller.modelStatusMessage,
+                    onModelChange: controller.handleModelChange,
+                    onPickerOpen: controller.handlePickerOpen,
+                  }}
+                  projectPicker={{
+                    selectedProjectId: controller.selectedProjectId,
+                    availableProjects: controller.availableProjects,
+                    onProjectChange: controller.handleProjectChange,
+                    onCreateProject: (options) =>
+                      onCreateProject?.({
+                        onCreated: (projectId) => {
+                          controller.handleProjectChange(projectId);
+                          options?.onCreated?.(projectId);
+                        },
+                      }),
+                  }}
+                  contextUsage={{
+                    contextTokens: controller.tokenState.accumulatedTotal,
+                    contextLimit: controller.tokenState.contextLimit,
+                    isContextUsageReady: controller.isContextUsageReady,
+                    onCompactContext: controller.compactConversation,
+                    canCompactContext: controller.canCompactContext,
+                    isCompactingContext: controller.isCompactingContext,
+                    supportsCompactionControls:
+                      controller.supportsCompactionControls,
+                  }}
+                />
+              </div>
             </div>
           </div>
         </div>
