@@ -151,6 +151,13 @@ describe("MessageBubble", () => {
     expect(container.querySelector(".text-success")).toBeInTheDocument();
   });
 
+  it("wraps long unbroken words so the bubble cannot overflow horizontally", () => {
+    const longWord = "a".repeat(160);
+    render(<MessageBubble message={userMessage(longWord)} />);
+    const paragraph = screen.getByText(longWord);
+    expect(paragraph).toHaveClass("wrap-anywhere");
+  });
+
   it("renders user text inside a bubble shell", () => {
     const { container } = render(
       <MessageBubble message={userMessage("hello world")} />,

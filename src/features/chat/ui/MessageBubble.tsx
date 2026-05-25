@@ -207,7 +207,10 @@ function renderContentBlock(
           return null;
         }
         return (
-          <p key={`text-${index}`} className="whitespace-pre-wrap break-words">
+          <p
+            key={`text-${index}`}
+            className="whitespace-pre-wrap wrap-anywhere"
+          >
             {tc.text}
           </p>
         );
