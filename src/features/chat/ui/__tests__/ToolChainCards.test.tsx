@@ -54,6 +54,22 @@ function pair(
   };
 }
 
+function completeItem(item: ToolChainItem): ToolChainItem {
+  return {
+    ...item,
+    request: item.request
+      ? { ...item.request, status: "completed" }
+      : item.request,
+    response: {
+      type: "toolResponse",
+      id: item.request?.id ?? item.response?.id ?? "tool-x",
+      name: item.request?.name ?? item.response?.name ?? "",
+      result: "ok",
+      isError: false,
+    },
+  };
+}
+
 describe("ToolChainCards", () => {
   it("renders without a parent header for a single tool item", () => {
     render(<ToolChainCards toolItems={[pair("Read · src/a.ts")]} />);
@@ -126,7 +142,7 @@ describe("ToolChainCards", () => {
     expect(header).toHaveAttribute("aria-expanded", "true");
   });
 
-  it("auto-collapses a live chain once every step has completed", () => {
+  it("auto-collapses an untouched live chain once every step has completed", () => {
     const a = pair("Edit · src/a.ts");
     const bRequest = pair("Edit · src/b.ts", {
       status: "in_progress",
@@ -140,19 +156,7 @@ describe("ToolChainCards", () => {
 
     // Same chain identity, but the second step now has a response — i.e. the
     // chain has just completed in realtime.
-    const bComplete: typeof bRequest = {
-      ...bRequest,
-      request: bRequest.request
-        ? { ...bRequest.request, status: "completed" }
-        : bRequest.request,
-      response: {
-        type: "toolResponse",
-        id: bRequest.request?.id ?? "tool-x",
-        name: "Edit · src/b.ts",
-        result: "ok",
-        isError: false,
-      },
-    };
+    const bComplete = completeItem(bRequest);
     rerender(<ToolChainCards toolItems={[a, bComplete]} />);
 
     const completedHeader = screen.getByRole("button", {
@@ -211,6 +215,155 @@ describe("ToolChainCards", () => {
       name: /working through 3 steps/i,
     });
     expect(header).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps a user-expanded live chain open once every step has completed", async () => {
+    const user = userEvent.setup();
+    const a = pair("Edit · src/a.ts");
+    const bRequest = pair("Edit · src/b.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(<ToolChainCards toolItems={[a, bRequest]} />);
+
+    await user.click(screen.getByRole("button", { name: /edit.*src\/a\.ts/i }));
+    expect(screen.getByText("ok")).toBeVisible();
+
+    rerender(<ToolChainCards toolItems={[a, completeItem(bRequest)]} />);
+
+    const completedHeader = screen.getByRole("button", {
+      name: /updating files.*2 steps/i,
+    });
+    expect(completedHeader).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("ok")).toBeVisible();
+  });
+
+  it("leaves the parent collapsed when an untouched single tool becomes an active chain", () => {
+    const a = pair("Read · src/a.ts");
+    const bRequest = pair("Run checks", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(<ToolChainCards toolItems={[a]} />);
+
+    rerender(<ToolChainCards toolItems={[a, bRequest]} />);
+
+    expect(
+      screen.getByRole("button", { name: /working through 2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("keeps a live chain open when the user toggles the chain header", async () => {
+    const user = userEvent.setup();
+    const a = pair("Edit · src/a.ts");
+    const bRequest = pair("Edit · src/b.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(<ToolChainCards toolItems={[a, bRequest]} />);
+
+    const activeHeader = screen.getByRole("button", {
+      name: /working through 2 steps/i,
+    });
+    expect(activeHeader).toHaveAttribute("aria-expanded", "true");
+
+    // Toggling the chain header off and back on is the original
+    // "user is paying attention" signal — both clicks count as interaction.
+    await user.click(activeHeader);
+    expect(activeHeader).toHaveAttribute("aria-expanded", "false");
+    await user.click(activeHeader);
+    expect(activeHeader).toHaveAttribute("aria-expanded", "true");
+
+    rerender(<ToolChainCards toolItems={[a, completeItem(bRequest)]} />);
+
+    const completedHeader = screen.getByRole("button", {
+      name: /updating files.*2 steps/i,
+    });
+    expect(completedHeader).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps a live chain open when the user opens the internal steps disclosure", async () => {
+    const user = userEvent.setup();
+    const edit = pair("Edit · src/a.ts");
+    const lsStep = pair("ls -lh");
+    const catStep = pair("cat file.txt");
+    const finalStep = pair("Edit · src/b.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(
+      <ToolChainCards toolItems={[edit, lsStep, catStep, finalStep]} />,
+    );
+
+    const activeHeader = screen.getByRole("button", {
+      name: /working through 4 steps/i,
+    });
+    expect(activeHeader).toHaveAttribute("aria-expanded", "true");
+
+    await user.click(
+      screen.getByRole("button", { name: /show internal steps \(2\)/i }),
+    );
+
+    rerender(
+      <ToolChainCards
+        toolItems={[edit, lsStep, catStep, completeItem(finalStep)]}
+      />,
+    );
+
+    const completedHeader = screen.getByRole("button", {
+      name: /updating files.*4 steps/i,
+    });
+    expect(completedHeader).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps a live chain open after the user opens and closes a tool item", async () => {
+    const user = userEvent.setup();
+    const a = pair("Edit · src/a.ts");
+    const bRequest = pair("Edit · src/b.ts", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { rerender } = render(<ToolChainCards toolItems={[a, bRequest]} />);
+
+    // Open the first tool item, then close it again. After this the chain has
+    // no expanded items but userInteractedRef has been flipped — closing a
+    // tool you just opened still counts as interaction.
+    const aHeader = screen.getByRole("button", { name: /edit.*src\/a\.ts/i });
+    await user.click(aHeader);
+    expect(screen.getByText("ok")).toBeVisible();
+    await user.click(aHeader);
+    expect(screen.queryByText("ok")).not.toBeInTheDocument();
+
+    rerender(<ToolChainCards toolItems={[a, completeItem(bRequest)]} />);
+
+    const completedHeader = screen.getByRole("button", {
+      name: /updating files.*2 steps/i,
+    });
+    expect(completedHeader).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps an expanded single tool visible when it becomes a grouped chain", async () => {
+    const user = userEvent.setup();
+    const a = pair("Read · src/a.ts");
+    const bRequest = pair("Run checks", {
+      status: "in_progress",
+      completed: false,
+    });
+    const { container, rerender } = render(<ToolChainCards toolItems={[a]} />);
+    const singleCaret = container.querySelector<HTMLButtonElement>(
+      '[data-role="tool-single"] > button',
+    );
+    if (!singleCaret) throw new Error("expected single tool caret");
+
+    await user.click(singleCaret);
+    expect(screen.getByText("ok")).toBeVisible();
+
+    rerender(<ToolChainCards toolItems={[a, bRequest]} />);
+
+    expect(
+      screen.getByRole("button", { name: /working through 2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("ok")).toBeVisible();
   });
 
   it("surfaces error status as a data attribute on the chain wrapper", () => {
@@ -282,6 +435,45 @@ describe("ToolChainCards", () => {
       ".group-data-\\[state\\=closed\\]\\:-rotate-90",
     );
     expect(trailingChevron).toBeNull();
+  });
+
+  it("keeps expanded low-signal steps visible when a chain starts hiding internal steps", async () => {
+    const user = userEvent.setup();
+    const reportStep = pair("Write report");
+    const expandedInternalStep = pair("python3 create_report.py");
+    const finalStep = pair("Finalize report");
+    const laterInternalStep = pair("ls -lh report.pdf");
+    const { container, rerender } = render(
+      <ToolChainCards
+        toolItems={[reportStep, expandedInternalStep, finalStep]}
+      />,
+    );
+    const chainHeader = container.querySelector<HTMLButtonElement>(
+      '[data-role="tool-chain-card"] > button[aria-expanded]',
+    );
+    if (!chainHeader) throw new Error("expected tool-chain-card header");
+
+    await user.click(chainHeader);
+    await user.click(
+      screen.getByRole("button", { name: /python3 create_report\.py/i }),
+    );
+    expect(screen.getByText("ok")).toBeVisible();
+
+    rerender(
+      <ToolChainCards
+        toolItems={[
+          reportStep,
+          expandedInternalStep,
+          finalStep,
+          laterInternalStep,
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /python3 create_report\.py/i }),
+    ).toBeVisible();
+    expect(screen.getByText("ok")).toBeVisible();
   });
 
   it("counts the internal-steps disclosure as part of the rail", async () => {

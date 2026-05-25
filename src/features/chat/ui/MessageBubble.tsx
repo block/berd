@@ -132,20 +132,23 @@ function findMatchingToolChainIndex(
 function groupContentSections(content: MessageContent[]): ContentSection[] {
   const sections: ContentSection[] = [];
   let currentToolChain: ToolChainItem[] = [];
+  let currentToolChainKey: string | null = null;
 
   const flushToolChain = () => {
     if (currentToolChain.length > 0) {
       sections.push({
-        key: currentToolChain[0]?.key ?? "tool-chain",
+        key: currentToolChainKey ?? currentToolChain[0]?.key ?? "tool-chain",
         type: "toolChain",
         items: [...currentToolChain],
       });
       currentToolChain = [];
+      currentToolChainKey = null;
     }
   };
 
   for (const [index, block] of content.entries()) {
     if (block.type === "toolRequest") {
+      currentToolChainKey ??= `tool-chain-${block.id}-${index}`;
       currentToolChain.push({
         key: `tool-request-${block.id}-${index}`,
         request: block,
@@ -166,6 +169,7 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
         };
         continue;
       }
+      currentToolChainKey ??= `tool-chain-${block.id}-${index}`;
       currentToolChain.push({
         key: `tool-response-${block.id}-${index}`,
         response: block,

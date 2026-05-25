@@ -137,7 +137,10 @@ function isLowSignalToolStep(item: ToolChainItem): boolean {
   );
 }
 
-function partitionToolSteps(toolItems: ToolChainItem[]) {
+function partitionToolSteps(
+  toolItems: ToolChainItem[],
+  expandedKeys: Set<string>,
+) {
   if (toolItems.length <= 3) {
     return { primaryItems: toolItems, hiddenItems: [] as ToolChainItem[] };
   }
@@ -146,7 +149,7 @@ function partitionToolSteps(toolItems: ToolChainItem[]) {
   const hiddenItems: ToolChainItem[] = [];
 
   for (const item of toolItems) {
-    if (isLowSignalToolStep(item)) {
+    if (!expandedKeys.has(item.key) && isLowSignalToolStep(item)) {
       hiddenItems.push(item);
       continue;
     }
@@ -167,38 +170,47 @@ function partitionToolSteps(toolItems: ToolChainItem[]) {
 export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   const { t } = useTranslation("chat");
   const [showInternalSteps, setShowInternalSteps] = useState(false);
-  const [chainExpansionIntent, setChainExpansionIntent] = useState<
-    "auto" | "manual"
-  >("auto");
-  const { primaryItems, hiddenItems } = partitionToolSteps(toolItems);
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const { primaryItems, hiddenItems } = partitionToolSteps(
+    toolItems,
+    expandedKeys,
+  );
   const grouped = shouldRenderAsGroupedChain(toolItems);
   const aggregateStatus = getChainAggregateStatus(toolItems);
   const summary = summarizeToolChainSteps(primaryItems);
   const isActiveChain =
     aggregateStatus === "in_progress" || aggregateStatus === "pending";
   // Chains that mount as already-complete (history replay) start collapsed;
-  // live chains mount mid-execution, stay open while running, and auto-collapse
-  // once they finish so the chat keeps moving forward.
+  // untouched live chains mount mid-execution, stay open while running, and
+  // auto-collapse once they finish so the chat keeps moving forward.
   const [chainExpanded, setChainExpanded] = useState(() => isActiveChain);
-  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
   const wasActiveChainRef = useRef(isActiveChain);
+  const wasGroupedRef = useRef(grouped);
+  const userInteractedRef = useRef(false);
+  const hasExpandedToolItem = toolItems.some((item) =>
+    expandedKeys.has(item.key),
+  );
   useEffect(() => {
-    if (chainExpansionIntent === "auto" && isActiveChain) {
-      setChainExpanded(true);
-    }
     if (
-      chainExpansionIntent === "auto" &&
       wasActiveChainRef.current &&
-      !isActiveChain
+      !isActiveChain &&
+      !userInteractedRef.current
     ) {
       setChainExpanded(false);
       setExpandedKeys(new Set());
       setShowInternalSteps(false);
     }
+
+    if (!wasGroupedRef.current && grouped && hasExpandedToolItem) {
+      setChainExpanded(true);
+    }
+
     wasActiveChainRef.current = isActiveChain;
-  }, [chainExpansionIntent, isActiveChain]);
+    wasGroupedRef.current = grouped;
+  }, [grouped, hasExpandedToolItem, isActiveChain]);
 
   const handleOpenChange = (key: string, open: boolean) => {
+    userInteractedRef.current = true;
     setExpandedKeys((prev) => {
       const next = new Set(prev);
       if (open) {
@@ -332,7 +344,7 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
       <button
         type="button"
         onClick={() => {
-          setChainExpansionIntent("manual");
+          userInteractedRef.current = true;
           if (chainExpanded) {
             setExpandedKeys(new Set());
             setShowInternalSteps(false);
@@ -387,7 +399,10 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
               <div className="min-w-0 flex-1 pb-1">
                 <button
                   type="button"
-                  onClick={() => setShowInternalSteps((prev) => !prev)}
+                  onClick={() => {
+                    userInteractedRef.current = true;
+                    setShowInternalSteps((prev) => !prev);
+                  }}
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
                 >
                   <ChevronRight

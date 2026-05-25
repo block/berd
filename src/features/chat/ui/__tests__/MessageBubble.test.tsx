@@ -373,6 +373,57 @@ describe("MessageBubble", () => {
     expect(screen.getAllByText("readFile")).toHaveLength(1);
   });
 
+  it("keeps expanded tool steps open when a streamed chain grows", async () => {
+    const user = userEvent.setup();
+    const initialContent: Message["content"] = [
+      {
+        type: "toolRequest",
+        id: "tool-1",
+        name: "Read config",
+        arguments: {},
+        status: "completed",
+      },
+      {
+        type: "toolResponse",
+        id: "tool-1",
+        name: "Read config",
+        result: "config contents",
+        isError: false,
+      },
+      {
+        type: "toolRequest",
+        id: "tool-2",
+        name: "Run checks",
+        arguments: {},
+        status: "in_progress",
+      },
+    ];
+    const { rerender } = render(
+      <MessageBubble message={assistantMessage(initialContent)} isStreaming />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /read config/i }));
+    expect(screen.getByText("config contents")).toBeVisible();
+
+    rerender(
+      <MessageBubble
+        message={assistantMessage([
+          ...initialContent,
+          {
+            type: "toolRequest",
+            id: "tool-3",
+            name: "Inspect output",
+            arguments: {},
+            status: "in_progress",
+          },
+        ])}
+        isStreaming
+      />,
+    );
+
+    expect(screen.getByText("config contents")).toBeVisible();
+  });
+
   it("renders tool cards inline between surrounding assistant text blocks", () => {
     const msg = assistantMessage([
       { type: "text", text: "Lemme check..." },
