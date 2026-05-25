@@ -28,6 +28,7 @@ interface MessageTimelineProps {
   onEditMessage?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   className?: string;
+  tailPaddingPx?: number;
 }
 
 function isSameDay(a: number, b: number): boolean {
@@ -73,6 +74,7 @@ export function MessageTimeline({
   onEditMessage,
   onSendMcpAppMessage,
   className,
+  tailPaddingPx,
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
@@ -246,6 +248,19 @@ export function MessageTimeline({
     scrollToBottomIfNearBottom();
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
 
+  // The composer reserves bottom padding so messages stay reachable above it.
+  // When the composer grows, scrollHeight grows; a user pinned to the bottom
+  // would otherwise drift Δ pixels away. Re-pin them.
+  useEffect(() => {
+    if (tailPaddingPx == null) {
+      return;
+    }
+    if (userDetachedRef.current) {
+      return;
+    }
+    scrollToBottom("auto");
+  }, [tailPaddingPx, scrollToBottom]);
+
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
 
@@ -399,7 +414,12 @@ export function MessageTimeline({
   }
 
   return (
-    <div className={cn("relative min-h-0 flex-1", className)}>
+    <div
+      className={cn("relative min-h-0 flex-1", className)}
+      style={
+        tailPaddingPx != null ? { paddingBottom: tailPaddingPx } : undefined
+      }
+    >
       <div
         ref={containerRef}
         onScroll={handleScroll}

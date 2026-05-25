@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { MessageTimeline } from "./MessageTimeline";
@@ -54,11 +54,50 @@ export function ChatView({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
   });
+  const composerWrapperRef = useRef<HTMLDivElement>(null);
+  const [composerHeight, setComposerHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    const element = composerWrapperRef.current;
+    if (!element || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) {
+        return;
+      }
+      const height =
+        entry.borderBoxSize?.[0]?.blockSize ?? entry.contentRect.height;
+      setComposerHeight(height);
+    });
+
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
     perfLog(`[perf:chatview] ${sessionId.slice(0, 8)} mounted in ${ms}ms`);
   }, [sessionId]);
+
+  // Card bottom sits 80px above the page bottom (mb-20); composer bottom sits
+  // 48px above it (bottom-12). So composer extends (composerHeight - 32) px
+  // up into / above the card — that's the "no-message zone" the timeline must
+  // reserve to keep the latest messages reachable.
+  const COMPOSER_CARD_OFFSET_PX = 32;
+  const MCP_APP_TAIL_TIGHTEN_PX = 48;
+  const usesMcpAppTail = isMcpAppTail(controller.messages);
+  let tailPaddingPx: number;
+  if (composerHeight == null) {
+    tailPaddingPx = usesMcpAppTail ? 48 : 96;
+  } else {
+    const base = Math.max(0, composerHeight - COMPOSER_CARD_OFFSET_PX);
+    tailPaddingPx = usesMcpAppTail
+      ? Math.max(0, base - MCP_APP_TAIL_TIGHTEN_PX)
+      : base;
+  }
 
   const showIndicator =
     controller.chatState === "thinking" ||
@@ -101,9 +140,7 @@ export function ChatView({
                 scrollTargetQuery={controller.scrollTarget?.query ?? null}
                 onScrollTargetHandled={controller.handleScrollTargetHandled}
                 onSendMcpAppMessage={controller.handleSend}
-                className={
-                  isMcpAppTail(controller.messages) ? "pb-12" : "pb-24"
-                }
+                tailPaddingPx={tailPaddingPx}
               />
             )}
 
@@ -123,8 +160,9 @@ export function ChatView({
             </AnimatePresence>
           </div>
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-20 flex translate-y-1/2 justify-center px-4">
+          <div className="pointer-events-none absolute inset-x-0 bottom-12 flex justify-center px-4">
             <div
+              ref={composerWrapperRef}
               className="pointer-events-auto w-full max-w-3xl rounded-composer bg-surface-composer-glass ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
               style={{
                 backdropFilter: "var(--backdrop-composer-glass)",

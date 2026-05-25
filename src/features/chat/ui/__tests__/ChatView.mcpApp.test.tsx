@@ -164,9 +164,9 @@ describe("ChatView MCP app messaging", () => {
 
     expect(mocks.messageTimelineSpy).toHaveBeenCalled();
     const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      className?: string;
+      tailPaddingPx?: number;
     };
-    expect(timelineProps.className).toBe("pb-12");
+    expect(timelineProps.tailPaddingPx).toBe(48);
   });
 
   it("uses regular timeline padding when reasoning is the latest visible content", () => {
@@ -191,9 +191,9 @@ describe("ChatView MCP app messaging", () => {
 
     expect(mocks.messageTimelineSpy).toHaveBeenCalled();
     const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      className?: string;
+      tailPaddingPx?: number;
     };
-    expect(timelineProps.className).toBe("pb-24");
+    expect(timelineProps.tailPaddingPx).toBe(96);
   });
 
   it("uses regular timeline padding over the loading indicator", () => {
@@ -206,9 +206,9 @@ describe("ChatView MCP app messaging", () => {
 
     expect(mocks.messageTimelineSpy).toHaveBeenCalled();
     const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      className?: string;
+      tailPaddingPx?: number;
     };
-    expect(timelineProps.className).toBe("pb-24");
+    expect(timelineProps.tailPaddingPx).toBe(96);
   });
 
   it("renders the chat empty state instead of the timeline for a fresh chat", () => {
