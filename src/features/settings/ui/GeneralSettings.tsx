@@ -14,7 +14,7 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { ButtonGroup } from "@/shared/ui/button-group";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import { Check, MonitorSmartphone, Moon, Sun, Trash2 } from "lucide-react";
+import { Check, Moon, Sun, SunMoon, Trash2 } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
@@ -223,7 +223,7 @@ export function GeneralSettings() {
               [
                 {
                   value: "system",
-                  icon: MonitorSmartphone,
+                  icon: SunMoon,
                   label: t("appearance.theme.systemLabel"),
                   description: t("appearance.theme.systemDescription"),
                 },
@@ -231,15 +231,18 @@ export function GeneralSettings() {
                   value: "light",
                   icon: Sun,
                   label: t("appearance.theme.lightLabel"),
-                  description: t("appearance.theme.lightDescription"),
                 },
                 {
                   value: "dark",
                   icon: Moon,
                   label: t("appearance.theme.darkLabel"),
-                  description: t("appearance.theme.darkDescription"),
                 },
-              ] as const
+              ] satisfies ReadonlyArray<{
+                value: "system" | "light" | "dark";
+                icon: typeof SunMoon;
+                label: string;
+                description?: string;
+              }>
             ).map((option) => {
               const selected = themeMode === option.value;
               const ThemeIcon = option.icon;
@@ -263,9 +266,11 @@ export function GeneralSettings() {
                   <ThemeIcon className="h-4 w-4 shrink-0" />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{option.label}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {option.description}
-                    </div>
+                    {option.description ? (
+                      <div className="truncate text-xs text-muted-foreground">
+                        {option.description}
+                      </div>
+                    ) : null}
                   </div>
                   {selected ? (
                     <Check className="h-4 w-4 shrink-0 text-primary" />

@@ -31,14 +31,12 @@
       }
     },
     "theme": {
-      "darkDescription": "Usa siempre el tema oscuro predeterminado de Goose.",
-      "darkLabel": "Oscuro · Goose oscuro",
-      "description": "Usa el tema predeterminado claro, oscuro o según el sistema de Goose.",
+      "darkLabel": "Oscuro",
+      "description": "Elige cómo se ve Goose: claro, oscuro o según tu sistema.",
       "label": "Tema",
-      "lightDescription": "Usa siempre el tema claro predeterminado de Goose.",
-      "lightLabel": "Claro · Goose claro",
-      "systemDescription": "Usa el tema claro u oscuro predeterminado de Goose según la configuración de tu dispositivo.",
-      "systemLabel": "Sistema · Goose predeterminado"
+      "lightLabel": "Claro",
+      "systemDescription": "Coincide con tu dispositivo.",
+      "systemLabel": "Sistema"
     },
     "primary": {
       "custom": "Personalizado",
