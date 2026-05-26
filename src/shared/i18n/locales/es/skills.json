@@ -25,6 +25,8 @@
     "deleteSuccess": "Skill \"{{name}}\" eliminada",
     "deleteTitle": "¿Eliminar \"{{name}}\" de forma permanente?",
     "description": "Las skills son instrucciones reutilizables que ayudan a un agente a manejar tareas, flujos de trabajo o herramientas específicas.",
+    "createManually": "Crear manualmente",
+    "createWithChat": "Crear con chat",
     "detailEmptyDescription": "Selecciona una skill para inspeccionar su origen, ubicación e instrucciones.",
     "detailEmptyTitle": "Elige una skill",
     "exportError": "Error al exportar la skill",

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ComponentProps } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
@@ -148,11 +149,13 @@ function TopBarActionsHost() {
   return <div>{actions}</div>;
 }
 
-function renderSkillsViewWithTopBarActions() {
+function renderSkillsViewWithTopBarActions(
+  props?: ComponentProps<typeof SkillsView>,
+) {
   return render(
     <TopBarActionsProvider>
       <TopBarActionsHost />
-      <SkillsView />
+      <SkillsView {...props} />
     </TopBarActionsProvider>,
   );
 }
@@ -313,10 +316,56 @@ describe("SkillsView", () => {
     );
     await user.click(screen.getByRole("menuitem", { name: "alpha" }));
     await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
+    await user.click(screen.getByRole("menuitem", { name: "Create manually" }));
 
     expect(
       screen.getByText("Stored in the project folder"),
     ).toBeInTheDocument();
+  });
+
+  it("starts skill builder chat from the top bar create menu", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const onStartChatWithSkill = vi.fn();
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions({ onStartChatWithSkill });
+    await screen.findByText("code-review");
+
+    await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
+    await user.click(
+      screen.getByRole("menuitem", { name: "Create with chat" }),
+    );
+
+    expect(onStartChatWithSkill).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "builtin:skill-builder",
+        name: "skill-builder",
+      }),
+      null,
+    );
+  });
+
+  it("starts project-scoped skill builder chat from a project filter", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const onStartChatWithSkill = vi.fn();
+    const user = userEvent.setup();
+
+    renderSkillsViewWithTopBarActions({ onStartChatWithSkill });
+    await screen.findByText("code-review");
+
+    await user.click(
+      screen.getByRole("button", { name: "Filter skills by source" }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "alpha" }));
+    await user.click(screen.getAllByRole("button", { name: "New skill" })[0]);
+    await user.click(
+      screen.getByRole("menuitem", { name: "Create with chat" }),
+    );
+
+    expect(onStartChatWithSkill).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "skill-builder" }),
+      "project-alpha",
+    );
   });
 
   it("uses controlled navigation for skill detail routes", async () => {

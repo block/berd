@@ -1,6 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconPlus, IconUpload } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconMessageCircle,
+  IconPencil,
+  IconPlus,
+  IconUpload,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -40,6 +46,21 @@ interface SkillsViewProps {
 }
 
 type SkillScope = "all" | "global" | `project:${string}`;
+
+const SKILL_BUILDER_SKILL: SkillInfo = {
+  id: "builtin:skill-builder",
+  name: "skill-builder",
+  description:
+    "Create, edit, or inspect Goose skills stored as skill folders with SKILL.md files.",
+  instructions: "",
+  path: "builtin://skills/skill-builder",
+  fileLocation: "builtin://skills/skill-builder",
+  sourceKind: "builtin",
+  sourceLabel: "Built in",
+  projectLinks: [],
+  readonly: true,
+  color: null,
+};
 
 function skillMatchesQuery(skill: SkillInfo, query: string): boolean {
   const normalizedQuery = query.trim().toLowerCase();
@@ -274,6 +295,10 @@ export function SkillsView({
     setDialogOpen(true);
   }, []);
 
+  const handleNewSkillWithChat = useCallback(() => {
+    onStartChatWithSkill?.(SKILL_BUILDER_SKILL, selectedProjectId);
+  }, [onStartChatWithSkill, selectedProjectId]);
+
   const handleSkillSaved = useCallback(
     async (savedSkill?: SkillInfo) => {
       const refreshedSkills = await loadSkills();
@@ -357,21 +382,35 @@ export function SkillsView({
         >
           {t("common:actions.import")}
         </Button>
-        <Button
-          type="button"
-          variant="page-header"
-          size="xs"
-          onClick={handleNewSkill}
-          leftIcon={<IconPlus />}
-        >
-          {t("view.newSkill")}
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="page-header"
+              size="xs"
+              leftIcon={<IconPlus />}
+            >
+              {t("view.newSkill")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onSelect={handleNewSkillWithChat}>
+              <IconMessageCircle />
+              {t("view.createWithChat")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={handleNewSkill}>
+              <IconPencil />
+              {t("view.createManually")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </>,
     );
     return () => setTopBarActions(null);
   }, [
     activeSkill,
     handleNewSkill,
+    handleNewSkillWithChat,
     openFilePicker,
     projectsWithSkillDirs,
     selectedScopeLabel,

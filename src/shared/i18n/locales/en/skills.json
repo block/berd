@@ -29,6 +29,8 @@
     "deleteSuccess": "Deleted \"{{name}}\"",
     "deleteTitle": "Delete \"{{name}}\" permanently?",
     "description": "Use skills to add specific instructions or behaviors to any agent.",
+    "createManually": "Create manually",
+    "createWithChat": "Create with chat",
     "detailEmptyDescription": "Select a skill to inspect its source, location, and instructions.",
     "detailEmptyTitle": "Choose a skill",
     "exportError": "Failed to export skill",
