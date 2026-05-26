@@ -98,6 +98,7 @@ const allowedBridgePatterns = [
   /^surface-(?:composer(?:-glass)?|editor-panel)$/,
   /^message-user-bg$/,
   /^chip-(?:file|chat|project|agent|skill|automation)-(?:bg|fg)$/,
+  /^skill-pill-fg$/,
   /^placeholder-composer$/,
   /^(?:success|warning|info)(?:-foreground)?$/,
   /^popover-inverse(?:-(?:foreground|muted-foreground))?$/,

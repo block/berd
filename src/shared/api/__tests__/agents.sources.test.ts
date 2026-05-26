@@ -8,10 +8,10 @@ const mockGooseSourcesDelete = vi.fn();
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseSourcesCreate: mockGooseSourcesCreate,
-      GooseSourcesList: mockGooseSourcesList,
-      GooseSourcesUpdate: mockGooseSourcesUpdate,
-      GooseSourcesDelete: mockGooseSourcesDelete,
+      GooseUnstableSourcesCreate: mockGooseSourcesCreate,
+      GooseUnstableSourcesList: mockGooseSourcesList,
+      GooseUnstableSourcesUpdate: mockGooseSourcesUpdate,
+      GooseUnstableSourcesDelete: mockGooseSourcesDelete,
     },
   }),
 }));

@@ -176,9 +176,12 @@ export const SkillPinWidget = memo(function SkillPinWidget({
         // cursor-grab per Figma image 8 — deliberate divergence from sibling
         // pin widgets.
         className={cn(
-          "flex items-center justify-center text-foreground cursor-grab",
+          "flex items-center justify-center cursor-grab",
           skill
-            ? cn("rounded-pill px-4 py-2", skillPillToneClass(tone))
+            ? cn(
+                "rounded-pill px-4 py-2 text-skill-pill-fg",
+                skillPillToneClass(tone),
+              )
             : "h-full w-full rounded-card-chat bg-card text-muted-foreground",
         )}
       >

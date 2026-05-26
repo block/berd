@@ -717,7 +717,7 @@ function PickerRow({ option, isLast, onSelect }: PickerRowProps) {
       >
         <span
           className={cn(
-            "shrink-0 rounded-pill px-2 py-0.5 text-xs text-foreground",
+            "shrink-0 rounded-pill px-2 py-0.5 text-xs text-skill-pill-fg",
             skillPillToneClass(
               resolveSkillPillTone(option.leading.name, option.leading.color),
             ),

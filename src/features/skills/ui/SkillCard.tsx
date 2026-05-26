@@ -70,7 +70,7 @@ export function SkillCard({
     >
       <span
         className={cn(
-          "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-foreground",
+          "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-skill-pill-fg",
           skillPillToneClass(tone),
         )}
       >

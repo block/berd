@@ -570,7 +570,11 @@ export async function createPersonaSource(
   request: CreatePersonaSourceRequest,
 ): Promise<AgentSourceEntry> {
   const client = await getClient();
-  const response = await client.goose.GooseSourcesCreate(request);
+  const { global: _global, ...sourceRequest } = request;
+  const response = await client.goose.GooseUnstableSourcesCreate({
+    ...sourceRequest,
+    target: { scope: "global" },
+  });
 
   return requireAgentSource(response.source);
 }
@@ -584,7 +588,7 @@ export async function updatePersonaSource(
     ? { ...(existing.properties ?? {}), ...patch.properties }
     : existing.properties;
   const client = await getClient();
-  const response = await client.goose.GooseSourcesUpdate({
+  const response = await client.goose.GooseUnstableSourcesUpdate({
     type: AGENT_SOURCE_TYPE,
     path,
     name: patch.name ?? existing.name,
@@ -598,7 +602,7 @@ export async function updatePersonaSource(
 
 export async function deletePersonaSource(path: string): Promise<void> {
   const client = await getClient();
-  await client.goose.GooseSourcesDelete({
+  await client.goose.GooseUnstableSourcesDelete({
     type: AGENT_SOURCE_TYPE,
     path,
   });
@@ -611,7 +615,7 @@ export async function promotePersonaSource(
   const existing = await readExistingPersonaSource(path);
   const name = patch.name ?? existing.name;
   const client = await getClient();
-  const response = await client.goose.GooseSourcesUpdate({
+  const response = await client.goose.GooseUnstableSourcesUpdate({
     type: AGENT_SOURCE_TYPE,
     path,
     name,

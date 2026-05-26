@@ -243,6 +243,10 @@
   );
   --chip-automation-fg: var(--color-green-700);
 
+  /* Skill name pills sit on theme-invariant pastel pill colors, so their
+     foreground is independent from the app-level foreground token. */
+  --skill-pill-fg: var(--color-gray-900);
+
   /* Denser placeholder for the translucent composer (default placeholder
      reads too light over surface-composer). Used on the chat input. */
   --text-placeholder-composer: color-mix(
@@ -461,6 +465,8 @@
   );
   --chip-automation-fg: var(--color-green-100);
 
+  --skill-pill-fg: var(--color-gray-900);
+
   --text-placeholder-composer: color-mix(
     in oklab,
     var(--color-white) 35%,
@@ -577,6 +583,8 @@
   --color-chip-skill-fg: var(--chip-skill-fg);
   --color-chip-automation-bg: var(--chip-automation-bg);
   --color-chip-automation-fg: var(--chip-automation-fg);
+
+  --color-skill-pill-fg: var(--skill-pill-fg);
 
   --color-placeholder-composer: var(--text-placeholder-composer);
 
