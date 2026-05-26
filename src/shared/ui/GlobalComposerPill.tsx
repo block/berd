@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { open } from "@tauri-apps/plugin-dialog";
 import {
   IconArrowUp,
   IconCheck,
   IconChevronDown,
   IconMicrophone,
   IconPlus,
-  IconX,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
+import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
+import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
+import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
 import { useMentionHandlers } from "@/features/chat/hooks/useMentionHandlers";
+import { getImageFilesFromClipboardItems } from "@/features/chat/lib/clipboardAttachments";
 import { buildSkillSendPayload } from "@/features/chat/lib/skillSendPayload";
+import { ChatInputAttachments } from "@/features/chat/ui/ChatInputAttachments";
 import { ChatInputSelectionChips } from "@/features/chat/ui/ChatInputSelectionChips";
 import { MentionAutocomplete } from "@/features/chat/ui/MentionAutocomplete";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
@@ -29,12 +32,7 @@ import { useProviderInventory } from "@/features/providers/hooks/useProviderInve
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { getClient } from "@/shared/api/acpConnection";
-import {
-  inspectAttachmentPaths,
-  readImageAttachment,
-} from "@/shared/api/system";
 import { cn } from "@/shared/lib/cn";
-import { getPlatform } from "@/shared/lib/platform";
 import {
   formatProviderLabel,
   getProviderIcon,
@@ -45,11 +43,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/shared/ui/popover";
-import type {
-  ChatAttachmentDraft,
-  ChatFileAttachmentDraft,
-  ChatImageAttachmentDraft,
-} from "@/shared/types/messages";
+import type { ChatAttachmentDraft } from "@/shared/types/messages";
 
 export interface GlobalComposeOptions {
   providerId?: string;
@@ -80,26 +74,8 @@ interface ModelGroup {
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
-function normalizeDialogSelection(
-  selected: string | string[] | null,
-): string[] {
-  if (!selected) {
-    return [];
-  }
-
-  return Array.isArray(selected) ? selected : [selected];
-}
-
 function compareLabels(left: string, right: string) {
   return left.localeCompare(right, undefined, { sensitivity: "base" });
-}
-
-function getAttachmentPathKey(path?: string) {
-  if (!path) {
-    return null;
-  }
-
-  return getPlatform() === "linux" ? path : path.toLowerCase();
 }
 
 function getModelName(model: ModelOption) {
@@ -200,55 +176,6 @@ function getPreferredModel(
   return model ? modelOptionToSelection(model, fallbackProviderId) : null;
 }
 
-async function buildPathAttachments(
-  paths: string[],
-): Promise<ChatAttachmentDraft[]> {
-  if (paths.length === 0) {
-    return [];
-  }
-
-  const inspectedPaths = await inspectAttachmentPaths(paths);
-
-  return Promise.all(
-    inspectedPaths.flatMap((attachmentPath) => {
-      if (attachmentPath.kind !== "file") {
-        return [];
-      }
-
-      return [
-        (async () => {
-          if (attachmentPath.mimeType?.startsWith("image/")) {
-            try {
-              const image = await readImageAttachment(attachmentPath.path);
-              return {
-                id: crypto.randomUUID(),
-                kind: "image",
-                name: attachmentPath.name,
-                path: attachmentPath.path,
-                mimeType: image.mimeType,
-                base64: image.base64,
-                previewUrl: attachmentPath.path,
-              } satisfies ChatImageAttachmentDraft;
-            } catch {
-              // Fall through to a file draft when the image payload can't be read.
-            }
-          }
-
-          return {
-            id: crypto.randomUUID(),
-            kind: "file",
-            name: attachmentPath.name,
-            path: attachmentPath.path,
-            ...(attachmentPath.mimeType
-              ? { mimeType: attachmentPath.mimeType }
-              : {}),
-          } satisfies ChatFileAttachmentDraft;
-        })(),
-      ];
-    }),
-  );
-}
-
 export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const selectedProvider = useAgentStore((state) => state.selectedProvider);
@@ -261,7 +188,6 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   const [focused, setFocused] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
-  const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
   const [modelOverride, setModelOverride] = useState<ModelSelection | null>(
     null,
   );
@@ -274,8 +200,25 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     null,
   );
   const [selectedSkills, setSelectedSkills] = useState<ChatSkillDraft[]>([]);
+  const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const personas = useAgentStore(selectPersonas);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const {
+    attachments,
+    addBrowserFiles,
+    addPathAttachments,
+    removeAttachment,
+    clearAttachments,
+  } = useChatInputAttachments();
+  const attachmentWorkPending = attachmentWorkCount > 0;
+
+  const runAttachmentWork = useCallback((task: () => Promise<void>) => {
+    setAttachmentWorkCount((count) => count + 1);
+    void task().finally(() => {
+      setAttachmentWorkCount((count) => Math.max(0, count - 1));
+    });
+  }, []);
 
   const handleSkillMentionSelected = useCallback((skill: SkillMentionItem) => {
     setSelectedSkills((current) =>
@@ -394,17 +337,13 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     personas,
     projectWorkingDirs: selectedProject?.workingDirs,
     skillsEnabled: true,
-    fileMentionsEnabled: false,
+    fileMentionsEnabled: true,
     text,
     setText,
     textareaRef,
     onPersonaChange: setSelectedPersonaId,
     onSkillMentionSelect: handleSkillMentionSelected,
   });
-
-  const clearAttachments = useCallback(() => {
-    setAttachments([]);
-  }, []);
 
   const submitCompose = useCallback(
     (draftText: string) => {
@@ -471,9 +410,10 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     attachments,
     clearAttachments,
     selectedPersonaId: null,
-    onSend: (draftText) => submitCompose(draftText),
+    onSend: (draftText) =>
+      attachmentWorkPending ? false : submitCompose(draftText),
     resetTextarea: () => {},
-    isSendLocked: false,
+    isSendLocked: attachmentWorkPending,
   });
 
   useEffect(() => {
@@ -560,6 +500,10 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       : placeholder;
 
   const handleSend = useCallback(() => {
+    if (attachmentWorkPending) {
+      return;
+    }
+
     if (
       dictation.isRecording ||
       dictation.isTranscribing ||
@@ -569,46 +513,42 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     }
 
     submitCompose(text);
-  }, [dictation, submitCompose, text]);
+  }, [attachmentWorkPending, dictation, submitCompose, text]);
 
-  const handleAttachFiles = useCallback(async () => {
-    try {
-      const selected = await open({
-        title: t("attachments.chooseFilesDialogTitle"),
-        multiple: true,
-      });
-      const nextAttachments = await buildPathAttachments(
-        normalizeDialogSelection(selected),
-      );
-      if (nextAttachments.length === 0) {
+  const handlePaste = useCallback(
+    (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const files = getImageFilesFromClipboardItems(event.clipboardData.items);
+      if (files.length === 0) {
         return;
       }
 
-      setAttachments((previous) => {
-        const seenPaths = new Set(
-          previous
-            .map((attachment) => getAttachmentPathKey(attachment.path))
-            .filter((value): value is string => Boolean(value)),
-        );
-        const merged = [...previous];
+      event.preventDefault();
+      runAttachmentWork(() => addBrowserFiles(files));
+    },
+    [addBrowserFiles, runAttachmentWork],
+  );
 
-        for (const attachment of nextAttachments) {
-          const pathKey = getAttachmentPathKey(attachment.path);
-          if (pathKey && seenPaths.has(pathKey)) {
-            continue;
-          }
-          if (pathKey) {
-            seenPaths.add(pathKey);
-          }
-          merged.push(attachment);
-        }
-
-        return merged;
-      });
-    } catch {
-      // Dialog plugin may be unavailable in some environments.
-    }
-  }, [t]);
+  const {
+    isAttachmentDragOver,
+    handleDragEnter,
+    handleDragOver,
+    handleDragLeave,
+    handleDrop,
+  } = useAttachmentDropTarget({
+    disabled: false,
+    isStreaming: false,
+    targetRef: containerRef,
+    onDropFiles: (files) => {
+      runAttachmentWork(() => addBrowserFiles(files));
+    },
+    onDropPaths: (paths) => {
+      runAttachmentWork(() => addPathAttachments(paths));
+    },
+  });
+  const { handleAttachFiles } = useChatInputFilePicker({
+    disabled: false,
+    addPathAttachments,
+  });
 
   const modelButtonLabel =
     effectiveModelSelection?.modelName ??
@@ -619,20 +559,32 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
 
   return (
     <div
+      ref={containerRef}
       role="region"
       aria-label={t("globalPill.ariaLabel")}
+      onDragEnter={handleDragEnter}
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
       onFocus={() => setFocused(true)}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
           setFocused(false);
         }
       }}
-      className="fixed bottom-3 right-3 z-40 flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-surface-composer-glass px-4 py-3 ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
+      className="fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-surface-composer-glass px-4 py-3 ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
       style={{
         backdropFilter: "blur(24px) saturate(180%) brightness(1.05)",
         WebkitBackdropFilter: "blur(24px) saturate(180%) brightness(1.05)",
       }}
     >
+      {isAttachmentDragOver ? (
+        <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border/80 bg-card/60">
+          <span className="rounded-md bg-secondary px-3 py-1 text-sm text-secondary-foreground">
+            {t("attachments.dropToAttach")}
+          </span>
+        </div>
+      ) : null}
       {(selectedPersona || selectedSkills.length > 0) && (
         <div className="px-2">
           <ChatInputSelectionChips
@@ -644,27 +596,11 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
         </div>
       )}
       {attachments.length > 0 ? (
-        <div className="mb-2 flex flex-wrap gap-2 px-2">
-          {attachments.map((attachment) => (
-            <span
-              key={attachment.id}
-              className="inline-flex max-w-full items-center gap-1 rounded-full bg-muted px-2 py-1 text-[12px] text-foreground"
-            >
-              <span className="max-w-[220px] truncate">{attachment.name}</span>
-              <button
-                type="button"
-                onClick={() =>
-                  setAttachments((previous) =>
-                    previous.filter((item) => item.id !== attachment.id),
-                  )
-                }
-                className="rounded-full p-0.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                aria-label={t("attachments.remove")}
-              >
-                <IconX className="size-3" />
-              </button>
-            </span>
-          ))}
+        <div className="max-h-36 overflow-y-auto overscroll-contain px-2 pr-1">
+          <ChatInputAttachments
+            attachments={attachments}
+            onRemove={removeAttachment}
+          />
         </div>
       ) : null}
 
@@ -712,6 +648,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
                   handleSend();
                 }
               }}
+              onPaste={handlePaste}
               placeholder={effectivePlaceholder}
               className="focus-override h-10 flex-1 resize-none appearance-none overflow-hidden border-0 bg-transparent py-2.5 text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
             />
@@ -755,6 +692,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
             type="button"
             tabIndex={expanded ? -1 : 0}
             onClick={handleSend}
+            disabled={attachmentWorkPending}
             className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
             aria-label={t("toolbar.sendMessage")}
           >
@@ -775,7 +713,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
             type="button"
             tabIndex={expanded ? 0 : -1}
             onClick={() => {
-              void handleAttachFiles();
+              runAttachmentWork(handleAttachFiles);
             }}
             className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
             aria-label={t("attachments.chooseFilesDialogTitle")}
@@ -938,6 +876,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               type="button"
               tabIndex={expanded ? 0 : -1}
               onClick={handleSend}
+              disabled={attachmentWorkPending}
               className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
               aria-label={t("toolbar.sendMessage")}
             >

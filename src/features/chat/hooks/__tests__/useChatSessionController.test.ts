@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
+import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { applyLatestSessionConfig } from "../../lib/sessionConfigRequests";
+import type { ChatSendOptions } from "../../types";
 
 const mockAcpPrepareSession = vi.fn();
 const mockAcpSetModel = vi.fn();
@@ -796,9 +798,95 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("queues Home attachments and migrates them when a real session becomes active", async () => {
+    mockUseMessageQueue.mockImplementation((sessionId: string) => ({
+      queuedMessage:
+        useChatStore.getState().queuedMessageBySession[sessionId] ?? null,
+      enqueue: (
+        text: string,
+        personaId?: string,
+        attachments?: ChatAttachmentDraft[],
+        sendOptions?: ChatSendOptions,
+      ) =>
+        useChatStore.getState().enqueueMessage(sessionId, {
+          text,
+          ...(personaId ? { personaId } : {}),
+          ...(attachments ? { attachments } : {}),
+          ...(sendOptions ? { sendOptions } : {}),
+        }),
+      dismiss: () => useChatStore.getState().dismissQueuedMessage(sessionId),
+    }));
+    const imageDraft = {
+      id: "home-image",
+      kind: "image" as const,
+      name: "home.png",
+      mimeType: "image/png",
+      base64: "home-base64",
+      previewUrl: "blob:home",
+    };
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string | null }) =>
+        useChatSessionController({ sessionId, isHomeSession: true }),
+      {
+        initialProps: { sessionId: null as string | null },
+      },
+    );
+
+    act(() => {
+      result.current.handleSend("", undefined, [imageDraft]);
+    });
+
+    expect(
+      useChatStore.getState().queuedMessageBySession.__home_pending__,
+    ).toEqual({
+      text: "",
+      attachments: [imageDraft],
+    });
+
+    useChatSessionStore.setState((state) => ({
+      sessions: [
+        {
+          id: "session-home-attachments",
+          title: "Chat",
+          providerId: "openai",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        ...state.sessions,
+      ],
+    }));
+
+    rerender({ sessionId: "session-home-attachments" });
+
+    await waitFor(() => {
+      expect(
+        useChatStore.getState().queuedMessageBySession[
+          "session-home-attachments"
+        ],
+      ).toEqual({
+        text: "",
+        attachments: [imageDraft],
+      });
+    });
+    expect(
+      useChatStore.getState().queuedMessageBySession.__home_pending__,
+    ).toBeUndefined();
+  });
+
   it("moves pending Home queued messages when preparation is superseded", async () => {
     const firstPrepare = deferred();
     mockAcpPrepareSession.mockReturnValueOnce(firstPrepare.promise);
+    const queuedImageAttachment = {
+      id: "queued-image",
+      kind: "image" as const,
+      name: "queued.png",
+      path: "/tmp/queued.png",
+      mimeType: "image/png",
+      base64: "queued-base64",
+      previewUrl: "asset:///tmp/queued.png",
+    };
 
     const { result, rerender } = renderHook(
       ({ sessionId }: { sessionId: string | null }) =>
@@ -810,9 +898,10 @@ describe("useChatSessionController", () => {
 
     act(() => {
       result.current.handleModelChange("claude-sonnet-4");
-      useChatStore
-        .getState()
-        .enqueueMessage("__home_pending__", { text: "queued from Home" });
+      useChatStore.getState().enqueueMessage("__home_pending__", {
+        text: "queued from Home",
+        attachments: [queuedImageAttachment],
+      });
     });
 
     useChatSessionStore.setState((state) => ({
@@ -862,7 +951,10 @@ describe("useChatSessionController", () => {
         useChatStore.getState().queuedMessageBySession[
           "session-superseded-home"
         ],
-      ).toEqual({ text: "queued from Home" });
+      ).toEqual({
+        text: "queued from Home",
+        attachments: [queuedImageAttachment],
+      });
     });
     expect(
       useChatStore.getState().queuedMessageBySession.__home_pending__,

@@ -1,10 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { HomeScreen } from "./HomeScreen";
 
 const setSelectedProvider = vi.fn();
 const setSelectedProviderWithoutPersist = vi.fn();
+const mockOpenDialog = vi.fn();
+const mockInspectAttachmentPaths = vi.fn();
+const mockReadImageAttachment = vi.fn();
 const mockController = {
   handleSend: vi.fn(),
   projectMetadataPending: false,
@@ -57,6 +60,7 @@ const mockController = {
   selectedProvider: "goose",
   handleProviderChange: setSelectedProvider,
   currentModelId: null,
+  currentModelProviderId: null,
   currentModelName: null,
   availableModels: [],
   modelsLoading: false,
@@ -86,6 +90,21 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
 
 vi.mock("@/features/skills/api/skills", () => ({
   listSkills: vi.fn().mockResolvedValue([]),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: (...args: unknown[]) => mockOpenDialog(...args),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: (path: string) => `asset://${path}`,
+}));
+
+vi.mock("@/shared/api/system", () => ({
+  inspectAttachmentPaths: (paths: string[]) =>
+    mockInspectAttachmentPaths(paths),
+  readImageAttachment: (path: string) => mockReadImageAttachment(path),
+  listFilesForMentions: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/features/chat/hooks/useChatSessionController", () => ({
@@ -169,6 +188,16 @@ describe("HomeScreen", () => {
     localStorage.setItem("goose:defaultProvider", "goose");
     setSelectedProvider.mockReset();
     setSelectedProviderWithoutPersist.mockReset();
+    mockController.handleSend.mockReset();
+    mockOpenDialog.mockReset();
+    mockOpenDialog.mockResolvedValue(null);
+    mockInspectAttachmentPaths.mockReset();
+    mockInspectAttachmentPaths.mockResolvedValue([]);
+    mockReadImageAttachment.mockReset();
+    mockReadImageAttachment.mockResolvedValue({
+      base64: "home-image",
+      mimeType: "image/png",
+    });
   });
 
   it("renders the clock", () => {
@@ -220,5 +249,43 @@ describe("HomeScreen", () => {
     await user.click(screen.getByRole("button", { name: /claude code/i }));
 
     expect(setSelectedProvider).toHaveBeenLastCalledWith("claude-acp");
+  });
+
+  it("uses ChatInput attachments on the home composer", async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/test/home.png");
+    mockInspectAttachmentPaths.mockResolvedValue([
+      {
+        name: "home.png",
+        path: "/Users/test/home.png",
+        kind: "file",
+        mimeType: "image/png",
+      },
+    ]);
+
+    renderHome();
+
+    await user.click(screen.getByRole("button", { name: /^attach$/i }));
+    await user.click(screen.getByRole("menuitem", { name: /^file$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByAltText("Attachment 1")).toBeInTheDocument();
+    });
+
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(mockController.handleSend).toHaveBeenCalledWith(
+      "",
+      undefined,
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "image",
+          name: "home.png",
+          path: "/Users/test/home.png",
+          base64: "home-image",
+        }),
+      ]),
+    );
   });
 });

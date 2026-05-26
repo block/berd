@@ -35,6 +35,7 @@ import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
 import { resolveAgentToolsCapabilityTip } from "../lib/agentToolsCapabilities";
 import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
+import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
 import type { ChatInputProps, ChatSkillDraft } from "../types";
 import { ContextualTip } from "@/shared/ui/contextual-tip";
 
@@ -378,12 +379,7 @@ export function ChatInput({
       if (!scopedControls.attachments) {
         return;
       }
-      const files = Array.from(event.clipboardData.items)
-        .filter(
-          (item) => item.kind === "file" && item.type.startsWith("image/"),
-        )
-        .map((item) => item.getAsFile())
-        .filter((file): file is File => Boolean(file));
+      const files = getImageFilesFromClipboardItems(event.clipboardData.items);
 
       if (files.length === 0) {
         return;
