@@ -114,7 +114,7 @@
   },
   "input": {
     "ariaLabel": "Chat message input",
-    "placeholder": "Chatting with {{agent}}... @mention an agent or skill to add them"
+    "placeholder": "Chat with {{agent}} or @ to add an agent or skill"
   },
   "loading": {
     "compacting": "Compacting conversation...",

@@ -97,7 +97,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(
       screen.getByPlaceholderText(
-        "Chatting with Goose... @mention an agent or skill to add them",
+        "Chat with Goose or @ to add an agent or skill",
       ),
     ).toBeInTheDocument();
   });
