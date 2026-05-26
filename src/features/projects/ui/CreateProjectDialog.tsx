@@ -266,6 +266,7 @@ export function CreateProjectDialog({
                 prompt,
                 color,
                 workingDirs,
+                artifact: editingProject?.artifact ?? null,
               }}
               className="h-full w-full"
             />

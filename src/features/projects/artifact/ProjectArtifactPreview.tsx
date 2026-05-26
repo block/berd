@@ -49,15 +49,20 @@ function ProjectArtifactFallback({
     >
       {isTile ? null : (
         <div
-          className="absolute top-[9%] left-[18%] h-[72%] w-[64%] rounded-full blur-3xl transition-colors duration-700 ease-out"
+          className="absolute inset-[8%] transition-colors duration-700 ease-out"
           style={{
-            background: state.accentCssColor,
-            opacity: 0.42,
+            background: `radial-gradient(ellipse at center, ${state.accentCssColor} 0%, ${state.accentCssColor} 28%, transparent 66%)`,
+            opacity: 0.34,
           }}
         />
       )}
       <div
-        className="relative aspect-square w-[44%] rounded-[22%] bg-white/30 shadow-[0_26px_70px_rgba(15,23,42,0.16)] backdrop-blur-xl"
+        className={cn(
+          "relative aspect-square w-[44%] rounded-[22%]",
+          isTile
+            ? "bg-white/55 shadow-[0_22px_60px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+            : "bg-white/30 shadow-[0_26px_70px_rgba(15,23,42,0.16)] backdrop-blur-xl",
+        )}
         aria-hidden="true"
       />
     </div>

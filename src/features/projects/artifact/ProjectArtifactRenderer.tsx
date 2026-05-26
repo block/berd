@@ -21,23 +21,9 @@ import {
   useGLTF,
   useTexture,
 } from "@react-three/drei";
-import {
-  Bloom,
-  DepthOfField,
-  EffectComposer,
-  Noise,
-  ToneMapping,
-  Vignette,
-} from "@react-three/postprocessing";
-import {
-  BlendFunction,
-  LensDistortionEffect,
-  ToneMappingMode,
-} from "postprocessing";
 import * as THREE from "three";
 import { cn } from "@/shared/lib/cn";
 import { PROJECT_ARTIFACT_CUBE_MODEL_URL } from "./assets";
-import { CubeDistortionEffect } from "./effects/CubeDistortionEffect";
 import type {
   ProjectArtifactContentMode,
   ProjectArtifactRendererProps,
@@ -94,7 +80,6 @@ const SLEEP_THRESHOLD_MS = 300_000;
 const CUBE_POINTER_CLICK_PX = 10;
 const CUBE_POINTER_CLICK_MS = 500;
 const CLICK_VISUAL_DURATION = 1.1;
-const CLICK_RIPPLE_DURATION = 1.8;
 const VISUAL_READY_FRAME_DELAY = 2;
 const TILE_VISUAL_READY_FRAME_DELAY = 8;
 
@@ -485,6 +470,41 @@ function getSceneBackgroundColor(
   return `#${background.getHexString()}`;
 }
 
+const TRANSPARENT_BACKGROUND_VARIANTS: readonly NonNullable<
+  ProjectArtifactRendererProps["variant"]
+>[] = ["preview", "tile"];
+
+function usesTransparentBackground(
+  variant: NonNullable<ProjectArtifactRendererProps["variant"]>,
+) {
+  return TRANSPARENT_BACKGROUND_VARIANTS.includes(variant);
+}
+
+function SceneBackground({
+  color,
+  transparent,
+}: {
+  color: string;
+  transparent: boolean;
+}) {
+  const gl = useThree((state) => state.gl);
+  const scene = useThree((state) => state.scene);
+
+  useEffect(() => {
+    const clearColor = transparent ? "#000000" : color;
+    scene.background = transparent ? null : new THREE.Color(color);
+    gl.domElement.style.background = transparent ? "transparent" : color;
+    gl.setClearColor(clearColor, transparent ? 0 : 1);
+    gl.setClearAlpha(transparent ? 0 : 1);
+
+    return () => {
+      if (transparent) scene.background = null;
+    };
+  }, [color, gl, scene, transparent]);
+
+  return null;
+}
+
 function SceneEnvironment({ environmentUrl }: { environmentUrl: string }) {
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const scene = useThree((state) => state.scene);
@@ -504,6 +524,14 @@ function SceneEnvironment({ environmentUrl }: { environmentUrl: string }) {
       <Environment files={environmentUrl} background={false} />
     </>
   );
+}
+
+function TransparentSceneRender() {
+  useFrame(({ gl, scene, camera }) => {
+    gl.render(scene, camera);
+  }, 1);
+
+  return null;
 }
 
 function StackedPlanesContent({
@@ -1208,12 +1236,13 @@ function PrototypeCube({
       const material = materialRef.current;
       const energy = 1 + proximityEnergy.current * 0.5;
       const bounce = releaseBounceMat.current;
-      material.roughness = Math.max(
+      const animatedRoughness = Math.max(
         0,
         animatedMaterialValue(MATERIAL_ANIM.roughness, time, 0.16, 0.1) +
           idleFrost.current * 0.15 +
           EFFECTS.roughnessBoost,
       );
+      material.roughness = animatedRoughness;
       material.thickness =
         animatedMaterialValue(MATERIAL_ANIM.thickness, time, 0.44, 0.28, 2) +
         bounce * 0.5;
@@ -1494,119 +1523,6 @@ function CubeInteraction({
   );
 }
 
-function PrototypePostProcessing({
-  runtimeRef,
-  variant,
-}: {
-  runtimeRef: ArtifactRuntimeRef;
-  variant: NonNullable<ProjectArtifactRendererProps["variant"]>;
-}) {
-  const cubeDistortion = useMemo(() => new CubeDistortionEffect(), []);
-  const lensDistortion = useMemo(
-    () =>
-      new LensDistortionEffect({
-        distortion: new THREE.Vector2(
-          EFFECTS.lensDistortion,
-          EFFECTS.lensDistortion,
-        ),
-        focalLength: new THREE.Vector2(1, 1),
-        principalPoint: new THREE.Vector2(0, 0),
-        skew: 0,
-      }),
-    [],
-  );
-  const lastDistortionClickPulse = useRef(0);
-
-  useEffect(
-    () => () => {
-      cubeDistortion.dispose();
-      lensDistortion.dispose();
-    },
-    [cubeDistortion, lensDistortion],
-  );
-
-  useFrame((_frameState, _delta) => {
-    const runtime = runtimeRef.current;
-    const distortionUniforms = cubeDistortion.uniforms;
-    const dragAmount = runtime.isDragging
-      ? clamp01((runtime.dragVelocity - 0.00025) / 0.004)
-      : 0;
-    const targetAmp =
-      dragAmount > 0
-        ? 0.0028 * dragAmount + Math.min(runtime.dragVelocity * 0.0175, 0.00525)
-        : 0;
-    const currentAmp = distortionUniforms.get("uNoiseAmp")?.value ?? 0;
-    const noiseAmp = distortionUniforms.get("uNoiseAmp");
-    if (noiseAmp) noiseAmp.value = currentAmp + (targetAmp - currentAmp) * 0.06;
-
-    if (runtime.clickPulse > lastDistortionClickPulse.current) {
-      lastDistortionClickPulse.current = runtime.clickPulse;
-      const time = distortionUniforms.get("uTime")?.value ?? 0;
-      const rippleTime = distortionUniforms.get("uRippleTime");
-      if (rippleTime) rippleTime.value = time;
-      const rippleCenter = distortionUniforms.get("uRippleCenter")?.value as
-        | THREE.Vector2
-        | undefined;
-      if (rippleCenter) {
-        rippleCenter.x = runtime.cursorPosition.x * 0.5 + 0.5;
-        rippleCenter.y = runtime.cursorPosition.y * 0.5 + 0.5;
-      }
-    }
-    const rippleElapsed =
-      (distortionUniforms.get("uTime")?.value ?? 0) -
-      (distortionUniforms.get("uRippleTime")?.value ?? 0);
-    const rippleStrength = distortionUniforms.get("uRippleStrength");
-    if (rippleStrength) {
-      rippleStrength.value =
-        clickEnvelope(rippleElapsed, CLICK_RIPPLE_DURATION) * 0.22;
-    }
-    const targetTurbulence = dragAmount;
-    const turbulence = distortionUniforms.get("uTurbulence");
-    const currentTurbulence = turbulence?.value ?? 0;
-    if (turbulence) {
-      turbulence.value =
-        currentTurbulence + (targetTurbulence - currentTurbulence) * 0.06;
-    }
-    const meltAmount = distortionUniforms.get("uMeltAmount");
-    if (meltAmount) meltAmount.value = runtime.isIdle ? 0.18 : 0;
-  });
-
-  return (
-    <EffectComposer frameBufferType={THREE.HalfFloatType} multisampling={0}>
-      <primitive object={cubeDistortion} />
-      <Bloom
-        blendFunction={BlendFunction.SCREEN}
-        intensity={EFFECTS.bloomBoost * 3}
-        luminanceSmoothing={0.025}
-        luminanceThreshold={Math.max(0.5, 1 - EFFECTS.bloomBoost)}
-        mipmapBlur
-        radius={0.6}
-      />
-      <Vignette
-        darkness={
-          (variant === "tile"
-            ? EFFECTS.vignetteAmountTile
-            : EFFECTS.vignetteAmountPreview) * 1.5
-        }
-        offset={0.5}
-      />
-      <Noise blendFunction={BlendFunction.OVERLAY} opacity={0.015} />
-      <primitive object={lensDistortion} />
-      <ToneMapping mode={ToneMappingMode.NEUTRAL} />
-      <DepthOfField
-        bokehScale={
-          variant === "tile"
-            ? EFFECTS.dofBokehScaleTile
-            : EFFECTS.dofBokehScalePreview
-        }
-        focalLength={EFFECTS.dofFocalLength}
-        focusRange={8}
-        target={[0, 0.25, 0]}
-      />
-    </EffectComposer>
-  );
-}
-
 function ArtifactScene({
   environmentUrl,
   imageUrls,
@@ -1631,10 +1547,14 @@ function ArtifactScene({
     () => getSceneBackgroundColor(state.accentColor, variant),
     [state.accentColor, variant],
   );
+  const hasTransparentBackground = usesTransparentBackground(variant);
 
   return (
     <>
-      <color attach="background" args={[backgroundColor]} />
+      <SceneBackground
+        color={backgroundColor}
+        transparent={hasTransparentBackground}
+      />
       <SceneEnvironment environmentUrl={environmentUrl} />
       <PrototypeCube
         cameraAnglesRef={cameraAnglesRef}
@@ -1652,7 +1572,7 @@ function ArtifactScene({
           runtimeRef={runtimeRef}
         />
       ) : null}
-      <PrototypePostProcessing runtimeRef={runtimeRef} variant={variant} />
+      {hasTransparentBackground ? <TransparentSceneRender /> : null}
     </>
   );
 }
@@ -1670,10 +1590,14 @@ export function ProjectArtifactRenderer({
     makeRuntime(initialImageIndex),
   );
   const interactive = variant === "preview";
+  const hasTransparentBackground = usesTransparentBackground(variant);
   const canvasBackground = useMemo(
     () => getSceneBackgroundColor(state.accentColor, variant),
     [state.accentColor, variant],
   );
+  const canvasKey = `${variant}-${
+    hasTransparentBackground ? "transparent" : "opaque"
+  }`;
   const [isVisualReady, setIsVisualReady] = useState(false);
 
   useEffect(() => {
@@ -1750,8 +1674,10 @@ export function ProjectArtifactRenderer({
     >
       {variant === "preview" ? (
         <div
-          className="pointer-events-none absolute top-[8%] left-[18%] h-[74%] w-[64%] rounded-full opacity-35 blur-3xl transition-colors duration-700 ease-out"
-          style={{ backgroundColor: state.accentColor }}
+          className="pointer-events-none absolute inset-[8%] opacity-30 transition-colors duration-700 ease-out"
+          style={{
+            background: `radial-gradient(ellipse at center, ${state.accentColor} 0%, ${state.accentColor} 28%, transparent 66%)`,
+          }}
         />
       ) : null}
       <div
@@ -1767,21 +1693,35 @@ export function ProjectArtifactRenderer({
         )}
       >
         <Canvas
+          key={canvasKey}
           camera={{ position: [10.8, 12.6, 10.8], fov: 35, near: 1, far: 100 }}
           className={cn(
             "relative h-full w-full",
             variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
           )}
           dpr={[1, variant === "tile" ? 1.25 : 1.5]}
+          resize={{ offsetSize: true }}
           gl={{
-            alpha: false,
+            alpha: hasTransparentBackground,
             antialias: true,
+            premultipliedAlpha: true,
             powerPreference: "high-performance",
             stencil: false,
           }}
-          style={{ backgroundColor: canvasBackground }}
+          style={{
+            backgroundColor: hasTransparentBackground
+              ? "transparent"
+              : canvasBackground,
+          }}
           onCreated={({ gl, scene }) => {
-            gl.setClearColor(canvasBackground, 1);
+            gl.domElement.style.background = hasTransparentBackground
+              ? "transparent"
+              : canvasBackground;
+            gl.setClearAlpha(hasTransparentBackground ? 0 : 1);
+            gl.setClearColor(
+              hasTransparentBackground ? "#000000" : canvasBackground,
+              hasTransparentBackground ? 0 : 1,
+            );
             scene.environmentIntensity = EFFECTS.envIntensity;
           }}
         >
