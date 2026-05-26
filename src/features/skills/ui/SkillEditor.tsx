@@ -33,8 +33,7 @@ import { getRenamedSkillFileLocation } from "../lib/skillsPath";
 /** Sentinel value for the "Global" option in the save-location picker. */
 const GLOBAL_VALUE = "__global__";
 
-// Shared visual constants for create/edit sheets. Mirrored in PersonaEditor —
-// extract to a shared primitive once a third surface adopts the IA.
+// Shared visual constants for create/edit sheets.
 const SHEET_CONTENT_CLASS =
   "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-surface-editor-panel p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
 const CLOSE_BUTTON_CLASS =
@@ -45,8 +44,7 @@ const FIELD_INPUT_CLASS =
 const SELECT_TRIGGER_CLASS =
   "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
 // Instructions stay monospace because the field holds markdown the agent
-// reads literally — divergence from PersonaEditor's natural-language textarea
-// is functional, not stylistic. Height comes from the parent section's
+// reads literally. Height comes from the parent section's
 // flex-grow so the textarea owns whatever vertical space the form body has
 // after the other fields, falling back to a 215px floor on short windows.
 const INSTRUCTIONS_TEXTAREA_CLASS =

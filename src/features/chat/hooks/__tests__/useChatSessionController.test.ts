@@ -20,6 +20,8 @@ const mockUseProviderInventory = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseMessageQueue = vi.fn();
+const mockPreSeedDraftAgent = vi.fn();
+const mockDeletePersonaSource = vi.fn();
 const mockPickerState = {
   pickerAgents: [{ id: "goose", label: "Goose" }],
   availableModels: [] as Array<{
@@ -105,6 +107,14 @@ vi.mock("../useMessageQueue", () => ({
   useMessageQueue: (...args: unknown[]) => mockUseMessageQueue(...args),
 }));
 
+vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
+  preSeedDraftAgent: (...args: unknown[]) => mockPreSeedDraftAgent(...args),
+}));
+
+vi.mock("@/shared/api/agents", () => ({
+  deletePersonaSource: (...args: unknown[]) => mockDeletePersonaSource(...args),
+}));
+
 vi.mock("@/features/agents/hooks/useProviderSelection", () => ({
   useProviderSelection: () => ({
     providers: [
@@ -181,6 +191,7 @@ describe("useChatSessionController", () => {
       enqueue: vi.fn(),
       dismiss: vi.fn(),
     }));
+    mockDeletePersonaSource.mockResolvedValue(undefined);
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
       {
@@ -209,6 +220,10 @@ describe("useChatSessionController", () => {
     });
     mockGoosePreferencesRead.mockResolvedValue({ values: [] });
     mockGoosePreferencesSave.mockResolvedValue(undefined);
+    mockPreSeedDraftAgent.mockResolvedValue({
+      path: "/Users/x/.agents/agents/draft-from-chat.md",
+      slug: "draft-from-chat",
+    });
     mockUseProviderInventory.mockReturnValue({
       getEntry: () => undefined,
     });
@@ -227,9 +242,6 @@ describe("useChatSessionController", () => {
       selectedProvider: "openai",
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
     });
 
     useProjectStore.setState({
@@ -395,6 +407,289 @@ describe("useChatSessionController", () => {
     const [queueSessionId, queueChatState] = latestMessageQueueArgs();
     expect(queueSessionId).toBe("session-1");
     expect(queueChatState).toBe("idle");
+  });
+
+  it("handleCreatePersona calls the AppShell-provided callback", () => {
+    const onCreatePersonaRequested = vi.fn();
+    const { result } = renderHook(() =>
+      useChatSessionController({
+        sessionId: "session-1",
+        onCreatePersonaRequested,
+      }),
+    );
+
+    act(() => {
+      result.current.handleCreatePersona();
+    });
+
+    expect(onCreatePersonaRequested).toHaveBeenCalled();
+  });
+
+  it("does not fall back to the persona editor without an AppShell callback", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleCreatePersona();
+    });
+
+    expect(warn).toHaveBeenCalledWith(
+      "Create-persona requested without an AppShell handler",
+    );
+    warn.mockRestore();
+  });
+
+  it("handleSend in a builder session merges the builder assistant prompt", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+          intent: "build-agent",
+          targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
+          targetAgentSlug: "draft-1",
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend("hello", undefined, undefined, {
+        assistantPrompt: "from another skill",
+      });
+    });
+
+    await waitFor(() => {
+      expect(mockUseChatSendMessage).toHaveBeenCalled();
+    });
+    const sendOptions = mockUseChatSendMessage.mock.calls.at(-1)?.[4] as
+      | { assistantPrompt?: string }
+      | undefined;
+    expect(sendOptions?.assistantPrompt).toContain("agent-builder");
+    expect(sendOptions?.assistantPrompt).toContain("draft-1.md");
+    expect(sendOptions?.assistantPrompt).toMatch(/\n\nfrom another skill$/);
+  });
+
+  it("keeps the agent-builder skill visible in builder sessions", () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+          intent: "build-agent",
+          targetAgentPath: "/Users/x/.agents/agents/draft-1.md",
+          targetAgentSlug: "draft-1",
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.selectedSkills).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "agent-builder" }),
+      ]),
+    );
+
+    act(() => {
+      result.current.handleSkillsChange([]);
+    });
+
+    expect(useChatStore.getState().skillDraftsBySession["session-1"]).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "agent-builder" }),
+      ]),
+    );
+  });
+
+  it("turns a normal chat into a builder session when agent-builder is invoked", async () => {
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.handleSend(
+        "make an agent",
+        undefined,
+        undefined,
+        {
+          chips: [{ label: "agent-builder", type: "skill" }],
+          assistantPrompt: "Use these skills for this request: agent-builder.",
+        },
+      );
+    });
+
+    expect(accepted).toBe(true);
+    expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      intent: "build-agent",
+      targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+      targetAgentSlug: "draft-from-chat",
+    });
+    const sendOptions = mockUseChatSendMessage.mock.calls.at(-1)?.[4] as
+      | { assistantPrompt?: string }
+      | undefined;
+    expect(sendOptions?.assistantPrompt).toContain("agent-builder");
+    expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
+  });
+
+  it("activates builder mode for a deferred persona send with the agent-builder chip", async () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Planner",
+          systemPrompt: "Plan clearly.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      const sendResult = result.current.handleSend(
+        "make an agent",
+        "persona-1",
+        undefined,
+        {
+          chips: [{ label: "agent-builder", type: "skill" }],
+          assistantPrompt: "Use these skills for this request: agent-builder.",
+        },
+      );
+      accepted = sendResult instanceof Promise ? await sendResult : sendResult;
+    });
+
+    expect(accepted).toBe(true);
+    expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+      intent: "build-agent",
+      targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+    });
+    const sendOptions = mockUseChatSendMessage.mock.calls.at(-1)?.[4] as
+      | { assistantPrompt?: string }
+      | undefined;
+    expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
+  });
+
+  it("opens builder mode as soon as the agent-builder skill is selected", async () => {
+    useChatStore.getState().setSkillDrafts("session-1", [
+      {
+        id: "global:/skills/agent-builder",
+        name: "agent-builder",
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      expect(mockPreSeedDraftAgent).toHaveBeenCalledWith("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        intent: "build-agent",
+        targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+        targetAgentSlug: "draft-from-chat",
+      });
+    });
+  });
+
+  it("does not pre-seed repeatedly while typing with agent-builder selected", async () => {
+    const pendingDraft = deferred<{ path: string; slug: string }>();
+    mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);
+    useChatStore.getState().setSkillDrafts("session-1", [
+      {
+        id: "global:/skills/agent-builder",
+        name: "agent-builder",
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    act(() => {
+      useChatStore.getState().setDraft("session-1", "a");
+      useChatStore.getState().setDraft("session-1", "ab");
+    });
+
+    expect(mockPreSeedDraftAgent).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingDraft.resolve({
+        path: "/Users/x/.agents/agents/draft-from-chat.md",
+        slug: "draft-from-chat",
+      });
+      await pendingDraft.promise;
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        intent: "build-agent",
+        targetAgentPath: "/Users/x/.agents/agents/draft-from-chat.md",
+      });
+    });
+  });
+
+  it("cancels a pending builder activation when the skill draft is cleared", async () => {
+    const pendingDraft = deferred<{ path: string; slug: string }>();
+    mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);
+    useChatStore.getState().setSkillDrafts("session-1", [
+      {
+        id: "global:/skills/agent-builder",
+        name: "agent-builder",
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    act(() => {
+      useChatStore.getState().clearSkillDrafts("session-1");
+    });
+
+    await act(async () => {
+      pendingDraft.resolve({
+        path: "/Users/x/.agents/agents/draft-from-chat.md",
+        slug: "draft-from-chat",
+      });
+      await pendingDraft.promise;
+    });
+
+    await waitFor(() => {
+      expect(mockDeletePersonaSource).toHaveBeenCalledWith(
+        "/Users/x/.agents/agents/draft-from-chat.md",
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).not.toMatchObject({
+      intent: "build-agent",
+    });
   });
 
   it("prepares the selected model provider before setting a goose model", async () => {

@@ -21,6 +21,13 @@ interface AvatarLibraryPickerProps {
   selectedAvatarRef: string | null;
   onSelectAvatar: (avatarId: string) => void;
   onPreviewError: () => void;
+  /**
+   * When provided, the parent controls collection navigation and the picker's
+   * internal back-to-collections row is suppressed (the parent is expected to
+   * render its own back affordance, e.g. in a surrounding header).
+   */
+  selectedCollectionId?: string | null;
+  onSelectCollection?: (collectionId: string | null) => void;
 }
 
 function getCachedAvatarMedia(
@@ -39,11 +46,27 @@ export function AvatarLibraryPicker({
   selectedAvatarRef,
   onSelectAvatar,
   onPreviewError,
+  selectedCollectionId: controlledCollectionId,
+  onSelectCollection,
 }: AvatarLibraryPickerProps) {
   const { t } = useTranslation(["agents", "common"]);
-  const [selectedCollectionId, setSelectedCollectionId] = useState<
+  const isControlled = controlledCollectionId !== undefined;
+  const [uncontrolledCollectionId, setUncontrolledCollectionId] = useState<
     string | null
   >(null);
+  const selectedCollectionId = isControlled
+    ? controlledCollectionId
+    : uncontrolledCollectionId;
+  const setSelectedCollectionId = useCallback(
+    (next: string | null) => {
+      if (isControlled) {
+        onSelectCollection?.(next);
+      } else {
+        setUncontrolledCollectionId(next);
+      }
+    },
+    [isControlled, onSelectCollection],
+  );
 
   const avatarCollections = library.catalog?.collections ?? [];
   const selectedCollection = avatarCollections.find(
@@ -212,7 +235,14 @@ export function AvatarLibraryPicker({
         </button>
       );
     },
-    [cachedAvatarMediaById, catalogVersion, library, onPreviewError, t],
+    [
+      cachedAvatarMediaById,
+      catalogVersion,
+      library,
+      onPreviewError,
+      setSelectedCollectionId,
+      t,
+    ],
   );
 
   const renderCollectionSkeleton = (index: number) => (
@@ -252,20 +282,22 @@ export function AvatarLibraryPicker({
       ) : null}
       {selectedCollection ? (
         <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("editor.avatarBackToCollections")}
-              onClick={() => setSelectedCollectionId(null)}
-            >
-              <ArrowLeft className="size-3.5" />
-            </Button>
-            <p className="text-xs text-foreground">
-              {selectedCollection.label}
-            </p>
-          </div>
+          {isControlled ? null : (
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-xs"
+                aria-label={t("editor.avatarBackToCollections")}
+                onClick={() => setSelectedCollectionId(null)}
+              >
+                <ArrowLeft className="size-3.5" />
+              </Button>
+              <p className="text-xs text-foreground">
+                {selectedCollection.label}
+              </p>
+            </div>
+          )}
           {library.failedCollectionIds.has(selectedCollection.id) ? (
             <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
               <span>{t("avatar.loadFailed")}</span>

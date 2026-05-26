@@ -52,8 +52,8 @@ vi.mock("../ChatLoadingSkeleton", () => ({
   ChatLoadingSkeleton: () => <div data-testid="chat-loading-skeleton" />,
 }));
 
-vi.mock("../ChatContextPanel", () => ({
-  ChatContextPanel: () => null,
+vi.mock("../ChatRightRail", () => ({
+  ChatRightRail: () => null,
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({

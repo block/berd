@@ -5,15 +5,16 @@ import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
-import { useChatSessionStore } from "../stores/chatSessionStore";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
-import { ChatContextPanel } from "./ChatContextPanel";
+import { ChatRightRail } from "./ChatRightRail";
 import { perfLog } from "@/shared/lib/perfLog";
 import { useChatSessionController } from "../hooks/useChatSessionController";
+import type { AgentSourceEntry } from "@/shared/api/agents";
 
 interface ChatViewProps {
   sessionId: string;
   onCreatePersona?: () => void;
+  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onCreateProject?: (options?: {
     onCreated?: (projectId: string) => void;
   }) => void;
@@ -22,11 +23,11 @@ interface ChatViewProps {
 export function ChatView({
   sessionId,
   onCreatePersona,
+  onAgentBuilderSaved,
   onCreateProject,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
-  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const controller = useChatSessionController({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
@@ -76,6 +77,14 @@ export function ChatView({
         <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput
             surface="bare"
+            controls={
+              controller.session?.intent === "build-agent"
+                ? {
+                    agentModelPicker: false,
+                    projectPicker: false,
+                  }
+                : undefined
+            }
             composerActions={{
               onSend: controller.handleSend,
               disabled:
@@ -172,11 +181,11 @@ export function ChatView({
           </div>
         </div>
 
-        <ChatContextPanel
-          activeSessionId={sessionId}
-          isOpen={isContextPanelOpen}
+        <ChatRightRail
+          session={controller.session}
           project={controller.project}
           sessionWorkingDir={controller.session?.workingDir}
+          onDraftPromoted={onAgentBuilderSaved}
         />
       </div>
     </ArtifactPolicyProvider>

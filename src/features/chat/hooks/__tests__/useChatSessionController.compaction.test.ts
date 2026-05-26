@@ -120,8 +120,6 @@ describe("useChatSessionController compaction behavior", () => {
       selectedProvider: "openai",
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
     });
 
     useProjectStore.setState({

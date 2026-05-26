@@ -41,9 +41,6 @@ describe("useChat attachments", () => {
       agentsLoading: false,
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
     });
     mockAcpCancelSession.mockResolvedValue(true);
     mockAcpPrepareSession.mockResolvedValue(undefined);

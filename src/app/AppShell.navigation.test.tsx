@@ -9,6 +9,10 @@ import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
+const mockListPersonaSources = vi.hoisted(() => vi.fn());
+const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
+const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 
 vi.mock("./hooks/useAppStartup", () => ({
   useAppStartup: () => ({ ready: true }),
@@ -65,6 +69,14 @@ vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/shared/api/agents", () => ({
+  createPersonaSource: (...args: unknown[]) => mockCreatePersonaSource(...args),
+  listPersonaSources: (...args: unknown[]) => mockListPersonaSources(...args),
+  readAgentSourceFile: (...args: unknown[]) => mockReadAgentSourceFile(...args),
+  deletePersonaSource: (...args: unknown[]) => mockDeletePersonaSource(...args),
+  promotePersonaSource: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/shared/api/pathResolver", () => ({
   resolvePath: async ({ parts }: { parts: string[] }) => ({
     path: parts.join("/") || "/tmp",
@@ -88,6 +100,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onSkillsBreadcrumbLabelChange,
     onAgentsBreadcrumbLabelChange,
     onAutomationsBreadcrumbLabelChange,
+    onCreatePersona,
     onExitSearch,
   }) => (
     <section>
@@ -125,6 +138,11 @@ vi.mock("./ui/AppShellContent", () => ({
       >
         Open automation history
       </button>
+      {activeView === "agents" ? (
+        <button type="button" onClick={onCreatePersona}>
+          Create agent
+        </button>
+      ) : null}
       {activeView === "search" ? (
         <button type="button" onClick={onExitSearch}>
           Exit search
@@ -140,6 +158,23 @@ describe("AppShell global navigation", () => {
     window.localStorage.clear();
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockCreatePersonaSource.mockReset();
+    mockCreatePersonaSource.mockResolvedValue({
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Untitled agent created-session",
+      description: "Draft",
+      content: "Draft in progress.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    });
+    mockListPersonaSources.mockReset();
+    mockListPersonaSources.mockResolvedValue([]);
+    mockReadAgentSourceFile.mockReset();
+    mockReadAgentSourceFile.mockRejectedValue(new Error("not found"));
+    mockDeletePersonaSource.mockReset();
+    mockDeletePersonaSource.mockResolvedValue(undefined);
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -260,6 +295,122 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("agent-route")).toHaveTextContent("persona-1");
     });
+  });
+
+  it("starts a new agent builder session without prompting against itself", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(
+      screen.queryByText("Save this agent draft?"),
+    ).not.toBeInTheDocument();
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+      targetAgentPath:
+        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+    });
+  });
+
+  it("prompts when navigating away from a dirty new agent draft", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const dirtyDraft = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Save this agent draft?")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
+  it("discarding a dirty agent draft continues the pending navigation", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const dirtyDraft = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(mockDeletePersonaSource).toHaveBeenCalledWith(dirtyDraft.path);
+  });
+
+  it("keeping a dirty agent draft continues the pending navigation without deleting it", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const dirtyDraft = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(await screen.findByRole("button", { name: "Save draft" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(mockDeletePersonaSource).not.toHaveBeenCalled();
   });
 
   it("keeps Settings section navigation in the global stack", async () => {

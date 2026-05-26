@@ -48,9 +48,6 @@ describe("useChat skill chips", () => {
       agentsLoading: false,
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
     });
   });
 

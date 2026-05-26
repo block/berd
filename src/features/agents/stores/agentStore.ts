@@ -53,11 +53,6 @@ interface AgentStoreState {
 
   // General loading (for backwards compat)
   isLoading: boolean;
-
-  // UI state
-  personaEditorOpen: boolean;
-  editingPersona: Persona | null;
-  personaEditorMode: "create" | "edit" | "details";
 }
 
 interface AgentStoreActions {
@@ -84,13 +79,6 @@ interface AgentStoreActions {
   setActiveAgent: (id: string | null) => void;
   getActiveAgent: () => Agent | null;
 
-  // Persona editor
-  openPersonaEditor: (
-    persona?: Persona,
-    mode?: "create" | "edit" | "details",
-  ) => void;
-  closePersonaEditor: () => void;
-
   // Loading
   setLoading: (loading: boolean) => void;
 
@@ -115,9 +103,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
   selectedProvider: getStoredProvider(),
   activeAgentId: null,
   isLoading: false,
-  personaEditorOpen: false,
-  editingPersona: null,
-  personaEditorMode: "create",
 
   // Persona CRUD
   setPersonas: (personas) => set({ personas }),
@@ -191,21 +176,6 @@ export const useAgentStore = create<AgentStore>((set, get) => ({
     if (!activeAgentId) return null;
     return agents.find((a) => a.id === activeAgentId) ?? null;
   },
-
-  // Persona editor
-  openPersonaEditor: (persona, mode) =>
-    set({
-      personaEditorOpen: true,
-      editingPersona: persona ?? null,
-      personaEditorMode: mode ?? (persona ? "edit" : "create"),
-    }),
-
-  closePersonaEditor: () =>
-    set({
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
-    }),
 
   // Loading
   setLoading: (isLoading) => set({ isLoading }),

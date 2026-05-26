@@ -26,11 +26,27 @@ type AgentSourceProperties = {
   provider?: string | null;
   model?: string | null;
   avatar?: string | null;
+  draft?: boolean;
+  builderSessionId?: string;
 };
 
-type AgentSourceEntry = SourceEntry & {
+export type AgentSourceEntry = SourceEntry & {
   type: typeof AGENT_SOURCE_TYPE;
+  properties?: AgentSourceProperties;
 };
+
+export type CreatePersonaSourceRequest = {
+  type: typeof AGENT_SOURCE_TYPE;
+  name: string;
+  description: string;
+  content: string;
+  global: boolean;
+  properties?: AgentSourceProperties;
+};
+
+export type PersonaSourcePatch = Partial<
+  Pick<AgentSourceEntry, "name" | "description" | "content" | "properties">
+>;
 
 function isAgentSource(source: SourceEntry): source is AgentSourceEntry {
   return source.type === AGENT_SOURCE_TYPE;
@@ -436,6 +452,63 @@ function personaMarkdownToCreateRequest(fileContents: string) {
   };
 }
 
+function agentSourceFromMarkdownFile(
+  fileContents: string,
+  sourcePath: string,
+  fallback?: AgentSourceEntry,
+): AgentSourceEntry {
+  const { frontmatter, body } = splitPersonaMarkdown(fileContents);
+  const parsed = parsePersonaFrontmatter(frontmatter);
+  const displayName =
+    requiredFrontmatterString(parsed, "display_name") ??
+    requiredFrontmatterString(parsed, "name") ??
+    fallback?.name;
+
+  if (!displayName) {
+    throw new Error("Persona display_name cannot be empty");
+  }
+
+  const properties: AgentSourceProperties = { ...(fallback?.properties ?? {}) };
+  const model = propertyToString(parsed.model);
+  if (model) {
+    const split = splitPersonaModel(model);
+    applyOptionalProperty(properties, "provider", split.provider);
+    applyOptionalProperty(properties, "model", split.model);
+  }
+  applyOptionalProperty(
+    properties,
+    "avatar",
+    legacyAvatarToProperty(parsed.avatar),
+  );
+
+  for (const [key, value] of Object.entries(parsed)) {
+    if (
+      key === "name" ||
+      key === "display_name" ||
+      key === "description" ||
+      key === "model" ||
+      key === "avatar"
+    ) {
+      continue;
+    }
+    properties[key] = value;
+  }
+
+  return {
+    type: AGENT_SOURCE_TYPE,
+    path: sourcePath,
+    name: displayName,
+    description:
+      requiredFrontmatterString(parsed, "description") ??
+      fallback?.description ??
+      AGENT_DESCRIPTION,
+    content: body,
+    global: fallback?.global ?? true,
+    writable: fallback?.writable ?? true,
+    properties,
+  };
+}
+
 function toPersona(source: AgentSourceEntry): Persona {
   const writable = source.writable === true;
   return {
@@ -460,8 +533,102 @@ async function listAgentSources(): Promise<AgentSourceEntry[]> {
   return response.sources.filter(isAgentSource);
 }
 
+function requireAgentSource(source: SourceEntry): AgentSourceEntry {
+  if (!isAgentSource(source)) {
+    throw new Error(`Unexpected source type returned: ${source.type}`);
+  }
+
+  return source;
+}
+
+async function findPersonaSource(path: string): Promise<AgentSourceEntry> {
+  const source = (await listPersonaSources()).find(
+    (source) => source.path === path,
+  );
+  if (!source) {
+    throw new Error(`Persona source not found: ${path}`);
+  }
+
+  return source;
+}
+
+async function readExistingPersonaSource(
+  path: string,
+): Promise<AgentSourceEntry> {
+  try {
+    return await findPersonaSource(path);
+  } catch {
+    return readAgentSourceFile(path);
+  }
+}
+
+export async function listPersonaSources(): Promise<AgentSourceEntry[]> {
+  return listAgentSources();
+}
+
+export async function createPersonaSource(
+  request: CreatePersonaSourceRequest,
+): Promise<AgentSourceEntry> {
+  const client = await getClient();
+  const response = await client.goose.GooseSourcesCreate(request);
+
+  return requireAgentSource(response.source);
+}
+
+export async function updatePersonaSource(
+  path: string,
+  patch: PersonaSourcePatch,
+): Promise<AgentSourceEntry> {
+  const existing = await readExistingPersonaSource(path);
+  const properties = patch.properties
+    ? { ...(existing.properties ?? {}), ...patch.properties }
+    : existing.properties;
+  const client = await getClient();
+  const response = await client.goose.GooseSourcesUpdate({
+    type: AGENT_SOURCE_TYPE,
+    path,
+    name: patch.name ?? existing.name,
+    description: patch.description ?? existing.description,
+    content: patch.content ?? existing.content,
+    properties,
+  });
+
+  return requireAgentSource(response.source);
+}
+
+export async function deletePersonaSource(path: string): Promise<void> {
+  const client = await getClient();
+  await client.goose.GooseSourcesDelete({
+    type: AGENT_SOURCE_TYPE,
+    path,
+  });
+}
+
+export async function promotePersonaSource(
+  path: string,
+  patch: PersonaSourcePatch,
+): Promise<AgentSourceEntry> {
+  const existing = await readExistingPersonaSource(path);
+  const name = patch.name ?? existing.name;
+  const client = await getClient();
+  const response = await client.goose.GooseSourcesUpdate({
+    type: AGENT_SOURCE_TYPE,
+    path,
+    name,
+    description: patch.description ?? existing.description,
+    content: patch.content ?? existing.content,
+    properties: patch.properties ?? existing.properties,
+  });
+
+  const promoted = requireAgentSource(response.source);
+
+  return promoted;
+}
+
 export async function listPersonas(): Promise<Persona[]> {
-  return (await listAgentSources()).map(toPersona);
+  return (await listAgentSources())
+    .filter((source) => source.properties?.draft !== true)
+    .map(toPersona);
 }
 
 export async function createPersona(
@@ -590,4 +757,14 @@ export async function readImportPersonaFile(
   return invoke<ImportFileReadResult>("read_import_persona_file", {
     sourcePath,
   });
+}
+
+export async function readAgentSourceFile(
+  sourcePath: string,
+  fallback?: AgentSourceEntry,
+): Promise<AgentSourceEntry> {
+  const result = await invoke<ImportFileReadResult>("read_agent_source_file", {
+    sourcePath,
+  });
+  return agentSourceFromMarkdownFile(result.fileContents, sourcePath, fallback);
 }

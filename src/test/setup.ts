@@ -97,6 +97,8 @@ function ensureLocalStorage() {
   });
 }
 
+ensureLocalStorage();
+
 beforeEach(async () => {
   ensureLocalStorage();
   localStorage.removeItem("goose:locale");

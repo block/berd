@@ -594,6 +594,7 @@ export function ChatInput({
                     "scrollbar-none",
                   )}
                   aria-label={t("input.ariaLabel")}
+                  data-testid="chat-composer"
                 />
               </PopoverAnchor>
 

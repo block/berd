@@ -49,7 +49,8 @@ import {
   setDesignSystemUrl,
   setSettingsSectionUrl,
 } from "./lib/settingsSectionUrl";
-import { useCreatePersonaNavigation } from "./hooks/useCreatePersonaNavigation";
+import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuilderCoordinator";
+import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderLeaveDraftDialog";
 import { AppShellLayout } from "./ui/AppShellLayout";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
@@ -189,7 +190,7 @@ function getTopBarChromeInsets(
 }
 
 export function AppShell({ children }: { children?: React.ReactNode }) {
-  const { t } = useTranslation(["chat", "common", "settings"]);
+  const { t } = useTranslation(["chat", "common", "agents", "settings"]);
   const {
     expandSidebar,
     handleCornerResizeDoubleClick,
@@ -263,6 +264,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     canGoBack: false,
     canGoForward: false,
   });
+  const closeAgentBuilderSessionRef = useRef<
+    (sessionId: string) => void | Promise<void>
+  >(() => {});
+  const navigateAgentBuilderChatRef = useRef<
+    (sessionId: string) => void | Promise<void>
+  >(() => {});
+  const navigateAgentBuilderAgentsRef = useRef<
+    (
+      personaId: string | null,
+      options?: AppNavigationUpdateOptions,
+    ) => void | Promise<void>
+  >(() => {});
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const setChatActiveSession = useChatStore((s) => s.setActiveSession);
@@ -747,6 +760,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     ],
   );
 
+  const agentBuilder = useAgentBuilderCoordinator({
+    startupReady: startup.ready,
+    createNewTab,
+    closeSession: (sessionId) => closeAgentBuilderSessionRef.current(sessionId),
+    navigateChat: (sessionId) => navigateAgentBuilderChatRef.current(sessionId),
+    navigateAgents: (personaId, options) =>
+      navigateAgentBuilderAgentsRef.current(personaId, options),
+  });
+
   const createNewProjectDraft = useCallback(
     async (title = DEFAULT_CHAT_TITLE, project: ProjectInfo) => {
       const tStart = performance.now();
@@ -881,100 +903,123 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
-      void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+      agentBuilder.guardNavigation(() => {
+        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+      });
     },
-    [createNewProjectDraft],
+    [createNewProjectDraft, agentBuilder.guardNavigation],
   );
 
   const handleStartProjectChat = useCallback(
     (projectId: string) => {
       const project = projects.find((candidate) => candidate.id === projectId);
       if (project) {
-        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+        agentBuilder.guardNavigation(() => {
+          void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+        });
       }
     },
-    [createNewProjectDraft, projects],
+    [createNewProjectDraft, projects, agentBuilder.guardNavigation],
   );
 
   const handleStartChatWithSkill = useCallback(
     (skill: SkillInfo, projectId?: string | null) => {
-      const project = projectId
-        ? projects.find((candidate) => candidate.id === projectId)
-        : undefined;
-      const createChat = project
-        ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
-        : createNewTab(DEFAULT_CHAT_TITLE);
+      agentBuilder.guardNavigation(() => {
+        const project = projectId
+          ? projects.find((candidate) => candidate.id === projectId)
+          : undefined;
+        const createChat = project
+          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
+          : createNewTab(DEFAULT_CHAT_TITLE);
 
-      void createChat
-        .then((session) => {
-          useChatStore
-            .getState()
-            .setSkillDrafts(session.id, [toChatSkillDraft(skill)]);
-        })
-        .catch((error) => {
-          console.error("Failed to start chat with skill:", error);
-        });
+        void createChat
+          .then((session) => {
+            useChatStore
+              .getState()
+              .setSkillDrafts(session.id, [toChatSkillDraft(skill)]);
+          })
+          .catch((error) => {
+            console.error("Failed to start chat with skill:", error);
+          });
+      });
     },
-    [createNewProjectDraft, createNewTab, projects],
+    [
+      createNewProjectDraft,
+      createNewTab,
+      projects,
+      agentBuilder.guardNavigation,
+    ],
   );
 
   const handleStartChatWithAgent = useCallback(
     (agentId: string) => {
-      void createNewTab(DEFAULT_CHAT_TITLE)
-        .then((session) => {
-          patchSession(session.id, { personaId: agentId });
-        })
-        .catch((error) => {
-          console.error("Failed to start chat with agent:", error);
-        });
+      agentBuilder.guardNavigation(() => {
+        void createNewTab(DEFAULT_CHAT_TITLE)
+          .then((session) => {
+            patchSession(session.id, { personaId: agentId });
+          })
+          .catch((error) => {
+            console.error("Failed to start chat with agent:", error);
+          });
+      });
     },
-    [createNewTab, patchSession],
+    [createNewTab, patchSession, agentBuilder.guardNavigation],
   );
 
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
-      const project = options?.projectId
-        ? projects.find((candidate) => candidate.id === options.projectId)
-        : undefined;
-      const createChat = project
-        ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
-        : createNewTab(DEFAULT_CHAT_TITLE);
+      agentBuilder.guardNavigation(() => {
+        const project = options?.projectId
+          ? projects.find((candidate) => candidate.id === options.projectId)
+          : undefined;
+        const createChat = project
+          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
+          : createNewTab(DEFAULT_CHAT_TITLE);
 
-      void createChat
-        .then((session) => {
-          if (options?.providerId && options.modelId) {
-            patchSession(session.id, {
-              providerId: options.providerId,
-              modelId: options.modelId,
-              modelName: options.modelName ?? options.modelId,
+        void createChat
+          .then((session) => {
+            if (options?.providerId && options.modelId) {
+              patchSession(session.id, {
+                providerId: options.providerId,
+                modelId: options.modelId,
+                modelName: options.modelName ?? options.modelId,
+              });
+            }
+            if (options?.personaId) {
+              patchSession(session.id, { personaId: options.personaId });
+            }
+            useChatStore.getState().enqueueMessage(session.id, {
+              text,
+              attachments: options?.attachments,
+              ...(options?.sendOptions
+                ? { sendOptions: options.sendOptions }
+                : {}),
             });
-          }
-          if (options?.personaId) {
-            patchSession(session.id, { personaId: options.personaId });
-          }
-          useChatStore.getState().enqueueMessage(session.id, {
-            text,
-            attachments: options?.attachments,
-            ...(options?.sendOptions
-              ? { sendOptions: options.sendOptions }
-              : {}),
+          })
+          .catch((error) => {
+            console.error("Failed to start chat from global composer:", error);
           });
-        })
-        .catch((error) => {
-          console.error("Failed to start chat from global composer:", error);
-        });
+      });
     },
-    [createNewProjectDraft, createNewTab, patchSession, projects],
+    [
+      createNewProjectDraft,
+      createNewTab,
+      patchSession,
+      projects,
+      agentBuilder.guardNavigation,
+    ],
   );
 
   const handleNewChatInProject = useCallback(
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
       if (project) {
-        void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+        agentBuilder.guardNavigation(() => {
+          void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
+        });
       }
     },
-    [createNewProjectDraft, projects],
+    [createNewProjectDraft, projects, agentBuilder.guardNavigation],
   );
 
   const handleArchiveProject = useCallback(
@@ -1084,6 +1129,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     },
     [archiveSession, cleanupChatSession, setActiveSession],
   );
+  closeAgentBuilderSessionRef.current = handleArchiveChat;
 
   const handleEditProject = useCallback(
     (projectId: string) => {
@@ -1140,19 +1186,26 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const activateHomeSession = useCallback(
     (sessionId: string) => {
-      if (homeSessionId === sessionId) {
-        setHomeSessionId(null);
-      }
-      setActiveSession(sessionId);
-      clearSettingsSectionUrl();
-      setActiveView("chat");
-      setChatActiveSession(sessionId);
-      useChatStore.getState().markSessionRead(sessionId);
+      agentBuilder.guardNavigation(() => {
+        if (homeSessionId === sessionId) {
+          setHomeSessionId(null);
+        }
+        setActiveSession(sessionId);
+        clearSettingsSectionUrl();
+        setActiveView("chat");
+        setChatActiveSession(sessionId);
+        useChatStore.getState().markSessionRead(sessionId);
+      });
     },
-    [homeSessionId, setActiveSession, setChatActiveSession],
+    [
+      homeSessionId,
+      agentBuilder.guardNavigation,
+      setActiveSession,
+      setChatActiveSession,
+    ],
   );
 
-  const handleSelectSession = useCallback(
+  const selectSessionDirect = useCallback(
     (id: string) => {
       setActiveSession(id);
       clearSettingsSectionUrl();
@@ -1161,7 +1214,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       useChatStore.getState().markSessionRead(id);
       loadSessionMessages(id);
     },
-    [setActiveSession, setChatActiveSession, loadSessionMessages],
+    [loadSessionMessages, setActiveSession, setChatActiveSession],
+  );
+  navigateAgentBuilderChatRef.current = selectSessionDirect;
+
+  const handleSelectSession = useCallback(
+    (id: string) => {
+      if (id === useChatSessionStore.getState().activeSessionId) {
+        return;
+      }
+      agentBuilder.guardNavigation(() => {
+        selectSessionDirect(id);
+      });
+    },
+    [agentBuilder.guardNavigation, selectSessionDirect],
   );
 
   const handleSelectSearchResult = useCallback(
@@ -1185,60 +1251,71 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleOpenAutomationFromSearch = useCallback(
     (automationId: string) => {
-      replaceNextNavigationEntryRef.current = false;
-      setAutomationsRoute({
-        surface: "detail",
-        automationId,
-        tab: "details",
-        selectedRunKey: null,
+      agentBuilder.guardNavigation(() => {
+        replaceNextNavigationEntryRef.current = false;
+        setAutomationsRoute({
+          surface: "detail",
+          automationId,
+          tab: "details",
+          selectedRunKey: null,
+        });
+        setActiveSession(null);
+        clearSettingsSectionUrl();
+        setActiveView("automations");
       });
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("automations");
     },
-    [setActiveSession],
+    [agentBuilder.guardNavigation, setActiveSession],
   );
 
   const handleNavigate = useCallback(
     (view: AppView) => {
-      if (view === "settings") {
-        openSettings();
-        return;
-      }
-      if (view === "design-system") {
-        openDesignSystem();
-        return;
-      }
-      if (view !== "chat" && view !== "search") {
-        setActiveSession(null);
-      }
-      if (view === "skills") {
-        setSkillsSkillId(null);
-      }
-      if (view === "agents") {
-        setAgentsPersonaId(null);
-      }
-      if (view === "automations") {
-        setAutomationsRoute({ surface: "overview" });
-      }
-      clearSettingsSectionUrl();
-      setActiveView(view);
+      agentBuilder.guardNavigation(() => {
+        if (view === "settings") {
+          openSettings();
+          return;
+        }
+        if (view === "design-system") {
+          openDesignSystem();
+          return;
+        }
+        if (view !== "chat" && view !== "search") {
+          setActiveSession(null);
+        }
+        if (view === "skills") {
+          setSkillsSkillId(null);
+        }
+        if (view === "agents") {
+          setAgentsPersonaId(null);
+        }
+        if (view === "automations") {
+          setAutomationsRoute({ surface: "overview" });
+        }
+        clearSettingsSectionUrl();
+        setActiveView(view);
+      });
     },
-    [openDesignSystem, openSettings, setActiveSession],
+    [
+      openDesignSystem,
+      openSettings,
+      agentBuilder.guardNavigation,
+      setActiveSession,
+    ],
   );
 
   const navigateSkills = useCallback(
     (skillId: string | null, options?: AppNavigationUpdateOptions) => {
-      replaceNextNavigationEntryRef.current = Boolean(options?.replace);
-      setSkillsSkillId(skillId);
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("skills");
+      agentBuilder.guardNavigation(() => {
+        replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+        setSkillsSkillId(skillId);
+        setActiveSession(null);
+        clearSettingsSectionUrl();
+        setActiveView("skills");
+      });
     },
-    [setActiveSession],
+    [agentBuilder.guardNavigation, setActiveSession],
   );
 
-  const navigateAgents = useCallback(
+  const navigateAgentsDirect = useCallback(
     (personaId: string | null, options?: AppNavigationUpdateOptions) => {
       replaceNextNavigationEntryRef.current = Boolean(options?.replace);
       setAgentsPersonaId(personaId);
@@ -1248,23 +1325,31 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     },
     [setActiveSession],
   );
+  navigateAgentBuilderAgentsRef.current = navigateAgentsDirect;
+
+  const navigateAgents = useCallback(
+    (personaId: string | null, options?: AppNavigationUpdateOptions) => {
+      agentBuilder.guardNavigation(() => {
+        navigateAgentsDirect(personaId, options);
+      });
+    },
+    [agentBuilder.guardNavigation, navigateAgentsDirect],
+  );
 
   const navigateAutomations = useCallback(
     (
       route: AutomationNavigationRoute,
       options?: AppNavigationUpdateOptions,
     ) => {
-      replaceNextNavigationEntryRef.current = Boolean(options?.replace);
-      setAutomationsRoute(route);
-      setActiveSession(null);
-      clearSettingsSectionUrl();
-      setActiveView("automations");
+      agentBuilder.guardNavigation(() => {
+        replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+        setAutomationsRoute(route);
+        setActiveSession(null);
+        clearSettingsSectionUrl();
+        setActiveView("automations");
+      });
     },
-    [setActiveSession],
-  );
-
-  const handleCreatePersona = useCreatePersonaNavigation(() =>
-    handleNavigate("agents"),
+    [agentBuilder.guardNavigation, setActiveSession],
   );
 
   const applyNavigationLocation = useCallback(
@@ -1350,26 +1435,38 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const goBack = useCallback(() => {
-    const history = navigationHistoryRef.current;
-    if (history.index <= 0) {
-      return;
-    }
+    agentBuilder.guardNavigation(() => {
+      const history = navigationHistoryRef.current;
+      if (history.index <= 0) {
+        return;
+      }
 
-    history.index -= 1;
-    applyNavigationLocation(history.entries[history.index]);
-    updateNavigationAvailability();
-  }, [applyNavigationLocation, updateNavigationAvailability]);
+      history.index -= 1;
+      applyNavigationLocation(history.entries[history.index]);
+      updateNavigationAvailability();
+    });
+  }, [
+    applyNavigationLocation,
+    agentBuilder.guardNavigation,
+    updateNavigationAvailability,
+  ]);
 
   const goForward = useCallback(() => {
-    const history = navigationHistoryRef.current;
-    if (history.index >= history.entries.length - 1) {
-      return;
-    }
+    agentBuilder.guardNavigation(() => {
+      const history = navigationHistoryRef.current;
+      if (history.index >= history.entries.length - 1) {
+        return;
+      }
 
-    history.index += 1;
-    applyNavigationLocation(history.entries[history.index]);
-    updateNavigationAvailability();
-  }, [applyNavigationLocation, updateNavigationAvailability]);
+      history.index += 1;
+      applyNavigationLocation(history.entries[history.index]);
+      updateNavigationAvailability();
+    });
+  }, [
+    applyNavigationLocation,
+    agentBuilder.guardNavigation,
+    updateNavigationAvailability,
+  ]);
 
   const handleExitSearch = useCallback(() => {
     const history = navigationHistoryRef.current;
@@ -1378,10 +1475,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       return;
     }
 
-    clearSettingsSectionUrl();
-    setActiveSession(null);
-    setActiveView("home");
-  }, [goBack, setActiveSession]);
+    agentBuilder.guardNavigation(() => {
+      clearSettingsSectionUrl();
+      setActiveSession(null);
+      setActiveView("home");
+    });
+  }, [goBack, agentBuilder.guardNavigation, setActiveSession]);
 
   const toggleContextPanel = useCallback(() => {
     if (!activeSessionId) {
@@ -1638,128 +1737,137 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   return (
-    <AppShellLayout
-      topBar={{
-        activeView,
-        breadcrumbs: topBarBreadcrumbs,
-        chatSessionTitle: activeSession?.title,
-        sidebarCollapsed,
-        canGoBack: navigationAvailability.canGoBack,
-        canGoForward: navigationAvailability.canGoForward,
-        onToggleSidebar: toggleSidebar,
-        onGoBack: goBack,
-        onGoForward: goForward,
-        showContextPanelToggle:
-          activeView === "chat" && Boolean(activeSessionId),
-        chromeInsets: topBarChromeInsets,
-        contextPanelOpen: isContextPanelOpen,
-        contextPanelLabel,
-        onToggleContextPanel: toggleContextPanel,
-        onFeedbackClick: handleFeedbackClick,
-        onNavigateHome: () => handleNavigate("home"),
-        onSearchClick: () => handleNavigate("search"),
-      }}
-      sidebar={{
-        collapsed: sidebarCollapsed,
-        width: sidebarWidth,
-        isResizing,
-        onSettingsClick: () => openSettings(),
-        onSettingsBack: leaveSecondarySurface,
-        onSettingsSectionChange: selectSettingsSection,
-        onDesignSystemBack: leaveSecondarySurface,
-        onDesignSystemSectionChange: selectDesignSystemSection,
-        designSystemInspectorVisible,
-        onDesignSystemInspectorVisibleChange: setDesignSystemInspectorVisible,
-        onNavigate: handleNavigate,
-        onNewChatInProject: handleNewChatInProject,
-        onNewChat: () => {
-          void createNewTab(DEFAULT_CHAT_TITLE).catch((error) => {
-            console.error("Failed to start new chat:", error);
-          });
-        },
-        onCreateProject: () => openCreateProjectDialog(),
-        onEditProject: handleEditProject,
-        onArchiveProject: handleArchiveProject,
-        onArchiveChat: handleArchiveChat,
-        onRenameChat: handleRenameChat,
-        onMarkChatRead: handleMarkChatRead,
-        onMarkChatUnread: handleMarkChatUnread,
-        onMoveToProject: handleMoveToProject,
-        onReorderProject: reorderProjects,
-        onSelectSession: handleSelectSession,
-        activeView,
-        activeSettingsSection,
-        activeDesignSystemSection,
-        activeSessionId,
-        projects,
-        className: "h-full rounded-xl",
-      }}
-      sidebarCollapsed={sidebarCollapsed}
-      sidebarOuterWidth={sidebarOuterWidth}
-      isResizing={isResizing}
-      resizeHandleHeight={resizeHandleHeight}
-      resizeHandleWidth={resizeHandleWidth}
-      sidebarOuterHeight={sidebarOuterHeight}
-      onResizeStart={handleResizeStart}
-      onResizeDoubleClick={handleResizeDoubleClick}
-      onHeightResizeStart={handleHeightResizeStart}
-      onHeightResizeDoubleClick={handleHeightResizeDoubleClick}
-      onCornerResizeStart={handleCornerResizeStart}
-      onCornerResizeDoubleClick={handleCornerResizeDoubleClick}
-      contentUnderSidebar={activeView === "home"}
-      contentUnderTopBar={activeView === "home"}
-      showDesignSystemInspector={designSystemInspectorVisible}
-      createProjectDialog={{
-        isOpen: createProjectOpen,
-        onClose: closeCreateProjectDialog,
-        onCreated: handleProjectCreated,
-        initialWorkingDir: createProjectInitialWorkingDir,
-        editingProject: editingProject ?? undefined,
-      }}
-    >
-      {children ?? (
-        <>
-          <AppShellContent
-            activeView={activeView}
-            activeSettingsSection={activeSettingsSection}
-            activeSkillsSkillId={skillsSkillId}
-            activeAgentsPersonaId={agentsPersonaId}
-            activeAutomationsRoute={automationsRoute}
-            activeDesignSystemSection={activeDesignSystemSection}
-            activeSession={activeSession}
-            homeSessionId={homeSessionId}
-            onNavigateSkills={navigateSkills}
-            onNavigateAgents={navigateAgents}
-            onNavigateAutomations={navigateAutomations}
-            onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
-            onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
-            onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
-            onCreatePersona={handleCreatePersona}
-            onArchiveChat={handleArchiveChat}
-            onCreateProject={openCreateProjectDialog}
-            onActivateHomeSession={activateHomeSession}
-            onRenameChat={handleRenameChat}
-            onSelectSession={handleSelectSession}
-            onSelectSearchResult={handleSelectSearchResult}
-            onStartChatFromProjectId={handleStartProjectChat}
-            onStartChatFromProject={handleStartChatFromProject}
-            onStartProjectChat={handleStartProjectChat}
-            onStartChatWithSkill={handleStartChatWithSkill}
-            onExitSearch={handleExitSearch}
-            onOpenExtension={handleOpenExtensionFromSearch}
-            onOpenAgent={handleStartChatWithAgent}
-            onOpenAutomation={handleOpenAutomationFromSearch}
-            onOpenSkill={handleStartChatWithSkill}
-          />
-          {activeView !== "chat" &&
-          !(
-            activeView === "automations" &&
-            automationsRoute.surface === "builder"
-          ) ? (
-            <GlobalComposerPill onSend={handleGlobalCompose} />
-          ) : null}
-        </>
-      )}
-    </AppShellLayout>
+    <>
+      <AppShellLayout
+        topBar={{
+          activeView,
+          breadcrumbs: topBarBreadcrumbs,
+          chatSessionTitle: activeSession?.title,
+          sidebarCollapsed,
+          canGoBack: navigationAvailability.canGoBack,
+          canGoForward: navigationAvailability.canGoForward,
+          onToggleSidebar: toggleSidebar,
+          onGoBack: goBack,
+          onGoForward: goForward,
+          showContextPanelToggle:
+            activeView === "chat" &&
+            Boolean(activeSessionId) &&
+            activeSession?.intent !== "build-agent",
+          chromeInsets: topBarChromeInsets,
+          contextPanelOpen: isContextPanelOpen,
+          contextPanelLabel,
+          onToggleContextPanel: toggleContextPanel,
+          onFeedbackClick: handleFeedbackClick,
+          onNavigateHome: () => handleNavigate("home"),
+          onSearchClick: () => handleNavigate("search"),
+        }}
+        sidebar={{
+          collapsed: sidebarCollapsed,
+          width: sidebarWidth,
+          isResizing,
+          onSettingsClick: () => handleNavigate("settings"),
+          onSettingsBack: leaveSecondarySurface,
+          onSettingsSectionChange: selectSettingsSection,
+          onDesignSystemBack: leaveSecondarySurface,
+          onDesignSystemSectionChange: selectDesignSystemSection,
+          designSystemInspectorVisible,
+          onDesignSystemInspectorVisibleChange: setDesignSystemInspectorVisible,
+          onNavigate: handleNavigate,
+          onNewChatInProject: handleNewChatInProject,
+          onNewChat: () => {
+            agentBuilder.guardNavigation(() => {
+              void createNewTab(DEFAULT_CHAT_TITLE).catch((error) => {
+                console.error("Failed to start new chat:", error);
+              });
+            });
+          },
+          onCreateProject: () => openCreateProjectDialog(),
+          onEditProject: handleEditProject,
+          onArchiveProject: handleArchiveProject,
+          onArchiveChat: handleArchiveChat,
+          onRenameChat: handleRenameChat,
+          onMarkChatRead: handleMarkChatRead,
+          onMarkChatUnread: handleMarkChatUnread,
+          onMoveToProject: handleMoveToProject,
+          onReorderProject: reorderProjects,
+          onSelectSession: handleSelectSession,
+          activeView,
+          activeSettingsSection,
+          activeDesignSystemSection,
+          activeSessionId,
+          projects,
+          className: "h-full rounded-xl",
+        }}
+        sidebarCollapsed={sidebarCollapsed}
+        sidebarOuterWidth={sidebarOuterWidth}
+        isResizing={isResizing}
+        resizeHandleHeight={resizeHandleHeight}
+        resizeHandleWidth={resizeHandleWidth}
+        sidebarOuterHeight={sidebarOuterHeight}
+        onResizeStart={handleResizeStart}
+        onResizeDoubleClick={handleResizeDoubleClick}
+        onHeightResizeStart={handleHeightResizeStart}
+        onHeightResizeDoubleClick={handleHeightResizeDoubleClick}
+        onCornerResizeStart={handleCornerResizeStart}
+        onCornerResizeDoubleClick={handleCornerResizeDoubleClick}
+        contentUnderSidebar={activeView === "home"}
+        contentUnderTopBar={activeView === "home"}
+        showDesignSystemInspector={designSystemInspectorVisible}
+        createProjectDialog={{
+          isOpen: createProjectOpen,
+          onClose: closeCreateProjectDialog,
+          onCreated: handleProjectCreated,
+          initialWorkingDir: createProjectInitialWorkingDir,
+          editingProject: editingProject ?? undefined,
+        }}
+      >
+        {children ?? (
+          <>
+            <AppShellContent
+              activeView={activeView}
+              activeSettingsSection={activeSettingsSection}
+              activeSkillsSkillId={skillsSkillId}
+              activeAgentsPersonaId={agentsPersonaId}
+              activeAutomationsRoute={automationsRoute}
+              activeDesignSystemSection={activeDesignSystemSection}
+              activeSession={activeSession}
+              homeSessionId={homeSessionId}
+              onNavigateSkills={navigateSkills}
+              onNavigateAgents={navigateAgents}
+              onNavigateAutomations={navigateAutomations}
+              onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
+              onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
+              onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
+              onCreatePersona={agentBuilder.create}
+              onAgentBuilderSaved={agentBuilder.onSaved}
+              onStartAgentBuilderSession={agentBuilder.start}
+              onArchiveChat={handleArchiveChat}
+              onCreateProject={openCreateProjectDialog}
+              onActivateHomeSession={activateHomeSession}
+              onRenameChat={handleRenameChat}
+              onSelectSession={handleSelectSession}
+              onSelectSearchResult={handleSelectSearchResult}
+              onStartChatFromProjectId={handleStartProjectChat}
+              onStartChatFromProject={handleStartChatFromProject}
+              onStartProjectChat={handleStartProjectChat}
+              onStartChatWithSkill={handleStartChatWithSkill}
+              onExitSearch={handleExitSearch}
+              onOpenExtension={handleOpenExtensionFromSearch}
+              onOpenAgent={handleStartChatWithAgent}
+              onOpenAutomation={handleOpenAutomationFromSearch}
+              onOpenSkill={handleStartChatWithSkill}
+            />
+            {activeView !== "chat" &&
+            !(
+              activeView === "automations" &&
+              automationsRoute.surface === "builder"
+            ) ? (
+              <GlobalComposerPill onSend={handleGlobalCompose} />
+            ) : null}
+          </>
+        )}
+      </AppShellLayout>
+      <AgentBuilderLeaveDraftDialog {...agentBuilder.leaveDraftDialogProps} />
+    </>
   );
 }

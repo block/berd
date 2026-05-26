@@ -14,6 +14,7 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ExtensionEntry } from "@/features/extensions/types";
+import type { AgentSourceEntry } from "@/shared/api/agents";
 import type {
   AppNavigationUpdateOptions,
   AppView,
@@ -47,6 +48,8 @@ interface AppShellContentProps {
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
   onCreatePersona: () => void;
+  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
+  onStartAgentBuilderSession: (args?: { slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
     initialWorkingDir?: string | null;
@@ -87,6 +90,8 @@ export function AppShellContent({
   onAgentsBreadcrumbLabelChange,
   onAutomationsBreadcrumbLabelChange,
   onCreatePersona,
+  onAgentBuilderSaved,
+  onStartAgentBuilderSession,
   onArchiveChat,
   onCreateProject,
   onActivateHomeSession,
@@ -133,6 +138,7 @@ export function AppShellContent({
           activePersonaId={activeAgentsPersonaId}
           onActivePersonaIdChange={onNavigateAgents}
           onBreadcrumbLabelChange={onAgentsBreadcrumbLabelChange}
+          onStartAgentBuilderSession={onStartAgentBuilderSession}
         />
       );
     case "projects":
@@ -163,6 +169,7 @@ export function AppShellContent({
           key={activeSession.id}
           sessionId={activeSession.id}
           onCreatePersona={onCreatePersona}
+          onAgentBuilderSaved={onAgentBuilderSaved}
           onCreateProject={onCreateProject}
         />
       ) : (

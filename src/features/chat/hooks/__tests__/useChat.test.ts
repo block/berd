@@ -102,9 +102,6 @@ describe("useChat", () => {
       agentsLoading: false,
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
     });
     mockAcpSendMessage.mockResolvedValue(undefined);
     mockAcpCancelSession.mockResolvedValue(true);

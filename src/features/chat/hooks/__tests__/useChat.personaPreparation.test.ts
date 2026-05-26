@@ -62,8 +62,6 @@ describe("useChat persona preparation", () => {
       agentsLoading: false,
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
     });
     mockAcpSendMessage.mockResolvedValue(undefined);
     mockAcpCancelSession.mockResolvedValue(true);

@@ -133,6 +133,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::agents::read_import_persona_file,
+            commands::agents::read_agent_source_file,
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::ensure_avatar_collection,

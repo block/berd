@@ -43,9 +43,6 @@ describe("agentStore", () => {
       agentsLoading: false,
       activeAgentId: null,
       isLoading: false,
-      personaEditorOpen: false,
-      editingPersona: null,
-      personaEditorMode: "create",
     });
   });
 
@@ -133,31 +130,6 @@ describe("agentStore", () => {
     useAgentStore.getState().setAgents([a]);
     useAgentStore.getState().setActiveAgent("active-1");
     expect(useAgentStore.getState().getActiveAgent()).toEqual(a);
-  });
-
-  // ── persona editor ────────────────────────────────────────────────
-
-  it("openPersonaEditor sets editing state", () => {
-    const p = makePersona();
-    useAgentStore.getState().openPersonaEditor(p);
-    expect(useAgentStore.getState().personaEditorOpen).toBe(true);
-    expect(useAgentStore.getState().editingPersona).toEqual(p);
-    expect(useAgentStore.getState().personaEditorMode).toBe("edit");
-  });
-
-  it("openPersonaEditor without persona sets editingPersona to null", () => {
-    useAgentStore.getState().openPersonaEditor();
-    expect(useAgentStore.getState().personaEditorOpen).toBe(true);
-    expect(useAgentStore.getState().editingPersona).toBeNull();
-    expect(useAgentStore.getState().personaEditorMode).toBe("create");
-  });
-
-  it("closePersonaEditor clears editing state", () => {
-    useAgentStore.getState().openPersonaEditor(makePersona());
-    useAgentStore.getState().closePersonaEditor();
-    expect(useAgentStore.getState().personaEditorOpen).toBe(false);
-    expect(useAgentStore.getState().editingPersona).toBeNull();
-    expect(useAgentStore.getState().personaEditorMode).toBe("create");
   });
 
   // ── helpers ───────────────────────────────────────────────────────

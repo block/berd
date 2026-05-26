@@ -4,6 +4,23 @@ import {
   navigateToAgents,
   buildInitScript,
 } from "./fixtures/tauri-mock";
+import type { Page } from "@playwright/test";
+
+async function listAgentSources(page: Page) {
+  return page.evaluate(() => {
+    const e2eWindow = window as typeof window & {
+      __GOOSE_E2E__?: {
+        listAgentSources: () => Array<{
+          name: string;
+          path: string;
+          content: string;
+          properties?: Record<string, unknown>;
+        }>;
+      };
+    };
+    return e2eWindow.__GOOSE_E2E__?.listAgentSources() ?? [];
+  });
+}
 
 test.describe("Agents view", () => {
   test("navigates to agents view from sidebar", async ({
@@ -11,9 +28,9 @@ test.describe("Agents view", () => {
   }) => {
     await navigateToAgents(page);
 
-    await expect(page.locator("h1", { hasText: "Agents" })).toBeVisible();
+    await expect(page.getByLabel("Agent: Code Reviewer")).toBeVisible();
     await expect(
-      page.getByText("Custom agent configurations for specific workflows"),
+      page.getByRole("button", { name: "New Agent", exact: true }),
     ).toBeVisible();
   });
 
@@ -39,36 +56,12 @@ test.describe("Agents view", () => {
 
   test("shows create new agent button", async ({ tauriMocked: page }) => {
     await navigateToAgents(page);
-    await expect(page.getByLabel("Create new agent")).toBeVisible();
-  });
-
-  test("opens create agent dialog via New Agent button", async ({
-    tauriMocked: page,
-  }) => {
-    await navigateToAgents(page);
-    await page
-      .getByRole("button", { name: "New Agent", exact: true })
-      .first()
-      .click();
-
-    const dialog = page.getByRole("dialog");
-    await expect(dialog).toBeVisible();
-    await expect(dialog.locator("h2", { hasText: "New Agent" })).toBeVisible();
-    await expect(dialog.getByPlaceholder("e.g. Code Reviewer")).toBeVisible();
     await expect(
-      dialog.getByPlaceholder("You are a helpful assistant that..."),
+      page.getByRole("button", { name: "New Agent", exact: true }),
     ).toBeVisible();
   });
 
-  test("opens create agent dialog via plus card", async ({
-    tauriMocked: page,
-  }) => {
-    await navigateToAgents(page);
-    await page.getByLabel("Create new agent").click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-  });
-
-  test("create dialog has disabled Create button when fields are empty", async ({
+  test("opens agent builder via New Agent button", async ({
     tauriMocked: page,
   }) => {
     await navigateToAgents(page);
@@ -77,40 +70,70 @@ test.describe("Agents view", () => {
       .first()
       .click();
 
-    const dialog = page.getByRole("dialog");
-    await expect(dialog.getByRole("button", { name: "Create" })).toBeDisabled();
-  });
-
-  test("create dialog enables Create button when name and prompt are filled", async ({
-    tauriMocked: page,
-  }) => {
-    await navigateToAgents(page);
-    await page
-      .getByRole("button", { name: "New Agent", exact: true })
-      .first()
-      .click();
-
-    const dialog = page.getByRole("dialog");
-    await dialog.getByPlaceholder("e.g. Code Reviewer").fill("Test Agent");
-    await dialog
-      .getByPlaceholder("You are a helpful assistant that...")
-      .fill("You are a test agent");
-
-    await expect(dialog.getByRole("button", { name: "Create" })).toBeEnabled();
-  });
-
-  test("closes create agent dialog via Close button", async ({
-    tauriMocked: page,
-  }) => {
-    await navigateToAgents(page);
-    await page
-      .getByRole("button", { name: "New Agent", exact: true })
-      .first()
-      .click();
-
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: "Cancel" }).click();
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+    await expect(page.getByTestId("chat-composer")).toBeVisible();
     await expect(page.getByRole("dialog")).not.toBeVisible();
+  });
+
+  test("opens agent builder via top-bar action", async ({
+    tauriMocked: page,
+  }) => {
+    await navigateToAgents(page);
+    await page
+      .getByRole("button", { name: "New Agent", exact: true })
+      .first()
+      .click();
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+    await expect(page.getByRole("dialog")).not.toBeVisible();
+  });
+
+  test("agent builder chat and rail edits update the draft source", async ({
+    tauriMocked: page,
+  }) => {
+    await navigateToAgents(page);
+    await page
+      .getByRole("button", { name: "New Agent", exact: true })
+      .first()
+      .click();
+
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+    await page
+      .getByTestId("chat-composer")
+      .fill("make me a snarky code reviewer");
+    await page.getByTestId("chat-composer").press("Enter");
+    await expect(page.getByLabel("Name")).toHaveValue("Snarky Code Reviewer", {
+      timeout: 5000,
+    });
+
+    await page.getByLabel("Name").fill("Code Reviewer Pro");
+    await expect
+      .poll(async () => listAgentSources(page))
+      .toContainEqual(
+        expect.objectContaining({
+          name: "Code Reviewer Pro",
+          properties: expect.objectContaining({ draft: true }),
+        }),
+      );
+  });
+
+  test("discard removes an unchanged draft source", async ({
+    tauriMocked: page,
+  }) => {
+    await navigateToAgents(page);
+    await page
+      .getByRole("button", { name: "New Agent", exact: true })
+      .first()
+      .click();
+
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+    await page.getByRole("button", { name: "Discard" }).click();
+    await expect
+      .poll(async () => listAgentSources(page))
+      .not.toContainEqual(
+        expect.objectContaining({
+          properties: expect.objectContaining({ draft: true }),
+        }),
+      );
   });
 
   test("clicking a custom agent card opens details with edit actions", async ({
@@ -126,7 +149,7 @@ test.describe("Agents view", () => {
       page.locator("h1", { hasText: "Code Reviewer" }),
     ).toBeVisible();
     await expect(page.getByText(/^Source$/)).toBeVisible();
-    await expect(page.getByText("Custom")).toBeVisible();
+    await expect(page.getByText("File-backed")).toBeVisible();
     await expect(page.getByText(/^Provider$/)).toBeVisible();
     await expect(page.getByText("claude-sonnet-4-20250514")).toBeVisible();
     await expect(page.getByRole("button", { name: "Edit" })).toBeVisible();
@@ -170,6 +193,49 @@ test.describe("Agents view", () => {
     ).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Export" })).toBeVisible();
     await expect(menu.getByRole("menuitem", { name: "Delete" })).toBeVisible();
+  });
+
+  test("Edit on a custom agent opens the builder rail bound to that agent", async ({
+    tauriMocked: page,
+  }) => {
+    await navigateToAgents(page);
+
+    const card = page.getByLabel("Agent: Code Reviewer");
+    await card.getByLabel("Agent options").click();
+    await page.getByRole("menuitem", { name: "Edit" }).click();
+
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+    await expect(page.getByLabel("Name")).toHaveValue("Code Reviewer");
+    await page.getByLabel("Name").fill("Code Reviewer Pro");
+    await expect
+      .poll(async () => listAgentSources(page))
+      .toContainEqual(expect.objectContaining({ name: "Code Reviewer Pro" }));
+  });
+
+  test("reloading with real draft content keeps the draft source", async ({
+    tauriMocked: page,
+  }) => {
+    await navigateToAgents(page);
+    await page
+      .getByRole("button", { name: "New Agent", exact: true })
+      .first()
+      .click();
+    await expect(page.getByTestId("agent-builder-rail")).toBeVisible();
+
+    await page.getByLabel("Name").fill("Persisted");
+    await expect
+      .poll(async () => listAgentSources(page))
+      .toContainEqual(expect.objectContaining({ name: "Persisted" }));
+
+    await page.reload();
+    await expect
+      .poll(async () => listAgentSources(page))
+      .toContainEqual(
+        expect.objectContaining({
+          name: "Persisted",
+          properties: expect.objectContaining({ draft: true }),
+        }),
+      );
   });
 
   test("built-in agent dropdown menu does not show Edit or Delete", async ({
@@ -236,20 +302,6 @@ test.describe("Agents view", () => {
     await expect(page.getByLabel("Agent: Code Reviewer")).toBeVisible();
   });
 
-  test("search filters agents", async ({ tauriMocked: page }) => {
-    await navigateToAgents(page);
-    await page.getByPlaceholder("Search agents").fill("Solo");
-
-    await expect(page.getByLabel("Agent: Solo")).toBeVisible();
-    await expect(page.getByLabel("Agent: Scout")).not.toBeVisible();
-    await expect(page.getByLabel("Agent: Code Reviewer")).not.toBeVisible();
-
-    await page.getByPlaceholder("Search agents").clear();
-    await expect(page.getByLabel("Agent: Solo")).toBeVisible();
-    await expect(page.getByLabel("Agent: Scout")).toBeVisible();
-    await expect(page.getByLabel("Agent: Code Reviewer")).toBeVisible();
-  });
-
   test("empty agent state shows only create button", async ({
     tauriMocked: page,
   }) => {
@@ -258,7 +310,9 @@ test.describe("Agents view", () => {
     });
     await navigateToAgents(page);
 
-    await expect(page.getByLabel("Create new agent")).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "New Agent", exact: true }),
+    ).toBeVisible();
     await expect(page.getByLabel(/^Agent: /)).not.toBeVisible();
   });
 });

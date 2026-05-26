@@ -168,11 +168,10 @@ vi.mock("@/features/agents/stores/agentStore", async (importOriginal) => {
             },
           ],
           personasLoading: false,
-          openPersonaEditor: vi.fn(),
         };
         return selector ? selector(state) : state;
       },
-      { getState: () => ({ openPersonaEditor: vi.fn() }) },
+      { getState: () => ({}) },
     ),
   };
 });

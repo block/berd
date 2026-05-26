@@ -24,18 +24,13 @@ import {
 } from "@/features/agents/stores/agentSelectors";
 import { AgentDetailPage } from "@/features/agents/ui/AgentDetailPage";
 import { PersonaGallery } from "@/features/agents/ui/PersonaGallery";
-import { PersonaEditor } from "@/features/agents/ui/PersonaEditor";
 import {
   exportPersona,
   importPersonas,
   readImportPersonaFile,
 } from "@/shared/api/agents";
 import { usePersonas } from "@/features/agents/hooks/usePersonas";
-import type {
-  Persona,
-  CreatePersonaRequest,
-  UpdatePersonaRequest,
-} from "@/shared/types/agents";
+import type { Persona } from "@/shared/types/agents";
 import {
   formatAgentError,
   formatImportSuccessMessage,
@@ -56,6 +51,15 @@ function decodeImportFileBytes(fileBytes: number[]): string {
   }
 }
 
+function sourcePathToSlug(pathOrId: string): string {
+  const baseName = pathOrId.split(/[\\/]/).pop() ?? pathOrId;
+  const lowerName = baseName.toLowerCase();
+  if (lowerName.endsWith(".persona.md")) {
+    return baseName.slice(0, -".persona.md".length);
+  }
+  return lowerName.endsWith(".md") ? baseName.slice(0, -3) : baseName;
+}
+
 interface AgentsViewProps {
   activePersonaId?: string | null;
   onActivePersonaIdChange?: (
@@ -63,12 +67,14 @@ interface AgentsViewProps {
     options?: AppNavigationUpdateOptions,
   ) => void;
   onBreadcrumbLabelChange?: (label: string | null) => void;
+  onStartAgentBuilderSession?: (args?: { slug?: string }) => void;
 }
 
 export function AgentsView({
   activePersonaId,
   onActivePersonaIdChange,
   onBreadcrumbLabelChange,
+  onStartAgentBuilderSession,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
   const isActivePersonaControlled = activePersonaId !== undefined;
@@ -84,18 +90,8 @@ export function AgentsView({
   // vertical center; the fifth makes the grid taller, so it returns to the top
   // and scrolls. The motion layout animation slides it up/down across that line.
   const isVerticallyCentered = !personasLoading && personas.length <= 4;
-  const personaEditorOpen = useAgentStore((s) => s.personaEditorOpen);
-  const editingPersona = useAgentStore((s) => s.editingPersona);
-  const personaEditorMode = useAgentStore((s) => s.personaEditorMode);
-  const openPersonaEditor = useAgentStore((s) => s.openPersonaEditor);
-  const closePersonaEditor = useAgentStore((s) => s.closePersonaEditor);
 
-  const {
-    createPersona,
-    updatePersona: updatePersonaViaHook,
-    deletePersona,
-    refreshFromDisk,
-  } = usePersonas();
+  const { createPersona, deletePersona, refreshFromDisk } = usePersonas();
 
   const currentActivePersonaId = isActivePersonaControlled
     ? activePersonaId
@@ -127,13 +123,15 @@ export function AgentsView({
   );
 
   const handleEditPersona = useCallback(
-    (persona: Persona) => openPersonaEditor(persona, "edit"),
-    [openPersonaEditor],
+    (persona: Persona) => {
+      onStartAgentBuilderSession?.({ slug: sourcePathToSlug(persona.id) });
+    },
+    [onStartAgentBuilderSession],
   );
 
   const handleCreatePersona = useCallback(() => {
-    openPersonaEditor();
-  }, [openPersonaEditor]);
+    onStartAgentBuilderSession?.({});
+  }, [onStartAgentBuilderSession]);
 
   useEffect(() => {
     if (
@@ -151,34 +149,6 @@ export function AgentsView({
     personasLoading,
     setActivePersona,
   ]);
-
-  const handleSavePersona = useCallback(
-    async (data: CreatePersonaRequest | UpdatePersonaRequest) => {
-      try {
-        if (editingPersona && personaEditorMode === "edit") {
-          await updatePersonaViaHook(
-            editingPersona,
-            data as UpdatePersonaRequest,
-          );
-          toast.success(t("editor.updated"));
-        } else {
-          await createPersona(data as CreatePersonaRequest);
-          toast.success(t("editor.created"));
-        }
-        closePersonaEditor();
-      } catch (error) {
-        toast.error(formatAgentError(error, t("editor.saveFailed")));
-      }
-    },
-    [
-      closePersonaEditor,
-      createPersona,
-      editingPersona,
-      personaEditorMode,
-      t,
-      updatePersonaViaHook,
-    ],
-  );
 
   const handleDuplicatePersona = useCallback(
     async (persona: Persona) => {
@@ -207,9 +177,6 @@ export function AgentsView({
     if (!deletingPersona) return;
     try {
       await deletePersona(deletingPersona.id);
-      if (editingPersona?.id === deletingPersona.id) {
-        closePersonaEditor();
-      }
       if (currentActivePersonaId === deletingPersona.id) {
         setActivePersona(null, { replace: true });
       }
@@ -219,11 +186,9 @@ export function AgentsView({
     }
     setDeletingPersona(null);
   }, [
-    closePersonaEditor,
     currentActivePersonaId,
     deletingPersona,
     deletePersona,
-    editingPersona,
     setActivePersona,
     t,
   ]);
@@ -344,7 +309,7 @@ export function AgentsView({
           type="button"
           variant="page-header"
           size="xs"
-          onClick={() => openPersonaEditor()}
+          onClick={handleCreatePersona}
           leftIcon={<IconPlus />}
         >
           {t("view.newPersona")}
@@ -355,24 +320,13 @@ export function AgentsView({
   }, [
     activePersona,
     handleImportPicker,
-    openPersonaEditor,
+    handleCreatePersona,
     setTopBarActions,
     t,
   ]);
 
   const dialogs = (
     <>
-      <PersonaEditor
-        persona={editingPersona ?? undefined}
-        isOpen={personaEditorOpen}
-        mode={personaEditorMode}
-        onClose={closePersonaEditor}
-        onSave={handleSavePersona}
-        onDuplicate={handleDuplicatePersona}
-        onEdit={(persona) => openPersonaEditor(persona, "edit")}
-        onDelete={handleDeletePersona}
-      />
-
       <AlertDialog
         open={!!deletingPersona}
         onOpenChange={(open) => !open && setDeletingPersona(null)}
@@ -410,7 +364,7 @@ export function AgentsView({
         <AgentDetailPage
           persona={activePersona}
           onBack={() => setActivePersona(null)}
-          onEdit={(persona) => openPersonaEditor(persona, "edit")}
+          onEdit={handleEditPersona}
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
           onExport={handleExportPersona}

@@ -106,6 +106,21 @@ export function buildInitScript(options?: {
         }),
       );
 
+      const persistAgentSources = () => {
+        sessionStorage.setItem("goose:e2e:agentSources", JSON.stringify(AGENT_SOURCES));
+      };
+
+      const slugify = (name) =>
+        String(name ?? "agent")
+          .trim()
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, "-")
+          .replace(/^-+|-+$/g, "")
+          .slice(0, 64)
+          .replace(/-+$/g, "") || "agent";
+
+      const clone = (value) => JSON.parse(JSON.stringify(value));
+
       const skillToSourceEntry = (s) => ({
         type: "skill",
         name: s.name,
@@ -123,7 +138,10 @@ export function buildInitScript(options?: {
           name: p.displayName ?? p.name,
           description: "Agent",
           content: p.systemPrompt ?? p.content ?? "",
-          path: p.id ?? ("/mock/.agents/agents/" + (p.displayName ?? p.name ?? "agent")),
+          path:
+            p.id && String(p.id).startsWith("/")
+              ? p.id
+              : "/mock/.agents/agents/" + slugify(p.id ?? p.displayName ?? p.name ?? "agent") + ".md",
           global: true,
           writable: p.writable ?? !p.isBuiltin,
           supportingFiles: [],
@@ -133,6 +151,47 @@ export function buildInitScript(options?: {
             ...(avatarValue ? { avatar: avatarValue } : {}),
           },
         };
+      };
+
+      const markdownScalar = (value) => {
+        if (typeof value === "boolean" || typeof value === "number") {
+          return String(value);
+        }
+        return JSON.stringify(String(value ?? ""));
+      };
+
+      const agentSourceToMarkdown = (source) => {
+        const properties = source.properties ?? {};
+        const frontmatter = {
+          name: source.name,
+          description: source.description ?? "Agent",
+          ...properties,
+        };
+        const lines = Object.entries(frontmatter).map(
+          ([key, value]) => key + ": " + markdownScalar(value),
+        );
+        return "---\\n" + lines.join("\\n") + "\\n---\\n\\n" + (source.content ?? "");
+      };
+
+      let AGENT_SOURCES = (() => {
+        const stored = sessionStorage.getItem("goose:e2e:agentSources");
+        if (stored) {
+          try {
+            return JSON.parse(stored);
+          } catch (_error) {
+            sessionStorage.removeItem("goose:e2e:agentSources");
+          }
+        }
+        return PERSONAS.map(personaToSourceEntry);
+      })();
+      const SKILL_SOURCES = SKILLS.map(skillToSourceEntry);
+
+      window.__GOOSE_E2E__ = {
+        listAgentSources: () => clone(AGENT_SOURCES),
+        clearAgentSources: () => {
+          AGENT_SOURCES = PERSONAS.map(personaToSourceEntry);
+          persistAgentSources();
+        },
       };
 
       function nowIso() {
@@ -212,6 +271,34 @@ export function buildInitScript(options?: {
               session.messageCount += 1;
               session.updatedAt = nowIso();
             }
+            const promptBlocks = Array.isArray(message.params?.prompt)
+              ? message.params.prompt
+              : [];
+            const userText =
+              promptBlocks
+                .filter((block) => !block.annotations?.audience?.includes("assistant"))
+                .map((block) => block.text ?? "")
+                .join(" ")
+                .trim() || "";
+            const targetPath = promptBlocks
+              .map((block) => block.text ?? "")
+              .join("\\n")
+              .match(/persona at ([^\\s]+\\.md)/)?.[1];
+            const targetSource =
+              AGENT_SOURCES.find((source) => source.path === targetPath) ??
+              AGENT_SOURCES.find((source) => source.properties?.draft === true);
+            if (targetSource && /snarky code reviewer/i.test(userText)) {
+              targetSource.name = "Snarky Code Reviewer";
+              targetSource.description = "Agent";
+              targetSource.content =
+                "You are a snarky but constructive code reviewer. Be direct, specific, and useful.";
+              targetSource.properties = {
+                ...(targetSource.properties ?? {}),
+                provider: "openai",
+                model: "gpt-4.1",
+              };
+              persistAgentSources();
+            }
             return jsonRpcResult(message.id, { stopReason: "end_turn" });
           }
           case "_goose/providers/list":
@@ -255,61 +342,70 @@ export function buildInitScript(options?: {
             return jsonRpcResult(message.id, {
               sources:
                 message.params?.type === "agent"
-                  ? PERSONAS.map(personaToSourceEntry)
-                  : SKILLS.map(skillToSourceEntry),
+                  ? clone(AGENT_SOURCES)
+                  : clone(SKILL_SOURCES),
             });
-          case "_goose/sources/create":
+          case "_goose/sources/create": {
+            const type = message.params?.type ?? "skill";
+            const name = message.params?.name ?? (type === "agent" ? "new-agent" : "new-skill");
+            const source = {
+              name,
+              type,
+              description: message.params?.description ?? "",
+              content: message.params?.content ?? "",
+              path:
+                type === "agent"
+                  ? "/mock/.agents/agents/" + slugify(name) + ".md"
+                  : "/mock/.agents/skills/" + slugify(name),
+              global: message.params?.global ?? true,
+              writable: true,
+              supportingFiles: [],
+              properties: message.params?.properties ?? {},
+            };
+            if (type === "agent") {
+              AGENT_SOURCES.push(source);
+              persistAgentSources();
+            }
             return jsonRpcResult(message.id, {
-              source: {
-                name: message.params?.name ?? "new-skill",
-                type: message.params?.type ?? "skill",
-                description: message.params?.description ?? "",
-                content: message.params?.content ?? "",
-                path:
-                  message.params?.type === "agent"
-                    ? "/mock/.agents/agents/" + (message.params?.name ?? "new-agent")
-                    : "/mock/.agents/skills/" + (message.params?.name ?? "new-skill"),
-                global: message.params?.global ?? true,
-                writable: true,
-                properties: message.params?.properties ?? {},
-              },
+              source,
             });
+          }
           case "_goose/sources/update":
           case "goose/sources/update": {
             const path = message.params?.path ?? "/mock/.agents/skills/updated-skill";
-            const existingPersona = PERSONAS.find(
-              (persona) => personaToSourceEntry(persona).path === path,
-            );
-            const existingSource = existingPersona
-              ? personaToSourceEntry(existingPersona)
-              : null;
-            const nextName = message.params?.name;
-            const name =
-              typeof nextName === "string" && nextName.length > 0
-                ? nextName
-                : String(path).split("/").filter(Boolean).at(-1) ?? "updated-skill";
-            const segments = String(path).split("/").filter(Boolean);
-            if (segments.length > 0) {
-              segments[segments.length - 1] = name;
+            const sources = message.params?.type === "agent" ? AGENT_SOURCES : SKILL_SOURCES;
+            const existingIndex = sources.findIndex((source) => source.path === path);
+            const existingSource = existingIndex >= 0 ? sources[existingIndex] : null;
+            const source = {
+              name: message.params?.name ?? existingSource?.name ?? "updated-skill",
+              type: message.params?.type ?? existingSource?.type ?? "skill",
+              description: message.params?.description ?? existingSource?.description ?? "",
+              content: message.params?.content ?? existingSource?.content ?? "",
+              path,
+              global: message.params?.global ?? existingSource?.global ?? true,
+              supportingFiles: [],
+              writable: existingSource?.writable ?? true,
+              properties:
+                message.params?.properties ?? existingSource?.properties ?? {},
+            };
+            if (existingIndex >= 0) {
+              sources[existingIndex] = source;
             }
-            const updatedPath = \`/\${segments.join("/")}\`;
+            if (message.params?.type === "agent") {
+              persistAgentSources();
+            }
             return jsonRpcResult(message.id, {
-              source: {
-                name,
-                type: message.params?.type ?? "skill",
-                description: message.params?.description ?? "",
-                content: message.params?.content ?? "",
-                path: updatedPath,
-                global: message.params?.global ?? existingSource?.global ?? true,
-                supportingFiles: [],
-                writable: existingSource?.writable ?? true,
-                properties:
-                  message.params?.properties ?? existingSource?.properties ?? {},
-              },
+              source,
             });
           }
           case "_goose/sources/delete":
           case "goose/sources/delete":
+            if (message.params?.type === "agent") {
+              AGENT_SOURCES = AGENT_SOURCES.filter(
+                (source) => source.path !== message.params?.path,
+              );
+              persistAgentSources();
+            }
             return jsonRpcResult(message.id, {});
           case "_goose/sources/export":
           case "goose/sources/export": {
@@ -372,6 +468,20 @@ export function buildInitScript(options?: {
               return Promise.resolve(FAKE_ACP_URL);
             case "get_distro_bundle":
               return Promise.resolve(DISTRO);
+            case "migration_status":
+            case "mark_migration_complete":
+            case "dismiss_migration_banner":
+              return Promise.resolve({
+                done: true,
+                disabledExtensions: [],
+                backupPath: null,
+                bannerDismissedAt: null,
+              });
+            case "backup_goose_config":
+              return Promise.resolve({
+                backedUp: false,
+                backupPath: null,
+              });
 
             // ---- Sessions / Misc ----
             case "list_sessions":
@@ -429,6 +539,18 @@ export function buildInitScript(options?: {
                 : path;
               return Promise.resolve({ path: normalizedPath });
             }
+            case "read_agent_source_file": {
+              const source = AGENT_SOURCES.find(
+                (entry) => entry.path === args?.sourcePath,
+              );
+              if (!source) {
+                return Promise.reject(new Error("agent source not found"));
+              }
+              return Promise.resolve({
+                fileName: String(source.path).split("/").pop() ?? "agent.md",
+                fileContents: agentSourceToMarkdown(source),
+              });
+            }
 
             // ---- Fallback ----
             default:
@@ -474,11 +596,11 @@ export async function waitForHome(page: Page) {
 
 export async function navigateToAgents(page: Page) {
   await page.goto("/");
-  await expect(page.getByText(/Good (morning|afternoon|evening)/)).toBeVisible({
+  await expect(page.getByRole("button", { name: "Agents" })).toBeVisible({
     timeout: 10_000,
   });
   await page.getByRole("button", { name: "Agents" }).click();
-  await expect(page.locator("h1", { hasText: "Agents" })).toBeVisible();
+  await expect(page.getByRole("main")).toBeVisible();
 }
 
 export async function navigateToSkills(page: Page) {

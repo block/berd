@@ -415,6 +415,52 @@ describe("agents API", () => {
     });
   });
 
+  it("updates persona sources from the exact markdown file when listing omits them", async () => {
+    const sourcePath = "/Users/test/.agents/agents/untitled-agent-1.md";
+    mockGooseSourcesList.mockResolvedValue({ sources: [] });
+    mockedInvoke.mockResolvedValue({
+      fileName: "untitled-agent-1.md",
+      fileContents:
+        "---\nname: Constructive Critic\ndescription: Challenges assumptions.\ndraft: true\nbuilderSessionId: sess-1\n---\n\nPush back constructively.",
+    });
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        ...agentSource,
+        path: sourcePath,
+        name: "Constructive Critic",
+        description: "Challenges assumptions.",
+        content: "Push back with examples.",
+        properties: {
+          draft: true,
+          builderSessionId: "sess-1",
+          model: "gpt-4.1",
+        },
+      },
+    });
+
+    const { updatePersonaSource } = await import("../agents");
+    await updatePersonaSource(sourcePath, {
+      content: "Push back with examples.",
+      properties: { model: "gpt-4.1" },
+    });
+
+    expect(mockedInvoke).toHaveBeenCalledWith("read_agent_source_file", {
+      sourcePath,
+    });
+    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+      type: "agent",
+      path: sourcePath,
+      name: "Constructive Critic",
+      description: "Challenges assumptions.",
+      content: "Push back with examples.",
+      properties: {
+        draft: true,
+        builderSessionId: "sess-1",
+        model: "gpt-4.1",
+      },
+    });
+  });
+
   it("clears unsupported requested avatar values on update", async () => {
     mockGooseSourcesUpdate.mockResolvedValue({
       source: {
@@ -851,6 +897,41 @@ Research carefully.
     expect(result).toEqual({
       fileContents: "{}",
       fileName: "scout.agent.json",
+    });
+  });
+
+  it("reads and maps native agent source markdown files", async () => {
+    mockedInvoke.mockResolvedValue({
+      fileContents:
+        "---\nname: Constructive Critic\ndescription: Challenges assumptions.\nbuilderSessionId: sess-1\ndraft: true\nprovider: openai\nmodel: gpt-5\n---\n\nPush back constructively.\n",
+      fileName: "constructive-critic.md",
+    });
+
+    const { readAgentSourceFile } = await import("../agents");
+    const result = await readAgentSourceFile(
+      "/Users/test/.agents/agents/constructive-critic.md",
+      {
+        ...agentSource,
+        name: "Untitled agent",
+        properties: { draft: true, builderSessionId: "sess-1" },
+      },
+    );
+
+    expect(mockedInvoke).toHaveBeenCalledWith("read_agent_source_file", {
+      sourcePath: "/Users/test/.agents/agents/constructive-critic.md",
+    });
+    expect(result).toMatchObject({
+      type: "agent",
+      path: "/Users/test/.agents/agents/constructive-critic.md",
+      name: "Constructive Critic",
+      description: "Challenges assumptions.",
+      content: "Push back constructively.",
+      properties: {
+        builderSessionId: "sess-1",
+        draft: true,
+        provider: "openai",
+        model: "gpt-5",
+      },
     });
   });
 });

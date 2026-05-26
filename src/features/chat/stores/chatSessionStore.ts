@@ -35,6 +35,9 @@ export interface ChatSession {
   userSetName?: boolean;
   creationState?: "pending" | "failed";
   creationError?: string;
+  intent?: "build-agent" | null;
+  targetAgentPath?: string | null;
+  targetAgentSlug?: string | null;
 }
 
 export interface ActiveWorkspace {
@@ -288,6 +291,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       createdAt: now,
       updatedAt: now,
       messageCount: 0,
+      intent: null,
+      targetAgentPath: null,
+      targetAgentSlug: null,
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
@@ -312,6 +318,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       updatedAt: now,
       messageCount: 0,
       creationState: "pending",
+      intent: null,
+      targetAgentPath: null,
+      targetAgentSlug: null,
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
