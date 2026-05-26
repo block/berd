@@ -17,6 +17,9 @@
       "allow": [
         {
           "url": "linear://*"
+        },
+        {
+          "url": "https://linear.app/*"
         }
       ]
     },

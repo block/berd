@@ -9,6 +9,7 @@ use crate::commands::sse::{SseDecoder, SseMessage};
 
 const KGOOSE_AUTOMATIONS_BASE_URL_ENV: &str = "GOOSE_INTERNAL_KGOOSE_BASE_URL";
 const KGOOSE_AUTOMATIONS_PATH_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PATH";
+const KGOOSE_AUTOMATIONS_PLAYPEN_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PLAYPEN";
 const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.stage.sqprod.co/";
 const DEFAULT_KGOOSE_PATH: &str = "cash-app/goose";
 const MAX_ERROR_BODY_CHARS: usize = 500;
@@ -28,16 +29,18 @@ pub(super) const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
 pub(super) const DELETE_TILE_ENDPOINT: &str = "v3/delete-tile";
 pub(super) const GENERATE_CRON_SCHEDULE_ENDPOINT: &str = "v3/generate-cron-schedule";
 
-pub(super) async fn post_kgoose_json(
+pub(crate) async fn post_kgoose_json(
     distro_state: &DistroBundleState,
     endpoint: &str,
     body: Value,
 ) -> Result<Value, String> {
     let url = build_kgoose_url(endpoint, distro_state.kgoose_config())?;
-    let response = kgoose_client()
+    let request = kgoose_client()
         .post(url.clone())
         .header(ACCEPT, "application/json")
-        .header(CONTENT_TYPE, "application/json")
+        .header(CONTENT_TYPE, "application/json");
+    let request = add_kgoose_playpen_baggage(request);
+    let response = request
         .timeout(KGOOSE_JSON_REQUEST_TIMEOUT)
         .json(&body)
         .send()
@@ -77,6 +80,7 @@ pub(super) async fn open_kgoose_sse_stream(
         .get(url.clone())
         .header(ACCEPT, "text/event-stream")
         .header(CACHE_CONTROL, "no-cache");
+    request = add_kgoose_playpen_baggage(request);
     if let Some(last_event_id) = last_event_id {
         request = request.header("Last-Event-ID", last_event_id);
     }
@@ -166,6 +170,17 @@ fn kgoose_client() -> &'static reqwest::Client {
             .build()
             .expect("failed to build kgoose HTTP client")
     })
+}
+
+fn add_kgoose_playpen_baggage(request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    match kgoose_playpen_baggage() {
+        Some(playpen_baggage) => request.header("Baggage", playpen_baggage),
+        None => request,
+    }
+}
+
+fn kgoose_playpen_baggage() -> Option<String> {
+    env_value(KGOOSE_AUTOMATIONS_PLAYPEN_ENV).map(|playpen| format!("kgoose-playpen={playpen}"))
 }
 
 fn build_kgoose_url(
@@ -287,9 +302,10 @@ fn messages_payload_from_sse_message(event: &SseMessage) -> Result<Option<Value>
 #[cfg(test)]
 mod tests {
     use super::{
-        build_kgoose_sse_url, build_kgoose_url, messages_payload_from_sse_message,
-        truncate_error_body, KgooseDistroConfig, KGOOSE_AUTOMATIONS_BASE_URL_ENV,
-        KGOOSE_AUTOMATIONS_PATH_ENV,
+        build_kgoose_sse_url, build_kgoose_url, kgoose_playpen_baggage,
+        messages_payload_from_sse_message, truncate_error_body, KgooseDistroConfig,
+        KGOOSE_AUTOMATIONS_BASE_URL_ENV, KGOOSE_AUTOMATIONS_PATH_ENV,
+        KGOOSE_AUTOMATIONS_PLAYPEN_ENV,
     };
     use crate::commands::sse::SseMessage;
     use serde_json::json;
@@ -403,6 +419,29 @@ mod tests {
                 .as_str(),
             "https://kgoose.stage.sqprod.co/cash-app/goose/v3/get-messages-sse?session_id=session%2F1"
         );
+    }
+
+    #[test]
+    fn builds_playpen_baggage_from_trimmed_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        env::set_var(KGOOSE_AUTOMATIONS_PLAYPEN_ENV, " kalvin ");
+
+        assert_eq!(
+            kgoose_playpen_baggage(),
+            Some("kgoose-playpen=kalvin".to_string())
+        );
+
+        env::remove_var(KGOOSE_AUTOMATIONS_PLAYPEN_ENV);
+    }
+
+    #[test]
+    fn omits_empty_playpen_baggage() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        env::set_var(KGOOSE_AUTOMATIONS_PLAYPEN_ENV, " ");
+
+        assert_eq!(kgoose_playpen_baggage(), None);
+
+        env::remove_var(KGOOSE_AUTOMATIONS_PLAYPEN_ENV);
     }
 
     #[test]

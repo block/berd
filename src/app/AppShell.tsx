@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { getVersion } from "@tauri-apps/api/app";
-import { openFeedbackForm } from "@/shared/api/feedback";
+import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
 import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -1490,17 +1489,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setContextPanelOpen(activeSessionId, !isContextPanelOpen);
   }, [activeSessionId, isContextPanelOpen, setContextPanelOpen]);
 
-  const handleFeedbackClick = useCallback(async () => {
-    let version: string;
-    try {
-      version = await getVersion();
-    } catch {
-      version = "unknown";
-    }
-    await openFeedbackForm({
-      version,
-      platform: getPlatform(),
-    });
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const handleFeedbackClick = useCallback(() => {
+    setFeedbackOpen(true);
   }, []);
 
   const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
@@ -1868,6 +1859,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         )}
       </AppShellLayout>
       <AgentBuilderLeaveDraftDialog {...agentBuilder.leaveDraftDialogProps} />
+      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </>
   );
 }

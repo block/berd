@@ -157,6 +157,7 @@ pub fn run() {
             commands::artifacts::get_artifacts,
             commands::doctor::run_doctor,
             commands::doctor::run_doctor_fix,
+            commands::feedback::submit_feedback_issue,
             commands::git::get_git_state,
             commands::git_changes::get_changed_files,
             commands::git::git_switch_branch,

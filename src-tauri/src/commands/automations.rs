@@ -3,8 +3,9 @@ mod sanitize;
 mod stream_registry;
 
 use crate::services::distro_bundle::DistroBundleState;
+pub(crate) use client::post_kgoose_json;
 use client::{
-    build_kgoose_sse_url, get_kgoose_messages_snapshot, open_kgoose_sse_stream, post_kgoose_json,
+    build_kgoose_sse_url, get_kgoose_messages_snapshot, open_kgoose_sse_stream,
     read_kgoose_sse_chunk, CANCEL_LAST_USER_MESSAGE_ENDPOINT, CREATE_TILE_ENDPOINT,
     DELETE_TILE_ENDPOINT, GENERATE_CRON_SCHEDULE_ENDPOINT, GET_MESSAGES_SSE_ENDPOINT,
     GET_TILE_ENDPOINT, GET_TILE_RESULTS_ENDPOINT, GET_USER_TILES_ENDPOINT, PUSH_MESSAGES_ENDPOINT,

@@ -1,18 +1,32 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { invoke } from "@tauri-apps/api/core";
 
-export interface FeedbackContext {
-  version: string;
-  platform: string;
+export interface SubmitFeedbackIssueInput {
+  title: string;
+  description: string;
 }
 
-export async function openFeedbackForm(
-  context: FeedbackContext,
-): Promise<void> {
-  const body = `Describe your issue or feedback here\n\n---\n**Context**\n- App version: ${context.version}\n- Platform: ${context.platform}`;
-  const params = new URLSearchParams({
-    project: "Goose Internal Feedback",
-    description: body,
+export interface SubmitFeedbackIssueResult {
+  issueUrl?: string;
+}
+
+export async function submitFeedbackIssue(
+  input: SubmitFeedbackIssueInput,
+): Promise<SubmitFeedbackIssueResult> {
+  const response = await invoke<unknown>("submit_feedback_issue", {
+    title: input.title,
+    description: input.description,
   });
-  const webUrl = `https://linear.app/squareup/team/BOT/new?${params.toString()}`;
-  await openUrl(webUrl);
+
+  if (response && typeof response === "object") {
+    const record = response as Record<string, unknown>;
+    const issueUrl =
+      typeof record.issueUrl === "string"
+        ? record.issueUrl
+        : typeof record.issue_url === "string"
+          ? record.issue_url
+          : undefined;
+    return { issueUrl };
+  }
+
+  return {};
 }

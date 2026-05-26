@@ -1,3 +1,22 @@
 {
-  "title": "Send Feedback"
+  "title": "Send Feedback",
+  "dialog": {
+    "title": "Submit Bugs or Feedback",
+    "description": "Help us improve by reporting bugs or sharing general feedback.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "Brief summary",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Describe your issue or feedback…",
+    "submit": "Submit",
+    "submitting": "Submitting…",
+    "submitError": "Failed to submit feedback",
+    "successTitle": "Thank you!",
+    "successBody": "Your feedback has been submitted.",
+    "viewTicket": "View ticket",
+    "submitAnother": "Submit another",
+    "discardTitle": "Discard feedback?",
+    "discardBody": "You have unsubmitted feedback. Your changes will be lost.",
+    "discardCancel": "Cancel",
+    "discardConfirm": "Discard"
+  }
 }

@@ -1,3 +1,22 @@
 {
-  "title": "Enviar comentarios"
+  "title": "Enviar comentarios",
+  "dialog": {
+    "title": "Enviar errores o comentarios",
+    "description": "Ayúdanos a mejorar reportando errores o compartiendo comentarios.",
+    "titleLabel": "Título",
+    "titlePlaceholder": "Resumen breve",
+    "descriptionLabel": "Descripción",
+    "descriptionPlaceholder": "Describe tu problema o comentario…",
+    "submit": "Enviar",
+    "submitting": "Enviando…",
+    "submitError": "No se pudo enviar el comentario",
+    "successTitle": "¡Gracias!",
+    "successBody": "Tu comentario ha sido enviado.",
+    "viewTicket": "Ver ticket",
+    "submitAnother": "Enviar otro",
+    "discardTitle": "¿Descartar comentario?",
+    "discardBody": "Tienes comentarios sin enviar. Se perderán tus cambios.",
+    "discardCancel": "Cancelar",
+    "discardConfirm": "Descartar"
+  }
 }
