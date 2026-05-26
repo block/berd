@@ -23,8 +23,17 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
 }));
 
 vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
-  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
-    <div data-testid="project-artifact-preview">{input.name}</div>
+  ProjectArtifactPreview: ({
+    input,
+  }: {
+    input: { artifact?: { seed: number } | null; name: string };
+  }) => (
+    <div
+      data-artifact-seed={input.artifact?.seed ?? ""}
+      data-testid="project-artifact-preview"
+    >
+      {input.name}
+    </div>
   ),
 }));
 
@@ -92,6 +101,27 @@ describe("ProjectArtifactWidget", () => {
       "group-hover:opacity-100",
     );
     expect(screen.queryByText("Project")).not.toBeInTheDocument();
+  });
+
+  it("passes the saved artifact identity to the preview", () => {
+    state.projects = [
+      project({
+        artifact: {
+          seed: 1234,
+          color: "olive",
+          mood: "serene",
+          moodIntensity: 0.5,
+          contentMode: "cubeStatic",
+        },
+      }),
+    ];
+
+    renderWidget();
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-artifact-seed",
+      "1234",
+    );
   });
 
   it("starts a project chat when activated", () => {

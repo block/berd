@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getClient } from "@/shared/api/acpConnection";
+import {
+  createProjectArtifactMetadata,
+  parseProjectArtifactMetadata,
+} from "../artifact/deriveProjectArtifactState";
+import type { ProjectArtifactMetadata } from "../artifact/types";
 
 export interface ProjectInfo {
   id: string;
@@ -16,6 +21,7 @@ export interface ProjectInfo {
   useWorktrees: boolean;
   order: number;
   archivedAt: string | null;
+  artifact?: ProjectArtifactMetadata | null;
 }
 
 // Shape returned by _goose/sources/*. Narrowed to project-type sources here.
@@ -45,6 +51,7 @@ function toProjectInfo(source: SourceEntry): ProjectInfo {
     useWorktrees: (p.useWorktrees as boolean) ?? false,
     order: (p.order as number) ?? 0,
     archivedAt: (p.archivedAt as string) ?? null,
+    artifact: parseProjectArtifactMetadata(p.artifact),
   };
 }
 
@@ -58,6 +65,7 @@ interface ProjectMetadataFields {
   useWorktrees: boolean;
   order: number;
   archivedAt: string | null;
+  artifact?: ProjectArtifactMetadata | null;
 }
 
 function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
@@ -71,6 +79,7 @@ function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
   if (info.useWorktrees) props.useWorktrees = info.useWorktrees;
   if (typeof info.order === "number") props.order = info.order;
   if (info.archivedAt) props.archivedAt = info.archivedAt;
+  if (info.artifact) props.artifact = info.artifact;
   return props;
 }
 
@@ -145,6 +154,13 @@ export async function createProject(
   const client = await getClient();
   const existing = await listAllProjects();
   const id = uniqueProjectSlug(name, new Set(existing.map((p) => p.id)));
+  const artifact = createProjectArtifactMetadata({
+    projectId: null,
+    name,
+    prompt,
+    color,
+    workingDirs,
+  });
   const raw = await client.extMethod("_goose/sources/create", {
     type: "project",
     name: id,
@@ -161,9 +177,59 @@ export async function createProject(
       useWorktrees,
       order: 0,
       archivedAt: null,
+      artifact,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);
+}
+
+function shouldCreateArtifactForUpdate(
+  updates: Partial<Omit<ProjectInfo, "id" | "path">>,
+) {
+  return (
+    updates.name !== undefined ||
+    updates.prompt !== undefined ||
+    updates.color !== undefined ||
+    updates.workingDirs !== undefined
+  );
+}
+
+function artifactForUpdate(
+  existing: ProjectInfo,
+  updates: Partial<Omit<ProjectInfo, "id" | "path">>,
+  merged: ProjectInfo,
+): ProjectArtifactMetadata | null {
+  if ("artifact" in updates) {
+    return updates.artifact ?? null;
+  }
+
+  if (existing.artifact) {
+    return {
+      ...existing.artifact,
+      color:
+        updates.color !== undefined
+          ? createProjectArtifactMetadata({
+              projectId: existing.id,
+              name: merged.name,
+              prompt: merged.prompt,
+              color: merged.color,
+              workingDirs: merged.workingDirs,
+            }).color
+          : existing.artifact.color,
+    };
+  }
+
+  if (!shouldCreateArtifactForUpdate(updates)) {
+    return null;
+  }
+
+  return createProjectArtifactMetadata({
+    projectId: existing.id,
+    name: merged.name,
+    prompt: merged.prompt,
+    color: merged.color,
+    workingDirs: merged.workingDirs,
+  });
 }
 
 export async function updateProject(
@@ -171,6 +237,7 @@ export async function updateProject(
   updates: Partial<Omit<ProjectInfo, "id" | "path">>,
 ): Promise<ProjectInfo> {
   const merged = { ...existing, ...updates };
+  const artifact = artifactForUpdate(existing, updates, merged);
   const client = await getClient();
   const raw = await client.extMethod("_goose/sources/update", {
     type: "project",
@@ -188,6 +255,7 @@ export async function updateProject(
       useWorktrees: merged.useWorktrees,
       order: merged.order,
       archivedAt: merged.archivedAt,
+      artifact,
     }),
   });
   return toProjectInfo(raw.source as SourceEntry);

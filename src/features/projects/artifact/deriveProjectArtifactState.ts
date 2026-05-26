@@ -3,6 +3,7 @@ import { isPillTone, pillCssColor, type PillTone } from "../lib/pillTones";
 import type {
   ProjectArtifactContentMode,
   ProjectArtifactInput,
+  ProjectArtifactMetadata,
   ProjectArtifactMood,
   ProjectArtifactState,
 } from "./types";
@@ -46,8 +47,16 @@ function normalizedText(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
 
-function colorForProject(color: string | null | undefined) {
+function normalizedArtifactColor(color: string | null | undefined) {
   const normalized = normalizedText(color) || DEFAULT_PROJECT_COLOR;
+  if (isPillTone(normalized) || /^#[0-9a-f]{3,8}$/i.test(normalized)) {
+    return normalized;
+  }
+  return DEFAULT_PROJECT_COLOR;
+}
+
+function colorForProject(color: string | null | undefined) {
+  const normalized = normalizedArtifactColor(color);
   if (isPillTone(normalized)) {
     return {
       accentColor: PILL_TONE_HEX[normalized],
@@ -94,7 +103,62 @@ function contentModeForInput(
   return CONTENT_MODES[seed % CONTENT_MODES.length];
 }
 
-export function deriveProjectArtifactState(
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function finiteNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function finiteSeed(value: unknown): number | null {
+  const number = finiteNumber(value);
+  if (number === null) return null;
+  return Math.max(0, Math.floor(number)) >>> 0;
+}
+
+function isProjectArtifactMood(value: unknown): value is ProjectArtifactMood {
+  return (
+    typeof value === "string" && MOODS.includes(value as ProjectArtifactMood)
+  );
+}
+
+function isProjectArtifactContentMode(
+  value: unknown,
+): value is ProjectArtifactContentMode {
+  return (
+    typeof value === "string" &&
+    CONTENT_MODES.includes(value as ProjectArtifactContentMode)
+  );
+}
+
+export function parseProjectArtifactMetadata(
+  value: unknown,
+): ProjectArtifactMetadata | null {
+  if (!isRecord(value)) return null;
+
+  const seed = finiteSeed(value.seed);
+  const moodIntensity = finiteNumber(value.moodIntensity);
+  if (
+    seed === null ||
+    moodIntensity === null ||
+    typeof value.color !== "string" ||
+    !isProjectArtifactMood(value.mood) ||
+    !isProjectArtifactContentMode(value.contentMode)
+  ) {
+    return null;
+  }
+
+  return {
+    seed,
+    color: normalizedArtifactColor(value.color),
+    mood: value.mood,
+    moodIntensity: Math.max(0, Math.min(1, moodIntensity)),
+    contentMode: value.contentMode,
+  };
+}
+
+function deriveBaseProjectArtifactState(
   input: ProjectArtifactInput,
 ): ProjectArtifactState {
   const name = normalizedText(input.name) || "Untitled project";
@@ -125,5 +189,39 @@ export function deriveProjectArtifactState(
     mood: moodForInput(input, seed),
     moodIntensity,
     contentMode: contentModeForInput(input, seed),
+  };
+}
+
+export function createProjectArtifactMetadata(
+  input: ProjectArtifactInput,
+): ProjectArtifactMetadata {
+  const state = deriveBaseProjectArtifactState(input);
+  return {
+    seed: state.seed,
+    color: normalizedArtifactColor(input.color),
+    mood: state.mood,
+    moodIntensity: state.moodIntensity,
+    contentMode: state.contentMode,
+  };
+}
+
+export function deriveProjectArtifactState(
+  input: ProjectArtifactInput,
+): ProjectArtifactState {
+  const state = deriveBaseProjectArtifactState(input);
+  const artifact = parseProjectArtifactMetadata(input.artifact);
+  if (!artifact) {
+    return state;
+  }
+
+  const { accentColor, accentCssColor } = colorForProject(artifact.color);
+  return {
+    ...state,
+    seed: artifact.seed,
+    accentColor,
+    accentCssColor,
+    mood: artifact.mood,
+    moodIntensity: artifact.moodIntensity,
+    contentMode: artifact.contentMode,
   };
 }

@@ -65,6 +65,7 @@ export function ProjectArtifactWidget({
             color: project.color,
             workingDirs: project.workingDirs,
             sessionCount,
+            artifact: project.artifact ?? null,
           }
         : {
             projectId,
@@ -72,6 +73,7 @@ export function ProjectArtifactWidget({
             color: null,
             workingDirs: [],
             sessionCount: 0,
+            artifact: null,
           },
     [project, projectId, sessionCount, t],
   );

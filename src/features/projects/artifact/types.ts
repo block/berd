@@ -19,6 +19,7 @@ export interface ProjectArtifactInput {
   color?: string | null;
   workingDirs?: string[];
   sessionCount?: number;
+  artifact?: ProjectArtifactMetadata | null;
 }
 
 export interface ProjectArtifactState {
@@ -26,6 +27,14 @@ export interface ProjectArtifactState {
   name: string;
   accentColor: string;
   accentCssColor: string;
+  mood: ProjectArtifactMood;
+  moodIntensity: number;
+  contentMode: ProjectArtifactContentMode;
+}
+
+export interface ProjectArtifactMetadata {
+  seed: number;
+  color: string;
   mood: ProjectArtifactMood;
   moodIntensity: number;
   contentMode: ProjectArtifactContentMode;
