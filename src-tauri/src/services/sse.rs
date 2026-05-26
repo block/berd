@@ -94,11 +94,11 @@ fn parse_sse_message(raw_event: &str) -> Option<SseMessage> {
             continue;
         }
         if let Some(value) = line.strip_prefix("id:") {
-            id = Some(value.trim_start().to_string());
+            id = Some(strip_one_space(value).to_string());
         } else if let Some(value) = line.strip_prefix("event:") {
-            event = Some(value.trim_start().to_string());
+            event = Some(strip_one_space(value).to_string());
         } else if let Some(value) = line.strip_prefix("data:") {
-            data_lines.push(value.trim_start().to_string());
+            data_lines.push(strip_one_space(value).to_string());
         }
     }
 
@@ -112,6 +112,10 @@ fn parse_sse_message(raw_event: &str) -> Option<SseMessage> {
         event,
         data: data_lines.join("\n"),
     })
+}
+
+fn strip_one_space(value: &str) -> &str {
+    value.strip_prefix(' ').unwrap_or(value)
 }
 
 #[cfg(test)]
@@ -163,5 +167,16 @@ mod tests {
 
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].data, "{\"text\":\"cafe\u{301}\"}");
+    }
+
+    #[test]
+    fn strips_only_one_optional_space_after_field_separator() {
+        let events =
+            decode_events(b"id:  abc\nevent:\tmessages\ndata:\tindented\ndata:  spaced\n\n");
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id.as_deref(), Some(" abc"));
+        assert_eq!(events[0].event, "\tmessages");
+        assert_eq!(events[0].data, "\tindented\n spaced");
     }
 }

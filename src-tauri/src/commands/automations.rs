@@ -1,15 +1,10 @@
-mod client;
 mod sanitize;
 mod stream_registry;
 
-use crate::services::distro_bundle::DistroBundleState;
-pub(crate) use client::post_kgoose_json;
-use client::{
-    build_kgoose_sse_url, get_kgoose_messages_snapshot, open_kgoose_sse_stream,
-    read_kgoose_sse_chunk, CANCEL_LAST_USER_MESSAGE_ENDPOINT, CREATE_TILE_ENDPOINT,
-    DELETE_TILE_ENDPOINT, GENERATE_CRON_SCHEDULE_ENDPOINT, GET_MESSAGES_SSE_ENDPOINT,
-    GET_TILE_ENDPOINT, GET_TILE_RESULTS_ENDPOINT, GET_USER_TILES_ENDPOINT, PUSH_MESSAGES_ENDPOINT,
-    UPDATE_TILE_ENDPOINT,
+use crate::services::{
+    distro_bundle::DistroBundleState,
+    kgoose::{self, build_sse_url, open_sse_stream, read_sse_chunk},
+    sse::{SseDecoder, SseMessage},
 };
 use sanitize::{
     is_builderbot_automation_type, sanitize_create_automation_tile_request,
@@ -21,10 +16,21 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use stream_registry::AutomationStreamRegistry;
 use tauri::{AppHandle, Emitter, Manager, State, Window};
-
-use super::sse::SseDecoder;
+use tokio::time::{timeout, Duration};
 
 pub const AUTOMATION_BUILDER_STREAM_EVENT: &str = "automation-builder-stream";
+
+const CANCEL_LAST_USER_MESSAGE_ENDPOINT: &str = "v3/cancel-last-user-message";
+const CREATE_TILE_ENDPOINT: &str = "v3/create-tile";
+const DELETE_TILE_ENDPOINT: &str = "v3/delete-tile";
+const GENERATE_CRON_SCHEDULE_ENDPOINT: &str = "v3/generate-cron-schedule";
+const GET_MESSAGES_SSE_ENDPOINT: &str = "v3/get-messages-sse";
+const GET_TILE_ENDPOINT: &str = "v3/get-tile";
+const GET_TILE_RESULTS_ENDPOINT: &str = "v3/get-tile-results";
+const GET_USER_TILES_ENDPOINT: &str = "v3/get-user-tiles";
+const KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
+const PUSH_MESSAGES_ENDPOINT: &str = "v3/push-messages";
+const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
 
 #[derive(Default)]
 pub struct AutomationStreamState {
@@ -52,7 +58,7 @@ struct AutomationBuilderStreamPayload {
 
 #[tauri::command]
 pub async fn get_automation_tiles(state: State<'_, DistroBundleState>) -> Result<Value, String> {
-    post_kgoose_json(
+    kgoose::post_json(
         state.inner(),
         GET_USER_TILES_ENDPOINT,
         json!({ "spaceId": null }),
@@ -66,7 +72,7 @@ pub async fn get_automation_tile(
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    post_kgoose_json(state.inner(), GET_TILE_ENDPOINT, json!({ "id": id })).await
+    kgoose::post_json(state.inner(), GET_TILE_ENDPOINT, json!({ "id": id })).await
 }
 
 #[tauri::command]
@@ -75,7 +81,7 @@ pub async fn get_automation_tile_results(
     tile_id: String,
 ) -> Result<Value, String> {
     let tile_id = trim_required_string(&tile_id, "automation id")?;
-    post_kgoose_json(
+    kgoose::post_json(
         state.inner(),
         GET_TILE_RESULTS_ENDPOINT,
         json!({ "tileId": tile_id }),
@@ -89,7 +95,7 @@ pub async fn create_automation_tile(
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_create_automation_tile_request(request)?;
-    post_kgoose_json(state.inner(), CREATE_TILE_ENDPOINT, request).await
+    kgoose::post_json(state.inner(), CREATE_TILE_ENDPOINT, request).await
 }
 
 #[tauri::command]
@@ -98,7 +104,7 @@ pub async fn push_automation_builder_messages(
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_push_automation_builder_messages_request(request)?;
-    post_kgoose_json(state.inner(), PUSH_MESSAGES_ENDPOINT, request).await
+    kgoose::post_json(state.inner(), PUSH_MESSAGES_ENDPOINT, request).await
 }
 
 #[tauri::command]
@@ -107,7 +113,7 @@ pub async fn cancel_automation_builder_message(
     session_id: String,
 ) -> Result<Value, String> {
     let session_id = trim_required_string(&session_id, "session id")?;
-    post_kgoose_json(
+    kgoose::post_json(
         state.inner(),
         CANCEL_LAST_USER_MESSAGE_ENDPOINT,
         json!({ "sessionId": session_id }),
@@ -126,7 +132,7 @@ pub async fn start_automation_builder_stream(
 ) -> Result<(), String> {
     let session_id = trim_required_string(&session_id, "session id")?;
     let stream_id = trim_required_string(&stream_id, "stream id")?;
-    let url = build_kgoose_sse_url(
+    let url = build_sse_url(
         GET_MESSAGES_SSE_ENDPOINT,
         &session_id,
         distro_state.inner().kgoose_config(),
@@ -198,7 +204,7 @@ pub async fn update_automation_tile(
         .ok_or_else(|| "automation id must not be empty".to_string())?
         .to_string();
     ensure_generic_automation_tile(state.inner(), &id).await?;
-    post_kgoose_json(state.inner(), UPDATE_TILE_ENDPOINT, request).await
+    kgoose::post_json(state.inner(), UPDATE_TILE_ENDPOINT, request).await
 }
 
 #[tauri::command]
@@ -208,7 +214,7 @@ pub async fn delete_automation_tile(
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
     ensure_generic_automation_tile(state.inner(), &id).await?;
-    post_kgoose_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
+    kgoose::post_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
 }
 
 #[tauri::command]
@@ -222,7 +228,7 @@ pub async fn generate_automation_schedule(
     if let Some(time_zone) = time_zone.as_deref().and_then(trim_optional_string) {
         body["timeZone"] = Value::String(time_zone);
     }
-    post_kgoose_json(state.inner(), GENERATE_CRON_SCHEDULE_ENDPOINT, body).await
+    kgoose::post_json(state.inner(), GENERATE_CRON_SCHEDULE_ENDPOINT, body).await
 }
 
 #[tauri::command]
@@ -231,14 +237,14 @@ pub async fn get_automation_session_messages(
     session_id: String,
 ) -> Result<Value, String> {
     let session_id = trim_required_string(&session_id, "session id")?;
-    get_kgoose_messages_snapshot(state.inner(), &session_id).await
+    get_automation_messages_snapshot(state.inner(), &session_id).await
 }
 
 async fn ensure_generic_automation_tile(
     distro_state: &DistroBundleState,
     id: &str,
 ) -> Result<(), String> {
-    let response = post_kgoose_json(distro_state, GET_TILE_ENDPOINT, json!({ "id": id })).await?;
+    let response = kgoose::post_json(distro_state, GET_TILE_ENDPOINT, json!({ "id": id })).await?;
     let tile = response
         .get("tileInfo")
         .or_else(|| response.get("tile_info"))
@@ -273,11 +279,11 @@ async fn stream_kgoose_messages(
     session_id: String,
     last_event_id: Option<reqwest::header::HeaderValue>,
 ) -> Result<(), String> {
-    let mut response = open_kgoose_sse_stream(url.clone(), last_event_id).await?;
+    let mut response = open_sse_stream(url.clone(), last_event_id).await?;
     let mut decoder = SseDecoder::default();
 
     loop {
-        let Some(chunk) = read_kgoose_sse_chunk(&mut response, &url).await? else {
+        let Some(chunk) = read_sse_chunk(&mut response, &url).await? else {
             return Ok(());
         };
 
@@ -337,9 +343,63 @@ fn parse_automation_sse_event_data(event: &str, data: &str) -> Result<Option<Val
     }
 }
 
+async fn get_automation_messages_snapshot(
+    distro_state: &DistroBundleState,
+    session_id: &str,
+) -> Result<Value, String> {
+    timeout(KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT, async {
+        let mut url = build_sse_url(
+            GET_MESSAGES_SSE_ENDPOINT,
+            session_id,
+            distro_state.kgoose_config(),
+        )?;
+        url.query_pairs_mut()
+            .append_pair("update_last_read_at", "false");
+
+        let mut response = open_sse_stream(url.clone(), None).await?;
+        let mut decoder = SseDecoder::default();
+        while let Some(chunk) = read_sse_chunk(&mut response, &url).await? {
+            for event in decoder.push_chunk(&chunk) {
+                if let Some(payload) = automation_messages_payload_from_sse_message(&event)? {
+                    return Ok(payload);
+                }
+            }
+        }
+
+        Err("kgoose messages stream ended before returning session messages".to_string())
+    })
+    .await
+    .map_err(|_| "Timed out waiting for kgoose session messages".to_string())?
+}
+
+fn automation_messages_payload_from_sse_message(
+    event: &SseMessage,
+) -> Result<Option<Value>, String> {
+    if event.event != "messages" || event.data.is_empty() {
+        return Ok(None);
+    }
+
+    let payload: Value = serde_json::from_str(&event.data)
+        .map_err(|error| format!("Failed to parse kgoose SSE event: {error}"))?;
+
+    // kgoose has sent both proto/snake casing and generated/camel casing across
+    // clients; keep accepting both at this automation boundary.
+    if payload.get("get_messages_response").is_some()
+        || payload.get("getMessagesResponse").is_some()
+    {
+        Ok(Some(payload))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{parse_automation_sse_event_data, validate_generic_automation_tile};
+    use super::{
+        automation_messages_payload_from_sse_message, parse_automation_sse_event_data,
+        validate_generic_automation_tile,
+    };
+    use crate::services::sse::SseMessage;
     use serde_json::json;
 
     #[test]
@@ -374,6 +434,32 @@ mod tests {
             None
         );
         assert!(parse_automation_sse_event_data("messages", "still alive").is_err());
+    }
+
+    #[test]
+    fn extracts_only_full_messages_sse_payloads() {
+        let delta = SseMessage {
+            id: None,
+            event: "messages".to_string(),
+            data: "{\"delta_message_content\":{\"streaming_message_id\":\"msg-1\"}}".to_string(),
+        };
+        assert!(automation_messages_payload_from_sse_message(&delta)
+            .unwrap()
+            .is_none());
+
+        let snapshot = SseMessage {
+            id: None,
+            event: "messages".to_string(),
+            data: "{\"get_messages_response\":{\"messages\":[{\"id\":\"msg-1\"}]}}".to_string(),
+        };
+        assert_eq!(
+            automation_messages_payload_from_sse_message(&snapshot).unwrap(),
+            Some(json!({
+                "get_messages_response": {
+                    "messages": [{ "id": "msg-1" }]
+                }
+            }))
+        );
     }
 }
 

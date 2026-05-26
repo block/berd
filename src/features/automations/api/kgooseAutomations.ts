@@ -1,11 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { normalizeKgooseJson } from "./kgooseJson";
+import { normalizeKgooseJson } from "@/shared/api/kgooseJson";
 import {
   asKgooseMessagesResponse,
   type KgooseMessagesResponse,
-} from "./kgooseSessionMessages";
-
-export { normalizeKgooseJson, type KgooseJson } from "./kgooseJson";
+} from "@/shared/api/kgooseMessages";
 
 export interface AutomationTile {
   id?: string;

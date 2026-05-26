@@ -1,5 +1,4 @@
-use crate::commands::automations::post_kgoose_json;
-use crate::services::distro_bundle::DistroBundleState;
+use crate::services::{distro_bundle::DistroBundleState, kgoose};
 use serde_json::{json, Value};
 use tauri::State;
 
@@ -28,5 +27,5 @@ pub async fn submit_feedback_issue(
         "project_key": FEEDBACK_PROJECT_KEY,
     });
 
-    post_kgoose_json(state.inner(), FILE_ISSUE_ENDPOINT, body).await
+    kgoose::post_json(state.inner(), FILE_ISSUE_ENDPOINT, body).await
 }

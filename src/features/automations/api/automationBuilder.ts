@@ -4,7 +4,7 @@ import {
   createSystemNotificationMessage,
   type Message,
 } from "@/shared/types/messages";
-import { normalizeKgooseJson, type KgooseJson } from "./kgooseJson";
+import { normalizeKgooseJson, type KgooseJson } from "@/shared/api/kgooseJson";
 import {
   applyKgooseMessageDelta,
   asKgooseMessagesResponse,
@@ -12,7 +12,7 @@ import {
   type KgooseMessageDelta,
   type KgooseMessagesResponse,
   type KgooseSessionStatus,
-} from "./kgooseSessionMessages";
+} from "@/shared/api/kgooseMessages";
 
 export const AUTOMATION_BUILDER_STREAM_EVENT = "automation-builder-stream";
 export const AUTOMATION_APPROVAL_TOOL_NAME = "tile__preview_automation";

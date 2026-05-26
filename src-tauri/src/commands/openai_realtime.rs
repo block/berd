@@ -1,5 +1,6 @@
-use reqwest::header::{ACCEPT, CONTENT_TYPE};
+use crate::services::kgoose;
 use serde::Serialize;
+use serde_json::json;
 
 const OPENAI_REALTIME_CLIENT_SECRETS_URL: &str =
     "https://kgoose.sqprod.co/cash-app/goose/transcribe/v1/realtime-client-secret";
@@ -43,48 +44,70 @@ pub async fn get_openai_realtime_status() -> Result<OpenAiRealtimeStatus, String
 pub async fn create_openai_realtime_session() -> Result<OpenAiRealtimeSession, String> {
     let transcription_model = transcription_model();
 
-    let response = reqwest::Client::new()
-        .post(OPENAI_REALTIME_CLIENT_SECRETS_URL)
-        .header(CONTENT_TYPE, "application/json;charset=utf-8")
-        .header(ACCEPT, "application/json;charset=utf-8")
-        .body(r#"{"language":"en"}"#)
-        .send()
-        .await
-        .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
-
-    let status = response.status();
-    let body = response
-        .text()
-        .await
-        .map_err(|error| format!("Failed to read OpenAI realtime session response: {error}"))?;
-
-    if !status.is_success() {
-        return Err(format!(
-            "OpenAI realtime session request failed with {status}: {body}"
-        ));
-    }
-
-    let value: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|error| format!("Failed to parse OpenAI realtime session response: {error}"))?;
-    let client_secret = value
-        .get("client_secret")
-        .and_then(|secret| {
-            secret
-                .get("value")
-                .and_then(|value| value.as_str())
-                .or_else(|| secret.as_str())
-        })
-        .or_else(|| value.get("value").and_then(|value| value.as_str()))
-        .or_else(|| value.get("secret").and_then(|value| value.as_str()))
-        .ok_or_else(|| {
-            format!(
-                "OpenAI realtime client secret response did not include a recognized secret field: {body}"
-            )
-        })?
-        .to_string();
+    let value = kgoose::post_json_external_url(
+        OPENAI_REALTIME_CLIENT_SECRETS_URL,
+        json!({ "language": "en" }),
+    )
+    .await
+    .map_err(|error| format!("Failed to create OpenAI realtime session: {error}"))?;
+    let client_secret = parse_client_secret(&value)?;
 
     Ok(OpenAiRealtimeSession {
         client_secret,
         transcription_model,
     })
+}
+
+fn parse_client_secret(value: &serde_json::Value) -> Result<String, String> {
+    let client_secret = value.get("client_secret").and_then(client_secret_value);
+    let top_level_value = value.get("value").and_then(|value| value.as_str());
+    let top_level_secret = value.get("secret").and_then(|value| value.as_str());
+
+    client_secret
+        .or(top_level_value)
+        .or(top_level_secret)
+        .map(ToString::to_string)
+        .ok_or_else(|| {
+            format!(
+                "OpenAI realtime client secret response did not include a recognized secret field: {value}"
+            )
+        })
+}
+
+fn client_secret_value(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("value")
+        .and_then(|value| value.as_str())
+        .or_else(|| value.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_client_secret;
+    use serde_json::json;
+
+    #[test]
+    fn parses_supported_client_secret_shapes() {
+        assert_eq!(
+            parse_client_secret(&json!({ "client_secret": { "value": "nested" } })).unwrap(),
+            "nested"
+        );
+        assert_eq!(
+            parse_client_secret(&json!({ "client_secret": "direct" })).unwrap(),
+            "direct"
+        );
+        assert_eq!(
+            parse_client_secret(&json!({ "value": "value" })).unwrap(),
+            "value"
+        );
+        assert_eq!(
+            parse_client_secret(&json!({ "secret": "secret" })).unwrap(),
+            "secret"
+        );
+    }
+
+    #[test]
+    fn rejects_missing_client_secret() {
+        assert!(parse_client_secret(&json!({ "ok": true })).is_err());
+    }
 }

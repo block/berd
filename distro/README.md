@@ -62,7 +62,7 @@ Example:
   - reserved for future UI suggestions
 
 - `kgoose?: { baseUrl?: string, path?: string }`
-  - default kgoose endpoint used by the Automations panel
+  - default kgoose endpoint used by KGoose-backed features
   - `baseUrl` must use `http` or `https`
   - environment variables `GOOSE_INTERNAL_KGOOSE_BASE_URL` and
     `GOOSE_INTERNAL_KGOOSE_PATH` override these values for local testing
@@ -90,7 +90,7 @@ When the Tauri shell launches the long-lived `goose serve` process, it applies t
 - prepends `distro/bin` to `PATH` when present
 - adds `distro/config.yaml` to `GOOSE_ADDITIONAL_CONFIG_FILES` when present
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
-- uses `kgoose` as the default endpoint for the Automations panel
+- uses `kgoose` as the default endpoint for KGoose-backed features
 - installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
 
 This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
