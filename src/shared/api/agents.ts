@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { SourceEntry } from "@aaif/goose-sdk";
+import type { SourceEntry, SourceScope } from "@aaif/goose-sdk";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { getClient } from "@/shared/api/acpConnection";
 import type {
@@ -40,7 +40,7 @@ export type CreatePersonaSourceRequest = {
   name: string;
   description: string;
   content: string;
-  global: boolean;
+  target: SourceScope;
   properties?: AgentSourceProperties;
 };
 
@@ -570,11 +570,7 @@ export async function createPersonaSource(
   request: CreatePersonaSourceRequest,
 ): Promise<AgentSourceEntry> {
   const client = await getClient();
-  const { global: _global, ...sourceRequest } = request;
-  const response = await client.goose.GooseUnstableSourcesCreate({
-    ...sourceRequest,
-    target: { scope: "global" },
-  });
+  const response = await client.goose.GooseUnstableSourcesCreate(request);
 
   return requireAgentSource(response.source);
 }

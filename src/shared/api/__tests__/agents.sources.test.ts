@@ -50,7 +50,7 @@ describe("persona source helpers", () => {
       name: "Untitled agent",
       description: "Draft",
       content: "Draft in progress.",
-      global: true,
+      target: { scope: "global" },
       properties: { draft: true, builderSessionId: "abc" },
     });
 

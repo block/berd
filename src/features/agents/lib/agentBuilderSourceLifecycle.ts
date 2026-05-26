@@ -36,7 +36,7 @@ export async function createDraftAgentSource(
     name: placeholderAgentName(sessionId),
     description: PLACEHOLDER_AGENT_DESCRIPTION,
     content: PLACEHOLDER_AGENT_BODY,
-    global: true,
+    target: { scope: "global" },
     properties: { draft: true, builderSessionId: sessionId },
   };
   const created = await createPersonaSource(request);
