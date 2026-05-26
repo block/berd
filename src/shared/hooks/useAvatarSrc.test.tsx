@@ -179,7 +179,7 @@ describe("useAvatarSrc", () => {
     await act(async () => {
       localMediaCachesClearedHandler?.({
         avatars: true,
-        projectArtifactAssets: false,
+        artifacts: false,
       });
     });
 
@@ -215,7 +215,7 @@ describe("useAvatarSrc", () => {
     await act(async () => {
       localMediaCachesClearedHandler?.({
         avatars: false,
-        projectArtifactAssets: true,
+        artifacts: true,
       });
     });
 

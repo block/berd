@@ -15,8 +15,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const avatarManifestScript = pathToFileURL(
   resolve(repoRoot, "scripts/avatar-manifest.mjs"),
 ).href;
-const projectAssetManifestScript = pathToFileURL(
-  resolve(repoRoot, "scripts/project-artifacts-manifest.mjs"),
+const artifactManifestScript = pathToFileURL(
+  resolve(repoRoot, "scripts/artifacts-manifest.mjs"),
 ).href;
 const CATALOG_VERSION = "20260521T121530123Z";
 const BASE_URL = "https://example.test/avatars";
@@ -42,23 +42,24 @@ type AvatarManifestModule = {
   }) => Promise<{ version: string; manifest: AvatarManifest }>;
 };
 
-type ProjectAssetManifestModule = {
-  buildProjectAssetManifest: (options: {
+type ArtifactManifestModule = {
+  buildArtifactManifest: (options: {
     source: string;
     version: string;
-  }) => Promise<ProjectAssetManifest>;
-  promoteProjectAssets: (options: {
+  }) => Promise<ArtifactManifest>;
+  promoteArtifacts: (options: {
     version: string;
     fetchImpl: typeof fetch;
     baseUrl: string;
   }) => Promise<{ catalogVersion: string; manifestPath: string }>;
-  publishProjectAssets: (options: {
+  publishArtifacts: (options: {
     source: string;
     fetchImpl: typeof fetch;
     baseUrl: string;
     now?: Date;
+    version?: string;
     onProgress?: (event: { type: string }) => void;
-  }) => Promise<{ version: string; manifest: ProjectAssetManifest }>;
+  }) => Promise<{ version: string; manifest: ArtifactManifest }>;
 };
 
 type AvatarManifest = {
@@ -72,10 +73,16 @@ type AvatarManifest = {
   }>;
 };
 
-type ProjectAssetManifest = {
+type ArtifactManifest = {
   catalogVersion: string;
-  images: Array<{ id: string; path: string; byteSize: number; sha256: string }>;
-  environment: { id: string; path: string; byteSize: number; sha256: string };
+  assets: Array<{
+    kind: "environment" | "projectImage" | "collectionImage";
+    path: string;
+    mimeType: string;
+    byteSize: number;
+    sha256: string;
+    collectionId?: string;
+  }>;
 };
 
 type StoredArtifact = {
@@ -125,23 +132,26 @@ function writeCompleteSource(source = makeTempDir()) {
   return source;
 }
 
-function writeCompleteProjectAssetSource(source = makeTempDir()) {
+function writeCompleteArtifactSource(source = makeTempDir()) {
   for (let index = 1; index <= 12; index += 1) {
     const id = String(index).padStart(2, "0");
-    writeAsset(source, `images/memory-${id}.webp`, `memory-${id}`);
+    writeAsset(
+      source,
+      `assets/project-images/memory-${id}.webp`,
+      `memory-${id}`,
+    );
   }
-  writeAsset(source, "hdri/studio_soft.exr", "studio-soft");
-  return source;
+  writeAsset(source, "assets/images/fuzzies/fuzzy-01.png", "fuzzy-01");
+  writeAsset(source, "assets/hdri/studio_soft.exr", "studio-soft");
+  return resolve(source, "assets");
 }
 
 async function loadAvatarManifestModule() {
   return (await import(avatarManifestScript)) as AvatarManifestModule;
 }
 
-async function loadProjectAssetManifestModule() {
-  return (await import(
-    projectAssetManifestScript
-  )) as ProjectAssetManifestModule;
+async function loadArtifactManifestModule() {
+  return (await import(artifactManifestScript)) as ArtifactManifestModule;
 }
 
 function okResponse(body?: string, headers?: HeadersInit) {
@@ -656,7 +666,7 @@ describe("avatar manifest script", () => {
   });
 });
 
-describe("project asset manifest script", () => {
+describe("artifact manifest script", () => {
   beforeEach(() => {
     process.env.ARTIFACTORY_IDENTITY_TOKEN = "token";
   });
@@ -668,82 +678,73 @@ describe("project asset manifest script", () => {
     }
   });
 
-  it("builds a manifest for arbitrary WebP images and one environment", async () => {
-    const { buildProjectAssetManifest } =
-      await loadProjectAssetManifestModule();
-    const source = makeTempDir();
-    writeAsset(source, "images/zebra.webp", "zebra");
-    writeAsset(source, "images/alpha.webp", "alpha");
-    writeAsset(source, "hdri/loft.exr", "loft");
+  it("builds a manifest for supported assets", async () => {
+    const { buildArtifactManifest } = await loadArtifactManifestModule();
+    const root = makeTempDir();
+    writeAsset(root, "assets/project-images/zebra.webp", "zebra");
+    writeAsset(root, "assets/project-images/alpha.webp", "alpha");
+    writeAsset(root, "assets/images/fuzzies/fuzzy-01.png", "fuzzy-01");
+    writeAsset(root, "assets/hdri/loft.exr", "loft");
+    writeAsset(root, "assets/.DS_Store", "dotfile");
+    writeAsset(root, "video/ignored.mp4", "ignored");
 
-    const manifest = await buildProjectAssetManifest({
-      source,
+    const manifest = await buildArtifactManifest({
+      source: resolve(root, "assets"),
       version: CATALOG_VERSION,
     });
 
     expect(manifest.catalogVersion).toBe(CATALOG_VERSION);
-    expect(manifest.images.map((image) => image.path)).toEqual([
-      "images/alpha.webp",
-      "images/zebra.webp",
+    expect(manifest.assets.map((asset) => asset.path)).toEqual([
+      "assets/hdri/loft.exr",
+      "assets/images/fuzzies/fuzzy-01.png",
+      "assets/project-images/alpha.webp",
+      "assets/project-images/zebra.webp",
     ]);
-    expect(manifest.environment).toMatchObject({
-      id: "loft",
-      path: "hdri/loft.exr",
+    expect(manifest.assets[1]).toMatchObject({
+      kind: "collectionImage",
+      collectionId: "fuzzies",
     });
   });
 
-  it("rejects empty WebP image lists", async () => {
-    const { buildProjectAssetManifest } =
-      await loadProjectAssetManifestModule();
-    const source = makeTempDir();
-    mkdirSync(resolve(source, "images"), { recursive: true });
-    writeAsset(source, "hdri/studio_soft.exr", "studio-soft");
+  it("rejects empty asset lists", async () => {
+    const { buildArtifactManifest } = await loadArtifactManifestModule();
+    const root = makeTempDir();
+    mkdirSync(resolve(root, "assets"), { recursive: true });
 
     await expect(
-      buildProjectAssetManifest({ source, version: CATALOG_VERSION }),
-    ).rejects.toThrow(/at least one image/);
+      buildArtifactManifest({
+        source: resolve(root, "assets"),
+        version: CATALOG_VERSION,
+      }),
+    ).rejects.toThrow(/at least one asset/);
   });
 
-  it("rejects multiple environments", async () => {
-    const { buildProjectAssetManifest } =
-      await loadProjectAssetManifestModule();
-    const source = makeTempDir();
-    writeAsset(source, "images/memory-01.webp", "memory-01");
-    writeAsset(source, "hdri/studio_soft.exr", "studio-soft");
-    writeAsset(source, "hdri/loft.exr", "loft");
+  it("rejects unsupported and unsafe artifact paths", async () => {
+    const { buildArtifactManifest } = await loadArtifactManifestModule();
+    const unsupported = writeCompleteArtifactSource();
+    writeAsset(unsupported, "project-images/notes.txt", "notes");
 
     await expect(
-      buildProjectAssetManifest({ source, version: CATALOG_VERSION }),
-    ).rejects.toThrow(/exactly one environment/);
-  });
-
-  it("rejects unsupported and unsafe project asset paths", async () => {
-    const { buildProjectAssetManifest } =
-      await loadProjectAssetManifestModule();
-    const unsupported = writeCompleteProjectAssetSource();
-    writeAsset(unsupported, "images/notes.txt", "notes");
-
-    await expect(
-      buildProjectAssetManifest({
+      buildArtifactManifest({
         source: unsupported,
         version: CATALOG_VERSION,
       }),
     ).rejects.toThrow(/Unsupported project image extension/);
 
-    const stray = writeCompleteProjectAssetSource();
+    const stray = writeCompleteArtifactSource();
     writeAsset(stray, "README.md", "notes");
 
     await expect(
-      buildProjectAssetManifest({ source: stray, version: CATALOG_VERSION }),
-    ).rejects.toThrow(/outside images\/ or hdri\//);
+      buildArtifactManifest({ source: stray, version: CATALOG_VERSION }),
+    ).rejects.toThrow(/must match assets\/hdri/);
   });
 
-  it("publishes project assets and manifest without latest.json", async () => {
-    const { publishProjectAssets } = await loadProjectAssetManifestModule();
-    const source = writeCompleteProjectAssetSource();
+  it("publishes artifacts and manifest without latest.json", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
     const remote = makeArtifactFetch();
 
-    const result = await publishProjectAssets({
+    const result = await publishArtifacts({
       source,
       fetchImpl: remote.fetchImpl,
       baseUrl: BASE_URL,
@@ -751,41 +752,190 @@ describe("project asset manifest script", () => {
     });
 
     expect(result.version).toBe(CATALOG_VERSION);
-    expect(remote.puts).toHaveLength(14);
-    expect(remote.puts[0].path).toBe(
-      `${CATALOG_VERSION}/images/memory-01.webp`,
-    );
-    expect(remote.puts.at(-2)?.path).toBe(
-      `${CATALOG_VERSION}/hdri/studio_soft.exr`,
+    expect(remote.puts).toHaveLength(15);
+    expect(remote.puts.map((put) => put.path)).toContain(
+      `${CATALOG_VERSION}/assets/project-images/memory-01.webp`,
     );
     expect(remote.puts.at(-1)?.path).toBe(`${CATALOG_VERSION}/manifest.json`);
+    expect(remote.puts.map((put) => put.path)).toContain(
+      `${CATALOG_VERSION}/assets/hdri/studio_soft.exr`,
+    );
     expect(remote.puts.map((put) => put.path)).not.toContain("latest.json");
     expect(remote.puts.every((put) => put.ifNoneMatch === "*")).toBe(true);
   });
 
-  it("fails project publish when any remote target already exists", async () => {
-    const { publishProjectAssets } = await loadProjectAssetManifestModule();
-    const source = writeCompleteProjectAssetSource();
+  it("publishes artifacts with an explicit version", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const remote = makeArtifactFetch();
+    const version = "20260522T121530123Z";
+
+    const result = await publishArtifacts({
+      source,
+      fetchImpl: remote.fetchImpl,
+      baseUrl: BASE_URL,
+      now: new Date("2026-05-21T12:15:30.123Z"),
+      version,
+    });
+
+    expect(result.version).toBe(version);
+    expect(remote.puts[0].path.startsWith(`${version}/`)).toBe(true);
+  });
+
+  it("resumes partial artifact publishes with matching existing assets", async () => {
+    const { buildArtifactManifest, publishArtifacts } =
+      await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const manifest = await buildArtifactManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+    const existing = manifest.assets[0];
     const remote = makeArtifactFetch({
-      [`${CATALOG_VERSION}/images/memory-01.webp`]: storedArtifact("exists"),
+      [`${CATALOG_VERSION}/${existing.path}`]: {
+        body: readFileSync(resolve(dirname(source), existing.path), "utf8"),
+        contentLength: existing.byteSize,
+        contentType: "application/octet-stream",
+        sha256: existing.sha256,
+      },
+    });
+
+    await publishArtifacts({
+      source,
+      fetchImpl: remote.fetchImpl,
+      baseUrl: BASE_URL,
+      now: new Date("2026-05-21T12:15:30.123Z"),
+    });
+
+    expect(remote.puts.map((put) => put.path)).not.toContain(
+      `${CATALOG_VERSION}/${existing.path}`,
+    );
+    expect(remote.puts).toHaveLength(manifest.assets.length);
+    expect(remote.puts.at(-1)?.path).toBe(`${CATALOG_VERSION}/manifest.json`);
+  });
+
+  it("fails project publish when any remote target already exists", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const remote = makeArtifactFetch({
+      [`${CATALOG_VERSION}/assets/project-images/memory-01.webp`]:
+        storedArtifact("exists"),
     });
 
     await expect(
-      publishProjectAssets({
+      publishArtifacts({
         source,
         fetchImpl: remote.fetchImpl,
         baseUrl: BASE_URL,
         now: new Date("2026-05-21T12:15:30.123Z"),
       }),
-    ).rejects.toThrow(/Refusing to overwrite/);
+    ).rejects.toThrow(/mismatch/);
     expect(remote.puts).toEqual([]);
   });
 
-  it("promote validates remote project assets before writing latest.json", async () => {
-    const { buildProjectAssetManifest, promoteProjectAssets } =
-      await loadProjectAssetManifestModule();
-    const source = writeCompleteProjectAssetSource();
-    const manifest = await buildProjectAssetManifest({
+  it("treats a matching existing artifact manifest as already published", async () => {
+    const { buildArtifactManifest, publishArtifacts } =
+      await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const manifest = await buildArtifactManifest({
+      source,
+      version: CATALOG_VERSION,
+    });
+    const remote = makeArtifactFetch({
+      [`${CATALOG_VERSION}/manifest.json`]: storedJsonArtifact(
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      ),
+    });
+
+    await expect(
+      publishArtifacts({
+        source,
+        fetchImpl: remote.fetchImpl,
+        baseUrl: BASE_URL,
+        now: new Date("2026-05-21T12:15:30.123Z"),
+      }),
+    ).resolves.toMatchObject({ version: CATALOG_VERSION });
+    expect(remote.puts).toEqual([]);
+  });
+
+  it("fails when an existing artifact manifest differs", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const remote = makeArtifactFetch({
+      [`${CATALOG_VERSION}/manifest.json`]: storedJsonArtifact("{}\n"),
+    });
+
+    await expect(
+      publishArtifacts({
+        source,
+        fetchImpl: remote.fetchImpl,
+        baseUrl: BASE_URL,
+        now: new Date("2026-05-21T12:15:30.123Z"),
+      }),
+    ).rejects.toThrow(/different content/);
+    expect(remote.puts).toEqual([]);
+  });
+
+  it("retries transient artifact publish errors", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const remote = makeArtifactFetch();
+    let failures = 2;
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "HEAD" && failures > 0) {
+        failures -= 1;
+        return Promise.resolve(
+          new Response("try again", {
+            status: 503,
+            statusText: "Service Unavailable",
+          }),
+        );
+      }
+      return remote.fetchImpl(input, init);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      publishArtifacts({
+        source,
+        fetchImpl,
+        baseUrl: BASE_URL,
+        now: new Date("2026-05-21T12:15:30.123Z"),
+      }),
+    ).resolves.toMatchObject({ version: CATALOG_VERSION });
+    expect(failures).toBe(0);
+  });
+
+  it("includes Artifactory response bodies in artifact publish errors", async () => {
+    const { publishArtifacts } = await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const remote = makeArtifactFetch();
+    const fetchImpl = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        return Promise.resolve(
+          new Response("permission denied by repository policy", {
+            status: 403,
+            statusText: "Forbidden",
+          }),
+        );
+      }
+      return remote.fetchImpl(input, init);
+    }) as unknown as typeof fetch;
+
+    await expect(
+      publishArtifacts({
+        source,
+        fetchImpl,
+        baseUrl: BASE_URL,
+        now: new Date("2026-05-21T12:15:30.123Z"),
+      }),
+    ).rejects.toThrow(/permission denied by repository policy/);
+  });
+
+  it("promote validates remote artifacts before writing latest.json", async () => {
+    const { buildArtifactManifest, promoteArtifacts } =
+      await loadArtifactManifestModule();
+    const source = writeCompleteArtifactSource();
+    const manifest = await buildArtifactManifest({
       source,
       version: CATALOG_VERSION,
     });
@@ -794,24 +944,18 @@ describe("project asset manifest script", () => {
         JSON.stringify(manifest),
       ),
     };
-    for (const image of manifest.images) {
-      artifacts[`${CATALOG_VERSION}/${image.path}`] = {
-        body: readFileSync(resolve(source, image.path), "utf8"),
-        contentLength: image.byteSize,
+    for (const asset of manifest.assets) {
+      artifacts[`${CATALOG_VERSION}/${asset.path}`] = {
+        body: readFileSync(resolve(dirname(source), asset.path), "utf8"),
+        contentLength: asset.byteSize,
         contentType: "application/octet-stream",
-        sha256: image.sha256,
+        sha256: asset.sha256,
       };
     }
-    artifacts[`${CATALOG_VERSION}/${manifest.environment.path}`] = {
-      body: readFileSync(resolve(source, manifest.environment.path), "utf8"),
-      contentLength: manifest.environment.byteSize,
-      contentType: "application/octet-stream",
-      sha256: manifest.environment.sha256,
-    };
     const remote = makeArtifactFetch(artifacts);
 
     await expect(
-      promoteProjectAssets({
+      promoteArtifacts({
         version: CATALOG_VERSION,
         fetchImpl: remote.fetchImpl,
         baseUrl: BASE_URL,

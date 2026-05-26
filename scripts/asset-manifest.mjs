@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import process from "node:process";
 
 export const MANIFEST_FILENAME = "manifest.json";
@@ -22,7 +22,7 @@ export async function assetMetadata(file, mimeType) {
   const bytes = await readFile(file);
   return {
     mimeType,
-    byteSize: (await stat(file)).size,
+    byteSize: bytes.byteLength,
     sha256: createHash("sha256").update(bytes).digest("hex"),
   };
 }
@@ -43,14 +43,68 @@ export function authHeaders() {
   return { Authorization: `Bearer ${token}` };
 }
 
+const RETRYABLE_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+const BASE_RETRY_DELAY_MS = 50;
+const MAX_ERROR_BODY_CHARS = 2048;
+
+function retryDelayMs(attempt) {
+  return BASE_RETRY_DELAY_MS * 2 ** attempt;
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRetryableStatus(status) {
+  return RETRYABLE_STATUSES.has(status);
+}
+
 export async function fetchArtifact(fetchImpl, baseUrl, path, init) {
-  return fetchImpl(artifactUrl(baseUrl, path), {
+  const url = artifactUrl(baseUrl, path);
+  const request = {
     ...init,
     headers: {
       ...authHeaders(),
       ...init?.headers,
     },
-  });
+  };
+  let lastError;
+
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await fetchImpl(url, request);
+      if (attempt + 1 < MAX_ATTEMPTS && isRetryableStatus(response.status)) {
+        await response.body?.cancel?.();
+        await wait(retryDelayMs(attempt));
+        continue;
+      }
+      return response;
+    } catch (error) {
+      lastError = error;
+      if (attempt + 1 >= MAX_ATTEMPTS) {
+        break;
+      }
+      await wait(retryDelayMs(attempt));
+    }
+  }
+
+  throw lastError;
+}
+
+export async function responseErrorDetails(response) {
+  let body = "";
+  try {
+    body = await response.text();
+  } catch {
+    body = "";
+  }
+  const trimmedBody =
+    body.length > MAX_ERROR_BODY_CHARS
+      ? `${body.slice(0, MAX_ERROR_BODY_CHARS)}...`
+      : body;
+  const suffix = trimmedBody ? `: ${trimmedBody}` : "";
+  return `${response.status} ${response.statusText}${suffix}`;
 }
 
 export async function ensureRemoteMissing(
@@ -69,7 +123,7 @@ export async function ensureRemoteMissing(
   }
   if (response.status !== 404) {
     throw new Error(
-      `Failed to preflight ${path}: ${response.status} ${response.statusText}`,
+      `Failed to preflight ${path}: ${await responseErrorDetails(response)}`,
     );
   }
 }
@@ -93,7 +147,7 @@ export async function putArtifact(
   });
   if (!response.ok) {
     throw new Error(
-      `Failed to publish ${path}: ${response.status} ${response.statusText}`,
+      `Failed to publish ${path}: ${await responseErrorDetails(response)}`,
     );
   }
 }
@@ -107,7 +161,7 @@ export async function latestWritePrecondition(fetchImpl, baseUrl) {
   }
   if (!response.ok) {
     throw new Error(
-      `Failed to preflight ${LATEST_FILENAME}: ${response.status} ${response.statusText}`,
+      `Failed to preflight ${LATEST_FILENAME}: ${await responseErrorDetails(response)}`,
     );
   }
 
@@ -130,7 +184,7 @@ function headerValue(headers, names) {
   return null;
 }
 
-async function remoteAssetSha256(fetchImpl, baseUrl, version, path, head) {
+async function remoteObjectSha256(fetchImpl, baseUrl, path, head) {
   const checksum = headerValue(head.headers, [
     "x-checksum-sha256",
     "x-artifactory-sha256",
@@ -140,21 +194,55 @@ async function remoteAssetSha256(fetchImpl, baseUrl, version, path, head) {
     return checksum.toLowerCase();
   }
 
-  const response = await fetchArtifact(
-    fetchImpl,
-    baseUrl,
-    `${version}/${path}`,
-    {
-      method: "GET",
-    },
-  );
+  const response = await fetchArtifact(fetchImpl, baseUrl, path, {
+    method: "GET",
+  });
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch asset ${version}/${path} for checksum: ${response.status} ${response.statusText}`,
+      `Failed to fetch ${path} for checksum: ${await responseErrorDetails(response)}`,
     );
   }
   const bytes = Buffer.from(await response.arrayBuffer());
   return createHash("sha256").update(bytes).digest("hex");
+}
+
+export async function verifyRemoteObject(
+  fetchImpl,
+  baseUrl,
+  path,
+  byteSize,
+  sha256,
+  label = "asset",
+) {
+  const response = await fetchArtifact(fetchImpl, baseUrl, path, {
+    method: "HEAD",
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Missing ${label} asset ${path}: ${await responseErrorDetails(response)}`,
+    );
+  }
+  const contentLength = response.headers.get("content-length");
+  if (
+    typeof byteSize === "number" &&
+    contentLength !== null &&
+    Number(contentLength) !== byteSize
+  ) {
+    throw new Error(
+      `${label} asset ${path} byte size mismatch: expected ${byteSize}, got ${contentLength}.`,
+    );
+  }
+  const actualSha256 = await remoteObjectSha256(
+    fetchImpl,
+    baseUrl,
+    path,
+    response,
+  );
+  if (actualSha256 !== sha256.toLowerCase()) {
+    throw new Error(
+      `${label} asset ${path} checksum mismatch: expected ${sha256}, got ${actualSha256}.`,
+    );
+  }
 }
 
 export async function verifyRemoteAsset(
@@ -166,41 +254,14 @@ export async function verifyRemoteAsset(
   sha256,
   label = "asset",
 ) {
-  const response = await fetchArtifact(
+  await verifyRemoteObject(
     fetchImpl,
     baseUrl,
     `${version}/${path}`,
-    {
-      method: "HEAD",
-    },
+    byteSize,
+    sha256,
+    label,
   );
-  if (!response.ok) {
-    throw new Error(
-      `Missing ${label} asset ${version}/${path}: ${response.status} ${response.statusText}`,
-    );
-  }
-  const contentLength = response.headers.get("content-length");
-  if (
-    typeof byteSize === "number" &&
-    contentLength !== null &&
-    Number(contentLength) !== byteSize
-  ) {
-    throw new Error(
-      `${label} asset ${version}/${path} byte size mismatch: expected ${byteSize}, got ${contentLength}.`,
-    );
-  }
-  const actualSha256 = await remoteAssetSha256(
-    fetchImpl,
-    baseUrl,
-    version,
-    path,
-    response,
-  );
-  if (actualSha256 !== sha256.toLowerCase()) {
-    throw new Error(
-      `${label} asset ${version}/${path} checksum mismatch: expected ${sha256}, got ${actualSha256}.`,
-    );
-  }
 }
 
 export async function fetchRemoteManifest({
@@ -216,7 +277,7 @@ export async function fetchRemoteManifest({
   });
   if (!response.ok) {
     throw new Error(
-      `Failed to fetch ${label} manifest ${path}: ${response.status} ${response.statusText}`,
+      `Failed to fetch ${label} manifest ${path}: ${await responseErrorDetails(response)}`,
     );
   }
   const manifest = JSON.parse(await response.text());

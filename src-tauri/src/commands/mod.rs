@@ -1,6 +1,7 @@
 pub mod acp;
 pub mod agent_setup;
 pub mod agents;
+pub mod artifacts;
 pub mod automations;
 pub mod avatars;
 pub mod cache;
@@ -13,7 +14,6 @@ pub mod migration;
 pub mod model_setup;
 pub mod openai_realtime;
 pub mod path_resolver;
-pub mod project_assets;
 pub mod project_icons;
 mod sse;
 pub mod system;

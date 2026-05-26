@@ -1,9 +1,10 @@
 import { lazy, Suspense, useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  getProjectArtifactAssets,
-  PROJECT_ARTIFACT_ASSETS_QUERY_KEY,
-} from "@/shared/api/projectArtifactAssets";
+  ARTIFACTS_QUERY_KEY,
+  getArtifacts,
+  selectProjectPreviewArtifacts,
+} from "@/shared/api/artifacts";
 import { cn } from "@/shared/lib/cn";
 import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
 import type {
@@ -25,7 +26,7 @@ interface ProjectArtifactPreviewProps {
 }
 
 function canUseWebGlRenderer(): boolean {
-  return typeof window !== "undefined" && import.meta.env.MODE !== "test";
+  return typeof window !== "undefined";
 }
 
 function ProjectArtifactFallback({
@@ -72,11 +73,13 @@ export function ProjectArtifactPreview({
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
   const canUseRenderer = canUseWebGlRenderer();
   const assetQuery = useQuery({
-    queryKey: PROJECT_ARTIFACT_ASSETS_QUERY_KEY,
-    queryFn: getProjectArtifactAssets,
+    queryKey: ARTIFACTS_QUERY_KEY,
+    queryFn: async () => {
+      const artifacts = await getArtifacts();
+      return selectProjectPreviewArtifacts(artifacts);
+    },
     enabled: canUseRenderer,
     staleTime: Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: "always",
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 2000),
   });

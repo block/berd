@@ -80,6 +80,37 @@ To generate a local manifest without uploading:
 just avatars-manifest /path/to/avatars 20260521T121530123Z
 ```
 
+## Publishing startup artifacts
+
+Startup artifacts publish as versioned create-only catalog releases. Source files must be:
+
+```text
+/path/to/assets/
+  hdri/<environment>.exr
+  project-images/<image>.webp
+  images/<collection>/<image>.png
+```
+
+```bash
+export ARTIFACTORY_IDENTITY_TOKEN=...
+ASSET_ROOT=/path/to/goose-internal-assets
+just artifacts-publish "$ASSET_ROOT/assets"
+```
+
+Publish prints the generated timestamp version and does not update
+`latest.json`. Promote that version explicitly:
+
+```bash
+just artifacts-promote 20260521T121530123Z
+```
+
+To generate a local manifest without uploading:
+
+```bash
+ASSET_ROOT=/path/to/goose-internal-assets
+just artifacts-manifest "$ASSET_ROOT/assets" 20260521T121530123Z
+```
+
 ## Useful commands
 
 - `just check` — Biome/i18n/type checks

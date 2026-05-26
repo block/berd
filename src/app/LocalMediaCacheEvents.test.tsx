@@ -5,7 +5,7 @@ import {
   listenLocalMediaCachesCleared,
   type LocalMediaCachesClearedPayload,
 } from "@/shared/api/localMediaCaches";
-import { PROJECT_ARTIFACT_ASSETS_QUERY_KEY } from "@/shared/api/projectArtifactAssets";
+import { ARTIFACTS_QUERY_KEY } from "@/shared/api/artifacts";
 import { LocalMediaCacheEvents } from "./LocalMediaCacheEvents";
 
 vi.mock("@/shared/api/localMediaCaches", () => ({
@@ -29,7 +29,7 @@ describe("LocalMediaCacheEvents", () => {
     });
   });
 
-  it("invalidates project artifact assets when the backend clears that cache", async () => {
+  it("invalidates artifacts when the backend clears that cache", async () => {
     const queryClient = new QueryClient({
       defaultOptions: {
         queries: {
@@ -51,11 +51,11 @@ describe("LocalMediaCacheEvents", () => {
 
     localMediaCachesClearedHandler?.({
       avatars: false,
-      projectArtifactAssets: true,
+      artifacts: true,
     });
 
     expect(invalidateQueries).toHaveBeenCalledWith({
-      queryKey: PROJECT_ARTIFACT_ASSETS_QUERY_KEY,
+      queryKey: ARTIFACTS_QUERY_KEY,
     });
   });
 
@@ -81,7 +81,7 @@ describe("LocalMediaCacheEvents", () => {
 
     localMediaCachesClearedHandler?.({
       avatars: true,
-      projectArtifactAssets: false,
+      artifacts: false,
     });
 
     expect(invalidateQueries).not.toHaveBeenCalled();

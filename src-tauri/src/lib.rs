@@ -79,13 +79,10 @@ pub fn run() {
             .map_err(std::io::Error::other)?;
             app.manage(layout_state);
 
-            let project_assets_app = app.handle().clone();
+            let artifacts_app = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) =
-                    commands::project_assets::warm_project_artifact_assets_cache(project_assets_app)
-                        .await
-                {
-                    log::warn!("Failed to warm project artifact asset cache: {error}");
+                if let Err(error) = commands::artifacts::warm_artifacts_cache(artifacts_app).await {
+                    log::warn!("Failed to warm artifact asset cache: {error}");
                 }
             });
 
@@ -156,7 +153,7 @@ pub fn run() {
             commands::acp::get_goose_serve_host_info,
             commands::project_icons::scan_project_icons,
             commands::project_icons::read_project_icon,
-            commands::project_assets::get_project_artifact_assets,
+            commands::artifacts::get_artifacts,
             commands::doctor::run_doctor,
             commands::doctor::run_doctor_fix,
             commands::git::get_git_state,

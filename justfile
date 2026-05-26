@@ -198,14 +198,20 @@ avatars-publish source:
 avatars-promote version:
     pnpm avatars:promote -- --version="{{ version }}"
 
-project-artifacts-manifest source version:
-    pnpm project-artifacts:manifest -- --source="{{ source }}" --version="{{ version }}"
+artifacts-manifest source version:
+    pnpm artifacts:manifest -- --source="{{ source }}" --version="{{ version }}"
 
-project-artifacts-publish source:
-    pnpm project-artifacts:publish -- --source="{{ source }}"
+artifacts-publish source version="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -n "{{ version }}" ]]; then
+      pnpm artifacts:publish -- --source="{{ source }}" --version="{{ version }}"
+    else
+      pnpm artifacts:publish -- --source="{{ source }}"
+    fi
 
-project-artifacts-promote version:
-    pnpm project-artifacts:promote -- --version="{{ version }}"
+artifacts-promote version:
+    pnpm artifacts:promote -- --version="{{ version }}"
 
 # Delete the silent migration marker(s) so the next launch re-runs the migration.
 reset-migration:

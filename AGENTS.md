@@ -19,6 +19,15 @@ in Goose core and should be exposed through typed ACP methods.
 - `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling
 - `scripts/update-goose-backend-lock.sh` — resolves and records a new Goose backend pin
 
+## Startup assets
+
+Startup artifact media is resolved by the Tauri backend and returned as local
+cache paths. Renderer code should use `getArtifacts()` or
+`selectProjectPreviewArtifacts()` from `src/shared/api/artifacts.ts`, then pass
+paths through `convertFileSrc(..., "asset")` before rendering media. Do not
+vendor startup media, fetch catalogs in the renderer, or construct Artifactory
+URLs in UI code.
+
 ## Common commands
 
 - `just setup` — install pnpm deps, build SDK, build managed local Goose

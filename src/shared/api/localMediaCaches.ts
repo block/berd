@@ -6,7 +6,7 @@ export const LOCAL_MEDIA_CACHES_CLEARED_EVENT =
 
 export interface LocalMediaCachesClearedPayload {
   avatars: boolean;
-  projectArtifactAssets: boolean;
+  artifacts: boolean;
 }
 
 export async function clearLocalMediaCaches(): Promise<void> {

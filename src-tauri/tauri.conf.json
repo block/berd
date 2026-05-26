@@ -43,6 +43,7 @@
         "enable": true,
         "scope": [
           "$APPDATA/avatars/media/**/*",
+          "$APPDATA/artifacts/media/**/*",
           "$APPDATA/project-artifacts/media/**/*",
           "$HOME/**/*",
           "$TEMP/**/*"

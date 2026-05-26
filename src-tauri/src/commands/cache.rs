@@ -1,7 +1,7 @@
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 
-use crate::commands::{avatars, project_assets};
+use crate::commands::{artifacts, avatars};
 
 const LOCAL_MEDIA_CACHES_CLEARED_EVENT: &str = "goose:local-media-caches-cleared";
 
@@ -9,16 +9,15 @@ const LOCAL_MEDIA_CACHES_CLEARED_EVENT: &str = "goose:local-media-caches-cleared
 #[serde(rename_all = "camelCase")]
 struct LocalMediaCachesClearedPayload {
     avatars: bool,
-    project_artifact_assets: bool,
+    artifacts: bool,
 }
 
 #[tauri::command]
 pub async fn clear_local_media_caches(app: AppHandle) -> Result<(), String> {
     let avatar_result = avatars::clear_avatar_cache(app.clone()).await;
-    let project_artifact_assets_result =
-        project_assets::clear_project_artifact_assets_cache(app.clone()).await;
+    let artifacts_result = artifacts::clear_artifacts_cache(app.clone()).await;
 
-    clear_local_media_caches_result(avatar_result, project_artifact_assets_result, |payload| {
+    clear_local_media_caches_result(avatar_result, artifacts_result, |payload| {
         app.emit(LOCAL_MEDIA_CACHES_CLEARED_EVENT, payload)
             .map_err(|error| format!("Failed to emit local media cache clear event: {error}"))
     })
@@ -26,15 +25,15 @@ pub async fn clear_local_media_caches(app: AppHandle) -> Result<(), String> {
 
 fn clear_local_media_caches_result(
     avatar_result: Result<(), String>,
-    project_artifact_assets_result: Result<(), String>,
+    artifacts_result: Result<(), String>,
     emit_cleared: impl FnOnce(LocalMediaCachesClearedPayload) -> Result<(), String>,
 ) -> Result<(), String> {
     let payload = LocalMediaCachesClearedPayload {
         avatars: avatar_result.is_ok(),
-        project_artifact_assets: project_artifact_assets_result.is_ok(),
+        artifacts: artifacts_result.is_ok(),
     };
 
-    let emit_result = if payload.avatars || payload.project_artifact_assets {
+    let emit_result = if payload.avatars || payload.artifacts {
         emit_cleared(payload)
     } else {
         Ok(())
@@ -44,8 +43,8 @@ fn clear_local_media_caches_result(
     if let Err(error) = avatar_result {
         errors.push(format!("avatars: {error}"));
     }
-    if let Err(error) = project_artifact_assets_result {
-        errors.push(format!("project artifact assets: {error}"));
+    if let Err(error) = artifacts_result {
+        errors.push(format!("artifact assets: {error}"));
     }
 
     if !errors.is_empty() {
@@ -77,13 +76,13 @@ mod tests {
             emitted.into_inner(),
             Some(LocalMediaCachesClearedPayload {
                 avatars: true,
-                project_artifact_assets: true,
+                artifacts: true,
             })
         );
     }
 
     #[test]
-    fn clear_result_emits_partial_event_and_fails_when_project_assets_fail() {
+    fn clear_result_emits_partial_event_and_fails_when_artifacts_fail() {
         let emitted = RefCell::new(None);
 
         let result = clear_local_media_caches_result(
@@ -97,13 +96,13 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            "Failed to clear local media caches: project artifact assets: permission denied"
+            "Failed to clear local media caches: artifact assets: permission denied"
         );
         assert_eq!(
             emitted.into_inner(),
             Some(LocalMediaCachesClearedPayload {
                 avatars: true,
-                project_artifact_assets: false,
+                artifacts: false,
             })
         );
     }
@@ -123,7 +122,7 @@ mod tests {
 
         assert_eq!(
             result.unwrap_err(),
-            "Failed to clear local media caches: avatars: avatar locked; project artifact assets: project locked"
+            "Failed to clear local media caches: avatars: avatar locked; artifact assets: project locked"
         );
         assert!(!emitted.into_inner());
     }

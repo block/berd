@@ -1,18 +1,18 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { ARTIFACTS_QUERY_KEY } from "@/shared/api/artifacts";
 import { listenLocalMediaCachesCleared } from "@/shared/api/localMediaCaches";
-import { PROJECT_ARTIFACT_ASSETS_QUERY_KEY } from "@/shared/api/projectArtifactAssets";
 
 export function LocalMediaCacheEvents() {
   const queryClient = useQueryClient();
 
   useEffect(() => {
     const unlisten = listenLocalMediaCachesCleared((payload) => {
-      if (!payload.projectArtifactAssets) {
+      if (!payload.artifacts) {
         return;
       }
       void queryClient.invalidateQueries({
-        queryKey: PROJECT_ARTIFACT_ASSETS_QUERY_KEY,
+        queryKey: ARTIFACTS_QUERY_KEY,
       });
     });
 

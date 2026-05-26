@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { access, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, extname, join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 import process from "node:process";
@@ -73,6 +73,9 @@ async function listFiles(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
   for (const entry of entries) {
+    if (entry.name.startsWith(".")) {
+      continue;
+    }
     const path = join(dir, entry.name);
     if (entry.isDirectory()) {
       files.push(...(await listFiles(path)));
@@ -139,7 +142,7 @@ async function variantForFile(source, file) {
     variant: {
       path: rel,
       mimeType: mimeTypeFor(format),
-      byteSize: (await stat(file)).size,
+      byteSize: bytes.byteLength,
       sha256: createHash("sha256").update(bytes).digest("hex"),
     },
   };

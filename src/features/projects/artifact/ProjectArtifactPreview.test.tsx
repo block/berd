@@ -2,13 +2,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getProjectArtifactAssets } from "@/shared/api/projectArtifactAssets";
+import { getArtifacts } from "@/shared/api/artifacts";
 import { ProjectArtifactPreview } from "./ProjectArtifactPreview";
 
-vi.mock("@/shared/api/projectArtifactAssets", () => ({
-  getProjectArtifactAssets: vi.fn(),
-  PROJECT_ARTIFACT_ASSETS_QUERY_KEY: ["project-artifact-assets"],
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  invoke: vi.fn(),
 }));
+
+vi.mock("@/shared/api/artifacts", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/shared/api/artifacts")>();
+  return {
+    ...actual,
+    getArtifacts: vi.fn(),
+  };
+});
 
 vi.mock("./ProjectArtifactRenderer", () => ({
   ProjectArtifactRenderer: ({
@@ -26,7 +35,7 @@ vi.mock("./ProjectArtifactRenderer", () => ({
   ),
 }));
 
-const mockedGetProjectArtifactAssets = vi.mocked(getProjectArtifactAssets);
+const mockedGetArtifacts = vi.mocked(getArtifacts);
 
 function renderWithQueryClient(children: ReactNode) {
   const queryClient = new QueryClient({
@@ -53,7 +62,7 @@ describe("ProjectArtifactPreview", () => {
   });
 
   it("shows the fallback while project artifact assets load", () => {
-    mockedGetProjectArtifactAssets.mockReturnValue(new Promise(() => {}));
+    mockedGetArtifacts.mockReturnValue(new Promise(() => {}));
 
     renderWithQueryClient(
       <ProjectArtifactPreview input={{ name: "Launch plan" }} />,
@@ -66,10 +75,31 @@ describe("ProjectArtifactPreview", () => {
   });
 
   it("passes cached image and environment URLs to the renderer", async () => {
-    mockedGetProjectArtifactAssets.mockResolvedValue({
+    mockedGetArtifacts.mockResolvedValue({
       catalogVersion: "20260521T121530123Z",
-      imageUrls: ["asset://memory-01.webp", "asset://memory-02.webp"],
-      environmentUrl: "asset://studio_soft.exr",
+      assets: [
+        {
+          kind: "environment",
+          path: "/tmp/assets/hdri/studio_soft.exr",
+          mimeType: "image/x-exr",
+          byteSize: 4,
+          sha256: "a".repeat(64),
+        },
+        {
+          kind: "projectImage",
+          path: "/tmp/assets/project-images/memory-01.webp",
+          mimeType: "image/webp",
+          byteSize: 4,
+          sha256: "b".repeat(64),
+        },
+        {
+          kind: "projectImage",
+          path: "/tmp/assets/project-images/memory-02.webp",
+          mimeType: "image/webp",
+          byteSize: 4,
+          sha256: "c".repeat(64),
+        },
+      ],
     });
 
     renderWithQueryClient(
@@ -79,17 +109,17 @@ describe("ProjectArtifactPreview", () => {
     const renderer = await screen.findByTestId("project-artifact-renderer");
     expect(renderer).toHaveAttribute(
       "data-image-urls",
-      "asset://memory-01.webp,asset://memory-02.webp",
+      "asset:///tmp/assets/project-images/memory-01.webp,asset:///tmp/assets/project-images/memory-02.webp",
     );
     expect(renderer).toHaveAttribute(
       "data-environment-url",
-      "asset://studio_soft.exr",
+      "asset:///tmp/assets/hdri/studio_soft.exr",
     );
   });
 
   it("keeps the fallback visible when asset loading fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    mockedGetProjectArtifactAssets.mockRejectedValue(new Error("offline"));
+    mockedGetArtifacts.mockRejectedValue(new Error("offline"));
 
     renderWithQueryClient(
       <ProjectArtifactPreview input={{ name: "Launch plan" }} />,
@@ -112,12 +142,26 @@ describe("ProjectArtifactPreview", () => {
   });
 
   it("recovers when an asset query retry succeeds", async () => {
-    mockedGetProjectArtifactAssets
+    mockedGetArtifacts
       .mockRejectedValueOnce(new Error("offline"))
       .mockResolvedValueOnce({
         catalogVersion: "20260521T121530123Z",
-        imageUrls: ["asset://memory-01.webp"],
-        environmentUrl: "asset://studio_soft.exr",
+        assets: [
+          {
+            kind: "environment",
+            path: "/tmp/assets/hdri/studio_soft.exr",
+            mimeType: "image/x-exr",
+            byteSize: 4,
+            sha256: "a".repeat(64),
+          },
+          {
+            kind: "projectImage",
+            path: "/tmp/assets/project-images/memory-01.webp",
+            mimeType: "image/webp",
+            byteSize: 4,
+            sha256: "b".repeat(64),
+          },
+        ],
       });
 
     renderWithQueryClient(
@@ -126,6 +170,9 @@ describe("ProjectArtifactPreview", () => {
 
     expect(
       await screen.findByTestId("project-artifact-renderer"),
-    ).toHaveAttribute("data-image-urls", "asset://memory-01.webp");
+    ).toHaveAttribute(
+      "data-image-urls",
+      "asset:///tmp/assets/project-images/memory-01.webp",
+    );
   });
 });

@@ -2,7 +2,6 @@ use futures_util::{stream, StreamExt};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::HashSet;
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -12,7 +11,7 @@ use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 
 const ARTIFACTORY_BASE: &str =
-    "https://global.block-artifacts.com/artifactory/goose-internal/project-artifacts/";
+    "https://global.block-artifacts.com/artifactory/goose-internal/artifacts/";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const REFRESH_MARKER_FILE: &str = "refresh.marker";
@@ -22,111 +21,129 @@ const DOWNLOAD_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectAssetLatest {
+pub struct ArtifactLatest {
     pub catalog_version: String,
     pub manifest_path: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectAssetCatalog {
+pub struct ArtifactCatalog {
     pub schema_version: u8,
     pub catalog_version: String,
-    pub images: Vec<ProjectAssetEntry>,
-    pub environment: ProjectAssetEntry,
+    pub assets: Vec<ArtifactEntry>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectAssetEntry {
-    pub id: String,
+pub struct ArtifactEntry {
+    pub kind: ArtifactKind,
     pub path: String,
     pub mime_type: String,
     pub byte_size: u64,
     pub sha256: String,
+    pub collection_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ArtifactKind {
+    Environment,
+    ProjectImage,
+    CollectionImage,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectArtifactAssets {
+pub struct Artifacts {
     pub catalog_version: String,
-    pub image_paths: Vec<String>,
-    pub environment_path: String,
+    pub assets: Vec<CachedArtifact>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CachedArtifact {
+    pub kind: ArtifactKind,
+    pub path: String,
+    pub mime_type: String,
+    pub byte_size: u64,
+    pub sha256: String,
+    pub collection_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
-struct ProjectAssetCachePaths {
+struct ArtifactCachePaths {
+    legacy_root: Option<PathBuf>,
     meta: PathBuf,
     media: PathBuf,
 }
 
 #[tauri::command]
-pub async fn get_project_artifact_assets(app: AppHandle) -> Result<ProjectArtifactAssets, String> {
-    ensure_project_artifact_assets(app).await
+pub async fn get_artifacts(app: AppHandle) -> Result<Artifacts, String> {
+    ensure_artifacts(app).await
 }
 
-pub async fn warm_project_artifact_assets_cache(app: AppHandle) -> Result<(), String> {
-    ensure_project_artifact_assets(app).await.map(|_| ())
+pub async fn warm_artifacts_cache(app: AppHandle) -> Result<(), String> {
+    ensure_artifacts(app).await.map(|_| ())
 }
 
-pub async fn clear_project_artifact_assets_cache(app: AppHandle) -> Result<(), String> {
-    let _cache_guard = project_asset_cache_lock().lock().await;
-    let paths = project_asset_cache_paths(&app)?;
-    clear_project_artifact_assets_cache_paths(&paths).await
+pub async fn clear_artifacts_cache(app: AppHandle) -> Result<(), String> {
+    let _cache_guard = artifact_cache_lock().lock().await;
+    let paths = artifact_cache_paths(&app)?;
+    clear_artifacts_cache_paths(&paths).await
 }
 
-async fn clear_project_artifact_assets_cache_paths(
-    paths: &ProjectAssetCachePaths,
-) -> Result<(), String> {
-    remove_dir_all_if_exists(&paths.meta, "project artifact metadata").await?;
-    remove_dir_all_if_exists(&paths.media, "project artifact media").await
+async fn clear_artifacts_cache_paths(paths: &ArtifactCachePaths) -> Result<(), String> {
+    remove_dir_all_if_exists(&paths.meta, "artifact metadata").await?;
+    remove_dir_all_if_exists(&paths.media, "artifact media").await?;
+    if let Some(legacy_root) = &paths.legacy_root {
+        remove_dir_all_if_exists(legacy_root, "legacy project artifact").await?;
+    }
+    Ok(())
 }
 
-async fn ensure_project_artifact_assets(app: AppHandle) -> Result<ProjectArtifactAssets, String> {
-    let _cache_guard = project_asset_cache_lock().lock().await;
-    let paths = project_asset_cache_paths(&app)?;
+async fn ensure_artifacts(app: AppHandle) -> Result<Artifacts, String> {
+    let _cache_guard = artifact_cache_lock().lock().await;
+    let paths = artifact_cache_paths(&app)?;
     clean_part_files(&paths)?;
 
     if let Some((catalog, assets)) = read_complete_cached_assets(&paths).await? {
-        prune_obsolete_versions(&paths, &catalog.catalog_version)?;
         if is_cache_fresh(&paths)? {
+            prune_obsolete_versions(&paths, &catalog.catalog_version)?;
             return Ok(assets);
         }
 
-        match refresh_project_artifact_assets_cache_unlocked(&paths).await {
+        match refresh_artifacts_cache_unlocked(&paths).await {
             Ok(refreshed) => return Ok(refreshed),
             Err(error) => {
                 log::warn!(
-                    "Failed to refresh stale project artifact asset cache; using cached assets: {error}"
+                    "Failed to refresh stale artifact asset cache; using cached assets: {error}"
                 );
                 return Ok(assets);
             }
         }
     }
 
-    refresh_project_artifact_assets_cache_unlocked(&paths).await
+    refresh_artifacts_cache_unlocked(&paths).await
 }
 
 async fn read_complete_cached_assets(
-    paths: &ProjectAssetCachePaths,
-) -> Result<Option<(ProjectAssetCatalog, ProjectArtifactAssets)>, String> {
+    paths: &ArtifactCachePaths,
+) -> Result<Option<(ArtifactCatalog, Artifacts)>, String> {
     let Some(catalog) = read_cached_catalog(paths)? else {
         return Ok(None);
     };
 
-    let client = http_client()?;
-    match ensure_assets_for_catalog(&client, paths, &catalog).await {
+    match read_cached_assets_for_catalog(paths, &catalog) {
         Ok(assets) => Ok(Some((catalog, assets))),
         Err(error) => {
-            log::warn!("Ignoring incomplete project artifact asset cache: {error}");
+            log::warn!("Ignoring incomplete artifact asset cache: {error}");
             Ok(None)
         }
     }
 }
 
-async fn refresh_project_artifact_assets_cache_unlocked(
-    paths: &ProjectAssetCachePaths,
-) -> Result<ProjectArtifactAssets, String> {
+async fn refresh_artifacts_cache_unlocked(paths: &ArtifactCachePaths) -> Result<Artifacts, String> {
     let catalog = refresh_cached_catalog(paths).await?;
     let client = http_client()?;
     let assets = ensure_assets_for_catalog(&client, paths, &catalog).await?;
@@ -137,55 +154,74 @@ async fn refresh_project_artifact_assets_cache_unlocked(
 
 async fn ensure_assets_for_catalog(
     client: &reqwest::Client,
-    paths: &ProjectAssetCachePaths,
-    catalog: &ProjectAssetCatalog,
-) -> Result<ProjectArtifactAssets, String> {
-    let image_paths = ensure_entries(client, paths, catalog, &catalog.images).await?;
-    let environment_path = ensure_entry(client, paths, catalog, &catalog.environment).await?;
+    paths: &ArtifactCachePaths,
+    catalog: &ArtifactCatalog,
+) -> Result<Artifacts, String> {
+    let assets = ensure_entries(client, paths, catalog, &catalog.assets).await?;
 
-    Ok(ProjectArtifactAssets {
+    Ok(Artifacts {
         catalog_version: catalog.catalog_version.clone(),
-        image_paths,
-        environment_path,
+        assets,
     })
 }
 
-async fn refresh_cached_catalog(
-    paths: &ProjectAssetCachePaths,
-) -> Result<ProjectAssetCatalog, String> {
+fn read_cached_assets_for_catalog(
+    paths: &ArtifactCachePaths,
+    catalog: &ArtifactCatalog,
+) -> Result<Artifacts, String> {
+    let mut assets = Vec::with_capacity(catalog.assets.len());
+    for entry in &catalog.assets {
+        validate_entry_path(entry)?;
+        let target = media_cache_path(paths, &catalog.catalog_version, &entry.path)?;
+        if !valid_cached_asset(paths, catalog, entry, &target)? {
+            return Err(format!(
+                "Cached artifact asset is missing or invalid: {}",
+                entry.path
+            ));
+        }
+        assets.push(cached_artifact(entry, &target));
+    }
+
+    Ok(Artifacts {
+        catalog_version: catalog.catalog_version.clone(),
+        assets,
+    })
+}
+
+async fn refresh_cached_catalog(paths: &ArtifactCachePaths) -> Result<ArtifactCatalog, String> {
     let (latest, catalog) = fetch_current_catalog().await?;
     write_cached_catalog(paths, &latest, &catalog)?;
     Ok(catalog)
 }
 
-async fn fetch_current_catalog() -> Result<(ProjectAssetLatest, ProjectAssetCatalog), String> {
+async fn fetch_current_catalog() -> Result<(ArtifactLatest, ArtifactCatalog), String> {
     let client = http_client()?;
-    let latest: ProjectAssetLatest = client
+    let latest: ArtifactLatest = client
         .get(allowed_artifactory_url(LATEST_PATH)?)
         .send()
         .await
-        .map_err(|error| format!("Failed to fetch project image latest pointer: {error}"))?
+        .map_err(|error| format!("Failed to fetch artifact latest pointer: {error}"))?
         .error_for_status()
-        .map_err(|error| format!("Project image latest pointer returned an error: {error}"))?
+        .map_err(|error| format!("Artifact latest pointer returned an error: {error}"))?
         .json()
         .await
-        .map_err(|error| format!("Failed to parse project image latest pointer: {error}"))?;
+        .map_err(|error| format!("Failed to parse artifact latest pointer: {error}"))?;
 
     let manifest_path = manifest_path_for_latest(&latest)?;
-    let catalog: ProjectAssetCatalog = client
+    let catalog: ArtifactCatalog = client
         .get(allowed_artifactory_url(&manifest_path)?)
         .send()
         .await
-        .map_err(|error| format!("Failed to fetch project image catalog: {error}"))?
+        .map_err(|error| format!("Failed to fetch artifact catalog: {error}"))?
         .error_for_status()
-        .map_err(|error| format!("Project image catalog returned an error: {error}"))?
+        .map_err(|error| format!("Artifact catalog returned an error: {error}"))?
         .json()
         .await
-        .map_err(|error| format!("Failed to parse project image catalog: {error}"))?;
+        .map_err(|error| format!("Failed to parse artifact catalog: {error}"))?;
 
     validate_catalog(&catalog)?;
     if catalog.catalog_version != latest.catalog_version {
-        return Err("Project image catalog version does not match latest pointer".to_string());
+        return Err("Artifact catalog version does not match latest pointer".to_string());
     }
 
     Ok((latest, catalog))
@@ -195,27 +231,25 @@ fn http_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
         .build()
-        .map_err(|error| format!("Failed to create project image HTTP client: {error}"))
+        .map_err(|error| format!("Failed to create artifact HTTP client: {error}"))
 }
 
-fn project_asset_cache_lock() -> &'static tokio::sync::Mutex<()> {
+fn artifact_cache_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
-fn read_cached_catalog(
-    paths: &ProjectAssetCachePaths,
-) -> Result<Option<ProjectAssetCatalog>, String> {
+fn read_cached_catalog(paths: &ArtifactCachePaths) -> Result<Option<ArtifactCatalog>, String> {
     let latest_path = paths.meta.join(LATEST_PATH);
     if !latest_path.exists() {
         return Ok(None);
     }
 
-    let latest = match read_json_file::<ProjectAssetLatest>(&latest_path) {
+    let latest = match read_json_file::<ArtifactLatest>(&latest_path) {
         Ok(latest) => latest,
         Err(error) => {
             delete_file_if_exists(&latest_path)?;
-            log::warn!("Ignoring corrupt project image latest cache: {error}");
+            log::warn!("Ignoring corrupt artifact latest cache: {error}");
             return Ok(None);
         }
     };
@@ -223,7 +257,7 @@ fn read_cached_catalog(
         Ok(path) => path,
         Err(error) => {
             delete_file_if_exists(&latest_path)?;
-            log::warn!("Ignoring invalid project image latest cache: {error}");
+            log::warn!("Ignoring invalid artifact latest cache: {error}");
             return Ok(None);
         }
     };
@@ -233,17 +267,17 @@ fn read_cached_catalog(
         return Ok(None);
     }
 
-    let catalog = match read_json_file::<ProjectAssetCatalog>(&catalog_path) {
+    let catalog = match read_json_file::<ArtifactCatalog>(&catalog_path) {
         Ok(catalog) => catalog,
         Err(error) => {
             delete_file_if_exists(&catalog_path)?;
-            log::warn!("Ignoring corrupt project image manifest cache: {error}");
+            log::warn!("Ignoring corrupt artifact manifest cache: {error}");
             return Ok(None);
         }
     };
     if let Err(error) = validate_catalog(&catalog) {
         delete_file_if_exists(&catalog_path)?;
-        log::warn!("Ignoring invalid project image manifest cache: {error}");
+        log::warn!("Ignoring invalid artifact manifest cache: {error}");
         return Ok(None);
     }
     if catalog.catalog_version != latest.catalog_version {
@@ -255,27 +289,27 @@ fn read_cached_catalog(
 }
 
 fn write_cached_catalog(
-    paths: &ProjectAssetCachePaths,
-    latest: &ProjectAssetLatest,
-    catalog: &ProjectAssetCatalog,
+    paths: &ArtifactCachePaths,
+    latest: &ArtifactLatest,
+    catalog: &ArtifactCatalog,
 ) -> Result<(), String> {
     validate_catalog(catalog)?;
     if latest.catalog_version != catalog.catalog_version {
-        return Err("Project image catalog version does not match latest pointer".to_string());
+        return Err("Artifact catalog version does not match latest pointer".to_string());
     }
 
     let manifest_path = manifest_path_for_latest(latest)?;
     let latest_json = serde_json::to_vec_pretty(latest)
-        .map_err(|error| format!("Failed to serialize project image latest pointer: {error}"))?;
+        .map_err(|error| format!("Failed to serialize artifact latest pointer: {error}"))?;
     let catalog_json = serde_json::to_vec_pretty(catalog)
-        .map_err(|error| format!("Failed to serialize project image catalog: {error}"))?;
+        .map_err(|error| format!("Failed to serialize artifact catalog: {error}"))?;
 
     atomic_write(&paths.meta.join(&manifest_path), &catalog_json)?;
     atomic_write(&paths.meta.join(LATEST_PATH), &latest_json)?;
     Ok(())
 }
 
-fn manifest_path_for_latest(latest: &ProjectAssetLatest) -> Result<String, String> {
+fn manifest_path_for_latest(latest: &ArtifactLatest) -> Result<String, String> {
     validate_catalog_version(&latest.catalog_version)?;
     let expected = format!("{}/{}", latest.catalog_version, MANIFEST_FILE);
     let manifest_path = latest
@@ -285,8 +319,7 @@ fn manifest_path_for_latest(latest: &ProjectAssetLatest) -> Result<String, Strin
     validate_safe_relative_path(&manifest_path)?;
     if manifest_path != expected {
         return Err(
-            "Project image latest manifest path must match catalogVersion/manifest.json"
-                .to_string(),
+            "Artifact latest manifest path must match catalogVersion/manifest.json".to_string(),
         );
     }
     Ok(manifest_path)
@@ -309,31 +342,31 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> Result<(), String> {
 
     let parent = path
         .parent()
-        .ok_or_else(|| "Project image cache target has no parent".to_string())?;
+        .ok_or_else(|| "Artifact cache target has no parent".to_string())?;
     fs::create_dir_all(parent)
-        .map_err(|error| format!("Failed to create project image cache directory: {error}"))?;
+        .map_err(|error| format!("Failed to create artifact cache directory: {error}"))?;
     let part_path = unique_part_path(path);
     {
         let mut file = fs::File::create(&part_path)
-            .map_err(|error| format!("Failed to create project image cache part file: {error}"))?;
+            .map_err(|error| format!("Failed to create artifact cache part file: {error}"))?;
         file.write_all(bytes)
-            .map_err(|error| format!("Failed to write project image cache part file: {error}"))?;
+            .map_err(|error| format!("Failed to write artifact cache part file: {error}"))?;
         file.sync_all()
-            .map_err(|error| format!("Failed to sync project image cache part file: {error}"))?;
+            .map_err(|error| format!("Failed to sync artifact cache part file: {error}"))?;
     }
     fs::rename(&part_path, path).map_err(|error| {
         let _ = fs::remove_file(&part_path);
-        format!("Failed to finalize project image cache file: {error}")
+        format!("Failed to finalize artifact cache file: {error}")
     })
 }
 
 async fn ensure_entries(
     client: &reqwest::Client,
-    paths: &ProjectAssetCachePaths,
-    catalog: &ProjectAssetCatalog,
-    entries: &[ProjectAssetEntry],
-) -> Result<Vec<String>, String> {
-    let results: Vec<Result<String, String>> = stream::iter(entries.to_vec())
+    paths: &ArtifactCachePaths,
+    catalog: &ArtifactCatalog,
+    entries: &[ArtifactEntry],
+) -> Result<Vec<CachedArtifact>, String> {
+    let results: Vec<Result<CachedArtifact, String>> = stream::iter(entries.to_vec())
         .map(|entry| async move { ensure_entry(client, paths, catalog, &entry).await })
         .buffered(DOWNLOAD_CONCURRENCY)
         .collect()
@@ -343,15 +376,15 @@ async fn ensure_entries(
 
 async fn ensure_entry(
     client: &reqwest::Client,
-    paths: &ProjectAssetCachePaths,
-    catalog: &ProjectAssetCatalog,
-    entry: &ProjectAssetEntry,
-) -> Result<String, String> {
+    paths: &ArtifactCachePaths,
+    catalog: &ArtifactCatalog,
+    entry: &ArtifactEntry,
+) -> Result<CachedArtifact, String> {
     validate_entry_path(entry)?;
     let target = media_cache_path(paths, &catalog.catalog_version, &entry.path)?;
 
     if valid_cached_asset(paths, catalog, entry, &target)? {
-        return Ok(target.to_string_lossy().into_owned());
+        return Ok(cached_artifact(entry, &target));
     }
     delete_file_if_exists(&target)?;
     delete_file_if_exists(&checksum_marker_path(
@@ -364,76 +397,85 @@ async fn ensure_entry(
     download_asset(client, url, &target, entry).await?;
     write_checksum_marker(paths, &catalog.catalog_version, entry)?;
 
-    Ok(target.to_string_lossy().into_owned())
+    Ok(cached_artifact(entry, &target))
+}
+
+fn cached_artifact(entry: &ArtifactEntry, target: &Path) -> CachedArtifact {
+    CachedArtifact {
+        kind: entry.kind.clone(),
+        path: target.to_string_lossy().into_owned(),
+        mime_type: entry.mime_type.clone(),
+        byte_size: entry.byte_size,
+        sha256: entry.sha256.clone(),
+        collection_id: entry.collection_id.clone(),
+    }
 }
 
 async fn download_asset(
     client: &reqwest::Client,
     url: Url,
     target: &Path,
-    entry: &ProjectAssetEntry,
+    entry: &ArtifactEntry,
 ) -> Result<(), String> {
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|error| format!("Failed to download project image asset: {error}"))?
+        .map_err(|error| format!("Failed to download artifact asset: {error}"))?
         .error_for_status()
-        .map_err(|error| format!("Project image asset returned an error: {error}"))?;
+        .map_err(|error| format!("Artifact asset returned an error: {error}"))?;
     if let Some(content_length) = response.content_length() {
         if content_length != entry.byte_size {
-            return Err("Project image asset byte size did not match manifest".to_string());
+            return Err("Artifact asset byte size did not match manifest".to_string());
         }
     }
 
     let parent = target
         .parent()
-        .ok_or_else(|| "Project image cache target has no parent".to_string())?;
+        .ok_or_else(|| "Artifact cache target has no parent".to_string())?;
     tokio::fs::create_dir_all(parent)
         .await
-        .map_err(|error| format!("Failed to create project image cache directory: {error}"))?;
+        .map_err(|error| format!("Failed to create artifact cache directory: {error}"))?;
     let part_path = unique_part_path(target);
     let mut file = tokio::fs::File::create(&part_path)
         .await
-        .map_err(|error| format!("Failed to create project image cache part file: {error}"))?;
+        .map_err(|error| format!("Failed to create artifact cache part file: {error}"))?;
     let mut part_file = PartFile::new(part_path);
     let mut stream = response.bytes_stream();
     let mut hasher = Sha256::new();
     let mut downloaded = 0_u64;
 
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk
-            .map_err(|error| format!("Failed to read project image asset response: {error}"))?;
+        let chunk =
+            chunk.map_err(|error| format!("Failed to read artifact asset response: {error}"))?;
         downloaded += chunk.len() as u64;
         if downloaded > entry.byte_size {
-            return Err("Project image asset byte size exceeded manifest".to_string());
+            return Err("Artifact asset byte size exceeded manifest".to_string());
         }
         hasher.update(&chunk);
         file.write_all(&chunk)
             .await
-            .map_err(|error| format!("Failed to write project image cache part file: {error}"))?;
+            .map_err(|error| format!("Failed to write artifact cache part file: {error}"))?;
     }
     file.flush()
         .await
-        .map_err(|error| format!("Failed to flush project image cache part file: {error}"))?;
+        .map_err(|error| format!("Failed to flush artifact cache part file: {error}"))?;
 
     if downloaded != entry.byte_size {
-        return Err("Project image asset byte size did not match manifest".to_string());
+        return Err("Artifact asset byte size did not match manifest".to_string());
     }
     let actual = hex_digest(hasher.finalize().as_slice());
     if actual != entry.sha256.to_ascii_lowercase() {
-        return Err("Project image asset checksum did not match manifest".to_string());
+        return Err("Artifact asset checksum did not match manifest".to_string());
     }
 
     file.sync_all()
         .await
-        .map_err(|error| format!("Failed to sync project image cache part file: {error}"))?;
+        .map_err(|error| format!("Failed to sync artifact cache part file: {error}"))?;
     drop(file);
 
     if let Err(error) = tokio::fs::rename(part_file.path(), target).await {
-        return Err(format!(
-            "Failed to finalize project image cache file: {error}"
-        ));
+        return Err(format!("Failed to finalize artifact cache file: {error}"));
     }
     part_file.persist();
     Ok(())
@@ -477,7 +519,7 @@ fn unique_part_path(target: &Path) -> PathBuf {
 }
 
 fn checksum_marker_path(
-    paths: &ProjectAssetCachePaths,
+    paths: &ArtifactCachePaths,
     catalog_version: &str,
     entry_path: &str,
 ) -> Result<PathBuf, String> {
@@ -489,34 +531,34 @@ fn checksum_marker_path(
         .join(format!("{entry_path}.sha256")))
 }
 
-fn refresh_marker_path(paths: &ProjectAssetCachePaths) -> PathBuf {
+fn refresh_marker_path(paths: &ArtifactCachePaths) -> PathBuf {
     paths.meta.join(REFRESH_MARKER_FILE)
 }
 
-fn write_refresh_marker(paths: &ProjectAssetCachePaths) -> Result<(), String> {
+fn write_refresh_marker(paths: &ArtifactCachePaths) -> Result<(), String> {
     let refreshed_at = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
-        .map_err(|error| format!("Failed to create project image refresh marker: {error}"))?
+        .map_err(|error| format!("Failed to create artifact refresh marker: {error}"))?
         .as_nanos()
         .to_string();
     atomic_write(&refresh_marker_path(paths), refreshed_at.as_bytes())
 }
 
-fn is_cache_fresh(paths: &ProjectAssetCachePaths) -> Result<bool, String> {
+fn is_cache_fresh(paths: &ArtifactCachePaths) -> Result<bool, String> {
     let marker_path = refresh_marker_path(paths);
     let metadata = match fs::metadata(&marker_path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(error) => {
             return Err(format!(
-                "Failed to inspect project image refresh marker '{}': {error}",
+                "Failed to inspect artifact refresh marker '{}': {error}",
                 marker_path.display()
             ))
         }
     };
     let modified = metadata.modified().map_err(|error| {
         format!(
-            "Failed to read project image refresh marker timestamp '{}': {error}",
+            "Failed to read artifact refresh marker timestamp '{}': {error}",
             marker_path.display()
         )
     })?;
@@ -526,9 +568,9 @@ fn is_cache_fresh(paths: &ProjectAssetCachePaths) -> Result<bool, String> {
 }
 
 fn write_checksum_marker(
-    paths: &ProjectAssetCachePaths,
+    paths: &ArtifactCachePaths,
     catalog_version: &str,
-    entry: &ProjectAssetEntry,
+    entry: &ArtifactEntry,
 ) -> Result<(), String> {
     atomic_write(
         &checksum_marker_path(paths, catalog_version, &entry.path)?,
@@ -537,9 +579,9 @@ fn write_checksum_marker(
 }
 
 fn has_valid_checksum_marker(
-    paths: &ProjectAssetCachePaths,
+    paths: &ArtifactCachePaths,
     catalog_version: &str,
-    entry: &ProjectAssetEntry,
+    entry: &ArtifactEntry,
 ) -> Result<bool, String> {
     let marker_path = checksum_marker_path(paths, catalog_version, &entry.path)?;
     if !marker_path.exists() {
@@ -547,7 +589,7 @@ fn has_valid_checksum_marker(
     }
     let checksum = fs::read_to_string(&marker_path).map_err(|error| {
         format!(
-            "Failed to read cached project image checksum marker '{}': {error}",
+            "Failed to read cached artifact checksum marker '{}': {error}",
             marker_path.display()
         )
     })?;
@@ -555,9 +597,9 @@ fn has_valid_checksum_marker(
 }
 
 fn valid_cached_asset(
-    paths: &ProjectAssetCachePaths,
-    catalog: &ProjectAssetCatalog,
-    entry: &ProjectAssetEntry,
+    paths: &ArtifactCachePaths,
+    catalog: &ArtifactCatalog,
+    entry: &ArtifactEntry,
     target: &Path,
 ) -> Result<bool, String> {
     if !target.exists() {
@@ -565,7 +607,7 @@ fn valid_cached_asset(
     }
     let metadata = fs::metadata(target).map_err(|error| {
         format!(
-            "Failed to inspect cached project image '{}': {error}",
+            "Failed to inspect cached artifact '{}': {error}",
             target.display()
         )
     })?;
@@ -575,16 +617,28 @@ fn valid_cached_asset(
     has_valid_checksum_marker(paths, &catalog.catalog_version, entry)
 }
 
-fn project_asset_cache_paths(app: &AppHandle) -> Result<ProjectAssetCachePaths, String> {
+fn artifact_cache_paths(app: &AppHandle) -> Result<ArtifactCachePaths, String> {
     let app_data_dir = app
         .path()
         .app_data_dir()
         .map_err(|error| format!("Failed to resolve app data directory: {error}"))?;
-    Ok(cache_paths_for_root(app_data_dir.join("project-artifacts")))
+    Ok(cache_paths_for_root_with_legacy(
+        app_data_dir.join("artifacts"),
+        Some(app_data_dir.join("project-artifacts")),
+    ))
 }
 
-fn cache_paths_for_root(root: PathBuf) -> ProjectAssetCachePaths {
-    ProjectAssetCachePaths {
+#[cfg(test)]
+fn cache_paths_for_root(root: PathBuf) -> ArtifactCachePaths {
+    cache_paths_for_root_with_legacy(root, None)
+}
+
+fn cache_paths_for_root_with_legacy(
+    root: PathBuf,
+    legacy_root: Option<PathBuf>,
+) -> ArtifactCachePaths {
+    ArtifactCachePaths {
+        legacy_root,
         meta: root.join("meta"),
         media: root.join("media"),
     }
@@ -596,15 +650,15 @@ fn allowed_artifactory_url(relative_path: &str) -> Result<Url, String> {
     let base = Url::parse(ARTIFACTORY_BASE).map_err(|error| error.to_string())?;
     let url = base
         .join(relative_path)
-        .map_err(|error| format!("Invalid project image artifact URL: {error}"))?;
+        .map_err(|error| format!("Invalid artifact URL: {error}"))?;
     if !url.as_str().starts_with(ARTIFACTORY_BASE) {
-        return Err("Project image artifact URL is outside the allowed base".to_string());
+        return Err("Artifact URL is outside the allowed base".to_string());
     }
     Ok(url)
 }
 
 fn media_cache_path(
-    paths: &ProjectAssetCachePaths,
+    paths: &ArtifactCachePaths,
     catalog_version: &str,
     relative_path: &str,
 ) -> Result<PathBuf, String> {
@@ -613,72 +667,95 @@ fn media_cache_path(
     Ok(paths.media.join(catalog_version).join(relative_path))
 }
 
-fn validate_catalog(catalog: &ProjectAssetCatalog) -> Result<(), String> {
+fn validate_catalog(catalog: &ArtifactCatalog) -> Result<(), String> {
     if catalog.schema_version != 1 {
-        return Err("Unsupported project image catalog schema".to_string());
+        return Err("Unsupported artifact catalog schema".to_string());
     }
     validate_catalog_version(&catalog.catalog_version)?;
-    if catalog.images.is_empty() {
-        return Err("Project image catalog must contain at least one image".to_string());
+    if catalog.assets.is_empty() {
+        return Err("Artifact catalog must contain at least one asset".to_string());
     }
 
-    let mut ids = HashSet::new();
     let mut previous_path: Option<&str> = None;
-    for entry in &catalog.images {
-        validate_asset_id(&entry.id)?;
+    for entry in &catalog.assets {
         validate_entry_path(entry)?;
-        if entry.mime_type != "image/webp" {
-            return Err("Project memory image mime type must be image/webp".to_string());
-        }
-        if !entry.path.starts_with("images/") || !entry.path.ends_with(".webp") {
-            return Err(
-                "Project memory image path must be under images/ with .webp extension".to_string(),
-            );
-        }
         if previous_path.is_some_and(|previous| previous >= entry.path.as_str()) {
-            return Err("Project image catalog paths must be sorted".to_string());
+            return Err("Artifact catalog paths must be sorted".to_string());
         }
         previous_path = Some(&entry.path);
-        if !ids.insert(entry.id.as_str()) {
-            return Err("Project image catalog contains duplicate image ids".to_string());
-        }
-    }
-
-    validate_asset_id(&catalog.environment.id)?;
-    validate_entry_path(&catalog.environment)?;
-    if catalog.environment.mime_type != "image/x-exr" {
-        return Err("Project environment image mime type must be image/x-exr".to_string());
-    }
-    if !catalog.environment.path.starts_with("hdri/") || !catalog.environment.path.ends_with(".exr")
-    {
-        return Err(
-            "Project environment image path must be under hdri/ with .exr extension".to_string(),
-        );
+        validate_entry_kind(entry)?;
     }
 
     Ok(())
 }
 
-fn validate_entry_path(entry: &ProjectAssetEntry) -> Result<(), String> {
+fn validate_entry_kind(entry: &ArtifactEntry) -> Result<(), String> {
+    match entry.kind {
+        ArtifactKind::Environment => {
+            validate_entry_file(entry, "assets/hdri/", ".exr", "image/x-exr")?;
+            if entry.collection_id.is_some() {
+                return Err("Environment artifacts must not include collectionId".to_string());
+            }
+        }
+        ArtifactKind::ProjectImage => {
+            validate_entry_file(entry, "assets/project-images/", ".webp", "image/webp")?;
+            if entry.collection_id.is_some() {
+                return Err("Project image artifacts must not include collectionId".to_string());
+            }
+        }
+        ArtifactKind::CollectionImage => {
+            validate_entry_file(entry, "assets/images/", ".png", "image/png")?;
+            let collection_id = entry
+                .collection_id
+                .as_deref()
+                .ok_or_else(|| "Collection image artifacts require collectionId".to_string())?;
+            validate_collection_id(collection_id)?;
+            if !entry
+                .path
+                .starts_with(&format!("assets/images/{collection_id}/"))
+            {
+                return Err("Collection image path must match collectionId".to_string());
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_entry_file(
+    entry: &ArtifactEntry,
+    prefix: &str,
+    extension: &str,
+    mime_type: &str,
+) -> Result<(), String> {
+    if entry.mime_type != mime_type {
+        return Err("Artifact mime type does not match kind".to_string());
+    }
+    if !entry.path.starts_with(prefix) || !entry.path.ends_with(extension) {
+        return Err("Artifact path does not match kind".to_string());
+    }
+    Ok(())
+}
+
+fn validate_entry_path(entry: &ArtifactEntry) -> Result<(), String> {
     validate_safe_relative_path(&entry.path)?;
     if entry.byte_size == 0 {
-        return Err("Project image asset byte size must be positive".to_string());
+        return Err("Artifact asset byte size must be positive".to_string());
     }
     if !entry.sha256.chars().all(|c| c.is_ascii_hexdigit()) || entry.sha256.len() != 64 {
-        return Err("Project image asset checksum must be a SHA-256 hex digest".to_string());
+        return Err("Artifact asset checksum must be a SHA-256 hex digest".to_string());
     }
     Ok(())
 }
 
 #[cfg(test)]
-fn validate_bytes(bytes: &[u8], entry: &ProjectAssetEntry) -> Result<(), String> {
+fn validate_bytes(bytes: &[u8], entry: &ArtifactEntry) -> Result<(), String> {
     if bytes.len() as u64 != entry.byte_size {
-        return Err("Project image asset byte size did not match manifest".to_string());
+        return Err("Artifact asset byte size did not match manifest".to_string());
     }
     let digest = Sha256::digest(bytes);
     let actual = hex_digest(digest.as_slice());
     if actual != entry.sha256.to_ascii_lowercase() {
-        return Err("Project image asset checksum did not match manifest".to_string());
+        return Err("Artifact asset checksum did not match manifest".to_string());
     }
     Ok(())
 }
@@ -692,7 +769,7 @@ fn hex_digest(bytes: &[u8]) -> String {
 
 fn validate_safe_relative_path(path: &str) -> Result<(), String> {
     if path.is_empty() || path.contains('\\') || path.contains('\0') {
-        return Err("Invalid project image artifact path".to_string());
+        return Err("Invalid artifact path".to_string());
     }
     let path = Path::new(path);
     if path.is_absolute()
@@ -700,7 +777,7 @@ fn validate_safe_relative_path(path: &str) -> Result<(), String> {
             .components()
             .any(|component| !matches!(component, Component::Normal(_)))
     {
-        return Err("Invalid project image artifact path".to_string());
+        return Err("Invalid artifact path".to_string());
     }
     Ok(())
 }
@@ -712,12 +789,12 @@ fn validate_catalog_version(value: &str) -> Result<(), String> {
         || !value.as_bytes()[9..18].iter().all(u8::is_ascii_digit)
         || value.as_bytes()[18] != b'Z'
     {
-        return Err("Project image catalog version must match YYYYMMDDTHHMMSSmmmZ".to_string());
+        return Err("Artifact catalog version must match YYYYMMDDTHHMMSSmmmZ".to_string());
     }
     Ok(())
 }
 
-fn validate_asset_id(value: &str) -> Result<(), String> {
+fn validate_collection_id(value: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > 64
         || !value
@@ -728,13 +805,13 @@ fn validate_asset_id(value: &str) -> Result<(), String> {
             .chars()
             .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
     {
-        return Err("Invalid project image id".to_string());
+        return Err("Invalid artifact collection id".to_string());
     }
     Ok(())
 }
 
 fn prune_obsolete_versions(
-    paths: &ProjectAssetCachePaths,
+    paths: &ArtifactCachePaths,
     current_version: &str,
 ) -> Result<(), String> {
     for base in [&paths.meta, &paths.media] {
@@ -742,24 +819,21 @@ fn prune_obsolete_versions(
             continue;
         }
         for entry in fs::read_dir(base)
-            .map_err(|error| format!("Failed to read project image cache directory: {error}"))?
+            .map_err(|error| format!("Failed to read artifact cache directory: {error}"))?
         {
             let entry = entry
-                .map_err(|error| format!("Failed to inspect project image cache entry: {error}"))?;
+                .map_err(|error| format!("Failed to inspect artifact cache entry: {error}"))?;
             if !entry
                 .file_type()
-                .map_err(|error| {
-                    format!("Failed to inspect project image cache file type: {error}")
-                })?
+                .map_err(|error| format!("Failed to inspect artifact cache file type: {error}"))?
                 .is_dir()
             {
                 continue;
             }
             let version = entry.file_name().to_string_lossy().into_owned();
             if version != current_version {
-                fs::remove_dir_all(entry.path()).map_err(|error| {
-                    format!("Failed to prune obsolete project image cache: {error}")
-                })?;
+                fs::remove_dir_all(entry.path())
+                    .map_err(|error| format!("Failed to prune obsolete artifact cache: {error}"))?;
             }
         }
     }
@@ -767,7 +841,7 @@ fn prune_obsolete_versions(
     Ok(())
 }
 
-fn clean_part_files(paths: &ProjectAssetCachePaths) -> Result<(), String> {
+fn clean_part_files(paths: &ArtifactCachePaths) -> Result<(), String> {
     for base in [&paths.meta, &paths.media] {
         clean_part_files_under(base)?;
     }
@@ -779,14 +853,14 @@ fn clean_part_files_under(path: &Path) -> Result<(), String> {
         return Ok(());
     }
     for entry in fs::read_dir(path)
-        .map_err(|error| format!("Failed to read project image cache directory: {error}"))?
+        .map_err(|error| format!("Failed to read artifact cache directory: {error}"))?
     {
-        let entry = entry
-            .map_err(|error| format!("Failed to inspect project image cache entry: {error}"))?;
+        let entry =
+            entry.map_err(|error| format!("Failed to inspect artifact cache entry: {error}"))?;
         let path = entry.path();
         let file_type = entry
             .file_type()
-            .map_err(|error| format!("Failed to inspect project image cache file type: {error}"))?;
+            .map_err(|error| format!("Failed to inspect artifact cache file type: {error}"))?;
         if file_type.is_dir() {
             clean_part_files_under(&path)?;
         } else if entry.file_name().to_string_lossy().ends_with(".part") {
@@ -800,9 +874,7 @@ fn delete_file_if_exists(path: &Path) -> Result<(), String> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(format!(
-            "Failed to delete project image cache file: {error}"
-        )),
+        Err(error) => Err(format!("Failed to delete artifact cache file: {error}")),
     }
 }
 
@@ -818,46 +890,68 @@ async fn remove_dir_all_if_exists(path: &Path, label: &str) -> Result<(), String
 mod tests {
     use super::*;
 
-    fn entry(id: &str, path: &str, bytes: &[u8]) -> ProjectAssetEntry {
+    fn entry(kind: ArtifactKind, path: &str, bytes: &[u8]) -> ArtifactEntry {
         let digest = Sha256::digest(bytes);
-        ProjectAssetEntry {
-            id: id.to_string(),
+        let collection_id = match kind {
+            ArtifactKind::CollectionImage => path
+                .strip_prefix("assets/images/")
+                .and_then(|rest| rest.split('/').next())
+                .map(ToString::to_string),
+            _ => None,
+        };
+        ArtifactEntry {
+            kind,
             path: path.to_string(),
             mime_type: if path.ends_with(".exr") {
                 "image/x-exr".to_string()
+            } else if path.ends_with(".png") {
+                "image/png".to_string()
             } else {
                 "image/webp".to_string()
             },
             byte_size: bytes.len() as u64,
             sha256: hex_digest(digest.as_slice()),
+            collection_id,
         }
     }
 
-    fn valid_catalog(bytes: &[u8]) -> ProjectAssetCatalog {
-        ProjectAssetCatalog {
+    fn valid_catalog(bytes: &[u8]) -> ArtifactCatalog {
+        ArtifactCatalog {
             schema_version: 1,
             catalog_version: "20260521T121530123Z".to_string(),
-            images: (1..=12)
-                .map(|index| {
-                    entry(
-                        &format!("memory-{index:02}"),
-                        &format!("images/memory-{index:02}.webp"),
-                        bytes,
-                    )
-                })
-                .collect(),
-            environment: entry("studio-soft", "hdri/studio_soft.exr", bytes),
+            assets: [
+                vec![entry(
+                    ArtifactKind::Environment,
+                    "assets/hdri/studio_soft.exr",
+                    bytes,
+                )],
+                vec![entry(
+                    ArtifactKind::CollectionImage,
+                    "assets/images/fuzzies/fuzzy-01.png",
+                    bytes,
+                )],
+                (1..=12)
+                    .map(|index| {
+                        entry(
+                            ArtifactKind::ProjectImage,
+                            &format!("assets/project-images/memory-{index:02}.webp"),
+                            bytes,
+                        )
+                    })
+                    .collect(),
+            ]
+            .concat(),
         }
     }
 
-    fn temp_paths() -> (tempfile::TempDir, ProjectAssetCachePaths) {
+    fn temp_paths() -> (tempfile::TempDir, ArtifactCachePaths) {
         let dir = tempfile::tempdir().unwrap();
-        let paths = cache_paths_for_root(dir.path().join("project-artifacts"));
+        let paths = cache_paths_for_root(dir.path().join("artifacts"));
         (dir, paths)
     }
 
-    fn write_valid_catalog(paths: &ProjectAssetCachePaths, catalog: &ProjectAssetCatalog) {
-        let latest = ProjectAssetLatest {
+    fn write_valid_catalog(paths: &ArtifactCachePaths, catalog: &ArtifactCatalog) {
+        let latest = ArtifactLatest {
             catalog_version: catalog.catalog_version.clone(),
             manifest_path: Some(format!("{}/manifest.json", catalog.catalog_version)),
         };
@@ -869,7 +963,7 @@ mod tests {
         let url = allowed_artifactory_url("v1/manifest.json").unwrap();
         assert_eq!(
             url.as_str(),
-            "https://global.block-artifacts.com/artifactory/goose-internal/project-artifacts/v1/manifest.json"
+            "https://global.block-artifacts.com/artifactory/goose-internal/artifacts/v1/manifest.json"
         );
         assert!(allowed_artifactory_url("../manifest.json").is_err());
         assert!(allowed_artifactory_url("https://example.com/file").is_err());
@@ -877,23 +971,30 @@ mod tests {
 
     #[test]
     fn media_cache_paths_reject_traversal_and_point_under_media() {
-        let paths = cache_paths_for_root(PathBuf::from("/tmp/project-artifacts"));
+        let paths = cache_paths_for_root(PathBuf::from("/tmp/artifacts"));
         let version = "20260521T121530123Z";
-        let path = media_cache_path(&paths, version, "images/memory-01.webp").unwrap();
+        let path =
+            media_cache_path(&paths, version, "assets/project-images/memory-01.webp").unwrap();
         assert_eq!(
             path,
-            paths.media.join(format!("{version}/images/memory-01.webp"))
+            paths
+                .media
+                .join(format!("{version}/assets/project-images/memory-01.webp"))
         );
         assert!(path.starts_with(&paths.media));
         assert!(!path.starts_with(&paths.meta));
-        assert!(media_cache_path(&paths, version, "images/../secret").is_err());
-        assert!(media_cache_path(&paths, "../v1", "images/memory-01.webp").is_err());
+        assert!(media_cache_path(&paths, version, "assets/../secret").is_err());
+        assert!(media_cache_path(&paths, "../v1", "assets/project-images/memory-01.webp").is_err());
     }
 
     #[test]
     fn byte_size_and_sha256_are_validated() {
         let bytes = b"asset-bytes";
-        let valid = entry("memory-01", "images/memory-01.webp", bytes);
+        let valid = entry(
+            ArtifactKind::ProjectImage,
+            "assets/project-images/memory-01.webp",
+            bytes,
+        );
         assert!(validate_bytes(bytes, &valid).is_ok());
 
         let mut bad_size = valid.clone();
@@ -906,16 +1007,24 @@ mod tests {
     }
 
     #[test]
-    fn catalog_validation_allows_variable_images_and_renamed_environment() {
+    fn catalog_validation_allows_supported_artifact_kinds() {
         let bytes = b"asset-bytes";
-        let catalog = ProjectAssetCatalog {
+        let catalog = ArtifactCatalog {
             schema_version: 1,
             catalog_version: "20260521T121530123Z".to_string(),
-            images: vec![
-                entry("alpha", "images/alpha.webp", bytes),
-                entry("zebra", "images/zebra.webp", bytes),
+            assets: vec![
+                entry(ArtifactKind::Environment, "assets/hdri/loft.exr", bytes),
+                entry(
+                    ArtifactKind::CollectionImage,
+                    "assets/images/fuzzies/fuzzy-01.png",
+                    bytes,
+                ),
+                entry(
+                    ArtifactKind::ProjectImage,
+                    "assets/project-images/alpha.webp",
+                    bytes,
+                ),
             ],
-            environment: entry("loft", "hdri/loft.exr", bytes),
         };
 
         assert!(validate_catalog(&catalog).is_ok());
@@ -929,19 +1038,19 @@ mod tests {
         assert!(validate_catalog(&catalog).is_err());
 
         let mut catalog = valid_catalog(bytes);
-        catalog.images.clear();
+        catalog.assets.clear();
         assert!(validate_catalog(&catalog).is_err());
 
         let mut catalog = valid_catalog(bytes);
-        catalog.images[1].id = catalog.images[0].id.clone();
+        catalog.assets[1].collection_id = Some("unexpected".to_string());
         assert!(validate_catalog(&catalog).is_err());
 
         let mut catalog = valid_catalog(bytes);
-        catalog.images[0].path = "../memory-01.webp".to_string();
+        catalog.assets[0].path = "../memory-01.webp".to_string();
         assert!(validate_catalog(&catalog).is_err());
 
         let mut catalog = valid_catalog(bytes);
-        catalog.images[0].mime_type = "image/png".to_string();
+        catalog.assets[0].mime_type = "image/png".to_string();
         assert!(validate_catalog(&catalog).is_err());
     }
 
@@ -949,7 +1058,7 @@ mod tests {
     fn catalog_validation_requires_sorted_image_paths() {
         let bytes = b"asset-bytes";
         let mut catalog = valid_catalog(bytes);
-        catalog.images.swap(0, 1);
+        catalog.assets.swap(0, 1);
 
         assert!(validate_catalog(&catalog).is_err());
     }
@@ -963,7 +1072,7 @@ mod tests {
         assert!(!paths.meta.join(LATEST_PATH).exists());
 
         let catalog = valid_catalog(b"asset-bytes");
-        let latest = ProjectAssetLatest {
+        let latest = ArtifactLatest {
             catalog_version: catalog.catalog_version.clone(),
             manifest_path: Some(format!("{}/manifest.json", catalog.catalog_version)),
         };
@@ -997,22 +1106,28 @@ mod tests {
         let bytes = b"asset-bytes";
         let catalog = valid_catalog(bytes);
         let (_dir, paths) = temp_paths();
-        let target =
-            media_cache_path(&paths, &catalog.catalog_version, &catalog.images[0].path).unwrap();
+        let entry = &catalog.assets[0];
+        let target = media_cache_path(&paths, &catalog.catalog_version, &entry.path).unwrap();
         fs::create_dir_all(target.parent().unwrap()).unwrap();
         fs::write(&target, bytes).unwrap();
-        write_checksum_marker(&paths, &catalog.catalog_version, &catalog.images[0]).unwrap();
+        write_checksum_marker(&paths, &catalog.catalog_version, entry).unwrap();
 
-        let cached = ensure_entry(
-            &http_client().unwrap(),
-            &paths,
-            &catalog,
-            &catalog.images[0],
-        )
-        .await
-        .unwrap();
+        let cached = ensure_entry(&http_client().unwrap(), &paths, &catalog, entry)
+            .await
+            .unwrap();
 
-        assert_eq!(cached, target.to_string_lossy());
+        assert_eq!(cached.path, target.to_string_lossy());
+    }
+
+    #[tokio::test]
+    async fn cached_catalog_reads_do_not_download_missing_assets() {
+        let catalog = valid_catalog(b"asset-bytes");
+        let (_dir, paths) = temp_paths();
+        write_valid_catalog(&paths, &catalog);
+
+        let cached = read_complete_cached_assets(&paths).await.unwrap();
+
+        assert!(cached.is_none());
     }
 
     #[tokio::test]
@@ -1021,20 +1136,20 @@ mod tests {
         let catalog = valid_catalog(bytes);
         let (_dir, paths) = temp_paths();
 
-        for entry in &catalog.images {
+        for entry in &catalog.assets {
             let target = media_cache_path(&paths, &catalog.catalog_version, &entry.path).unwrap();
             fs::create_dir_all(target.parent().unwrap()).unwrap();
             fs::write(&target, bytes).unwrap();
             write_checksum_marker(&paths, &catalog.catalog_version, entry).unwrap();
         }
 
-        let cached = ensure_entries(&http_client().unwrap(), &paths, &catalog, &catalog.images)
+        let cached = ensure_entries(&http_client().unwrap(), &paths, &catalog, &catalog.assets)
             .await
             .unwrap();
 
-        assert_eq!(cached.len(), catalog.images.len());
-        for (index, path) in cached.iter().enumerate() {
-            assert!(path.ends_with(&catalog.images[index].path));
+        assert_eq!(cached.len(), catalog.assets.len());
+        for (index, asset) in cached.iter().enumerate() {
+            assert!(asset.path.ends_with(&catalog.assets[index].path));
         }
     }
 
@@ -1053,11 +1168,11 @@ mod tests {
         let bytes = b"asset-bytes";
         let catalog = valid_catalog(bytes);
         let (_dir, paths) = temp_paths();
-        let target =
-            media_cache_path(&paths, &catalog.catalog_version, &catalog.images[0].path).unwrap();
+        let entry = &catalog.assets[1];
+        let target = media_cache_path(&paths, &catalog.catalog_version, &entry.path).unwrap();
         fs::create_dir_all(target.parent().unwrap()).unwrap();
         fs::write(&target, b"wrong").unwrap();
-        write_checksum_marker(&paths, &catalog.catalog_version, &catalog.images[0]).unwrap();
+        write_checksum_marker(&paths, &catalog.catalog_version, entry).unwrap();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1072,7 +1187,7 @@ mod tests {
             socket.write_all(response.as_bytes()).await.unwrap();
         });
         let url = Url::parse(&format!("http://{addr}/memory-01.webp")).unwrap();
-        download_asset(&http_client().unwrap(), url, &target, &catalog.images[0])
+        download_asset(&http_client().unwrap(), url, &target, entry)
             .await
             .unwrap();
 
@@ -1081,34 +1196,51 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn clear_project_artifact_assets_cache_deletes_meta_and_media_roots() {
+    async fn clear_artifacts_cache_deletes_meta_and_media_roots() {
         let (_dir, paths) = temp_paths();
         fs::create_dir_all(paths.meta.join("20260521T121530123Z")).unwrap();
-        fs::create_dir_all(paths.media.join("20260521T121530123Z/images")).unwrap();
+        fs::create_dir_all(
+            paths
+                .media
+                .join("20260521T121530123Z/assets/project-images"),
+        )
+        .unwrap();
         fs::write(paths.meta.join("20260521T121530123Z/manifest.json"), b"{}").unwrap();
         fs::write(
             paths
                 .media
-                .join("20260521T121530123Z/images/memory-01.webp"),
+                .join("20260521T121530123Z/assets/project-images/memory-01.webp"),
             b"asset",
         )
         .unwrap();
 
-        clear_project_artifact_assets_cache_paths(&paths)
-            .await
-            .unwrap();
+        clear_artifacts_cache_paths(&paths).await.unwrap();
 
         assert!(!paths.meta.exists());
         assert!(!paths.media.exists());
     }
 
     #[tokio::test]
-    async fn clear_project_artifact_assets_cache_succeeds_when_roots_are_missing() {
+    async fn clear_artifacts_cache_deletes_legacy_project_artifacts_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = cache_paths_for_root_with_legacy(
+            dir.path().join("artifacts"),
+            Some(dir.path().join("project-artifacts")),
+        );
+        let legacy_root = paths.legacy_root.as_ref().unwrap();
+        fs::create_dir_all(legacy_root.join("media")).unwrap();
+        fs::write(legacy_root.join("media/legacy.webp"), b"asset").unwrap();
+
+        clear_artifacts_cache_paths(&paths).await.unwrap();
+
+        assert!(!legacy_root.exists());
+    }
+
+    #[tokio::test]
+    async fn clear_artifacts_cache_succeeds_when_roots_are_missing() {
         let (_dir, paths) = temp_paths();
 
-        clear_project_artifact_assets_cache_paths(&paths)
-            .await
-            .unwrap();
+        clear_artifacts_cache_paths(&paths).await.unwrap();
 
         assert!(!paths.meta.exists());
         assert!(!paths.media.exists());
