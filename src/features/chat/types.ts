@@ -117,4 +117,12 @@ export interface ChatInputProps {
   projectPicker?: ChatInputProjectPicker;
   contextUsage?: ChatInputContextUsage;
   controls?: ChatInputControls;
+  /**
+   * Visual surface for the composer.
+   * - "pill" (default): translucent glass pill — used by the Home composer.
+   * - "bare": no background of its own, so a parent panel provides the surface.
+   *   The chat composer uses this to render a translucent glass floating island
+   *   (the wrapper supplies --surface-composer + backdrop blur).
+   */
+  surface?: "pill" | "bare";
 }

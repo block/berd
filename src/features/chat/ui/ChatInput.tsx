@@ -52,6 +52,7 @@ export function ChatInput({
   projectPicker,
   contextUsage,
   controls,
+  surface = "pill",
 }: ChatInputProps) {
   const {
     onSend,
@@ -148,14 +149,20 @@ export function ChatInput({
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
 
+  // Cap how tall the textarea grows before it scrolls internally. The chat
+  // composer caps shorter so the floating island tops out ~260px tall (textarea
+  // + ~76px of surrounding chrome) instead of growing unbounded; the Home pill
+  // keeps the taller cap. Keep this in sync with the textarea's max-h-* class.
+  const textareaMaxHeightPx = surface === "bare" ? 184 : 200;
+
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
     if (!textarea) {
       return;
     }
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, 200)}px`;
-  }, []);
+    textarea.style.height = `${Math.min(textarea.scrollHeight, textareaMaxHeightPx)}px`;
+  }, [textareaMaxHeightPx]);
 
   const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
@@ -466,11 +473,19 @@ export function ChatInput({
     [selectedSkills, setSelectedSkills],
   );
 
+  // Bare composer matches the conversation panel's chat radius so the two read
+  // as one family; the floating Home pill keeps its softer composer radius.
+  const composerRadius =
+    surface === "bare" ? "rounded-card-chat" : "rounded-composer";
+
   return (
     <TooltipProvider delayDuration={300}>
       <div
         className={cn(
-          "relative z-10 px-2 pb-3 pt-0 sm:px-4 sm:pb-6",
+          "relative z-10",
+          // The floating Home pill needs outer breathing room from the screen
+          // edge; the bare chat composer is inset by its panel wrapper instead.
+          surface === "pill" && "px-2 pb-3 pt-0 sm:px-4 sm:pb-6",
           className,
         )}
       >
@@ -497,7 +512,9 @@ export function ChatInput({
             <div
               ref={containerRef}
               className={cn(
-                "relative rounded-composer bg-surface-composer backdrop-blur-md px-5 pb-3 pt-4 transition-colors",
+                "relative px-5 pb-3 pt-4 transition-colors",
+                composerRadius,
+                surface === "pill" && "bg-surface-composer backdrop-blur-md",
                 isAttachmentDragOver && "bg-surface-composer/60",
               )}
               onDragEnter={handleDragEnter}
@@ -506,7 +523,12 @@ export function ChatInput({
               onDrop={handleDrop}
             >
               {isAttachmentDragOver && (
-                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border/80 bg-card/60">
+                <div
+                  className={cn(
+                    "pointer-events-none absolute inset-0 z-10 flex items-center justify-center border border-dashed border-border/80 bg-card/60",
+                    composerRadius,
+                  )}
+                >
                   <Badge variant="secondary" className="px-3 py-1 text-sm">
                     {t("attachments.dropToAttach")}
                   </Badge>
@@ -563,7 +585,14 @@ export function ChatInput({
                   placeholder={inputPlaceholder}
                   disabled={disabled}
                   rows={1}
-                  className="mb-3 min-h-[36px] max-h-[200px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-base leading-relaxed text-foreground placeholder:font-light placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60"
+                  className={cn(
+                    "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-base leading-relaxed text-foreground placeholder:font-light placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
+                    // Backstop for the JS auto-resize cap (textareaMaxHeightPx).
+                    surface === "bare" ? "max-h-[184px]" : "max-h-[200px]",
+                    // The composer text scrolls with the cursor, but never shows
+                    // its own scrollbar.
+                    "scrollbar-none",
+                  )}
                   aria-label={t("input.ariaLabel")}
                 />
               </PopoverAnchor>

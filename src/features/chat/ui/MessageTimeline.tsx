@@ -1,9 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ReactNode,
+  type SyntheticEvent,
   type WheelEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -29,6 +32,16 @@ interface MessageTimelineProps {
   onSendMcpAppMessage?: McpAppMessageHandler;
   className?: string;
   tailPaddingPx?: number;
+  /** Pinned to the bottom inside the scroll container so it scrolls natively
+      with the conversation behind it (the floating chat composer). */
+  footer?: ReactNode;
+  /** Shown in place of the message list (empty state or loading skeleton)
+      while keeping the scroll container and sticky footer mounted, so the
+      composer never remounts between empty, loading, and populated states. */
+  placeholder?: ReactNode;
+  /** Force the placeholder even when messages exist, e.g. while history is
+      still loading. */
+  showPlaceholder?: boolean;
 }
 
 function isSameDay(a: number, b: number): boolean {
@@ -75,10 +88,17 @@ export function MessageTimeline({
   onSendMcpAppMessage,
   className,
   tailPaddingPx,
+  footer,
+  placeholder,
+  showPlaceholder,
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
   const containerRef = useRef<HTMLDivElement>(null);
+  // The composer is a sticky footer inside the scroll container. Wheels and
+  // touches that land on it scroll the composer's own text, not the
+  // conversation, so the scroll handlers below ignore anything inside this ref.
+  const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
   const userDetachedRef = useRef(false);
@@ -226,7 +246,11 @@ export function MessageTimeline({
 
       const containerRect = nextContainer.getBoundingClientRect();
       const elementRect = element.getBoundingClientRect();
-      const delta = elementRect.bottom - containerRect.bottom + 16;
+      const footerRect = footerRef.current?.getBoundingClientRect();
+      const visibleBottom = footerRect
+        ? Math.min(containerRect.bottom, footerRect.top)
+        : containerRect.bottom;
+      const delta = elementRect.bottom - visibleBottom + 16;
 
       if (delta > 0) {
         nextContainer.scrollBy({
@@ -249,9 +273,13 @@ export function MessageTimeline({
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
 
   // The composer reserves bottom padding so messages stay reachable above it.
-  // When the composer grows, scrollHeight grows; a user pinned to the bottom
-  // would otherwise drift Δ pixels away. Re-pin them.
-  useEffect(() => {
+  // When the composer resizes, that padding (and thus scrollHeight) changes; a
+  // user pinned to the bottom would otherwise drift. Re-pin them in BOTH
+  // directions. This runs as a layout effect so it fires synchronously after the
+  // padding mutation and before paint — reading scrollHeight here forces a fresh
+  // measurement, so on shrink we pin to the new (shorter) bottom in the same
+  // frame instead of leaving the view parked past the end until the next scroll.
+  useLayoutEffect(() => {
     if (tailPaddingPx == null) {
       return;
     }
@@ -380,6 +408,12 @@ export function MessageTimeline({
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
+    // A wheel over the composer scrolls its text, not the conversation, so it
+    // must not flip the conversation into the detached "jump to latest" state.
+    if (footerRef.current?.contains(event.target as Node)) {
+      return;
+    }
+
     userScrollIntentRef.current = true;
 
     if (event.deltaY < 0) {
@@ -388,7 +422,10 @@ export function MessageTimeline({
     }
   };
 
-  const handleUserScrollIntent = () => {
+  const handleUserScrollIntent = (event: SyntheticEvent) => {
+    if (footerRef.current?.contains(event.target as Node)) {
+      return;
+    }
     userScrollIntentRef.current = true;
   };
 
@@ -398,98 +435,141 @@ export function MessageTimeline({
     scrollToBottom("smooth");
   };
 
-  if (visibleMessages.length === 0) {
-    return (
-      <div className={cn("flex flex-1 items-center justify-center", className)}>
-        <div className="text-center">
-          <p className="text-lg font-medium font-display tracking-tight text-muted-foreground">
-            {t("timeline.emptyTitle")}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {t("timeline.emptyDescription")}
-          </p>
-        </div>
+  const jumpToLatestButton = userDetached ? (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      onClick={handleJumpToLatest}
+      leftIcon={<ArrowDown />}
+      className="bg-background/95 shadow-sm"
+    >
+      {t("timeline.jumpToLatest")}
+    </Button>
+  ) : null;
+
+  const messageList = (
+    <div
+      className="mx-auto w-full max-w-3xl flex-1 pt-4"
+      style={{ paddingBottom: footer ? 16 : (tailPaddingPx ?? 16) }}
+    >
+      {visibleMessages.map((message, index) => {
+        const prev = index > 0 ? visibleMessages[index - 1] : null;
+        const showDateSeparator =
+          !prev || !isSameDay(prev.created, message.created);
+
+        return (
+          <div
+            key={message.id}
+            ref={(el) => {
+              messageRefs.current[message.id] = el;
+            }}
+            className={cn(
+              index === 0 ? "mt-0" : "mt-4",
+              "rounded-xl transition-[background-color,box-shadow]",
+              pulsingMessageId === message.id &&
+                "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+            )}
+          >
+            {showDateSeparator && (
+              <div className="my-4 px-4 text-center">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {formatDateSeparator(
+                    message.created,
+                    t("timeline.today"),
+                    t("timeline.yesterday"),
+                    formatDate,
+                  )}
+                </span>
+              </div>
+            )}
+            <MessageBubble
+              message={message}
+              isStreaming={message.id === streamingMessageId}
+              onRetryMessage={
+                message.role === "assistant" ? onRetryMessage : undefined
+              }
+              onEditMessage={
+                message.role === "user" ? onEditMessage : undefined
+              }
+              onSendMcpAppMessage={onSendMcpAppMessage}
+              onMcpAppAutoScroll={requestMcpAppAutoScroll}
+            />
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const defaultEmptyState = (
+    <div className="flex flex-1 items-center justify-center">
+      <div className="text-center">
+        <p className="text-lg font-medium font-display tracking-tight text-muted-foreground">
+          {t("timeline.emptyTitle")}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {t("timeline.emptyDescription")}
+        </p>
       </div>
-    );
-  }
+    </div>
+  );
+
+  const showPlaceholderContent =
+    showPlaceholder || visibleMessages.length === 0;
+  const content = showPlaceholderContent
+    ? (placeholder ?? defaultEmptyState)
+    : messageList;
 
   return (
-    <div
-      className={cn("relative min-h-0 flex-1", className)}
-      style={
-        tailPaddingPx != null ? { paddingBottom: tailPaddingPx } : undefined
-      }
-    >
+    <div className={cn("relative min-h-0 flex-1", className)}>
       <div
         ref={containerRef}
         onScroll={handleScroll}
         onWheel={handleWheel}
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
-        className="h-full overflow-y-auto [scrollbar-gutter:stable_both-edges]"
-        role="log"
-        aria-label={t("timeline.ariaLabel")}
-        aria-live="polite"
+        data-testid="message-timeline-scroll"
+        className="scrollbar-none h-full overflow-y-auto"
       >
-        <div className="mx-auto max-w-3xl py-4">
-          {visibleMessages.map((message, index) => {
-            const prev = index > 0 ? visibleMessages[index - 1] : null;
-            const showDateSeparator =
-              !prev || !isSameDay(prev.created, message.created);
-
-            return (
-              <div
-                key={message.id}
-                ref={(el) => {
-                  messageRefs.current[message.id] = el;
-                }}
-                className={cn(
-                  index === 0 ? "mt-0" : "mt-4",
-                  "rounded-xl transition-[background-color,box-shadow]",
-                  pulsingMessageId === message.id &&
-                    "bg-accent/25 ring-2 ring-accent/35 ring-inset",
-                )}
-              >
-                {showDateSeparator && (
-                  <div className="my-4 px-4 text-center">
-                    <span className="text-[11px] font-medium text-muted-foreground">
-                      {formatDateSeparator(
-                        message.created,
-                        t("timeline.today"),
-                        t("timeline.yesterday"),
-                        formatDate,
-                      )}
-                    </span>
+        {/* A min-height column so the sticky footer sits at the bottom even when
+            the conversation is short, and floats over the messages once they
+            overflow. The footer (composer) shares this scroll container, so the
+            browser handles native scroll latching: a swipe parks the composer's
+            text at its edge, the next swipe scrolls the conversation behind it. */}
+        <div className="flex min-h-full flex-col">
+          <div
+            className="flex min-h-0 flex-1 flex-col"
+            role="log"
+            aria-label={t("timeline.ariaLabel")}
+            aria-live="polite"
+          >
+            {content}
+          </div>
+          {footer ? (
+            <div
+              ref={footerRef}
+              data-testid="message-timeline-footer"
+              className="pointer-events-none sticky bottom-4 z-10 flex flex-col"
+            >
+              {jumpToLatestButton ? (
+                <div className="mb-2 flex justify-center">
+                  <div className="pointer-events-auto">
+                    {jumpToLatestButton}
                   </div>
-                )}
-                <MessageBubble
-                  message={message}
-                  isStreaming={message.id === streamingMessageId}
-                  onRetryMessage={
-                    message.role === "assistant" ? onRetryMessage : undefined
-                  }
-                  onEditMessage={
-                    message.role === "user" ? onEditMessage : undefined
-                  }
-                  onSendMcpAppMessage={onSendMcpAppMessage}
-                  onMcpAppAutoScroll={requestMcpAppAutoScroll}
-                />
-              </div>
-            );
-          })}
+                </div>
+              ) : null}
+              {footer}
+            </div>
+          ) : null}
         </div>
       </div>
-      {userDetached ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleJumpToLatest}
-          leftIcon={<ArrowDown />}
-          className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-background/95 shadow-sm"
+      {!footer && jumpToLatestButton ? (
+        <div
+          className="absolute left-1/2 -translate-x-1/2"
+          style={{ bottom: (tailPaddingPx ?? 16) + 8 }}
         >
-          {t("timeline.jumpToLatest")}
-        </Button>
+          {jumpToLatestButton}
+        </div>
       ) : null}
     </div>
   );

@@ -281,6 +281,18 @@
   --shadow-btn: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-card: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-elevated: 0 3px 12px rgba(76, 76, 76, 0.22);
+  /* Floating chat composer — the light-mode dual of the dark-mode specular rim.
+     The card is pure white, so a bright highlight can't show (nothing beats
+     #fff). Same light-from-above, opposite visible half: the shadowed underside
+     reads as a soft directional dark rim on the bottom edge (inset), which feels
+     like a lit edge rather than a stamped border. A whisper-faint uniform ring
+     contains the other edges without the harshness of a crisp full stroke. Then
+     the graduated drop cocktail (rising blur, falling opacity). Neutral
+     gray-on-light per the project shadow convention (never raw black). */
+  --shadow-chat:
+    inset 0 -1px 0 rgba(76, 76, 76, 0.05), 0 0 0 1px rgba(76, 76, 76, 0.03),
+    0 1px 2px rgba(76, 76, 76, 0.04), 0 3px 6px rgba(76, 76, 76, 0.05),
+    0 8px 16px rgba(76, 76, 76, 0.06), 0 16px 28px rgba(76, 76, 76, 0.05);
   --shadow-popover:
     0 1px 1px rgba(0, 0, 0, 0.03), 0 6px 18px rgba(0, 0, 0, 0.06),
     0 16px 32px rgba(0, 0, 0, 0.03);
@@ -474,6 +486,17 @@
   --shadow-btn: 0 2px 8px rgba(0, 0, 0, 0.3);
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-elevated: 0 3px 12px rgba(0, 0, 0, 0.5);
+  /* Floating chat composer — the island sits on a same-colored (gray-800) panel,
+     so a darker drop shadow would vanish dark-on-dark. Definition comes from
+     light instead: a directional specular rim (inset top highlight that catches
+     light from above and fades around the rounded corners, à la Apple's Liquid
+     Glass) plus a faint uniform ring for the sides + bottom. Two soft dark layers
+     darken the panel right under the island to ground it. The ring is the
+     "border", drawn via shadow so it never affects layout or gets clipped. */
+  --shadow-chat:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    0 0 0 1px rgba(255, 255, 255, 0.07), 0 2px 6px rgba(0, 0, 0, 0.32),
+    0 10px 28px rgba(0, 0, 0, 0.24);
   --shadow-popover:
     0 1px 0 rgba(255, 255, 255, 0.05) inset, 0 8px 22px rgba(0, 0, 0, 0.36),
     0 2px 6px rgba(0, 0, 0, 0.24);
@@ -638,6 +661,7 @@
   --shadow-btn: var(--shadow-btn);
   --shadow-card: var(--shadow-card);
   --shadow-elevated: var(--shadow-elevated);
+  --shadow-chat: var(--shadow-chat);
   --shadow-popover: var(--shadow-popover);
   --shadow-popover-inverse: var(--shadow-popover-inverse);
   --shadow-modal: var(--shadow-modal);

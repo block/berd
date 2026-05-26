@@ -19,9 +19,21 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("../MessageTimeline", () => ({
-  MessageTimeline: (props: unknown) => {
+  MessageTimeline: (props: {
+    messages: unknown[];
+    footer?: ReactNode;
+    placeholder?: ReactNode;
+    showPlaceholder?: boolean;
+  }) => {
     mocks.messageTimelineSpy(props);
-    return <div data-testid="message-timeline" />;
+    const showPlaceholder =
+      props.showPlaceholder || props.messages.length === 0;
+    return (
+      <div data-testid="message-timeline">
+        {showPlaceholder ? props.placeholder : null}
+        {props.footer}
+      </div>
+    );
   },
 }));
 
@@ -141,77 +153,7 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.className).toBeUndefined();
   });
 
-  it("uses tighter timeline padding when the latest visible content is an MCP app", () => {
-    mocks.useChatSessionController.mockReturnValue({
-      ...mocks.useChatSessionController(),
-      messages: [
-        {
-          id: "assistant-1",
-          role: "assistant",
-          created: Date.now(),
-          content: [
-            {
-              type: "mcpApp",
-              id: "mcp-app-1",
-              payload: {},
-            },
-          ],
-        },
-      ],
-    });
-
-    render(<ChatView sessionId="session-1" />);
-
-    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
-    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      tailPaddingPx?: number;
-    };
-    expect(timelineProps.tailPaddingPx).toBe(48);
-  });
-
-  it("uses regular timeline padding when reasoning is the latest visible content", () => {
-    mocks.useChatSessionController.mockReturnValue({
-      ...mocks.useChatSessionController(),
-      messages: [
-        {
-          id: "assistant-1",
-          role: "assistant",
-          created: Date.now(),
-          content: [
-            {
-              type: "reasoning",
-              text: "Working through it",
-            },
-          ],
-        },
-      ],
-    });
-
-    render(<ChatView sessionId="session-1" />);
-
-    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
-    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      tailPaddingPx?: number;
-    };
-    expect(timelineProps.tailPaddingPx).toBe(96);
-  });
-
-  it("uses regular timeline padding over the loading indicator", () => {
-    mocks.useChatSessionController.mockReturnValue({
-      ...mocks.useChatSessionController(),
-      chatState: "thinking",
-    });
-
-    render(<ChatView sessionId="session-1" />);
-
-    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
-    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
-      tailPaddingPx?: number;
-    };
-    expect(timelineProps.tailPaddingPx).toBe(96);
-  });
-
-  it("renders the chat empty state instead of the timeline for a fresh chat", () => {
+  it("shows the empty-state placeholder while keeping the composer mounted for a fresh chat", () => {
     mocks.useChatSessionController.mockReturnValue({
       ...mocks.useChatSessionController(),
       messages: [],
@@ -219,8 +161,36 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" />);
 
+    // The composer lives inside the timeline as a sticky footer, so the
+    // timeline always renders and the composer never remounts between states.
+    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
     expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
-    expect(mocks.messageTimelineSpy).not.toHaveBeenCalled();
     expect(mocks.chatInputSpy).toHaveBeenCalled();
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      footer?: unknown;
+      showPlaceholder?: boolean;
+    };
+    expect(timelineProps.footer).toBeTruthy();
+    expect(timelineProps.showPlaceholder).toBe(false);
+  });
+
+  it("forces the loading skeleton placeholder while history loads", () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      isLoadingHistory: true,
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    expect(mocks.messageTimelineSpy).toHaveBeenCalled();
+    expect(screen.getByTestId("chat-loading-skeleton")).toBeTruthy();
+    // Composer is still mounted underneath the skeleton.
+    expect(mocks.chatInputSpy).toHaveBeenCalled();
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      showPlaceholder?: boolean;
+    };
+    expect(timelineProps.showPlaceholder).toBe(true);
   });
 });

@@ -29,7 +29,25 @@ vi.mock("../MessageBubble", () => ({
           <div
             key={block.id}
             data-testid={`mcp-app-${block.id}`}
-            ref={(element) => onMcpAppAutoScroll?.(element)}
+            ref={(element) => {
+              if (element) {
+                Object.defineProperty(element, "getBoundingClientRect", {
+                  configurable: true,
+                  value: () => ({
+                    bottom: 460,
+                    height: 0,
+                    left: 0,
+                    right: 0,
+                    top: 0,
+                    width: 0,
+                    x: 0,
+                    y: 0,
+                    toJSON: () => ({}),
+                  }),
+                });
+              }
+              onMcpAppAutoScroll?.(element);
+            }}
           />
         ))}
     </div>
@@ -102,6 +120,24 @@ function setScrollMetrics(
   });
 }
 
+function setElementRect(element: HTMLElement, rect: Partial<DOMRectReadOnly>) {
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({
+      bottom: 0,
+      height: 0,
+      left: 0,
+      right: 0,
+      top: 0,
+      width: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+      ...rect,
+    }),
+  });
+}
+
 function attachScrollTo(element: HTMLElement) {
   const scrollTo = vi.fn((options: ScrollToOptions) => {
     if (typeof options.top === "number") {
@@ -115,6 +151,23 @@ function attachScrollTo(element: HTMLElement) {
   return scrollTo;
 }
 
+function attachScrollBy(element: HTMLElement) {
+  const scrollBy = vi.fn((options: ScrollToOptions) => {
+    if (typeof options.top === "number") {
+      element.scrollTop += options.top;
+    }
+  });
+  Object.defineProperty(element, "scrollBy", {
+    configurable: true,
+    value: scrollBy,
+  });
+  return scrollBy;
+}
+
+function getTimelineScroller() {
+  return screen.getByTestId("message-timeline-scroll");
+}
+
 describe("MessageTimeline", () => {
   it("keeps following streaming content while the user is near the bottom", async () => {
     const messages = [
@@ -124,9 +177,9 @@ describe("MessageTimeline", () => {
     const { rerender } = renderWithProviders(
       <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
     );
-    const log = screen.getByRole("log", { name: "Chat messages" });
-    setScrollMetrics(log, { scrollTop: 450 });
-    const scrollTo = attachScrollTo(log);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    const scrollTo = attachScrollTo(scroller);
     scrollTo.mockClear();
 
     rerender(
@@ -156,13 +209,13 @@ describe("MessageTimeline", () => {
     const { rerender } = renderWithProviders(
       <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
     );
-    const log = screen.getByRole("log", { name: "Chat messages" });
-    setScrollMetrics(log, { scrollTop: 450 });
-    const scrollTo = attachScrollTo(log);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    const scrollTo = attachScrollTo(scroller);
 
-    fireEvent.wheel(log, { deltaY: -120 });
-    log.scrollTop = 100;
-    fireEvent.scroll(log);
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
 
     expect(
       await screen.findByRole("button", { name: "Jump to latest" }),
@@ -197,11 +250,11 @@ describe("MessageTimeline", () => {
     const { rerender } = renderWithProviders(
       <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
     );
-    const log = screen.getByRole("log", { name: "Chat messages" });
-    setScrollMetrics(log, { scrollTop: 450 });
-    const scrollTo = attachScrollTo(log);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    const scrollTo = attachScrollTo(scroller);
 
-    fireEvent.wheel(log, { deltaY: -40 });
+    fireEvent.wheel(scroller, { deltaY: -40 });
 
     expect(
       await screen.findByRole("button", { name: "Jump to latest" }),
@@ -229,11 +282,11 @@ describe("MessageTimeline", () => {
     const { rerender } = renderWithProviders(
       <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
     );
-    const log = screen.getByRole("log", { name: "Chat messages" });
-    setScrollMetrics(log, { scrollTop: 450 });
-    const scrollTo = attachScrollTo(log);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    const scrollTo = attachScrollTo(scroller);
 
-    fireEvent.wheel(log, { deltaY: -40 });
+    fireEvent.wheel(scroller, { deltaY: -40 });
 
     expect(
       await screen.findByRole("button", { name: "Jump to latest" }),
@@ -258,13 +311,13 @@ describe("MessageTimeline", () => {
     const { rerender } = renderWithProviders(
       <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
     );
-    const log = screen.getByRole("log", { name: "Chat messages" });
-    setScrollMetrics(log, { scrollTop: 450 });
-    const scrollTo = attachScrollTo(log);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    const scrollTo = attachScrollTo(scroller);
 
-    fireEvent.wheel(log, { deltaY: -120 });
-    log.scrollTop = 100;
-    fireEvent.scroll(log);
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    scroller.scrollTop = 100;
+    fireEvent.scroll(scroller);
 
     expect(
       await screen.findByRole("button", { name: "Jump to latest" }),
@@ -286,5 +339,52 @@ describe("MessageTimeline", () => {
       top: 1000,
       behavior: "auto",
     });
+  });
+
+  it("keeps MCP app auto-scroll above the sticky footer", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "First token"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline
+        messages={messages}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+    setElementRect(scroller, { bottom: 500 });
+    setElementRect(screen.getByTestId("message-timeline-footer"), {
+      top: 400,
+    });
+    const scrollBy = attachScrollBy(scroller);
+
+    rerender(
+      <MessageTimeline
+        messages={[messages[0], mcpAppMessage("assistant-1")]}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollBy).toHaveBeenCalledWith({
+        top: 76,
+        behavior: "auto",
+      }),
+    );
+  });
+
+  it("keeps the sticky footer outside the live message log", () => {
+    renderWithProviders(
+      <MessageTimeline
+        messages={[message("user-1", "user", "Question")]}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+
+    const log = screen.getByRole("log", { name: "Chat messages" });
+
+    expect(log).not.toContainElement(screen.getByTestId("composer-footer"));
   });
 });
