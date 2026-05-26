@@ -1,5 +1,5 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { ProviderConfigChangeResponse } from "@aaif/goose-sdk";
+import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import { authenticateProviderConfig } from "./credentials";
 
 interface ModelSetupOutput {

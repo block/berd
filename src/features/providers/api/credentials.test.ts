@@ -25,11 +25,11 @@ describe("provider credential API", () => {
     vi.clearAllMocks();
     mocks.getClient.mockResolvedValue({
       goose: {
-        GooseProvidersConfigRead: mocks.configRead,
-        GooseProvidersConfigAuthenticate: mocks.configAuthenticate,
-        GooseProvidersConfigSave: mocks.configSave,
-        GooseProvidersConfigDelete: mocks.configDelete,
-        GooseProvidersConfigStatus: mocks.configStatus,
+        GooseUnstableProvidersConfigRead: mocks.configRead,
+        GooseUnstableProvidersConfigAuthenticate: mocks.configAuthenticate,
+        GooseUnstableProvidersConfigSave: mocks.configSave,
+        GooseUnstableProvidersConfigDelete: mocks.configDelete,
+        GooseUnstableProvidersConfigStatus: mocks.configStatus,
       },
     });
   });

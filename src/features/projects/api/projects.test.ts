@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectArtifactMetadata } from "../artifact/types";
 
 const mocks = vi.hoisted(() => ({
-  extMethod: vi.fn(),
+  sourcesList: vi.fn(),
+  sourcesCreate: vi.fn(),
+  sourcesUpdate: vi.fn(),
+  sourcesDelete: vi.fn(),
   getClient: vi.fn(),
 }));
 
@@ -26,20 +29,20 @@ describe("projects API artifact metadata", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.getClient.mockResolvedValue({
-      extMethod: mocks.extMethod,
+      goose: {
+        GooseUnstableSourcesList: mocks.sourcesList,
+        GooseUnstableSourcesCreate: mocks.sourcesCreate,
+        GooseUnstableSourcesUpdate: mocks.sourcesUpdate,
+        GooseUnstableSourcesDelete: mocks.sourcesDelete,
+      },
     });
   });
 
   it("stores artifact metadata when creating a project", async () => {
-    mocks.extMethod.mockImplementation(async (method, request) => {
-      if (method === "_goose/sources/list") {
-        return { sources: [] };
-      }
-      if (method === "_goose/sources/create") {
-        return { source: source(request.properties) };
-      }
-      throw new Error(`Unexpected method ${method}`);
-    });
+    mocks.sourcesList.mockResolvedValue({ sources: [] });
+    mocks.sourcesCreate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
 
     const { createProject } = await import("./projects");
 
@@ -55,7 +58,7 @@ describe("projects API artifact metadata", () => {
       false,
     );
 
-    const createRequest = mocks.extMethod.mock.calls[1]?.[1];
+    const createRequest = mocks.sourcesCreate.mock.calls[0]?.[0];
     expect(createRequest.properties.artifact).toMatchObject({
       seed: expect.any(Number),
       color: "olive",
@@ -74,12 +77,9 @@ describe("projects API artifact metadata", () => {
       moodIntensity: 0.5,
       contentMode: "cubeStatic",
     };
-    mocks.extMethod.mockImplementation(async (method, request) => {
-      if (method === "_goose/sources/update") {
-        return { source: source(request.properties) };
-      }
-      throw new Error(`Unexpected method ${method}`);
-    });
+    mocks.sourcesUpdate.mockImplementation(async (request) => ({
+      source: source(request.properties),
+    }));
 
     const { updateProject } = await import("./projects");
 
@@ -103,7 +103,7 @@ describe("projects API artifact metadata", () => {
       { color: "peach" },
     );
 
-    const updateRequest = mocks.extMethod.mock.calls[0]?.[1];
+    const updateRequest = mocks.sourcesUpdate.mock.calls[0]?.[0];
     expect(updateRequest.properties.artifact).toEqual({
       ...existingArtifact,
       color: "peach",

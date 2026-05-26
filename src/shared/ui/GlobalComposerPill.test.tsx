@@ -69,7 +69,7 @@ vi.mock("@/features/providers/api/inventory", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: vi.fn().mockResolvedValue({
     goose: {
-      GooseDefaultsRead: vi.fn().mockResolvedValue({}),
+      GooseUnstableDefaultsRead: vi.fn().mockResolvedValue({}),
     },
   }),
 }));

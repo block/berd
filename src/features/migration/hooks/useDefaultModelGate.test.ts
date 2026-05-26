@@ -13,7 +13,8 @@ vi.mock("../api/defaultModel", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseDefaultsSave: (...args: unknown[]) => mockGooseDefaultsSave(...args),
+      GooseUnstableDefaultsSave: (...args: unknown[]) =>
+        mockGooseDefaultsSave(...args),
     },
   }),
 }));

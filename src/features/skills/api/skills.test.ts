@@ -5,7 +5,8 @@ const mockGooseSourcesList = vi.fn();
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseSourcesList: (...args: unknown[]) => mockGooseSourcesList(...args),
+      GooseUnstableSourcesList: (...args: unknown[]) =>
+        mockGooseSourcesList(...args),
     },
   }),
 }));

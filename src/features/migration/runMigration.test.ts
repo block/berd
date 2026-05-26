@@ -16,12 +16,13 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseOnboardingImportScan: (...args: unknown[]) =>
+      GooseUnstableOnboardingImportScan: (...args: unknown[]) =>
         mockGooseOnboardingImportScan(...args),
-      GooseOnboardingImportApply: (...args: unknown[]) =>
+      GooseUnstableOnboardingImportApply: (...args: unknown[]) =>
         mockGooseOnboardingImportApply(...args),
-      GooseDefaultsSave: (...args: unknown[]) => mockGooseDefaultsSave(...args),
-      GooseConfigExtensionsToggle: (...args: unknown[]) =>
+      GooseUnstableDefaultsSave: (...args: unknown[]) =>
+        mockGooseDefaultsSave(...args),
+      GooseUnstableConfigExtensionsToggle: (...args: unknown[]) =>
         mockGooseConfigExtensionsToggle(...args),
     },
   }),
@@ -205,7 +206,7 @@ describe("runMigration", () => {
   });
 
   it("saves the configured Databricks default model and mirrors it into the frontend stores", async () => {
-    // Locks in the shape sent to `_goose/defaults/save` and the per-agent
+    // Locks in the shape sent to `_goose/unstable/defaults/save` and the per-agent
     // preference. The constants module ships a concrete Databricks model id;
     // if the shipped default changes, this test should change with it.
     const { runMigration } = await import("./runMigration");
@@ -226,8 +227,8 @@ describe("runMigration", () => {
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
   });
 
-  it("propagates failures from GooseDefaultsSave instead of swallowing them", async () => {
-    // The orchestrator is a strict pipeline: any GooseDefaultsSave failure
+  it("propagates failures from GooseUnstableDefaultsSave instead of swallowing them", async () => {
+    // The orchestrator is a strict pipeline: any GooseUnstableDefaultsSave failure
     // — including invalid_params for a stale DEFAULT_MODEL_ID — must
     // surface as the gate's retryable error state, not be papered over.
     // The marker is the caller's job, so the next boot retries cleanly
@@ -243,7 +244,7 @@ describe("runMigration", () => {
     expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
   });
 
-  it("propagates non-invalid_params failures from GooseDefaultsSave too", async () => {
+  it("propagates non-invalid_params failures from GooseUnstableDefaultsSave too", async () => {
     const internalError = Object.assign(new Error("Internal error"), {
       code: -32603,
     });

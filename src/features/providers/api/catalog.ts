@@ -32,7 +32,9 @@ export async function listProviderSetupCatalog(): Promise<
 > {
   const client = await getClient();
   const t0 = performance.now();
-  const response = await client.goose.GooseProvidersSetupCatalogList({});
+  const response = await client.goose.GooseUnstableProvidersSetupCatalogList(
+    {},
+  );
   const providers = response.providers.map(mapProviderSetupCatalogEntryDto);
 
   perfLog(

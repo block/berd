@@ -146,13 +146,14 @@ export async function createSkill(
   options: CreateSkillOptions = {},
 ): Promise<void> {
   const client = await getClient();
-  await client.goose.GooseSourcesCreate({
+  await client.goose.GooseUnstableSourcesCreate({
     type: SKILL_SOURCE_TYPE,
     name,
     description,
     content: instructions,
-    global: !options.projectId,
-    ...(options.projectId ? { projectId: options.projectId } : {}),
+    target: options.projectId
+      ? { scope: "projectId", projectId: options.projectId }
+      : { scope: "global" },
     properties: { color },
   });
 }
@@ -165,7 +166,7 @@ export async function listSkills(
     type: typeof SKILL_SOURCE_TYPE | typeof BUILTIN_SKILL_SOURCE_TYPE,
     projectDir?: string,
   ) =>
-    client.goose.GooseSourcesList({
+    client.goose.GooseUnstableSourcesList({
       type,
       ...(projectDir ? { projectDir } : {}),
     });
@@ -217,7 +218,7 @@ export async function listSkills(
 
 export async function deleteSkill(path: string): Promise<void> {
   const client = await getClient();
-  await client.goose.GooseSourcesDelete({
+  await client.goose.GooseUnstableSourcesDelete({
     type: SKILL_SOURCE_TYPE,
     path,
   });
@@ -234,7 +235,7 @@ export async function updateSkill(
   // properties replaces the full bag, so only send fields skills own
   // client-side. projectDir/projectName/gooseInternalBundled are derived
   // by the backend at list time, not persisted through this path.
-  const response = await client.goose.GooseSourcesUpdate({
+  const response = await client.goose.GooseUnstableSourcesUpdate({
     type: SKILL_SOURCE_TYPE,
     path,
     name,
@@ -254,7 +255,7 @@ export async function exportSkill(
   path: string,
 ): Promise<{ json: string; filename: string }> {
   const client = await getClient();
-  const response = await client.goose.GooseSourcesExport({
+  const response = await client.goose.GooseUnstableSourcesExport({
     type: SKILL_SOURCE_TYPE,
     path,
   });
@@ -271,9 +272,9 @@ export async function importSkills(
 
   const data = new TextDecoder().decode(new Uint8Array(fileBytes));
   const client = await getClient();
-  const response = await client.goose.GooseSourcesImport({
+  const response = await client.goose.GooseUnstableSourcesImport({
     data,
-    global: true,
+    target: { scope: "global" },
   });
 
   return response.sources.filter(isFilesystemSkillSource).map(toSkillInfo);

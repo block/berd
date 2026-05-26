@@ -451,7 +451,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     void (async () => {
       try {
         const client = await getClient();
-        const defaults = await client.goose.GooseDefaultsRead({});
+        const defaults = await client.goose.GooseUnstableDefaultsRead({});
 
         if (cancelled) {
           return;

@@ -1,6 +1,6 @@
 import type {
   ProviderInventoryEntryDto,
-  RefreshProviderInventoryResponse,
+  RefreshProviderInventoryResponseUnstable as RefreshProviderInventoryResponse,
 } from "@aaif/goose-sdk";
 import { getProviderInventory, refreshProviderInventory } from "./inventory";
 

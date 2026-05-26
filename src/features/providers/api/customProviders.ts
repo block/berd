@@ -1,9 +1,9 @@
 import { getClient } from "@/shared/api/acpConnection";
 import type {
-  CustomProviderCreateResponse,
-  CustomProviderDeleteResponse,
-  CustomProviderReadResponse,
-  CustomProviderUpdateResponse,
+  CustomProviderCreateResponseUnstable as CustomProviderCreateResponse,
+  CustomProviderDeleteResponseUnstable as CustomProviderDeleteResponse,
+  CustomProviderReadResponseUnstable as CustomProviderReadResponse,
+  CustomProviderUpdateResponseUnstable as CustomProviderUpdateResponse,
   ProviderTemplateCatalogEntryDto,
   ProviderTemplateDto,
 } from "@aaif/goose-sdk";
@@ -21,7 +21,7 @@ export async function listCustomProviderCatalog(
   format?: CustomProviderFormat,
 ): Promise<ProviderTemplateCatalogEntryDto[]> {
   const client = await getProviderClient();
-  const response = await client.GooseProvidersCatalogList(
+  const response = await client.GooseUnstableProvidersCatalogList(
     format ? { format } : {},
   );
   return response.providers;
@@ -31,7 +31,9 @@ export async function getCustomProviderTemplate(
   providerId: string,
 ): Promise<ProviderTemplateDto> {
   const client = await getProviderClient();
-  const response = await client.GooseProvidersCatalogTemplate({ providerId });
+  const response = await client.GooseUnstableProvidersCatalogTemplate({
+    providerId,
+  });
   return response.template;
 }
 
@@ -39,14 +41,14 @@ export async function createCustomProvider(
   input: CustomProviderUpsertRequest,
 ): Promise<CustomProviderCreateResponse> {
   const client = await getProviderClient();
-  return client.GooseProvidersCustomCreate(input);
+  return client.GooseUnstableProvidersCustomCreate(input);
 }
 
 export async function readCustomProvider(
   providerId: string,
 ): Promise<CustomProviderReadResponse> {
   const client = await getProviderClient();
-  return client.GooseProvidersCustomRead({ providerId });
+  return client.GooseUnstableProvidersCustomRead({ providerId });
 }
 
 export async function updateCustomProvider(
@@ -54,12 +56,12 @@ export async function updateCustomProvider(
   input: CustomProviderUpsertRequest,
 ): Promise<CustomProviderUpdateResponse> {
   const client = await getProviderClient();
-  return client.GooseProvidersCustomUpdate({ ...input, providerId });
+  return client.GooseUnstableProvidersCustomUpdate({ ...input, providerId });
 }
 
 export async function deleteCustomProvider(
   providerId: string,
 ): Promise<CustomProviderDeleteResponse> {
   const client = await getProviderClient();
-  return client.GooseProvidersCustomDelete({ providerId });
+  return client.GooseUnstableProvidersCustomDelete({ providerId });
 }

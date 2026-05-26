@@ -1,10 +1,10 @@
 import type {
   CustomProviderConfigDto,
-  CustomProviderCreateRequest,
-  CustomProviderCreateResponse,
-  CustomProviderDeleteResponse,
-  CustomProviderReadResponse,
-  CustomProviderUpdateResponse,
+  CustomProviderCreateRequestUnstable as CustomProviderCreateRequest,
+  CustomProviderCreateResponseUnstable as CustomProviderCreateResponse,
+  CustomProviderDeleteResponseUnstable as CustomProviderDeleteResponse,
+  CustomProviderReadResponseUnstable as CustomProviderReadResponse,
+  CustomProviderUpdateResponseUnstable as CustomProviderUpdateResponse,
   ProviderTemplateCatalogEntryDto,
   ProviderTemplateDto,
 } from "@aaif/goose-sdk";

@@ -117,11 +117,18 @@ interface MethodMeta {
 
 function methodToCamelCase(method: string): string {
   return method
-    .split(/[/_]/)
+    .split(/[/_-]/)
     .map((part, i) =>
       i === 0 ? part : part.charAt(0).toUpperCase() + part.slice(1),
     )
     .join("");
+}
+
+// Mirror hey-api's identifier normalization: underscores are treated as word
+// boundaries, so `Foo_unstable` becomes `FooUnstable`. Keeps the meta-driven
+// client type references in sync with the generated types.gen.ts / zod.gen.ts.
+function normalizeTypeName(name: string): string {
+  return name.replace(/_(\w)/g, (_match, ch: string) => ch.toUpperCase());
 }
 
 async function generateClient(meta: { methods: MethodMeta[] }) {
@@ -133,13 +140,21 @@ async function generateClient(meta: { methods: MethodMeta[] }) {
   for (const m of meta.methods) {
     const fnName = methodToCamelCase(m.method);
     const fullMethod = m.method;
+    // hey-api normalizes `Foo_unstable` -> `FooUnstable` in types.gen.ts /
+    // zod.gen.ts. The meta uses the raw schema names, so normalize to match.
+    const requestType = m.requestType
+      ? normalizeTypeName(m.requestType)
+      : m.requestType;
+    const responseType = m.responseType
+      ? normalizeTypeName(m.responseType)
+      : m.responseType;
 
     let paramType = "";
     let paramArg = "";
     let callParams = "{}";
-    if (m.requestType) {
-      typeImports.add(m.requestType);
-      paramType = m.requestType;
+    if (requestType) {
+      typeImports.add(requestType);
+      paramType = requestType;
       paramArg = `params: ${paramType}`;
       callParams = "params";
     }
@@ -147,11 +162,11 @@ async function generateClient(meta: { methods: MethodMeta[] }) {
     let returnType: string;
     let bodyLines: string[];
 
-    if (m.responseType && m.responseType !== "EmptyResponse") {
-      typeImports.add(m.responseType);
-      const zodName = `z${m.responseType}`;
+    if (responseType && responseType !== "EmptyResponse") {
+      typeImports.add(responseType);
+      const zodName = `z${responseType}`;
       zodImports.add(zodName);
-      returnType = m.responseType;
+      returnType = responseType;
       bodyLines = [
         `const raw = await this.conn.extMethod("${fullMethod}", ${callParams});`,
         `return ${zodName}.parse(raw) as ${returnType};`,

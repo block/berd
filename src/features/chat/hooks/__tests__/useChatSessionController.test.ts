@@ -71,10 +71,11 @@ vi.mock("sonner", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseDefaultsRead: (...args: unknown[]) => mockGooseDefaultsRead(...args),
-      GoosePreferencesRead: (...args: unknown[]) =>
+      GooseUnstableDefaultsRead: (...args: unknown[]) =>
+        mockGooseDefaultsRead(...args),
+      GooseUnstablePreferencesRead: (...args: unknown[]) =>
         mockGoosePreferencesRead(...args),
-      GoosePreferencesSave: (...args: unknown[]) =>
+      GooseUnstablePreferencesSave: (...args: unknown[]) =>
         mockGoosePreferencesSave(...args),
     },
   }),

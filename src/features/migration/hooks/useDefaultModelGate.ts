@@ -67,7 +67,7 @@ export function useDefaultModelGate(migrationReady: boolean): DefaultModelGate {
         }
 
         const client = await getClient();
-        await client.goose.GooseDefaultsSave({
+        await client.goose.GooseUnstableDefaultsSave({
           providerId: DEFAULT_PROVIDER_ID,
           modelId: modelToHeal,
         });

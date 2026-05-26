@@ -53,12 +53,6 @@ type CallToolResult = Awaited<
 type ReadResourceResult = Awaited<
   ReturnType<NonNullable<AppRendererProps["onReadResource"]>>
 >;
-type GooseToolCallResponse = {
-  content?: unknown[];
-  structuredContent?: unknown;
-  isError: boolean;
-  _meta?: unknown;
-};
 type HostContextToolInfo = NonNullable<McpUiHostContext["toolInfo"]>;
 type HostContextTool = HostContextToolInfo["tool"];
 
@@ -330,11 +324,11 @@ export function McpAppView({
       setActiveToolInput(args ?? {});
 
       const client = await getClient();
-      const response = (await client.extMethod("_goose/tool/call", {
+      const response = await client.goose.GooseUnstableToolsCall({
         sessionId: payload.sessionId,
         name: `${payload.tool.extensionName}__${name}`,
         arguments: args ?? {},
-      })) as GooseToolCallResponse;
+      });
 
       const toolResult: CallToolResult = {
         content: (response.content ?? []) as CallToolResult["content"],
@@ -352,7 +346,7 @@ export function McpAppView({
   const handleReadResource = useCallback(
     async ({ uri }: { uri: string }) => {
       const client = await getClient();
-      const response = await client.goose.GooseResourceRead({
+      const response = await client.goose.GooseUnstableResourcesRead({
         sessionId: payload.sessionId,
         uri,
         extensionName: payload.tool.extensionName,

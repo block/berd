@@ -27,7 +27,7 @@ function normalize(value: string | null | undefined): string | undefined {
  */
 export async function readDefaultModelStatus(): Promise<DefaultModelStatus> {
   const client = await getClient();
-  const defaults = await client.goose.GooseDefaultsRead({});
+  const defaults = await client.goose.GooseUnstableDefaultsRead({});
   const providerId = normalize(defaults.providerId);
   const modelId = normalize(defaults.modelId);
   return {

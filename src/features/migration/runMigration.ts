@@ -36,14 +36,16 @@ export async function runMigration(): Promise<MigrationResult> {
   const client = await getClient();
 
   // 2. Discover everything goose can import from the user's machine.
-  const scan = await client.goose.GooseOnboardingImportScan({ sources: [] });
+  const scan = await client.goose.GooseUnstableOnboardingImportScan({
+    sources: [],
+  });
   const candidateIds = scan.candidates.map((candidate) => candidate.id);
 
   // 3. Apply every candidate, enabling any imported extensions in the process.
   //    The "yes to everything" semantics are intentional — the plan replaces
   //    the multi-step opt-in flow with a silent migration.
   if (candidateIds.length > 0) {
-    await client.goose.GooseOnboardingImportApply({
+    await client.goose.GooseUnstableOnboardingImportApply({
       candidateIds,
       enableImportedExtensions: true,
     });
@@ -55,7 +57,7 @@ export async function runMigration(): Promise<MigrationResult> {
   //    the chat model picker on first run. Any failure propagates: the
   //    gate surfaces it as a retryable error, and the marker stays
   //    unwritten so the next boot starts fresh.
-  await client.goose.GooseDefaultsSave({
+  await client.goose.GooseUnstableDefaultsSave({
     providerId: DEFAULT_PROVIDER_ID,
     ...(DEFAULT_MODEL_ID ? { modelId: DEFAULT_MODEL_ID } : {}),
   });

@@ -113,11 +113,44 @@ default_goose_dev_root() {
 goose_dev_root="${GOOSE_DEV_ROOT:-$(default_goose_dev_root)}"
 goose_repo="${GOOSE_DEV_REPO:-${goose_dev_root}/goose}"
 stamp_file="${GOOSE_DEV_STAMP_FILE:-${goose_dev_root}/stamp.env}"
-bin_path="${goose_repo}/target/debug/${goose_bin}"
+
+# Pin a dedicated target directory for the goose backend build. We must NOT
+# share a target-dir with this repo's src-tauri crate: that crate's binary is
+# named `Goose` and upstream's is named `goose`, which collide on macOS APFS
+# (case-insensitive by default), so whichever cargo build runs last clobbers
+# the other. The original symptom: `just dev` builds the goose backend, then
+# Tauri builds `Goose` over it, and at runtime `GOOSE_BIN` points at the
+# Tauri app -- which proceeds to relaunch itself recursively, opening new
+# windows forever.
+#
+# A dedicated target dir under the dev cache root preserves the shared-cache
+# benefit across goose-internal worktrees (they still all hit the same
+# location) without ever sharing with src-tauri or any other workspace that
+# honours `$HOME/.cargo/config.toml`'s `[build] target-dir`.
+goose_cargo_target_dir="${GOOSE_DEV_CARGO_TARGET_DIR:-${goose_dev_root}/cargo-target}"
+export CARGO_TARGET_DIR="$goose_cargo_target_dir"
+
+# bin_path is computed after the checkout exists, via `cargo metadata`, so it
+# matches CARGO_TARGET_DIR exactly (and would also honour any user override).
+bin_path=""
 
 resolve_ref_to_commit() {
   local ref="$1"
   git -C "$goose_repo" ls-remote "$remote" "$ref" 2>/dev/null | awk 'NR == 1 { print $1 }'
+}
+
+# Ask cargo where it will actually write the binary. With CARGO_TARGET_DIR
+# exported above, this is deterministic; we still go through `cargo metadata`
+# (rather than hard-coding the path) so the script and cargo can't disagree
+# if anything else ever overrides the target directory.
+resolve_bin_path() {
+  local target_dir
+  target_dir="$(cd "$goose_repo" && cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("target_directory",""))')"
+  if [[ -z "$target_dir" ]]; then
+    target_dir="${goose_repo}/target"
+  fi
+  printf '%s/debug/%s\n' "$target_dir" "$goose_bin"
 }
 
 write_stamp() {
@@ -145,6 +178,10 @@ stamp_matches_current_build() {
   [[ "${STAMP_PACKAGE:-$goose_package}" == "$goose_package" ]] || return 1
   [[ "${STAMP_BIN_NAME:-$goose_bin}" == "$goose_bin" ]] || return 1
   [[ -x "${STAMP_BIN:-}" ]] || return 1
+  # The recorded binary path must match where cargo writes today; otherwise
+  # the user's cargo config (e.g. build.target-dir) changed and the stamp is
+  # pointing at a fossil binary that no rebuild will refresh.
+  [[ "${STAMP_BIN:-}" == "$bin_path" ]] || return 1
   local local_head
   local_head="$(git -C "$goose_repo" rev-parse HEAD)"
   [[ "${STAMP_COMMIT:-}" == "$local_head" ]] || return 1
@@ -165,6 +202,8 @@ ensure_checkout_exists() {
 }
 
 ensure_checkout_exists
+
+bin_path="$(resolve_bin_path)"
 
 if [[ "$allow_dirty" != "1" && -n "$(git -C "$goose_repo" status --porcelain)" ]]; then
   fail_or_skip "Managed goose checkout at $goose_repo is dirty. Use a dedicated checkout or set GOOSE_DEV_ALLOW_DIRTY=1."

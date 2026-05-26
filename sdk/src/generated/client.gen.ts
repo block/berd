@@ -8,562 +8,686 @@ export interface ExtMethodProvider {
 }
 
 import type {
-  AddConfigExtensionRequest,
-  AddExtensionRequest,
-  ArchiveSessionRequest,
-  CreateSourceRequest,
-  CreateSourceResponse,
-  CustomProviderCreateRequest,
-  CustomProviderCreateResponse,
-  CustomProviderDeleteRequest,
-  CustomProviderDeleteResponse,
-  CustomProviderReadRequest,
-  CustomProviderReadResponse,
-  CustomProviderUpdateRequest,
-  CustomProviderUpdateResponse,
-  DefaultsReadRequest,
-  DefaultsReadResponse,
-  DefaultsSaveRequest,
+  AddConfigExtensionRequestUnstable,
+  AddExtensionRequestUnstable,
+  ArchiveSessionRequestUnstable,
+  CreateSourceRequestUnstable,
+  CreateSourceResponseUnstable,
+  CustomProviderCreateRequestUnstable,
+  CustomProviderCreateResponseUnstable,
+  CustomProviderDeleteRequestUnstable,
+  CustomProviderDeleteResponseUnstable,
+  CustomProviderReadRequestUnstable,
+  CustomProviderReadResponseUnstable,
+  CustomProviderUpdateRequestUnstable,
+  CustomProviderUpdateResponseUnstable,
+  DefaultsReadRequestUnstable,
+  DefaultsReadResponseUnstable,
+  DefaultsSaveRequestUnstable,
   DeleteSessionRequest,
-  DeleteSourceRequest,
-  DictationConfigRequest,
-  DictationConfigResponse,
-  DictationModelCancelRequest,
-  DictationModelDeleteRequest,
-  DictationModelDownloadProgressRequest,
-  DictationModelDownloadProgressResponse,
-  DictationModelDownloadRequest,
-  DictationModelSelectRequest,
-  DictationModelsListRequest,
-  DictationModelsListResponse,
-  DictationSecretDeleteRequest,
-  DictationSecretSaveRequest,
-  DictationTranscribeRequest,
-  DictationTranscribeResponse,
-  ExportSessionRequest,
-  ExportSessionResponse,
-  ExportSourceRequest,
-  ExportSourceResponse,
-  GetExtensionsRequest,
-  GetExtensionsResponse,
-  GetSessionExtensionsRequest,
-  GetSessionExtensionsResponse,
-  GetToolsRequest,
-  GetToolsResponse,
-  GooseToolCallRequest,
-  GooseToolCallResponse,
-  ImportSessionRequest,
-  ImportSessionResponse,
-  ImportSourcesRequest,
-  ImportSourcesResponse,
-  ListProvidersRequest,
-  ListProvidersResponse,
-  ListSourcesRequest,
-  ListSourcesResponse,
-  OnboardingImportApplyRequest,
-  OnboardingImportApplyResponse,
-  OnboardingImportScanRequest,
-  OnboardingImportScanResponse,
-  PreferencesReadRequest,
-  PreferencesReadResponse,
-  PreferencesRemoveRequest,
-  PreferencesSaveRequest,
-  ProviderCatalogListRequest,
-  ProviderCatalogListResponse,
-  ProviderCatalogTemplateRequest,
-  ProviderCatalogTemplateResponse,
-  ProviderConfigAuthenticateRequest,
-  ProviderConfigChangeResponse,
-  ProviderConfigDeleteRequest,
-  ProviderConfigReadRequest,
-  ProviderConfigReadResponse,
-  ProviderConfigSaveRequest,
-  ProviderConfigStatusRequest,
-  ProviderConfigStatusResponse,
-  ProviderSetupCatalogListRequest,
-  ProviderSetupCatalogListResponse,
-  ReadResourceRequest,
-  ReadResourceResponse,
-  RefreshProviderInventoryRequest,
-  RefreshProviderInventoryResponse,
-  RemoveConfigExtensionRequest,
-  RemoveExtensionRequest,
-  RenameSessionRequest,
-  ToggleConfigExtensionRequest,
-  UnarchiveSessionRequest,
-  UpdateSessionProjectRequest,
-  UpdateSourceRequest,
-  UpdateSourceResponse,
-  UpdateWorkingDirRequest,
+  DeleteSourceRequestUnstable,
+  DictationConfigRequestUnstable,
+  DictationConfigResponseUnstable,
+  DictationModelCancelRequestUnstable,
+  DictationModelDeleteRequestUnstable,
+  DictationModelDownloadProgressRequestUnstable,
+  DictationModelDownloadProgressResponseUnstable,
+  DictationModelDownloadRequestUnstable,
+  DictationModelSelectRequestUnstable,
+  DictationModelsListRequestUnstable,
+  DictationModelsListResponseUnstable,
+  DictationSecretDeleteRequestUnstable,
+  DictationSecretSaveRequestUnstable,
+  DictationTranscribeRequestUnstable,
+  DictationTranscribeResponseUnstable,
+  ExportSessionRequestUnstable,
+  ExportSessionResponseUnstable,
+  ExportSourceRequestUnstable,
+  ExportSourceResponseUnstable,
+  GetExtensionsRequestUnstable,
+  GetExtensionsResponseUnstable,
+  GetSessionExtensionsRequestUnstable,
+  GetSessionExtensionsResponseUnstable,
+  GetToolsRequestUnstable,
+  GetToolsResponseUnstable,
+  GooseToolCallRequestUnstable,
+  GooseToolCallResponseUnstable,
+  ImportSessionRequestUnstable,
+  ImportSessionResponseUnstable,
+  ImportSourcesRequestUnstable,
+  ImportSourcesResponseUnstable,
+  ListProvidersRequestUnstable,
+  ListProvidersResponseUnstable,
+  ListSourcesRequestUnstable,
+  ListSourcesResponseUnstable,
+  OnboardingImportApplyRequestUnstable,
+  OnboardingImportApplyResponseUnstable,
+  OnboardingImportScanRequestUnstable,
+  OnboardingImportScanResponseUnstable,
+  PreferencesReadRequestUnstable,
+  PreferencesReadResponseUnstable,
+  PreferencesRemoveRequestUnstable,
+  PreferencesSaveRequestUnstable,
+  ProviderCatalogListRequestUnstable,
+  ProviderCatalogListResponseUnstable,
+  ProviderCatalogTemplateRequestUnstable,
+  ProviderCatalogTemplateResponseUnstable,
+  ProviderConfigAuthenticateRequestUnstable,
+  ProviderConfigChangeResponseUnstable,
+  ProviderConfigDeleteRequestUnstable,
+  ProviderConfigReadRequestUnstable,
+  ProviderConfigReadResponseUnstable,
+  ProviderConfigSaveRequestUnstable,
+  ProviderConfigStatusRequestUnstable,
+  ProviderConfigStatusResponseUnstable,
+  ProviderSetupCatalogListRequestUnstable,
+  ProviderSetupCatalogListResponseUnstable,
+  ReadResourceRequestUnstable,
+  ReadResourceResponseUnstable,
+  RefreshProviderInventoryRequestUnstable,
+  RefreshProviderInventoryResponseUnstable,
+  RemoveConfigExtensionRequestUnstable,
+  RemoveExtensionRequestUnstable,
+  RenameSessionRequestUnstable,
+  ToggleConfigExtensionRequestUnstable,
+  UnarchiveSessionRequestUnstable,
+  UpdateSessionProjectRequestUnstable,
+  UpdateSourceRequestUnstable,
+  UpdateSourceResponseUnstable,
+  UpdateWorkingDirRequestUnstable,
 } from './types.gen.js';
 import {
-  zCreateSourceResponse,
-  zCustomProviderCreateResponse,
-  zCustomProviderDeleteResponse,
-  zCustomProviderReadResponse,
-  zCustomProviderUpdateResponse,
-  zDefaultsReadResponse,
-  zDictationConfigResponse,
-  zDictationModelDownloadProgressResponse,
-  zDictationModelsListResponse,
-  zDictationTranscribeResponse,
-  zExportSessionResponse,
-  zExportSourceResponse,
-  zGetExtensionsResponse,
-  zGetSessionExtensionsResponse,
-  zGetToolsResponse,
-  zGooseToolCallResponse,
-  zImportSessionResponse,
-  zImportSourcesResponse,
-  zListProvidersResponse,
-  zListSourcesResponse,
-  zOnboardingImportApplyResponse,
-  zOnboardingImportScanResponse,
-  zPreferencesReadResponse,
-  zProviderCatalogListResponse,
-  zProviderCatalogTemplateResponse,
-  zProviderConfigChangeResponse,
-  zProviderConfigReadResponse,
-  zProviderConfigStatusResponse,
-  zProviderSetupCatalogListResponse,
-  zReadResourceResponse,
-  zRefreshProviderInventoryResponse,
-  zUpdateSourceResponse,
+  zCreateSourceResponseUnstable,
+  zCustomProviderCreateResponseUnstable,
+  zCustomProviderDeleteResponseUnstable,
+  zCustomProviderReadResponseUnstable,
+  zCustomProviderUpdateResponseUnstable,
+  zDefaultsReadResponseUnstable,
+  zDictationConfigResponseUnstable,
+  zDictationModelDownloadProgressResponseUnstable,
+  zDictationModelsListResponseUnstable,
+  zDictationTranscribeResponseUnstable,
+  zExportSessionResponseUnstable,
+  zExportSourceResponseUnstable,
+  zGetExtensionsResponseUnstable,
+  zGetSessionExtensionsResponseUnstable,
+  zGetToolsResponseUnstable,
+  zGooseToolCallResponseUnstable,
+  zImportSessionResponseUnstable,
+  zImportSourcesResponseUnstable,
+  zListProvidersResponseUnstable,
+  zListSourcesResponseUnstable,
+  zOnboardingImportApplyResponseUnstable,
+  zOnboardingImportScanResponseUnstable,
+  zPreferencesReadResponseUnstable,
+  zProviderCatalogListResponseUnstable,
+  zProviderCatalogTemplateResponseUnstable,
+  zProviderConfigChangeResponseUnstable,
+  zProviderConfigReadResponseUnstable,
+  zProviderConfigStatusResponseUnstable,
+  zProviderSetupCatalogListResponseUnstable,
+  zReadResourceResponseUnstable,
+  zRefreshProviderInventoryResponseUnstable,
+  zUpdateSourceResponseUnstable,
 } from './zod.gen.js';
 
 export class GooseExtClient {
   constructor(private conn: ExtMethodProvider) {}
 
-  async GooseExtensionsAdd(params: AddExtensionRequest): Promise<void> {
-    await this.conn.extMethod("_goose/extensions/add", params);
+  async GooseUnstableSessionExtensionsAdd(
+    params: AddExtensionRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/session/extensions/add", params);
   }
 
-  async GooseExtensionsRemove(params: RemoveExtensionRequest): Promise<void> {
-    await this.conn.extMethod("_goose/extensions/remove", params);
+  async GooseUnstableSessionExtensionsRemove(
+    params: RemoveExtensionRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/session/extensions/remove",
+      params,
+    );
   }
 
-  async GooseTools(params: GetToolsRequest): Promise<GetToolsResponse> {
-    const raw = await this.conn.extMethod("_goose/tools", params);
-    return zGetToolsResponse.parse(raw) as GetToolsResponse;
+  async GooseUnstableToolsList(
+    params: GetToolsRequestUnstable,
+  ): Promise<GetToolsResponseUnstable> {
+    const raw = await this.conn.extMethod("_goose/unstable/tools/list", params);
+    return zGetToolsResponseUnstable.parse(raw) as GetToolsResponseUnstable;
   }
 
-  async GooseToolCall(
-    params: GooseToolCallRequest,
-  ): Promise<GooseToolCallResponse> {
-    const raw = await this.conn.extMethod("_goose/tool/call", params);
-    return zGooseToolCallResponse.parse(raw) as GooseToolCallResponse;
+  async GooseUnstableToolsCall(
+    params: GooseToolCallRequestUnstable,
+  ): Promise<GooseToolCallResponseUnstable> {
+    const raw = await this.conn.extMethod("_goose/unstable/tools/call", params);
+    return zGooseToolCallResponseUnstable.parse(
+      raw,
+    ) as GooseToolCallResponseUnstable;
   }
 
-  async GooseResourceRead(
-    params: ReadResourceRequest,
-  ): Promise<ReadResourceResponse> {
-    const raw = await this.conn.extMethod("_goose/resource/read", params);
-    return zReadResourceResponse.parse(raw) as ReadResourceResponse;
+  async GooseUnstableResourcesRead(
+    params: ReadResourceRequestUnstable,
+  ): Promise<ReadResourceResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/resources/read",
+      params,
+    );
+    return zReadResourceResponseUnstable.parse(
+      raw,
+    ) as ReadResourceResponseUnstable;
   }
 
-  async GooseWorkingDirUpdate(params: UpdateWorkingDirRequest): Promise<void> {
-    await this.conn.extMethod("_goose/working_dir/update", params);
+  async GooseUnstableSessionWorkingDirUpdate(
+    params: UpdateWorkingDirRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/session/working-dir/update",
+      params,
+    );
   }
 
   async sessionDelete(params: DeleteSessionRequest): Promise<void> {
     await this.conn.extMethod("session/delete", params);
   }
 
-  async GooseConfigExtensions(
-    params: GetExtensionsRequest,
-  ): Promise<GetExtensionsResponse> {
-    const raw = await this.conn.extMethod("_goose/config/extensions", params);
-    return zGetExtensionsResponse.parse(raw) as GetExtensionsResponse;
+  async GooseUnstableConfigExtensionsList(
+    params: GetExtensionsRequestUnstable,
+  ): Promise<GetExtensionsResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/config/extensions/list",
+      params,
+    );
+    return zGetExtensionsResponseUnstable.parse(
+      raw,
+    ) as GetExtensionsResponseUnstable;
   }
 
-  async GooseConfigExtensionsAdd(
-    params: AddConfigExtensionRequest,
+  async GooseUnstableConfigExtensionsAdd(
+    params: AddConfigExtensionRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/config/extensions/add", params);
+    await this.conn.extMethod("_goose/unstable/config/extensions/add", params);
   }
 
-  async GooseConfigExtensionsRemove(
-    params: RemoveConfigExtensionRequest,
+  async GooseUnstableConfigExtensionsRemove(
+    params: RemoveConfigExtensionRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/config/extensions/remove", params);
+    await this.conn.extMethod(
+      "_goose/unstable/config/extensions/remove",
+      params,
+    );
   }
 
-  async GooseConfigExtensionsToggle(
-    params: ToggleConfigExtensionRequest,
+  async GooseUnstableConfigExtensionsToggle(
+    params: ToggleConfigExtensionRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/config/extensions/toggle", params);
+    await this.conn.extMethod(
+      "_goose/unstable/config/extensions/toggle",
+      params,
+    );
   }
 
-  async GooseSessionExtensions(
-    params: GetSessionExtensionsRequest,
-  ): Promise<GetSessionExtensionsResponse> {
-    const raw = await this.conn.extMethod("_goose/session/extensions", params);
-    return zGetSessionExtensionsResponse.parse(
+  async GooseUnstableSessionExtensionsList(
+    params: GetSessionExtensionsRequestUnstable,
+  ): Promise<GetSessionExtensionsResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/session/extensions/list",
+      params,
+    );
+    return zGetSessionExtensionsResponseUnstable.parse(
       raw,
-    ) as GetSessionExtensionsResponse;
+    ) as GetSessionExtensionsResponseUnstable;
   }
 
-  async GooseProvidersList(
-    params: ListProvidersRequest,
-  ): Promise<ListProvidersResponse> {
-    const raw = await this.conn.extMethod("_goose/providers/list", params);
-    return zListProvidersResponse.parse(raw) as ListProvidersResponse;
-  }
-
-  async GooseProvidersCatalogList(
-    params: ProviderCatalogListRequest,
-  ): Promise<ProviderCatalogListResponse> {
+  async GooseUnstableProvidersList(
+    params: ListProvidersRequestUnstable,
+  ): Promise<ListProvidersResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/catalog/list",
+      "_goose/unstable/providers/list",
       params,
     );
-    return zProviderCatalogListResponse.parse(
+    return zListProvidersResponseUnstable.parse(
       raw,
-    ) as ProviderCatalogListResponse;
+    ) as ListProvidersResponseUnstable;
   }
 
-  async GooseProvidersSetupCatalogList(
-    params: ProviderSetupCatalogListRequest,
-  ): Promise<ProviderSetupCatalogListResponse> {
+  async GooseUnstableProvidersCatalogList(
+    params: ProviderCatalogListRequestUnstable,
+  ): Promise<ProviderCatalogListResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/setup/catalog/list",
+      "_goose/unstable/providers/catalog/list",
       params,
     );
-    return zProviderSetupCatalogListResponse.parse(
+    return zProviderCatalogListResponseUnstable.parse(
       raw,
-    ) as ProviderSetupCatalogListResponse;
+    ) as ProviderCatalogListResponseUnstable;
   }
 
-  async GooseProvidersCatalogTemplate(
-    params: ProviderCatalogTemplateRequest,
-  ): Promise<ProviderCatalogTemplateResponse> {
+  async GooseUnstableProvidersSetupCatalogList(
+    params: ProviderSetupCatalogListRequestUnstable,
+  ): Promise<ProviderSetupCatalogListResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/catalog/template",
+      "_goose/unstable/providers/setup/catalog/list",
       params,
     );
-    return zProviderCatalogTemplateResponse.parse(
+    return zProviderSetupCatalogListResponseUnstable.parse(
       raw,
-    ) as ProviderCatalogTemplateResponse;
+    ) as ProviderSetupCatalogListResponseUnstable;
   }
 
-  async GooseProvidersCustomCreate(
-    params: CustomProviderCreateRequest,
-  ): Promise<CustomProviderCreateResponse> {
+  async GooseUnstableProvidersCatalogTemplate(
+    params: ProviderCatalogTemplateRequestUnstable,
+  ): Promise<ProviderCatalogTemplateResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/custom/create",
+      "_goose/unstable/providers/catalog/template",
       params,
     );
-    return zCustomProviderCreateResponse.parse(
+    return zProviderCatalogTemplateResponseUnstable.parse(
       raw,
-    ) as CustomProviderCreateResponse;
+    ) as ProviderCatalogTemplateResponseUnstable;
   }
 
-  async GooseProvidersCustomRead(
-    params: CustomProviderReadRequest,
-  ): Promise<CustomProviderReadResponse> {
+  async GooseUnstableProvidersCustomCreate(
+    params: CustomProviderCreateRequestUnstable,
+  ): Promise<CustomProviderCreateResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/custom/read",
+      "_goose/unstable/providers/custom/create",
       params,
     );
-    return zCustomProviderReadResponse.parse(raw) as CustomProviderReadResponse;
-  }
-
-  async GooseProvidersCustomUpdate(
-    params: CustomProviderUpdateRequest,
-  ): Promise<CustomProviderUpdateResponse> {
-    const raw = await this.conn.extMethod(
-      "_goose/providers/custom/update",
-      params,
-    );
-    return zCustomProviderUpdateResponse.parse(
+    return zCustomProviderCreateResponseUnstable.parse(
       raw,
-    ) as CustomProviderUpdateResponse;
+    ) as CustomProviderCreateResponseUnstable;
   }
 
-  async GooseProvidersCustomDelete(
-    params: CustomProviderDeleteRequest,
-  ): Promise<CustomProviderDeleteResponse> {
+  async GooseUnstableProvidersCustomRead(
+    params: CustomProviderReadRequestUnstable,
+  ): Promise<CustomProviderReadResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/custom/delete",
+      "_goose/unstable/providers/custom/read",
       params,
     );
-    return zCustomProviderDeleteResponse.parse(
+    return zCustomProviderReadResponseUnstable.parse(
       raw,
-    ) as CustomProviderDeleteResponse;
+    ) as CustomProviderReadResponseUnstable;
   }
 
-  async GooseProvidersInventoryRefresh(
-    params: RefreshProviderInventoryRequest,
-  ): Promise<RefreshProviderInventoryResponse> {
+  async GooseUnstableProvidersCustomUpdate(
+    params: CustomProviderUpdateRequestUnstable,
+  ): Promise<CustomProviderUpdateResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/inventory/refresh",
+      "_goose/unstable/providers/custom/update",
       params,
     );
-    return zRefreshProviderInventoryResponse.parse(
+    return zCustomProviderUpdateResponseUnstable.parse(
       raw,
-    ) as RefreshProviderInventoryResponse;
+    ) as CustomProviderUpdateResponseUnstable;
   }
 
-  async GooseProvidersConfigRead(
-    params: ProviderConfigReadRequest,
-  ): Promise<ProviderConfigReadResponse> {
+  async GooseUnstableProvidersCustomDelete(
+    params: CustomProviderDeleteRequestUnstable,
+  ): Promise<CustomProviderDeleteResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/config/read",
+      "_goose/unstable/providers/custom/delete",
       params,
     );
-    return zProviderConfigReadResponse.parse(raw) as ProviderConfigReadResponse;
-  }
-
-  async GooseProvidersConfigStatus(
-    params: ProviderConfigStatusRequest,
-  ): Promise<ProviderConfigStatusResponse> {
-    const raw = await this.conn.extMethod(
-      "_goose/providers/config/status",
-      params,
-    );
-    return zProviderConfigStatusResponse.parse(
+    return zCustomProviderDeleteResponseUnstable.parse(
       raw,
-    ) as ProviderConfigStatusResponse;
+    ) as CustomProviderDeleteResponseUnstable;
   }
 
-  async GooseProvidersConfigSave(
-    params: ProviderConfigSaveRequest,
-  ): Promise<ProviderConfigChangeResponse> {
+  async GooseUnstableProvidersInventoryRefresh(
+    params: RefreshProviderInventoryRequestUnstable,
+  ): Promise<RefreshProviderInventoryResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/config/save",
+      "_goose/unstable/providers/inventory/refresh",
       params,
     );
-    return zProviderConfigChangeResponse.parse(
+    return zRefreshProviderInventoryResponseUnstable.parse(
       raw,
-    ) as ProviderConfigChangeResponse;
+    ) as RefreshProviderInventoryResponseUnstable;
   }
 
-  async GooseProvidersConfigDelete(
-    params: ProviderConfigDeleteRequest,
-  ): Promise<ProviderConfigChangeResponse> {
+  async GooseUnstableProvidersConfigRead(
+    params: ProviderConfigReadRequestUnstable,
+  ): Promise<ProviderConfigReadResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/config/delete",
+      "_goose/unstable/providers/config/read",
       params,
     );
-    return zProviderConfigChangeResponse.parse(
+    return zProviderConfigReadResponseUnstable.parse(
       raw,
-    ) as ProviderConfigChangeResponse;
+    ) as ProviderConfigReadResponseUnstable;
   }
 
-  async GooseProvidersConfigAuthenticate(
-    params: ProviderConfigAuthenticateRequest,
-  ): Promise<ProviderConfigChangeResponse> {
+  async GooseUnstableProvidersConfigStatus(
+    params: ProviderConfigStatusRequestUnstable,
+  ): Promise<ProviderConfigStatusResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/providers/config/authenticate",
+      "_goose/unstable/providers/config/status",
       params,
     );
-    return zProviderConfigChangeResponse.parse(
+    return zProviderConfigStatusResponseUnstable.parse(
       raw,
-    ) as ProviderConfigChangeResponse;
+    ) as ProviderConfigStatusResponseUnstable;
   }
 
-  async GoosePreferencesRead(
-    params: PreferencesReadRequest,
-  ): Promise<PreferencesReadResponse> {
-    const raw = await this.conn.extMethod("_goose/preferences/read", params);
-    return zPreferencesReadResponse.parse(raw) as PreferencesReadResponse;
+  async GooseUnstableProvidersConfigSave(
+    params: ProviderConfigSaveRequestUnstable,
+  ): Promise<ProviderConfigChangeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/config/save",
+      params,
+    );
+    return zProviderConfigChangeResponseUnstable.parse(
+      raw,
+    ) as ProviderConfigChangeResponseUnstable;
   }
 
-  async GoosePreferencesSave(params: PreferencesSaveRequest): Promise<void> {
-    await this.conn.extMethod("_goose/preferences/save", params);
+  async GooseUnstableProvidersConfigDelete(
+    params: ProviderConfigDeleteRequestUnstable,
+  ): Promise<ProviderConfigChangeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/config/delete",
+      params,
+    );
+    return zProviderConfigChangeResponseUnstable.parse(
+      raw,
+    ) as ProviderConfigChangeResponseUnstable;
   }
 
-  async GoosePreferencesRemove(
-    params: PreferencesRemoveRequest,
+  async GooseUnstableProvidersConfigAuthenticate(
+    params: ProviderConfigAuthenticateRequestUnstable,
+  ): Promise<ProviderConfigChangeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/config/authenticate",
+      params,
+    );
+    return zProviderConfigChangeResponseUnstable.parse(
+      raw,
+    ) as ProviderConfigChangeResponseUnstable;
+  }
+
+  async GooseUnstablePreferencesRead(
+    params: PreferencesReadRequestUnstable,
+  ): Promise<PreferencesReadResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/preferences/read",
+      params,
+    );
+    return zPreferencesReadResponseUnstable.parse(
+      raw,
+    ) as PreferencesReadResponseUnstable;
+  }
+
+  async GooseUnstablePreferencesSave(
+    params: PreferencesSaveRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/preferences/remove", params);
+    await this.conn.extMethod("_goose/unstable/preferences/save", params);
   }
 
-  async GooseDefaultsRead(
-    params: DefaultsReadRequest,
-  ): Promise<DefaultsReadResponse> {
-    const raw = await this.conn.extMethod("_goose/defaults/read", params);
-    return zDefaultsReadResponse.parse(raw) as DefaultsReadResponse;
+  async GooseUnstablePreferencesRemove(
+    params: PreferencesRemoveRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/preferences/remove", params);
   }
 
-  async GooseDefaultsSave(
-    params: DefaultsSaveRequest,
-  ): Promise<DefaultsReadResponse> {
-    const raw = await this.conn.extMethod("_goose/defaults/save", params);
-    return zDefaultsReadResponse.parse(raw) as DefaultsReadResponse;
-  }
-
-  async GooseOnboardingImportScan(
-    params: OnboardingImportScanRequest,
-  ): Promise<OnboardingImportScanResponse> {
+  async GooseUnstableDefaultsRead(
+    params: DefaultsReadRequestUnstable,
+  ): Promise<DefaultsReadResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/onboarding/import/scan",
+      "_goose/unstable/defaults/read",
       params,
     );
-    return zOnboardingImportScanResponse.parse(
+    return zDefaultsReadResponseUnstable.parse(
       raw,
-    ) as OnboardingImportScanResponse;
+    ) as DefaultsReadResponseUnstable;
   }
 
-  async GooseOnboardingImportApply(
-    params: OnboardingImportApplyRequest,
-  ): Promise<OnboardingImportApplyResponse> {
+  async GooseUnstableDefaultsSave(
+    params: DefaultsSaveRequestUnstable,
+  ): Promise<DefaultsReadResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/onboarding/import/apply",
+      "_goose/unstable/defaults/save",
       params,
     );
-    return zOnboardingImportApplyResponse.parse(
+    return zDefaultsReadResponseUnstable.parse(
       raw,
-    ) as OnboardingImportApplyResponse;
+    ) as DefaultsReadResponseUnstable;
   }
 
-  async GooseSessionExport(
-    params: ExportSessionRequest,
-  ): Promise<ExportSessionResponse> {
-    const raw = await this.conn.extMethod("_goose/session/export", params);
-    return zExportSessionResponse.parse(raw) as ExportSessionResponse;
-  }
-
-  async GooseSessionImport(
-    params: ImportSessionRequest,
-  ): Promise<ImportSessionResponse> {
-    const raw = await this.conn.extMethod("_goose/session/import", params);
-    return zImportSessionResponse.parse(raw) as ImportSessionResponse;
-  }
-
-  async GooseSessionUpdateProject(
-    params: UpdateSessionProjectRequest,
-  ): Promise<void> {
-    await this.conn.extMethod("_goose/session/update_project", params);
-  }
-
-  async GooseSessionRename(params: RenameSessionRequest): Promise<void> {
-    await this.conn.extMethod("_goose/session/rename", params);
-  }
-
-  async GooseSessionArchive(params: ArchiveSessionRequest): Promise<void> {
-    await this.conn.extMethod("_goose/session/archive", params);
-  }
-
-  async GooseSessionUnarchive(params: UnarchiveSessionRequest): Promise<void> {
-    await this.conn.extMethod("_goose/session/unarchive", params);
-  }
-
-  async GooseSourcesCreate(
-    params: CreateSourceRequest,
-  ): Promise<CreateSourceResponse> {
-    const raw = await this.conn.extMethod("_goose/sources/create", params);
-    return zCreateSourceResponse.parse(raw) as CreateSourceResponse;
-  }
-
-  async GooseSourcesList(
-    params: ListSourcesRequest,
-  ): Promise<ListSourcesResponse> {
-    const raw = await this.conn.extMethod("_goose/sources/list", params);
-    return zListSourcesResponse.parse(raw) as ListSourcesResponse;
-  }
-
-  async GooseSourcesUpdate(
-    params: UpdateSourceRequest,
-  ): Promise<UpdateSourceResponse> {
-    const raw = await this.conn.extMethod("_goose/sources/update", params);
-    return zUpdateSourceResponse.parse(raw) as UpdateSourceResponse;
-  }
-
-  async GooseSourcesDelete(params: DeleteSourceRequest): Promise<void> {
-    await this.conn.extMethod("_goose/sources/delete", params);
-  }
-
-  async GooseSourcesExport(
-    params: ExportSourceRequest,
-  ): Promise<ExportSourceResponse> {
-    const raw = await this.conn.extMethod("_goose/sources/export", params);
-    return zExportSourceResponse.parse(raw) as ExportSourceResponse;
-  }
-
-  async GooseSourcesImport(
-    params: ImportSourcesRequest,
-  ): Promise<ImportSourcesResponse> {
-    const raw = await this.conn.extMethod("_goose/sources/import", params);
-    return zImportSourcesResponse.parse(raw) as ImportSourcesResponse;
-  }
-
-  async GooseDictationTranscribe(
-    params: DictationTranscribeRequest,
-  ): Promise<DictationTranscribeResponse> {
+  async GooseUnstableOnboardingImportScan(
+    params: OnboardingImportScanRequestUnstable,
+  ): Promise<OnboardingImportScanResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/dictation/transcribe",
+      "_goose/unstable/onboarding/import/scan",
       params,
     );
-    return zDictationTranscribeResponse.parse(
+    return zOnboardingImportScanResponseUnstable.parse(
       raw,
-    ) as DictationTranscribeResponse;
+    ) as OnboardingImportScanResponseUnstable;
   }
 
-  async GooseDictationConfig(
-    params: DictationConfigRequest,
-  ): Promise<DictationConfigResponse> {
-    const raw = await this.conn.extMethod("_goose/dictation/config", params);
-    return zDictationConfigResponse.parse(raw) as DictationConfigResponse;
-  }
-
-  async GooseDictationSecretSave(
-    params: DictationSecretSaveRequest,
-  ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/secret/save", params);
-  }
-
-  async GooseDictationSecretDelete(
-    params: DictationSecretDeleteRequest,
-  ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/secret/delete", params);
-  }
-
-  async GooseDictationModelsList(
-    params: DictationModelsListRequest,
-  ): Promise<DictationModelsListResponse> {
+  async GooseUnstableOnboardingImportApply(
+    params: OnboardingImportApplyRequestUnstable,
+  ): Promise<OnboardingImportApplyResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/dictation/models/list",
+      "_goose/unstable/onboarding/import/apply",
       params,
     );
-    return zDictationModelsListResponse.parse(
+    return zOnboardingImportApplyResponseUnstable.parse(
       raw,
-    ) as DictationModelsListResponse;
+    ) as OnboardingImportApplyResponseUnstable;
   }
 
-  async GooseDictationModelsDownload(
-    params: DictationModelDownloadRequest,
-  ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/models/download", params);
-  }
-
-  async GooseDictationModelsDownloadProgress(
-    params: DictationModelDownloadProgressRequest,
-  ): Promise<DictationModelDownloadProgressResponse> {
+  async GooseUnstableSessionExport(
+    params: ExportSessionRequestUnstable,
+  ): Promise<ExportSessionResponseUnstable> {
     const raw = await this.conn.extMethod(
-      "_goose/dictation/models/download/progress",
+      "_goose/unstable/session/export",
       params,
     );
-    return zDictationModelDownloadProgressResponse.parse(
+    return zExportSessionResponseUnstable.parse(
       raw,
-    ) as DictationModelDownloadProgressResponse;
+    ) as ExportSessionResponseUnstable;
   }
 
-  async GooseDictationModelsCancel(
-    params: DictationModelCancelRequest,
-  ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/models/cancel", params);
+  async GooseUnstableSessionImport(
+    params: ImportSessionRequestUnstable,
+  ): Promise<ImportSessionResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/session/import",
+      params,
+    );
+    return zImportSessionResponseUnstable.parse(
+      raw,
+    ) as ImportSessionResponseUnstable;
   }
 
-  async GooseDictationModelsDelete(
-    params: DictationModelDeleteRequest,
+  async GooseUnstableSessionProjectUpdate(
+    params: UpdateSessionProjectRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/models/delete", params);
+    await this.conn.extMethod("_goose/unstable/session/project/update", params);
   }
 
-  async GooseDictationModelSelect(
-    params: DictationModelSelectRequest,
+  async GooseUnstableSessionRename(
+    params: RenameSessionRequestUnstable,
   ): Promise<void> {
-    await this.conn.extMethod("_goose/dictation/model/select", params);
+    await this.conn.extMethod("_goose/unstable/session/rename", params);
+  }
+
+  async GooseUnstableSessionArchive(
+    params: ArchiveSessionRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/session/archive", params);
+  }
+
+  async GooseUnstableSessionUnarchive(
+    params: UnarchiveSessionRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/session/unarchive", params);
+  }
+
+  async GooseUnstableSourcesCreate(
+    params: CreateSourceRequestUnstable,
+  ): Promise<CreateSourceResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/sources/create",
+      params,
+    );
+    return zCreateSourceResponseUnstable.parse(
+      raw,
+    ) as CreateSourceResponseUnstable;
+  }
+
+  async GooseUnstableSourcesList(
+    params: ListSourcesRequestUnstable,
+  ): Promise<ListSourcesResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/sources/list",
+      params,
+    );
+    return zListSourcesResponseUnstable.parse(
+      raw,
+    ) as ListSourcesResponseUnstable;
+  }
+
+  async GooseUnstableSourcesUpdate(
+    params: UpdateSourceRequestUnstable,
+  ): Promise<UpdateSourceResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/sources/update",
+      params,
+    );
+    return zUpdateSourceResponseUnstable.parse(
+      raw,
+    ) as UpdateSourceResponseUnstable;
+  }
+
+  async GooseUnstableSourcesDelete(
+    params: DeleteSourceRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/sources/delete", params);
+  }
+
+  async GooseUnstableSourcesExport(
+    params: ExportSourceRequestUnstable,
+  ): Promise<ExportSourceResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/sources/export",
+      params,
+    );
+    return zExportSourceResponseUnstable.parse(
+      raw,
+    ) as ExportSourceResponseUnstable;
+  }
+
+  async GooseUnstableSourcesImport(
+    params: ImportSourcesRequestUnstable,
+  ): Promise<ImportSourcesResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/sources/import",
+      params,
+    );
+    return zImportSourcesResponseUnstable.parse(
+      raw,
+    ) as ImportSourcesResponseUnstable;
+  }
+
+  async GooseUnstableDictationTranscribe(
+    params: DictationTranscribeRequestUnstable,
+  ): Promise<DictationTranscribeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/dictation/transcribe",
+      params,
+    );
+    return zDictationTranscribeResponseUnstable.parse(
+      raw,
+    ) as DictationTranscribeResponseUnstable;
+  }
+
+  async GooseUnstableDictationConfig(
+    params: DictationConfigRequestUnstable,
+  ): Promise<DictationConfigResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/dictation/config",
+      params,
+    );
+    return zDictationConfigResponseUnstable.parse(
+      raw,
+    ) as DictationConfigResponseUnstable;
+  }
+
+  async GooseUnstableDictationSecretSave(
+    params: DictationSecretSaveRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/dictation/secret/save", params);
+  }
+
+  async GooseUnstableDictationSecretDelete(
+    params: DictationSecretDeleteRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/dictation/secret/delete",
+      params,
+    );
+  }
+
+  async GooseUnstableDictationModelsList(
+    params: DictationModelsListRequestUnstable,
+  ): Promise<DictationModelsListResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/dictation/models/list",
+      params,
+    );
+    return zDictationModelsListResponseUnstable.parse(
+      raw,
+    ) as DictationModelsListResponseUnstable;
+  }
+
+  async GooseUnstableDictationModelsDownload(
+    params: DictationModelDownloadRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/dictation/models/download",
+      params,
+    );
+  }
+
+  async GooseUnstableDictationModelsDownloadProgress(
+    params: DictationModelDownloadProgressRequestUnstable,
+  ): Promise<DictationModelDownloadProgressResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/dictation/models/download/progress",
+      params,
+    );
+    return zDictationModelDownloadProgressResponseUnstable.parse(
+      raw,
+    ) as DictationModelDownloadProgressResponseUnstable;
+  }
+
+  async GooseUnstableDictationModelsCancel(
+    params: DictationModelCancelRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/dictation/models/cancel",
+      params,
+    );
+  }
+
+  async GooseUnstableDictationModelsDelete(
+    params: DictationModelDeleteRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/dictation/models/delete",
+      params,
+    );
+  }
+
+  async GooseUnstableDictationModelsSelect(
+    params: DictationModelSelectRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/dictation/models/select",
+      params,
+    );
   }
 }

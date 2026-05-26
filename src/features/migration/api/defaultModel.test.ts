@@ -5,7 +5,8 @@ const mockGooseDefaultsRead = vi.fn();
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseDefaultsRead: (...args: unknown[]) => mockGooseDefaultsRead(...args),
+      GooseUnstableDefaultsRead: (...args: unknown[]) =>
+        mockGooseDefaultsRead(...args),
     },
   }),
 }));

@@ -19,7 +19,7 @@ import {
   authenticateModelProvider,
   onModelSetupOutput,
 } from "@/features/providers/api/modelSetup";
-import type { ProviderConfigChangeResponse } from "@aaif/goose-sdk";
+import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import type {
   ProviderDisplayInfo,
   ProviderField,

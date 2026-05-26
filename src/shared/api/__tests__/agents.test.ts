@@ -17,16 +17,17 @@ vi.mock("@tauri-apps/api/core", () => ({
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
-      GooseSourcesList: (...args: unknown[]) => mockGooseSourcesList(...args),
-      GooseSourcesCreate: (...args: unknown[]) =>
+      GooseUnstableSourcesList: (...args: unknown[]) =>
+        mockGooseSourcesList(...args),
+      GooseUnstableSourcesCreate: (...args: unknown[]) =>
         mockGooseSourcesCreate(...args),
-      GooseSourcesUpdate: (...args: unknown[]) =>
+      GooseUnstableSourcesUpdate: (...args: unknown[]) =>
         mockGooseSourcesUpdate(...args),
-      GooseSourcesDelete: (...args: unknown[]) =>
+      GooseUnstableSourcesDelete: (...args: unknown[]) =>
         mockGooseSourcesDelete(...args),
-      GooseSourcesExport: (...args: unknown[]) =>
+      GooseUnstableSourcesExport: (...args: unknown[]) =>
         mockGooseSourcesExport(...args),
-      GooseSourcesImport: (...args: unknown[]) =>
+      GooseUnstableSourcesImport: (...args: unknown[]) =>
         mockGooseSourcesImport(...args),
     },
   }),
@@ -195,7 +196,7 @@ describe("agents API", () => {
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         provider: "openai",
         model: "gpt-4.1",
@@ -220,7 +221,7 @@ describe("agents API", () => {
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {},
     });
   });
@@ -248,7 +249,7 @@ describe("agents API", () => {
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         avatar: appAvatarRef,
       },
@@ -613,7 +614,7 @@ describe("agents API", () => {
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         provider: "openai",
         model: "gpt-4.1",
@@ -651,7 +652,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         provider: "openai",
         model: "gpt-4.1",
@@ -692,7 +693,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         avatar: appAvatarRef,
         sprout: {
@@ -720,7 +721,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         avatar: appAvatarRef,
       },
@@ -772,7 +773,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {
         avatar: "https://example.test/scout.png",
       },
@@ -798,7 +799,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {},
     });
     expect(warnSpy).not.toHaveBeenCalled();
@@ -823,7 +824,7 @@ Research carefully.
       name: "Scout",
       description: "Agent",
       content: "Research carefully.",
-      global: true,
+      target: { scope: "global" },
       properties: {},
     });
   });
@@ -844,7 +845,7 @@ Research carefully.
 
     expect(mockGooseSourcesImport).toHaveBeenCalledWith({
       data: raw,
-      global: true,
+      target: { scope: "global" },
     });
     expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
   });

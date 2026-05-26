@@ -25,10 +25,10 @@ describe("useAutoCompactPreferences", () => {
   it("hydrates from the stored threshold value", async () => {
     mockGetClient.mockResolvedValue({
       goose: {
-        GoosePreferencesRead: vi.fn().mockResolvedValue({
+        GooseUnstablePreferencesRead: vi.fn().mockResolvedValue({
           values: [{ key: "autoCompactThreshold", value: 0.65 }],
         }),
-        GoosePreferencesSave: vi.fn().mockResolvedValue({}),
+        GooseUnstablePreferencesSave: vi.fn().mockResolvedValue({}),
       },
     });
 
@@ -52,8 +52,8 @@ describe("useAutoCompactPreferences", () => {
 
     mockGetClient.mockResolvedValue({
       goose: {
-        GoosePreferencesRead: read,
-        GoosePreferencesSave: upsert,
+        GooseUnstablePreferencesRead: read,
+        GooseUnstablePreferencesSave: upsert,
       },
     });
 
@@ -104,8 +104,8 @@ describe("useAutoCompactPreferences", () => {
 
     mockGetClient.mockResolvedValue({
       goose: {
-        GoosePreferencesRead: read,
-        GoosePreferencesSave: vi.fn().mockResolvedValue({}),
+        GooseUnstablePreferencesRead: read,
+        GooseUnstablePreferencesSave: vi.fn().mockResolvedValue({}),
       },
     });
 
@@ -136,8 +136,8 @@ describe("useAutoCompactPreferences", () => {
 
     mockGetClient.mockResolvedValue({
       goose: {
-        GoosePreferencesRead: read,
-        GoosePreferencesSave: vi.fn().mockResolvedValue({}),
+        GooseUnstablePreferencesRead: read,
+        GooseUnstablePreferencesSave: vi.fn().mockResolvedValue({}),
       },
     });
 

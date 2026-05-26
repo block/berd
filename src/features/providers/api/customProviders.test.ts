@@ -42,12 +42,12 @@ describe("custom provider API", () => {
     vi.clearAllMocks();
     mocks.getClient.mockResolvedValue({
       goose: {
-        GooseProvidersCatalogList: mocks.catalogList,
-        GooseProvidersCatalogTemplate: mocks.catalogTemplate,
-        GooseProvidersCustomCreate: mocks.customCreate,
-        GooseProvidersCustomRead: mocks.customRead,
-        GooseProvidersCustomUpdate: mocks.customUpdate,
-        GooseProvidersCustomDelete: mocks.customDelete,
+        GooseUnstableProvidersCatalogList: mocks.catalogList,
+        GooseUnstableProvidersCatalogTemplate: mocks.catalogTemplate,
+        GooseUnstableProvidersCustomCreate: mocks.customCreate,
+        GooseUnstableProvidersCustomRead: mocks.customRead,
+        GooseUnstableProvidersCustomUpdate: mocks.customUpdate,
+        GooseUnstableProvidersCustomDelete: mocks.customDelete,
       },
     });
   });

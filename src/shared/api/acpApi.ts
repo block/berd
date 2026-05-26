@@ -67,7 +67,7 @@ export function buildProviderListFromEntries(
 
 export async function listProviders(): Promise<AcpProvider[]> {
   const client = await getClient();
-  const result = await client.goose.GooseProvidersList({
+  const result = await client.goose.GooseUnstableProvidersList({
     providerIds: [],
   });
   return buildProviderListFromEntries(result.entries);
@@ -111,14 +111,14 @@ export async function listSessionsPage({
 
 export async function exportSession(sessionId: string): Promise<string> {
   const client = await getClient();
-  const result = await client.goose.GooseSessionExport({ sessionId });
+  const result = await client.goose.GooseUnstableSessionExport({ sessionId });
   // biome-ignore lint/suspicious/noExplicitAny: SDK doesn't expose data field on export result
   return (result as any).data;
 }
 
 export async function importSession(json: string): Promise<AcpSessionInfo> {
   const client = await getClient();
-  const result = await client.goose.GooseSessionImport({ data: json });
+  const result = await client.goose.GooseUnstableSessionImport({ data: json });
   return result as unknown as AcpSessionInfo;
 }
 
@@ -185,7 +185,7 @@ export async function updateWorkingDir(
   workingDir: string,
 ): Promise<void> {
   const client = await getClient();
-  await client.extMethod("_goose/working_dir/update", {
+  await client.goose.GooseUnstableSessionWorkingDirUpdate({
     sessionId,
     workingDir,
   });
@@ -196,7 +196,7 @@ export async function updateSessionProject(
   projectId: string | null,
 ): Promise<void> {
   const client = await getClient();
-  await client.extMethod("_goose/session/update_project", {
+  await client.goose.GooseUnstableSessionProjectUpdate({
     sessionId,
     projectId,
   });
@@ -204,12 +204,12 @@ export async function updateSessionProject(
 
 export async function archiveSession(sessionId: string): Promise<void> {
   const client = await getClient();
-  await client.extMethod("_goose/session/archive", { sessionId });
+  await client.goose.GooseUnstableSessionArchive({ sessionId });
 }
 
 export async function unarchiveSession(sessionId: string): Promise<void> {
   const client = await getClient();
-  await client.extMethod("_goose/session/unarchive", { sessionId });
+  await client.goose.GooseUnstableSessionUnarchive({ sessionId });
 }
 
 export async function renameSession(
@@ -217,7 +217,7 @@ export async function renameSession(
   title: string,
 ): Promise<void> {
   const client = await getClient();
-  await client.extMethod("_goose/session/rename", { sessionId, title });
+  await client.goose.GooseUnstableSessionRename({ sessionId, title });
 }
 
 export async function cancelSession(sessionId: string): Promise<void> {

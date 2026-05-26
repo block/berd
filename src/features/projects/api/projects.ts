@@ -120,10 +120,10 @@ export interface ProjectIconData {
 
 export async function listProjects(): Promise<ProjectInfo[]> {
   const client = await getClient();
-  const raw = await client.extMethod("_goose/sources/list", {
+  const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
   });
-  const sources = (raw.sources ?? []) as SourceEntry[];
+  const sources = (raw.sources ?? []) as unknown as SourceEntry[];
   return sources
     .map(toProjectInfo)
     .filter((p) => p.archivedAt === null)
@@ -161,12 +161,12 @@ export async function createProject(
     color,
     workingDirs,
   });
-  const raw = await client.extMethod("_goose/sources/create", {
+  const raw = await client.goose.GooseUnstableSourcesCreate({
     type: "project",
     name: id,
     description,
     content: prompt,
-    global: true,
+    target: { scope: "global" },
     properties: toProperties({
       name,
       icon,
@@ -239,7 +239,7 @@ export async function updateProject(
   const merged = { ...existing, ...updates };
   const artifact = artifactForUpdate(existing, updates, merged);
   const client = await getClient();
-  const raw = await client.extMethod("_goose/sources/update", {
+  const raw = await client.goose.GooseUnstableSourcesUpdate({
     type: "project",
     path: existing.path,
     name: existing.id,
@@ -269,7 +269,7 @@ export async function deleteProject(
     typeof idOrProject === "string"
       ? (await getProject(idOrProject)).path
       : idOrProject.path;
-  await client.extMethod("_goose/sources/delete", {
+  await client.goose.GooseUnstableSourcesDelete({
     type: "project",
     path,
   });
@@ -285,10 +285,10 @@ export async function getProject(id: string): Promise<ProjectInfo> {
 /** List both archived and active projects. */
 async function listAllProjects(): Promise<ProjectInfo[]> {
   const client = await getClient();
-  const raw = await client.extMethod("_goose/sources/list", {
+  const raw = await client.goose.GooseUnstableSourcesList({
     type: "project",
   });
-  const sources = (raw.sources ?? []) as SourceEntry[];
+  const sources = (raw.sources ?? []) as unknown as SourceEntry[];
   return sources.map(toProjectInfo);
 }
 

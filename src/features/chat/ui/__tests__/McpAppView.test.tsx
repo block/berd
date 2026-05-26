@@ -12,7 +12,8 @@ import type {
 const mocks = vi.hoisted(() => ({
   appRendererSpy: vi.fn(),
   nestedToolResultSpy: vi.fn(),
-  extMethod: vi.fn(),
+  toolCall: vi.fn(),
+  resourcesRead: vi.fn(),
   getClient: vi.fn(),
   resolvedTheme: "dark" as "light" | "dark",
 }));
@@ -134,13 +135,17 @@ describe("McpAppView nested tool calls", () => {
   beforeEach(() => {
     mocks.appRendererSpy.mockClear();
     mocks.nestedToolResultSpy.mockClear();
-    mocks.extMethod.mockReset();
+    mocks.toolCall.mockReset();
+    mocks.resourcesRead.mockReset();
     mocks.getClient.mockReset();
     mocks.resolvedTheme = "dark";
     vi.mocked(openUrl).mockReset();
     vi.mocked(openUrl).mockResolvedValue(undefined);
     mocks.getClient.mockResolvedValue({
-      extMethod: mocks.extMethod,
+      goose: {
+        GooseUnstableToolsCall: mocks.toolCall,
+        GooseUnstableResourcesRead: mocks.resourcesRead,
+      },
     });
   });
 
@@ -158,7 +163,7 @@ describe("McpAppView nested tool calls", () => {
       },
     };
 
-    mocks.extMethod.mockResolvedValue(nestedToolResult);
+    mocks.toolCall.mockResolvedValue(nestedToolResult);
 
     render(
       <McpAppView
@@ -185,7 +190,7 @@ describe("McpAppView nested tool calls", () => {
     fireEvent.click(screen.getByTestId("mock-app-renderer"));
 
     await waitFor(() => {
-      expect(mocks.extMethod).toHaveBeenCalledWith("_goose/tool/call", {
+      expect(mocks.toolCall).toHaveBeenCalledWith({
         sessionId: "local-session",
         name: "mcpappbench_local___get-server-time",
         arguments: { timezone: "America/New_York" },

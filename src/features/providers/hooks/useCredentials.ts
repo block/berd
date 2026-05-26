@@ -6,7 +6,7 @@ import {
   type ProviderStatus,
   checkAllProviderStatus,
 } from "@/features/providers/api/credentials";
-import type { ProviderConfigChangeResponse } from "@aaif/goose-sdk";
+import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import {
   syncProviderInventory,
   type SyncProviderInventoryResult,

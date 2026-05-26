@@ -390,7 +390,7 @@ function legacyPersonaToCreateRequest(parsed: Record<string, unknown>) {
     name: parsed.displayName as string,
     description: AGENT_DESCRIPTION,
     content: parsed.systemPrompt as string,
-    global: true,
+    target: { scope: "global" } as const,
     properties: legacyPersonaProperties(parsed),
   };
 }
@@ -447,7 +447,7 @@ function personaMarkdownToCreateRequest(fileContents: string) {
     description:
       requiredFrontmatterString(parsed, "description") ?? AGENT_DESCRIPTION,
     content: body,
-    global: true,
+    target: { scope: "global" } as const,
     properties: personaMarkdownProperties(parsed),
   };
 }
@@ -527,7 +527,7 @@ function toPersona(source: AgentSourceEntry): Persona {
 
 async function listAgentSources(): Promise<AgentSourceEntry[]> {
   const client = await getClient();
-  const response = await client.goose.GooseSourcesList({
+  const response = await client.goose.GooseUnstableSourcesList({
     type: AGENT_SOURCE_TYPE,
   });
   return response.sources.filter(isAgentSource);
@@ -635,12 +635,12 @@ export async function createPersona(
   request: CreatePersonaRequest,
 ): Promise<Persona> {
   const client = await getClient();
-  const response = await client.goose.GooseSourcesCreate({
+  const response = await client.goose.GooseUnstableSourcesCreate({
     type: AGENT_SOURCE_TYPE,
     name: request.displayName,
     description: AGENT_DESCRIPTION,
     content: request.systemPrompt,
-    global: true,
+    target: { scope: "global" },
     properties: personaProperties(request),
   });
 
@@ -658,7 +658,7 @@ export async function updatePersona(
   const client = await getClient();
   const description = persona.sourceDescription ?? AGENT_DESCRIPTION;
 
-  const response = await client.goose.GooseSourcesUpdate({
+  const response = await client.goose.GooseUnstableSourcesUpdate({
     type: AGENT_SOURCE_TYPE,
     path: persona.id,
     name: request.displayName ?? persona.displayName,
@@ -676,7 +676,7 @@ export async function updatePersona(
 
 export async function deletePersona(id: string): Promise<void> {
   const client = await getClient();
-  await client.goose.GooseSourcesDelete({
+  await client.goose.GooseUnstableSourcesDelete({
     type: AGENT_SOURCE_TYPE,
     path: id,
   });
@@ -716,7 +716,7 @@ export async function importPersonas(
   const client = await getClient();
 
   if (isPersonaMarkdownFile(fileName)) {
-    const response = await client.goose.GooseSourcesCreate(
+    const response = await client.goose.GooseUnstableSourcesCreate(
       personaMarkdownToCreateRequest(fileContents),
     );
     if (!isAgentSource(response.source)) {
@@ -730,14 +730,14 @@ export async function importPersonas(
   const parsed = readImportJson(fileContents);
 
   if (parsed.type === AGENT_SOURCE_TYPE) {
-    const response = await client.goose.GooseSourcesImport({
+    const response = await client.goose.GooseUnstableSourcesImport({
       data: fileContents,
-      global: true,
+      target: { scope: "global" },
     });
     return response.sources.filter(isAgentSource).map(toPersona);
   }
 
-  const response = await client.goose.GooseSourcesCreate(
+  const response = await client.goose.GooseUnstableSourcesCreate(
     legacyPersonaToCreateRequest(parsed),
   );
   if (!isAgentSource(response.source)) {
