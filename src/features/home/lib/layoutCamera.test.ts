@@ -5,6 +5,7 @@ import {
   layoutCameraToCanvasViewport,
   canvasViewportToLayoutCamera,
   panCanvasViewport,
+  snapCanvasPointToDevicePixels,
   screenToWorld,
   viewportZoomToZoomBps,
   zoomCanvasViewportAtPoint,
@@ -26,6 +27,21 @@ describe("layoutCamera", () => {
   it("converts zoom bps to canvas zoom and back", () => {
     expect(zoomBpsToViewportZoom(12_500)).toBe(1.25);
     expect(viewportZoomToZoomBps(1.23456)).toBe(12_346);
+  });
+
+  it("snaps canvas points to physical pixels", () => {
+    expect(snapCanvasPointToDevicePixels({ x: 10.4, y: 20.6 }, 1)).toEqual({
+      x: 10,
+      y: 21,
+    });
+    expect(snapCanvasPointToDevicePixels({ x: 10.25, y: 20.25 }, 2)).toEqual({
+      x: 10.5,
+      y: 20.5,
+    });
+    expect(snapCanvasPointToDevicePixels({ x: 10.2, y: 20.2 }, 1.25)).toEqual({
+      x: 10.4,
+      y: 20,
+    });
   });
 
   it("maps the default camera to a centered viewport at zoom 1", () => {

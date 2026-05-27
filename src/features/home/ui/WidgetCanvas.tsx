@@ -1,9 +1,13 @@
 import type React from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   LayoutCamera,
   LayoutConstraints,
 } from "@/features/layout/api/layout";
+import {
+  snapCanvasPointToDevicePixels,
+  zoomBpsToViewportZoom,
+} from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
@@ -55,6 +59,86 @@ const DEFAULT_CONSTRAINTS: LayoutConstraints = {
   maxItems: 100,
 };
 
+function currentDevicePixelRatio(): number {
+  return typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
+}
+
+function useDevicePixelRatio(): number {
+  const [devicePixelRatio, setDevicePixelRatio] = useState(
+    currentDevicePixelRatio,
+  );
+
+  useEffect(() => {
+    const updateDevicePixelRatio = () => {
+      setDevicePixelRatio(currentDevicePixelRatio());
+    };
+
+    window.addEventListener("resize", updateDevicePixelRatio);
+
+    const mediaQuery =
+      typeof window.matchMedia === "function"
+        ? window.matchMedia(`(resolution: ${devicePixelRatio}dppx)`)
+        : null;
+    if (mediaQuery?.addEventListener) {
+      mediaQuery.addEventListener("change", updateDevicePixelRatio);
+    } else {
+      mediaQuery?.addListener?.(updateDevicePixelRatio);
+    }
+
+    return () => {
+      window.removeEventListener("resize", updateDevicePixelRatio);
+      if (mediaQuery?.removeEventListener) {
+        mediaQuery.removeEventListener("change", updateDevicePixelRatio);
+      } else {
+        mediaQuery?.removeListener?.(updateDevicePixelRatio);
+      }
+    };
+  }, [devicePixelRatio]);
+
+  return devicePixelRatio;
+}
+
+function renderedWidgetPosition(
+  position: { x: number; y: number },
+  viewport: { x: number; y: number; zoom: number },
+  devicePixelRatio: number,
+): { x: number; y: number } {
+  return snapCanvasPointToDevicePixels(
+    {
+      x: viewport.x + position.x * viewport.zoom,
+      y: viewport.y + position.y * viewport.zoom,
+    },
+    devicePixelRatio,
+  );
+}
+
+function renderedWidgetStyle({
+  position,
+  size,
+  zIndex,
+  zoom,
+}: {
+  position: { x: number; y: number };
+  size: { width: number; height: number };
+  zIndex: number;
+  zoom: number;
+}): React.CSSProperties & { zoom?: number } {
+  const style: React.CSSProperties & { zoom?: number } = {
+    position: "absolute",
+    left: position.x,
+    top: position.y,
+    zIndex,
+    width: size.width,
+    height: size.height,
+  };
+
+  if (zoom !== zoomBpsToViewportZoom(10_000)) {
+    style.zoom = zoom;
+  }
+
+  return style;
+}
+
 /**
  * WidgetCanvas — the free-form widget layer.
  *
@@ -89,6 +173,7 @@ export function WidgetCanvas({
     worldX: 0,
     worldY: 0,
   });
+  const devicePixelRatio = useDevicePixelRatio();
 
   const currentMaxZ = useMemo(
     () => instances.reduce((max, instance) => Math.max(max, instance.z), 0),
@@ -213,19 +298,24 @@ export function WidgetCanvas({
       onWheel={handleWheel}
       className="relative h-full w-full overflow-hidden bg-dot-grid select-none touch-none"
     >
-      <div
-        className="absolute left-0 top-0 size-0"
-        style={{
-          transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.zoom})`,
-          transformOrigin: "0 0",
-        }}
-      >
+      <div className="absolute left-0 top-0 size-0">
         {renderedInstances.map((instance) => {
           const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
           const position = dragPositions[instance.id] ?? {
             x: instance.x,
             y: instance.y,
           };
+          const renderPosition = renderedWidgetPosition(
+            position,
+            viewport,
+            devicePixelRatio,
+          );
+          const widgetStyle = renderedWidgetStyle({
+            position: renderPosition,
+            size: catalogEntry.defaultSize,
+            zIndex: visuallyLiftedZ[instance.id] ?? instance.z,
+            zoom: viewport.zoom,
+          });
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: freeform widget node captures canvas drag gestures; WidgetFrame owns semantics.
             <div
@@ -234,14 +324,7 @@ export function WidgetCanvas({
               draggable={false}
               onPointerDown={(event) => beginWidgetDrag(event, instance)}
               onDragStart={preventNativeDrag}
-              style={{
-                position: "absolute",
-                left: position.x,
-                top: position.y,
-                zIndex: visuallyLiftedZ[instance.id] ?? instance.z,
-                width: catalogEntry.defaultSize.width,
-                height: catalogEntry.defaultSize.height,
-              }}
+              style={widgetStyle}
             >
               <WidgetFrame
                 instance={instance}

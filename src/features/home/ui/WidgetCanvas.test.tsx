@@ -251,6 +251,17 @@ function renderCanvas({
   );
 }
 
+function widgetWorld(container: HTMLElement): HTMLElement {
+  return container.firstElementChild?.firstElementChild as HTMLElement;
+}
+
+function setDevicePixelRatio(value: number) {
+  Object.defineProperty(window, "devicePixelRatio", {
+    configurable: true,
+    value,
+  });
+}
+
 const PANEL_LABELS = {
   widgets: /^widgets$/i,
   agent: /^agent$/i,
@@ -300,6 +311,73 @@ describe("WidgetCanvas", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+    setDevicePixelRatio(1);
+  });
+
+  it("renders widgets directly at snapped screen positions", () => {
+    mocks.homeWidgetState.camera = {
+      centerX: -10.25,
+      centerY: -20.25,
+      zoomBps: 10_000,
+    };
+    setDevicePixelRatio(2);
+
+    const { container } = renderCanvas({ instances: [widget()] });
+    const world = widgetWorld(container);
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+
+    expect(world.style.transform).toBe("");
+    expect(widgetNode.style.transform).toBe("");
+    expect(widgetNode.style.zoom).toBeUndefined();
+    expect(widgetNode.style.left).toBe("30.5px");
+    expect(widgetNode.style.top).toBe("50.5px");
+  });
+
+  it("updates snapped widget placement when device pixel ratio changes", () => {
+    mocks.homeWidgetState.camera = {
+      centerX: -10.25,
+      centerY: -20.25,
+      zoomBps: 10_000,
+    };
+    setDevicePixelRatio(1);
+
+    const { container } = renderCanvas({ instances: [widget()] });
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    expect(widgetNode.style.left).toBe("30px");
+    expect(widgetNode.style.top).toBe("50px");
+
+    setDevicePixelRatio(2);
+    fireEvent.resize(window);
+
+    expect(widgetNode.style.left).toBe("30.5px");
+    expect(widgetNode.style.top).toBe("50.5px");
+  });
+
+  it("zooms widgets without a transformed canvas wrapper", () => {
+    mocks.homeWidgetState.camera = {
+      centerX: -10.25,
+      centerY: -20.25,
+      zoomBps: 12_500,
+    };
+    setDevicePixelRatio(2);
+
+    const { container } = renderCanvas({
+      instances: [widget({ x: 20.25, y: 30.25 })],
+    });
+    const world = widgetWorld(container);
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+
+    expect(world.style.transform).toBe("");
+    expect(widgetNode.style.transform).toBe("");
+    expect(widgetNode.style.zoom).toBe("1.25");
+    expect(widgetNode.style.left).toBe("38px");
+    expect(widgetNode.style.top).toBe("63px");
   });
 
   it("allows child widget clicks when the pointer does not drag", () => {

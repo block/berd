@@ -34,6 +34,21 @@ export function viewportZoomToZoomBps(zoom: number): number {
   return Math.round(zoom * ZOOM_BPS_SCALE);
 }
 
+export function snapCanvasPointToDevicePixels(
+  point: CanvasPoint,
+  devicePixelRatio: number,
+): CanvasPoint {
+  const ratio =
+    Number.isFinite(devicePixelRatio) && devicePixelRatio > 0
+      ? devicePixelRatio
+      : 1;
+
+  return {
+    x: Math.round(point.x * ratio) / ratio,
+    y: Math.round(point.y * ratio) / ratio,
+  };
+}
+
 export function clampLayoutCamera(
   camera: LayoutCamera,
   constraints: LayoutConstraints,
