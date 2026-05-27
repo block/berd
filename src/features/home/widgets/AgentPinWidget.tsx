@@ -49,7 +49,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
               media={avatarMedia}
               alt=""
               loadingStrategy="visible-video"
-              className="object-contain"
+              className="pointer-events-none object-contain"
             />
           ) : (
             <span

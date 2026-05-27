@@ -487,7 +487,6 @@ export function AgentBuilderRail({
               <AvatarMedia
                 media={selectedAvatarMediaState.media}
                 alt={t("avatar.previewAlt")}
-                playback="always"
                 className="h-full w-full object-contain"
               />
             ) : selectedAvatarMediaState.loading ? (

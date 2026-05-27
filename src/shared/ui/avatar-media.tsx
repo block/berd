@@ -17,15 +17,22 @@ interface AvatarMediaProps {
   className?: string;
   lazy?: boolean;
   loadingStrategy?: "eager" | "lazy-once" | "visible-video";
-  playback?: "hover" | "always";
   poster?: string;
   onError?: ReactEventHandler<HTMLImageElement | HTMLVideoElement>;
 }
 
-function getVideoPreload(shouldLoadVideo: boolean) {
-  if (shouldLoadVideo) {
-    // Keep loaded videos ready so hover playback starts without reloading.
+function getVideoPreload(
+  animatedAvatarsEnabled: boolean,
+  shouldLoadVideo: boolean,
+  loadingStrategy: AvatarMediaProps["loadingStrategy"],
+) {
+  if (!animatedAvatarsEnabled && shouldLoadVideo) {
+    // No poster asset today, so load the video to paint frame 0.
     return "auto";
+  }
+
+  if (loadingStrategy === "eager") {
+    return "metadata";
   }
 
   return "none";
@@ -75,24 +82,19 @@ export const AvatarMedia = memo(function AvatarMedia({
   className,
   lazy = false,
   loadingStrategy = lazy ? "lazy-once" : "eager",
-  playback = "hover",
   poster,
   onError,
 }: AvatarMediaProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const { enabled: animatedAvatarsEnabled } = useAnimatedAvatarsPreference();
   const prefersReducedMotion = usePrefersReducedMotion();
-  const [isHovered, setIsHovered] = useState(false);
-  const isVideo = media.mediaType === "video";
-  const canAnimateVideo = animatedAvatarsEnabled && !prefersReducedMotion;
-  const shouldAnimateVideo =
-    canAnimateVideo && (playback === "always" || isHovered);
+  const shouldAnimateVideo = animatedAvatarsEnabled && !prefersReducedMotion;
   const [shouldLoadVideo, setShouldLoadVideo] = useState(
     loadingStrategy === "eager",
   );
 
   useEffect(() => {
-    if (!isVideo || loadingStrategy === "eager") {
+    if (media.mediaType !== "video" || loadingStrategy === "eager") {
       setShouldLoadVideo(true);
       return;
     }
@@ -123,10 +125,10 @@ export const AvatarMedia = memo(function AvatarMedia({
 
     observer.observe(video);
     return () => observer.disconnect();
-  }, [isVideo, loadingStrategy, media.src]);
+  }, [loadingStrategy, media.mediaType, media.src]);
 
   useEffect(() => {
-    if (!isVideo) {
+    if (media.mediaType !== "video") {
       return;
     }
 
@@ -144,33 +146,26 @@ export const AvatarMedia = memo(function AvatarMedia({
       video.setAttribute("src", media.src);
     }
 
-    return () => stopVideo(video);
-  }, [isVideo, media.src, shouldLoadVideo]);
-
-  useEffect(() => {
-    if (!isVideo || !shouldLoadVideo) {
-      return;
-    }
-
-    const video = videoRef.current;
-    if (!video) {
-      return;
-    }
-
     if (shouldAnimateVideo) {
       void video.play().catch(() => {});
     } else {
       video.pause();
     }
-  }, [isVideo, media.src, shouldAnimateVideo, shouldLoadVideo]);
 
-  if (isVideo) {
-    const preload = getVideoPreload(shouldLoadVideo);
+    return () => stopVideo(video);
+  }, [media.mediaType, media.src, shouldAnimateVideo, shouldLoadVideo]);
+
+  if (media.mediaType === "video") {
+    const preload = getVideoPreload(
+      shouldAnimateVideo,
+      shouldLoadVideo,
+      loadingStrategy,
+    );
 
     return (
       <video
         ref={videoRef}
-        loop={canAnimateVideo}
+        loop={shouldAnimateVideo}
         muted
         poster={poster}
         playsInline
@@ -180,8 +175,6 @@ export const AvatarMedia = memo(function AvatarMedia({
         aria-hidden={alt ? undefined : true}
         className={cn("aspect-square size-full object-cover", className)}
         onError={onError}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
       />
     );
   }

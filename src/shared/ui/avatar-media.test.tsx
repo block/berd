@@ -1,11 +1,4 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ANIMATED_AVATARS_CHANGED_EVENT } from "@/shared/avatars/avatarPlaybackPreferences";
 import { AvatarMedia } from "./avatar-media";
@@ -99,7 +92,7 @@ describe("AvatarMedia", () => {
     window.matchMedia = originalMatchMedia;
   });
 
-  it("attaches visible-video sources with intersection and only plays while hovered", async () => {
+  it("attaches, plays, pauses, and detaches visible-video sources with intersection", async () => {
     render(
       <AvatarMedia
         media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
@@ -122,18 +115,7 @@ describe("AvatarMedia", () => {
     await waitFor(() =>
       expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
     );
-    expect(video).toHaveAttribute("preload", "auto");
-    expect(playMock).not.toHaveBeenCalled();
-
-    fireEvent.mouseEnter(video);
-
-    await waitFor(() => expect(playMock).toHaveBeenCalledTimes(1));
-
-    fireEvent.mouseLeave(video);
-
     expect(playMock).toHaveBeenCalledTimes(1);
-    expect(pauseMock).toHaveBeenCalled();
-    expect(loadMock).not.toHaveBeenCalled();
 
     emitIntersection(false);
 
@@ -169,28 +151,7 @@ describe("AvatarMedia", () => {
     expect(pauseMock).toHaveBeenCalled();
   });
 
-  it("plays visible-video sources without hover when playback is always", async () => {
-    render(
-      <AvatarMedia
-        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
-        alt="avatar"
-        loadingStrategy="visible-video"
-        playback="always"
-      />,
-    );
-
-    const video = screen.getByRole("img", { name: "avatar" });
-
-    emitIntersection(true);
-
-    await waitFor(() =>
-      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
-    );
-    expect(playMock).toHaveBeenCalledTimes(1);
-    expect(video).toHaveAttribute("loop");
-  });
-
-  it("pauses and resumes a hovered visible video when animation preference changes", async () => {
+  it("pauses and resumes a mounted visible video when animation preference changes", async () => {
     render(
       <AvatarMedia
         media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
@@ -202,7 +163,6 @@ describe("AvatarMedia", () => {
     const video = screen.getByRole("img", { name: "avatar" });
 
     emitIntersection(true);
-    fireEvent.mouseEnter(video);
 
     await waitFor(() => expect(playMock).toHaveBeenCalledTimes(1));
     expect(video).toHaveAttribute("loop");
@@ -215,14 +175,6 @@ describe("AvatarMedia", () => {
     dispatchAnimatedAvatarsPreference(true);
 
     await waitFor(() => expect(playMock).toHaveBeenCalledTimes(2));
-    expect(video).toHaveAttribute("loop");
-
-    const pauseCallsBeforeMouseLeave = pauseMock.mock.calls.length;
-    fireEvent.mouseLeave(video);
-
-    await waitFor(() =>
-      expect(pauseMock).toHaveBeenCalledTimes(pauseCallsBeforeMouseLeave + 1),
-    );
     expect(video).toHaveAttribute("loop");
   });
 
@@ -246,7 +198,6 @@ describe("AvatarMedia", () => {
     await waitFor(() =>
       expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
     );
-    fireEvent.mouseEnter(video);
     expect(playMock).not.toHaveBeenCalled();
     expect(pauseMock).toHaveBeenCalled();
   });
