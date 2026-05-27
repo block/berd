@@ -95,13 +95,21 @@ describe("ProjectArtifactWidget", () => {
   it("renders the project artifact with a hover-only project name", () => {
     renderWidget();
 
-    expect(screen.getByTestId("project-artifact-preview")).toHaveTextContent(
-      "Alpha Project",
+    const preview = screen.getByTestId("project-artifact-preview");
+    const label = screen.getByTestId("project-artifact-hover-label");
+
+    expect(preview).toHaveTextContent("Alpha Project");
+    expect(preview.parentElement).toHaveClass(
+      "top-[47%]",
+      "left-[49%]",
+      "h-[320px]",
+      "w-[320px]",
     );
-    expect(
-      screen.getByTestId("project-artifact-hover-label"),
-    ).toHaveTextContent("Alpha Project");
-    expect(screen.getByTestId("project-artifact-hover-label")).toHaveClass(
+    expect(label).toHaveTextContent("Alpha Project");
+    expect(label).toHaveClass(
+      "px-2.5",
+      "py-1",
+      "text-xs",
       "opacity-0",
       "group-hover:opacity-100",
     );

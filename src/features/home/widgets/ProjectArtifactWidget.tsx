@@ -162,7 +162,7 @@ export function ProjectArtifactWidget({
       )}
     >
       <div className="pointer-events-none absolute inset-0 overflow-visible">
-        <div className="absolute top-[47%] left-[49%] h-full w-full -translate-x-1/2 -translate-y-1/2">
+        <div className="absolute top-[47%] left-[49%] h-[320px] w-[320px] -translate-x-1/2 -translate-y-1/2">
           <ProjectArtifactPreview
             input={input}
             motionImpulse={motionImpulse}
@@ -172,13 +172,7 @@ export function ProjectArtifactWidget({
       </div>
       <span
         data-testid="project-artifact-hover-label"
-        className="pointer-events-none absolute bottom-3 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-white/90 font-medium text-[#242424] opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-        style={{
-          fontSize:
-            "clamp(0.75rem, calc(0.75rem * var(--widget-scale, 1)), 1.125rem)",
-          padding:
-            "clamp(0.2rem, calc(0.25rem * var(--widget-scale, 1)), 0.45rem) clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
-        }}
+        className="pointer-events-none absolute bottom-3 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-[#242424] opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
       >
         {label}
       </span>
