@@ -25,8 +25,8 @@ vi.mock("@/features/chat/lib/modelPreferences", () => ({
 }));
 
 vi.mock("../lib/constants", () => ({
-  DEFAULT_PROVIDER_ID: "databricks",
-  DEFAULT_MODEL_ID: "compass-openai-gpt-5-5",
+  DEFAULT_PROVIDER_ID: "databricks_v2",
+  DEFAULT_MODEL_ID: "goose-gpt-5-5",
   DEFAULT_MODEL_NAME: "GPT-5.5",
 }));
 
@@ -38,8 +38,8 @@ describe("useDefaultModelGate", () => {
 
   it("stays loading until the migration gate is ready", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks",
-      modelId: "compass-openai-gpt-5-5",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
       modelMissing: false,
     });
 
@@ -52,8 +52,8 @@ describe("useDefaultModelGate", () => {
 
   it("resolves to ok without healing when the model is already set", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks",
-      modelId: "compass-openai-gpt-5-5",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
       modelMissing: false,
     });
 
@@ -67,7 +67,7 @@ describe("useDefaultModelGate", () => {
 
   it("re-saves the default model when the broken state is detected", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks",
+      providerId: "databricks_v2",
       modelId: undefined,
       modelMissing: true,
     });
@@ -78,12 +78,12 @@ describe("useDefaultModelGate", () => {
     await waitFor(() => expect(result.current.status).toBe("ok"));
 
     expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
-      providerId: "databricks",
-      modelId: "compass-openai-gpt-5-5",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
     });
     expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
-      providerId: "databricks",
-      modelId: "compass-openai-gpt-5-5",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
       modelName: "GPT-5.5",
     });
   });
@@ -114,8 +114,8 @@ describe("useDefaultModelGate", () => {
     expect(result.current.error).toBe(readError);
 
     mockReadDefaultModelStatus.mockResolvedValueOnce({
-      providerId: "databricks",
-      modelId: "compass-openai-gpt-5-5",
+      providerId: "databricks_v2",
+      modelId: "goose-gpt-5-5",
       modelMissing: false,
     });
 
@@ -128,7 +128,7 @@ describe("useDefaultModelGate", () => {
 
   it("surfaces a retryable error when the heal save fails", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks",
+      providerId: "databricks_v2",
       modelId: undefined,
       modelMissing: true,
     });

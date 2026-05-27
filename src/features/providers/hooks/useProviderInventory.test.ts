@@ -48,6 +48,14 @@ describe("useProviderInventory", () => {
         setupMethod: "single_api_key",
         group: "additional",
       },
+      {
+        id: "databricks_v2",
+        displayName: "Databricks AI Gateway",
+        category: "model",
+        description: "Databricks AI Gateway models",
+        setupMethod: "host_with_oauth_fallback",
+        group: "default",
+      },
     ]);
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
     useProviderInventoryStore.setState({
@@ -285,5 +293,30 @@ describe("useProviderInventory", () => {
         recommended: true,
       },
     ]);
+  });
+
+  it("shows only goose-prefixed Databricks v2 models under Goose", () => {
+    useDistroStore.setState({
+      loaded: true,
+      manifest: { present: true, providerAllowlist: "databricks_v2" },
+    });
+    useProviderInventoryStore.getState().setEntries([
+      providerEntry({
+        providerId: "databricks_v2",
+        providerName: "Databricks AI Gateway",
+        providerType: "Preferred",
+        models: [
+          { id: "databricks-gpt-5-5", name: "GPT-5.5" },
+          { id: "goose-gpt-5-5", name: "GPT-5.5" },
+          { id: "databricks-claude-opus-4-7", name: "Claude Opus 4.7" },
+        ],
+      }),
+    ]);
+
+    const { result } = renderHook(() => useProviderInventory());
+
+    expect(
+      result.current.getModelsForAgent("goose").map((model) => model.id),
+    ).toEqual(["goose-gpt-5-5"]);
   });
 });

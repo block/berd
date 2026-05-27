@@ -210,17 +210,16 @@ describe("runMigration", () => {
     // preference. The constants module ships a concrete Databricks model id;
     // if the shipped default changes, this test should change with it.
     const { runMigration } = await import("./runMigration");
-    const { DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME } = await import(
-      "./lib/constants"
-    );
+    const { DEFAULT_PROVIDER_ID, DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME } =
+      await import("./lib/constants");
     await runMigration();
 
     expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
-      providerId: "databricks",
+      providerId: DEFAULT_PROVIDER_ID,
       modelId: DEFAULT_MODEL_ID,
     });
     expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
-      providerId: "databricks",
+      providerId: DEFAULT_PROVIDER_ID,
       modelId: DEFAULT_MODEL_ID,
       modelName: DEFAULT_MODEL_NAME,
     });

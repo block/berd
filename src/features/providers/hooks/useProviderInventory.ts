@@ -14,6 +14,8 @@ import {
 } from "../distroProviderConstraints";
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 
+const GOOSE_ONLY_MODEL_PROVIDER_IDS = new Set(["databricks_v2"]);
+
 function isConfiguredGooseModelProvider(
   entry: ProviderInventoryEntryDto,
   modelProviderIds: Set<string>,
@@ -57,6 +59,14 @@ function inventoryModelToOption(
     contextLimit: model.contextLimit ?? undefined,
     recommended: model.recommended ?? false,
   };
+}
+
+function visibleModelsForGooseAgent(entry: ProviderInventoryEntryDto) {
+  if (!GOOSE_ONLY_MODEL_PROVIDER_IDS.has(entry.providerId)) {
+    return entry.models;
+  }
+
+  return entry.models.filter((model) => model.id.startsWith("goose-"));
 }
 
 export function useProviderInventory() {
@@ -115,7 +125,9 @@ export function useProviderInventory() {
       }
 
       return configuredModelProviderEntries.flatMap((entry) =>
-        entry.models.map((model) => inventoryModelToOption(model, entry)),
+        visibleModelsForGooseAgent(entry).map((model) =>
+          inventoryModelToOption(model, entry),
+        ),
       );
     },
     [configuredModelProviderEntries, getModelsForProvider],

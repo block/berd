@@ -6,5 +6,5 @@
     "baseUrl": "https://kgoose.sqprod.co/",
     "path": "cash-app/goose"
   },
-  "providerAllowlist": "databricks"
+  "providerAllowlist": "databricks_v2"
 }
