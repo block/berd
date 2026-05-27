@@ -36,14 +36,14 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   );
 
   return (
-    <div className="flex h-full w-full items-center justify-center">
+    <div className="flex h-full w-full items-center justify-center p-4">
       <button
         type="button"
         onClick={handleClick}
         aria-label={t("widgets.agentPin.openAria", { name: label })}
-        className="flex h-full w-full flex-col items-center justify-center gap-2 rounded-card-chat bg-transparent p-4 text-center text-foreground transition-colors duration-150 cursor-pointer hover:bg-transparent"
+        className="group relative flex w-[min(80%,176px)] max-w-full flex-col items-center justify-center rounded-card-chat bg-transparent text-center text-foreground transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
-        <span className="flex aspect-square w-[min(80%,176px)] shrink-0 items-center justify-center overflow-hidden">
+        <span className="flex aspect-square w-full shrink-0 items-center justify-center overflow-hidden">
           {avatarMedia ? (
             <AvatarMedia
               media={avatarMedia}
@@ -60,7 +60,10 @@ export const AgentPinWidget = memo(function AgentPinWidget({
             </span>
           )}
         </span>
-        <span className="max-w-full truncate text-sm leading-[15px]">
+        <span
+          data-testid="agent-pin-hover-label"
+          className="pointer-events-none absolute top-full left-1/2 z-10 mt-2 max-w-[calc(100vw-2rem)] -translate-x-1/2 truncate whitespace-nowrap rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-[#242424] opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+        >
           {label}
         </span>
       </button>
