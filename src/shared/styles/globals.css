@@ -528,11 +528,15 @@
 [data-density="compact"] {
   --density-spacing: 0.75;
   --spacing: 0.1875rem;
+  --spacing-app-top-bar-control: 20px;
+  --spacing-app-top-bar-button-gap: 2px;
 }
 
 [data-density="spacious"] {
   --density-spacing: 1.25;
   --spacing: 0.3125rem;
+  --spacing-app-top-bar-control: 28px;
+  --spacing-app-top-bar-button-gap: 6px;
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -677,9 +681,10 @@
   --shadow-date-field-focus: var(--shadow-date-field-focus);
 
   /* Spacing — app chrome dimensions */
-  --spacing-app-top-bar: 56px;
+  --spacing-app-top-bar: 52px;
   --spacing-app-top-bar-leading: 96px;
   --spacing-app-top-bar-control: 24px;
+  --spacing-app-top-bar-button-gap: 4px;
   --spacing-app-panel-gutter-top: 4px;
   --spacing-app-panel-gutter-bottom: 12px;
   --spacing-app-page-bottom: 6rem;

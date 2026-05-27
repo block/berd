@@ -12,7 +12,7 @@ use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
-const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 25.0);
+const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 28.0);
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

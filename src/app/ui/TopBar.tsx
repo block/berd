@@ -128,7 +128,7 @@ export function TopBar({
         className={cn("h-full shrink-0", leadingSpaceClassName)}
         data-tauri-drag-region
       />
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         <Button
           type="button"
           variant="ghost"
@@ -185,7 +185,7 @@ export function TopBar({
       {viewActions ? (
         <div className="flex items-center gap-2">{viewActions}</div>
       ) : null}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         <Button
           type="button"
           variant="ghost"
