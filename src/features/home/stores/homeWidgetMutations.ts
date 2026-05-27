@@ -221,14 +221,7 @@ export function removeWidgetMutation(
   instances: WidgetInstance[],
   id: string,
 ): WidgetInstance[] | null {
-  const target = instances.find((instance) => instance.id === id);
-  if (!target) {
-    return null;
-  }
-  // Clock is a persistent fixture of the home canvas. Any caller that tries to
-  // remove it (keyboard Delete, stray UnpinPill path) is silently no-op'd as a
-  // safety net behind the UI-level suppression in WidgetFrame.
-  if (target.type === "clock") {
+  if (!instances.some((instance) => instance.id === id)) {
     return null;
   }
 

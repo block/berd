@@ -36,7 +36,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
     <section
       role="timer"
       aria-label={currentLabel}
-      className="relative h-full w-full overflow-hidden rounded-full border border-white/5 bg-clock-face text-white"
+      className="relative h-full w-full overflow-hidden rounded-full border border-clock-mark/5 bg-clock-face text-white"
     >
       <div aria-hidden="true" className="absolute inset-0">
         {HOUR_TICK_ANGLES.map((angle) => (
@@ -45,7 +45,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
             className="absolute inset-0"
             style={{ transform: `rotate(${angle}deg)` }}
           >
-            <span className="absolute left-1/2 top-[2%] h-[8%] w-[2px] -translate-x-1/2 rounded-full bg-white" />
+            <span className="absolute left-1/2 top-[2%] h-[8%] w-[2px] -translate-x-1/2 rounded-full bg-clock-mark" />
           </div>
         ))}
 
@@ -55,16 +55,16 @@ export function ClockWidget(_props: WidgetRenderProps) {
             className="absolute inset-0"
             style={{ transform: `rotate(${angle}deg)` }}
           >
-            <span className="absolute left-1/2 top-[3%] h-[2.5%] w-[1px] -translate-x-1/2 rounded-full bg-white/40" />
+            <span className="absolute left-1/2 top-[3%] h-[2.5%] w-[1px] -translate-x-1/2 rounded-full bg-clock-mark/40" />
           </div>
         ))}
 
-        {/* Hour hand — white, stubby (Mondaine proportions). */}
+        {/* Hour hand — mark token (white in light, dark in dark), stubby. */}
         <div
           className="absolute inset-0 z-10"
           style={{ transform: `rotate(${hourAngle}deg)` }}
         >
-          <span className="absolute left-1/2 top-[26%] h-[26%] w-[3px] -translate-x-1/2 rounded-full bg-white" />
+          <span className="absolute left-1/2 top-[26%] h-[26%] w-[3px] -translate-x-1/2 rounded-full bg-clock-mark" />
         </div>
 
         {/* Minute hand — red with circular dot at tip (Swiss railway accent). */}
@@ -86,7 +86,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
 
         {/* Center hub */}
         <div
-          className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full bg-clock-mark"
           style={{
             width:
               "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)",

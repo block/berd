@@ -264,9 +264,11 @@
   --info: var(--color-blue-600);
   --info-foreground: var(--color-white);
 
-  /* Widget: clock face — always-dark surface regardless of theme.
-     Intentionally slightly warmer than --color-gray-900 per Figma spec. */
+  /* Widget: clock face. Light mode = warm-near-black surface with white marks.
+     Dark mode inverts both via the .dark override below so the clock doesn't
+     disappear into the canvas. The minute hand stays red in both modes. */
   --clock-face: #1c1c1c;
+  --clock-mark: var(--color-white);
   --clock-hand: var(--color-red-500);
 
   /* Alpha utility (text-on-canvas overlays) */
@@ -484,6 +486,12 @@
   --dark-10: rgba(242, 242, 242, 0.1);
   --dark-40: rgba(242, 242, 242, 0.4);
 
+  /* Clock — invert face + marks against the dark canvas. Mirror of the light
+     token: face is slightly warmer than gray-100, marks match the light-mode
+     face value so the contrast direction flips cleanly. Hand stays red. */
+  --clock-face: #f5f5f5;
+  --clock-mark: #1c1c1c;
+
   --dot-color-base: rgba(255, 255, 255, 0.12);
 
   /* Shadows — doubled intensity over dark surfaces */
@@ -610,6 +618,7 @@
 
   /* Widget tokens */
   --color-clock-face: var(--clock-face);
+  --color-clock-mark: var(--clock-mark);
   --color-clock-hand: var(--clock-hand);
 
   /* Alpha overlays */

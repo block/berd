@@ -248,7 +248,10 @@ describe("homeWidgetStore", () => {
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
   });
 
-  it("seeds a clock when backend layout has other widgets but no clock", async () => {
+  it("does not seed a clock when backend layout has other widgets but no clock", async () => {
+    // If the user unpinned the clock, that choice must be respected across
+    // reloads. Auto-seeding only fires for genuinely empty layouts; layouts
+    // with any item are taken as-is.
     const agentPinItem: Layout["items"][number] = {
       id: "agent-1",
       kind: "persona",
@@ -263,24 +266,16 @@ describe("homeWidgetStore", () => {
     vi.mocked(getLayout).mockResolvedValue(
       layout({ itemRevision: 11, items: [agentPinItem] }),
     );
-    vi.mocked(saveLayoutItems).mockResolvedValue({
-      ok: true,
-      layout: layout({ itemRevision: 12 }),
-    });
 
     await useHomeWidgetStore.getState().initialize();
 
-    expect(saveLayoutItems).toHaveBeenCalledTimes(1);
-    const request = vi.mocked(saveLayoutItems).mock.calls[0][0];
-    expect(request).toMatchObject({
-      layoutId: HOME_LAYOUT_ID,
-      expectedRevision: 11,
-      replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+    expect(saveLayoutItems).not.toHaveBeenCalled();
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      loadStatus: "ready",
+      itemRevision: 11,
     });
-    // Preserves existing items and appends a clock.
-    expect(request.items).toHaveLength(2);
-    expect(request.items[0]).toEqual(agentPinItem);
-    expect(request.items[1].kind).toBe("clock");
+    expect(useHomeWidgetStore.getState().instances).toHaveLength(1);
+    expect(useHomeWidgetStore.getState().instances[0].type).toBe("agentPin");
   });
 
   it("adopts the backend layout when default clock seeding conflicts", async () => {

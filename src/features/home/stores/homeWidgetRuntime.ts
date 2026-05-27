@@ -212,22 +212,19 @@ export function createHomeWidgetRuntime({
         }
 
         const instances = layoutItemsToHomeWidgets(layout.items);
-        const hasClock = instances.some(
-          (instance) => instance.type === "clock",
-        );
-        if (instances.length > 0 && hasClock) {
+        if (instances.length > 0) {
           setReadyLayout(layout, generation);
           return;
         }
 
-        // Clock is a permanent fixture. Seed one whenever the loaded layout
-        // doesn't already contain it — either a brand-new layout (empty) or
-        // a legacy layout from before the clock became persistent.
+        // Empty layout — seed a default clock so first-run users have
+        // something on the canvas. If the user later unpins it, that
+        // choice is respected: only an empty layout re-seeds.
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: [...layout.items, createDefaultClockLayoutItem()],
+          items: [createDefaultClockLayoutItem()],
         });
         if (generation !== runtime.generation) {
           return;

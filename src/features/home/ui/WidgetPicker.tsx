@@ -63,14 +63,16 @@ interface PickerOption {
     | null;
 }
 
-// Order matches the Figma pin menu. "clock" is intentionally omitted — the
-// clock is a permanent canvas fixture (not pinnable), seeded by the runtime.
+// Order matches the Figma pin menu. "clock" sits under a trailing "Widgets"
+// group so the entity categories (which the user is searching for) lead, and
+// generative widgets sit at the end where the menu has room to grow.
 const STAGE_ONE_ORDER: WidgetCategory[] = [
   "project",
   "skill",
   "agent",
   "chat",
   "automation",
+  "clock",
 ];
 
 const VISIBLE_WIDGET_CATEGORIES = STAGE_ONE_ORDER.filter((category) =>
@@ -469,6 +471,7 @@ export function WidgetPicker({
   const isSkillLoading = isSkillPanel && skillsPending;
   const showEmpty =
     activePanel !== null &&
+    activePanel !== "clock" &&
     !isAutomationLoading &&
     !isAutomationError &&
     !isSkillLoading &&
@@ -523,6 +526,11 @@ export function WidgetPicker({
             options={options}
             onSelectOption={selectOption}
             pickerMessage={pickerMessage}
+            onSelectClock={() => onSelect("clock")}
+            clockLabel={t("widgets.clock.label")}
+            clockPinned={instances.some(
+              (instance) => instance.type === "clock",
+            )}
             backLabel={t("widgets.picker.back")}
             title={t(`widgets.picker.selectTitles.${activePanel}`)}
             isLoadingMoreSessions={isLoadingMoreSessions}
@@ -589,6 +597,9 @@ interface PanelStageTwoProps {
   options: PickerOption[];
   onSelectOption: (option: PickerOption) => void;
   pickerMessage: string | null;
+  onSelectClock: () => void;
+  clockLabel: string;
+  clockPinned: boolean;
   backLabel: string;
   title: string;
   isLoadingMoreSessions: boolean;
@@ -606,6 +617,9 @@ function PanelStageTwo({
   options,
   onSelectOption,
   pickerMessage,
+  onSelectClock,
+  clockLabel,
+  clockPinned,
   backLabel,
   title,
   isLoadingMoreSessions,
@@ -626,43 +640,63 @@ function PanelStageTwo({
       </div>
 
       <div className="rounded-dropdown bg-card p-3">
-        <label
-          htmlFor={searchInputId}
-          className="flex h-9 items-center gap-2 border-b border-border/80 px-1 text-muted-foreground"
-        >
-          <Search className="size-4 shrink-0" aria-hidden="true" />
-          <Input
-            id={searchInputId}
-            inputRef={searchInputRef}
-            variant="ghost"
-            value={query}
-            onChange={(event) => onQueryChange(event.target.value)}
-            aria-label={searchPlaceholder}
-            placeholder={searchPlaceholder}
-            className="h-auto min-w-0 flex-1 p-0 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
-          />
-        </label>
+        {activePanel === "clock" ? (
+          <div className="space-y-0">
+            <button
+              type="button"
+              disabled={clockPinned}
+              aria-disabled={clockPinned || undefined}
+              onClick={onSelectClock}
+              className={cn(
+                "flex w-full items-center gap-3 py-3 text-left text-sm text-foreground transition-colors hover:text-muted-foreground",
+                clockPinned &&
+                  "cursor-not-allowed opacity-50 pointer-events-none",
+              )}
+            >
+              <span className="min-w-0 flex-1 truncate">{clockLabel}</span>
+            </button>
+          </div>
+        ) : (
+          <>
+            <label
+              htmlFor={searchInputId}
+              className="flex h-9 items-center gap-2 border-b border-border/80 px-1 text-muted-foreground"
+            >
+              <Search className="size-4 shrink-0" aria-hidden="true" />
+              <Input
+                id={searchInputId}
+                inputRef={searchInputRef}
+                variant="ghost"
+                value={query}
+                onChange={(event) => onQueryChange(event.target.value)}
+                aria-label={searchPlaceholder}
+                placeholder={searchPlaceholder}
+                className="h-auto min-w-0 flex-1 p-0 text-sm text-foreground placeholder:text-muted-foreground focus-visible:ring-0 focus-visible:ring-offset-0"
+              />
+            </label>
 
-        <div className="max-h-[260px] overflow-y-auto">
-          {pickerMessage ? (
-            <p className="py-3 text-sm text-muted-foreground">
-              {pickerMessage}
-            </p>
-          ) : null}
-          {options.map((option, index) => (
-            <PickerRow
-              key={option.id}
-              option={option}
-              isLast={index === options.length - 1}
-              onSelect={() => onSelectOption(option)}
-            />
-          ))}
-          {activePanel === "chat" && isLoadingMoreSessions ? (
-            <p className="py-2 text-xs text-muted-foreground">
-              {loadingMoreLabel}
-            </p>
-          ) : null}
-        </div>
+            <div className="max-h-[260px] overflow-y-auto">
+              {pickerMessage ? (
+                <p className="py-3 text-sm text-muted-foreground">
+                  {pickerMessage}
+                </p>
+              ) : null}
+              {options.map((option, index) => (
+                <PickerRow
+                  key={option.id}
+                  option={option}
+                  isLast={index === options.length - 1}
+                  onSelect={() => onSelectOption(option)}
+                />
+              ))}
+              {activePanel === "chat" && isLoadingMoreSessions ? (
+                <p className="py-2 text-xs text-muted-foreground">
+                  {loadingMoreLabel}
+                </p>
+              ) : null}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

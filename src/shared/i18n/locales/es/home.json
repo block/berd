@@ -80,6 +80,7 @@
       "loadingMoreChats": "Cargando más chats...",
       "header": "Fijar",
       "sections": {
+        "clock": "Widgets",
         "agent": "Agente",
         "chat": "Chat",
         "automation": "Automatizaciones",
@@ -87,6 +88,7 @@
         "skill": "Habilidad"
       },
       "selectTitles": {
+        "clock": "Fijar un widget",
         "agent": "Fijar un agente",
         "chat": "Fijar un chat",
         "automation": "Fijar una automatización",

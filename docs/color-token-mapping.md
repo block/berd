@@ -55,7 +55,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `skill-pill-fg` | Skill name labels on theme-invariant pastel skill/project pill tones. | `text-skill-pill-fg` |
 | `success`, `warning`, `info` | Non-destructive status colors, modeled after shadcn's destructive pattern. | `text-success bg-success/10` |
 | `popover-inverse` | Dark popover on light UI for specific inverse menus. | `bg-popover-inverse text-popover-inverse-foreground` |
-| `clock-face`, `clock-hand`, `dark-*`, `dot-*`, `status-*`, `chart-*` | Product visuals, charts, activity states, and canvas details. | `bg-clock-face`, `bg-clock-hand`, `text-status-added` |
+| `clock-face`, `clock-mark`, `clock-hand`, `dark-*`, `dot-*`, `status-*`, `chart-*` | Product visuals, charts, activity states, and canvas details. `clock-face` and `clock-mark` flip between themes; `clock-hand` stays red in both. | `bg-clock-face`, `bg-clock-mark`, `bg-clock-hand`, `text-status-added` |
 
 ## Deleted Or Replaced Names
 

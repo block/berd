@@ -245,24 +245,23 @@ describe("WidgetFrame", () => {
     expect(removeWidget).toHaveBeenCalledWith("agent-pin-1");
   });
 
-  it("does not open the unpin pill when right-clicking the clock", () => {
+  it("opens the unpin pill when right-clicking the clock", async () => {
+    const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
       mutations: mutationHandlers({ removeWidget }),
     });
 
     fireEvent.contextMenu(frame, { clientX: 40, clientY: 50 });
+    await user.click(screen.getByRole("button", { name: "Unpin" }));
 
-    expect(
-      screen.queryByRole("button", { name: "Unpin" }),
-    ).not.toBeInTheDocument();
-    expect(removeWidget).not.toHaveBeenCalled();
+    expect(removeWidget).toHaveBeenCalledWith("clock-1");
   });
 
   it.each([
     ["Delete", "{Delete}"],
     ["Backspace", "{Backspace}"],
-  ])("does not remove the clock on %s key", async (_, key) => {
+  ])("removes the clock on %s key", async (_, key) => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
@@ -274,7 +273,7 @@ describe("WidgetFrame", () => {
 
     await user.keyboard(key);
 
-    expect(removeWidget).not.toHaveBeenCalled();
+    expect(removeWidget).toHaveBeenCalledWith("clock-1");
   });
 
   it("does not remove an interactive widget when a child control handles keyboard input", async () => {

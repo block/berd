@@ -699,25 +699,45 @@ describe("WidgetCanvas", () => {
     );
   });
 
-  it("omits the Widgets/clock category from the picker", async () => {
+  it("offers the Widgets > Clock path so users can repin the clock", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
     mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       canvasRect({ left: 25, top: 50, width: 1000, height: 800 }),
     );
 
-    const { container } = renderCanvas({ mutations: {} });
+    const { container } = renderCanvas({ mutations: { addWidget } });
 
-    fireEvent.contextMenu(container.firstElementChild as Element, {
-      clientX: 345,
-      clientY: 290,
+    await openPickerPanel(user, container, "widgets");
+    await user.click(screen.getByRole("button", { name: /^clock$/i }));
+
+    expect(addWidget).toHaveBeenCalledWith(
+      "clock",
+      expect.any(Number),
+      expect.any(Number),
+      undefined,
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
+  it("disables the Clock row when a clock is already pinned", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({
+      instances: [widget()],
+      mutations: { addWidget },
     });
 
-    expect(
-      screen.queryByRole("button", { name: /^widgets$/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /^clock$/i }),
-    ).not.toBeInTheDocument();
+    await openPickerPanel(user, container, "widgets");
+
+    const clockRow = screen.getByRole("button", { name: /^clock$/i });
+    expect(clockRow).toBeDisabled();
+    await user.click(clockRow);
+
+    expect(addWidget).not.toHaveBeenCalled();
   });
 
   it("adds an agent pin with the selected agent id", async () => {
