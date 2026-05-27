@@ -2,6 +2,11 @@
 # gets the same Vite port.
 vite_port := `python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().encode()).hexdigest(),16); print(10000 + h % 55000)"`
 
+# Use one shared Tauri target dir across goose-internal worktrees without
+# sharing with upstream Goose, whose `goose` binary collides with this crate's
+# `Goose` binary on case-insensitive macOS filesystems.
+tauri_cargo_target_dir := `if [ -n "${GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR:-}" ]; then printf '%s\n' "$GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR"; elif [ -n "${XDG_CACHE_HOME:-}" ]; then printf '%s/goose-internal-tauri/cargo-target\n' "$XDG_CACHE_HOME"; elif [ "$(uname -s)" = "Darwin" ]; then printf '%s/Library/Caches/goose-internal-tauri/cargo-target\n' "$HOME"; else printf '%s/.cache/goose-internal-tauri/cargo-target\n' "$HOME"; fi`
+
 # Default recipe
 default:
     @just --list
@@ -85,7 +90,7 @@ tauri-fmt-check:
 
 # Run Rust clippy with warnings denied.
 clippy:
-    cd src-tauri && TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
 
 # Build the frontend.
 build:
@@ -93,7 +98,7 @@ build:
 
 # Check the Tauri/Rust crate with external sidecars disabled.
 tauri-check:
-    cd src-tauri && TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
 
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check clippy test build
@@ -101,7 +106,7 @@ ci: check tauri-fmt-check tauri-check clippy test build
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     ./scripts/prepare-goose-sidecar.sh
-    pnpm tauri build
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" pnpm tauri build
 
 # ── Test ─────────────────────────────────────────────────────
 
@@ -130,6 +135,8 @@ dev:
     export VITE_PORT
     export VITE_DESIGN_SYSTEM_EXPLORER=1
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
+    export CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}"
+    echo "Using Tauri Cargo target dir: ${CARGO_TARGET_DIR}"
 
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"
@@ -159,7 +166,7 @@ dev:
         if [[ "$GIT_DIR" == *".git/worktrees/"* ]]; then
             BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
             WORKTREE_LABEL="${BRANCH_NAME##*/}"
-            ICON_DIR="$(pwd)/src-tauri/target/dev-icons"
+            ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
             mkdir -p "$ICON_DIR"
             DEV_ICON="$ICON_DIR/icon.icns"
             if swift scripts/generate-dev-icon.swift src-tauri/icons/icon.icns "$DEV_ICON" "$WORKTREE_LABEL"; then
@@ -183,7 +190,7 @@ bump-goose ref="main":
 # ── Utilities ────────────────────────────────────────────────
 
 clean:
-    cd src-tauri && cargo clean
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" cargo clean
     rm -rf dist node_modules sdk/node_modules sdk/dist
 
 stage-sidecar:
