@@ -2,10 +2,9 @@ export { KEEP_ENABLED } from "@/features/extensions/lib/keepEnabled";
 
 /**
  * Provider the migration pre-selects. Every user on this build is a Square
- * employee with Databricks pre-provisioned, so there is no fallback path — if
- * Databricks isn't reachable at first boot, surface the error and let the user
- * retry. We target the AI Gateway v2 provider (`databricks_v2`); the legacy
- * `databricks` provider is left available for any users who still need it.
+ * employee with Databricks pre-provisioned. We target the AI Gateway v2
+ * provider (`databricks_v2`); the legacy `databricks` provider is left
+ * available for any users who still need it.
  */
 export const DEFAULT_PROVIDER_ID = "databricks_v2";
 

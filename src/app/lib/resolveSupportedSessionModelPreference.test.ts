@@ -1,20 +1,21 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
+import { beforeEach, describe, expect, it } from "vitest";
 import { resolveSupportedSessionModelPreference } from "./resolveSupportedSessionModelPreference";
 
-const mockGetProviderInventory = vi.fn();
-
-vi.mock("@/features/providers/api/inventory", () => ({
-  getProviderInventory: (...args: unknown[]) =>
-    mockGetProviderInventory(...args),
-}));
+function inventoryEntry(models: string[]): ProviderInventoryEntryDto {
+  return {
+    name: "openai",
+    displayName: "OpenAI",
+    models: models.map((id) => ({ id })),
+  } as unknown as ProviderInventoryEntryDto;
+}
 
 describe("resolveSupportedSessionModelPreference", () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     window.localStorage.clear();
   });
 
-  it("drops the model when provider inventory lookup fails", async () => {
+  it("preserves a stored model when inventory is missing", async () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
@@ -25,58 +26,63 @@ describe("resolveSupportedSessionModelPreference", () => {
         },
       }),
     );
-    mockGetProviderInventory.mockRejectedValue(
-      new Error("inventory unavailable"),
-    );
 
     await expect(
       resolveSupportedSessionModelPreference("goose", new Map()),
     ).resolves.toEqual({
       providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
     });
   });
 
-  it("drops the model when provider inventory has no matching entry", async () => {
-    window.localStorage.setItem(
-      "goose:preferredModelsByAgent",
-      JSON.stringify({
-        goose: {
-          modelId: "gpt-5.4",
-          modelName: "GPT-5.4",
-          providerId: "openai",
-        },
-      }),
-    );
-    mockGetProviderInventory.mockResolvedValue([]);
+  it("preserves a preferred model when inventory is missing", async () => {
+    await expect(
+      resolveSupportedSessionModelPreference("openai", new Map(), "gpt-5.4"),
+    ).resolves.toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "gpt-5.4",
+    });
+  });
+
+  it("preserves the selected model when inventory has no model list", async () => {
+    const entries = new Map<string, ProviderInventoryEntryDto>([
+      ["openai", inventoryEntry([])],
+    ]);
 
     await expect(
-      resolveSupportedSessionModelPreference("goose", new Map()),
+      resolveSupportedSessionModelPreference("openai", entries, "gpt-5.4"),
+    ).resolves.toEqual({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "gpt-5.4",
+    });
+  });
+
+  it("drops an unsupported model when populated inventory is available", async () => {
+    const entries = new Map<string, ProviderInventoryEntryDto>([
+      ["openai", inventoryEntry(["gpt-5.3"])],
+    ]);
+
+    await expect(
+      resolveSupportedSessionModelPreference("openai", entries, "gpt-5.4"),
     ).resolves.toEqual({
       providerId: "openai",
     });
   });
 
-  it("preserves an exact stored provider model while inventory is unavailable", async () => {
-    window.localStorage.setItem(
-      "goose:preferredModelsByAgent",
-      JSON.stringify({
-        "claude-acp": {
-          modelId: "opus",
-          modelName: "Claude Opus",
-          providerId: "claude-acp",
-        },
-      }),
-    );
-    mockGetProviderInventory.mockRejectedValue(
-      new Error("inventory unavailable"),
-    );
+  it("keeps a supported model when populated inventory is available", async () => {
+    const entries = new Map<string, ProviderInventoryEntryDto>([
+      ["openai", inventoryEntry(["gpt-5.4"])],
+    ]);
 
     await expect(
-      resolveSupportedSessionModelPreference("claude-acp", new Map()),
+      resolveSupportedSessionModelPreference("openai", entries, "gpt-5.4"),
     ).resolves.toEqual({
-      providerId: "claude-acp",
-      modelId: "opus",
-      modelName: "Claude Opus",
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "gpt-5.4",
     });
   });
 });

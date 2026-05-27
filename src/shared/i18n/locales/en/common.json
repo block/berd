@@ -89,10 +89,22 @@
   "errors": {
     "clipboardUnavailable": "Clipboard API not available"
   },
-  "migration": {
+  "startup": {
     "error": {
-      "title": "Couldn't finish setup",
-      "description": "Something went wrong while preparing Goose. Try again to continue."
+      "gooseServe": {
+        "title": "Goose couldn't start",
+        "description": "The local Goose service didn't start. Try again, or copy the startup details and open the logs folder to share them with support."
+      },
+      "unknown": {
+        "title": "Goose couldn't start",
+        "description": "Goose couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."
+      },
+      "copyDetails": "Copy details",
+      "openLogsFolder": "Open logs folder",
+      "technicalDetails": "Technical details",
+      "copySuccess": "Startup details copied.",
+      "copyFailed": "We couldn't copy startup details.",
+      "openLogsFailed": "We couldn't open the logs folder."
     }
   },
   "labels": {

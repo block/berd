@@ -1,8 +1,9 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockReadDefaultModelStatus = vi.fn();
 const mockGooseDefaultsSave = vi.fn();
+const mockGetStoredModelPreference = vi.fn();
 const mockSetStoredModelPreference = vi.fn();
 
 vi.mock("../api/defaultModel", () => ({
@@ -20,6 +21,8 @@ vi.mock("@/shared/api/acpConnection", () => ({
 }));
 
 vi.mock("@/features/chat/lib/modelPreferences", () => ({
+  getStoredModelPreference: (...args: unknown[]) =>
+    mockGetStoredModelPreference(...args),
   setStoredModelPreference: (...args: unknown[]) =>
     mockSetStoredModelPreference(...args),
 }));
@@ -31,38 +34,25 @@ vi.mock("../lib/constants", () => ({
 }));
 
 describe("useDefaultModelGate", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetStoredModelPreference.mockReturnValue(null);
     mockGooseDefaultsSave.mockResolvedValue(undefined);
+    consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
-  it("stays loading until the migration gate is ready", async () => {
-    mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
-      modelMissing: false,
-    });
+  afterEach(() => {
+    consoleError.mockRestore();
+  });
 
+  it("does not read defaults until the migration gate is ready", async () => {
     const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(false));
 
-    expect(result.current.status).toBe("loading");
+    renderHook(() => useDefaultModelGate(false));
+
     expect(mockReadDefaultModelStatus).not.toHaveBeenCalled();
-  });
-
-  it("resolves to ok without healing when the model is already set", async () => {
-    mockReadDefaultModelStatus.mockResolvedValue({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
-      modelMissing: false,
-    });
-
-    const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(true));
-
-    await waitFor(() => expect(result.current.status).toBe("ok"));
-    expect(mockGooseDefaultsSave).not.toHaveBeenCalled();
-    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
   });
 
   it("re-saves the default model when the broken state is detected", async () => {
@@ -73,22 +63,47 @@ describe("useDefaultModelGate", () => {
     });
 
     const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(true));
+    renderHook(() => useDefaultModelGate(true));
 
-    await waitFor(() => expect(result.current.status).toBe("ok"));
-
-    expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
-    });
+    await waitFor(() =>
+      expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      }),
+    );
     expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
       providerId: "databricks_v2",
       modelId: "goose-gpt-5-5",
       modelName: "GPT-5.5",
     });
+    expect(consoleError).not.toHaveBeenCalled();
   });
 
-  it("does not heal when the broken provider is not the default", async () => {
+  it("does not overwrite an existing local preference after repair", async () => {
+    mockReadDefaultModelStatus.mockResolvedValue({
+      providerId: "databricks_v2",
+      modelId: undefined,
+      modelMissing: true,
+    });
+    mockGetStoredModelPreference.mockReturnValueOnce({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+
+    const { useDefaultModelGate } = await import("./useDefaultModelGate");
+    renderHook(() => useDefaultModelGate(true));
+
+    await waitFor(() =>
+      expect(mockGooseDefaultsSave).toHaveBeenCalledWith({
+        providerId: "databricks_v2",
+        modelId: "goose-gpt-5-5",
+      }),
+    );
+    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
+  });
+
+  it("does not repair when the broken provider is not the default", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
       providerId: "openai",
       modelId: undefined,
@@ -96,37 +111,32 @@ describe("useDefaultModelGate", () => {
     });
 
     const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(true));
+    renderHook(() => useDefaultModelGate(true));
 
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() =>
+      expect(mockReadDefaultModelStatus).toHaveBeenCalledTimes(1),
+    );
     expect(mockGooseDefaultsSave).not.toHaveBeenCalled();
     expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
   });
 
-  it("surfaces a retryable error when the read fails", async () => {
+  it("logs read failures without surfacing state", async () => {
     const readError = new Error("read failed");
     mockReadDefaultModelStatus.mockRejectedValueOnce(readError);
 
     const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(true));
+    renderHook(() => useDefaultModelGate(true));
 
-    await waitFor(() => expect(result.current.status).toBe("error"));
-    expect(result.current.error).toBe(readError);
-
-    mockReadDefaultModelStatus.mockResolvedValueOnce({
-      providerId: "databricks_v2",
-      modelId: "goose-gpt-5-5",
-      modelMissing: false,
-    });
-
-    await act(async () => {
-      result.current.retry();
-    });
-
-    await waitFor(() => expect(result.current.status).toBe("ok"));
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to repair default model:",
+        readError,
+      ),
+    );
+    expect(mockGooseDefaultsSave).not.toHaveBeenCalled();
   });
 
-  it("surfaces a retryable error when the heal save fails", async () => {
+  it("logs save failures without writing the local preference", async () => {
     mockReadDefaultModelStatus.mockResolvedValue({
       providerId: "databricks_v2",
       modelId: undefined,
@@ -136,10 +146,14 @@ describe("useDefaultModelGate", () => {
     mockGooseDefaultsSave.mockRejectedValueOnce(saveError);
 
     const { useDefaultModelGate } = await import("./useDefaultModelGate");
-    const { result } = renderHook(() => useDefaultModelGate(true));
+    renderHook(() => useDefaultModelGate(true));
 
-    await waitFor(() => expect(result.current.status).toBe("error"));
-    expect(result.current.error).toBe(saveError);
+    await waitFor(() =>
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to repair default model:",
+        saveError,
+      ),
+    );
     expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
   });
 });

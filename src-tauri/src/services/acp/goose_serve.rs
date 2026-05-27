@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use crate::services::distro_bundle::DistroBundleState;
 use crate::services::shell_env;
 
+use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::OnceCell;
 
@@ -138,8 +139,8 @@ impl GooseServeProcess {
             .current_dir(&working_dir)
             .env("GOOSE_SERVER__SECRET_KEY", &secret_key)
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true);
 
         log::info!(
@@ -153,6 +154,9 @@ impl GooseServeProcess {
                 working_dir.display()
             )
         })?;
+
+        spawn_log_reader(child.stdout.take(), "stdout");
+        spawn_log_reader(child.stderr.take(), "stderr");
 
         wait_for_server_ready(port, &mut child).await?;
 
@@ -168,6 +172,156 @@ impl GooseServeProcess {
             _child: child,
         })
     }
+}
+
+fn spawn_log_reader<R>(stream: Option<R>, stream_name: &'static str)
+where
+    R: AsyncRead + Unpin + Send + 'static,
+{
+    let Some(stream) = stream else {
+        return;
+    };
+
+    tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stream).lines();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    let line = redact_log_line(&line);
+                    if stream_name == "stdout" {
+                        log::info!("[goose serve stdout] {line}");
+                    } else {
+                        log::warn!("[goose serve stderr] {line}");
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    log::warn!("Failed to read goose serve {stream_name}: {error}");
+                    break;
+                }
+            }
+        }
+    });
+}
+
+fn redact_log_line(line: &str) -> String {
+    [
+        "goose_server__secret_key",
+        "authorization",
+        "refresh_token",
+        "access_token",
+        "secret_key",
+        "api_key",
+        "apikey",
+        "password",
+        "secret",
+        "token",
+    ]
+    .into_iter()
+    .fold(line.to_string(), redact_sensitive_key)
+}
+
+fn redact_sensitive_key(line: String, key: &str) -> String {
+    let mut redacted = line;
+    let mut search_start = 0;
+
+    loop {
+        let lower = redacted.to_ascii_lowercase();
+        let Some(relative_key_start) = lower[search_start..].find(key) else {
+            break;
+        };
+        let key_start = search_start + relative_key_start;
+        let key_end = key_start + key.len();
+
+        if !is_key_boundary(lower.as_bytes(), key_start, key_end) {
+            search_start = key_end;
+            continue;
+        }
+
+        let mut delimiter_index = key_end;
+        if matches!(
+            lower.as_bytes().get(delimiter_index).copied(),
+            Some(b'"' | b'\'')
+        ) {
+            delimiter_index += 1;
+        }
+        delimiter_index = skip_ascii_whitespace(lower.as_bytes(), delimiter_index);
+
+        if !matches!(
+            lower.as_bytes().get(delimiter_index).copied(),
+            Some(b':' | b'=')
+        ) {
+            search_start = delimiter_index;
+            continue;
+        }
+
+        let mut value_start = skip_ascii_whitespace(lower.as_bytes(), delimiter_index + 1);
+        let quote = match lower.as_bytes().get(value_start).copied() {
+            Some(b'"') => {
+                value_start += 1;
+                Some(b'"')
+            }
+            Some(b'\'') => {
+                value_start += 1;
+                Some(b'\'')
+            }
+            _ => None,
+        };
+
+        let value_end = find_value_end(lower.as_bytes(), value_start, quote, key);
+        if value_end <= value_start {
+            search_start = value_start;
+            continue;
+        }
+
+        redacted.replace_range(value_start..value_end, "[redacted]");
+        search_start = value_start + "[redacted]".len();
+    }
+
+    redacted
+}
+
+fn is_key_boundary(bytes: &[u8], key_start: usize, key_end: usize) -> bool {
+    let before_is_key_char = key_start
+        .checked_sub(1)
+        .and_then(|index| bytes.get(index))
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-'));
+    let after_is_key_char = bytes
+        .get(key_end)
+        .is_some_and(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'_' | b'-'));
+
+    !before_is_key_char && !after_is_key_char
+}
+
+fn skip_ascii_whitespace(bytes: &[u8], start: usize) -> usize {
+    let mut index = start;
+    while bytes
+        .get(index)
+        .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
+        index += 1;
+    }
+    index
+}
+
+fn find_value_end(bytes: &[u8], value_start: usize, quote: Option<u8>, key: &str) -> usize {
+    if let Some(quote) = quote {
+        return bytes[value_start..]
+            .iter()
+            .position(|byte| *byte == quote)
+            .map(|relative| value_start + relative)
+            .unwrap_or(bytes.len());
+    }
+
+    let allow_spaces = key == "authorization";
+    let mut value_end = value_start;
+    while let Some(byte) = bytes.get(value_end) {
+        if matches!(*byte, b',' | b';' | b'&') || (!allow_spaces && byte.is_ascii_whitespace()) {
+            break;
+        }
+        value_end += 1;
+    }
+    value_end
 }
 
 // ---------------------------------------------------------------------------
@@ -411,7 +565,7 @@ fn reserve_free_port() -> Result<u16, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::prepend_path_env;
+    use super::{prepend_path_env, redact_log_line};
     use std::path::Path;
     use tokio::process::Command;
 
@@ -467,5 +621,35 @@ mod tests {
             Some(Path::new("/distro/bin"))
         );
         assert!(paths.len() > 1);
+    }
+
+    #[test]
+    fn redacts_common_secret_key_value_pairs() {
+        let redacted =
+            redact_log_line("token=abc123 api_key: xyz password = hunter2 secret='keep' ok=value");
+
+        assert_eq!(
+            redacted,
+            "token=[redacted] api_key: [redacted] password = [redacted] secret='[redacted]' ok=value"
+        );
+    }
+
+    #[test]
+    fn redacts_json_style_secret_values() {
+        let redacted = redact_log_line(
+            r#"{"authorization":"Bearer abc.def","GOOSE_SERVER__SECRET_KEY":"local-secret"}"#,
+        );
+
+        assert_eq!(
+            redacted,
+            r#"{"authorization":"[redacted]","GOOSE_SERVER__SECRET_KEY":"[redacted]"}"#
+        );
+    }
+
+    #[test]
+    fn redacts_unquoted_authorization_header_value_with_spaces() {
+        let redacted = redact_log_line("Authorization: Bearer abc.def, status=401");
+
+        assert_eq!(redacted, "Authorization: [redacted], status=401");
     }
 }

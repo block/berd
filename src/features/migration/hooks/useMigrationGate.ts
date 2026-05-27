@@ -17,8 +17,8 @@ interface MigrationGate {
  * the marker is the single source of truth.
  *
  * If anything in the sequence throws, the marker is never written, so the next
- * boot starts fresh. The caller renders an inline retry UI for the
- * `"error"` state.
+ * boot starts fresh. Startup callers may continue in offline-first mode after
+ * the `"error"` state.
  */
 export function useMigrationGate(startupReady: boolean): MigrationGate {
   const setStoreStatus = useMigrationStore((state) => state.setStatus);
@@ -69,6 +69,7 @@ export function useMigrationGate(startupReady: boolean): MigrationGate {
         setStatus("ready");
       } catch (err) {
         if (cancelled) return;
+        console.error("Failed to run startup migration:", err);
         setError(err instanceof Error ? err : new Error(String(err)));
         setStatus("error");
       } finally {

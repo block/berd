@@ -89,10 +89,22 @@
   "errors": {
     "clipboardUnavailable": "La API del portapapeles no está disponible"
   },
-  "migration": {
+  "startup": {
     "error": {
-      "title": "No se pudo finalizar la configuración",
-      "description": "Algo salió mal al preparar Goose. Inténtalo de nuevo para continuar."
+      "gooseServe": {
+        "title": "Goose no pudo iniciarse",
+        "description": "El servicio local de Goose no se inició. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
+      },
+      "unknown": {
+        "title": "Goose no pudo iniciarse",
+        "description": "Goose no pudo terminar de iniciarse. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
+      },
+      "copyDetails": "Copiar detalles",
+      "openLogsFolder": "Abrir carpeta de logs",
+      "technicalDetails": "Detalles técnicos",
+      "copySuccess": "Detalles de inicio copiados.",
+      "copyFailed": "No pudimos copiar los detalles de inicio.",
+      "openLogsFailed": "No pudimos abrir la carpeta de logs."
     }
   },
   "labels": {

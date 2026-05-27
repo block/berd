@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
@@ -40,23 +40,23 @@ export function filterStartupProvidersForDistro(
 export function useAppStartup() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is bumped by `retry()` to force a re-run
   useEffect(() => {
     let cancelled = false;
     (async () => {
       const tStartup = performance.now();
       perfLog("[perf:startup] useAppStartup begin");
-      try {
-        const tConn = performance.now();
-        setNotificationHandler(notificationHandler);
-        await getClient();
-        perfLog(
-          `[perf:startup] ACP getClient ready in ${(performance.now() - tConn).toFixed(1)}ms`,
-        );
-      } catch (err) {
-        console.error("Failed to initialize ACP connection:", err);
-        setError(err);
-      }
+      setReady(false);
+      setError(null);
+
+      const tConn = performance.now();
+      setNotificationHandler(notificationHandler);
+      await getClient();
+      perfLog(
+        `[perf:startup] ACP getClient ready in ${(performance.now() - tConn).toFixed(1)}ms`,
+      );
 
       const store = useAgentStore.getState();
       const inventoryStore = useProviderInventoryStore.getState();
@@ -204,7 +204,9 @@ export function useAppStartup() {
     })()
       .catch((err) => {
         console.error("Failed to complete app startup:", err);
-        setError(err);
+        if (!cancelled) {
+          setError(err);
+        }
       })
       .finally(() => {
         if (!cancelled) {
@@ -215,7 +217,11 @@ export function useAppStartup() {
     return () => {
       cancelled = true;
     };
+  }, [attempt]);
+
+  const retry = useCallback(() => {
+    setAttempt((value) => value + 1);
   }, []);
 
-  return { ready, error };
+  return { ready, error, retry };
 }

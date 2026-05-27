@@ -1,11 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGooseOnboardingImportScan = vi.fn();
 const mockGooseOnboardingImportApply = vi.fn();
 const mockGooseDefaultsSave = vi.fn();
 const mockGooseConfigExtensionsToggle = vi.fn();
 const mockListExtensions = vi.fn();
+const mockGetStoredModelPreference = vi.fn();
 const mockSetStoredModelPreference = vi.fn();
 const mockSetSelectedProvider = vi.fn();
 
@@ -35,6 +36,8 @@ vi.mock("@/features/extensions/api/extensions", () => ({
 }));
 
 vi.mock("@/features/chat/lib/modelPreferences", () => ({
+  getStoredModelPreference: (...args: unknown[]) =>
+    mockGetStoredModelPreference(...args),
   setStoredModelPreference: (...args: unknown[]) =>
     mockSetStoredModelPreference(...args),
 }));
@@ -51,9 +54,13 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
 const mockedInvoke = vi.mocked(invoke);
 
 describe("runMigration", () => {
+  let consoleError: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     vi.clearAllMocks();
     mockedInvoke.mockReset();
+    mockGetStoredModelPreference.mockReturnValue(null);
+    consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     // Default: backup_goose_config returns a backup path.
     mockedInvoke.mockImplementation(async (command: string) => {
       if (command === "backup_goose_config") {
@@ -71,6 +78,10 @@ describe("runMigration", () => {
     mockGooseDefaultsSave.mockResolvedValue(undefined);
     mockGooseConfigExtensionsToggle.mockResolvedValue(undefined);
     mockListExtensions.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    consoleError.mockRestore();
   });
 
   it("runs backup before issuing the ACP import scan", async () => {
@@ -205,7 +216,7 @@ describe("runMigration", () => {
     });
   });
 
-  it("saves the configured Databricks default model and mirrors it into the frontend stores", async () => {
+  it("saves the configured Databricks default model and seeds the frontend preference", async () => {
     // Locks in the shape sent to `_goose/unstable/defaults/save` and the per-agent
     // preference. The constants module ships a concrete Databricks model id;
     // if the shipped default changes, this test should change with it.
@@ -226,32 +237,42 @@ describe("runMigration", () => {
     expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
   });
 
-  it("propagates failures from GooseUnstableDefaultsSave instead of swallowing them", async () => {
-    // The orchestrator is a strict pipeline: any GooseUnstableDefaultsSave failure
-    // — including invalid_params for a stale DEFAULT_MODEL_ID — must
-    // surface as the gate's retryable error state, not be papered over.
-    // The marker is the caller's job, so the next boot retries cleanly
-    // once the underlying issue is fixed (e.g. shipping a new constant).
+  it("does not overwrite an existing frontend model preference", async () => {
+    mockGetStoredModelPreference.mockReturnValueOnce({
+      providerId: "openai",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+
+    const { runMigration } = await import("./runMigration");
+    await runMigration();
+
+    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
+  });
+
+  it("continues when saving the backend default model fails", async () => {
     const invalidParams = Object.assign(new Error("Invalid params"), {
       code: -32602,
     });
     mockGooseDefaultsSave.mockRejectedValueOnce(invalidParams);
 
     const { runMigration } = await import("./runMigration");
-    await expect(runMigration()).rejects.toBe(invalidParams);
-    expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(1);
-    expect(mockSetStoredModelPreference).not.toHaveBeenCalled();
-  });
+    const { DEFAULT_PROVIDER_ID, DEFAULT_MODEL_ID, DEFAULT_MODEL_NAME } =
+      await import("./lib/constants");
+    const result = await runMigration();
 
-  it("propagates non-invalid_params failures from GooseUnstableDefaultsSave too", async () => {
-    const internalError = Object.assign(new Error("Internal error"), {
-      code: -32603,
+    expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(1);
+    expect(mockSetStoredModelPreference).toHaveBeenCalledWith("goose", {
+      providerId: DEFAULT_PROVIDER_ID,
+      modelId: DEFAULT_MODEL_ID,
+      modelName: DEFAULT_MODEL_NAME,
     });
-    mockGooseDefaultsSave.mockRejectedValueOnce(internalError);
-
-    const { runMigration } = await import("./runMigration");
-    await expect(runMigration()).rejects.toBe(internalError);
-    expect(mockGooseDefaultsSave).toHaveBeenCalledTimes(1);
+    expect(mockSetSelectedProvider).toHaveBeenCalledWith("goose");
+    expect(result.disabledExtensions).toEqual([]);
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to save migrated default model:",
+      invalidParams,
+    );
   });
 
   it("returns an undefined backup path when no config was present to back up", async () => {

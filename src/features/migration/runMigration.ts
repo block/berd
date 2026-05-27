@@ -1,5 +1,8 @@
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import {
+  getStoredModelPreference,
+  setStoredModelPreference,
+} from "@/features/chat/lib/modelPreferences";
 import {
   listExtensions,
   toggleExtension,
@@ -24,9 +27,9 @@ import type { DisabledExtension, MigrationResult } from "./types";
  * crash mid-sequence leaves the marker absent and the next boot re-runs
  * everything from scratch.
  *
- * Failures bubble up as thrown errors. Since Databricks is guaranteed to be
- * provisioned on this build, a hard failure is a real bug and should surface
- * to the user via the gate's error state rather than be fallback-papered.
+ * Failures from migration/import work bubble up as thrown errors. Saving the
+ * default model is best effort because provider auth/connectivity should not
+ * decide whether the app shell can start.
  */
 export async function runMigration(): Promise<MigrationResult> {
   // 1. Snapshot the existing goose config before anything mutates it.
@@ -51,27 +54,29 @@ export async function runMigration(): Promise<MigrationResult> {
     });
   }
 
-  // 4. Pre-select Databricks (and the configured model when known) as the
-  //    goose default. Only include `modelId` when we have a real one;
-  //    otherwise save the provider and let the user pick a model from
-  //    the chat model picker on first run. Any failure propagates: the
-  //    gate surfaces it as a retryable error, and the marker stays
-  //    unwritten so the next boot starts fresh.
-  await client.goose.GooseUnstableDefaultsSave({
-    providerId: DEFAULT_PROVIDER_ID,
-    ...(DEFAULT_MODEL_ID ? { modelId: DEFAULT_MODEL_ID } : {}),
-  });
-
-  // 5. Mirror the default into frontend stores so the chat UI picks it up
-  //    immediately on first launch without a reload. Skip the model
-  //    preference when we don't have a real model id — the picker will
-  //    prompt the user.
-  if (DEFAULT_MODEL_ID) {
+  // 4. Seed the local chat preference before touching backend defaults so the
+  //    frontend can prefer the bundled model even when provider auth or
+  //    connectivity prevents saving the backend default.
+  if (DEFAULT_MODEL_ID && !getStoredModelPreference("goose")) {
     setStoredModelPreference("goose", {
       providerId: DEFAULT_PROVIDER_ID,
       modelId: DEFAULT_MODEL_ID,
       modelName: DEFAULT_MODEL_NAME,
     });
+  }
+
+  // 5. Pre-select Databricks (and the configured model when known) as the
+  //    goose default. Only include `modelId` when we have a real one;
+  //    otherwise save the provider and let the user pick a model from
+  //    the chat model picker on first run. Failures are logged and do not
+  //    block the rest of migration.
+  try {
+    await client.goose.GooseUnstableDefaultsSave({
+      providerId: DEFAULT_PROVIDER_ID,
+      ...(DEFAULT_MODEL_ID ? { modelId: DEFAULT_MODEL_ID } : {}),
+    });
+  } catch (error) {
+    console.error("Failed to save migrated default model:", error);
   }
   useAgentStore.getState().setSelectedProvider("goose");
 
