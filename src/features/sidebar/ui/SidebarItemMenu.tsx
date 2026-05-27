@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { IconDots } from "@tabler/icons-react";
-import { Pencil, Trash2 } from "lucide-react";
+import { Pencil, PinIcon, Trash2 } from "lucide-react";
 
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -15,6 +15,9 @@ import { useExclusiveMenu } from "@/shared/ui/useExclusiveMenu";
 interface SidebarItemMenuProps {
   label: string;
   onOpenChange?: (open: boolean) => void;
+  onPinToHome?: () => void;
+  pinToHomeDisabled?: boolean;
+  pinToHomeLabel?: string;
   onEdit?: () => void;
   onArchive?: () => void;
 }
@@ -22,6 +25,9 @@ interface SidebarItemMenuProps {
 export function SidebarItemMenu({
   label,
   onOpenChange,
+  onPinToHome,
+  pinToHomeDisabled = false,
+  pinToHomeLabel,
   onEdit,
   onArchive,
 }: SidebarItemMenuProps) {
@@ -57,6 +63,12 @@ export function SidebarItemMenu({
         alignOffset={-4}
         sideOffset={4}
       >
+        {onPinToHome && (
+          <DropdownMenuItem onClick={onPinToHome} disabled={pinToHomeDisabled}>
+            <PinIcon className="size-3.5" />
+            {pinToHomeLabel ?? t("common:actions.pinToHome")}
+          </DropdownMenuItem>
+        )}
         {onEdit && (
           <DropdownMenuItem onClick={onEdit}>
             <Pencil className="size-3.5" />

@@ -150,6 +150,64 @@ function adoptLayoutItems(
   return adoptLayout(layout);
 }
 
+function stableStateKey(state: WidgetInstance["state"]): string {
+  if (!state) {
+    return "";
+  }
+
+  return JSON.stringify(
+    Object.keys(state)
+      .sort()
+      .map((key) => [key, state[key]]),
+  );
+}
+
+function widgetIdentityKey(instance: WidgetInstance): string {
+  return `${instance.type}:${stableStateKey(instance.state)}`;
+}
+
+function mergeAddedWidgetsAfterConflict(
+  current: HomeWidgetState,
+  attemptedInstances: WidgetInstance[],
+  conflictLayout: Layout,
+): WidgetInstance[] | null {
+  const confirmedIds = new Set(
+    current.lastConfirmedLayout
+      ? layoutItemsToHomeWidgets(current.lastConfirmedLayout.items).map(
+          (instance) => instance.id,
+        )
+      : current.instances.map((instance) => instance.id),
+  );
+  const addedInstances = attemptedInstances.filter(
+    (instance) => !confirmedIds.has(instance.id),
+  );
+  if (addedInstances.length === 0) {
+    return null;
+  }
+
+  const conflictInstances = layoutItemsToHomeWidgets(conflictLayout.items);
+  const conflictKeys = new Set(conflictInstances.map(widgetIdentityKey));
+  const mergeableAddedInstances = addedInstances.filter(
+    (instance) => !conflictKeys.has(widgetIdentityKey(instance)),
+  );
+  if (mergeableAddedInstances.length === 0) {
+    return null;
+  }
+
+  const maxZ = conflictInstances.reduce(
+    (currentMax, instance) => Math.max(currentMax, instance.z),
+    0,
+  );
+  const rehydratedAddedInstances = mergeableAddedInstances.map(
+    (instance, index) => ({
+      ...instance,
+      z: maxZ + index + 1,
+    }),
+  );
+
+  return [...conflictInstances, ...rehydratedAddedInstances];
+}
+
 export function createHomeWidgetRuntime({
   getState,
   setState,
@@ -325,6 +383,24 @@ export function createHomeWidgetRuntime({
             }
 
             if (!result.ok) {
+              const conflictState = getState();
+              const pendingInstances = runtime.queuedInstances;
+              const mergedInstances = mergeAddedWidgetsAfterConflict(
+                conflictState,
+                pendingInstances ?? instances,
+                result.layout,
+              );
+
+              if (mergedInstances) {
+                runtime.queuedInstances = mergedInstances;
+                setState((current) => ({
+                  ...adoptSavedItems(result.layout, current),
+                  instances: mergedInstances,
+                  error: null,
+                }));
+                continue;
+              }
+
               runtime.queuedInstances = null;
               setState((current) => ({
                 ...adoptSavedItems(result.layout, current),

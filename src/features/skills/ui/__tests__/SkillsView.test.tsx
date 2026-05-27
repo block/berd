@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ComponentProps } from "react";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   TopBarActionsProvider,
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
+import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
 import type { SkillInfo } from "../../api/skills";
 import { SkillsView } from "../SkillsView";
 
@@ -123,6 +124,7 @@ const { listSkills, deleteSkill, updateSkill, exportSkill } = (await import(
 };
 
 beforeEach(() => {
+  resetHomeWidgetStoreForTests();
   vi.clearAllMocks();
   mockProjects = [
     {
@@ -523,6 +525,26 @@ describe("SkillsView", () => {
     expect(screen.getByText("goose-doc-guide")).toBeInTheDocument();
   });
 
+  it("shows pin-to-home in skill card menus", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+    const user = userEvent.setup();
+
+    render(<SkillsView />);
+    await screen.findByText("code-review");
+
+    const codeReviewCard = screen.getByRole("button", {
+      name: "Open code-review details",
+    });
+    const menuButton = within(codeReviewCard).getByRole("button", {
+      name: "More",
+    });
+    await user.click(menuButton);
+
+    expect(
+      screen.getByRole("menuitem", { name: "Pin to home" }),
+    ).toBeInTheDocument();
+  });
+
   it("shows a delete confirmation from the detail panel", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
@@ -577,6 +599,9 @@ describe("SkillsView", () => {
     expect(
       screen.queryByRole("button", { name: "More" }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Pin to home" }),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Start chat" }));
 

@@ -1,13 +1,17 @@
 import { useEffect, useRef } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
+import { PinIcon } from "lucide-react";
 import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
+import { Button } from "@/shared/ui/button";
 import { useChatSessionController } from "../hooks/useChatSessionController";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 
@@ -28,6 +32,12 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
+  const setTopBarActions = useSetTopBarActions();
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "chat", id: sessionId });
   const controller = useChatSessionController({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
@@ -51,6 +61,31 @@ export function ChatView({
     sendDisabledReason =
       controller.session.creationError ?? t("toolbar.sessionStartFailed");
   }
+
+  useEffect(() => {
+    const label = isPinnedToHome
+      ? t("pinToHome.pinned")
+      : isPinningToHome
+        ? t("pinToHome.pinning")
+        : t("pinToHome.action");
+
+    setTopBarActions(
+      <Button
+        type="button"
+        variant="page-header"
+        size="xs"
+        onClick={() => void pinToHome()}
+        disabled={isPinnedToHome || isPinningToHome}
+        aria-label={label}
+        title={label}
+        leftIcon={<PinIcon aria-hidden="true" />}
+      >
+        {label}
+      </Button>,
+    );
+
+    return () => setTopBarActions(null);
+  }, [isPinnedToHome, isPinningToHome, pinToHome, setTopBarActions, t]);
 
   // The composer lives inside the conversation's scroll container as a sticky
   // footer, so the conversation scrolls behind the glassy composer and the

@@ -1,5 +1,6 @@
 import { memo } from "react";
 import { useTranslation } from "react-i18next";
+import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
@@ -8,11 +9,6 @@ import type { WidgetRenderProps } from "./types";
 
 function getAgentId(state: Record<string, unknown> | undefined): string | null {
   return typeof state?.agentId === "string" ? state.agentId : null;
-}
-
-function avatarInitial(label: string): string {
-  const trimmed = label.trim();
-  return trimmed ? trimmed.charAt(0).toUpperCase() : "?";
 }
 
 export const AgentPinWidget = memo(function AgentPinWidget({
@@ -31,6 +27,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   const label = persona?.displayName ?? t("widgets.agentPin.fallbackName");
   const personaId = persona?.id ?? agentId ?? "goose";
   const avatarMedia = useAvatarMedia(persona?.avatar);
+  const fallbackIconSrc = resolveAgentIcon(personaId);
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () =>
     onOpenAgent?.(personaId),
   );
@@ -55,16 +52,12 @@ export const AgentPinWidget = memo(function AgentPinWidget({
             className="pointer-events-none h-full w-full object-contain"
           />
         ) : (
-          <span
+          <img
             aria-hidden="true"
-            className="flex h-full w-full items-center justify-center rounded-full bg-foreground font-medium text-background"
-            style={{
-              fontSize:
-                "clamp(1.5rem, calc(2.5rem * var(--widget-scale, 1)), 5rem)",
-            }}
-          >
-            {avatarInitial(label)}
-          </span>
+            alt=""
+            src={fallbackIconSrc}
+            className="pointer-events-none h-full w-full object-contain"
+          />
         )}
       </button>
       <span

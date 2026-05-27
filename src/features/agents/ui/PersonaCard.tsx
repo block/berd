@@ -7,6 +7,8 @@ import {
   IconPencil,
   IconTrash,
 } from "@tabler/icons-react";
+import { PinIcon } from "lucide-react";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
@@ -59,6 +61,11 @@ export const PersonaCard = memo(function PersonaCard({
   const fallbackIconSrc = resolveAgentIcon(persona.id);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "agent", id: persona.id });
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || menuOpen) {
@@ -136,6 +143,17 @@ export const PersonaCard = memo(function PersonaCard({
               alignOffset={-4}
               sideOffset={4}
             >
+              <DropdownMenuItem
+                onSelect={() => void pinToHome()}
+                disabled={isPinnedToHome || isPinningToHome}
+              >
+                <PinIcon className="size-3.5" />
+                {isPinnedToHome
+                  ? t("common:actions.pinnedToHome")
+                  : isPinningToHome
+                    ? t("common:actions.pinningToHome")
+                    : t("common:actions.pinToHome")}
+              </DropdownMenuItem>
               {isEditable && (
                 <DropdownMenuItem onSelect={() => onEdit?.(persona)}>
                   <IconPencil className="size-3.5" />

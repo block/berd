@@ -106,8 +106,8 @@ describe("AgentPinWidget", () => {
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
   });
 
-  it("renders the avatar layout with an initial-in-circle fallback when no avatar is set", () => {
-    renderPin();
+  it("renders the avatar layout with the deterministic agent artwork fallback when no avatar is set", () => {
+    const { container } = renderPin();
 
     const button = screen.getByRole("button", {
       name: "Start chat with Agent One",
@@ -115,9 +115,8 @@ describe("AgentPinWidget", () => {
     expect(button).toHaveClass("bg-transparent");
     expect(button).not.toHaveClass("bg-card");
     expect(screen.getByText("Agent One")).toBeInTheDocument();
-    // No "Agent" kicker — the fallback now shows an initial in place of the avatar.
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
-    // The fallback shows the first character of the agent's name.
-    expect(screen.getByText("A")).toBeInTheDocument();
+    expect(container.querySelector('img[aria-hidden="true"]')).toBeTruthy();
+    expect(screen.queryByText("A")).not.toBeInTheDocument();
   });
 });

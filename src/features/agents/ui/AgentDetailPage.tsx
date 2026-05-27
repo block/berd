@@ -1,6 +1,14 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Download, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import {
+  Copy,
+  Download,
+  MoreVertical,
+  Pencil,
+  PinIcon,
+  Trash2,
+} from "lucide-react";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
@@ -101,6 +109,11 @@ export function AgentDetailPage({
   const personaSource = getPersonaSource(persona);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "agent", id: persona.id });
   const sourceLabel =
     personaSource === "builtin"
       ? t("common:labels.builtIn")
@@ -171,24 +184,35 @@ export function AgentDetailPage({
                 icon={<Download className="size-3.5" />}
                 onClick={() => onExport(persona)}
               />
-              {isDeletable ? (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      size="icon-xs"
-                      variant="outline-flat"
-                      aria-label={t("view.more")}
-                    >
-                      <MoreVertical className="size-3.5" />
-                      <span className="sr-only">{t("view.more")}</span>
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    variant="inverse"
-                    align="end"
-                    sideOffset={8}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    size="icon-xs"
+                    variant="outline-flat"
+                    aria-label={t("view.more")}
                   >
+                    <MoreVertical className="size-3.5" />
+                    <span className="sr-only">{t("view.more")}</span>
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  variant="inverse"
+                  align="end"
+                  sideOffset={8}
+                >
+                  <DropdownMenuItem
+                    onSelect={() => void pinToHome()}
+                    disabled={isPinnedToHome || isPinningToHome}
+                  >
+                    <PinIcon className="size-3.5" />
+                    {isPinnedToHome
+                      ? t("common:actions.pinnedToHome")
+                      : isPinningToHome
+                        ? t("common:actions.pinningToHome")
+                        : t("common:actions.pinToHome")}
+                  </DropdownMenuItem>
+                  {isDeletable ? (
                     <DropdownMenuItem
                       variant="destructive"
                       onSelect={() => onDelete(persona)}
@@ -196,9 +220,9 @@ export function AgentDetailPage({
                       <Trash2 className="size-3.5" />
                       {t("common:actions.delete")}
                     </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              ) : null}
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </>
           }
           actionsClassName="gap-2"

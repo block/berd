@@ -6,6 +6,7 @@ import {
   IconEdit,
 } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
@@ -84,6 +85,11 @@ export function SidebarProjectSection({
   const [showExpandedChats, setShowExpandedChats] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "project", id: project.id });
 
   // Only a chat coming from a different group can be moved into this project.
   // Dragging a chat that already lives here resolves to a no-op, so the project
@@ -202,6 +208,15 @@ export function SidebarProjectSection({
         <SidebarItemMenu
           label={project.name}
           onOpenChange={setMenuOpen}
+          onPinToHome={() => void pinToHome()}
+          pinToHomeDisabled={isPinnedToHome || isPinningToHome}
+          pinToHomeLabel={
+            isPinnedToHome
+              ? t("common:actions.pinnedToHome")
+              : isPinningToHome
+                ? t("common:actions.pinningToHome")
+                : t("common:actions.pinToHome")
+          }
           onEdit={() => onEditProject?.(project.id)}
           onArchive={() => onArchiveProject?.(project.id)}
         />

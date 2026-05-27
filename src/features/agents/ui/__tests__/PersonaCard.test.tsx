@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
 import { PersonaCard } from "../PersonaCard";
 import type { Persona } from "@/shared/types/agents";
 
@@ -18,6 +19,10 @@ function makePersona(overrides: Partial<Persona> = {}): Persona {
 }
 
 describe("PersonaCard", () => {
+  beforeEach(() => {
+    resetHomeWidgetStoreForTests();
+  });
+
   it("renders persona name", () => {
     render(<PersonaCard persona={makePersona({ displayName: "Coder" })} />);
     expect(screen.getByText("Coder")).toBeInTheDocument();
@@ -87,6 +92,9 @@ describe("PersonaCard", () => {
 
     await user.click(screen.getByRole("button", { name: /agent options/i }));
     expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /pin to home/i }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: /edit/i })).toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: /duplicate/i }),

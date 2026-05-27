@@ -1,5 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { IconDots, IconPencil, IconTrash } from "@tabler/icons-react";
+import { PinIcon } from "lucide-react";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -42,7 +44,12 @@ export function SkillCard({
   const [menuOpen, setMenuOpen] = useExclusiveMenu();
   const isEditable = skill.sourceKind !== "builtin";
   const isDeletable = skill.sourceKind !== "builtin";
-  const showMenu = Boolean((onEdit && isEditable) || (onDelete && isDeletable));
+  const showMenu = true;
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "skill", id: skill.id });
 
   const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.target !== event.currentTarget || menuOpen) {
@@ -109,6 +116,17 @@ export function SkillCard({
               alignOffset={-4}
               sideOffset={4}
             >
+              <DropdownMenuItem
+                onSelect={() => void pinToHome()}
+                disabled={isPinnedToHome || isPinningToHome}
+              >
+                <PinIcon className="size-3.5" />
+                {isPinnedToHome
+                  ? t("common:actions.pinnedToHome")
+                  : isPinningToHome
+                    ? t("common:actions.pinningToHome")
+                    : t("common:actions.pinToHome")}
+              </DropdownMenuItem>
               {onEdit && isEditable ? (
                 <DropdownMenuItem onSelect={() => onEdit(skill)}>
                   <IconPencil className="size-3.5" />

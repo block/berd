@@ -8,6 +8,8 @@ import {
   IconRefresh,
   IconTrash,
 } from "@tabler/icons-react";
+import { PinIcon } from "lucide-react";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import {
   type AutomationTile,
   createAutomationTile,
@@ -61,7 +63,7 @@ export function AutomationsWorkbench({
   onRouteChange,
   onBreadcrumbLabelChange,
 }: AutomationsWorkbenchProps = {}) {
-  const { t } = useTranslation("automations");
+  const { t } = useTranslation(["automations", "common"]);
   const queryClient = useQueryClient();
   const isRouteControlled = route !== undefined;
   const [internalRoute, setInternalRoute] = useState<AutomationNavigationRoute>(
@@ -352,6 +354,11 @@ export function AutomationsWorkbench({
   const isDuplicating = duplicateMutation.isPending;
   const isDeleting = deleteMutation.isPending;
   const setTopBarActions = useSetTopBarActions();
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "automation", id: detailTile?.id });
 
   useEffect(() => {
     if (currentRoute.surface === "builder") {
@@ -360,8 +367,26 @@ export function AutomationsWorkbench({
     }
 
     if (detailAutomationId && detailTile) {
+      const pinLabel = isPinnedToHome
+        ? t("common:actions.pinnedToHome")
+        : isPinningToHome
+          ? t("common:actions.pinningToHome")
+          : t("common:actions.pinToHome");
+
       setTopBarActions(
         <>
+          <Button
+            type="button"
+            variant="page-header"
+            size="xs"
+            onClick={() => void pinToHome()}
+            disabled={isPinnedToHome || isPinningToHome || !detailTile.id}
+            aria-label={pinLabel}
+            title={pinLabel}
+            leftIcon={<PinIcon aria-hidden="true" />}
+          >
+            {pinLabel}
+          </Button>
           <Button
             type="button"
             variant="page-header"
@@ -447,7 +472,10 @@ export function AutomationsWorkbench({
     isUpdating,
     isDuplicating,
     isDeleting,
+    isPinnedToHome,
+    isPinningToHome,
     openBuilder,
+    pinToHome,
     refetchAutomations,
     refetchDetail,
     setTopBarActions,

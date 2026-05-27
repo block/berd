@@ -119,7 +119,7 @@ describe("WidgetFrame", () => {
     expect(bumpZ).toHaveBeenCalledWith("clock-1");
   });
 
-  it("commits z-index changes when opening the unpin pill", () => {
+  it("does not commit z-index changes when opening the unpin pill", () => {
     const bumpZ = vi.fn();
 
     const { frame } = renderWidgetFrame({
@@ -129,7 +129,7 @@ describe("WidgetFrame", () => {
 
     fireEvent.contextMenu(frame);
 
-    expect(bumpZ).toHaveBeenCalledWith("clock-1");
+    expect(bumpZ).not.toHaveBeenCalled();
   });
 
   it("prevents the canvas pin menu from opening when right-clicking a widget", () => {

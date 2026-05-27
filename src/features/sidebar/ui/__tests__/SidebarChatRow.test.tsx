@@ -1,10 +1,18 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import {
+  resetHomeWidgetStoreForTests,
+  useHomeWidgetStore,
+} from "@/features/home/stores/homeWidgetStore";
 import { SidebarChatRow } from "../SidebarChatRow";
 
 describe("SidebarChatRow", () => {
+  beforeEach(() => {
+    resetHomeWidgetStoreForTests();
+  });
+
   it("starts inline rename on double-click and commits on Enter", async () => {
     const user = userEvent.setup();
     const onRename = vi.fn();
@@ -220,6 +228,50 @@ describe("SidebarChatRow", () => {
     await user.click(screen.getByRole("menuitem", { name: /mark unread/i }));
 
     expect(onMarkUnread).toHaveBeenCalledWith("session-1");
+  });
+
+  it("shows pin-to-home in the chat options menu", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for idle chat/i }),
+    );
+
+    expect(
+      screen.getByRole("menuitem", { name: /pin to home/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("disables the pin-to-home option for an already pinned chat", async () => {
+    const user = userEvent.setup();
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "session-1" },
+        },
+      ],
+    });
+
+    render(
+      <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for idle chat/i }),
+    );
+
+    expect(
+      screen.getByRole("menuitem", { name: /pinned to home/i }),
+    ).toHaveAttribute("aria-disabled", "true");
   });
 
   it("can mark an unread chat read from the menu", async () => {

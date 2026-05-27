@@ -793,6 +793,75 @@ describe("homeWidgetStore", () => {
     );
   });
 
+  it("retries newly added widgets on top of the latest layout after a conflict", async () => {
+    const conflict = layout({
+      itemRevision: 11,
+      items: [clockLayoutItem(SAVED_CLOCK_ID, 360)],
+    });
+    const saved = layout({
+      itemRevision: 12,
+      items: [
+        clockLayoutItem(SAVED_CLOCK_ID, 360),
+        {
+          id: "agent-pin-1",
+          kind: "persona",
+          targetId: "agent-1",
+          centerX: 500,
+          centerY: 500,
+          width: 200,
+          height: 220,
+          zIndex: 3,
+          titleOverride: null,
+        },
+      ],
+    });
+    setReadyHomeState();
+    vi.mocked(saveLayoutItems)
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "revisionConflict",
+        layout: conflict,
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        layout: saved,
+      });
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 500, 500, { agentId: "agent-1" }, CANVAS_BOUNDS);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(saveLayoutItems).toHaveBeenCalledTimes(2);
+    const retryRequest = vi.mocked(saveLayoutItems).mock.calls[1][0];
+    expect(retryRequest.expectedRevision).toBe(11);
+    expect(retryRequest.items).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "persona",
+          targetId: "agent-1",
+        }),
+        expect.objectContaining({
+          id: SAVED_CLOCK_ID,
+          kind: "clock",
+        }),
+      ]),
+    );
+    expect(toast.warning).not.toHaveBeenCalledWith(
+      "home:widgetLayer.toasts.conflict",
+    );
+    expect(useHomeWidgetStore.getState().itemRevision).toBe(12);
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "agentPin",
+          state: { agentId: "agent-1" },
+        }),
+      ]),
+    );
+  });
+
   it("restores last confirmed layout after save error", async () => {
     const confirmed = layout({ itemRevision: 7 });
     setReadyHomeState({

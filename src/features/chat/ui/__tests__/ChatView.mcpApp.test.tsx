@@ -1,13 +1,21 @@
 import type { ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  TopBarActionsProvider,
+  useTopBarActions,
+} from "@/app/contexts/TopBarActionsContext";
 import { ChatView } from "../ChatView";
 
 const mocks = vi.hoisted(() => ({
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
   handleSend: vi.fn(() => true),
+  pinToHome: vi.fn(),
+  t: vi.fn((key: string) => key),
   useChatSessionController: vi.fn(),
+  usePinToHomeWidget: vi.fn(),
 }));
 
 vi.mock("motion/react", () => ({
@@ -15,7 +23,7 @@ vi.mock("motion/react", () => ({
 }));
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({ t: (key: string) => key }),
+  useTranslation: () => ({ t: mocks.t }),
 }));
 
 vi.mock("../MessageTimeline", () => ({
@@ -64,6 +72,10 @@ vi.mock("../../hooks/useChatSessionController", () => ({
   useChatSessionController: mocks.useChatSessionController,
 }));
 
+vi.mock("@/features/home/hooks/usePinToHomeWidget", () => ({
+  usePinToHomeWidget: mocks.usePinToHomeWidget,
+}));
+
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
@@ -80,11 +92,22 @@ vi.mock("@/shared/lib/perfLog", () => ({
   perfLog: vi.fn(),
 }));
 
+function TopBarActionsHost() {
+  const actions = useTopBarActions();
+  return <div data-testid="topbar-actions">{actions}</div>;
+}
+
 describe("ChatView MCP app messaging", () => {
   beforeEach(() => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
     mocks.handleSend.mockClear();
+    mocks.pinToHome.mockClear();
+    mocks.usePinToHomeWidget.mockReturnValue({
+      isPinned: false,
+      isPinning: false,
+      pinToHome: mocks.pinToHome,
+    });
     mocks.useChatSessionController.mockReturnValue({
       messages: [
         {
@@ -192,5 +215,20 @@ describe("ChatView MCP app messaging", () => {
       showPlaceholder?: boolean;
     };
     expect(timelineProps.showPlaceholder).toBe(true);
+  });
+
+  it("surfaces pin-to-home as a chat top-bar action", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TopBarActionsProvider>
+        <ChatView sessionId="session-1" />
+        <TopBarActionsHost />
+      </TopBarActionsProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "pinToHome.action" }));
+
+    expect(mocks.pinToHome).toHaveBeenCalled();
   });
 });

@@ -15,6 +15,7 @@ import {
   TopBarActionsProvider,
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
+import { resetHomeWidgetStoreForTests } from "@/features/home/stores/homeWidgetStore";
 import { AutomationsWorkbench as AutomationsView } from "./AutomationsView";
 import type { AutomationNavigationRoute } from "@/app/types/appNavigation";
 
@@ -89,6 +90,7 @@ function renderAutomationsView(props?: {
 
 describe("AutomationsView", () => {
   beforeEach(() => {
+    resetHomeWidgetStoreForTests();
     vi.clearAllMocks();
     vi.mocked(getAutomationTiles).mockResolvedValue({
       tiles: [
@@ -240,6 +242,11 @@ describe("AutomationsView", () => {
     expect(
       screen.queryByRole("button", { name: "Add" }),
     ).not.toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Pin to home",
+      }),
+    ).toBeInTheDocument();
   });
 
   it("reports controlled navigation from overview to detail", async () => {

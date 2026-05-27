@@ -12,7 +12,7 @@
       "copyDetails": "Copy details"
     },
     "toasts": {
-      "conflict": "Home layout changed elsewhere. Your local widget change was not kept.",
+      "conflict": "Home was updated in another window. We refreshed your widgets; please try that change again.",
       "saveFailed": "Widget layout could not be saved.",
       "copySuccess": "Copied error details.",
       "copyFailed": "Error details could not be copied."
@@ -69,6 +69,10 @@
     },
     "unpin": {
       "label": "Unpin"
+    },
+    "pinToHome": {
+      "error": "Could not pin to home.",
+      "success": "Pinned to home."
     },
     "resize": {
       "label": "Resize {{widget}}"

@@ -108,7 +108,6 @@ export function WidgetFrame({
     // onContextMenu from also opening the pin picker behind the pill.
     event.preventDefault();
     event.stopPropagation();
-    commitZLift();
     setPill({ open: true, x: event.clientX, y: event.clientY });
   };
 

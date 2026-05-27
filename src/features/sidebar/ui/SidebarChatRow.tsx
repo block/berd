@@ -5,6 +5,7 @@ import {
   MailOpen,
   MoreHorizontal,
   Pencil,
+  PinIcon,
   Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
@@ -14,6 +15,7 @@ import {
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -90,6 +92,11 @@ export function SidebarChatRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
   const displayTitle = getDisplaySessionTitle(
     title,
@@ -307,6 +314,17 @@ export function SidebarChatRow({
           <DropdownMenuItem onClick={startRename}>
             <Pencil className="size-3.5" />
             {t("common:actions.rename")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onClick={() => void pinToHome()}
+            disabled={isPinnedToHome || isPinningToHome}
+          >
+            <PinIcon className="size-3.5" />
+            {isPinnedToHome
+              ? t("common:actions.pinnedToHome")
+              : isPinningToHome
+                ? t("common:actions.pinningToHome")
+                : t("common:actions.pinToHome")}
           </DropdownMenuItem>
           {hasUnread ? (
             <DropdownMenuItem

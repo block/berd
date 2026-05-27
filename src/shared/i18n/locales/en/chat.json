@@ -134,6 +134,11 @@
     "moveError": "Failed to move chat",
     "renameError": "Failed to rename chat"
   },
+  "pinToHome": {
+    "action": "Pin to home",
+    "pinned": "Pinned to home",
+    "pinning": "Pinning..."
+  },
   "message": {
     "copied": "Copied",
     "defaultImageAlt": "Attached",

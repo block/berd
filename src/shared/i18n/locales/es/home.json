@@ -12,7 +12,7 @@
       "copyDetails": "Copiar detalles"
     },
     "toasts": {
-      "conflict": "El diseño de inicio cambió en otro lugar. Tu cambio local de widget no se conservó.",
+      "conflict": "Inicio se actualizó en otra ventana. Actualizamos tus widgets; intenta hacer ese cambio de nuevo.",
       "saveFailed": "No se pudo guardar el diseño de widgets.",
       "copySuccess": "Detalles del error copiados.",
       "copyFailed": "No se pudieron copiar los detalles del error."
@@ -69,6 +69,10 @@
     },
     "unpin": {
       "label": "Desanclar"
+    },
+    "pinToHome": {
+      "error": "No se pudo fijar en inicio.",
+      "success": "Fijado en inicio."
     },
     "resize": {
       "label": "Cambiar tamaño de {{widget}}"

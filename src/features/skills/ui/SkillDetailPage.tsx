@@ -8,6 +8,8 @@ import {
   IconShare,
   IconTrash,
 } from "@tabler/icons-react";
+import { PinIcon } from "lucide-react";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { Button } from "@/shared/ui/button";
 import { DetailField } from "@/shared/ui/detail-field";
@@ -77,6 +79,11 @@ export function SkillDetailPage({
   onDelete,
 }: SkillDetailPageProps) {
   const { t } = useTranslation(["skills", "common"]);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+  } = usePinToHomeWidget({ kind: "skill", id: skill?.id });
 
   if (!skill) {
     return (
@@ -94,12 +101,24 @@ export function SkillDetailPage({
       ? [...new Set(skill.projectLinks.map((project) => project.name))]
       : [skill.sourceLabel];
   const startChatLabel = t("view.startChatShort");
+  const pinLabel = isPinnedToHome
+    ? t("common:actions.pinnedToHome")
+    : isPinningToHome
+      ? t("common:actions.pinningToHome")
+      : t("common:actions.pinToHome");
   const editLabel = t("common:actions.edit");
   const revealLabel = t("view.reveal");
   const moreLabel = t("view.more");
   const isReadonly = skill.readonly;
   const actions = (
     <>
+      <SkillHeaderActionButton
+        label={pinLabel}
+        icon={<PinIcon className="size-3.5" />}
+        tooltipSide="top"
+        onClick={() => void pinToHome()}
+        disabled={isPinnedToHome || isPinningToHome}
+      />
       {onStartChat ? (
         <SkillHeaderActionButton
           label={startChatLabel}
