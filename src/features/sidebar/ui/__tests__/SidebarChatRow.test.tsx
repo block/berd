@@ -246,7 +246,7 @@ describe("SidebarChatRow", () => {
     ).toBeInTheDocument();
   });
 
-  it("disables the pin-to-home option for an already pinned chat", async () => {
+  it("shows the unpin-from-home option for an already pinned chat", async () => {
     const user = userEvent.setup();
     useHomeWidgetStore.setState({
       instances: [
@@ -270,8 +270,8 @@ describe("SidebarChatRow", () => {
     );
 
     expect(
-      screen.getByRole("menuitem", { name: /pinned to home/i }),
-    ).toHaveAttribute("aria-disabled", "true");
+      screen.getByRole("menuitem", { name: /unpin from home/i }),
+    ).not.toHaveAttribute("aria-disabled", "true");
   });
 
   it("can mark an unread chat read from the menu", async () => {

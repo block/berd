@@ -450,6 +450,35 @@ describe("useHomeCanvasViewport", () => {
     expect(saveCamera).not.toHaveBeenCalled();
   });
 
+  it("keeps the final drag preview in place while committing the widget move", () => {
+    let previewDuringCommit: Point | undefined;
+    const { result } = renderViewportHook({
+      onWidgetDragEnd: vi.fn(() => {
+        previewDuringCommit = result.current.dragPositions["agent-widget"];
+      }),
+    });
+
+    act(() => {
+      beginWidgetDrag(result.current);
+      result.current.handlePointerMove(
+        pointerEvent({ clientX: 30, clientY: 34 }),
+      );
+    });
+
+    expect(result.current.dragPositions).toEqual({
+      "agent-widget": { x: 26, y: 30 },
+    });
+
+    act(() => {
+      result.current.finishPointerGesture(
+        pointerEvent({ clientX: 30, clientY: 34 }),
+      );
+    });
+
+    expect(previewDuringCommit).toEqual({ x: 26, y: 30 });
+    expect(result.current.dragPositions).toEqual({});
+  });
+
   it("uses the pointerdown zoom when converting widget drag movement", () => {
     const onWidgetDragEnd = vi.fn();
     const { result, rerender } = renderHook(
@@ -484,6 +513,40 @@ describe("useHomeCanvasViewport", () => {
     });
 
     expectWidgetDragEnd(onWidgetDragEnd, { x: 30, y: 30 }, { x: 10, y: 0 });
+  });
+
+  it("saves non-centered wheel zooms around the cursor", () => {
+    vi.useFakeTimers();
+    const saveCamera = vi.fn();
+    const hook = renderHook(
+      ({ currentCamera }) =>
+        useHomeCanvasViewport({
+          camera: currentCamera,
+          constraints,
+          saveCamera,
+        }),
+      { initialProps: { currentCamera: camera } },
+    );
+    const canvas = canvasElement();
+
+    attachCanvasRef(hook.result.current.canvasRef, canvas);
+    hook.rerender({ currentCamera: { ...camera } });
+
+    act(() => {
+      hook.result.current.handleWheel(
+        wheelEvent({ clientX: 100, clientY: 120, ctrlKey: true, deltaY: -120 }),
+      );
+    });
+    advanceCameraSaveTimer();
+
+    expect(saveCamera).toHaveBeenCalledWith({
+      centerX: expect.any(Number),
+      centerY: expect.any(Number),
+      zoomBps: expect.any(Number),
+    });
+    expect(saveCamera.mock.calls[0][0].centerX).toBeLessThan(0);
+    expect(saveCamera.mock.calls[0][0].centerY).toBeLessThan(0);
+    expect(saveCamera.mock.calls[0][0].zoomBps).toBeGreaterThan(10_000);
   });
 
   it("rebuilds the viewport from the persisted camera once canvas size is known", () => {

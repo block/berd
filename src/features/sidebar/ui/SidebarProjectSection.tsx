@@ -89,6 +89,7 @@ export function SidebarProjectSection({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "project", id: project.id });
 
   // Only a chat coming from a different group can be moved into this project.
@@ -208,11 +209,13 @@ export function SidebarProjectSection({
         <SidebarItemMenu
           label={project.name}
           onOpenChange={setMenuOpen}
-          onPinToHome={() => void pinToHome()}
-          pinToHomeDisabled={isPinnedToHome || isPinningToHome}
+          onPinToHome={() =>
+            isPinnedToHome ? unpinFromHome() : void pinToHome()
+          }
+          pinToHomeDisabled={isPinningToHome}
           pinToHomeLabel={
             isPinnedToHome
-              ? t("common:actions.pinnedToHome")
+              ? t("common:actions.unpinFromHome")
               : isPinningToHome
                 ? t("common:actions.pinningToHome")
                 : t("common:actions.pinToHome")

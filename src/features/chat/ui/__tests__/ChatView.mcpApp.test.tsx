@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   chatInputSpy: vi.fn(),
   handleSend: vi.fn(() => true),
   pinToHome: vi.fn(),
+  unpinFromHome: vi.fn(),
   t: vi.fn((key: string) => key),
   useChatSessionController: vi.fn(),
   usePinToHomeWidget: vi.fn(),
@@ -103,10 +104,12 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.handleSend.mockClear();
     mocks.pinToHome.mockClear();
+    mocks.unpinFromHome.mockClear();
     mocks.usePinToHomeWidget.mockReturnValue({
       isPinned: false,
       isPinning: false,
       pinToHome: mocks.pinToHome,
+      unpinFromHome: mocks.unpinFromHome,
     });
     mocks.useChatSessionController.mockReturnValue({
       messages: [
@@ -230,5 +233,27 @@ describe("ChatView MCP app messaging", () => {
     await user.click(screen.getByRole("button", { name: "pinToHome.action" }));
 
     expect(mocks.pinToHome).toHaveBeenCalled();
+  });
+
+  it("surfaces unpin-from-home as a chat top-bar action", async () => {
+    const user = userEvent.setup();
+    mocks.usePinToHomeWidget.mockReturnValue({
+      isPinned: true,
+      isPinning: false,
+      pinToHome: mocks.pinToHome,
+      unpinFromHome: mocks.unpinFromHome,
+    });
+
+    render(
+      <TopBarActionsProvider>
+        <ChatView sessionId="session-1" />
+        <TopBarActionsHost />
+      </TopBarActionsProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "pinToHome.unpin" }));
+
+    expect(mocks.unpinFromHome).toHaveBeenCalled();
+    expect(mocks.pinToHome).not.toHaveBeenCalled();
   });
 });

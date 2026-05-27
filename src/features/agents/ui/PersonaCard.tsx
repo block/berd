@@ -66,6 +66,7 @@ export const PersonaCard = memo(function PersonaCard({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "agent", id: persona.id });
   const avatarTransitionName = getAgentAvatarTransitionName(persona.id);
 
@@ -110,12 +111,12 @@ export const PersonaCard = memo(function PersonaCard({
         sideOffset={4}
       >
         <DropdownMenuItem
-          onSelect={() => void pinToHome()}
-          disabled={isPinnedToHome || isPinningToHome}
+          onSelect={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
+          disabled={isPinningToHome}
         >
           <PinIcon className="size-3.5" />
           {isPinnedToHome
-            ? t("common:actions.pinnedToHome")
+            ? t("common:actions.unpinFromHome")
             : isPinningToHome
               ? t("common:actions.pinningToHome")
               : t("common:actions.pinToHome")}

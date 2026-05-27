@@ -2,6 +2,10 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  TopBarActionsProvider,
+  useTopBarActions,
+} from "@/app/contexts/TopBarActionsContext";
 import type { Layout } from "@/features/layout/api/layout";
 import { getLayout, HOME_LAYOUT_ID } from "@/features/layout/api/layout";
 import {
@@ -65,8 +69,22 @@ function layout(overrides: Partial<Layout> = {}): Layout {
   };
 }
 
+function TopBarActionsHost() {
+  const actions = useTopBarActions();
+  return <div data-testid="topbar-actions">{actions}</div>;
+}
+
 function renderHomeView() {
   return render(<HomeView />);
+}
+
+function renderHomeViewWithTopBarActions() {
+  return render(
+    <TopBarActionsProvider>
+      <TopBarActionsHost />
+      <HomeView />
+    </TopBarActionsProvider>,
+  );
 }
 
 beforeEach(() => {
@@ -150,5 +168,51 @@ describe("HomeView", () => {
 
     await screen.findByText("widget canvas");
     expect(getLayout).toHaveBeenCalledTimes(2);
+  });
+
+  it("exposes a top-bar recenter action for the home camera", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000001",
+            centerX: 240,
+            centerY: 240,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 640,
+            centerY: 360,
+            width: 240,
+            height: 240,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(screen.queryByText("Recenter")).not.toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Recenter pinned objects" }),
+    );
+
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      centerX: 440,
+      centerY: 300,
+      zoomBps: 10_000,
+    });
   });
 });

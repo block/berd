@@ -120,8 +120,43 @@ describe("AvatarMedia", () => {
     emitIntersection(false);
 
     await waitFor(() => expect(video).not.toHaveAttribute("src"));
-    expect(pauseMock).toHaveBeenCalled();
-    expect(loadMock).toHaveBeenCalled();
+  });
+
+  it("keeps lazy-once video sources attached after they have become visible", async () => {
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="lazy-once"
+      />,
+    );
+
+    const video = screen.getByRole("img", { name: "avatar" });
+
+    emitIntersection(true);
+    await waitFor(() =>
+      expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4"),
+    );
+
+    emitIntersection(false);
+
+    expect(video).toHaveAttribute("src", "asset://localhost/avatar.mp4");
+    expect(loadMock).not.toHaveBeenCalled();
+  });
+
+  it("renders eager video sources on the first paint", () => {
+    render(
+      <AvatarMedia
+        media={{ src: "asset://localhost/avatar.mp4", mediaType: "video" }}
+        alt="avatar"
+        loadingStrategy="eager"
+      />,
+    );
+
+    expect(screen.getByRole("img", { name: "avatar" })).toHaveAttribute(
+      "src",
+      "asset://localhost/avatar.mp4",
+    );
   });
 
   it("attaches paused visible-video sources without looping when animation is disabled", async () => {

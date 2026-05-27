@@ -135,16 +135,25 @@ export function isPinnedToHome(
   instances: WidgetInstance[],
   target: PinToHomeTarget,
 ): boolean {
+  return findPinnedHomeWidgetId(instances, target) !== null;
+}
+
+function findPinnedHomeWidgetId(
+  instances: WidgetInstance[],
+  target: PinToHomeTarget,
+): string | null {
   const targetId = normalizedTargetId(target.id);
   if (!targetId) {
-    return false;
+    return null;
   }
 
   const config = PIN_TARGET_CONFIG[target.kind];
-  return instances.some(
-    (instance) =>
-      instance.type === config.widgetType &&
-      instance.state?.[config.stateKey] === targetId,
+  return (
+    instances.find(
+      (instance) =>
+        instance.type === config.widgetType &&
+        instance.state?.[config.stateKey] === targetId,
+    )?.id ?? null
   );
 }
 
@@ -155,10 +164,39 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
   const loadStatus = useHomeWidgetStore((state) => state.loadStatus);
   const { id, kind } = target;
 
-  const isPinned = useMemo(
-    () => isPinnedToHome(instances, { id, kind }),
+  const pinnedWidgetId = useMemo(
+    () => findPinnedHomeWidgetId(instances, { id, kind }),
     [id, instances, kind],
   );
+  const isPinned = pinnedWidgetId !== null;
+
+  const unpinFromHome = useCallback(() => {
+    const targetId = normalizedTargetId(id);
+    if (!targetId) {
+      return;
+    }
+
+    try {
+      const state = useHomeWidgetStore.getState();
+      if (state.loadStatus !== "ready") {
+        toast.error(t("widgets.unpinFromHome.error"));
+        return;
+      }
+
+      const currentPinnedWidgetId = findPinnedHomeWidgetId(state.instances, {
+        id: targetId,
+        kind,
+      });
+      if (!currentPinnedWidgetId) {
+        return;
+      }
+
+      state.removeWidget(currentPinnedWidgetId);
+      toast.success(t("widgets.unpinFromHome.success"));
+    } catch {
+      toast.error(t("widgets.unpinFromHome.error"));
+    }
+  }, [id, kind, t]);
 
   const pinToHome = useCallback(async () => {
     const targetId = normalizedTargetId(id);
@@ -217,5 +255,6 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
     isPinned,
     isPinning: isPinning || loadStatus === "loading",
     pinToHome,
+    unpinFromHome,
   };
 }

@@ -358,6 +358,7 @@ export function AutomationsWorkbench({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "automation", id: detailTile?.id });
 
   useEffect(() => {
@@ -368,7 +369,7 @@ export function AutomationsWorkbench({
 
     if (detailAutomationId && detailTile) {
       const pinLabel = isPinnedToHome
-        ? t("common:actions.pinnedToHome")
+        ? t("common:actions.unpinFromHome")
         : isPinningToHome
           ? t("common:actions.pinningToHome")
           : t("common:actions.pinToHome");
@@ -379,8 +380,10 @@ export function AutomationsWorkbench({
             type="button"
             variant="page-header"
             size="xs"
-            onClick={() => void pinToHome()}
-            disabled={isPinnedToHome || isPinningToHome || !detailTile.id}
+            onClick={() =>
+              isPinnedToHome ? unpinFromHome() : void pinToHome()
+            }
+            disabled={isPinningToHome || !detailTile.id}
             aria-label={pinLabel}
             title={pinLabel}
             leftIcon={<PinIcon aria-hidden="true" />}
@@ -480,6 +483,7 @@ export function AutomationsWorkbench({
     refetchDetail,
     setTopBarActions,
     t,
+    unpinFromHome,
   ]);
 
   if (currentRoute.surface === "builder") {

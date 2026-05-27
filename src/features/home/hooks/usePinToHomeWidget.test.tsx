@@ -196,4 +196,38 @@ describe("usePinToHomeWidget", () => {
     expect(saveLayoutItems).not.toHaveBeenCalled();
     expect(toast.success).not.toHaveBeenCalled();
   });
+
+  it("removes the matching home pin when unpinning", async () => {
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "session-1" },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      cameraRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      constraints: layout().constraints,
+    });
+
+    const { result } = renderHook(() =>
+      usePinToHomeWidget({ kind: "chat", id: "session-1" }),
+    );
+
+    expect(result.current.isPinned).toBe(true);
+
+    act(() => {
+      result.current.unpinFromHome();
+    });
+
+    await waitFor(() => expect(result.current.isPinned).toBe(false));
+    expect(useHomeWidgetStore.getState().instances).toEqual([]);
+    expect(toast.success).toHaveBeenCalledWith("widgets.unpinFromHome.success");
+  });
 });

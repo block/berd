@@ -83,6 +83,7 @@ export function SkillDetailPage({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "skill", id: skill?.id });
 
   if (!skill) {
@@ -102,7 +103,7 @@ export function SkillDetailPage({
       : [skill.sourceLabel];
   const startChatLabel = t("view.startChatShort");
   const pinLabel = isPinnedToHome
-    ? t("common:actions.pinnedToHome")
+    ? t("common:actions.unpinFromHome")
     : isPinningToHome
       ? t("common:actions.pinningToHome")
       : t("common:actions.pinToHome");
@@ -116,8 +117,8 @@ export function SkillDetailPage({
         label={pinLabel}
         icon={<PinIcon className="size-3.5" />}
         tooltipSide="top"
-        onClick={() => void pinToHome()}
-        disabled={isPinnedToHome || isPinningToHome}
+        onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
+        disabled={isPinningToHome}
       />
       {onStartChat ? (
         <SkillHeaderActionButton

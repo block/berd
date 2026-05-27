@@ -223,6 +223,7 @@ function chatWidget(overrides: Partial<WidgetInstance> = {}): WidgetInstance {
 type RenderCanvasOptions = WidgetNavigationHandlers & {
   instances?: WidgetInstance[];
   mutations?: Partial<WidgetMutationHandlers>;
+  animateCameraTransition?: boolean;
 };
 
 function PickerTestProvider({ children }: { children: ReactNode }) {
@@ -239,6 +240,7 @@ function PickerTestProvider({ children }: { children: ReactNode }) {
 function renderCanvas({
   instances = [],
   mutations = {},
+  animateCameraTransition,
   ...navigation
 }: RenderCanvasOptions = {}) {
   return render(
@@ -246,6 +248,7 @@ function renderCanvas({
       <WidgetCanvas
         instances={instances}
         mutations={mutationHandlers(mutations)}
+        animateCameraTransition={animateCameraTransition}
         {...navigation}
       />
     </PickerTestProvider>,
@@ -358,7 +361,7 @@ describe("WidgetCanvas", () => {
     expect(widgetNode.style.top).toBe("50.5px");
   });
 
-  it("zooms widgets without a transformed canvas wrapper", () => {
+  it("zooms widget contents without scaling the positioned widget shell", () => {
     mocks.homeWidgetState.camera = {
       centerX: -10.25,
       centerY: -20.25,
@@ -373,12 +376,42 @@ describe("WidgetCanvas", () => {
     const widgetNode = container.querySelector(
       HOME_WIDGET_NODE_SELECTOR,
     ) as HTMLElement;
+    const widgetContent = widgetNode.firstElementChild as HTMLElement;
 
     expect(world.style.transform).toBe("");
     expect(widgetNode.style.transform).toBe("");
-    expect(widgetNode.style.zoom).toBe("1.25");
+    expect(widgetNode.style.zoom).toBeUndefined();
     expect(widgetNode.style.left).toBe("38px");
     expect(widgetNode.style.top).toBe("63px");
+    expect(widgetNode.style.width).toBe("300px");
+    expect(widgetNode.style.height).toBe("300px");
+    expect(widgetContent.style.transform).toBe("scale(1.25)");
+    expect(widgetContent.style.transformOrigin).toBe("top left");
+    expect(widgetContent.style.width).toBe("240px");
+    expect(widgetContent.style.height).toBe("240px");
+  });
+
+  it("adds a short position transition during recenter motion", () => {
+    const { container, rerender } = renderCanvas({
+      instances: [widget()],
+      animateCameraTransition: false,
+    });
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    expect(widgetNode.className).not.toContain("transition-[left,top]");
+
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas
+          instances={[widget()]}
+          mutations={mutationHandlers()}
+          animateCameraTransition={true}
+        />
+      </PickerTestProvider>,
+    );
+
+    expect(widgetNode.className).toContain("transition-[left,top]");
   });
 
   it("allows child widget clicks when the pointer does not drag", () => {
@@ -755,6 +788,38 @@ describe("WidgetCanvas", () => {
       "agentPin",
       100,
       120,
+      { agentId: "agent-2" },
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
+  it("adds pins at the cursor in the current camera space", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.camera = {
+      centerX: 0,
+      centerY: 0,
+      zoomBps: 12_500,
+    };
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    const { container } = renderCanvas({ mutations: { addWidget } });
+    const canvas = container.firstElementChild as Element;
+
+    fireEvent.contextMenu(canvas, {
+      clientX: 500,
+      clientY: 360,
+    });
+    await user.click(screen.getByRole("button", { name: PANEL_LABELS.agent }));
+    await user.click(screen.getByRole("button", { name: /agent two/i }));
+
+    expect(addWidget).toHaveBeenCalledWith(
+      "agentPin",
+      80,
+      48,
       { agentId: "agent-2" },
       CANVAS_CONSTRAINTS,
     );

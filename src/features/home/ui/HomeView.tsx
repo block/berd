@@ -1,7 +1,16 @@
-import { useEffect, useMemo } from "react";
+import { Crosshair } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import { Button } from "@/shared/ui/button";
+import { clampLayoutCamera } from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
+import {
+  HOME_WIDGET_CATALOG_BY_ID,
+  widgetSizeForInstance,
+} from "../widgets/catalog";
+import type { WidgetInstance } from "../widgets/types";
 import { WidgetCanvas } from "./WidgetCanvas";
 
 export interface HomeViewProps {
@@ -22,6 +31,8 @@ export function HomeView({
   onOpenAutomation,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
+  const setTopBarActions = useSetTopBarActions();
+  const [recenterMotionActive, setRecenterMotionActive] = useState(false);
   const {
     instances,
     loadStatus,
@@ -29,7 +40,71 @@ export function HomeView({
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
+    camera,
+    constraints,
+    saveCamera,
   } = useHomeWidgetLayoutController();
+  const recenterTarget = useMemo(
+    () => widgetCenterOfGravity(instances),
+    [instances],
+  );
+  const recenterTitle = t("widgets.canvasControls.recenterTitle");
+
+  useEffect(() => {
+    if (!recenterMotionActive) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setRecenterMotionActive(false);
+    }, 280);
+
+    return () => window.clearTimeout(timer);
+  }, [recenterMotionActive]);
+
+  const handleRecenter = useCallback(() => {
+    if (!camera || !recenterTarget) {
+      return;
+    }
+
+    setRecenterMotionActive(true);
+    const nextCamera = {
+      centerX: recenterTarget.x,
+      centerY: recenterTarget.y,
+      zoomBps: camera.zoomBps,
+    };
+    saveCamera(
+      constraints ? clampLayoutCamera(nextCamera, constraints) : nextCamera,
+    );
+  }, [camera, constraints, recenterTarget, saveCamera]);
+
+  useEffect(() => {
+    if (loadStatus !== "ready") {
+      setTopBarActions(null);
+      return;
+    }
+
+    setTopBarActions(
+      <Button
+        type="button"
+        variant="page-header"
+        size="xs"
+        onClick={handleRecenter}
+        disabled={!recenterTarget}
+        aria-label={recenterTitle}
+        title={recenterTitle}
+        leftIcon={<Crosshair aria-hidden="true" />}
+      />,
+    );
+
+    return () => setTopBarActions(null);
+  }, [
+    handleRecenter,
+    loadStatus,
+    recenterTarget,
+    recenterTitle,
+    setTopBarActions,
+  ]);
 
   return (
     <div className="relative h-full w-full">
@@ -37,6 +112,7 @@ export function HomeView({
         <WidgetCanvas
           instances={instances}
           mutations={widgetMutations}
+          animateCameraTransition={recenterMotionActive}
           onOpenProject={onOpenProject}
           onOpenSkill={onOpenSkill}
           onOpenAgent={onOpenAgent}
@@ -88,15 +164,47 @@ export function HomeView({
   );
 }
 
+function widgetCenterOfGravity(
+  instances: WidgetInstance[],
+): { x: number; y: number } | null {
+  let count = 0;
+  let totalX = 0;
+  let totalY = 0;
+
+  for (const instance of instances) {
+    const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
+    if (!catalogEntry?.Component) {
+      continue;
+    }
+
+    const size = widgetSizeForInstance(instance);
+    totalX += instance.x + size.width / 2;
+    totalY += instance.y + size.height / 2;
+    count += 1;
+  }
+
+  if (count === 0) {
+    return null;
+  }
+
+  return {
+    x: totalX / count,
+    y: totalY / count,
+  };
+}
+
 function useHomeWidgetLayoutController() {
   const instances = useHomeWidgetStore((state) => state.instances);
   const loadStatus = useHomeWidgetStore((state) => state.loadStatus);
   const error = useHomeWidgetStore((state) => state.error);
+  const camera = useHomeWidgetStore((state) => state.camera);
+  const constraints = useHomeWidgetStore((state) => state.constraints);
   const initialize = useHomeWidgetStore((state) => state.initialize);
   const retryInitialize = useHomeWidgetStore((state) => state.retryInitialize);
   const copyErrorDetails = useHomeWidgetStore(
     (state) => state.copyErrorDetails,
   );
+  const saveCamera = useHomeWidgetStore((state) => state.saveCamera);
   const addWidget = useHomeWidgetStore((state) => state.addWidget);
   const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
   const resizeWidget = useHomeWidgetStore((state) => state.resizeWidget);
@@ -136,5 +244,8 @@ function useHomeWidgetLayoutController() {
     retryInitialize,
     copyErrorDetails,
     widgetMutations,
+    camera,
+    constraints,
+    saveCamera,
   };
 }

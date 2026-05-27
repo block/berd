@@ -578,12 +578,12 @@ export function useHomeCanvasViewport({
         );
 
         clearScheduledCameraSave();
-        clearWidgetResizePreview(activePointer.widgetId);
         onWidgetResizeEnd?.({
           id: activePointer.widgetId,
           bounds: finalBounds,
           offset,
         });
+        clearWidgetResizePreview(activePointer.widgetId);
         return;
       }
 
@@ -597,12 +597,12 @@ export function useHomeCanvasViewport({
       const finalPosition = widgetPositionFromOffset(activePointer, offset);
 
       clearScheduledCameraSave();
-      clearWidgetDragPosition(activePointer.widgetId);
       onWidgetDragEnd?.({
         id: activePointer.widgetId,
         position: finalPosition,
         offset,
       });
+      clearWidgetDragPosition(activePointer.widgetId);
     },
     [
       clearScheduledCameraSave,

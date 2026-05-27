@@ -137,7 +137,8 @@
   "pinToHome": {
     "action": "Fijar en inicio",
     "pinned": "Fijado en inicio",
-    "pinning": "Fijando..."
+    "pinning": "Fijando...",
+    "unpin": "Desfijar de inicio"
   },
   "message": {
     "copied": "Copiado",

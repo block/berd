@@ -5,10 +5,8 @@ import type {
   LayoutCamera,
   LayoutConstraints,
 } from "@/features/layout/api/layout";
-import {
-  snapCanvasPointToDevicePixels,
-  zoomBpsToViewportZoom,
-} from "../lib/layoutCamera";
+import { cn } from "@/shared/lib/cn";
+import { snapCanvasPointToDevicePixels } from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import {
   HOME_WIDGET_CATALOG_BY_ID,
@@ -36,6 +34,7 @@ const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
   mutations: WidgetMutationHandlers;
+  animateCameraTransition?: boolean;
 }
 
 interface PickerState {
@@ -126,21 +125,31 @@ function renderedWidgetStyle({
   size: { width: number; height: number };
   zIndex: number;
   zoom: number;
-}): React.CSSProperties & { zoom?: number } {
-  const style: React.CSSProperties & { zoom?: number } = {
+}): React.CSSProperties {
+  return {
     position: "absolute",
     left: position.x,
     top: position.y,
     zIndex,
+    width: size.width * zoom,
+    height: size.height * zoom,
+  };
+}
+
+function renderedWidgetContentStyle({
+  size,
+  zoom,
+}: {
+  size: { width: number; height: number };
+  zoom: number;
+}): React.CSSProperties {
+  return {
+    position: "relative",
     width: size.width,
     height: size.height,
+    transform: zoom === 1 ? undefined : `scale(${zoom})`,
+    transformOrigin: "top left",
   };
-
-  if (zoom !== zoomBpsToViewportZoom(10_000)) {
-    style.zoom = zoom;
-  }
-
-  return style;
 }
 
 const HOME_MIN_ZOOM_BPS = 5_000;
@@ -168,6 +177,7 @@ function homeCanvasZoomConstraints(
 export function WidgetCanvas({
   instances,
   mutations,
+  animateCameraTransition = false,
   onOpenAgent,
   onOpenProject,
   onOpenSkill,
@@ -375,49 +385,62 @@ export function WidgetCanvas({
               onPointerDown={(event) => beginWidgetDrag(event, instance)}
               onDragStart={preventNativeDrag}
               style={widgetStyle}
-              className="group/widget"
+              className={cn(
+                "group/widget",
+                animateCameraTransition &&
+                  "transition-[left,top] duration-[260ms] ease-out motion-reduce:transition-none",
+              )}
             >
-              <WidgetFrame
-                instance={instance}
-                currentMaxZ={currentMaxZ}
-                mutations={mutations}
-                shouldIgnoreActivation={dragSuppression.shouldIgnoreActivation}
-                gestureHandlers={dragSuppression.frameHandlers}
-                onVisualLiftReset={handleVisualLiftReset}
-                onOpenAgent={onOpenAgent}
-                onOpenProject={onOpenProject}
-                onOpenSkill={onOpenSkill}
-                onSelectSession={onSelectSession}
-                onStartProjectChat={onStartProjectChat}
-                onOpenAutomation={onOpenAutomation}
-              />
-              <button
-                type="button"
-                aria-label={t("widgets.resize.label", {
-                  widget: t(catalogEntry.labelKey),
+              <div
+                style={renderedWidgetContentStyle({
+                  size,
+                  zoom: viewport.zoom,
                 })}
-                draggable={false}
-                onPointerDown={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  beginWidgetResize(event, instance);
-                }}
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                }}
-                className="absolute -right-3 -bottom-3 z-20 flex size-7 cursor-nwse-resize items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
-                <span
-                  className="size-4 rounded-full border border-border bg-background shadow-mini"
-                  aria-hidden="true"
+                <WidgetFrame
+                  instance={instance}
+                  currentMaxZ={currentMaxZ}
+                  mutations={mutations}
+                  shouldIgnoreActivation={
+                    dragSuppression.shouldIgnoreActivation
+                  }
+                  gestureHandlers={dragSuppression.frameHandlers}
+                  onVisualLiftReset={handleVisualLiftReset}
+                  onOpenAgent={onOpenAgent}
+                  onOpenProject={onOpenProject}
+                  onOpenSkill={onOpenSkill}
+                  onSelectSession={onSelectSession}
+                  onStartProjectChat={onStartProjectChat}
+                  onOpenAutomation={onOpenAutomation}
                 />
-                <span className="sr-only">
-                  {t("widgets.resize.label", {
+                <button
+                  type="button"
+                  aria-label={t("widgets.resize.label", {
                     widget: t(catalogEntry.labelKey),
                   })}
-                </span>
-              </button>
+                  draggable={false}
+                  onPointerDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    beginWidgetResize(event, instance);
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                  }}
+                  className="absolute -right-3 -bottom-3 z-20 flex size-7 cursor-nwse-resize items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                >
+                  <span
+                    className="size-4 rounded-full border border-border bg-background shadow-mini"
+                    aria-hidden="true"
+                  />
+                  <span className="sr-only">
+                    {t("widgets.resize.label", {
+                      widget: t(catalogEntry.labelKey),
+                    })}
+                  </span>
+                </button>
+              </div>
             </div>
           );
         })}

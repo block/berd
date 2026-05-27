@@ -142,17 +142,11 @@ export const AvatarMedia = memo(function AvatarMedia({
       return;
     }
 
-    if (video.getAttribute("src") !== media.src) {
-      video.setAttribute("src", media.src);
-    }
-
     if (shouldAnimateVideo) {
       void video.play().catch(() => {});
     } else {
       video.pause();
     }
-
-    return () => stopVideo(video);
   }, [media.mediaType, media.src, shouldAnimateVideo, shouldLoadVideo]);
 
   if (media.mediaType === "video") {
@@ -170,6 +164,7 @@ export const AvatarMedia = memo(function AvatarMedia({
         poster={poster}
         playsInline
         preload={preload}
+        src={shouldLoadVideo ? media.src : undefined}
         role={alt ? "img" : undefined}
         aria-label={alt || undefined}
         aria-hidden={alt ? undefined : true}

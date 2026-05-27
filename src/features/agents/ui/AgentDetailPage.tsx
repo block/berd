@@ -95,6 +95,7 @@ export function AgentDetailPage({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "agent", id: persona.id });
   const personaAvatarValue = normalizeAvatarUrl(persona.avatar) ?? "";
   const [avatarValue, setAvatarValue] = useState(personaAvatarValue);
@@ -288,16 +289,16 @@ export function AgentDetailPage({
         variant="ghost"
         aria-label={
           isPinnedToHome
-            ? t("common:actions.pinnedToHome")
+            ? t("common:actions.unpinFromHome")
             : t("common:actions.pinToHome")
         }
         title={
           isPinnedToHome
-            ? t("common:actions.pinnedToHome")
+            ? t("common:actions.unpinFromHome")
             : t("common:actions.pinToHome")
         }
-        onClick={() => void pinToHome()}
-        disabled={isPinnedToHome || isPinningToHome}
+        onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
+        disabled={isPinningToHome}
         className={ACTION_BUTTON_CLASS}
       >
         <PinIcon className={ACTION_ICON_CLASS} />

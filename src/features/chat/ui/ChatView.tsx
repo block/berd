@@ -37,6 +37,7 @@ export function ChatView({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id: sessionId });
   const controller = useChatSessionController({
     sessionId,
@@ -64,7 +65,7 @@ export function ChatView({
 
   useEffect(() => {
     const label = isPinnedToHome
-      ? t("pinToHome.pinned")
+      ? t("pinToHome.unpin")
       : isPinningToHome
         ? t("pinToHome.pinning")
         : t("pinToHome.action");
@@ -74,8 +75,8 @@ export function ChatView({
         type="button"
         variant="page-header"
         size="xs"
-        onClick={() => void pinToHome()}
-        disabled={isPinnedToHome || isPinningToHome}
+        onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
+        disabled={isPinningToHome}
         aria-label={label}
         title={label}
         leftIcon={<PinIcon aria-hidden="true" />}
@@ -85,7 +86,14 @@ export function ChatView({
     );
 
     return () => setTopBarActions(null);
-  }, [isPinnedToHome, isPinningToHome, pinToHome, setTopBarActions, t]);
+  }, [
+    isPinnedToHome,
+    isPinningToHome,
+    pinToHome,
+    setTopBarActions,
+    t,
+    unpinFromHome,
+  ]);
 
   // The composer lives inside the conversation's scroll container as a sticky
   // footer, so the conversation scrolls behind the glassy composer and the

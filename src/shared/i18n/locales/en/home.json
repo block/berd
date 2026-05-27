@@ -74,8 +74,15 @@
       "error": "Could not pin to home.",
       "success": "Pinned to home."
     },
+    "unpinFromHome": {
+      "error": "Could not unpin from home.",
+      "success": "Unpinned from home."
+    },
     "resize": {
       "label": "Resize {{widget}}"
+    },
+    "canvasControls": {
+      "recenterTitle": "Recenter pinned objects"
     },
     "picker": {
       "back": "Back",

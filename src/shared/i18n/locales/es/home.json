@@ -74,8 +74,15 @@
       "error": "No se pudo fijar en inicio.",
       "success": "Fijado en inicio."
     },
+    "unpinFromHome": {
+      "error": "No se pudo desfijar de inicio.",
+      "success": "Desfijado de inicio."
+    },
     "resize": {
       "label": "Cambiar tamaño de {{widget}}"
+    },
+    "canvasControls": {
+      "recenterTitle": "Recentrar objetos fijados"
     },
     "picker": {
       "back": "Volver",

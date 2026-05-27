@@ -96,6 +96,7 @@ export function SidebarChatRow({
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
     pinToHome,
+    unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
   const displayTitle = getDisplaySessionTitle(
@@ -316,12 +317,14 @@ export function SidebarChatRow({
             {t("common:actions.rename")}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => void pinToHome()}
-            disabled={isPinnedToHome || isPinningToHome}
+            onClick={() =>
+              isPinnedToHome ? unpinFromHome() : void pinToHome()
+            }
+            disabled={isPinningToHome}
           >
             <PinIcon className="size-3.5" />
             {isPinnedToHome
-              ? t("common:actions.pinnedToHome")
+              ? t("common:actions.unpinFromHome")
               : isPinningToHome
                 ? t("common:actions.pinningToHome")
                 : t("common:actions.pinToHome")}

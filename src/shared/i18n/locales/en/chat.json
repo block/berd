@@ -137,7 +137,8 @@
   "pinToHome": {
     "action": "Pin to home",
     "pinned": "Pinned to home",
-    "pinning": "Pinning..."
+    "pinning": "Pinning...",
+    "unpin": "Unpin from home"
   },
   "message": {
     "copied": "Copied",
