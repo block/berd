@@ -9,17 +9,26 @@ const Toaster = ({ ...props }: ToasterProps) => {
       theme={isDark ? "dark" : "light"}
       className="toaster group"
       position="bottom-right"
-      // Lift toasts above the global composer pill (bottom-3 right-3, ~64px
-      // tall) so they stack just over it instead of behind it; right edge
-      // aligns with the pill's right-3 gutter.
+      expand
+      visibleToasts={3}
+      gap={8}
       offset={{ bottom: 88, right: 12 }}
+      mobileOffset={{ bottom: 132, left: 16, right: 16 }}
       style={
         {
-          "--normal-bg": "hsl(var(--popover))",
-          "--normal-text": "hsl(var(--popover-foreground))",
-          "--normal-border": "hsl(var(--border))",
+          "--normal-bg": "var(--surface-composer-glass)",
+          "--normal-text": "var(--popover-foreground)",
+          "--normal-border": "var(--border)",
+          "--border-radius": "var(--radius-card-chat)",
         } as React.CSSProperties
       }
+      toastOptions={{
+        style: {
+          backdropFilter: "var(--backdrop-composer-glass)",
+          boxShadow: "var(--shadow-popover)",
+          WebkitBackdropFilter: "var(--backdrop-composer-glass)",
+        },
+      }}
       {...props}
     />
   );
