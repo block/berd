@@ -1,6 +1,7 @@
 import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Copy, Download, MoreVertical, Pencil, Trash2 } from "lucide-react";
+import { cn } from "@/shared/lib/cn";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
   Avatar as AvatarRoot,
@@ -130,7 +131,16 @@ export function AgentDetailPage({
           variant="detail"
           title={
             <span className="inline-flex min-w-0 items-center gap-3">
-              <AvatarRoot className="size-12 shrink-0 border border-border/80 bg-muted/30">
+              <AvatarRoot
+                className={cn(
+                  "size-12 shrink-0",
+                  // The persona PNGs are transparent — skip the bordered
+                  // muted backdrop when we have an image so the page surface
+                  // shows through. Keep it for the initials fallback so the
+                  // text has something behind it.
+                  !avatarImage && "border border-border/80 bg-muted/30",
+                )}
+              >
                 <AvatarImage src={avatarImage} alt={persona.displayName} />
                 <AvatarFallback className="text-base font-semibold">
                   {initials}
