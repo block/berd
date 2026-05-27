@@ -13,6 +13,7 @@ import {
   bumpZMutation,
   moveWidgetMutation,
   removeWidgetMutation,
+  resizeWidgetMutation,
   updateWidgetStateMutation,
 } from "./homeWidgetMutations";
 import {
@@ -48,6 +49,13 @@ interface HomeWidgetStore extends HomeWidgetState {
     id: string,
     x: number,
     y: number,
+    bounds?: WidgetPlacementInput,
+    options?: MoveWidgetOptions,
+  ) => void;
+  resizeWidget: (
+    id: string,
+    width: number,
+    height: number,
     bounds?: WidgetPlacementInput,
     options?: MoveWidgetOptions,
   ) => void;
@@ -120,6 +128,18 @@ function createHomeWidgetStore() {
             id,
             x,
             y,
+            resolvePlacementBounds(bounds),
+            options,
+          ),
+        );
+      },
+      resizeWidget: (id, width, height, bounds, options) => {
+        applyMutation((instances) =>
+          resizeWidgetMutation(
+            instances,
+            id,
+            width,
+            height,
             resolvePlacementBounds(bounds),
             options,
           ),

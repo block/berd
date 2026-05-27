@@ -70,6 +70,9 @@
     "unpin": {
       "label": "Desanclar"
     },
+    "resize": {
+      "label": "Cambiar tamaño de {{widget}}"
+    },
     "picker": {
       "back": "Volver",
       "loading": "Cargando...",

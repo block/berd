@@ -36,37 +36,48 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   );
 
   return (
-    <div className="flex h-full w-full items-center justify-center p-4">
+    // Box is aspect-locked to ratio (label-band + square-avatar), so the
+    // wrapper here can fill it edge-to-edge with no padding. Outer div stays
+    // pointer-events: none defensively; the avatar button and label each
+    // re-enable pointer events on themselves.
+    <div className="pointer-events-none flex h-full w-full flex-col text-center text-foreground">
       <button
         type="button"
         onClick={handleClick}
         aria-label={t("widgets.agentPin.openAria", { name: label })}
-        className="group relative flex w-[min(80%,176px)] max-w-full flex-col items-center justify-center rounded-card-chat bg-transparent text-center text-foreground transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="pointer-events-auto relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-full bg-transparent transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
-        <span className="flex aspect-square w-full shrink-0 items-center justify-center overflow-hidden">
-          {avatarMedia ? (
-            <AvatarMedia
-              media={avatarMedia}
-              alt=""
-              loadingStrategy="visible-video"
-              className="pointer-events-none object-contain"
-            />
-          ) : (
-            <span
-              aria-hidden="true"
-              className="flex size-full items-center justify-center rounded-full bg-foreground text-[2.5rem] font-medium text-background"
-            >
-              {avatarInitial(label)}
-            </span>
-          )}
-        </span>
-        <span
-          data-testid="agent-pin-hover-label"
-          className="pointer-events-none absolute top-full left-1/2 z-10 mt-2 max-w-[calc(100vw-2rem)] -translate-x-1/2 truncate whitespace-nowrap rounded-full bg-white/90 px-2.5 py-1 text-xs font-medium text-[#242424] opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-        >
-          {label}
-        </span>
+        {avatarMedia ? (
+          <AvatarMedia
+            media={avatarMedia}
+            alt=""
+            loadingStrategy="visible-video"
+            className="pointer-events-none h-full w-full object-contain"
+          />
+        ) : (
+          <span
+            aria-hidden="true"
+            className="flex h-full w-full items-center justify-center rounded-full bg-foreground font-medium text-background"
+            style={{
+              fontSize:
+                "clamp(1.5rem, calc(2.5rem * var(--widget-scale, 1)), 5rem)",
+            }}
+          >
+            {avatarInitial(label)}
+          </span>
+        )}
       </button>
+      <span
+        className="pointer-events-auto block w-full shrink-0 truncate"
+        style={{
+          fontSize:
+            "clamp(0.6875rem, calc(0.875rem * var(--widget-scale, 1)), 1.75rem)",
+          lineHeight:
+            "clamp(0.875rem, calc(1.125rem * var(--widget-scale, 1)), 2.25rem)",
+        }}
+      >
+        {label}
+      </span>
     </div>
   );
 });

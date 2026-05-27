@@ -1,4 +1,12 @@
-import { lazy, Suspense, useEffect, useMemo } from "react";
+import {
+  Component,
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  type ErrorInfo,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   ARTIFACTS_QUERY_KEY,
@@ -69,6 +77,51 @@ function ProjectArtifactFallback({
   );
 }
 
+/**
+ * Catches WebGL/three.js failures inside the r3f Canvas (context lost,
+ * context-limit exhaustion on view transitions, etc.) and degrades to the
+ * static fallback instead of crashing the whole view. The boundary resets on
+ * `resetKey` change so a different project gets a fresh attempt.
+ */
+interface RendererErrorBoundaryProps {
+  resetKey: string;
+  fallback: ReactNode;
+  children: ReactNode;
+}
+
+interface RendererErrorBoundaryState {
+  errored: boolean;
+}
+
+class RendererErrorBoundary extends Component<
+  RendererErrorBoundaryProps,
+  RendererErrorBoundaryState
+> {
+  state: RendererErrorBoundaryState = { errored: false };
+
+  static getDerivedStateFromError(): RendererErrorBoundaryState {
+    return { errored: true };
+  }
+
+  componentDidUpdate(prevProps: RendererErrorBoundaryProps) {
+    if (prevProps.resetKey !== this.props.resetKey && this.state.errored) {
+      this.setState({ errored: false });
+    }
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.warn(
+      "ProjectArtifactRenderer crashed; falling back to static preview.",
+      error,
+      info,
+    );
+  }
+
+  render() {
+    return this.state.errored ? this.props.fallback : this.props.children;
+  }
+}
+
 export function ProjectArtifactPreview({
   input,
   className,
@@ -113,7 +166,8 @@ export function ProjectArtifactPreview({
         variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
       )}
     >
-      <Suspense
+      <RendererErrorBoundary
+        resetKey={input.projectId ?? "no-project"}
         fallback={
           <ProjectArtifactFallback
             className={className}
@@ -122,15 +176,25 @@ export function ProjectArtifactPreview({
           />
         }
       >
-        <LazyProjectArtifactRenderer
-          className={className}
-          environmentUrl={assetQuery.data.environmentUrl}
-          imageUrls={assetQuery.data.imageUrls}
-          motionImpulse={motionImpulse}
-          state={state}
-          variant={variant}
-        />
-      </Suspense>
+        <Suspense
+          fallback={
+            <ProjectArtifactFallback
+              className={className}
+              state={state}
+              variant={variant}
+            />
+          }
+        >
+          <LazyProjectArtifactRenderer
+            className={className}
+            environmentUrl={assetQuery.data.environmentUrl}
+            imageUrls={assetQuery.data.imageUrls}
+            motionImpulse={motionImpulse}
+            state={state}
+            variant={variant}
+          />
+        </Suspense>
+      </RendererErrorBoundary>
     </div>
   );
 }

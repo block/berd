@@ -1,5 +1,9 @@
 import type { LayoutItem, LayoutItemKind } from "@/features/layout/api/layout";
-import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
+import {
+  clampWidgetSize,
+  HOME_WIDGET_CATALOG_BY_ID,
+  widgetSizeForInstance,
+} from "../widgets/catalog";
 import type { CanvasBounds, WidgetInstance } from "../widgets/types";
 import { clampToBounds, snapPoint } from "./snapToGrid";
 
@@ -131,14 +135,20 @@ export function layoutItemsToHomeWidgets(
     if (!size) {
       return [];
     }
+    const widgetSize = clampWidgetSize(type, {
+      width: item.width,
+      height: item.height,
+    });
     const state = stateForItem(item);
     return [
       {
         id: item.id,
         type,
-        x: item.centerX - size.width / 2,
-        y: item.centerY - size.height / 2,
+        x: item.centerX - widgetSize.width / 2,
+        y: item.centerY - widgetSize.height / 2,
         z: item.zIndex,
+        width: widgetSize.width,
+        height: widgetSize.height,
         ...(state ? { state } : {}),
       },
     ];
@@ -153,10 +163,10 @@ export function homeWidgetsToLayoutItems(
     if (!kind) {
       return [];
     }
-    const size = HOME_WIDGET_CATALOG_BY_ID[instance.type]?.defaultSize;
-    if (!size) {
+    if (!HOME_WIDGET_CATALOG_BY_ID[instance.type]?.defaultSize) {
       return [];
     }
+    const size = widgetSizeForInstance(instance);
     return [
       {
         id: instance.id,
@@ -177,7 +187,10 @@ export function createDefaultClockWidget(
   bounds: CanvasBounds = DEFAULT_CANVAS,
 ): WidgetInstance {
   const type = "clock";
-  const size = HOME_WIDGET_CATALOG_BY_ID[type].defaultSize;
+  const size = clampWidgetSize(
+    type,
+    HOME_WIDGET_CATALOG_BY_ID[type].defaultSize,
+  );
   const snapped = snapPoint({
     x: bounds.width * DEFAULT_CLOCK_ANCHOR.x - size.width / 2,
     y: bounds.height * DEFAULT_CLOCK_ANCHOR.y - size.height / 2,
@@ -190,6 +203,8 @@ export function createDefaultClockWidget(
     x: position.x,
     y: position.y,
     z: 1,
+    width: size.width,
+    height: size.height,
   };
 }
 

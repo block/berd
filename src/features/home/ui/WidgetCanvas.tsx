@@ -1,5 +1,6 @@
 import type React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import type {
   LayoutCamera,
   LayoutConstraints,
@@ -9,7 +10,10 @@ import {
   zoomBpsToViewportZoom,
 } from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
-import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
+import {
+  HOME_WIDGET_CATALOG_BY_ID,
+  widgetSizeForInstance,
+} from "../widgets/catalog";
 import type {
   WidgetInstance,
   WidgetMutationHandlers,
@@ -53,7 +57,7 @@ const DEFAULT_CONSTRAINTS: LayoutConstraints = {
   maxCenter: 100_000,
   minSize: 1,
   maxSize: 10_000,
-  minZoomBps: 1_000,
+  minZoomBps: 5_000,
   maxZoomBps: 20_000,
   maxTitleOverrideLength: 120,
   maxItems: 100,
@@ -139,6 +143,19 @@ function renderedWidgetStyle({
   return style;
 }
 
+const HOME_MIN_ZOOM_BPS = 5_000;
+const HOME_MAX_ZOOM_BPS = 20_000;
+
+function homeCanvasZoomConstraints(
+  constraints: LayoutConstraints,
+): LayoutConstraints {
+  return {
+    ...constraints,
+    minZoomBps: Math.max(constraints.minZoomBps, HOME_MIN_ZOOM_BPS),
+    maxZoomBps: Math.min(constraints.maxZoomBps, HOME_MAX_ZOOM_BPS),
+  };
+}
+
 /**
  * WidgetCanvas — the free-form widget layer.
  *
@@ -158,9 +175,14 @@ export function WidgetCanvas({
   onStartProjectChat,
   onOpenAutomation,
 }: WidgetCanvasProps) {
+  const { t } = useTranslation("home");
   const camera = useHomeWidgetStore((state) => state.camera) ?? DEFAULT_CAMERA;
   const constraints =
     useHomeWidgetStore((state) => state.constraints) ?? DEFAULT_CONSTRAINTS;
+  const viewportConstraints = useMemo(
+    () => homeCanvasZoomConstraints(constraints),
+    [constraints],
+  );
   const saveCamera = useHomeWidgetStore((state) => state.saveCamera);
   const dragSuppression = useWidgetDragSuppression();
   const [visuallyLiftedZ, setVisuallyLiftedZ] = useState<
@@ -201,15 +223,17 @@ export function WidgetCanvas({
     canvasRef,
     viewport,
     dragPositions,
+    resizeSizes,
     worldPointForClientPoint,
     beginPan,
     beginWidgetDrag,
+    beginWidgetResize,
     handlePointerMove,
     finishPointerGesture,
     handleWheel,
   } = useHomeCanvasViewport({
     camera,
-    constraints,
+    constraints: viewportConstraints,
     saveCamera,
     onViewportGestureStart: closePicker,
     onWidgetDragStart: (instance) => {
@@ -223,6 +247,21 @@ export function WidgetCanvas({
       mutations.moveWidget(id, position.x, position.y, constraints, {
         bringToFront: true,
       });
+    },
+    onWidgetResizeStart: (instance) => {
+      if (instance.z < currentMaxZ) {
+        handleVisualLift(instance.id, currentMaxZ + 1);
+      }
+    },
+    onWidgetResizeEnd: ({ id, size, offset }) => {
+      dragSuppression.suppressClickAfterDrag(offset);
+      handleVisualLiftReset(id);
+      mutations.resizeWidget(id, size.width, size.height, constraints, {
+        bringToFront: true,
+      });
+    },
+    onWidgetResizeCancel: ({ id }) => {
+      handleVisualLiftReset(id);
     },
   });
 
@@ -310,12 +349,24 @@ export function WidgetCanvas({
             viewport,
             devicePixelRatio,
           );
-          const widgetStyle = renderedWidgetStyle({
-            position: renderPosition,
-            size: catalogEntry.defaultSize,
-            zIndex: visuallyLiftedZ[instance.id] ?? instance.z,
-            zoom: viewport.zoom,
-          });
+          const size =
+            resizeSizes[instance.id] ?? widgetSizeForInstance(instance);
+          // Geometric-mean scale: sqrt(area ratio). Treats both dims symmetrically
+          // so widgets that stretch one axis don't blow up text in the other.
+          const defaultSize = catalogEntry.defaultSize;
+          const widgetScale = Math.sqrt(
+            (size.width * size.height) /
+              (defaultSize.width * defaultSize.height),
+          );
+          const widgetStyle = {
+            ...renderedWidgetStyle({
+              position: renderPosition,
+              size,
+              zIndex: visuallyLiftedZ[instance.id] ?? instance.z,
+              zoom: viewport.zoom,
+            }),
+            "--widget-scale": widgetScale,
+          } as React.CSSProperties;
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: freeform widget node captures canvas drag gestures; WidgetFrame owns semantics.
             <div
@@ -325,6 +376,7 @@ export function WidgetCanvas({
               onPointerDown={(event) => beginWidgetDrag(event, instance)}
               onDragStart={preventNativeDrag}
               style={widgetStyle}
+              className="group/widget"
             >
               <WidgetFrame
                 instance={instance}
@@ -340,6 +392,29 @@ export function WidgetCanvas({
                 onStartProjectChat={onStartProjectChat}
                 onOpenAutomation={onOpenAutomation}
               />
+              <button
+                type="button"
+                aria-label={t("widgets.resize.label", {
+                  widget: t(catalogEntry.labelKey),
+                })}
+                draggable={false}
+                onPointerDown={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  beginWidgetResize(event, instance);
+                }}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                }}
+                className="absolute -right-1.5 -bottom-1.5 z-20 size-4 cursor-nwse-resize rounded-full border border-border bg-background shadow-mini opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              >
+                <span className="sr-only">
+                  {t("widgets.resize.label", {
+                    widget: t(catalogEntry.labelKey),
+                  })}
+                </span>
+              </button>
             </div>
           );
         })}

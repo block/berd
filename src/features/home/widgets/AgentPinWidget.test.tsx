@@ -96,21 +96,12 @@ describe("AgentPinWidget", () => {
     });
 
     await waitFor(() => expect(button).toHaveClass("bg-transparent"));
-    expect(button.className).toContain("w-[min(80%,176px)]");
-    expect(button).not.toHaveClass("h-full");
-    expect(button).not.toHaveClass("w-full");
+    expect(button).toHaveClass("aspect-square", "w-full", "rounded-full");
     expect(button).not.toHaveClass("bg-card");
-    expect(screen.getByTestId("agent-pin-hover-label")).toHaveTextContent(
-      "Agent One",
-    );
-    expect(screen.getByTestId("agent-pin-hover-label")).toHaveClass(
-      "opacity-0",
-      "group-hover:opacity-100",
-      "group-focus-visible:opacity-100",
-      "bg-white/90",
-      "text-[#242424]",
-      "backdrop-blur-md",
-    );
+    expect(screen.getByText("Agent One")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("agent-pin-hover-label"),
+    ).not.toBeInTheDocument();
     expect(container.querySelector(media)).toBeInTheDocument();
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
   });

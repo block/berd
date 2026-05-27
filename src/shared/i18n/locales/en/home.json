@@ -70,6 +70,9 @@
     "unpin": {
       "label": "Unpin"
     },
+    "resize": {
+      "label": "Resize {{widget}}"
+    },
     "picker": {
       "back": "Back",
       "loading": "Loading...",

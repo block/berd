@@ -24,12 +24,22 @@ export interface WidgetSize {
   height: number;
 }
 
+export interface WidgetSizeBounds {
+  minWidth: number;
+  maxWidth: number;
+  minHeight: number;
+  maxHeight: number;
+  lockAspectRatio?: boolean;
+}
+
 export interface WidgetInstance {
   id: string;
   type: string;
   x: number;
   y: number;
   z: number;
+  width?: number;
+  height?: number;
   state?: Record<string, unknown>;
 }
 
@@ -52,6 +62,7 @@ export interface WidgetCatalogEntry {
   labelKey: string;
   descriptionKey?: string;
   defaultSize: WidgetSize;
+  sizeBounds: WidgetSizeBounds;
   /** Renderable component for this widget type. Entries without a Component
    *  are catalog stubs — they appear in data but are not rendered on the canvas
    *  until the component is supplied (Task C fills in the pin types). */
@@ -79,6 +90,13 @@ export interface WidgetMutationHandlers {
     id: string,
     x: number,
     y: number,
+    bounds?: LayoutConstraints,
+    options?: MoveWidgetOptions,
+  ) => void;
+  resizeWidget: (
+    id: string,
+    width: number,
+    height: number,
     bounds?: LayoutConstraints,
     options?: MoveWidgetOptions,
   ) => void;

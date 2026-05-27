@@ -65,22 +65,58 @@ export function ChatPinWidget({
       type="button"
       onClick={handleClick}
       aria-label={t("widgets.chatPin.openAria", { title })}
-      className="flex h-full w-full flex-col rounded-card-chat bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col rounded-card-chat bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      style={{
+        padding: "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",
+      }}
     >
-      <span className="flex min-w-0 items-start gap-2 text-sm leading-[18px] text-foreground">
+      <span
+        className="flex min-w-0 items-start text-foreground"
+        style={{
+          gap: "clamp(0.4rem, calc(0.5rem * var(--widget-scale, 1)), 0.9rem)",
+          fontSize:
+            "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+          lineHeight:
+            "clamp(1rem, calc(1.125rem * var(--widget-scale, 1)), 1.9rem)",
+        }}
+      >
         <IconMessageCircle
-          className="mt-0.5 size-3.5 shrink-0 text-muted-foreground"
+          className="mt-0.5 shrink-0 text-muted-foreground"
           aria-hidden="true"
+          style={{
+            width:
+              "clamp(0.85rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+            height:
+              "clamp(0.85rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+          }}
         />
         <span className="min-w-0 break-words line-clamp-2">{title}</span>
       </span>
-      <span className="mt-auto flex min-w-0 items-center gap-1.5 text-[10px] text-foreground/40">
+      <span
+        className="mt-auto flex min-w-0 items-center text-foreground/40"
+        style={{
+          gap: "clamp(0.3rem, calc(0.375rem * var(--widget-scale, 1)), 0.7rem)",
+          fontSize:
+            "clamp(0.625rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+        }}
+      >
         {project ? (
-          <ProjectIcon
-            icon={project.icon}
-            className="size-3 shrink-0"
-            imageClassName="size-3 shrink-0"
-          />
+          <span
+            aria-hidden="true"
+            className="inline-flex shrink-0 items-center justify-center"
+            style={{
+              width:
+                "clamp(0.7rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+              height:
+                "clamp(0.7rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+            }}
+          >
+            <ProjectIcon
+              icon={project.icon}
+              className="h-full w-full shrink-0"
+              imageClassName="h-full w-full shrink-0"
+            />
+          </span>
         ) : null}
         <span className="min-w-0 break-words line-clamp-2">{footerLabel}</span>
       </span>

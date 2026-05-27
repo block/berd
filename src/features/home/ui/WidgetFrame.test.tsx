@@ -45,6 +45,7 @@ function mutationHandlers(
   return {
     addWidget: vi.fn(),
     moveWidget: vi.fn(),
+    resizeWidget: vi.fn(),
     bumpZ: vi.fn(),
     removeWidget: vi.fn(),
     updateWidgetState: vi.fn(),

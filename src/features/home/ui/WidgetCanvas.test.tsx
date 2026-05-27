@@ -184,6 +184,7 @@ function mutationHandlers(
   return {
     addWidget: vi.fn(),
     moveWidget: vi.fn(),
+    resizeWidget: vi.fn(),
     bumpZ: vi.fn(),
     removeWidget: vi.fn(),
     updateWidgetState: vi.fn(),
@@ -516,6 +517,84 @@ describe("WidgetCanvas", () => {
     );
   });
 
+  it("resizes widgets with type-specific bounds", async () => {
+    const user = userEvent.setup();
+    const resizeWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({
+      instances: [widget()],
+      mutations: { resizeWidget },
+    });
+
+    const canvas = container.firstElementChild as Element;
+    const resizeHandle = screen.getByRole("button", {
+      name: /resize clock/i,
+    });
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: resizeHandle,
+        coords: { clientX: 260, clientY: 270 },
+      },
+      {
+        target: canvas,
+        coords: { clientX: 380, clientY: 390 },
+      },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 380, clientY: 390 },
+      },
+    ]);
+
+    expect(resizeWidget).toHaveBeenCalledWith(
+      "clock-widget",
+      360,
+      360,
+      CANVAS_CONSTRAINTS,
+      { bringToFront: true },
+    );
+  });
+
+  it("clears temporary lift when resize ends without movement", async () => {
+    const user = userEvent.setup();
+    const resizeWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({
+      instances: [widget(), widget({ id: "front-widget", x: 300, z: 2 })],
+      mutations: { resizeWidget },
+    });
+
+    const canvas = container.firstElementChild as Element;
+    const clockNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement | null;
+    expect(clockNode).not.toBeNull();
+    const resizeHandle = clockNode?.querySelector(
+      'button[aria-label="Resize Clock"]',
+    );
+    expect(resizeHandle).not.toBeNull();
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: resizeHandle as Element,
+        coords: { clientX: 260, clientY: 270 },
+      },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 260, clientY: 270 },
+      },
+    ]);
+
+    expect(resizeWidget).not.toHaveBeenCalled();
+    expect(clockNode?.style.zIndex).toBe("1");
+  });
+
   it("saves the camera after panning the canvas background", async () => {
     const user = userEvent.setup();
     const { container } = renderCanvas();
@@ -594,6 +673,30 @@ describe("WidgetCanvas", () => {
       zoomBps: expect.any(Number),
     });
     expect(mocks.saveCamera.mock.calls[0][0].zoomBps).toBeGreaterThan(10_000);
+  });
+
+  it("clamps broad backend zoom constraints to the home canvas max", () => {
+    vi.useFakeTimers();
+    mocks.homeWidgetState.constraints = {
+      ...CANVAS_CONSTRAINTS,
+      maxZoomBps: 80_000,
+    };
+    const { container } = renderCanvas();
+    const canvas = container.firstElementChild as HTMLElement;
+
+    vi.spyOn(canvas, "getBoundingClientRect").mockReturnValue(canvasRect());
+
+    fireEvent.wheel(canvas, {
+      clientX: 400,
+      clientY: 300,
+      ctrlKey: true,
+      deltaY: -10_000,
+    });
+    vi.advanceTimersByTime(150);
+
+    expect(mocks.saveCamera).toHaveBeenCalledWith(
+      expect.objectContaining({ zoomBps: 20_000 }),
+    );
   });
 
   it("omits the Widgets/clock category from the picker", async () => {

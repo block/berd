@@ -99,6 +99,7 @@ function useHomeWidgetLayoutController() {
   );
   const addWidget = useHomeWidgetStore((state) => state.addWidget);
   const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
+  const resizeWidget = useHomeWidgetStore((state) => state.resizeWidget);
   const bumpZ = useHomeWidgetStore((state) => state.bumpZ);
   const removeWidget = useHomeWidgetStore((state) => state.removeWidget);
   const updateWidgetState = useHomeWidgetStore(
@@ -113,11 +114,19 @@ function useHomeWidgetLayoutController() {
     () => ({
       addWidget,
       moveWidget,
+      resizeWidget,
       bumpZ,
       removeWidget,
       updateWidgetState,
     }),
-    [addWidget, moveWidget, bumpZ, removeWidget, updateWidgetState],
+    [
+      addWidget,
+      moveWidget,
+      resizeWidget,
+      bumpZ,
+      removeWidget,
+      updateWidgetState,
+    ],
   );
 
   return {

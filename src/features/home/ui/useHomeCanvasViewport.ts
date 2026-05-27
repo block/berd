@@ -27,7 +27,8 @@ import {
   movedBeyondWidgetDragThreshold,
   offsetBetween,
 } from "../lib/widgetGesture";
-import type { WidgetInstance } from "../widgets/types";
+import { clampWidgetSize, widgetSizeForInstance } from "../widgets/catalog";
+import type { WidgetInstance, WidgetSize } from "../widgets/types";
 
 type ActivePointer =
   | {
@@ -48,12 +49,32 @@ type ActivePointer =
       startPosition: CanvasPoint;
       didDrag: boolean;
       instance: WidgetInstance;
+    }
+  | {
+      kind: "resize";
+      pointerId: number;
+      captureElement: HTMLElement;
+      widgetId: string;
+      startClient: CanvasPoint;
+      startViewport: CanvasViewport;
+      startSize: WidgetSize;
+      instance: WidgetInstance;
     };
 
 type WidgetDragEnd = {
   id: string;
   position: CanvasPoint;
   offset: CanvasPoint;
+};
+
+type WidgetResizeEnd = {
+  id: string;
+  size: WidgetSize;
+  offset: CanvasPoint;
+};
+
+type WidgetResizeCancel = {
+  id: string;
 };
 
 type SelectionLockSnapshot = {
@@ -80,6 +101,9 @@ interface UseHomeCanvasViewportOptions {
   onViewportGestureStart?: () => void;
   onWidgetDragStart?: (instance: WidgetInstance) => void;
   onWidgetDragEnd?: (drag: WidgetDragEnd) => void;
+  onWidgetResizeStart?: (instance: WidgetInstance) => void;
+  onWidgetResizeEnd?: (resize: WidgetResizeEnd) => void;
+  onWidgetResizeCancel?: (resize: WidgetResizeCancel) => void;
 }
 
 function viewportSize(element: HTMLElement | null) {
@@ -174,6 +198,17 @@ function widgetPositionFromOffset(
   };
 }
 
+function widgetSizeFromOffset(
+  activePointer: Extract<ActivePointer, { kind: "resize" }>,
+  offset: CanvasPoint,
+): WidgetSize {
+  const { instance, startSize, startViewport } = activePointer;
+  return clampWidgetSize(instance.type, {
+    width: startSize.width + offset.x / startViewport.zoom,
+    height: startSize.height + offset.y / startViewport.zoom,
+  });
+}
+
 export function useHomeCanvasViewport({
   camera,
   constraints,
@@ -181,6 +216,9 @@ export function useHomeCanvasViewport({
   onViewportGestureStart,
   onWidgetDragStart,
   onWidgetDragEnd,
+  onWidgetResizeStart,
+  onWidgetResizeEnd,
+  onWidgetResizeCancel,
 }: UseHomeCanvasViewportOptions) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const activePointerRef = useRef<ActivePointer | null>(null);
@@ -193,6 +231,9 @@ export function useHomeCanvasViewport({
   const [dragPositions, setDragPositions] = useState<
     Record<string, CanvasPoint>
   >({});
+  const [resizeSizes, setResizeSizes] = useState<Record<string, WidgetSize>>(
+    {},
+  );
 
   const viewportCamera = useCallback(
     (nextViewport: CanvasViewport) =>
@@ -333,6 +374,12 @@ export function useHomeCanvasViewport({
     [],
   );
 
+  const clearWidgetResizeSize = useCallback(
+    (widgetId: string) =>
+      setResizeSizes(({ [widgetId]: _removed, ...rest }) => rest),
+    [],
+  );
+
   const worldPointForClientPoint = useCallback(
     (point: CanvasPoint): CanvasPoint => {
       const rect = canvasRef.current?.getBoundingClientRect();
@@ -384,6 +431,35 @@ export function useHomeCanvasViewport({
     [onViewportGestureStart, viewport],
   );
 
+  const beginWidgetResize = useCallback(
+    (event: React.PointerEvent<HTMLElement>, instance: WidgetInstance) => {
+      if (typeof event.button === "number" && event.button !== 0) {
+        return;
+      }
+
+      lockDocumentSelection();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      onViewportGestureStart?.();
+      onWidgetResizeStart?.(instance);
+      activePointerRef.current = {
+        kind: "resize",
+        pointerId: event.pointerId,
+        captureElement: event.currentTarget,
+        widgetId: instance.id,
+        startClient: eventClientPoint(event),
+        startViewport: viewport,
+        startSize: widgetSizeForInstance(instance),
+        instance,
+      };
+    },
+    [
+      lockDocumentSelection,
+      onViewportGestureStart,
+      onWidgetResizeStart,
+      viewport,
+    ],
+  );
+
   const handlePointerMove = useCallback(
     (event: React.PointerEvent<HTMLElement>) => {
       const activePointer = activePointerRef.current;
@@ -405,6 +481,14 @@ export function useHomeCanvasViewport({
       }
 
       const offset = offsetBetween(eventClient, activePointer.startClient);
+      if (activePointer.kind === "resize") {
+        setResizeSizes((current) => ({
+          ...current,
+          [activePointer.widgetId]: widgetSizeFromOffset(activePointer, offset),
+        }));
+        return;
+      }
+
       if (!activePointer.didDrag && !movedBeyondWidgetDragThreshold(offset)) {
         return;
       }
@@ -431,13 +515,23 @@ export function useHomeCanvasViewport({
 
       activePointerRef.current = null;
       unlockDocumentSelection();
-      if (activePointer.kind === "pan" || activePointer.hasCapture) {
+      if (
+        activePointer.kind === "pan" ||
+        activePointer.kind === "resize" ||
+        activePointer.hasCapture
+      ) {
         releasePointerCapture(activePointer);
       }
 
       if (event.type === "pointercancel") {
         if (activePointer.kind === "pan") {
           setViewport(activePointer.startViewport);
+          return;
+        }
+
+        if (activePointer.kind === "resize") {
+          clearWidgetResizeSize(activePointer.widgetId);
+          onWidgetResizeCancel?.({ id: activePointer.widgetId });
           return;
         }
 
@@ -463,6 +557,25 @@ export function useHomeCanvasViewport({
         return;
       }
 
+      if (activePointer.kind === "resize") {
+        if (offset.x === 0 && offset.y === 0) {
+          clearWidgetResizeSize(activePointer.widgetId);
+          onWidgetResizeCancel?.({ id: activePointer.widgetId });
+          return;
+        }
+
+        const finalSize = widgetSizeFromOffset(activePointer, offset);
+
+        clearScheduledCameraSave();
+        clearWidgetResizeSize(activePointer.widgetId);
+        onWidgetResizeEnd?.({
+          id: activePointer.widgetId,
+          size: finalSize,
+          offset,
+        });
+        return;
+      }
+
       if (!activePointer.didDrag && !movedBeyondWidgetDragThreshold(offset)) {
         return;
       }
@@ -483,9 +596,12 @@ export function useHomeCanvasViewport({
     [
       clearScheduledCameraSave,
       clearWidgetDragPosition,
+      clearWidgetResizeSize,
       commitCamera,
       onWidgetDragEnd,
       onWidgetDragStart,
+      onWidgetResizeCancel,
+      onWidgetResizeEnd,
       unlockDocumentSelection,
     ],
   );
@@ -584,9 +700,11 @@ export function useHomeCanvasViewport({
     canvasRef,
     viewport,
     dragPositions,
+    resizeSizes,
     worldPointForClientPoint,
     beginPan,
     beginWidgetDrag,
+    beginWidgetResize,
     handlePointerMove,
     finishPointerGesture,
     handleWheel,

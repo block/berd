@@ -48,7 +48,13 @@ export function ClockWidget(_props: WidgetRenderProps) {
     >
       <div aria-hidden="true" className="absolute inset-0">
         {/* Day label — left side */}
-        <div className="absolute left-[16%] top-1/2 z-10 -translate-y-1/2 px-1 text-[30px] font-light leading-none tracking-normal">
+        <div
+          className="absolute left-[16%] top-1/2 z-10 -translate-y-1/2 px-1 font-light leading-none tracking-normal"
+          style={{
+            fontSize:
+              "clamp(1.25rem, calc(1.875rem * var(--widget-scale, 1)), 3rem)",
+          }}
+        >
           {day}
         </div>
 
@@ -69,10 +75,24 @@ export function ClockWidget(_props: WidgetRenderProps) {
         </div>
 
         {/* Center hub */}
-        <div className="absolute left-1/2 top-1/2 z-40 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white" />
+        <div
+          className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          style={{
+            width:
+              "clamp(0.625rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+            height:
+              "clamp(0.625rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+          }}
+        />
 
         {/* Date label — right side */}
-        <div className="absolute right-[14%] top-1/2 z-10 -translate-y-1/2 px-1 text-[30px] font-light leading-none tracking-normal">
+        <div
+          className="absolute right-[14%] top-1/2 z-10 -translate-y-1/2 px-1 font-light leading-none tracking-normal"
+          style={{
+            fontSize:
+              "clamp(1.25rem, calc(1.875rem * var(--widget-scale, 1)), 3rem)",
+          }}
+        >
           {date}
         </div>
       </div>

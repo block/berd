@@ -131,7 +131,14 @@ export function AutomationOutputWidget({
         onClick={handleUnavailableClick}
         className="flex h-full w-full items-center justify-center bg-card text-muted-foreground rounded-card-chat cursor-pointer"
       >
-        <span className="text-sm leading-[15px]">
+        <span
+          style={{
+            fontSize:
+              "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+            lineHeight:
+              "clamp(0.95rem, calc(0.9375rem * var(--widget-scale, 1)), 1.6rem)",
+          }}
+        >
           {t("widgets.automationOutputPin.unavailable")}
         </span>
       </button>
@@ -153,20 +160,49 @@ export function AutomationOutputWidget({
       type="button"
       onClick={handleClick}
       aria-label={title}
-      className="flex h-full w-full flex-col overflow-hidden rounded-card-chat bg-card p-4 text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col overflow-hidden rounded-card-chat bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      style={{
+        padding: "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",
+      }}
     >
-      <div className="flex flex-col gap-1">
-        <span className="truncate text-sm leading-[15px] text-foreground">
+      <div
+        className="flex flex-col"
+        style={{
+          gap: "clamp(0.2rem, calc(0.25rem * var(--widget-scale, 1)), 0.5rem)",
+        }}
+      >
+        <span
+          className="truncate text-foreground"
+          style={{
+            fontSize:
+              "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+            lineHeight:
+              "clamp(0.95rem, calc(0.9375rem * var(--widget-scale, 1)), 1.6rem)",
+          }}
+        >
           {title}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-[10px] text-foreground/40">
+        <span
+          className="flex min-w-0 items-center text-foreground/40"
+          style={{
+            gap: "clamp(0.3rem, calc(0.375rem * var(--widget-scale, 1)), 0.7rem)",
+            fontSize:
+              "clamp(0.625rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+          }}
+        >
           <span
             aria-hidden="true"
             className={cn(
-              "size-1.5 rounded-full shrink-0",
+              "rounded-full shrink-0",
               statusDotClass(cardState),
               cardState === "running" && "animate-pulse",
             )}
+            style={{
+              width:
+                "clamp(0.35rem, calc(0.375rem * var(--widget-scale, 1)), 0.625rem)",
+              height:
+                "clamp(0.35rem, calc(0.375rem * var(--widget-scale, 1)), 0.625rem)",
+            }}
           />
           <span className="truncate">
             {statusLabel}
@@ -175,13 +211,32 @@ export function AutomationOutputWidget({
         </span>
       </div>
 
-      <div className="mt-auto min-h-0 max-h-[calc(100%-3.5rem)] overflow-y-auto pt-4">
+      <div
+        className="mt-auto min-h-0 max-h-[calc(100%-3.5rem)] overflow-y-auto"
+        style={{
+          paddingTop:
+            "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",
+        }}
+      >
         {outputSummary ? (
-          <p className="text-xs leading-[1.4] text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]">
+          <p
+            className="text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]"
+            style={{
+              fontSize:
+                "clamp(0.75rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+              lineHeight: "1.4",
+            }}
+          >
             {outputSummary}
           </p>
         ) : (
-          <p className="text-xs italic text-muted-foreground">
+          <p
+            className="italic text-muted-foreground"
+            style={{
+              fontSize:
+                "clamp(0.75rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+            }}
+          >
             {t("widgets.automationOutputPin.noOutput")}
           </p>
         )}

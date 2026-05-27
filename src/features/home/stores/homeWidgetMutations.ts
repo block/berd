@@ -4,8 +4,16 @@ import {
   isLayoutConstraints,
   snapPoint,
 } from "../lib/snapToGrid";
-import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
-import type { MoveWidgetOptions, WidgetInstance } from "../widgets/types";
+import {
+  clampWidgetSize,
+  HOME_WIDGET_CATALOG_BY_ID,
+  widgetSizeForInstance,
+} from "../widgets/catalog";
+import type {
+  MoveWidgetOptions,
+  WidgetInstance,
+  WidgetSize,
+} from "../widgets/types";
 
 type AddWidgetOptions = {
   id: string;
@@ -53,6 +61,7 @@ function resolvePosition(
   type: string,
   x: number,
   y: number,
+  size: WidgetSize,
   bounds?: LayoutConstraints,
 ): { x: number; y: number } {
   const entry = HOME_WIDGET_CATALOG_BY_ID[type];
@@ -60,7 +69,7 @@ function resolvePosition(
   if (!entry || !isLayoutConstraints(bounds)) {
     return snapped;
   }
-  return clampToLayoutConstraints(snapped, entry.defaultSize, bounds);
+  return clampToLayoutConstraints(snapped, size, bounds);
 }
 
 function isStateMergeNoop(
@@ -83,11 +92,13 @@ export function addWidgetMutation(
   if (!entry) {
     return null;
   }
+  const size = clampWidgetSize(type, entry.defaultSize);
 
   const centered = resolvePosition(
     type,
-    x - entry.defaultSize.width / 2,
-    y - entry.defaultSize.height / 2,
+    x - size.width / 2,
+    y - size.height / 2,
+    size,
     bounds,
   );
 
@@ -99,6 +110,8 @@ export function addWidgetMutation(
       x: centered.x,
       y: centered.y,
       z: maxZ(instances) + 1,
+      width: size.width,
+      height: size.height,
       state,
     },
   ];
@@ -117,7 +130,13 @@ export function moveWidgetMutation(
     return null;
   }
 
-  const position = resolvePosition(target.type, x, y, bounds);
+  const position = resolvePosition(
+    target.type,
+    x,
+    y,
+    widgetSizeForInstance(target),
+    bounds,
+  );
   const moved = target.x !== position.x || target.y !== position.y;
   const nextInstances = moved
     ? instances.map((instance) =>
@@ -133,6 +152,54 @@ export function moveWidgetMutation(
   const next = applyNormalizedZOrder(nextInstances, zById);
   if (
     !moved &&
+    next.every((instance, index) => instance.z === nextInstances[index]?.z)
+  ) {
+    return null;
+  }
+
+  return next;
+}
+
+export function resizeWidgetMutation(
+  instances: WidgetInstance[],
+  id: string,
+  width: number,
+  height: number,
+  bounds?: LayoutConstraints,
+  options: MoveWidgetOptions = {},
+): WidgetInstance[] | null {
+  const target = instances.find((instance) => instance.id === id);
+  if (!target) {
+    return null;
+  }
+
+  const size = clampWidgetSize(target.type, { width, height });
+  const position = resolvePosition(
+    target.type,
+    target.x,
+    target.y,
+    size,
+    bounds,
+  );
+  const resized =
+    target.width !== size.width ||
+    target.height !== size.height ||
+    target.x !== position.x ||
+    target.y !== position.y;
+  const nextInstances = resized
+    ? instances.map((instance) =>
+        instance.id === id ? { ...instance, ...position, ...size } : instance,
+      )
+    : instances;
+
+  if (!options.bringToFront) {
+    return resized ? nextInstances : null;
+  }
+
+  const zById = normalizedZById(nextInstances, id);
+  const next = applyNormalizedZOrder(nextInstances, zById);
+  if (
+    !resized &&
     next.every((instance, index) => instance.z === nextInstances[index]?.z)
   ) {
     return null;
