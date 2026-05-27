@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "./BottomFade";
 import { MainPanelLayout } from "./MainPanelLayout";
@@ -41,34 +41,17 @@ export function PageShell({
   contentAlign = "top",
   showBottomFade = true,
 }: ShellProps) {
-  const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
-
   return (
-    <MainPanelLayout className={className}>
-      <div className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
-        <div
-          className={cn(
-            "mx-auto flex min-h-full w-full flex-col px-6 pt-8 page-transition",
-            showBottomFade ? "pb-app-page-bottom" : "pb-8",
-            widthClassName,
-          )}
-        >
-          <div
-            className={cn(
-              "flex w-full flex-col gap-8",
-              // `my-auto` centers only the content; the BottomFade sibling keeps
-              // its place at the wrapper's bottom edge instead of floating up
-              // with the centered group.
-              contentAlign === "center" && "my-auto",
-              contentClassName,
-            )}
-          >
-            {children}
-          </div>
-          {showBottomFade ? <BottomFade className="-mt-64" /> : null}
-        </div>
-      </div>
-    </MainPanelLayout>
+    <PageScrollFrame
+      className={className}
+      contentClassName={contentClassName}
+      contentWidth={contentWidth}
+      contentAlign={contentAlign}
+      showBottomFade={showBottomFade}
+      minContentHeight
+    >
+      {children}
+    </PageScrollFrame>
   );
 }
 
@@ -79,24 +62,63 @@ export function DetailPageShell({
   contentWidth = "default",
   showBottomFade = true,
 }: ShellProps) {
+  return (
+    <PageScrollFrame
+      className={className}
+      contentClassName={contentClassName}
+      contentWidth={contentWidth}
+      showBottomFade={showBottomFade}
+    >
+      {children}
+    </PageScrollFrame>
+  );
+}
+
+function PageScrollFrame({
+  children,
+  className,
+  contentClassName,
+  contentWidth = "default",
+  contentAlign = "top",
+  showBottomFade = true,
+  minContentHeight = false,
+}: ShellProps & { minContentHeight?: boolean }) {
   const widthClassName = SHELL_WIDTH_CLASSES[contentWidth];
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(
+    null,
+  );
 
   return (
-    <MainPanelLayout className={className}>
-      <div className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]">
+    <MainPanelLayout className={cn("relative", className)}>
+      <div
+        ref={setScrollElement}
+        className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]"
+      >
         <div
           className={cn(
             "mx-auto flex w-full flex-col px-6 pt-8 page-transition",
+            minContentHeight && "min-h-full",
             showBottomFade ? "pb-app-page-bottom" : "pb-8",
             widthClassName,
           )}
         >
-          <div className={cn("flex w-full flex-col gap-8", contentClassName)}>
+          <div
+            className={cn(
+              "flex w-full flex-col gap-8",
+              contentAlign === "center" && "my-auto",
+              contentClassName,
+            )}
+          >
             {children}
           </div>
-          {showBottomFade ? <BottomFade className="-mt-64" /> : null}
         </div>
       </div>
+      {showBottomFade ? (
+        <BottomFade
+          scrollElement={scrollElement}
+          className="absolute inset-x-0 bottom-0 z-10"
+        />
+      ) : null}
     </MainPanelLayout>
   );
 }

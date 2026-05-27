@@ -85,6 +85,9 @@ export function SessionHistoryView({
 }: SessionHistoryViewProps) {
   const { t, i18n } = useTranslation(["sessions", "common"]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(
+    null,
+  );
   const pageContentRef = useRef<HTMLDivElement>(null);
   const columnProbeRef = useRef<HTMLDivElement>(null);
   const virtualListRef = useRef<HTMLDivElement>(null);
@@ -686,11 +689,15 @@ export function SessionHistoryView({
       ? t("history.loadingMoreSearchResults")
       : t("history.loadingMoreSessions")
     : "";
+  const setScrollNode = useCallback((node: HTMLDivElement | null) => {
+    scrollRef.current = node;
+    setScrollElement(node);
+  }, []);
 
   return (
-    <div className="flex h-full min-h-0 flex-1 flex-col">
+    <div className="relative flex h-full min-h-0 flex-1 flex-col">
       <div
-        ref={scrollRef}
+        ref={setScrollNode}
         data-testid="session-history-scroll"
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-y-scroll [scrollbar-gutter:stable]"
@@ -827,9 +834,12 @@ export function SessionHistoryView({
                 : t("history.loadingMoreSessions")}
             </div>
           )}
-          <BottomFade className="-mt-64" />
         </div>
       </div>
+      <BottomFade
+        scrollElement={scrollElement}
+        className="absolute inset-x-0 bottom-0 z-10"
+      />
 
       <input
         ref={fileInputRef}

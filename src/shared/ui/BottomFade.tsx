@@ -3,6 +3,7 @@ import { cn } from "@/shared/lib/cn";
 
 interface BottomFadeProps {
   className?: string;
+  scrollElement?: HTMLElement | null;
   surface?: string;
 }
 
@@ -10,6 +11,7 @@ const FADE_OUT_DISTANCE = 120;
 
 export function BottomFade({
   className,
+  scrollElement,
   surface = "var(--canvas-base)",
 }: BottomFadeProps) {
   const ref = useRef<HTMLDivElement>(null);
@@ -19,13 +21,19 @@ export function BottomFade({
     const el = ref.current;
     if (!el) return;
 
-    let scrollEl: HTMLElement | null = el.parentElement;
-    while (scrollEl) {
-      const overflowY = getComputedStyle(scrollEl).overflowY;
-      if (overflowY === "scroll" || overflowY === "auto") break;
-      scrollEl = scrollEl.parentElement;
+    let scrollEl: HTMLElement | null = scrollElement ?? el.parentElement;
+    if (!scrollElement) {
+      while (scrollEl) {
+        const overflowY = getComputedStyle(scrollEl).overflowY;
+        if (overflowY === "scroll" || overflowY === "auto") break;
+        scrollEl = scrollEl.parentElement;
+      }
     }
     if (!scrollEl) return;
+    const contentEl =
+      scrollEl.firstElementChild instanceof HTMLElement
+        ? scrollEl.firstElementChild
+        : null;
 
     const update = () => {
       const maxScroll = scrollEl.scrollHeight - scrollEl.clientHeight;
@@ -42,13 +50,14 @@ export function BottomFade({
     scrollEl.addEventListener("scroll", update, { passive: true });
     const ro = new ResizeObserver(update);
     ro.observe(scrollEl);
+    if (contentEl) ro.observe(contentEl);
     if (el.parentElement) ro.observe(el.parentElement);
 
     return () => {
       scrollEl?.removeEventListener("scroll", update);
       ro.disconnect();
     };
-  }, []);
+  }, [scrollElement]);
 
   return (
     <div
