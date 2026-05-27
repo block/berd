@@ -13,6 +13,7 @@ interface SubmitComposerMessageOptions {
   resolveSkillSlashCommand: (
     message: string,
   ) => SkillCommandMatch<ChatSkillDraft> | null;
+  resolveAutoSkill?: (message: string) => ChatSkillDraft | null;
 }
 
 export async function submitComposerMessage({
@@ -22,12 +23,17 @@ export async function submitComposerMessage({
   selectedPersonaId,
   onSend,
   resolveSkillSlashCommand,
+  resolveAutoSkill,
 }: SubmitComposerMessageOptions) {
   const slashSkillCommand =
     skills.length === 0 ? resolveSkillSlashCommand(text) : null;
+  const autoSkill =
+    skills.length === 0 && slashSkillCommand === null
+      ? (resolveAutoSkill?.(text) ?? null)
+      : null;
   const { messageText, sendOptions } = buildSkillSendPayload(
     text,
-    skills,
+    autoSkill ? [autoSkill] : skills,
     slashSkillCommand,
   );
   const submittedAttachments = attachments.length > 0 ? attachments : undefined;

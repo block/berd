@@ -36,6 +36,7 @@ import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
 import { resolveAgentToolsCapabilityTip } from "../lib/agentToolsCapabilities";
 import { useAgentToolsTipsPreference } from "../lib/agentToolsTipPreferences";
 import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
+import { resolveGooseHelpSkill } from "../lib/gooseHelpSkill";
 import type { ChatInputProps, ChatSkillDraft } from "../types";
 import { ContextualTip } from "@/shared/ui/contextual-tip";
 
@@ -236,6 +237,14 @@ export function ChatInput({
     onSkillMentionSelect: handleSkillMentionAdded,
   });
 
+  const resolveAutoSkill = useCallback(
+    (message: string) =>
+      scopedControls.skills
+        ? resolveGooseHelpSkill(message, skillMentionItems)
+        : null,
+    [scopedControls.skills, skillMentionItems],
+  );
+
   useEffect(() => {
     const element = containerRef.current;
     if (!element || typeof ResizeObserver === "undefined") {
@@ -264,6 +273,7 @@ export function ChatInput({
     onSend,
     setSelectedSkills,
     resolveSkillSlashCommand,
+    resolveAutoSkill,
   });
 
   const dictation = useVoiceDictation({

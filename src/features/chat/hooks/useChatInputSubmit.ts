@@ -14,6 +14,7 @@ interface UseChatInputSubmitOptions {
   resolveSkillSlashCommand: (
     message: string,
   ) => SkillCommandMatch<ChatSkillDraft> | null;
+  resolveAutoSkill?: (message: string) => ChatSkillDraft | null;
 }
 
 export function useChatInputSubmit({
@@ -23,6 +24,7 @@ export function useChatInputSubmit({
   onSend,
   setSelectedSkills,
   resolveSkillSlashCommand,
+  resolveAutoSkill,
 }: UseChatInputSubmitOptions) {
   const submitChatInputMessage = useCallback(
     (
@@ -37,8 +39,9 @@ export function useChatInputSubmit({
         selectedPersonaId,
         onSend,
         resolveSkillSlashCommand,
+        resolveAutoSkill,
       }),
-    [onSend, resolveSkillSlashCommand, selectedPersonaId],
+    [onSend, resolveAutoSkill, resolveSkillSlashCommand, selectedPersonaId],
   );
 
   const handleVoiceAutoSubmit = useCallback(
