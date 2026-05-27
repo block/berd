@@ -175,6 +175,36 @@ describe("acpNotificationHandler", () => {
     ).toBe("assistant-1");
   });
 
+  it("attaches active persona identity to the live assistant message", async () => {
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-1", {
+      personaId: "persona-1",
+      personaName: "Builder",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Ready to build.",
+        },
+      },
+    } as never);
+
+    const [message] = useChatStore.getState().messagesBySession["acp-session"];
+    expect(message).toMatchObject({
+      id: "assistant-1",
+      role: "assistant",
+      metadata: {
+        personaId: "persona-1",
+        personaName: "Builder",
+        completionStatus: "inProgress",
+      },
+    });
+  });
+
   it("does not let a stale backend model snapshot overwrite a pending selected model", async () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",

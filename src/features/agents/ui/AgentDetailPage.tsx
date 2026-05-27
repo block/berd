@@ -7,7 +7,6 @@ import {
   AvatarFallback,
   AvatarImage,
 } from "@/shared/ui/avatar";
-import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { DetailField } from "@/shared/ui/detail-field";
@@ -20,7 +19,7 @@ import {
 import { PageColumns } from "@/shared/ui/page-columns";
 import { DetailPageShell, PageHeader } from "@/shared/ui/page-shell";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
-import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import type { Persona } from "@/shared/types/agents";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
@@ -96,7 +95,7 @@ export function AgentDetailPage({
 }: AgentDetailPageProps) {
   const { t } = useTranslation(["agents", "common"]);
   const acpProviders = useAgentStore((s) => s.providers);
-  const avatarMedia = useAvatarMedia(persona.avatar);
+  const avatarImage = useAvatarImage(persona.avatar);
   const initials = getPersonaInitials(persona.displayName);
   const personaSource = getPersonaSource(persona);
   const isEditable = canEditPersona(persona);
@@ -132,19 +131,10 @@ export function AgentDetailPage({
           title={
             <span className="inline-flex min-w-0 items-center gap-3">
               <AvatarRoot className="size-12 shrink-0 border border-border/80 bg-muted/30">
-                {avatarMedia?.mediaType === "video" ? (
-                  <AvatarMedia media={avatarMedia} alt={persona.displayName} />
-                ) : (
-                  <>
-                    <AvatarImage
-                      src={avatarMedia?.src}
-                      alt={persona.displayName}
-                    />
-                    <AvatarFallback className="text-base font-semibold">
-                      {initials}
-                    </AvatarFallback>
-                  </>
-                )}
+                <AvatarImage src={avatarImage} alt={persona.displayName} />
+                <AvatarFallback className="text-base font-semibold">
+                  {initials}
+                </AvatarFallback>
               </AvatarRoot>
               <span className="min-w-0 truncate">{persona.displayName}</span>
             </span>

@@ -31,6 +31,32 @@ export async function getArtifacts(): Promise<Artifacts> {
   return invoke<RawArtifacts>("get_artifacts");
 }
 
+function avatarIdFromArtifactPath(path: string): string | undefined {
+  const filename = path.split("/").pop();
+  if (!filename) return undefined;
+  const dotIndex = filename.lastIndexOf(".");
+  return dotIndex > 0 ? filename.slice(0, dotIndex) : filename;
+}
+
+/**
+ * Look up the local file URL for the static collection image whose filename
+ * matches the given avatar id (e.g. `fuzzies-1` → `assets/images/fuzzies/fuzzies-1.png`).
+ * Returns undefined when the artifacts catalog isn't loaded yet or no matching
+ * asset exists.
+ */
+export function selectAvatarImageUrl(
+  artifacts: Artifacts | null | undefined,
+  avatarId: string,
+): string | undefined {
+  if (!artifacts) return undefined;
+  const match = artifacts.assets.find(
+    (asset) =>
+      asset.kind === "collectionImage" &&
+      avatarIdFromArtifactPath(asset.path) === avatarId,
+  );
+  return match ? convertFileSrc(match.path, "asset") : undefined;
+}
+
 export function selectProjectPreviewArtifacts(
   artifacts: Artifacts,
 ): ProjectPreviewArtifacts | null {

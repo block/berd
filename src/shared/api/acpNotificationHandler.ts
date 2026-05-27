@@ -6,6 +6,7 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
 import type {
+  MessageMetadata,
   ToolCallLocation,
   ToolKind,
   ToolRequestContent,
@@ -33,8 +34,13 @@ import {
 } from "./acpToolCallIdentity";
 import { perfLog } from "@/shared/lib/perfLog";
 
-// Pre-set message ID for the next live stream per session.
-const presetMessageIds = new Map<string, string>();
+interface ActiveMessagePreset {
+  messageId: string;
+  metadata?: Pick<MessageMetadata, "personaId" | "personaName">;
+}
+
+// Pre-set message details for the next live stream per session.
+const activeMessagePresets = new Map<string, ActiveMessagePreset>();
 
 // Per-session perf counters for replay/live streaming.
 interface ReplayPerf {
@@ -247,8 +253,12 @@ function handleModelConfigSnapshot(
   });
 }
 
-export function setActiveMessageId(sessionId: string, messageId: string): void {
-  presetMessageIds.set(sessionId, messageId);
+export function setActiveMessageId(
+  sessionId: string,
+  messageId: string,
+  metadata?: ActiveMessagePreset["metadata"],
+): void {
+  activeMessagePresets.set(sessionId, { messageId, metadata });
   livePerf.set(sessionId, {
     sendStartedAt: performance.now(),
     firstChunkAt: null,
@@ -257,7 +267,7 @@ export function setActiveMessageId(sessionId: string, messageId: string): void {
 }
 
 export function clearActiveMessageId(sessionId: string): void {
-  presetMessageIds.delete(sessionId);
+  activeMessagePresets.delete(sessionId);
   const perf = livePerf.get(sessionId);
   if (perf) {
     const sid = sessionId.slice(0, 8);
@@ -681,17 +691,27 @@ function ensureLiveAssistantMessage(
   const store = useChatStore.getState();
   const existingStreamingMessageId = findStreamingMessageId(sessionId);
   const messages = store.messagesBySession[sessionId] ?? [];
+  const activePreset = activeMessagePresets.get(sessionId);
 
   if (
     existingStreamingMessageId &&
     messages.some((message) => message.id === existingStreamingMessageId)
   ) {
+    if (activePreset?.metadata) {
+      store.updateMessage(sessionId, existingStreamingMessageId, (message) => ({
+        ...message,
+        metadata: {
+          ...message.metadata,
+          ...activePreset.metadata,
+        },
+      }));
+    }
     return existingStreamingMessageId;
   }
 
   const messageId =
     preferredMessageId ??
-    presetMessageIds.get(sessionId) ??
+    activePreset?.messageId ??
     existingStreamingMessageId ??
     crypto.randomUUID();
 
@@ -705,6 +725,7 @@ function ensureLiveAssistantMessage(
         userVisible: true,
         agentVisible: true,
         completionStatus: "inProgress",
+        ...activePreset?.metadata,
       },
     });
   }
@@ -717,7 +738,7 @@ function ensureLiveAssistantMessage(
 }
 
 export function clearMessageTracking(): void {
-  presetMessageIds.clear();
+  activeMessagePresets.clear();
   clearReplayAssistantTracking();
 }
 

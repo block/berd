@@ -13,7 +13,7 @@ import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
-import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
@@ -335,6 +335,7 @@ export const MessageBubble = memo(function MessageBubble({
   );
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
   const personaAvatarMedia = useAvatarMedia(persona?.avatar);
+  const personaGutterImage = useAvatarImage(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
@@ -374,8 +375,12 @@ export const MessageBubble = memo(function MessageBubble({
   const assistantProviderIcon = assistantProviderId
     ? getProviderIcon(assistantProviderId, "size-3.5")
     : null;
+  const showPersonaGutterAvatar = Boolean(
+    !isUser && (message.metadata?.personaId || personaAvatarMedia),
+  );
   const showAssistantIdentity = Boolean(
     !isUser &&
+      !showPersonaGutterAvatar &&
       (assistantDisplayName || personaAvatarMedia || assistantProviderIcon),
   );
   const messageAttachments = message.metadata?.attachments ?? [];
@@ -397,10 +402,33 @@ export const MessageBubble = memo(function MessageBubble({
       className={cn(
         "flex px-4 py-1",
         "animate-in fade-in duration-200 motion-reduce:animate-none",
-        isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row",
+        isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
     >
+      {showPersonaGutterAvatar ? (
+        <div
+          className={cn(
+            "mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md",
+            // The persona PNGs are transparent — skip the muted backdrop
+            // when we're rendering an actual image so the chat surface
+            // shows through. Keep it for the icon fallback so the icon
+            // has something behind it.
+            !personaGutterImage && "bg-muted/40",
+          )}
+          data-role="assistant-persona-avatar"
+        >
+          {personaGutterImage ? (
+            <img
+              src={personaGutterImage}
+              alt=""
+              className="h-full w-full object-contain"
+            />
+          ) : (
+            <IconRobot size={16} className="text-muted-foreground" />
+          )}
+        </div>
+      ) : null}
       <div
         className={cn(
           "group relative min-w-0 flex flex-col gap-1 pb-8",

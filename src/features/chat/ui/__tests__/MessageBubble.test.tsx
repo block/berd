@@ -509,6 +509,69 @@ describe("MessageBubble", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("renders a custom persona avatar in the assistant gutter", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Builder",
+          avatar: "https://example.test/builder.png",
+          systemPrompt: "",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "hi" }], {
+          metadata: { personaId: "persona-1", personaName: "Builder" },
+        })}
+      />,
+    );
+
+    const gutterAvatar = container.querySelector(
+      '[data-role="assistant-persona-avatar"]',
+    );
+    expect(gutterAvatar).toHaveClass("size-9");
+    expect(gutterAvatar?.querySelector("img")).toHaveAttribute(
+      "src",
+      "https://example.test/builder.png",
+    );
+    expect(screen.queryByText("Builder")).not.toBeInTheDocument();
+  });
+
+  it("keeps custom persona identity in the gutter while avatar media is unavailable", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Builder",
+          avatar: "app-avatar:gloopy-1",
+          systemPrompt: "",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "hi" }], {
+          metadata: { personaId: "persona-1", personaName: "Builder" },
+        })}
+      />,
+    );
+
+    const gutterAvatar = container.querySelector(
+      '[data-role="assistant-persona-avatar"]',
+    );
+    expect(gutterAvatar).toHaveClass("size-9");
+    expect(gutterAvatar?.querySelector("img")).toBeNull();
+    expect(screen.queryByText("Builder")).not.toBeInTheDocument();
+  });
+
   it("does not render an assistant name when message identity metadata is missing", () => {
     render(
       <MessageBubble

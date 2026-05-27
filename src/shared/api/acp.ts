@@ -79,7 +79,8 @@ export async function acpSendMessage(
   prompt: string,
   options: AcpSendMessageOptions = {},
 ): Promise<void> {
-  const { systemPrompt, assistantPrompt, personaId, images } = options;
+  const { systemPrompt, assistantPrompt, personaId, personaName, images } =
+    options;
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
@@ -110,7 +111,16 @@ export async function acpSendMessage(
   }
 
   const messageId = crypto.randomUUID();
-  setActiveMessageId(sessionId, messageId);
+  setActiveMessageId(
+    sessionId,
+    messageId,
+    personaId
+      ? {
+          personaId,
+          ...(personaName ? { personaName } : {}),
+        }
+      : undefined,
+  );
 
   perfLog(
     `[perf:send] ${sid} acpSendMessage → prompt(len=${prompt.length}, imgs=${images?.length ?? 0})`,
