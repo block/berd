@@ -104,6 +104,16 @@ const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
   "goose:design-system-inspector-visible";
 
+const current = (id: string, label: string): TopBarBreadcrumb => ({
+  id,
+  label,
+});
+const parent = (
+  id: string,
+  label: string,
+  onClick: () => void,
+): TopBarBreadcrumb => ({ id, label, onClick });
+
 function validateBooleanPreference(value: unknown, defaults: boolean) {
   return typeof value === "boolean" ? value : defaults;
 }
@@ -1495,62 +1505,51 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, []);
 
   const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
-    const rootCrumb: TopBarBreadcrumb = {
-      id: "root",
-      label: "goose",
-      onClick: () => handleNavigate("home"),
-    };
-    const current = (id: string, label: string): TopBarBreadcrumb => ({
-      id,
-      label,
-    });
-    const parent = (
-      id: string,
-      label: string,
-      onClick: () => void,
-    ): TopBarBreadcrumb => ({
-      id,
-      label,
-      onClick,
-    });
-
     switch (activeView) {
-      case "chat":
-        return activeSession?.title
-          ? [rootCrumb, current("chat", activeSession.title)]
-          : [current("root", "goose")];
+      case "chat": {
+        if (!activeSession?.title) {
+          return [current("root", "Home")];
+        }
+        const chatProject = activeSession.projectId
+          ? (projects.find((p) => p.id === activeSession.projectId) ?? null)
+          : null;
+        // "Chat" and the project segment are intentionally non-clickable for now:
+        // neither destination exists yet (no chats-list view, no per-project surface).
+        // Swap `current` → `parent` with a real onClick when those routes land.
+        return chatProject
+          ? [
+              current("chat", "Chat"),
+              current("chat-project", chatProject.name),
+              current("chat-session", activeSession.title),
+            ]
+          : [
+              current("chat", "Chat"),
+              current("chat-session", activeSession.title),
+            ];
+      }
       case "skills":
-        return [
-          rootCrumb,
-          skillsSkillId && skillsBreadcrumbLabel
-            ? parent("skills", "Skills", () => handleNavigate("skills"))
-            : current("skills", "Skills"),
-          ...(skillsSkillId && skillsBreadcrumbLabel
-            ? [current("skill-detail", skillsBreadcrumbLabel)]
-            : []),
-        ];
+        return skillsSkillId && skillsBreadcrumbLabel
+          ? [
+              parent("skills", "Skills", () => handleNavigate("skills")),
+              current("skill-detail", skillsBreadcrumbLabel),
+            ]
+          : [current("skills", "Skills")];
       case "agents":
-        return [
-          rootCrumb,
-          agentsPersonaId && agentsBreadcrumbLabel
-            ? parent("agents", "Agents", () => handleNavigate("agents"))
-            : current("agents", "Agents"),
-          ...(agentsPersonaId && agentsBreadcrumbLabel
-            ? [current("agent-detail", agentsBreadcrumbLabel)]
-            : []),
-        ];
+        return agentsPersonaId && agentsBreadcrumbLabel
+          ? [
+              parent("agents", "Agents", () => handleNavigate("agents")),
+              current("agent-detail", agentsBreadcrumbLabel),
+            ]
+          : [current("agents", "Agents")];
       case "automations":
-        return [
-          rootCrumb,
-          automationsBreadcrumbLabel
-            ? parent("automations", "Automations", () =>
+        return automationsBreadcrumbLabel
+          ? [
+              parent("automations", "Automations", () =>
                 handleNavigate("automations"),
-              )
-            : current("automations", "Automations"),
-          ...(automationsBreadcrumbLabel
-            ? [current("automation-detail", automationsBreadcrumbLabel)]
-            : []),
-        ];
+              ),
+              current("automation-detail", automationsBreadcrumbLabel),
+            ]
+          : [current("automations", "Automations")];
       case "design-system": {
         const designSystemSectionLabel = DESIGN_SYSTEM_SECTIONS.find(
           (section) => section.id === activeDesignSystemSection,
@@ -1559,18 +1558,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           activeDesignSystemSection !== DEFAULT_DESIGN_SYSTEM_SECTION &&
           Boolean(designSystemSectionLabel);
 
-        return [
-          rootCrumb,
-          showDesignSystemSection
-            ? parent("design-system", "Design System", () => {
+        return showDesignSystemSection && designSystemSectionLabel
+          ? [
+              parent("design-system", "Design System", () => {
                 setActiveDesignSystemSection(DEFAULT_DESIGN_SYSTEM_SECTION);
                 openDesignSystem();
-              })
-            : current("design-system", "Design System"),
-          ...(showDesignSystemSection && designSystemSectionLabel
-            ? [current("design-system-section", designSystemSectionLabel)]
-            : []),
-        ];
+              }),
+              current("design-system-section", designSystemSectionLabel),
+            ]
+          : [current("design-system", "Design System")];
       }
       case "settings": {
         const settingsSection = SETTINGS_SECTIONS.find(
@@ -1580,34 +1576,30 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           activeSettingsSection !== DEFAULT_SETTINGS_SECTION &&
           Boolean(settingsSection);
 
-        return [
-          rootCrumb,
-          showSettingsSection
-            ? parent("settings", "Settings", () =>
+        return showSettingsSection && settingsSection
+          ? [
+              parent("settings", "Settings", () =>
                 openSettings(DEFAULT_SETTINGS_SECTION),
-              )
-            : current("settings", "Settings"),
-          ...(showSettingsSection && settingsSection
-            ? [
-                current(
-                  "settings-section",
-                  t(`settings:${settingsSection.labelKey}`),
-                ),
-              ]
-            : []),
-        ];
+              ),
+              current(
+                "settings-section",
+                t(`settings:${settingsSection.labelKey}`),
+              ),
+            ]
+          : [current("settings", "Settings")];
       }
       case "projects":
-        return [rootCrumb, current("projects", "Projects")];
+        return [current("projects", "Projects")];
       case "search":
-        return [rootCrumb, current("search", "Search")];
+        return [current("search", "Search")];
       case "session-history":
-        return [rootCrumb, current("session-history", "Session History")];
+        return [current("session-history", "Session History")];
       case "home":
-        return [current("root", "goose")];
+        return [current("root", "Home")];
     }
   }, [
     activeDesignSystemSection,
+    activeSession?.projectId,
     activeSession?.title,
     activeSettingsSection,
     activeView,
@@ -1617,6 +1609,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     handleNavigate,
     openDesignSystem,
     openSettings,
+    projects,
     skillsBreadcrumbLabel,
     skillsSkillId,
     t,
@@ -1731,9 +1724,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     <>
       <AppShellLayout
         topBar={{
-          activeView,
           breadcrumbs: topBarBreadcrumbs,
-          chatSessionTitle: activeSession?.title,
           sidebarCollapsed,
           canGoBack: navigationAvailability.canGoBack,
           canGoForward: navigationAvailability.canGoForward,
@@ -1749,7 +1740,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           contextPanelLabel,
           onToggleContextPanel: toggleContextPanel,
           onFeedbackClick: handleFeedbackClick,
-          onNavigateHome: () => handleNavigate("home"),
           onSearchClick: () => handleNavigate("search"),
         }}
         sidebar={{

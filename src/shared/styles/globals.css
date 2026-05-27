@@ -754,7 +754,10 @@
 
   /* Spacing — app chrome dimensions */
   --spacing-app-top-bar: 52px;
-  --spacing-app-top-bar-leading: 96px;
+  /* Leading inset reserves room for the macOS traffic-light cluster
+     (positioned at x=14, ~52px wide → ends at x=66). 80px gives a ~14px
+     visual gap to the first toolbar button. */
+  --spacing-app-top-bar-leading: 80px;
   --spacing-app-top-bar-control: 24px;
   --spacing-app-top-bar-button-gap: 4px;
   --spacing-app-panel-gutter-top: 4px;

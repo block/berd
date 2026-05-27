@@ -10,7 +10,6 @@ import {
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
-import type { AppView } from "@/app/types/appNavigation";
 import { cn } from "@/shared/lib/cn";
 import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
@@ -22,9 +21,7 @@ export interface TopBarChromeInsets {
 }
 
 interface TopBarProps {
-  activeView?: AppView;
-  breadcrumbs?: TopBarBreadcrumb[];
-  chatSessionTitle?: string;
+  breadcrumbs: TopBarBreadcrumb[];
   canGoBack?: boolean;
   canGoForward?: boolean;
   className?: string;
@@ -35,7 +32,6 @@ interface TopBarProps {
   sidebarCollapsed?: boolean;
   onGoBack?: () => void;
   onGoForward?: () => void;
-  onNavigateHome?: () => void;
   onToggleContextPanel?: () => void;
   onToggleSidebar?: () => void;
   onFeedbackClick: () => void;
@@ -48,21 +44,8 @@ export interface TopBarBreadcrumb {
   onClick?: () => void;
 }
 
-const PAGE_LABELS: Partial<Record<AppView, string>> = {
-  skills: "Skills",
-  agents: "Agents",
-  automations: "Automations",
-  "session-history": "Session History",
-  search: "Search",
-  settings: "Settings",
-  "design-system": "Design System",
-  projects: "Projects",
-};
-
 export function TopBar({
-  activeView,
   breadcrumbs,
-  chatSessionTitle,
   canGoBack = false,
   canGoForward = false,
   className,
@@ -73,7 +56,6 @@ export function TopBar({
   sidebarCollapsed = false,
   onGoBack,
   onGoForward,
-  onNavigateHome,
   onToggleContextPanel,
   onToggleSidebar,
   onFeedbackClick,
@@ -99,22 +81,6 @@ export function TopBar({
     chromeInsets.leading === "trafficLights"
       ? "w-[var(--spacing-app-top-bar-leading)]"
       : "w-4";
-
-  const pageLabel =
-    activeView === "chat"
-      ? chatSessionTitle
-      : activeView
-        ? PAGE_LABELS[activeView]
-        : undefined;
-
-  const topBarBreadcrumbs = breadcrumbs ?? [
-    {
-      id: "root",
-      label: "goose",
-      onClick: pageLabel ? onNavigateHome : undefined,
-    },
-    ...(pageLabel ? [{ id: "current", label: pageLabel }] : []),
-  ];
 
   return (
     <header
@@ -173,11 +139,17 @@ export function TopBar({
           aria-label={t("actions.search")}
           title={t("actions.search")}
         >
-          <IconSearch aria-hidden="true" className={toolbarIconClassName} />
+          {/* IconSearch's SVG centerpoint sits ~1px above the other Tabler
+              icons in this row; the per-icon nudge realigns just this one
+              rather than shifting the whole shared icon class. */}
+          <IconSearch
+            aria-hidden="true"
+            className={cn(toolbarIconClassName, "translate-y-px")}
+          />
         </Button>
       </div>
       <BreadcrumbTrail
-        items={topBarBreadcrumbs}
+        items={breadcrumbs}
         variant="top-bar"
         pageProps={{ "data-tauri-drag-region": true }}
       />

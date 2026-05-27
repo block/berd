@@ -4021,7 +4021,7 @@ function AvatarPage() {
 function BreadcrumbPage() {
   const [treatment, setTreatment] = useState<BreadcrumbTreatment>("top-bar");
   const [depth, setDepth] = useState<BreadcrumbDepth>("detail");
-  const [rootLabel, setRootLabel] = useState("goose");
+  const [rootLabel, setRootLabel] = useState("Home");
   const [sectionLabel, setSectionLabel] = useState("Skills");
   const [currentLabel, setCurrentLabel] = useState("adapt");
   const showCurrent = depth !== "root";
@@ -4031,7 +4031,7 @@ function BreadcrumbPage() {
     showCurrent,
   });
 
-  const rootText = rootLabel.trim() || "goose";
+  const rootText = rootLabel.trim() || "Home";
   const sectionText = sectionLabel.trim() || "Skills";
   const currentText = currentLabel.trim() || "adapt";
   const isTopBar = treatment === "top-bar";

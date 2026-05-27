@@ -1,10 +1,12 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import type { ProjectInfo } from "@/features/projects/api/projects";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -450,18 +452,20 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("returns home from the top bar goose breadcrumb", async () => {
+  it("shows the page title as the top bar header on subpages", async () => {
     const user = userEvent.setup();
     render(<AppShell />);
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
 
-    await user.click(screen.getByRole("link", { name: "goose" }));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
-    });
+    expect(
+      screen.queryByRole("link", { name: "goose" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: "Home" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Agents")).toBeInTheDocument();
   });
 
   it("shows and navigates from third-level Skills breadcrumbs", async () => {
@@ -502,6 +506,56 @@ describe("AppShell global navigation", () => {
       "aria-current",
       "page",
     );
+  });
+
+  it("shows Chat / project / session title for a chat inside a project", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const project: ProjectInfo = {
+      id: "proj-1",
+      path: "/tmp/sample-project",
+      name: "Sample Project",
+      description: "",
+      prompt: "",
+      icon: "folder",
+      color: "blue",
+      preferredProvider: null,
+      preferredModel: null,
+      workingDirs: [],
+      useWorktrees: false,
+      order: 0,
+      archivedAt: null,
+    };
+    const now = new Date().toISOString();
+    const session: ChatSession = {
+      id: "created-session",
+      title: "MCPs vs Extensions",
+      projectId: "proj-1",
+      createdAt: now,
+      updatedAt: now,
+      messageCount: 0,
+    };
+
+    act(() => {
+      useProjectStore.setState({ projects: [project] });
+      useChatSessionStore.setState({
+        sessions: [session],
+        activeSessionId: "created-session",
+        hasHydratedSessions: true,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Chat")).toBeInTheDocument();
+      expect(screen.getByText("Sample Project")).toBeInTheDocument();
+      expect(screen.getByText("MCPs vs Extensions")).toBeInTheDocument();
+    });
   });
 
   it("opens search with Cmd+K", async () => {
