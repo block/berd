@@ -231,35 +231,50 @@ describe("WidgetFrame", () => {
     expect(onOpenAgent).not.toHaveBeenCalled();
   });
 
-  it("unpins the widget via the unpin pill on right-click", async () => {
+  it("unpins a pin widget via the unpin pill on right-click", async () => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
+      instance: agentPinInstance,
       mutations: mutationHandlers({ removeWidget }),
     });
 
     fireEvent.contextMenu(frame, { clientX: 40, clientY: 50 });
     await user.click(screen.getByRole("button", { name: "Unpin" }));
 
-    expect(removeWidget).toHaveBeenCalledWith("clock-1");
+    expect(removeWidget).toHaveBeenCalledWith("agent-pin-1");
+  });
+
+  it("does not open the unpin pill when right-clicking the clock", () => {
+    const removeWidget = vi.fn();
+    const { frame } = renderWidgetFrame({
+      mutations: mutationHandlers({ removeWidget }),
+    });
+
+    fireEvent.contextMenu(frame, { clientX: 40, clientY: 50 });
+
+    expect(
+      screen.queryByRole("button", { name: "Unpin" }),
+    ).not.toBeInTheDocument();
+    expect(removeWidget).not.toHaveBeenCalled();
   });
 
   it.each([
     ["Delete", "{Delete}"],
     ["Backspace", "{Backspace}"],
-  ])("removes a focused non-interactive widget with %s", async (_, key) => {
+  ])("does not remove the clock on %s key", async (_, key) => {
     const user = userEvent.setup();
     const removeWidget = vi.fn();
     const { frame } = renderWidgetFrame({
       mutations: mutationHandlers({ removeWidget }),
     });
 
-    await user.tab();
+    frame.focus();
     expect(frame).toHaveFocus();
 
     await user.keyboard(key);
 
-    expect(removeWidget).toHaveBeenCalledWith("clock-1");
+    expect(removeWidget).not.toHaveBeenCalled();
   });
 
   it("does not remove an interactive widget when a child control handles keyboard input", async () => {

@@ -56,6 +56,9 @@ export function WidgetFrame({
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
   const { bumpZ, removeWidget, updateWidgetState } = mutations;
   const [pill, setPill] = useState<UnpinPillState>(CLOSED_PILL);
+  // Clock is a permanent fixture — no right-click unpin pill, no Delete-key
+  // removal. The store-level guard in removeWidgetMutation is the backstop.
+  const isPersistent = instance.type === "clock";
 
   const handleUpdateState = useCallback(
     (next: Record<string, unknown>) => updateWidgetState(instance.id, next),
@@ -68,6 +71,9 @@ export function WidgetFrame({
 
   const handleFrameKeyDown = useCallback(
     (event: KeyboardEvent<HTMLFieldSetElement>) => {
+      if (isPersistent) {
+        return;
+      }
       if (
         event.target === event.currentTarget &&
         (event.key === "Delete" || event.key === "Backspace")
@@ -77,7 +83,7 @@ export function WidgetFrame({
         handleRemove();
       }
     },
-    [handleRemove],
+    [handleRemove, isPersistent],
   );
 
   if (!catalogEntry?.Component) {
@@ -109,6 +115,9 @@ export function WidgetFrame({
     event.preventDefault();
     event.stopPropagation();
     commitZLift();
+    if (isPersistent) {
+      return;
+    }
     setPill({ open: true, x: event.clientX, y: event.clientY });
   };
 
@@ -122,7 +131,7 @@ export function WidgetFrame({
     <>
       <fieldset
         aria-label={t(catalogEntry.labelKey)}
-        aria-keyshortcuts="Delete Backspace"
+        aria-keyshortcuts={isPersistent ? undefined : "Delete Backspace"}
         draggable={false}
         // biome-ignore lint/a11y/noNoninteractiveTabindex: widget frames are keyboard-focusable groups so non-interactive widgets can be removed.
         tabIndex={0}
@@ -152,13 +161,15 @@ export function WidgetFrame({
           onOpenAutomation={onOpenAutomation}
         />
       </fieldset>
-      <UnpinPill
-        open={pill.open}
-        cursorClientX={pill.x}
-        cursorClientY={pill.y}
-        onUnpin={handleRemove}
-        onOpenChange={handlePillOpenChange}
-      />
+      {isPersistent ? null : (
+        <UnpinPill
+          open={pill.open}
+          cursorClientX={pill.x}
+          cursorClientY={pill.y}
+          onUnpin={handleRemove}
+          onOpenChange={handlePillOpenChange}
+        />
+      )}
     </>
   );
 }

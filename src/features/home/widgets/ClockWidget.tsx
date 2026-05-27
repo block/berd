@@ -3,33 +3,27 @@ import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { WidgetRenderProps } from "./types";
 
-/**
- * ClockWidget — analog clock with day + date display.
- *
- * Always-dark face per Figma spec (uses --clock-face token, not the app theme
- * surface). Clock hands use --color-red-500 (primitive token: #ef4444).
- *
- * Accepts WidgetRenderProps for type compatibility with the catalog Component
- * field; none of those props are used by this display-only widget.
- */
+// Hour ticks at every 30° (12 marks). Minute ticks at every 6°, skipping the
+// 12 hour positions (48 marks). Pre-computed at module load.
+const HOUR_TICK_ANGLES = Array.from({ length: 12 }, (_, i) => i * 30);
+const MINUTE_TICK_ANGLES = Array.from({ length: 60 }, (_, i) => i * 6).filter(
+  (angle) => angle % 30 !== 0,
+);
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function ClockWidget(_props: WidgetRenderProps) {
   const { t } = useTranslation("home");
-  const [time, setTime] = useState(new Date());
   const { formatDate } = useLocaleFormatting();
+  const [time, setTime] = useState(new Date());
 
   useEffect(() => {
     const interval = setInterval(() => setTime(new Date()), 1000);
     return () => clearInterval(interval);
   }, []);
 
-  const day = formatDate(time, { weekday: "short" })
-    .replace(/\.$/, "")
-    .toUpperCase();
-  const date = formatDate(time, {
-    month: "numeric",
-    day: "numeric",
-  });
+  const minuteAngle = time.getMinutes() * 6 + time.getSeconds() * 0.1;
+  const hourAngle = ((time.getHours() % 12) + time.getMinutes() / 60) * 30;
+
   const currentLabel = `${t("widgets.clock.current")}: ${formatDate(time, {
     weekday: "long",
     month: "long",
@@ -37,64 +31,69 @@ export function ClockWidget(_props: WidgetRenderProps) {
     hour: "numeric",
     minute: "2-digit",
   })}`;
-  const minuteAngle = time.getMinutes() * 6 + time.getSeconds() * 0.1;
-  const hourAngle = ((time.getHours() % 12) + time.getMinutes() / 60) * 30;
 
   return (
     <section
       role="timer"
       aria-label={currentLabel}
-      className="relative h-full w-full overflow-hidden rounded-full border border-white/10 bg-clock-face text-white"
+      className="relative h-full w-full overflow-hidden rounded-full border border-white/5 bg-clock-face text-white"
     >
       <div aria-hidden="true" className="absolute inset-0">
-        {/* Day label — left side */}
-        <div
-          className="absolute left-[16%] top-1/2 z-10 -translate-y-1/2 px-1 font-light leading-none tracking-normal"
-          style={{
-            fontSize:
-              "clamp(1.25rem, calc(1.875rem * var(--widget-scale, 1)), 3rem)",
-          }}
-        >
-          {day}
-        </div>
+        {HOUR_TICK_ANGLES.map((angle) => (
+          <div
+            key={`h-${angle}`}
+            className="absolute inset-0"
+            style={{ transform: `rotate(${angle}deg)` }}
+          >
+            <span className="absolute left-1/2 top-[2%] h-[8%] w-[2px] -translate-x-1/2 rounded-full bg-white" />
+          </div>
+        ))}
 
-        {/* Minute hand */}
-        <div
-          className="absolute inset-0 z-0"
-          style={{ transform: `rotate(${minuteAngle}deg)` }}
-        >
-          <span className="absolute left-1/2 top-[9%] h-[41%] w-[2px] -translate-x-1/2 rounded-full bg-clock-hand" />
-        </div>
+        {MINUTE_TICK_ANGLES.map((angle) => (
+          <div
+            key={`m-${angle}`}
+            className="absolute inset-0"
+            style={{ transform: `rotate(${angle}deg)` }}
+          >
+            <span className="absolute left-1/2 top-[3%] h-[2.5%] w-[1px] -translate-x-1/2 rounded-full bg-white/40" />
+          </div>
+        ))}
 
-        {/* Hour hand */}
+        {/* Hour hand — white, stubby (Mondaine proportions). */}
         <div
-          className="absolute inset-0 z-0"
+          className="absolute inset-0 z-10"
           style={{ transform: `rotate(${hourAngle}deg)` }}
         >
-          <span className="absolute left-1/2 top-[22%] h-[28%] w-[2px] -translate-x-1/2 rounded-full bg-clock-hand" />
+          <span className="absolute left-1/2 top-[26%] h-[26%] w-[3px] -translate-x-1/2 rounded-full bg-white" />
+        </div>
+
+        {/* Minute hand — red with circular dot at tip (Swiss railway accent). */}
+        <div
+          className="absolute inset-0 z-20"
+          style={{ transform: `rotate(${minuteAngle}deg)` }}
+        >
+          <span className="absolute left-1/2 top-[10%] h-[42%] w-[3px] -translate-x-1/2 rounded-full bg-clock-hand" />
+          <span
+            className="absolute left-1/2 top-[10%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-clock-hand"
+            style={{
+              width:
+                "clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+              height:
+                "clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+            }}
+          />
         </div>
 
         {/* Center hub */}
         <div
-          className="absolute left-1/2 top-1/2 z-40 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
+          className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white"
           style={{
             width:
-              "clamp(0.625rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+              "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)",
             height:
-              "clamp(0.625rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+              "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)",
           }}
         />
-
-        {/* Date label — right side */}
-        <div
-          className="absolute right-[14%] top-1/2 z-10 -translate-y-1/2 px-1 font-light leading-none tracking-normal"
-          style={{
-            fontSize:
-              "clamp(1.25rem, calc(1.875rem * var(--widget-scale, 1)), 3rem)",
-          }}
-        >
-          {date}
-        </div>
       </div>
     </section>
   );

@@ -21,7 +21,7 @@
   "widgets": {
     "clock": {
       "label": "Clock",
-      "description": "Analog clock with day and date",
+      "description": "Time",
       "current": "Current time"
     },
     "agentPin": {
@@ -80,7 +80,6 @@
       "loadingMoreChats": "Loading more chats...",
       "header": "Pin",
       "sections": {
-        "clock": "Widgets",
         "agent": "Agent",
         "chat": "Chat",
         "automation": "Automations",
@@ -88,7 +87,6 @@
         "skill": "Skill"
       },
       "selectTitles": {
-        "clock": "Pin a Widget",
         "agent": "Pin an Agent",
         "chat": "Pin a Chat",
         "automation": "Pin an Automation",

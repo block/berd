@@ -112,7 +112,7 @@ describe("HomeView layout camera persistence", () => {
     const user = userEvent.setup();
     const { container } = renderHomeView();
 
-    await screen.findByText(/wed|sun|mon|tue|thu|fri|sat/i);
+    await screen.findByRole("timer", { name: /current time/i });
     const canvas = container.querySelector(".bg-dot-grid");
     expect(canvas).toBeInstanceOf(HTMLElement);
     mockCanvasRect(canvas as HTMLElement);
@@ -148,7 +148,7 @@ describe("HomeView layout camera persistence", () => {
   it("saves camera changes after wheel zoom", async () => {
     const { container } = renderHomeView();
 
-    await screen.findByText(/wed|sun|mon|tue|thu|fri|sat/i);
+    await screen.findByRole("timer", { name: /current time/i });
     vi.useFakeTimers();
     const canvas = container.querySelector(".bg-dot-grid");
     expect(canvas).toBeInstanceOf(HTMLElement);

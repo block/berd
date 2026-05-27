@@ -212,16 +212,22 @@ export function createHomeWidgetRuntime({
         }
 
         const instances = layoutItemsToHomeWidgets(layout.items);
-        if (instances.length > 0) {
+        const hasClock = instances.some(
+          (instance) => instance.type === "clock",
+        );
+        if (instances.length > 0 && hasClock) {
           setReadyLayout(layout, generation);
           return;
         }
 
+        // Clock is a permanent fixture. Seed one whenever the loaded layout
+        // doesn't already contain it — either a brand-new layout (empty) or
+        // a legacy layout from before the clock became persistent.
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: [createDefaultClockLayoutItem()],
+          items: [...layout.items, createDefaultClockLayoutItem()],
         });
         if (generation !== runtime.generation) {
           return;

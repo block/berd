@@ -248,6 +248,41 @@ describe("homeWidgetStore", () => {
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
   });
 
+  it("seeds a clock when backend layout has other widgets but no clock", async () => {
+    const agentPinItem: Layout["items"][number] = {
+      id: "agent-1",
+      kind: "persona",
+      targetId: "persona-1",
+      centerX: 240,
+      centerY: 240,
+      width: 200,
+      height: 220,
+      zIndex: 1,
+      titleOverride: null,
+    };
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({ itemRevision: 11, items: [agentPinItem] }),
+    );
+    vi.mocked(saveLayoutItems).mockResolvedValue({
+      ok: true,
+      layout: layout({ itemRevision: 12 }),
+    });
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutItems).toHaveBeenCalledTimes(1);
+    const request = vi.mocked(saveLayoutItems).mock.calls[0][0];
+    expect(request).toMatchObject({
+      layoutId: HOME_LAYOUT_ID,
+      expectedRevision: 11,
+      replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+    });
+    // Preserves existing items and appends a clock.
+    expect(request.items).toHaveLength(2);
+    expect(request.items[0]).toEqual(agentPinItem);
+    expect(request.items[1].kind).toBe("clock");
+  });
+
   it("adopts the backend layout when default clock seeding conflicts", async () => {
     const conflict = layout({ itemRevision: 9 });
     vi.mocked(getLayout).mockResolvedValue(

@@ -958,17 +958,17 @@ describe("WidgetCanvas", () => {
     const moveWidget = vi.fn();
 
     renderCanvas({
-      instances: [widget()],
+      instances: [agentWidget()],
       mutations: { removeWidget, moveWidget },
     });
 
     await user.pointer({
       keys: "[MouseRight]",
-      target: screen.getByText(/wed|sun|mon|tue|thu|fri|sat/i),
+      target: screen.getByRole("group", { name: /pin an agent/i }),
     });
     await user.click(screen.getByText("Unpin"));
 
-    expect(removeWidget).toHaveBeenCalledWith("clock-widget");
+    expect(removeWidget).toHaveBeenCalledWith("agent-widget");
     // Right-click → Unpin must not start a widget drag.
     expect(moveWidget).not.toHaveBeenCalled();
   });
