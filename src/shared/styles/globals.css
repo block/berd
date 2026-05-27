@@ -1265,6 +1265,26 @@ code[data-streamdown="inline-code"],
   }
 }
 
+.agent-builder-column-enter {
+  animation: agent-builder-column-enter 0.62s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: var(--agent-builder-column-enter-delay, 0ms);
+  opacity: 0;
+  transform: translateY(var(--agent-builder-column-enter-y, 72px));
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+@keyframes agent-builder-column-enter {
+  from {
+    opacity: 0;
+    transform: translateY(var(--agent-builder-column-enter-y, 72px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .agents-profile-section-enter {
   animation: agents-profile-section-enter 0.24s ease-out both;
   transform-origin: center;
@@ -1447,6 +1467,7 @@ code[data-streamdown="inline-code"],
   }
 
   .agents-gallery-card-enter,
+  .agent-builder-column-enter,
   .agents-profile-section-enter,
   .agents-unpaired-enter {
     animation: none !important;

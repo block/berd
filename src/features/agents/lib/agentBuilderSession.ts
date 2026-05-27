@@ -34,7 +34,10 @@ interface StartAgentBuilderSessionArgs {
 type MaybePromise<T> = T | Promise<T>;
 
 export interface StartAgentBuilderSessionDeps {
-  createNewTab: (title?: string) => MaybePromise<{ id: string }>;
+  createNewTab: (
+    title?: string,
+    options?: { activate?: boolean },
+  ) => MaybePromise<{ id: string }>;
   closeSession: (sessionId: string) => MaybePromise<void>;
   navigateChat: (sessionId: string) => MaybePromise<void>;
 }
@@ -55,7 +58,7 @@ export async function startAgentBuilderSession(
     }
   }
 
-  const session = await deps.createNewTab("New agent");
+  const session = await deps.createNewTab("New agent", { activate: false });
   const sessionId = session.id;
 
   try {

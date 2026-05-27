@@ -168,6 +168,7 @@ export function AppShellContent({
         <ChatView
           key={activeSession.id}
           sessionId={activeSession.id}
+          activeSession={activeSession}
           onCreatePersona={onCreatePersona}
           onAgentBuilderSaved={onAgentBuilderSaved}
           onCreateProject={onCreateProject}

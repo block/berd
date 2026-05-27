@@ -16,6 +16,16 @@ const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 vi.mock("./hooks/useAppStartup", () => ({
   useAppStartup: () => ({ ready: true }),
 }));
@@ -312,6 +322,52 @@ describe("AppShell global navigation", () => {
     expect(
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+      targetAgentPath:
+        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+    });
+  });
+
+  it("waits to show the new agent builder until the draft target is ready", async () => {
+    const user = userEvent.setup();
+    const draft = deferred<{
+      type: "agent";
+      path: string;
+      name: string;
+      description: string;
+      content: string;
+      global: boolean;
+      writable: boolean;
+      properties: { draft: boolean; builderSessionId: string };
+    }>();
+    mockCreatePersonaSource.mockReturnValueOnce(draft.promise);
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalled();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+    expect(useChatSessionStore.getState().getActiveSession()).toBeNull();
+
+    draft.resolve({
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Untitled agent created-session",
+      description: "Draft",
+      content: "Draft in progress.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
     expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
       id: "created-session",
       intent: "build-agent",

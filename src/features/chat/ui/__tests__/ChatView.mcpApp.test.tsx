@@ -6,11 +6,13 @@ import {
   TopBarActionsProvider,
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
+import type { ChatSession } from "../../stores/chatSessionStore";
 import { ChatView } from "../ChatView";
 
 const mocks = vi.hoisted(() => ({
   messageTimelineSpy: vi.fn(),
   chatInputSpy: vi.fn(),
+  chatRightRailSpy: vi.fn(),
   handleSend: vi.fn(() => true),
   pinToHome: vi.fn(),
   unpinFromHome: vi.fn(),
@@ -62,7 +64,10 @@ vi.mock("../ChatLoadingSkeleton", () => ({
 }));
 
 vi.mock("../ChatRightRail", () => ({
-  ChatRightRail: () => null,
+  ChatRightRail: (props: unknown) => {
+    mocks.chatRightRailSpy(props);
+    return <div data-testid="chat-right-rail" />;
+  },
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
@@ -102,6 +107,7 @@ describe("ChatView MCP app messaging", () => {
   beforeEach(() => {
     mocks.messageTimelineSpy.mockClear();
     mocks.chatInputSpy.mockClear();
+    mocks.chatRightRailSpy.mockClear();
     mocks.handleSend.mockClear();
     mocks.pinToHome.mockClear();
     mocks.unpinFromHome.mockClear();
@@ -255,5 +261,36 @@ describe("ChatView MCP app messaging", () => {
 
     expect(mocks.unpinFromHome).toHaveBeenCalled();
     expect(mocks.pinToHome).not.toHaveBeenCalled();
+  });
+
+  it("reserves the builder rail from the active session before controller hydration", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const railProps = mocks.chatRightRailSpy.mock.calls.at(-1)?.[0] as {
+      builderColumnClassName?: string;
+      session?: ChatSession | null;
+    };
+    expect(railProps.session).toBe(activeSession);
+    expect(railProps.builderColumnClassName).toBe("agent-builder-column-enter");
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      controls?: unknown;
+    };
+    expect(chatInputProps.controls).toEqual({
+      agentModelPicker: false,
+      projectPicker: false,
+    });
+    expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
   });
 });

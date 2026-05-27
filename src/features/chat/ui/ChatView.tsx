@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type CSSProperties } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
@@ -12,11 +12,14 @@ import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
+import type { ChatSession } from "../stores/chatSessionStore";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 
 interface ChatViewProps {
   sessionId: string;
+  activeSession?: ChatSession | null;
   onCreatePersona?: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onCreateProject?: (options?: {
@@ -26,6 +29,7 @@ interface ChatViewProps {
 
 export function ChatView({
   sessionId,
+  activeSession,
   onCreatePersona,
   onAgentBuilderSaved,
   onCreateProject,
@@ -43,6 +47,25 @@ export function ChatView({
     sessionId,
     onCreatePersonaRequested: onCreatePersona,
   });
+  const effectiveSession = controller.session ?? activeSession ?? null;
+  const isAgentBuilderSession =
+    effectiveSession?.intent === "build-agent" &&
+    Boolean(
+      effectiveSession.targetAgentPath && effectiveSession.targetAgentSlug,
+    );
+  const agentBuilderChatColumnStyle = isAgentBuilderSession
+    ? ({
+        "--agent-builder-column-enter-delay": "0ms",
+        "--agent-builder-column-enter-y": "48px",
+      } as CSSProperties)
+    : undefined;
+  const agentBuilderRailColumnStyle = isAgentBuilderSession
+    ? ({
+        "--agent-builder-column-enter-delay": "105ms",
+        "--agent-builder-column-enter-y": "72px",
+      } as CSSProperties)
+    : undefined;
+
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
     perfLog(`[perf:chatview] ${sessionId.slice(0, 8)} mounted in ${ms}ms`);
@@ -56,11 +79,11 @@ export function ChatView({
   const shouldShowLoadingIndicator =
     showIndicator && !controller.isLoadingHistory;
   let sendDisabledReason: string | undefined;
-  if (controller.session?.creationState === "pending") {
+  if (effectiveSession?.creationState === "pending") {
     sendDisabledReason = t("toolbar.sessionStarting");
-  } else if (controller.session?.creationState === "failed") {
+  } else if (effectiveSession?.creationState === "failed") {
     sendDisabledReason =
-      controller.session.creationError ?? t("toolbar.sessionStartFailed");
+      effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
   }
 
   useEffect(() => {
@@ -121,7 +144,7 @@ export function ChatView({
           <ChatInput
             surface="bare"
             controls={
-              controller.session?.intent === "build-agent"
+              effectiveSession?.intent === "build-agent"
                 ? {
                     agentModelPicker: false,
                     projectPicker: false,
@@ -133,7 +156,7 @@ export function ChatView({
               disabled:
                 controller.projectMetadataPending ||
                 controller.isCompactingContext,
-              sendDisabled: controller.session?.creationState != null,
+              sendDisabled: effectiveSession?.creationState != null,
               sendDisabledReason,
               queuedMessage: controller.queue.queuedMessage,
               onDismissQueue: controller.queue.dismiss,
@@ -208,7 +231,13 @@ export function ChatView({
       sessionCwd={controller.sessionArtifactCwd}
     >
       <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
-        <div className="relative flex min-w-0 flex-1 flex-col">
+        <div
+          className={cn(
+            "relative flex min-w-0 flex-1 flex-col",
+            isAgentBuilderSession && "agent-builder-column-enter",
+          )}
+          style={agentBuilderChatColumnStyle}
+        >
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-card">
             <MessageTimeline
               messages={controller.messages}
@@ -225,10 +254,14 @@ export function ChatView({
         </div>
 
         <ChatRightRail
-          session={controller.session}
+          session={effectiveSession}
           project={controller.project}
-          sessionWorkingDir={controller.session?.workingDir}
+          sessionWorkingDir={effectiveSession?.workingDir}
           onDraftPromoted={onAgentBuilderSaved}
+          builderColumnClassName={
+            isAgentBuilderSession ? "agent-builder-column-enter" : undefined
+          }
+          builderColumnStyle={agentBuilderRailColumnStyle}
         />
       </div>
     </ArtifactPolicyProvider>

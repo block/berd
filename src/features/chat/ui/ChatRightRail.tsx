@@ -3,6 +3,7 @@ import { AgentBuilderRail } from "@/features/agents/ui/AgentBuilderRail";
 import { recoverDraftAgent } from "@/features/agents/lib/agentBuilderSession";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
+import { cn } from "@/shared/lib/cn";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -18,6 +19,8 @@ interface ChatRightRailProps {
     color?: string;
     workingDirs?: string[];
   } | null;
+  builderColumnClassName?: string;
+  builderColumnStyle?: CSSProperties;
   sessionWorkingDir?: string | null;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
 }
@@ -25,6 +28,8 @@ interface ChatRightRailProps {
 export function ChatRightRail({
   session,
   project,
+  builderColumnClassName,
+  builderColumnStyle,
   sessionWorkingDir,
   onDraftPromoted,
 }: ChatRightRailProps) {
@@ -87,11 +92,15 @@ export function ChatRightRail({
   ) {
     return (
       <div
-        className="flex h-full shrink-0 justify-center overflow-hidden"
+        className={cn(
+          "flex h-full shrink-0 justify-center overflow-hidden",
+          builderColumnClassName,
+        )}
         style={
           {
             width: AGENT_BUILDER_RAIL_W,
             paddingBlock: "var(--spacing-app-panel-gutter-top)",
+            ...builderColumnStyle,
           } as CSSProperties
         }
       >

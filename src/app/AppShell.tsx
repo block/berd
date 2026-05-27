@@ -685,7 +685,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   ]);
 
   const createNewTab = useCallback(
-    async (title = DEFAULT_CHAT_TITLE, project?: ProjectInfo) => {
+    async (
+      title = DEFAULT_CHAT_TITLE,
+      project?: ProjectInfo,
+      options: { activate?: boolean } = {},
+    ) => {
+      const shouldActivate = options.activate !== false;
       const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
@@ -724,10 +729,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             workingDir: inheritedWorkspace.path,
           });
         }
-        clearSettingsSectionUrl();
-        setActiveSession(existingDraft.id);
-        setActiveView("chat");
-        setChatActiveSession(existingDraft.id);
+        if (shouldActivate) {
+          clearSettingsSectionUrl();
+          setActiveSession(existingDraft.id);
+          setActiveView("chat");
+          setChatActiveSession(existingDraft.id);
+        }
         perfLog(
           `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused draft in ${(performance.now() - tStart).toFixed(1)}ms`,
         );
@@ -749,10 +756,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (inheritedWorkspace) {
         setActiveWorkspace(session.id, inheritedWorkspace);
       }
-      clearSettingsSectionUrl();
-      setActiveSession(session.id);
-      setActiveView("chat");
-      setChatActiveSession(session.id);
+      if (shouldActivate) {
+        clearSettingsSectionUrl();
+        setActiveSession(session.id);
+        setActiveView("chat");
+        setChatActiveSession(session.id);
+      }
       perfLog(
         `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
       );
@@ -771,7 +780,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const agentBuilder = useAgentBuilderCoordinator({
     startupReady: startup.ready,
-    createNewTab,
+    createNewTab: (title, options) => createNewTab(title, undefined, options),
     closeSession: (sessionId) => closeAgentBuilderSessionRef.current(sessionId),
     navigateChat: (sessionId) => navigateAgentBuilderChatRef.current(sessionId),
     navigateAgents: (personaId, options) =>

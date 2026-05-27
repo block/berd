@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import type { CSSProperties } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatRightRail } from "../ChatRightRail";
 
@@ -101,6 +102,33 @@ describe("ChatRightRail", () => {
     expect(screen.getByTestId("agent-builder-rail").parentElement).toHaveStyle({
       width: "509px",
     });
+  });
+
+  it("applies builder column entrance props to the build-agent rail shell", () => {
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        builderColumnClassName="agent-builder-column-enter"
+        builderColumnStyle={
+          {
+            "--agent-builder-column-enter-delay": "130ms",
+          } as CSSProperties
+        }
+      />,
+    );
+
+    const shell = screen.getByTestId("agent-builder-rail").parentElement;
+    expect(shell).toHaveClass("agent-builder-column-enter");
+    expect(
+      shell?.style.getPropertyValue("--agent-builder-column-enter-delay"),
+    ).toBe("130ms");
   });
 
   it("renders ChatContextPanel for normal sessions", () => {
