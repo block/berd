@@ -1,5 +1,5 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { AgentsView } from "../AgentsView";
 
@@ -30,6 +30,30 @@ const persona = {
 };
 
 describe("AgentsView entry points", () => {
+  const originalMatchMedia = window.matchMedia;
+  const originalStartViewTransition = (
+    document as Document & {
+      startViewTransition?: (callback: () => void) => unknown;
+    }
+  ).startViewTransition;
+
+  afterEach(() => {
+    if (originalStartViewTransition) {
+      Object.defineProperty(document, "startViewTransition", {
+        configurable: true,
+        value: originalStartViewTransition,
+      });
+    } else {
+      Reflect.deleteProperty(document, "startViewTransition");
+    }
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: originalMatchMedia,
+    });
+    delete document.documentElement.dataset.agentTransition;
+    vi.restoreAllMocks();
+  });
+
   beforeEach(() => {
     useAgentStore.setState({
       personas: [],
@@ -67,5 +91,83 @@ describe("AgentsView entry points", () => {
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({
       slug: "code-reviewer",
     });
+  });
+
+  it("starts a gallery-to-profile view transition when opening detail", () => {
+    const resolved = Promise.resolve();
+    const startViewTransition = vi.fn((callback: () => void) => {
+      expect(document.documentElement.dataset.agentTransition).toBe(
+        "gallery-to-profile",
+      );
+      callback();
+      return {
+        finished: resolved,
+        ready: resolved,
+        updateCallbackDone: resolved,
+        skipTransition: vi.fn(),
+      };
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({ matches: false }),
+    });
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView />);
+
+    fireEvent.click(screen.getByRole("button", { name: "card.ariaLabel" }));
+
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("heading", { name: persona.displayName }),
+    ).toBeInTheDocument();
+  });
+
+  it("replays gallery card reveal when returning from detail", () => {
+    useAgentStore.setState({ personas: [persona] });
+    const { container } = render(<AgentsView />);
+
+    fireEvent.click(screen.getByRole("button", { name: "card.ariaLabel" }));
+    fireEvent.click(screen.getByRole("button", { name: "view.backToAgents" }));
+
+    expect(
+      container.querySelector(".agents-gallery-card-enter"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not start a view transition when returning from detail", () => {
+    const resolved = Promise.resolve();
+    const startViewTransition = vi.fn((callback: () => void) => {
+      callback();
+      return {
+        finished: resolved,
+        ready: resolved,
+        updateCallbackDone: resolved,
+        skipTransition: vi.fn(),
+      };
+    });
+    Object.defineProperty(document, "startViewTransition", {
+      configurable: true,
+      value: startViewTransition,
+    });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn().mockReturnValue({ matches: false }),
+    });
+    useAgentStore.setState({ personas: [persona] });
+
+    render(<AgentsView />);
+
+    fireEvent.click(screen.getByRole("button", { name: "card.ariaLabel" }));
+    expect(startViewTransition).toHaveBeenCalledTimes(1);
+
+    startViewTransition.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "view.backToAgents" }));
+
+    expect(startViewTransition).not.toHaveBeenCalled();
   });
 });

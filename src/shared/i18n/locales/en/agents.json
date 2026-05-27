@@ -81,9 +81,11 @@
     "avatarLibrary": "Avatar library",
     "avatarLoading": "Loading",
     "avatarRetry": "Retry",
+    "avatarBackToProfile": "Back to profile",
     "avatarUrl": "Custom avatar URL",
     "avatarUrlInvalid": "Enter a valid http or https URL without credentials.",
     "avatarUrlPlaceholder": "https://example.com/avatar.png",
+    "customizeAvatar": "Customize",
     "displayName": "Agent Name",
     "displayNamePlaceholder": "e.g. Code Reviewer",
     "duplicate": "Duplicate",
@@ -108,6 +110,13 @@
   "gallery": {
     "createAria": "Create new agent",
     "dropFile": "or drop a file",
+    "empty": {
+      "aboutTitle": "What is an agent?",
+      "aboutDescription": "An agent is a focused helper you give a job to - it uses tools, follows instructions, and works through tasks on its own so you don't have to babysit it.",
+      "valueTitle": "What can it do for me?",
+      "valueDescription": "Hand off the repetitive or fiddly stuff - researching, drafting, organizing files, calling APIs, running multi-step workflows - and get back results instead of a to-do list.",
+      "createFirst": "Create My First Agent"
+    },
     "loading": "Loading agents",
     "new": "New Agent"
   },
@@ -131,6 +140,7 @@
     "importFailed": "Failed to import agent.",
     "imported_one": "Imported {{count}} agent.",
     "imported_other": "Imported {{count}} agents.",
+    "instructions": "Instructions",
     "newPersona": "New Agent",
     "optionsAria": "Options for {{name}}",
     "searchPlaceholder": "Search agents",

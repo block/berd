@@ -21,6 +21,7 @@ interface AvatarLibraryPickerProps {
   selectedAvatarRef: string | null;
   onSelectAvatar: (avatarId: string) => void;
   onPreviewError: () => void;
+  disabled?: boolean;
   /**
    * When provided, the parent controls collection navigation and the picker's
    * internal back-to-collections row is suppressed (the parent is expected to
@@ -46,6 +47,7 @@ export function AvatarLibraryPicker({
   selectedAvatarRef,
   onSelectAvatar,
   onPreviewError,
+  disabled = false,
   selectedCollectionId: controlledCollectionId,
   onSelectCollection,
 }: AvatarLibraryPickerProps) {
@@ -90,7 +92,7 @@ export function AvatarLibraryPicker({
         : "image";
       const collectionDownloading =
         downloadingCollectionId === entry.collectionId;
-      const selectable = Boolean(cachedMedia);
+      const selectable = Boolean(cachedMedia) && !disabled;
 
       return (
         <button
@@ -146,6 +148,7 @@ export function AvatarLibraryPicker({
       cachedAvatarMediaById,
       catalogVersion,
       downloadingCollectionId,
+      disabled,
       onPreviewError,
       onSelectAvatar,
       selectedAvatarRef,
@@ -196,7 +199,9 @@ export function AvatarLibraryPicker({
             "flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-popover p-3 text-center",
             "border border-border/80 transition-colors hover:border-border hover:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+            disabled && "cursor-not-allowed opacity-60",
           )}
+          disabled={disabled}
           onClick={() => {
             setSelectedCollectionId(collection.id);
             void library.openCollection(collection);
@@ -236,6 +241,7 @@ export function AvatarLibraryPicker({
     [
       cachedAvatarMediaById,
       catalogVersion,
+      disabled,
       library,
       onPreviewError,
       setSelectedCollectionId,

@@ -192,6 +192,19 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
+  --surface-agent-profile-bg: #f5f5f3;
+  --surface-agent-profile-fg: #242424;
+  --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
+  --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
+  --surface-agent-profile-fg-subtle: rgba(36, 36, 36, 0.4);
+  --surface-agent-profile-fg-faint: rgba(36, 36, 36, 0.35);
+  --surface-agent-profile-fg-placeholder: rgba(36, 36, 36, 0.3);
+  --surface-agent-profile-border: rgba(36, 36, 36, 0.1);
+  --surface-agent-profile-dot: rgba(36, 36, 36, 0.16);
+  --surface-agent-profile-control-bg: var(--color-white);
+  --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
+  --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
+  --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
   --message-user-bg: var(--color-gray-75);
 
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
@@ -306,6 +319,10 @@
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
+  --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
+  --shadow-agent-profile-affordance: 0 1px 2px rgba(36, 36, 36, 0.18);
+  --shadow-agent-profile-input-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-agent-profile-input-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
 
   /* Goose inverse popover — dark menu on light surface (Alex tile menu).
      Reuses gray-900 / white so the chain stays inside the existing palette. */
@@ -433,6 +450,19 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
+  --surface-agent-profile-bg: #f5f5f3;
+  --surface-agent-profile-fg: #242424;
+  --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
+  --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
+  --surface-agent-profile-fg-subtle: rgba(36, 36, 36, 0.4);
+  --surface-agent-profile-fg-faint: rgba(36, 36, 36, 0.35);
+  --surface-agent-profile-fg-placeholder: rgba(36, 36, 36, 0.3);
+  --surface-agent-profile-border: rgba(36, 36, 36, 0.1);
+  --surface-agent-profile-dot: rgba(36, 36, 36, 0.16);
+  --surface-agent-profile-control-bg: var(--color-white);
+  --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
+  --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
+  --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
   --message-user-bg: var(--color-gray-700);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
@@ -518,6 +548,10 @@
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
+  --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
+  --shadow-agent-profile-affordance: 0 1px 2px rgba(36, 36, 36, 0.18);
+  --shadow-agent-profile-input-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-agent-profile-input-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
 
   /* Inverse popover — light menu on dark surface (inverted for dark theme). */
   --popover-inverse: var(--color-gray-50);
@@ -580,6 +614,31 @@
   --color-surface-composer: var(--surface-composer);
   --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-editor-panel: var(--surface-editor-panel);
+  --color-surface-agent-profile-bg: var(--surface-agent-profile-bg);
+  --color-surface-agent-profile-fg: var(--surface-agent-profile-fg);
+  --color-surface-agent-profile-fg-80: var(--surface-agent-profile-fg-80);
+  --color-surface-agent-profile-fg-muted: var(--surface-agent-profile-fg-muted);
+  --color-surface-agent-profile-fg-subtle: var(
+    --surface-agent-profile-fg-subtle
+  );
+  --color-surface-agent-profile-fg-faint: var(--surface-agent-profile-fg-faint);
+  --color-surface-agent-profile-fg-placeholder: var(
+    --surface-agent-profile-fg-placeholder
+  );
+  --color-surface-agent-profile-border: var(--surface-agent-profile-border);
+  --color-surface-agent-profile-dot: var(--surface-agent-profile-dot);
+  --color-surface-agent-profile-control-bg: var(
+    --surface-agent-profile-control-bg
+  );
+  --color-surface-agent-profile-control-bg-hover: var(
+    --surface-agent-profile-control-bg-hover
+  );
+  --color-surface-agent-profile-action-fg: var(
+    --surface-agent-profile-action-fg
+  );
+  --color-surface-agent-profile-action-bg-hover: var(
+    --surface-agent-profile-action-bg-hover
+  );
   --color-message-user-bg: var(--message-user-bg);
 
   /* Composer chip tones */
@@ -688,6 +747,10 @@
   --shadow-modal: var(--shadow-modal);
   --shadow-kbd: var(--shadow-kbd);
   --shadow-date-field-focus: var(--shadow-date-field-focus);
+  --shadow-agent-profile-avatar: var(--shadow-agent-profile-avatar);
+  --shadow-agent-profile-affordance: var(--shadow-agent-profile-affordance);
+  --shadow-agent-profile-input-hover: var(--shadow-agent-profile-input-hover);
+  --shadow-agent-profile-input-focus: var(--shadow-agent-profile-input-focus);
 
   /* Spacing — app chrome dimensions */
   --spacing-app-top-bar: 52px;
@@ -1177,6 +1240,191 @@ code[data-streamdown="inline-code"],
   animation: content-fade-in 0.3s ease-out forwards;
 }
 
+.agents-gallery-card-enter {
+  animation: agents-gallery-card-enter 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
+  filter: blur(18px);
+  opacity: 0;
+  transform: scale(0.95);
+  transform-origin: center;
+  will-change: filter, opacity, transform;
+}
+
+@keyframes agents-gallery-card-enter {
+  from {
+    filter: blur(18px);
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.agents-profile-section-enter {
+  animation: agents-profile-section-enter 0.24s ease-out both;
+  transform-origin: center;
+  will-change: opacity, transform;
+}
+
+@keyframes agents-profile-section-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.agents-unpaired-enter {
+  animation: agents-unpaired-enter 0.22s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  filter: blur(10px);
+  opacity: 0;
+  transform: translateX(24px);
+  will-change: filter, opacity, transform;
+}
+
+@keyframes agents-unpaired-enter {
+  from {
+    filter: blur(10px);
+    opacity: 0;
+    transform: translateX(24px);
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.agents-transition-surface {
+  view-transition-name: agents-surface;
+  contain: layout;
+}
+
+.agents-gallery-transition-surface {
+  view-transition-name: agents-gallery-surface;
+  contain: layout;
+}
+
+@keyframes agents-gallery-surface-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes agents-gallery-surface-exit {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes agents-profile-surface-enter-after-gallery {
+  from {
+    opacity: 0;
+    filter: blur(10px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes agents-profile-surface-enter-side {
+  from {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+}
+
+@keyframes agents-profile-surface-exit-side {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    filter: blur(12px);
+    transform: translateX(-16px);
+  }
+}
+
+::view-transition-old(root),
+::view-transition-new(root),
+::view-transition-old(agents-surface),
+::view-transition-new(agents-surface) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-group(agents-gallery-surface) {
+  animation: none;
+}
+
+::view-transition-old(agents-gallery-surface) {
+  animation-name: agents-gallery-surface-exit;
+  animation-duration: 0.08s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+::view-transition-new(agents-gallery-surface) {
+  animation-name: agents-gallery-surface-enter;
+  animation-duration: 0.18s;
+  animation-fill-mode: both;
+  animation-timing-function: ease-out;
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="gallery-to-profile"]::view-transition-new(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-enter-after-gallery;
+  animation-duration: 0.22s;
+  animation-delay: 0.08s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="profile-to-profile"]::view-transition-old(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-exit-side;
+  animation-duration: 0.14s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
+:root[data-agent-transition="profile-to-profile"]::view-transition-new(
+    agents-surface
+  ) {
+  animation-name: agents-profile-surface-enter-side;
+  animation-duration: 0.24s;
+  animation-delay: 0.04s;
+  animation-fill-mode: both;
+  animation-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  mix-blend-mode: normal;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1188,5 +1436,19 @@ code[data-streamdown="inline-code"],
   .page-transition {
     animation: none !important;
     opacity: 1 !important;
+  }
+
+  .agents-transition-surface,
+  .agents-gallery-transition-surface {
+    view-transition-name: none;
+  }
+
+  .agents-gallery-card-enter,
+  .agents-profile-section-enter,
+  .agents-unpaired-enter {
+    animation: none !important;
+    filter: none !important;
+    opacity: 1 !important;
+    transform: none !important;
   }
 }

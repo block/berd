@@ -104,32 +104,49 @@ export function PersonaGallery({
       <div
         {...dropHandlers}
         className={cn(
-          "flex min-h-72 flex-col items-center justify-center rounded-card border border-dashed border-border/80 bg-muted/10 px-6 text-center",
-          isDragOver && "border-border bg-muted/30",
+          "flex min-h-[calc(100dvh-12rem)] flex-col items-center px-6 pt-10 pb-12",
+          isDragOver && "bg-muted/30",
         )}
       >
-        <Button
-          type="button"
-          size="sm"
-          aria-label={t("gallery.createAria")}
-          onClick={onCreatePersona}
-          leftIcon={<IconPlus />}
-        >
-          {t("gallery.new")}
-        </Button>
-        {onImportFile && (
-          <>
-            <p className="mt-3 text-xs text-muted-foreground">
-              {t("gallery.dropFile")}
+        <div className="flex w-full max-w-[359px] flex-col items-start text-left">
+          <div className="space-y-1">
+            <h2
+              id="personas-heading"
+              className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg"
+            >
+              {t("gallery.empty.aboutTitle")}
+            </h2>
+            <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
+              {t("gallery.empty.aboutDescription")}
             </p>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".persona.md,.json,text/markdown,text/plain,application/json"
-              className="hidden"
-              onChange={handleFileChange}
-            />
-          </>
+          </div>
+
+          <div className="mt-[29px] space-y-1">
+            <h3 className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg">
+              {t("gallery.empty.valueTitle")}
+            </h3>
+            <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
+              {t("gallery.empty.valueDescription")}
+            </p>
+          </div>
+
+          <Button
+            type="button"
+            aria-label={t("gallery.createAria")}
+            onClick={onCreatePersona}
+            className="mt-[35px] bg-surface-agent-profile-fg text-sm leading-[15px] text-surface-agent-profile-action-fg hover:bg-surface-agent-profile-action-bg-hover"
+          >
+            {t("gallery.empty.createFirst")}
+          </Button>
+        </div>
+        {onImportFile && (
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".persona.md,.json,text/markdown,text/plain,application/json"
+            className="hidden"
+            onChange={handleFileChange}
+          />
         )}
       </div>
     );
@@ -137,17 +154,35 @@ export function PersonaGallery({
 
   return (
     <div {...dropHandlers} className={gridClass}>
-      {sorted.map((persona) => (
-        <PersonaCard
+      <button
+        type="button"
+        onClick={onCreatePersona}
+        aria-label={t("gallery.createAria")}
+        className={cn(
+          "agents-gallery-card-enter group flex h-full w-full items-center justify-center rounded-card border border-transparent p-4",
+          "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
+          "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
+          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+        )}
+      >
+        <IconPlus className="size-8 stroke-[1.25]" aria-hidden="true" />
+      </button>
+      {sorted.map((persona, index) => (
+        <div
           key={persona.id}
-          persona={persona}
-          isActive={persona.id === activePersonaId}
-          onSelect={onSelectPersona}
-          onEdit={onEditPersona}
-          onDuplicate={onDuplicatePersona}
-          onDelete={onDeletePersona}
-          onExport={onExportPersona}
-        />
+          className="agents-gallery-card-enter"
+          style={{ animationDelay: `${(index + 1) * 115}ms` }}
+        >
+          <PersonaCard
+            persona={persona}
+            isActive={persona.id === activePersonaId}
+            onSelect={onSelectPersona}
+            onEdit={onEditPersona}
+            onDuplicate={onDuplicatePersona}
+            onDelete={onDeletePersona}
+            onExport={onExportPersona}
+          />
+        </div>
       ))}
       {onImportFile && (
         <input

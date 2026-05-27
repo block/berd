@@ -39,6 +39,7 @@ import {
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
 import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
+import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 
 function decodeImportFileBytes(fileBytes: number[]): string {
@@ -91,7 +92,12 @@ export function AgentsView({
   // and scrolls. The motion layout animation slides it up/down across that line.
   const isVerticallyCentered = !personasLoading && personas.length <= 4;
 
-  const { createPersona, deletePersona, refreshFromDisk } = usePersonas();
+  const {
+    createPersona,
+    updatePersona: updatePersonaViaHook,
+    deletePersona,
+    refreshFromDisk,
+  } = usePersonas();
 
   const currentActivePersonaId = isActivePersonaControlled
     ? activePersonaId
@@ -109,12 +115,36 @@ export function AgentsView({
 
   const setActivePersona = useCallback(
     (personaId: string | null, options?: AppNavigationUpdateOptions) => {
-      if (!isActivePersonaControlled) {
-        setInternalActivePersonaId(personaId);
+      const isReturningToGallery =
+        Boolean(currentActivePersonaId) && !personaId;
+      const applyActivePersonaChange = () => {
+        if (!isActivePersonaControlled) {
+          setInternalActivePersonaId(personaId);
+        }
+        onActivePersonaIdChange?.(personaId, options);
+      };
+
+      if (isReturningToGallery) {
+        applyActivePersonaChange();
+        return;
       }
-      onActivePersonaIdChange?.(personaId, options);
+
+      const transitionKind =
+        !currentActivePersonaId && personaId
+          ? "gallery-to-profile"
+          : currentActivePersonaId && personaId
+            ? "profile-to-profile"
+            : undefined;
+
+      runAgentViewTransition(applyActivePersonaChange, {
+        kind: transitionKind,
+      });
     },
-    [isActivePersonaControlled, onActivePersonaIdChange],
+    [
+      currentActivePersonaId,
+      isActivePersonaControlled,
+      onActivePersonaIdChange,
+    ],
   );
 
   const handleSelectPersona = useCallback(
@@ -166,6 +196,19 @@ export function AgentsView({
       }
     },
     [createPersona, t],
+  );
+
+  const handleUpdateAvatar = useCallback(
+    async (persona: Persona, avatar: string | null) => {
+      try {
+        await updatePersonaViaHook(persona, { avatar });
+        toast.success(t("editor.updated"));
+      } catch (error) {
+        toast.error(formatAgentError(error, t("editor.saveFailed")));
+        throw error;
+      }
+    },
+    [t, updatePersonaViaHook],
   );
 
   const handleDeletePersona = useCallback((persona: Persona) => {
@@ -368,6 +411,7 @@ export function AgentsView({
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
           onExport={handleExportPersona}
+          onAvatarUpdate={handleUpdateAvatar}
         />
         {dialogs}
       </>
@@ -378,6 +422,7 @@ export function AgentsView({
     <PageShell
       contentWidth="full"
       contentAlign={isVerticallyCentered ? "center" : "top"}
+      contentClassName="agents-gallery-transition-surface"
     >
       <motion.section
         layout="position"

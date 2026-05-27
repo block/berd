@@ -1,0 +1,69 @@
+import type { ReactNode } from "react";
+import { cn } from "@/shared/lib/cn";
+
+interface AgentIdentityMetadataItem {
+  label: string;
+  value: string;
+}
+
+interface AgentIdentityRailProps {
+  actions?: ReactNode;
+  avatar: ReactNode;
+  className?: string;
+  description?: ReactNode;
+  leadingControl?: ReactNode;
+  metadata?: AgentIdentityMetadataItem[];
+  modeControl?: ReactNode;
+  title: ReactNode;
+}
+
+export function AgentIdentityRail({
+  actions,
+  avatar,
+  className,
+  description,
+  leadingControl,
+  metadata = [],
+  modeControl,
+  title,
+}: AgentIdentityRailProps) {
+  return (
+    <div className={cn("w-full space-y-5", className)}>
+      {leadingControl ? <div>{leadingControl}</div> : null}
+
+      <div data-agent-layout-slot="avatar">{avatar}</div>
+
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <h1 className="break-words text-[28px] font-normal leading-8 text-surface-agent-profile-fg">
+            {title}
+          </h1>
+          {description ? (
+            <div className="text-xs leading-4 text-surface-agent-profile-fg-muted">
+              {description}
+            </div>
+          ) : null}
+        </div>
+
+        {modeControl ? <div>{modeControl}</div> : null}
+
+        {metadata.length > 0 ? (
+          <dl className="grid gap-3 border-y border-surface-agent-profile-border py-4">
+            {metadata.map((item) => (
+              <div key={item.label} className="min-w-0 space-y-1">
+                <dt className="text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted">
+                  {item.label}
+                </dt>
+                <dd className="truncate text-[14px] leading-5 text-surface-agent-profile-fg-80">
+                  {item.value}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        ) : null}
+
+        {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
+      </div>
+    </div>
+  );
+}

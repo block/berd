@@ -81,9 +81,11 @@
     "avatarLibrary": "Biblioteca de avatares",
     "avatarLoading": "Cargando",
     "avatarRetry": "Reintentar",
+    "avatarBackToProfile": "Volver al perfil",
     "avatarUrl": "URL de avatar personalizada",
     "avatarUrlInvalid": "Ingresa una URL http o https válida sin credenciales.",
     "avatarUrlPlaceholder": "https://example.com/avatar.png",
+    "customizeAvatar": "Personalizar",
     "displayName": "Nombre del agente",
     "displayNamePlaceholder": "p. ej. Revisor de código",
     "duplicate": "Duplicar",
@@ -108,6 +110,13 @@
   "gallery": {
     "createAria": "Crear nuevo agente",
     "dropFile": "o suelta un archivo",
+    "empty": {
+      "aboutTitle": "¿Qué es un agente?",
+      "aboutDescription": "Un agente es un ayudante enfocado al que le das una tarea: usa herramientas, sigue instrucciones y avanza por su cuenta para que no tengas que vigilarlo.",
+      "valueTitle": "¿Qué puede hacer por mí?",
+      "valueDescription": "Delega lo repetitivo o laborioso: investigar, redactar, organizar archivos, llamar APIs y ejecutar flujos de varios pasos, y recibe resultados en vez de una lista de pendientes.",
+      "createFirst": "Crear mi primer agente"
+    },
     "loading": "Cargando agentes",
     "new": "Nuevo agente"
   },
@@ -131,6 +140,7 @@
     "importFailed": "No se pudo importar el agente.",
     "imported_one": "Se importó {{count}} agente.",
     "imported_other": "Se importaron {{count}} agentes.",
+    "instructions": "Instrucciones",
     "newPersona": "Nuevo agente",
     "optionsAria": "Opciones de {{name}}",
     "searchPlaceholder": "Buscar agentes",

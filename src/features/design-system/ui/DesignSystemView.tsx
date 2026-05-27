@@ -496,6 +496,22 @@ const elevationTokens: RuntimeToken[] = [
     name: "--shadow-date-field-focus",
     description: "Date field focus treatment.",
   },
+  {
+    name: "--shadow-agent-profile-avatar",
+    description: "Agent profile avatar preview shadow.",
+  },
+  {
+    name: "--shadow-agent-profile-affordance",
+    description: "Agent profile floating affordance shadow.",
+  },
+  {
+    name: "--shadow-agent-profile-input-hover",
+    description: "Agent profile input hover shadow.",
+  },
+  {
+    name: "--shadow-agent-profile-input-focus",
+    description: "Agent profile input focus shadow.",
+  },
 ];
 
 const typographyTokens = [
