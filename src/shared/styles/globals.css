@@ -1243,6 +1243,7 @@ code[data-streamdown="inline-code"],
   animation: content-fade-in 0.3s ease-out forwards;
 }
 
+.gallery-card-enter,
 .agents-gallery-card-enter {
   animation: agents-gallery-card-enter 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
   filter: blur(18px);
@@ -1466,6 +1467,7 @@ code[data-streamdown="inline-code"],
     view-transition-name: none;
   }
 
+  .gallery-card-enter,
   .agents-gallery-card-enter,
   .agent-builder-column-enter,
   .agents-profile-section-enter,

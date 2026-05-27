@@ -251,6 +251,20 @@ describe("SkillsView", () => {
     ).toBeInTheDocument();
   });
 
+  it("staggers the skill grid reveal after loading", async () => {
+    listSkills.mockResolvedValue(mockSkills);
+
+    const { container } = render(<SkillsView />);
+    await screen.findByText("code-review");
+
+    const revealItems = container.querySelectorAll<HTMLElement>(
+      ".gallery-card-enter",
+    );
+    expect(revealItems).toHaveLength(mockSkills.length + 1);
+    expect(revealItems[1]).toHaveStyle({ animationDelay: "115ms" });
+    expect(revealItems[2]).toHaveStyle({ animationDelay: "230ms" });
+  });
+
   it("filters skills with page-local search", async () => {
     listSkills.mockResolvedValue(mockSkills);
     const user = userEvent.setup();
