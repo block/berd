@@ -100,16 +100,20 @@ describe("ProjectArtifactWidget", () => {
 
     expect(preview).toHaveTextContent("Alpha Project");
     expect(preview.parentElement).toHaveClass(
+      "pointer-events-auto",
       "top-[47%]",
       "left-[49%]",
       "h-[320px]",
       "w-[320px]",
     );
     expect(label).toHaveTextContent("Alpha Project");
+    expect(label).toHaveAttribute("aria-hidden", "true");
     expect(label).toHaveClass(
       "px-2.5",
       "py-1",
       "text-xs",
+      "bg-card/90",
+      "text-foreground",
       "opacity-0",
       "group-hover:opacity-100",
     );

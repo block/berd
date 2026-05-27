@@ -98,10 +98,21 @@ describe("AgentPinWidget", () => {
     await waitFor(() => expect(button).toHaveClass("bg-transparent"));
     expect(button).toHaveClass("aspect-square", "w-full", "rounded-full");
     expect(button).not.toHaveClass("bg-card");
-    expect(screen.getByText("Agent One")).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("agent-pin-hover-label"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("agent-pin-hover-label")).toHaveTextContent(
+      "Agent One",
+    );
+    expect(screen.getByTestId("agent-pin-hover-label")).toHaveAttribute(
+      "aria-hidden",
+      "true",
+    );
+    expect(screen.getByTestId("agent-pin-hover-label")).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+      "group-focus-within:opacity-100",
+      "bg-card/90",
+      "text-foreground",
+      "backdrop-blur-md",
+    );
     expect(container.querySelector(media)).toBeInTheDocument();
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
   });
@@ -114,7 +125,13 @@ describe("AgentPinWidget", () => {
     });
     expect(button).toHaveClass("bg-transparent");
     expect(button).not.toHaveClass("bg-card");
-    expect(screen.getByText("Agent One")).toBeInTheDocument();
+    expect(screen.getByTestId("agent-pin-hover-label")).toHaveTextContent(
+      "Agent One",
+    );
+    expect(screen.getByTestId("agent-pin-hover-label")).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+    );
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
     expect(container.querySelector('img[aria-hidden="true"]')).toBeTruthy();
     expect(screen.queryByText("A")).not.toBeInTheDocument();

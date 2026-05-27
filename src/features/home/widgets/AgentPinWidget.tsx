@@ -33,11 +33,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   );
 
   return (
-    // Box is aspect-locked to ratio (label-band + square-avatar), so the
-    // wrapper here can fill it edge-to-edge with no padding. Outer div stays
-    // pointer-events: none defensively; the avatar button and label each
-    // re-enable pointer events on themselves.
-    <div className="pointer-events-none flex h-full w-full flex-col text-center text-foreground">
+    <div className="group pointer-events-none relative flex h-full w-full items-center justify-center text-center text-foreground">
       <button
         type="button"
         onClick={handleClick}
@@ -61,13 +57,9 @@ export const AgentPinWidget = memo(function AgentPinWidget({
         )}
       </button>
       <span
-        className="pointer-events-auto block w-full shrink-0 truncate"
-        style={{
-          fontSize:
-            "clamp(0.6875rem, calc(0.875rem * var(--widget-scale, 1)), 1.75rem)",
-          lineHeight:
-            "clamp(0.875rem, calc(1.125rem * var(--widget-scale, 1)), 2.25rem)",
-        }}
+        aria-hidden="true"
+        data-testid="agent-pin-hover-label"
+        className="pointer-events-none absolute bottom-3 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate whitespace-nowrap rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {label}
       </span>
