@@ -84,11 +84,12 @@ function inferPathKind(path: string): SessionArtifact["kind"] {
   return "path";
 }
 
-function isExternalHref(href: string): boolean {
-  return (
-    /^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href) &&
-    !href.toLowerCase().startsWith("file://")
-  );
+function hasBlockedMarkdownScheme(href: string): boolean {
+  if (!/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(href)) {
+    return false;
+  }
+
+  return !href.toLowerCase().startsWith("file://");
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -158,8 +159,7 @@ export function ArtifactPolicyProvider({
     (href: string): ArtifactLinkCandidate | null => {
       const trimmed = href.trim();
       if (!trimmed || trimmed.startsWith("#")) return null;
-      if (trimmed.toLowerCase().startsWith("javascript:")) return null;
-      if (isExternalHref(trimmed)) return null;
+      if (hasBlockedMarkdownScheme(trimmed)) return null;
 
       const withoutHash = trimmed.split("#")[0];
       const withoutQuery = withoutHash.split("?")[0];

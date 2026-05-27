@@ -73,12 +73,20 @@ function extractSessionId(value: unknown): string | null {
   return null;
 }
 
+function stripTrailingSlashes(value: string): string {
+  let end = value.length;
+  while (end > 0 && value[end - 1] === "/") {
+    end -= 1;
+  }
+  return value.slice(0, end);
+}
+
 /**
  * Stream that speaks the ACP Streamable HTTP transport: a connection-scoped
  * GET SSE stream plus a session-scoped stream per active `sessionId`.
  */
 export function createHttpStream(serverUrl: string): Stream {
-  const base = serverUrl.replace(/\/+$/, "");
+  const base = stripTrailingSlashes(serverUrl);
   const endpoint = `${base}/acp`;
 
   let connectionId: string | null = null;

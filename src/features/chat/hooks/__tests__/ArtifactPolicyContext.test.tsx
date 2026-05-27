@@ -32,6 +32,7 @@ function LinkProbe({ href }: { href: string }) {
 
   return (
     <div>
+      <span data-testid="link-has-candidate">{String(candidate !== null)}</span>
       <span data-testid="link-path">{candidate?.resolvedPath ?? ""}</span>
     </div>
   );
@@ -124,5 +125,34 @@ describe("ArtifactPolicyContext", () => {
     expect(screen.getByTestId("link-path")).toHaveTextContent(
       "/Users/test/app/output/report.md",
     );
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,<h1>hello</h1>",
+    "vbscript:msgbox(1)",
+    "https://example.com/report.md",
+    "mailto:hello@example.com",
+    "#anchor",
+  ])("does not resolve blocked markdown href %s", (href) => {
+    render(
+      <ArtifactPolicyProvider messages={[]} sessionCwd="/Users/test/app">
+        <LinkProbe href={href} />
+      </ArtifactPolicyProvider>,
+    );
+
+    expect(screen.getByTestId("link-has-candidate")).toHaveTextContent("false");
+    expect(screen.getByTestId("link-path")).toHaveTextContent("");
+  });
+
+  it("resolves file markdown hrefs as local paths", () => {
+    render(
+      <ArtifactPolicyProvider messages={[]} sessionCwd="/Users/test/app">
+        <LinkProbe href="file:///tmp/report.md" />
+      </ArtifactPolicyProvider>,
+    );
+
+    expect(screen.getByTestId("link-has-candidate")).toHaveTextContent("true");
+    expect(screen.getByTestId("link-path")).toHaveTextContent("/tmp/report.md");
   });
 });
