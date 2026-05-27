@@ -217,7 +217,7 @@ describe("AppShell global navigation", () => {
 
   it("starts a full blank chat from the sidebar new chat action", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    const { container } = render(<AppShell />);
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
 
@@ -229,6 +229,11 @@ describe("AppShell global navigation", () => {
       personaId: undefined,
       projectId: undefined,
     });
+    expect(
+      (container.firstElementChild as HTMLElement).style.getPropertyValue(
+        "--project-tint",
+      ),
+    ).toBe("transparent");
   });
 
   it("goes back and forward through Skills detail subroutes", async () => {
@@ -566,7 +571,7 @@ describe("AppShell global navigation", () => {
 
   it("shows Chat / project / session title for a chat inside a project", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    const { container } = render(<AppShell />);
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
     await waitFor(() => {
@@ -612,6 +617,11 @@ describe("AppShell global navigation", () => {
       expect(screen.getByText("Sample Project")).toBeInTheDocument();
       expect(screen.getByText("MCPs vs Extensions")).toBeInTheDocument();
     });
+    expect(
+      (container.firstElementChild as HTMLElement).style.getPropertyValue(
+        "--project-tint",
+      ),
+    ).toBe("var(--color-pill-blue)");
   });
 
   it("opens search with Cmd+K", async () => {

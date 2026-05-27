@@ -1,4 +1,9 @@
-import type { ComponentProps, MouseEventHandler, ReactNode } from "react";
+import type {
+  ComponentProps,
+  CSSProperties,
+  MouseEventHandler,
+  ReactNode,
+} from "react";
 import { Sidebar } from "@/features/sidebar/ui/Sidebar";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
@@ -17,6 +22,7 @@ interface AppShellLayoutProps {
    * solid background and shares the dot-grid surface underneath.
    */
   contentUnderTopBar?: boolean;
+  projectTint?: string | null;
   createProjectDialog: ComponentProps<typeof CreateProjectDialog>;
   isResizing: boolean;
   onCornerResizeDoubleClick: MouseEventHandler<HTMLDivElement>;
@@ -39,6 +45,7 @@ export function AppShellLayout({
   children,
   contentUnderSidebar = false,
   contentUnderTopBar = false,
+  projectTint = null,
   createProjectDialog,
   isResizing,
   onCornerResizeDoubleClick,
@@ -56,8 +63,15 @@ export function AppShellLayout({
   showDesignSystemInspector,
   topBar,
 }: AppShellLayoutProps) {
+  const shellStyle = {
+    "--project-tint": projectTint ?? "transparent",
+  } as CSSProperties;
+
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground">
+    <div
+      className="relative flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground"
+      style={shellStyle}
+    >
       <TopBar
         {...topBar}
         className={

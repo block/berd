@@ -4,6 +4,8 @@ import { PinIcon } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { isHexColor } from "@/features/projects/lib/customPillColor";
+import { isPillTone } from "@/features/projects/lib/pillTones";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +42,10 @@ export function SkillCard({
   onDelete,
 }: SkillCardProps) {
   const { t } = useTranslation(["skills", "common"]);
-  const tone = resolveSkillPillTone(skill.name, skill.color);
+  const customColor = isHexColor(skill.color) ? skill.color : null;
+  const storedTone =
+    skill.color && isPillTone(skill.color) ? skill.color : null;
+  const tone = storedTone ?? resolveSkillPillTone(skill.name);
   const [menuOpen, setMenuOpen] = useExclusiveMenu();
   const isEditable = skill.sourceKind !== "builtin";
   const isDeletable = skill.sourceKind !== "builtin";
@@ -79,8 +84,9 @@ export function SkillCard({
       <span
         className={cn(
           "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-skill-pill-fg",
-          skillPillToneClass(tone),
+          customColor ? null : skillPillToneClass(tone),
         )}
+        style={customColor ? { backgroundColor: customColor } : undefined}
       >
         {skill.name}
       </span>

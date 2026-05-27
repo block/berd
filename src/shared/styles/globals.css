@@ -959,14 +959,14 @@
 .bg-dot-grid {
   background-color: color-mix(
     in oklch,
-    var(--project-tint, transparent) 7%,
+    var(--project-tint, transparent) 25%,
     var(--canvas-base)
   );
   background-image: radial-gradient(
     circle,
     color-mix(
         in oklch,
-        var(--project-tint, transparent) 12%,
+        var(--project-tint, transparent) 25%,
         var(--dot-color-base)
       )
       var(--dot-size),

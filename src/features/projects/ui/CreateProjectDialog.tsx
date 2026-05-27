@@ -27,7 +27,7 @@ import {
 } from "../lib/projectPromptText";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
-import { pillCssColor, type PillTone } from "../lib/pillTones";
+import { pillCssColor } from "../lib/pillTones";
 import { ProjectColorPicker } from "./ProjectColorPicker";
 import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 
@@ -273,7 +273,7 @@ export function CreateProjectDialog({
             <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
               <ProjectColorPicker
                 value={color}
-                onChange={(tone: PillTone) => setColor(tone)}
+                onChange={setColor}
                 variant="swatches"
               />
             </div>

@@ -16,6 +16,7 @@ import type { ExtensionEntry } from "@/features/extensions/types";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
+import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import {
   type ChatSession,
   useChatSessionStore,
@@ -296,6 +297,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const sessions = useChatSessionStore(selectSessions);
   const activeSessionId = useChatSessionStore(selectActiveSessionId);
+  const activeProjectTint = useActiveProjectTint();
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
   const createSession = useChatSessionStore((s) => s.createSession);
@@ -1802,6 +1804,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onCornerResizeDoubleClick={handleCornerResizeDoubleClick}
         contentUnderSidebar={activeView === "home"}
         contentUnderTopBar={activeView === "home"}
+        projectTint={activeView === "chat" ? activeProjectTint : null}
         showDesignSystemInspector={designSystemInspectorVisible}
         createProjectDialog={{
           isOpen: createProjectOpen,

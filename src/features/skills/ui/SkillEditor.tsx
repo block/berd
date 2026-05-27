@@ -16,7 +16,8 @@ import {
 } from "@/shared/ui/select";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { ProjectColorPicker } from "@/features/projects/ui/ProjectColorPicker";
-import type { PillTone } from "@/features/projects/lib/pillTones";
+import { isHexColor } from "@/features/projects/lib/customPillColor";
+import { isPillTone } from "@/features/projects/lib/pillTones";
 import {
   resolveSkillPillTone,
   skillPillToneClass,
@@ -82,7 +83,7 @@ export function SkillEditor({
   // name-hash tone so the editor still has visual identity before the user
   // clicks a swatch. Once they pick (or edit a skill with a stored color),
   // this holds the chosen tone and name renames no longer shift the hero.
-  const [color, setColor] = useState<PillTone | null>(null);
+  const [color, setColor] = useState<string | null>(null);
   const formBodyRef = useRef<HTMLDivElement>(null);
 
   const projects = useProjectStore((s) => s.projects);
@@ -140,8 +141,12 @@ export function SkillEditor({
   // resolver used by SkillsView cards so an unpicked skill shows identical
   // color in both surfaces.
   const heroToneSeed = name || editingSkill?.name || "new";
-  const effectiveTone = resolveSkillPillTone(heroToneSeed, color);
-  const heroToneClass = skillPillToneClass(effectiveTone);
+  const effectiveColor = color ?? resolveSkillPillTone(heroToneSeed);
+  const heroTone = isPillTone(effectiveColor)
+    ? effectiveColor
+    : resolveSkillPillTone(heroToneSeed);
+  const heroCustomColor = isHexColor(effectiveColor) ? effectiveColor : null;
+  const heroToneClass = heroCustomColor ? null : skillPillToneClass(heroTone);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,7 +161,7 @@ export function SkillEditor({
           name,
           description.trim(),
           instructions,
-          effectiveTone,
+          effectiveColor,
         );
       } else {
         const projectId =
@@ -165,7 +170,7 @@ export function SkillEditor({
           name,
           description.trim(),
           instructions,
-          effectiveTone,
+          effectiveColor,
           { projectId },
         );
       }
@@ -268,12 +273,15 @@ export function SkillEditor({
               HERO_HEIGHT_CLASS,
               heroToneClass,
             )}
+            style={
+              heroCustomColor ? { backgroundColor: heroCustomColor } : undefined
+            }
           >
             <div className="absolute inset-x-0 bottom-4 flex justify-center">
               <ProjectColorPicker
                 variant="swatches"
-                value={effectiveTone}
-                onChange={(tone) => setColor(tone)}
+                value={effectiveColor}
+                onChange={setColor}
               />
             </div>
           </div>

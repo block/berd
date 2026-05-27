@@ -1,6 +1,7 @@
 import type { SourceEntry } from "@aaif/goose-sdk";
 import { getClient } from "@/shared/api/acpConnection";
-import { isPillTone, type PillTone } from "@/features/projects/lib/pillTones";
+import { isHexColor } from "@/features/projects/lib/customPillColor";
+import { isPillTone } from "@/features/projects/lib/pillTones";
 import {
   basename,
   deriveProjectRoot,
@@ -29,10 +30,10 @@ export interface SkillInfo {
   sourceLabel: string;
   projectLinks: SkillProjectLink[];
   readonly: boolean;
-  /** User-chosen pill tone, persisted to frontmatter as `color`. Null for
+  /** User-chosen pill tone or custom pastel hex, persisted to frontmatter as `color`. Null for
    *  legacy skills created before the picker existed — consumers fall back
    *  to the deterministic hash-from-name tone in that case. */
-  color: PillTone | null;
+  color: string | null;
 }
 
 export type EditingSkill = Pick<
@@ -123,9 +124,11 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
 
 function readStoredColor(
   properties: SourceEntry["properties"] | undefined,
-): PillTone | null {
+): string | null {
   const raw = (properties as Record<string, unknown> | undefined)?.color;
-  return typeof raw === "string" && isPillTone(raw) ? raw : null;
+  return typeof raw === "string" && (isPillTone(raw) || isHexColor(raw))
+    ? raw
+    : null;
 }
 
 function uniqueProjectDirs(projectDirs: string[]) {
@@ -142,7 +145,7 @@ export async function createSkill(
   name: string,
   description: string,
   instructions: string,
-  color: PillTone,
+  color: string,
   options: CreateSkillOptions = {},
 ): Promise<void> {
   const client = await getClient();
@@ -229,7 +232,7 @@ export async function updateSkill(
   name: string,
   description: string,
   instructions: string,
-  color: PillTone,
+  color: string,
 ): Promise<SkillInfo> {
   const client = await getClient();
   // properties replaces the full bag, so only send fields skills own
