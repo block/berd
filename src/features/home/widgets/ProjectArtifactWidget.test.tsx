@@ -25,11 +25,16 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
 vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
   ProjectArtifactPreview: ({
     input,
+    motionImpulse,
   }: {
     input: { artifact?: { seed: number } | null; name: string };
+    motionImpulse?: { deltaX: number; deltaY: number; sequence: number };
   }) => (
     <div
       data-artifact-seed={input.artifact?.seed ?? ""}
+      data-motion-delta-x={motionImpulse?.deltaX ?? ""}
+      data-motion-delta-y={motionImpulse?.deltaY ?? ""}
+      data-motion-sequence={motionImpulse?.sequence ?? ""}
       data-testid="project-artifact-preview"
     >
       {input.name}
@@ -147,6 +152,66 @@ describe("ProjectArtifactWidget", () => {
     );
 
     expect(onStartProjectChat).not.toHaveBeenCalled();
+  });
+
+  it("does not animate pointer impulse while the canvas drag guard is active", () => {
+    renderWidget({ shouldIgnoreActivation: () => true });
+
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 220,
+      height: 220,
+      left: 0,
+      top: 0,
+      right: 220,
+      bottom: 220,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(button, { clientX: 20, clientY: 20 });
+    fireEvent.pointerMove(button, { clientX: 80, clientY: 20 });
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "",
+    );
+  });
+
+  it("starts cube pointer impulse tracking from each pointerdown", () => {
+    renderWidget();
+
+    const button = screen.getByRole("button", {
+      name: "Start chat in Alpha Project",
+    });
+    vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
+      width: 220,
+      height: 220,
+      left: 0,
+      top: 0,
+      right: 220,
+      bottom: 220,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    fireEvent.pointerDown(button, { clientX: 10, clientY: 20 });
+    fireEvent.pointerMove(button, { clientX: 80, clientY: 20 });
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-motion-sequence",
+      "1",
+    );
+
+    fireEvent.pointerDown(button, { clientX: 200, clientY: 20 });
+    fireEvent.pointerMove(button, { clientX: 201, clientY: 20 });
+
+    const preview = screen.getByTestId("project-artifact-preview");
+    expect(preview).toHaveAttribute("data-motion-sequence", "2");
+    expect(Number(preview.dataset.motionDeltaX)).toBeLessThan(0.1);
   });
 
   it("renders a non-crashing unavailable state when the project is missing", () => {

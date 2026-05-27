@@ -19,6 +19,7 @@ function getProjectId(
 }
 
 function clampPointerImpulse(value: number) {
+  if (!Number.isFinite(value)) return 0;
   return Math.max(-0.3, Math.min(0.3, value));
 }
 
@@ -28,7 +29,8 @@ function getPointerVelocityBoost(
   elapsedMs: number,
 ) {
   const normalizedDistance = Math.hypot(deltaX, deltaY);
-  const seconds = Math.max(elapsedMs, 8) / 1000;
+  const safeElapsedMs = Number.isFinite(elapsedMs) ? elapsedMs : 8;
+  const seconds = Math.max(safeElapsedMs, 8) / 1000;
   const velocity = normalizedDistance / seconds;
 
   return Math.max(0.9, Math.min(3.1, 1 + velocity * 0.22));
@@ -90,8 +92,23 @@ export function ProjectArtifactWidget({
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (project) onStartProjectChat?.(project.id);
   });
+  const rememberPointerPosition = (event: PointerEvent<HTMLButtonElement>) => {
+    lastPointerPosition.current = {
+      time: event.timeStamp,
+      x: event.clientX,
+      y: event.clientY,
+    };
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    rememberPointerPosition(event);
+  };
+
   const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!project) return;
+    if (!project || shouldIgnoreActivation?.()) {
+      lastPointerPosition.current = null;
+      return;
+    }
 
     const currentPosition = {
       time: event.timeStamp,
@@ -130,6 +147,7 @@ export function ProjectArtifactWidget({
     <button
       type="button"
       onClick={handleClick}
+      onPointerDown={handlePointerDown}
       onPointerLeave={handlePointerLeave}
       onPointerMove={handlePointerMove}
       disabled={!project}
