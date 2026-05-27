@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { getArtifacts } from "@/shared/api/artifacts";
+import { ARTIFACTS_QUERY_KEY, getArtifacts } from "@/shared/api/artifacts";
 import { ProjectArtifactPreview } from "./ProjectArtifactPreview";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -46,9 +46,14 @@ function renderWithQueryClient(children: ReactNode) {
     },
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>,
-  );
+  return {
+    queryClient,
+    ...render(
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>,
+    ),
+  };
 }
 
 describe("ProjectArtifactPreview", () => {
@@ -75,34 +80,35 @@ describe("ProjectArtifactPreview", () => {
   });
 
   it("passes cached image and environment URLs to the renderer", async () => {
-    mockedGetArtifacts.mockResolvedValue({
+    const rawArtifacts = {
       catalogVersion: "20260521T121530123Z",
       assets: [
         {
-          kind: "environment",
+          kind: "environment" as const,
           path: "/tmp/assets/hdri/studio_soft.exr",
           mimeType: "image/x-exr",
           byteSize: 4,
           sha256: "a".repeat(64),
         },
         {
-          kind: "projectImage",
+          kind: "projectImage" as const,
           path: "/tmp/assets/project-images/memory-01.webp",
           mimeType: "image/webp",
           byteSize: 4,
           sha256: "b".repeat(64),
         },
         {
-          kind: "projectImage",
+          kind: "projectImage" as const,
           path: "/tmp/assets/project-images/memory-02.webp",
           mimeType: "image/webp",
           byteSize: 4,
           sha256: "c".repeat(64),
         },
       ],
-    });
+    };
+    mockedGetArtifacts.mockResolvedValue(rawArtifacts);
 
-    renderWithQueryClient(
+    const { queryClient } = renderWithQueryClient(
       <ProjectArtifactPreview input={{ name: "Launch plan" }} />,
     );
 
@@ -115,6 +121,7 @@ describe("ProjectArtifactPreview", () => {
       "data-environment-url",
       "asset:///tmp/assets/hdri/studio_soft.exr",
     );
+    expect(queryClient.getQueryData(ARTIFACTS_QUERY_KEY)).toEqual(rawArtifacts);
   });
 
   it("keeps the fallback visible when asset loading fails", async () => {

@@ -12,6 +12,7 @@ import type {
   ToolRequestContent,
   ToolResponseContent,
 } from "@/shared/types/messages";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { AcpNotificationHandler } from "./acpConnection";
 import { handleReplayUserMessageChunk } from "./acpSkillReplayChips";
 import {
@@ -26,7 +27,11 @@ import {
   ensureReplayAssistantMessage,
   getTrackedReplayAssistantMessageId,
 } from "./acpReplayAssistant";
-import { getReplayCreated, getReplayMessageId } from "./acpReplayMetadata";
+import {
+  getReplayAssistantMetadata,
+  getReplayCreated,
+  getReplayMessageId,
+} from "./acpReplayMetadata";
 import { handleSessionInfoUpdate } from "./acpSessionInfoUpdate";
 import {
   getToolCallIdentity,
@@ -336,6 +341,31 @@ function getChunkMessageId(update: SessionUpdate): string | null {
     : null;
 }
 
+function getReplayAssistantMessageMetadata(
+  sessionId: string,
+  update: SessionUpdate,
+): Pick<MessageMetadata, "personaId" | "personaName"> | undefined {
+  const updateMetadata = getReplayAssistantMetadata(update);
+  if (updateMetadata) {
+    return updateMetadata;
+  }
+
+  const personaId = useChatSessionStore
+    .getState()
+    .getSession(sessionId)?.personaId;
+  if (!personaId) {
+    return undefined;
+  }
+
+  const personaName = useAgentStore
+    .getState()
+    .getPersonaById(personaId)?.displayName;
+  return {
+    personaId,
+    ...(personaName ? { personaName } : {}),
+  };
+}
+
 function handleReplay(sessionId: string, update: SessionUpdate): void {
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
@@ -343,6 +373,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         sessionId,
         getReplayMessageId(update),
         getReplayCreated(update),
+        getReplayAssistantMessageMetadata(sessionId, update),
       );
       if (msg && update.content.type === "text" && "text" in update.content) {
         const last = msg.content[msg.content.length - 1];
@@ -376,6 +407,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         sessionId,
         getReplayMessageId(update),
         created,
+        getReplayAssistantMessageMetadata(sessionId, update),
       );
       msg.content.push({
         type: "toolRequest",

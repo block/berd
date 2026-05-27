@@ -3,6 +3,7 @@ import {
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
 import type { Message } from "@/shared/types/messages";
+import type { ReplayAssistantMetadata } from "./acpReplayMetadata";
 
 const replayAssistantMessageIds = new Map<string, string>();
 
@@ -16,6 +17,7 @@ export function ensureReplayAssistantMessage(
   sessionId: string,
   preferredMessageId?: string | null,
   created?: number,
+  metadata?: ReplayAssistantMetadata,
 ): Message {
   const trackedMessageId = replayAssistantMessageIds.get(sessionId);
 
@@ -25,6 +27,7 @@ export function ensureReplayAssistantMessage(
       if (created !== undefined) {
         preferredMessage.created = created;
       }
+      mergeAssistantMetadata(preferredMessage, metadata);
       replayAssistantMessageIds.set(sessionId, preferredMessageId);
       return preferredMessage;
     }
@@ -40,6 +43,7 @@ export function ensureReplayAssistantMessage(
       if (created !== undefined) {
         trackedMessage.created = created;
       }
+      mergeAssistantMetadata(trackedMessage, metadata);
       return trackedMessage;
     }
   }
@@ -55,11 +59,26 @@ export function ensureReplayAssistantMessage(
       userVisible: true,
       agentVisible: true,
       completionStatus: "inProgress",
+      ...metadata,
     },
   };
   buffer.push(message);
   replayAssistantMessageIds.set(sessionId, messageId);
   return message;
+}
+
+function mergeAssistantMetadata(
+  message: Message,
+  metadata: ReplayAssistantMetadata | undefined,
+): void {
+  if (!metadata) {
+    return;
+  }
+
+  message.metadata = {
+    ...message.metadata,
+    ...metadata,
+  };
 }
 
 export function clearReplayAssistantMessage(sessionId: string): void {

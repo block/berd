@@ -223,7 +223,7 @@ export function WidgetCanvas({
     canvasRef,
     viewport,
     dragPositions,
-    resizeSizes,
+    resizePreviews,
     worldPointForClientPoint,
     beginPan,
     beginWidgetDrag,
@@ -253,10 +253,10 @@ export function WidgetCanvas({
         handleVisualLift(instance.id, currentMaxZ + 1);
       }
     },
-    onWidgetResizeEnd: ({ id, size, offset }) => {
+    onWidgetResizeEnd: ({ id, bounds, offset }) => {
       dragSuppression.suppressClickAfterDrag(offset);
       handleVisualLiftReset(id);
-      mutations.resizeWidget(id, size.width, size.height, constraints, {
+      mutations.resizeWidget(id, bounds.width, bounds.height, constraints, {
         bringToFront: true,
       });
     },
@@ -344,19 +344,18 @@ export function WidgetCanvas({
             x: instance.x,
             y: instance.y,
           };
+          const resizePreview = resizePreviews[instance.id];
+          const renderWorldPosition = resizePreview ?? position;
           const renderPosition = renderedWidgetPosition(
-            position,
+            renderWorldPosition,
             viewport,
             devicePixelRatio,
           );
-          const size =
-            resizeSizes[instance.id] ?? widgetSizeForInstance(instance);
-          // Geometric-mean scale: sqrt(area ratio). Treats both dims symmetrically
-          // so widgets that stretch one axis don't blow up text in the other.
+          const size = resizePreview ?? widgetSizeForInstance(instance);
           const defaultSize = catalogEntry.defaultSize;
-          const widgetScale = Math.sqrt(
-            (size.width * size.height) /
-              (defaultSize.width * defaultSize.height),
+          const widgetScale = Math.min(
+            size.width / defaultSize.width,
+            size.height / defaultSize.height,
           );
           const widgetStyle = {
             ...renderedWidgetStyle({
@@ -407,8 +406,12 @@ export function WidgetCanvas({
                   event.preventDefault();
                   event.stopPropagation();
                 }}
-                className="absolute -right-1.5 -bottom-1.5 z-20 size-4 cursor-nwse-resize rounded-full border border-border bg-background shadow-mini opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="absolute -right-3 -bottom-3 z-20 flex size-7 cursor-nwse-resize items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               >
+                <span
+                  className="size-4 rounded-full border border-border bg-background shadow-mini"
+                  aria-hidden="true"
+                />
                 <span className="sr-only">
                   {t("widgets.resize.label", {
                     widget: t(catalogEntry.labelKey),

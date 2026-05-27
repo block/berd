@@ -6,6 +6,7 @@ import {
 } from "@/features/chat/hooks/replayBuffer";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { McpAppPayload } from "@/shared/types/messages";
 import {
   clearMessageTracking,
@@ -53,6 +54,16 @@ function createModelConfigUpdate(
   };
 }
 
+function markSessionReplayLoading(sessionId = "acp-session") {
+  useChatStore.setState({
+    loadingSessionIds: new Set([sessionId]),
+  });
+}
+
+function getReplayMessage(sessionId = "acp-session") {
+  return getReplayBuffer(sessionId)?.[0];
+}
+
 describe("acpNotificationHandler", () => {
   beforeEach(() => {
     clearMessageTracking();
@@ -76,6 +87,7 @@ describe("acpNotificationHandler", () => {
       activeWorkspaceBySession: {},
       modelSelectionIntentBySession: {},
     });
+    useAgentStore.setState({ personas: [] });
   });
 
   it("keeps tool calls that arrive before the first text chunk on the pending assistant message", async () => {
@@ -201,6 +213,85 @@ describe("acpNotificationHandler", () => {
         personaId: "persona-1",
         personaName: "Builder",
         completionStatus: "inProgress",
+      },
+    });
+  });
+
+  it("attaches replay assistant persona identity from update metadata", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Ready.",
+        },
+        _meta: {
+          goose: {
+            messageId: "assistant-replay-1",
+            personaId: "persona-meta",
+            personaName: "Meta Persona",
+          },
+        },
+      },
+    } as never);
+
+    expect(getReplayMessage()).toMatchObject({
+      id: "assistant-replay-1",
+      role: "assistant",
+      metadata: {
+        personaId: "persona-meta",
+        personaName: "Meta Persona",
+      },
+    });
+  });
+
+  it("falls back to session persona identity for replay assistant messages", async () => {
+    markSessionReplayLoading();
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      personaId: "persona-session",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-session",
+          displayName: "Session Persona",
+          systemPrompt: "",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Ready.",
+        },
+        _meta: {
+          goose: {
+            messageId: "assistant-replay-2",
+          },
+        },
+      },
+    } as never);
+
+    expect(getReplayMessage()).toMatchObject({
+      id: "assistant-replay-2",
+      role: "assistant",
+      metadata: {
+        personaId: "persona-session",
+        personaName: "Session Persona",
       },
     });
   });

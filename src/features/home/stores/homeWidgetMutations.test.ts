@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
 import type { WidgetInstance } from "../widgets/types";
-import { addWidgetMutation, moveWidgetMutation } from "./homeWidgetMutations";
+import {
+  addWidgetMutation,
+  moveWidgetMutation,
+  resizeWidgetMutation,
+} from "./homeWidgetMutations";
 
 const CONSTRAINTS: LayoutConstraints = {
   minCenter: -120,
@@ -72,5 +76,24 @@ describe("homeWidgetMutations", () => {
         bringToFront: true,
       }),
     ).toBeNull();
+  });
+
+  it("resizes widgets and clamps their position with layout center constraints", () => {
+    expect(
+      resizeWidgetMutation(
+        [clockWidget({ x: 1000, y: 1000, width: 240, height: 240 })],
+        "w1",
+        360,
+        360,
+        CONSTRAINTS,
+      ),
+    ).toEqual([
+      clockWidget({
+        x: 60,
+        y: 60,
+        width: 360,
+        height: 360,
+      }),
+    ]);
   });
 });

@@ -1,4 +1,5 @@
 import type { LayoutConstraints } from "@/features/layout/api/layout";
+import { resolveWidgetResize } from "../lib/homeWidgetResize";
 import {
   clampToLayoutConstraints,
   isLayoutConstraints,
@@ -173,22 +174,19 @@ export function resizeWidgetMutation(
     return null;
   }
 
-  const size = clampWidgetSize(target.type, { width, height });
-  const position = resolvePosition(
-    target.type,
-    target.x,
-    target.y,
-    size,
+  const resolved = resolveWidgetResize({
+    instance: target,
+    requestedSize: { width, height },
     bounds,
-  );
+  });
   const resized =
-    target.width !== size.width ||
-    target.height !== size.height ||
-    target.x !== position.x ||
-    target.y !== position.y;
+    target.width !== resolved.width ||
+    target.height !== resolved.height ||
+    target.x !== resolved.x ||
+    target.y !== resolved.y;
   const nextInstances = resized
     ? instances.map((instance) =>
-        instance.id === id ? { ...instance, ...position, ...size } : instance,
+        instance.id === id ? { ...instance, ...resolved } : instance,
       )
     : instances;
 

@@ -1,11 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
-import {
-  ARTIFACTS_QUERY_KEY,
-  getArtifacts,
-  selectAvatarImageUrl,
-  type Artifacts,
-} from "@/shared/api/artifacts";
+import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import {
   cachedAssetToMedia,
   getCachedAvatarForRef,
@@ -15,6 +10,7 @@ import { isAppAvatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
 import { resolveAvatarMedia, resolveAvatarSrc } from "@/shared/lib/avatarUrl";
 import type { Avatar } from "@/shared/types/agents";
 import type { ResolvedAvatarMedia } from "@/shared/avatars/catalog";
+import { useArtifacts } from "./useArtifacts";
 
 export interface AvatarMediaState {
   media: ResolvedAvatarMedia | undefined;
@@ -56,34 +52,15 @@ export function useAvatarImage(
     () => (isAppAvatarRef(avatarRef) ? parseAvatarRef(avatarRef) : undefined),
     [avatarRef],
   );
-  const queryClient = useContext(QueryClientContext);
-  const [artifacts, setArtifacts] = useState<Artifacts | undefined>(() =>
-    queryClient?.getQueryData<Artifacts>(ARTIFACTS_QUERY_KEY),
-  );
-
-  useEffect(() => {
-    if (!avatarId || directUrl || !queryClient) return;
-    let cancelled = false;
-    void queryClient
-      .fetchQuery({
-        queryKey: ARTIFACTS_QUERY_KEY,
-        queryFn: getArtifacts,
-        staleTime: Number.POSITIVE_INFINITY,
-      })
-      .then((result) => {
-        if (!cancelled) setArtifacts(result);
-      })
-      .catch(() => {
-        // Catalog isn't available; fall back to IconRobot at the call site.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [avatarId, directUrl, queryClient]);
+  const avatarImageQuery = useArtifacts({
+    enabled: Boolean(avatarId && !directUrl),
+    select: (artifacts) =>
+      avatarId ? selectAvatarImageUrl(artifacts, avatarId) : undefined,
+  });
 
   if (directUrl) return directUrl;
   if (!avatarId) return undefined;
-  return selectAvatarImageUrl(artifacts, avatarId);
+  return avatarImageQuery.data;
 }
 
 export function useAvatarMediaState(

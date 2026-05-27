@@ -167,6 +167,38 @@ describe("homeLayoutMapper", () => {
     });
   });
 
+  it("round-trips explicit widget width and height", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "00000000-0000-0000-0000-000000000004",
+        type: "automationOutputPin",
+        x: 24,
+        y: 48,
+        z: 6,
+        width: 420,
+        height: 240,
+        state: { automationId: "automation-1" },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "automation",
+      width: 420,
+      height: 240,
+      centerX: 234,
+      centerY: 168,
+    });
+
+    const [widget] = layoutItemsToHomeWidgets([item]);
+    expect(widget).toMatchObject({
+      type: "automationOutputPin",
+      x: 24,
+      y: 48,
+      width: 420,
+      height: 240,
+    });
+  });
+
   it("creates a default clock widget and layout item with a uuid id", () => {
     const widget = createDefaultClockWidget();
     const item = createDefaultClockLayoutItem();

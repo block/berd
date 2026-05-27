@@ -52,6 +52,15 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
   useTheme: () => ({ resolvedTheme: "dark" }),
 }));
 
+vi.mock("@/shared/hooks/useAvatarSrc", () => ({
+  useAvatarImage: vi.fn((avatar: unknown) => {
+    if (avatar === "app-avatar:builder") return "asset:///avatars/builder.png";
+    return typeof avatar === "string" && avatar.startsWith("http")
+      ? avatar
+      : undefined;
+  }),
+}));
+
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
 }));
@@ -77,6 +86,13 @@ function assistantMessage(
     content,
     ...overrides,
   };
+}
+
+function expectNoVisibleText(container: HTMLElement, text: string) {
+  const visibleTextNodes = [...container.querySelectorAll("span")].filter(
+    (node) => node.textContent === text && !node.classList.contains("sr-only"),
+  );
+  expect(visibleTextNodes).toHaveLength(0);
 }
 
 describe("MessageBubble", () => {
@@ -539,7 +555,11 @@ describe("MessageBubble", () => {
       "src",
       "https://example.test/builder.png",
     );
-    expect(screen.queryByText("Builder")).not.toBeInTheDocument();
+    expect(gutterAvatar?.querySelector("img")).toHaveAttribute("alt", "");
+    expect(gutterAvatar?.querySelector(".sr-only")).toHaveTextContent(
+      "Builder",
+    );
+    expectNoVisibleText(container, "Builder");
   });
 
   it("keeps custom persona identity in the gutter while avatar media is unavailable", () => {
@@ -569,7 +589,10 @@ describe("MessageBubble", () => {
     );
     expect(gutterAvatar).toHaveClass("size-9");
     expect(gutterAvatar?.querySelector("img")).toBeNull();
-    expect(screen.queryByText("Builder")).not.toBeInTheDocument();
+    expect(gutterAvatar?.querySelector(".sr-only")).toHaveTextContent(
+      "Builder",
+    );
+    expectNoVisibleText(container, "Builder");
   });
 
   it("does not render an assistant name when message identity metadata is missing", () => {

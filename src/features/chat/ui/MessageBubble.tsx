@@ -13,8 +13,7 @@ import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
-import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
-import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
   Reasoning,
@@ -334,7 +333,6 @@ export const MessageBubble = memo(function MessageBubble({
       : undefined,
   );
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
-  const personaAvatarMedia = useAvatarMedia(persona?.avatar);
   const personaGutterImage = useAvatarImage(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
 
@@ -376,12 +374,12 @@ export const MessageBubble = memo(function MessageBubble({
     ? getProviderIcon(assistantProviderId, "size-3.5")
     : null;
   const showPersonaGutterAvatar = Boolean(
-    !isUser && (message.metadata?.personaId || personaAvatarMedia),
+    !isUser && (message.metadata?.personaId || personaGutterImage),
   );
   const showAssistantIdentity = Boolean(
     !isUser &&
       !showPersonaGutterAvatar &&
-      (assistantDisplayName || personaAvatarMedia || assistantProviderIcon),
+      (assistantDisplayName || personaGutterImage || assistantProviderIcon),
   );
   const messageAttachments = message.metadata?.attachments ?? [];
   const messageChips = message.metadata?.chips ?? [];
@@ -418,6 +416,9 @@ export const MessageBubble = memo(function MessageBubble({
           )}
           data-role="assistant-persona-avatar"
         >
+          {assistantDisplayName ? (
+            <span className="sr-only">{assistantDisplayName}</span>
+          ) : null}
           {personaGutterImage ? (
             <img
               src={personaGutterImage}
@@ -441,9 +442,9 @@ export const MessageBubble = memo(function MessageBubble({
       >
         {showAssistantIdentity ? (
           <div className="mb-0.5 flex items-center gap-1 text-xs">
-            {personaAvatarMedia ? (
-              <AvatarMedia
-                media={personaAvatarMedia}
+            {personaGutterImage ? (
+              <img
+                src={personaGutterImage}
                 alt=""
                 className="h-5 w-5 rounded-full"
               />

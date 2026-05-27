@@ -7,12 +7,8 @@ import {
   type ErrorInfo,
   type ReactNode,
 } from "react";
-import { useQuery } from "@tanstack/react-query";
-import {
-  ARTIFACTS_QUERY_KEY,
-  getArtifacts,
-  selectProjectPreviewArtifacts,
-} from "@/shared/api/artifacts";
+import { selectProjectPreviewArtifacts } from "@/shared/api/artifacts";
+import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { cn } from "@/shared/lib/cn";
 import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
 import type {
@@ -130,14 +126,9 @@ export function ProjectArtifactPreview({
 }: ProjectArtifactPreviewProps) {
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
   const canUseRenderer = canUseWebGlRenderer();
-  const assetQuery = useQuery({
-    queryKey: ARTIFACTS_QUERY_KEY,
-    queryFn: async () => {
-      const artifacts = await getArtifacts();
-      return selectProjectPreviewArtifacts(artifacts);
-    },
+  const assetQuery = useArtifacts({
     enabled: canUseRenderer,
-    staleTime: Number.POSITIVE_INFINITY,
+    select: selectProjectPreviewArtifacts,
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 2000),
   });

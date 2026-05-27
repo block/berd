@@ -2,12 +2,22 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { ARTIFACTS_QUERY_KEY, type Artifacts } from "@/shared/api/artifacts";
 import { getCachedAvatarForRef } from "@/shared/api/avatars";
 import {
   listenLocalMediaCachesCleared,
   type LocalMediaCachesClearedPayload,
 } from "@/shared/api/localMediaCaches";
-import { useAvatarMediaState, useAvatarSrc } from "./useAvatarSrc";
+import {
+  useAvatarImage,
+  useAvatarMediaState,
+  useAvatarSrc,
+} from "./useAvatarSrc";
+
+vi.mock("@tauri-apps/api/core", () => ({
+  convertFileSrc: vi.fn((path: string) => `asset://${path}`),
+  invoke: vi.fn(),
+}));
 
 vi.mock("@/shared/api/avatars", () => ({
   cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
@@ -29,19 +39,50 @@ let localMediaCachesClearedHandler:
   | ((payload: LocalMediaCachesClearedPayload) => void)
   | undefined;
 
-function createWrapper() {
-  const queryClient = new QueryClient({
+function createQueryClient() {
+  return new QueryClient({
     defaultOptions: {
       queries: {
         retry: false,
       },
     },
   });
+}
 
+function createWrapper(queryClient = createQueryClient()) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     );
+  };
+}
+
+function createArtifacts(): Artifacts {
+  return {
+    catalogVersion: "v1",
+    assets: [
+      {
+        kind: "environment",
+        path: "/tmp/goose/artifacts/env.exr",
+        mimeType: "image/x-exr",
+        byteSize: 1,
+        sha256: "a".repeat(64),
+      },
+      {
+        kind: "projectImage",
+        path: "/tmp/goose/artifacts/project.webp",
+        mimeType: "image/webp",
+        byteSize: 1,
+        sha256: "b".repeat(64),
+      },
+      {
+        kind: "collectionImage",
+        path: "/tmp/goose/avatars/gloopies/gloopy-1.png",
+        mimeType: "image/png",
+        byteSize: 1,
+        sha256: "c".repeat(64),
+      },
+    ],
   };
 }
 
@@ -223,5 +264,22 @@ describe("useAvatarSrc", () => {
     expect(result.current.media?.src).toBe(
       "asset:///tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
     );
+  });
+
+  it("reads avatar images from the raw shared artifacts query cache", async () => {
+    const artifacts = createArtifacts();
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(ARTIFACTS_QUERY_KEY, artifacts);
+
+    const { result } = renderHook(() => useAvatarImage("app-avatar:gloopy-1"), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    await waitFor(() => {
+      expect(result.current).toBe(
+        "asset:///tmp/goose/avatars/gloopies/gloopy-1.png",
+      );
+    });
+    expect(queryClient.getQueryData(ARTIFACTS_QUERY_KEY)).toBe(artifacts);
   });
 });
