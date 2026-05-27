@@ -14,6 +14,8 @@ use tokio::sync::OnceCell;
 
 const GOOSE_SERVE_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 const GOOSE_SERVE_CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
+const DATABRICKS_HOST_ENV: &str = "DATABRICKS_HOST";
+const DEFAULT_DATABRICKS_HOST: &str = "https://block-lakehouse-production.cloud.databricks.com";
 const LOCALHOST: &str = "127.0.0.1";
 
 // ---------------------------------------------------------------------------
@@ -125,6 +127,7 @@ impl GooseServeProcess {
                 command.env("GOOSE_DISTRO_DIR", &bundle.root_dir);
             }
         }
+        set_databricks_host_env(&mut command);
 
         command
             .arg("serve")
@@ -372,6 +375,11 @@ fn append_additional_config_env(command: &mut Command, config_path: &std::path::
         fallback.push(config_path.as_os_str());
         command.env("GOOSE_ADDITIONAL_CONFIG_FILES", fallback);
     }
+}
+
+fn set_databricks_host_env(command: &mut Command) {
+    log::info!("{DATABRICKS_HOST_ENV} set to bundled default");
+    command.env(DATABRICKS_HOST_ENV, DEFAULT_DATABRICKS_HOST);
 }
 
 fn set_path_list_env(
