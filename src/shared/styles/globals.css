@@ -450,19 +450,47 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
-  --surface-agent-profile-bg: #f5f5f3;
-  --surface-agent-profile-fg: #242424;
-  --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
-  --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
-  --surface-agent-profile-fg-subtle: rgba(36, 36, 36, 0.4);
-  --surface-agent-profile-fg-faint: rgba(36, 36, 36, 0.35);
-  --surface-agent-profile-fg-placeholder: rgba(36, 36, 36, 0.3);
-  --surface-agent-profile-border: rgba(36, 36, 36, 0.1);
-  --surface-agent-profile-dot: rgba(36, 36, 36, 0.16);
-  --surface-agent-profile-control-bg: var(--color-white);
-  --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
-  --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
-  --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
+  --surface-agent-profile-bg: var(--color-gray-900);
+  --surface-agent-profile-fg: var(--color-gray-50);
+  --surface-agent-profile-fg-80: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 80%,
+    transparent
+  );
+  --surface-agent-profile-fg-muted: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 48%,
+    transparent
+  );
+  --surface-agent-profile-fg-subtle: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 42%,
+    transparent
+  );
+  --surface-agent-profile-fg-faint: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 34%,
+    transparent
+  );
+  --surface-agent-profile-fg-placeholder: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 32%,
+    transparent
+  );
+  --surface-agent-profile-border: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 12%,
+    transparent
+  );
+  --surface-agent-profile-dot: color-mix(
+    in srgb,
+    var(--surface-agent-profile-fg) 14%,
+    transparent
+  );
+  --surface-agent-profile-control-bg: var(--color-gray-800);
+  --surface-agent-profile-control-bg-hover: var(--color-gray-700);
+  --surface-agent-profile-action-fg: var(--color-gray-900);
+  --surface-agent-profile-action-bg-hover: var(--color-gray-300);
   --message-user-bg: var(--color-gray-700);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
@@ -548,10 +576,10 @@
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
-  --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
-  --shadow-agent-profile-affordance: 0 1px 2px rgba(36, 36, 36, 0.18);
-  --shadow-agent-profile-input-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
-  --shadow-agent-profile-input-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-agent-profile-avatar: 0 18px 32px rgba(0, 0, 0, 0.42);
+  --shadow-agent-profile-affordance: 0 10px 24px rgba(0, 0, 0, 0.4);
+  --shadow-agent-profile-input-hover: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --shadow-agent-profile-input-focus: 0 0 0 1px rgba(255, 255, 255, 0.18);
 
   /* Inverse popover — light menu on dark surface (inverted for dark theme). */
   --popover-inverse: var(--color-gray-50);

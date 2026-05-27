@@ -49,7 +49,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
 | `surface-composer`, `surface-composer-glass` | Composer-specific translucent surfaces. | `bg-surface-composer` |
 | `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |
-| `surface-agent-profile-*` | Agent profile and avatar-editing surfaces are intentionally theme-invariant and use values that do not perfectly match shared shadcn tokens. | `bg-surface-agent-profile-bg text-surface-agent-profile-fg` |
+| `surface-agent-profile-*` | Agent profile and avatar-editing surfaces are product-specific and theme-aware; their light and dark values do not perfectly match shared shadcn tokens. | `bg-surface-agent-profile-bg text-surface-agent-profile-fg` |
 | `message-user-bg` | User message bubble fill is a chat-specific surface that should not become a broad card or muted token. | `bg-message-user-bg` |
 | `text-placeholder-composer` | Composer placeholder needs a denser value than normal muted text. | `placeholder:text-placeholder-composer` |
 | `chip-*-bg`, `chip-*-fg` | File/chat/project/agent/skill/automation identity chips. | `bg-chip-agent-bg text-chip-agent-fg` |
