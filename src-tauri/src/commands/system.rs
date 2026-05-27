@@ -1,7 +1,8 @@
 use base64::Engine;
 use serde::Serialize;
-use tauri::Window;
+use tauri::{AppHandle, Window};
 use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_opener::OpenerExt;
 
 use std::collections::HashSet;
 use std::fs;
@@ -41,6 +42,65 @@ pub struct ImageAttachmentPayload {
 pub fn get_home_dir() -> Result<String, String> {
     let home_dir = dirs::home_dir().ok_or("Could not determine home directory")?;
     Ok(home_dir.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+pub fn open_in_chrome(app: AppHandle, url: String) -> Result<(), String> {
+    validate_external_url(&url)?;
+
+    if try_launch_chrome(&url) {
+        return Ok(());
+    }
+
+    log::warn!("Could not launch Google Chrome; falling back to default browser for {url}");
+    app.opener()
+        .open_url(&url, None::<&str>)
+        .map_err(|error| format!("Failed to open URL '{url}' in fallback browser: {error}"))
+}
+
+fn validate_external_url(url: &str) -> Result<(), String> {
+    let parsed =
+        reqwest::Url::parse(url).map_err(|error| format!("Invalid URL '{url}': {error}"))?;
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return Err(format!(
+            "Refusing to open URL with non-http(s) scheme '{}'",
+            parsed.scheme()
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn try_launch_chrome(url: &str) -> bool {
+    std::process::Command::new("open")
+        .args(["-a", "Google Chrome", url])
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(target_os = "linux")]
+fn try_launch_chrome(url: &str) -> bool {
+    for binary in ["google-chrome", "google-chrome-stable", "chromium"] {
+        if std::process::Command::new(binary).arg(url).spawn().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn try_launch_chrome(url: &str) -> bool {
+    // `start` is a shell builtin; the empty "" is the window title argument
+    // that `start` requires when the first argument is quoted.
+    std::process::Command::new("cmd")
+        .args(["/C", "start", "", "chrome", url])
+        .spawn()
+        .is_ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+fn try_launch_chrome(_url: &str) -> bool {
+    false
 }
 
 #[tauri::command]
@@ -352,7 +412,7 @@ mod tests {
     use super::{
         build_file_tree_entry, inspect_attachment_path, inspect_attachment_paths,
         normalize_attachment_paths, normalize_roots, read_directory_entries, read_image_attachment,
-        scan_files_for_mentions, MAX_IMAGE_ATTACHMENT_BYTES,
+        scan_files_for_mentions, validate_external_url, MAX_IMAGE_ATTACHMENT_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -624,5 +684,14 @@ mod tests {
             "exceeds the {} byte limit",
             MAX_IMAGE_ATTACHMENT_BYTES
         )));
+    }
+
+    #[test]
+    fn rejects_non_http_external_urls() {
+        assert!(validate_external_url("https://example.com").is_ok());
+        assert!(validate_external_url("http://example.com").is_ok());
+        assert!(validate_external_url("javascript:alert(1)").is_err());
+        assert!(validate_external_url("file:///etc/passwd").is_err());
+        assert!(validate_external_url("not a url").is_err());
     }
 }

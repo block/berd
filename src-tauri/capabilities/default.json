@@ -11,6 +11,7 @@
     "core:window:allow-close",
     "core:window:allow-set-size",
     "core:window:allow-set-min-size",
+    "deep-link:default",
     "opener:default",
     {
       "identifier": "opener:allow-open-url",

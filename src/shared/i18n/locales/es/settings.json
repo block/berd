@@ -189,11 +189,28 @@
   "archive": {
     "title": "Archivo"
   },
+  "connections": {
+    "title": "Conexiones",
+    "description": "Inicia sesión en apps y servicios que Goose puede usar en tu nombre.",
+    "connect": "Conectar",
+    "reconnect": "Reconectar",
+    "extendAccess": "Ampliar acceso",
+    "connectError": "No se pudo abrir el flujo de conexión. Inténtalo de nuevo.",
+    "expiresToday": "Caduca hoy",
+    "expiresTomorrow": "Caduca mañana",
+    "expiresInDays": "Caduca en {{count}} días",
+    "status": {
+      "active": "Activa",
+      "expired": "Caducada",
+      "disconnected": "Desconectada"
+    }
+  },
   "nav": {
     "about": "Acerca de",
     "appearance": "Apariencia",
     "archive": "Archivo",
     "compaction": "Compactación",
+    "connections": "Conexiones",
     "doctor": "Diagnóstico",
     "extensions": "Extensiones",
     "general": "General",

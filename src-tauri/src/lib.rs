@@ -8,6 +8,7 @@ use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
 #[cfg(target_os = "macos")]
 use tauri::{WebviewWindow, WindowEvent};
+use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
@@ -29,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
@@ -40,6 +42,16 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            let deep_link_app = app.handle().clone();
+            app.deep_link().on_open_url(move |event| {
+                for url in event.urls() {
+                    log::info!("Received deep link: {url}");
+                }
+                if let Some(window) = deep_link_app.get_webview_window("main") {
+                    let _ = window.set_focus();
+                }
+            });
+
             // Register the updater plugin only when a signing public key is
             // configured (i.e. release builds that include tauri.release.conf.json).
             let updater_pubkey_present = app
@@ -138,6 +150,7 @@ pub fn run() {
             commands::avatars::get_cached_avatar_for_ref,
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
+            commands::connections::list_connections,
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,
             commands::automations::get_automation_tile_results,
@@ -185,6 +198,7 @@ pub fn run() {
             commands::path_resolver::resolve_path,
             commands::distro::get_distro_bundle,
             commands::system::get_home_dir,
+            commands::system::open_in_chrome,
             commands::system::save_exported_session_file,
             commands::system::path_exists,
             commands::system::list_directory_entries,

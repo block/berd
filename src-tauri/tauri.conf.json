@@ -51,6 +51,13 @@
       }
     }
   },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["goose-internal"]
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": "all",

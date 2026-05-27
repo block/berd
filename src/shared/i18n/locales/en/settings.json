@@ -189,11 +189,28 @@
   "archive": {
     "title": "Archive"
   },
+  "connections": {
+    "title": "Connections",
+    "description": "Sign in to apps and services Goose can use on your behalf.",
+    "connect": "Connect",
+    "reconnect": "Reconnect",
+    "extendAccess": "Extend access",
+    "connectError": "Couldn't open the connect flow. Try again.",
+    "expiresToday": "Expires today",
+    "expiresTomorrow": "Expires tomorrow",
+    "expiresInDays": "Expires in {{count}} days",
+    "status": {
+      "active": "Active",
+      "expired": "Expired",
+      "disconnected": "Disconnected"
+    }
+  },
   "nav": {
     "about": "About",
     "appearance": "Appearance",
     "archive": "Archive",
     "compaction": "Compaction",
+    "connections": "Connections",
     "doctor": "Doctor",
     "extensions": "Extensions",
     "general": "General",
