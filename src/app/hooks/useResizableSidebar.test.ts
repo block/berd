@@ -1,9 +1,41 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useResizableSidebar } from "./useResizableSidebar";
 
+type ResizableSidebar = ReturnType<typeof useResizableSidebar>;
+
+function dragSidebar(
+  sidebar: ResizableSidebar,
+  axis: "width" | "height" | "both",
+) {
+  const start =
+    axis === "both"
+      ? sidebar.handleCornerResizeStart
+      : axis === "height"
+        ? sidebar.handleHeightResizeStart
+        : sidebar.handleResizeStart;
+
+  act(() => {
+    start({
+      clientX: 0,
+      clientY: 0,
+      preventDefault: vi.fn(),
+    } as unknown as ReactMouseEvent);
+  });
+  act(() => {
+    document.dispatchEvent(
+      new MouseEvent("mousemove", { clientX: 60, clientY: 80 }),
+    );
+    document.dispatchEvent(new MouseEvent("mouseup"));
+  });
+}
+
 describe("useResizableSidebar", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it("starts expanded at the default width", () => {
     const { result } = renderHook(() => useResizableSidebar());
 
@@ -51,16 +83,7 @@ describe("useResizableSidebar", () => {
     const { result } = renderHook(() => useResizableSidebar());
     const initialWidth = result.current.sidebarWidth;
 
-    act(() => {
-      result.current.handleResizeStart({
-        clientX: 0,
-        preventDefault: vi.fn(),
-      } as unknown as ReactMouseEvent);
-    });
-    act(() => {
-      document.dispatchEvent(new MouseEvent("mousemove", { clientX: 60 }));
-      document.dispatchEvent(new MouseEvent("mouseup"));
-    });
+    dragSidebar(result.current, "width");
 
     const resizedWidth = result.current.sidebarWidth;
     expect(resizedWidth).toBeGreaterThan(initialWidth);
@@ -82,17 +105,7 @@ describe("useResizableSidebar", () => {
     const { result } = renderHook(() => useResizableSidebar());
     const initialHeight = result.current.sidebarHeight;
 
-    act(() => {
-      result.current.handleHeightResizeStart({
-        clientX: 0,
-        clientY: 0,
-        preventDefault: vi.fn(),
-      } as unknown as ReactMouseEvent);
-    });
-    act(() => {
-      document.dispatchEvent(new MouseEvent("mousemove", { clientY: 80 }));
-      document.dispatchEvent(new MouseEvent("mouseup"));
-    });
+    dragSidebar(result.current, "height");
 
     expect(result.current.sidebarHeight).toBeGreaterThan(initialHeight);
   });
@@ -102,21 +115,67 @@ describe("useResizableSidebar", () => {
     const initialWidth = result.current.sidebarWidth;
     const initialHeight = result.current.sidebarHeight;
 
-    act(() => {
-      result.current.handleCornerResizeStart({
-        clientX: 0,
-        clientY: 0,
-        preventDefault: vi.fn(),
-      } as unknown as ReactMouseEvent);
-    });
-    act(() => {
-      document.dispatchEvent(
-        new MouseEvent("mousemove", { clientX: 60, clientY: 80 }),
-      );
-      document.dispatchEvent(new MouseEvent("mouseup"));
-    });
+    dragSidebar(result.current, "both");
 
     expect(result.current.sidebarWidth).toBeGreaterThan(initialWidth);
     expect(result.current.sidebarHeight).toBeGreaterThan(initialHeight);
+  });
+
+  it("restores resized dimensions after remount", () => {
+    const { result, unmount } = renderHook(() => useResizableSidebar());
+    const initialWidth = result.current.sidebarWidth;
+    const initialHeight = result.current.sidebarHeight;
+
+    dragSidebar(result.current, "both");
+
+    const resizedWidth = result.current.sidebarWidth;
+    const resizedHeight = result.current.sidebarHeight;
+    expect(resizedWidth).toBeGreaterThan(initialWidth);
+    expect(resizedHeight).toBeGreaterThan(initialHeight);
+
+    unmount();
+    const { result: remountedResult } = renderHook(() => useResizableSidebar());
+
+    expect(remountedResult.current.sidebarWidth).toBe(resizedWidth);
+    expect(remountedResult.current.sidebarHeight).toBe(resizedHeight);
+  });
+
+  it("does not restore a collapsed sidebar after remount", () => {
+    const { result, unmount } = renderHook(() => useResizableSidebar());
+
+    act(() => {
+      result.current.toggleCollapse();
+    });
+
+    expect(result.current.isCollapsed).toBe(true);
+
+    unmount();
+    const { result: remountedResult } = renderHook(() => useResizableSidebar());
+
+    expect(remountedResult.current.isCollapsed).toBe(false);
+    expect(remountedResult.current.sidebarOuterWidth).toBeGreaterThan(0);
+  });
+
+  it("falls back to defaults for invalid stored layout data", () => {
+    const { result: defaultResult, unmount } = renderHook(() =>
+      useResizableSidebar(),
+    );
+    const defaultWidth = defaultResult.current.sidebarWidth;
+    const defaultHeight = defaultResult.current.sidebarHeight;
+    unmount();
+    window.localStorage.clear();
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: "wide",
+        height: Number.POSITIVE_INFINITY,
+        heightCustomized: "yes",
+      }),
+    );
+
+    const { result } = renderHook(() => useResizableSidebar());
+
+    expect(result.current.sidebarWidth).toBe(defaultWidth);
+    expect(result.current.sidebarHeight).toBe(defaultHeight);
   });
 });
