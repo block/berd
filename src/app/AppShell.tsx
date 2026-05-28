@@ -72,7 +72,6 @@ import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
-import { Spinner } from "@/shared/ui/spinner";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -95,6 +94,7 @@ import type {
   AutomationNavigationRoute,
 } from "./types/appNavigation";
 import type { TopBarBreadcrumb } from "./ui/TopBar";
+import { StartupLoadingView } from "./ui/StartupLoadingView";
 export type { AppView } from "./types/appNavigation";
 
 type AppNavigationHistory = {
@@ -1702,18 +1702,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     () => (startup.error ? buildStartupDiagnosticIssue(startup.error) : null),
     [startup.error],
   );
+  const forceStartupLoading =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).has("startupLoading");
+
+  if (forceStartupLoading || !startup.ready) {
+    return <StartupLoadingView />;
+  }
 
   if (startupIssue) {
     return (
       <StartupDiagnosticView issue={startupIssue} onRetry={startup.retry} />
-    );
-  }
-
-  if (!startup.ready) {
-    return (
-      <div className="flex h-screen w-screen items-center justify-center bg-background text-foreground">
-        <Spinner className="size-5 text-primary" />
-      </div>
     );
   }
 

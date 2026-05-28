@@ -120,6 +120,20 @@ describe("AppShell startup diagnostics", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("shows the bundled goose animation while app startup is loading", () => {
+    mocks.startupState.ready = false;
+
+    const { container } = render(<AppShell />);
+
+    expect(
+      screen.getByRole("status", { name: "Starting Goose" }),
+    ).toBeInTheDocument();
+    expect(container.querySelector("video")).toBeInTheDocument();
+    expect(container.querySelector('source[type="video/mp4"]')).toBeTruthy();
+    expect(container.querySelector('source[type="video/webm"]')).toBeTruthy();
+    expect(screen.queryByTestId("app-shell-content")).not.toBeInTheDocument();
+  });
+
   it("shows diagnostics only for app startup errors", async () => {
     const user = userEvent.setup();
     mocks.startupState.error = new Error(

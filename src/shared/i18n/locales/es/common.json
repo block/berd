@@ -90,6 +90,7 @@
     "clipboardUnavailable": "La API del portapapeles no está disponible"
   },
   "startup": {
+    "loadingLabel": "Iniciando Goose",
     "error": {
       "gooseServe": {
         "title": "Goose no pudo iniciarse",

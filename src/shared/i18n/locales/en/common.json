@@ -90,6 +90,7 @@
     "clipboardUnavailable": "Clipboard API not available"
   },
   "startup": {
+    "loadingLabel": "Starting Goose",
     "error": {
       "gooseServe": {
         "title": "Goose couldn't start",
