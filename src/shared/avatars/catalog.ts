@@ -46,6 +46,7 @@ export interface CachedAvatarCollection {
   catalogVersion: string;
   collectionId: string;
   assets: CachedAvatarAsset[];
+  errorCode?: "networkAccess" | "unavailable" | null;
 }
 
 export interface CachedAvatar {

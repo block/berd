@@ -74,6 +74,14 @@ export function AvatarLibraryPicker({
   const selectedCollection = avatarCollections.find(
     (collection) => collection.id === selectedCollectionId,
   );
+  const catalogErrorText =
+    library.errorCode === "networkAccess"
+      ? t("editor.avatarCatalogNetworkAccess")
+      : t("editor.avatarCatalogUnavailable");
+  const collectionErrorText =
+    library.errorCode === "networkAccess"
+      ? t("editor.avatarCollectionNetworkAccess")
+      : t("avatar.loadFailed");
   const catalogVersion = library.catalog?.catalogVersion;
   const { cachedAvatarMediaById, downloadingCollectionId } = library;
 
@@ -272,7 +280,7 @@ export function AvatarLibraryPicker({
     >
       {library.error ? (
         <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
-          <span>{t("editor.avatarCatalogUnavailable")}</span>
+          <span>{catalogErrorText}</span>
           <Button
             type="button"
             variant="ghost"
@@ -304,7 +312,7 @@ export function AvatarLibraryPicker({
           )}
           {library.failedCollectionIds.has(selectedCollection.id) ? (
             <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
-              <span>{t("avatar.loadFailed")}</span>
+              <span>{collectionErrorText}</span>
               <Button
                 type="button"
                 variant="ghost"

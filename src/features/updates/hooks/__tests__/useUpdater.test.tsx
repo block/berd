@@ -89,8 +89,58 @@ describe("UpdaterProvider", () => {
       await result.current.checkForUpdate();
     });
 
-    expect(check).toHaveBeenCalledWith({ timeout: 15_000 });
+    expect(check).toHaveBeenCalledWith({ timeout: 10_000 });
     expect(result.current.status).toBe("up-to-date");
+  });
+
+  it("shows WARP guidance for update check failures", async () => {
+    enableUpdaterRuntime();
+    vi.mocked(check)
+      .mockRejectedValueOnce(
+        new Error(
+          "error sending request for url (https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json)",
+        ),
+      )
+      .mockRejectedValueOnce(new Error("operation timed out"));
+
+    const { result } = renderHook(() => useUpdaterContext(), {
+      wrapper,
+    });
+
+    await act(async () => {
+      await result.current.checkForUpdate();
+    });
+
+    const networkMessage =
+      "Unable to check for updates. Connect to Cloudflare WARP and try again.";
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe(networkMessage);
+    expect(toast.error).toHaveBeenCalledWith(
+      "Update failed",
+      expect.objectContaining({
+        description: networkMessage,
+      }),
+    );
+    expect(toast.error).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        description: expect.stringContaining("global.block-artifacts.com"),
+      }),
+    );
+
+    vi.mocked(toast.error).mockClear();
+
+    await act(async () => {
+      await result.current.checkForUpdate();
+    });
+
+    expect(result.current.errorMessage).toBe(networkMessage);
+    expect(toast.error).toHaveBeenCalledWith(
+      "Update failed",
+      expect.objectContaining({
+        description: networkMessage,
+      }),
+    );
   });
 
   it("downloads and installs an available update before marking it ready", async () => {
@@ -152,7 +202,7 @@ describe("UpdaterProvider", () => {
     });
 
     expect(result.current.status).toBe("error");
-    expect(result.current.errorMessage).toBe("download failed");
+    expect(result.current.errorMessage).toBe("Update failed. Try again.");
     expect(toast.error).toHaveBeenCalled();
   });
 
@@ -171,7 +221,7 @@ describe("UpdaterProvider", () => {
     });
 
     expect(result.current.status).toBe("error");
-    expect(result.current.errorMessage).toBe("restart failed");
+    expect(result.current.errorMessage).toBe("Update failed. Try again.");
     expect(toast.error).toHaveBeenCalled();
   });
 

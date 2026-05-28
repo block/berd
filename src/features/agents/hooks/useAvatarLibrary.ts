@@ -4,6 +4,8 @@ import {
   ensureAvatarCollection,
   getAvatarCatalog,
   getCachedAvatarCollections,
+  normalizeAvatarLibraryError,
+  type AvatarLibraryErrorCode,
 } from "@/shared/api/avatars";
 import type {
   AvatarCatalog,
@@ -23,6 +25,7 @@ export interface AvatarLibraryState {
   loading: boolean;
   cacheChecking: boolean;
   error: boolean;
+  errorCode: AvatarLibraryErrorCode | null;
   downloadingCollectionId: string | null;
   failedCollectionIds: Set<string>;
   retryCatalog: () => void;
@@ -79,6 +82,9 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [loading, setLoading] = useState(false);
   const [cacheChecking, setCacheChecking] = useState(false);
   const [error, setError] = useState(false);
+  const [errorCode, setErrorCode] = useState<AvatarLibraryErrorCode | null>(
+    null,
+  );
   const [downloadingCollectionId, setDownloadingCollectionId] = useState<
     string | null
   >(null);
@@ -99,6 +105,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     setLoading(true);
     setCacheChecking(false);
     setError(false);
+    setErrorCode(null);
 
     const loadCachedAvatarCollections = async (nextCatalog: AvatarCatalog) => {
       try {
@@ -134,13 +141,16 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
           setCachedAvatarMediaById({});
           setFailedCollectionIds(new Set());
           setError(false);
+          setErrorCode(null);
         }
         void loadCachedAvatarCollections(nextCatalog);
       } catch (loadError) {
         console.warn("Failed to load avatar catalog:", loadError);
         if (!cancelled) {
+          const avatarError = normalizeAvatarLibraryError(loadError);
           setCatalog(null);
           setError(true);
+          setErrorCode(avatarError.code);
         }
       } finally {
         if (!cancelled) {
@@ -171,6 +181,8 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
       if (!catalog) {
         return;
       }
+
+      setErrorCode(null);
 
       if (isCollectionCached(collection)) {
         setFailedCollectionIds((current) => {
@@ -205,9 +217,16 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
           collection,
           cachedCollection,
         });
+        const collectionFailed =
+          failedAssetIds.length > 0 || !collectionCachedAfterEnsure;
+        setErrorCode(
+          collectionFailed
+            ? (cachedCollection.errorCode ?? "unavailable")
+            : null,
+        );
         setFailedCollectionIds((current) => {
           const next = new Set(current);
-          if (failedAssetIds.length > 0 || !collectionCachedAfterEnsure) {
+          if (collectionFailed) {
             next.add(collection.id);
           } else {
             next.delete(collection.id);
@@ -216,6 +235,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
         });
       } catch (downloadError) {
         console.warn("Failed to download avatar collection:", downloadError);
+        setErrorCode(normalizeAvatarLibraryError(downloadError).code);
         setFailedCollectionIds((current) =>
           new Set(current).add(collection.id),
         );
@@ -229,6 +249,8 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   );
 
   const retryCatalog = useCallback(() => {
+    setError(false);
+    setErrorCode(null);
     setCatalogRetryToken((value) => value + 1);
   }, []);
 
@@ -238,6 +260,7 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     loading,
     cacheChecking,
     error,
+    errorCode,
     downloadingCollectionId,
     failedCollectionIds,
     retryCatalog,

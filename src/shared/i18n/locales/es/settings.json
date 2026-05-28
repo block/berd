@@ -233,6 +233,10 @@
       "unavailable": "Las actualizaciones solo están disponibles en builds de lanzamiento firmadas de Tauri.",
       "upToDate": "Goose está actualizado."
     },
+    "errors": {
+      "generic": "La actualización falló. Inténtalo de nuevo.",
+      "networkAccess": "No se pudo buscar actualizaciones. Conéctate a Cloudflare WARP e inténtalo de nuevo."
+    },
     "progress": {
       "downloading": "Descargando",
       "installing": "Instalando",

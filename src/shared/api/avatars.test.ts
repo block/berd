@@ -1,11 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AvatarLibraryError,
   ensureAvatarCollection,
   getAvatarCatalog,
   getAvatarLibrarySnapshot,
   getCachedAvatarCollections,
   getCachedAvatarForRef,
+  normalizeAvatarLibraryError,
 } from "./avatars";
 import type { AvatarCatalog } from "@/shared/avatars/catalog";
 
@@ -78,6 +80,29 @@ describe("avatars api", () => {
     expect(invokeMock).toHaveBeenCalledWith("get_avatar_library_snapshot");
   });
 
+  it("normalizes avatar library command errors", async () => {
+    invokeMock.mockRejectedValueOnce({
+      code: "networkAccess",
+      message:
+        "Unable to load avatar library. Connect to Cloudflare WARP and try again.",
+    });
+
+    await expect(getAvatarLibrarySnapshot()).rejects.toMatchObject({
+      name: "AvatarLibraryError",
+      code: "networkAccess",
+      message:
+        "Unable to load avatar library. Connect to Cloudflare WARP and try again.",
+    });
+
+    const legacyError = normalizeAvatarLibraryError("Avatar library exploded");
+    expect(legacyError).toBeInstanceOf(AvatarLibraryError);
+    expect(legacyError).toMatchObject({
+      name: "AvatarLibraryError",
+      code: "unavailable",
+      message: "Avatar library exploded",
+    });
+  });
+
   it("keeps compatibility helpers on the snapshot command without catalog round-trips", async () => {
     invokeMock.mockResolvedValue({ catalog, cachedCollections });
 
@@ -106,11 +131,17 @@ describe("avatars api", () => {
       collectionId: "gloopies",
       assets: [],
       failedAssetIds: ["gloopy-2"],
+      errorCode: "networkAccess",
     });
 
-    await ensureAvatarCollection({
+    await expect(
+      ensureAvatarCollection({
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+      }),
+    ).resolves.toMatchObject({
       catalogVersion: "v1",
-      collectionId: "gloopies",
+      errorCode: "networkAccess",
     });
 
     expect(invokeMock).toHaveBeenCalledWith("ensure_avatar_collection", {

@@ -233,6 +233,10 @@
       "unavailable": "Updates are only available in signed Tauri release builds.",
       "upToDate": "Goose is up to date."
     },
+    "errors": {
+      "generic": "Update failed. Try again.",
+      "networkAccess": "Unable to check for updates. Connect to Cloudflare WARP and try again."
+    },
     "progress": {
       "downloading": "Downloading",
       "installing": "Installing",

@@ -1,5 +1,6 @@
 use futures_util::{stream, StreamExt};
-use reqwest::Url;
+use reqwest::{StatusCode, Url};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
@@ -16,7 +17,10 @@ const ARTIFACTORY_BASE: &str =
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const CATALOG_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
+const METADATA_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
+const ASSET_DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(60);
 const DEFAULT_DOWNLOAD_CONCURRENCY: usize = 8;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -90,6 +94,8 @@ pub struct CachedAvatarCollection {
     pub collection_id: String,
     pub assets: Vec<CachedAvatarAsset>,
     pub failed_asset_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_code: Option<AvatarErrorCode>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -98,6 +104,99 @@ pub struct CachedAvatar {
     pub catalog_version: String,
     pub collection_id: String,
     pub asset: CachedAvatarAsset,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AvatarCommandError {
+    code: AvatarErrorCode,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AvatarErrorCode {
+    NetworkAccess,
+    Unavailable,
+}
+
+type AvatarCommandResult<T> = Result<T, AvatarCommandError>;
+
+impl AvatarCommandError {
+    fn network_access(raw: impl AsRef<str>) -> Self {
+        log::warn!("Avatar library network access error: {}", raw.as_ref());
+        Self {
+            code: AvatarErrorCode::NetworkAccess,
+            message: "Unable to load avatar library. Connect to Cloudflare WARP and try again."
+                .to_string(),
+        }
+    }
+
+    fn unavailable(raw: impl AsRef<str>) -> Self {
+        log::warn!("Avatar library unavailable: {}", raw.as_ref());
+        Self {
+            code: AvatarErrorCode::Unavailable,
+            message: "Avatar library unavailable. Try again.".to_string(),
+        }
+    }
+}
+
+impl From<String> for AvatarCommandError {
+    fn from(error: String) -> Self {
+        AvatarCommandError::unavailable(error)
+    }
+}
+
+impl std::fmt::Display for AvatarCommandError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+#[derive(Debug)]
+struct AvatarAssetError {
+    code: AvatarErrorCode,
+    detail: String,
+}
+
+impl AvatarAssetError {
+    fn unavailable(detail: impl Into<String>) -> Self {
+        Self {
+            code: AvatarErrorCode::Unavailable,
+            detail: detail.into(),
+        }
+    }
+
+    fn request(label: &str, error: reqwest::Error) -> Self {
+        let code = if error.is_timeout() || error.is_connect() || error.is_redirect() {
+            AvatarErrorCode::NetworkAccess
+        } else {
+            AvatarErrorCode::Unavailable
+        };
+        Self {
+            code,
+            detail: format!("{label}: {error}"),
+        }
+    }
+
+    fn status(label: &str, status: StatusCode) -> Self {
+        Self {
+            code: classify_artifactory_status(status),
+            detail: format!("{label}: HTTP status {status}"),
+        }
+    }
+}
+
+impl From<String> for AvatarAssetError {
+    fn from(detail: String) -> Self {
+        AvatarAssetError::unavailable(detail)
+    }
+}
+
+impl std::fmt::Display for AvatarAssetError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.detail)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -115,7 +214,9 @@ fn platform_avatar_format() -> &'static str {
 }
 
 #[tauri::command]
-pub async fn get_avatar_library_snapshot(app: AppHandle) -> Result<AvatarLibrarySnapshot, String> {
+pub async fn get_avatar_library_snapshot(
+    app: AppHandle,
+) -> AvatarCommandResult<AvatarLibrarySnapshot> {
     let _cache_guard = avatar_cache_lock().lock().await;
     let paths = avatar_cache_paths(&app)?;
     clean_part_files(&paths)?;
@@ -182,7 +283,7 @@ pub async fn ensure_avatar_collection(
     app: AppHandle,
     catalog_version: String,
     collection_id: String,
-) -> Result<CachedAvatarCollection, String> {
+) -> AvatarCommandResult<CachedAvatarCollection> {
     let _cache_guard = avatar_cache_lock().lock().await;
     validate_safe_segment(&catalog_version)?;
     let paths = avatar_cache_paths(&app)?;
@@ -193,11 +294,12 @@ pub async fn ensure_avatar_collection(
         return Err(format!(
             "Avatar catalog version conflict: requested {}, current {}",
             catalog_version, catalog.catalog_version
-        ));
+        )
+        .into());
     }
 
     let collection = find_collection(&catalog, &collection_id)?;
-    let (assets, failed_asset_ids) =
+    let (assets, failed_asset_ids, error_code) =
         ensure_collection_assets(&paths, &catalog, collection, platform_avatar_format()).await?;
 
     prune_obsolete_versions(&paths, &catalog.catalog_version)?;
@@ -206,6 +308,7 @@ pub async fn ensure_avatar_collection(
         collection_id,
         assets,
         failed_asset_ids,
+        error_code,
     })
 }
 
@@ -220,7 +323,7 @@ async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String
     remove_dir_all_if_exists(&paths.media, "avatar media").await
 }
 
-async fn current_catalog(paths: &AvatarCachePaths) -> Result<AvatarCatalog, String> {
+async fn current_catalog(paths: &AvatarCachePaths) -> AvatarCommandResult<AvatarCatalog> {
     if let Some(catalog) = read_cached_catalog(paths)? {
         if !is_catalog_cache_stale(paths) {
             return Ok(catalog);
@@ -233,7 +336,7 @@ async fn current_catalog(paths: &AvatarCachePaths) -> Result<AvatarCatalog, Stri
 async fn catalog_for_requested_version(
     paths: &AvatarCachePaths,
     catalog_version: &str,
-) -> Result<AvatarCatalog, String> {
+) -> AvatarCommandResult<AvatarCatalog> {
     match read_cached_catalog(paths)? {
         Some(catalog) if catalog.catalog_version == catalog_version => Ok(catalog),
         _ => current_catalog(paths).await,
@@ -251,50 +354,115 @@ fn find_collection<'a>(
         .ok_or_else(|| "Avatar collection not found".to_string())
 }
 
-async fn refresh_cached_catalog(paths: &AvatarCachePaths) -> Result<AvatarCatalog, String> {
+async fn refresh_cached_catalog(paths: &AvatarCachePaths) -> AvatarCommandResult<AvatarCatalog> {
     let (latest, catalog) = fetch_current_catalog().await?;
     write_cached_catalog(paths, &latest, &catalog)?;
     Ok(catalog)
 }
 
-async fn fetch_current_catalog() -> Result<(AvatarLatest, AvatarCatalog), String> {
-    let client = http_client()?;
-    let latest: AvatarLatest = client
-        .get(allowed_artifactory_url(LATEST_PATH)?)
-        .send()
-        .await
-        .map_err(|error| format!("Failed to fetch avatar latest pointer: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("Avatar latest pointer returned an error: {error}"))?
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse avatar latest pointer: {error}"))?;
+async fn fetch_current_catalog() -> AvatarCommandResult<(AvatarLatest, AvatarCatalog)> {
+    let client = metadata_http_client()?;
+    let latest: AvatarLatest =
+        fetch_metadata_json(&client, LATEST_PATH, "avatar latest pointer").await?;
 
     let manifest_path = manifest_path_for_latest(&latest)?;
-    let catalog: AvatarCatalog = client
-        .get(allowed_artifactory_url(&manifest_path)?)
-        .send()
-        .await
-        .map_err(|error| format!("Failed to fetch avatar catalog: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("Avatar catalog returned an error: {error}"))?
-        .json()
-        .await
-        .map_err(|error| format!("Failed to parse avatar catalog: {error}"))?;
+    let catalog: AvatarCatalog =
+        fetch_metadata_json(&client, &manifest_path, "avatar catalog").await?;
 
     validate_catalog(&catalog)?;
     if catalog.catalog_version != latest.catalog_version {
-        return Err("Avatar catalog version does not match latest pointer".to_string());
+        return Err("Avatar catalog version does not match latest pointer"
+            .to_string()
+            .into());
     }
 
     Ok((latest, catalog))
 }
 
-fn http_client() -> Result<reqwest::Client, String> {
+async fn fetch_metadata_json<T>(
+    client: &reqwest::Client,
+    relative_path: &str,
+    label: &str,
+) -> AvatarCommandResult<T>
+where
+    T: DeserializeOwned,
+{
+    let response = client
+        .get(allowed_artifactory_url(relative_path)?)
+        .send()
+        .await
+        .map_err(|error| metadata_request_error(label, error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(metadata_status_error(label, status));
+    }
+
+    response.json().await.map_err(|error| {
+        AvatarCommandError::unavailable(format!("Failed to parse {label}: {error}"))
+    })
+}
+
+fn metadata_http_client() -> AvatarCommandResult<reqwest::Client> {
     reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .connect_timeout(METADATA_CONNECT_TIMEOUT)
+        .timeout(METADATA_REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
-        .map_err(|error| format!("Failed to create avatar HTTP client: {error}"))
+        .map_err(|error| {
+            AvatarCommandError::unavailable(format!(
+                "Failed to create avatar metadata HTTP client: {error}"
+            ))
+        })
+}
+
+fn asset_http_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .connect_timeout(ASSET_CONNECT_TIMEOUT)
+        .timeout(ASSET_DOWNLOAD_TIMEOUT)
+        .build()
+        .map_err(|error| format!("Failed to create avatar asset HTTP client: {error}"))
+}
+
+fn classify_metadata_request_error(error: &reqwest::Error) -> AvatarErrorCode {
+    if error.is_timeout() || error.is_connect() {
+        AvatarErrorCode::NetworkAccess
+    } else {
+        AvatarErrorCode::Unavailable
+    }
+}
+
+fn metadata_request_error(label: &str, error: reqwest::Error) -> AvatarCommandError {
+    let raw = format!("Failed to fetch {label}: {error}");
+    match classify_metadata_request_error(&error) {
+        AvatarErrorCode::NetworkAccess => AvatarCommandError::network_access(raw),
+        AvatarErrorCode::Unavailable => AvatarCommandError::unavailable(raw),
+    }
+}
+
+fn classify_artifactory_status(status: StatusCode) -> AvatarErrorCode {
+    // Artifactory is normally reached through Cloudflare WARP/Zero Trust, where
+    // off-network clients can surface as proxy/auth statuses instead of pure
+    // transport failures.
+    if status.is_redirection()
+        || matches!(
+            status,
+            StatusCode::UNAUTHORIZED
+                | StatusCode::FORBIDDEN
+                | StatusCode::PROXY_AUTHENTICATION_REQUIRED
+        )
+    {
+        AvatarErrorCode::NetworkAccess
+    } else {
+        AvatarErrorCode::Unavailable
+    }
+}
+
+fn metadata_status_error(label: &str, status: StatusCode) -> AvatarCommandError {
+    let raw = format!("{label} returned HTTP status {status}");
+    match classify_artifactory_status(status) {
+        AvatarErrorCode::NetworkAccess => AvatarCommandError::network_access(raw),
+        AvatarErrorCode::Unavailable => AvatarCommandError::unavailable(raw),
+    }
 }
 
 fn avatar_cache_lock() -> &'static tokio::sync::Mutex<()> {
@@ -438,7 +606,7 @@ async fn ensure_entry(
     catalog: &AvatarCatalog,
     entry: &AvatarCatalogEntry,
     format: &str,
-) -> Result<CachedAvatarAsset, String> {
+) -> Result<CachedAvatarAsset, AvatarAssetError> {
     let variant = variant_for_format(entry, format)?;
     validate_variant_path(variant, format, &entry.collection_id)?;
     let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
@@ -465,17 +633,24 @@ async fn download_asset(
     url: Url,
     target: &Path,
     variant: &AvatarVariant,
-) -> Result<(), String> {
+) -> Result<(), AvatarAssetError> {
     let response = client
         .get(url)
         .send()
         .await
-        .map_err(|error| format!("Failed to download avatar asset: {error}"))?
-        .error_for_status()
-        .map_err(|error| format!("Avatar asset returned an error: {error}"))?;
+        .map_err(|error| AvatarAssetError::request("Failed to download avatar asset", error))?;
+    let status = response.status();
+    if !status.is_success() {
+        return Err(AvatarAssetError::status(
+            "Avatar asset returned an error",
+            status,
+        ));
+    }
     if let Some(content_length) = response.content_length() {
         if content_length != variant.byte_size {
-            return Err("Avatar asset byte size did not match manifest".to_string());
+            return Err(AvatarAssetError::unavailable(
+                "Avatar asset byte size did not match manifest",
+            ));
         }
     }
 
@@ -495,11 +670,14 @@ async fn download_asset(
     let mut downloaded = 0_u64;
 
     while let Some(chunk) = stream.next().await {
-        let chunk =
-            chunk.map_err(|error| format!("Failed to read avatar asset response: {error}"))?;
+        let chunk = chunk.map_err(|error| {
+            AvatarAssetError::request("Failed to read avatar asset response", error)
+        })?;
         downloaded += chunk.len() as u64;
         if downloaded > variant.byte_size {
-            return Err("Avatar asset byte size exceeded manifest".to_string());
+            return Err(AvatarAssetError::unavailable(
+                "Avatar asset byte size exceeded manifest",
+            ));
         }
         hasher.update(&chunk);
         file.write_all(&chunk)
@@ -511,15 +689,21 @@ async fn download_asset(
         .map_err(|error| format!("Failed to flush avatar cache part file: {error}"))?;
 
     if downloaded != variant.byte_size {
-        return Err("Avatar asset byte size did not match manifest".to_string());
+        return Err(AvatarAssetError::unavailable(
+            "Avatar asset byte size did not match manifest",
+        ));
     }
     let actual = hex_digest(hasher.finalize().as_slice());
     if actual != variant.sha256.to_ascii_lowercase() {
-        return Err("Avatar asset checksum did not match manifest".to_string());
+        return Err(AvatarAssetError::unavailable(
+            "Avatar asset checksum did not match manifest",
+        ));
     }
 
     if let Err(error) = tokio::fs::rename(part_file.path(), target).await {
-        return Err(format!("Failed to finalize avatar cache file: {error}"));
+        return Err(AvatarAssetError::unavailable(format!(
+            "Failed to finalize avatar cache file: {error}"
+        )));
     }
     part_file.persist();
     Ok(())
@@ -609,8 +793,8 @@ async fn ensure_collection_assets(
     catalog: &AvatarCatalog,
     collection: &AvatarCollection,
     format: &str,
-) -> Result<(Vec<CachedAvatarAsset>, Vec<String>), String> {
-    let client = http_client()?;
+) -> Result<(Vec<CachedAvatarAsset>, Vec<String>, Option<AvatarErrorCode>), String> {
+    let client = asset_http_client()?;
     let entries = collection
         .avatar_ids
         .iter()
@@ -638,7 +822,7 @@ async fn ensure_collection_assets(
                     Ok(asset) => Ok(asset),
                     Err(error) => {
                         log::warn!("Failed to ensure avatar asset '{id}': {error}");
-                        Err(id)
+                        Err((id, error.code))
                     }
                 }
             }
@@ -650,16 +834,24 @@ async fn ensure_collection_assets(
 
     let mut assets = Vec::new();
     let mut failed_asset_ids = Vec::new();
+    let mut error_code = None;
     for result in results {
         match result {
             Ok(asset) => assets.push(asset),
-            Err(id) => failed_asset_ids.push(id),
+            Err((id, code)) => {
+                failed_asset_ids.push(id);
+                if code == AvatarErrorCode::NetworkAccess {
+                    error_code = Some(AvatarErrorCode::NetworkAccess);
+                } else if error_code.is_none() {
+                    error_code = Some(AvatarErrorCode::Unavailable);
+                }
+            }
         }
     }
     assets.sort_by_key(|asset| collection_order.get(asset.id.as_str()).copied());
     failed_asset_ids.sort_by_key(|id| collection_order.get(id.as_str()).copied());
 
-    Ok((assets, failed_asset_ids))
+    Ok((assets, failed_asset_ids, error_code))
 }
 
 fn collection_asset_order(collection: &AvatarCollection) -> HashMap<&str, usize> {
@@ -693,6 +885,7 @@ fn cached_collections_for_catalog(
                 collection_id: collection.id.clone(),
                 assets,
                 failed_asset_ids: Vec::new(),
+                error_code: None,
             });
         }
     }
@@ -1365,7 +1558,7 @@ mod tests {
         write_cached_webm(&paths, &catalog, bytes);
         write_webm_checksum_marker(&paths, &catalog);
 
-        let (assets, failed) =
+        let (assets, failed, error_code) =
             ensure_collection_assets(&paths, &catalog, &catalog.collections[0], "webm")
                 .await
                 .unwrap();
@@ -1377,6 +1570,7 @@ mod tests {
             vec!["gloopy-1"]
         );
         assert_eq!(failed, vec!["gloopy-2"]);
+        assert_eq!(error_code, Some(AvatarErrorCode::Unavailable));
     }
 
     #[tokio::test]
@@ -1396,7 +1590,7 @@ mod tests {
         let target = dir.path().join("media/v1/webm/gloopies/gloopy-1.webm");
         let variant = variant("webm/gloopies/gloopy-1.webm", b"abcd");
         let error = download_asset(
-            &http_client().unwrap(),
+            &asset_http_client().unwrap(),
             Url::parse(&format!("http://{addr}/avatar.webm")).unwrap(),
             &target,
             &variant,
@@ -1405,7 +1599,7 @@ mod tests {
         .unwrap_err();
 
         server.await.unwrap();
-        assert!(error.contains("exceeded"));
+        assert!(error.to_string().contains("exceeded"));
         assert!(!target.exists());
         assert_eq!(fs::read_dir(target.parent().unwrap()).unwrap().count(), 0);
     }
@@ -1450,6 +1644,95 @@ mod tests {
         std::env::set_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY", "0");
         assert_eq!(avatar_download_concurrency(), 8);
         std::env::remove_var("GOOSE_AVATAR_DOWNLOAD_CONCURRENCY");
+    }
+
+    #[test]
+    fn metadata_timeout_constants_are_short_and_assets_keep_long_timeout() {
+        assert_eq!(METADATA_CONNECT_TIMEOUT, Duration::from_secs(3));
+        assert_eq!(METADATA_REQUEST_TIMEOUT, Duration::from_secs(10));
+        assert_eq!(ASSET_CONNECT_TIMEOUT, Duration::from_secs(3));
+        assert_eq!(ASSET_DOWNLOAD_TIMEOUT, Duration::from_secs(60));
+    }
+
+    #[tokio::test]
+    async fn metadata_request_errors_are_classified() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let client = reqwest::Client::builder()
+            .connect_timeout(Duration::from_millis(200))
+            .timeout(Duration::from_millis(200))
+            .build()
+            .unwrap();
+
+        let error = client
+            .get(format!("http://{addr}/latest.json"))
+            .send()
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            classify_metadata_request_error(&error),
+            AvatarErrorCode::NetworkAccess
+        );
+
+        let error = reqwest::Client::new()
+            .get("http://127.0.0.1/latest.json")
+            .header("x-test", "line\nbreak")
+            .send()
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            classify_metadata_request_error(&error),
+            AvatarErrorCode::Unavailable
+        );
+    }
+
+    #[test]
+    fn metadata_statuses_classify_network_access_and_unavailable() {
+        for status in [
+            StatusCode::FOUND,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+        ] {
+            assert_eq!(
+                classify_artifactory_status(status),
+                AvatarErrorCode::NetworkAccess,
+                "{status}"
+            );
+            assert_eq!(
+                metadata_status_error("avatar metadata", status).code,
+                AvatarErrorCode::NetworkAccess,
+                "{status}"
+            );
+        }
+
+        assert_eq!(
+            classify_artifactory_status(StatusCode::INTERNAL_SERVER_ERROR),
+            AvatarErrorCode::Unavailable
+        );
+        assert_eq!(
+            metadata_status_error("avatar metadata", StatusCode::INTERNAL_SERVER_ERROR).code,
+            AvatarErrorCode::Unavailable
+        );
+    }
+
+    #[test]
+    fn parse_and_validation_failures_map_to_unavailable() {
+        assert_eq!(
+            AvatarCommandError::unavailable("Failed to parse avatar catalog: expected value").code,
+            AvatarErrorCode::Unavailable
+        );
+
+        let mut catalog = valid_catalog(b"avatar-bytes");
+        catalog.schema_version = 2;
+        let error = validate_catalog(&catalog).unwrap_err();
+        assert_eq!(
+            AvatarCommandError::from(error).code,
+            AvatarErrorCode::Unavailable
+        );
     }
 
     #[tokio::test]

@@ -49,7 +49,7 @@ type UpdaterProviderProps = {
 };
 
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-const CHECK_TIMEOUT_MS = 15_000;
+const CHECK_TIMEOUT_MS = 10_000;
 const ACTIVE_UPDATE_STATUSES = new Set<UpdateStatus>([
   "available",
   "downloading",
@@ -109,8 +109,9 @@ export function UpdaterProvider({
   }, []);
 
   const recordError = useCallback(
-    (error: unknown) => {
-      const message = getErrorMessage(error);
+    (error: unknown, fallbackMessage = t("updates.errors.generic")) => {
+      console.warn(`[updater] ${getErrorMessage(error)}`);
+      const message = fallbackMessage;
       setErrorMessage(message);
       setStatusValue("error");
       toast.error(t("updates.toast.error.title"), {
@@ -276,7 +277,7 @@ export function UpdaterProvider({
             return;
           }
 
-          recordError(error);
+          recordError(error, t("updates.errors.networkAccess"));
         }
       })();
 
@@ -289,7 +290,7 @@ export function UpdaterProvider({
         }
       }
     },
-    [downloadAndInstallUpdate, enabled, recordError, setStatusValue],
+    [downloadAndInstallUpdate, enabled, recordError, setStatusValue, t],
   );
 
   useEffect(() => {
