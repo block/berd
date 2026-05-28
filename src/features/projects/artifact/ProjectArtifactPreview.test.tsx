@@ -79,6 +79,18 @@ describe("ProjectArtifactPreview", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not use backdrop blur in the tile fallback", () => {
+    mockedGetArtifacts.mockReturnValue(new Promise(() => {}));
+
+    const { container } = renderWithQueryClient(
+      <ProjectArtifactPreview input={{ name: "Launch plan" }} variant="tile" />,
+    );
+
+    expect(
+      container.querySelector(".backdrop-blur-xl"),
+    ).not.toBeInTheDocument();
+  });
+
   it("passes cached image and environment URLs to the renderer", async () => {
     const rawArtifacts = {
       catalogVersion: "20260521T121530123Z",

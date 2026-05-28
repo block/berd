@@ -481,7 +481,7 @@ export function WidgetCanvas({
                     event.preventDefault();
                     event.stopPropagation();
                   }}
-                  className="absolute -right-3 -bottom-3 z-20 flex size-7 cursor-nwse-resize items-center justify-center rounded-full opacity-0 transition-opacity duration-150 group-hover/widget:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className="absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <span
                     className="size-4 rounded-full border border-border bg-background shadow-mini"

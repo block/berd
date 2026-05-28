@@ -1682,13 +1682,17 @@ export function ProjectArtifactRenderer({
       ) : null}
       <div
         className={cn(
-          "absolute inset-0 z-10 transition-[filter,opacity] ease-out",
+          "absolute inset-0 z-10 ease-out",
           variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
-          variant === "tile" ? "duration-500" : "duration-300",
+          variant === "tile"
+            ? "transition-opacity duration-500"
+            : "transition-[filter,opacity] duration-300",
           isVisualReady
-            ? "opacity-100 blur-0"
+            ? variant === "tile"
+              ? "opacity-100"
+              : "opacity-100 blur-0"
             : variant === "tile"
-              ? "opacity-0 blur-lg"
+              ? "opacity-0"
               : "opacity-0 blur-md",
         )}
       >

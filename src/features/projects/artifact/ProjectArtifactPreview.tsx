@@ -64,7 +64,7 @@ function ProjectArtifactFallback({
         className={cn(
           "relative aspect-square w-[44%] rounded-[22%]",
           isTile
-            ? "bg-white/55 shadow-[0_22px_60px_rgba(15,23,42,0.14)] backdrop-blur-xl"
+            ? "bg-white/55 shadow-[0_22px_60px_rgba(15,23,42,0.14)]"
             : "bg-white/30 shadow-[0_26px_70px_rgba(15,23,42,0.16)] backdrop-blur-xl",
         )}
         aria-hidden="true"

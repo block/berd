@@ -690,6 +690,12 @@ describe("WidgetCanvas", () => {
       name: /resize clock/i,
     });
 
+    expect(resizeHandle).toHaveClass("hidden", "group-hover/widget:flex");
+    expect(resizeHandle).not.toHaveClass(
+      "opacity-0",
+      "group-hover/widget:opacity-100",
+    );
+
     await user.pointer([
       {
         keys: "[MouseLeft>]",
