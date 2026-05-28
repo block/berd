@@ -4,6 +4,7 @@ import { ChatPinWidget } from "./ChatPinWidget";
 import { ClockWidget } from "./ClockWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import { SkillPinWidget } from "./SkillPinWidget";
+import { StickyNoteWidget } from "./StickyNoteWidget";
 import type {
   WidgetCatalogEntry,
   WidgetCategory,
@@ -35,6 +36,20 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       lockAspectRatio: true,
     },
     Component: ClockWidget,
+  },
+  {
+    id: "stickyNote",
+    category: "note",
+    labelKey: "widgets.stickyNote.label",
+    descriptionKey: "widgets.stickyNote.description",
+    defaultSize: { width: 224, height: 196 },
+    sizeBounds: {
+      minWidth: 184,
+      maxWidth: 360,
+      minHeight: 156,
+      maxHeight: 320,
+    },
+    Component: StickyNoteWidget,
   },
   {
     id: "agentPin",

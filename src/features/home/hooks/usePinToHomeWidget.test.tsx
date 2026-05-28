@@ -16,6 +16,9 @@ import {
   usePinToHomeWidget,
 } from "./usePinToHomeWidget";
 
+const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
+  "goose:home:onboarding-stickies-seeded";
+
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/layout/api/layout")>();
@@ -78,6 +81,8 @@ beforeEach(() => {
   vi.mocked(toast.error).mockClear();
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
+  localStorage.clear();
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
 });
 
 describe("usePinToHomeWidget", () => {

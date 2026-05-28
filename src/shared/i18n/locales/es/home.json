@@ -67,6 +67,42 @@
       "unavailable": "No disponible",
       "openAria": "Iniciar chat con {{name}}"
     },
+    "stickyNote": {
+      "label": "Nota adhesiva",
+      "description": "Una nota fijada en inicio",
+      "dismiss": "Descartar nota adhesiva",
+      "starterStickies": "Notas iniciales",
+      "notes": {
+        "welcome": {
+          "title": "Te damos la bienvenida a Goose para Block",
+          "body": "Creado para Block para explorar un espacio de trabajo de IA para todas las facetas del trabajo. Esto es solo el comienzo."
+        },
+        "buildAgent": {
+          "title": "Crea un agente",
+          "body": "Dale a Goose un rol, modelo e instrucciones para el trabajo que repites.",
+          "action": "Crear agente"
+        },
+        "startProject": {
+          "title": "Inicia un proyecto",
+          "body": "Agrupa chats, archivos y directorios de trabajo alrededor de un esfuerzo real.",
+          "action": "Nuevo proyecto"
+        },
+        "skills": {
+          "title": "Enséñale una habilidad a Goose",
+          "body": "Guarda instrucciones y recursos para que Goose sepa cómo aplicarlos cuando la tarea lo pida.",
+          "action": "Explorar habilidades"
+        },
+        "shapeHome": {
+          "title": "Haz tuyo Inicio",
+          "body": "Haz clic derecho en el lienzo para fijar chats, agentes, proyectos, habilidades y resultados de automatizaciones."
+        },
+        "automations": {
+          "title": "Gestiona automatizaciones",
+          "body": "Las automatizaciones de G2 ahora viven en Goose. Puedes ver, crear y gestionar trabajo programado aquí.",
+          "action": "Abrir automatizaciones"
+        }
+      }
+    },
     "unpin": {
       "label": "Desanclar"
     },

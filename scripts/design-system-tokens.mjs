@@ -104,6 +104,7 @@ const allowedBridgePatterns = [
   /^(?:success|warning|info)(?:-foreground)?$/,
   /^popover-inverse(?:-(?:foreground|muted-foreground))?$/,
   /^clock-(?:face|mark|hand)$/,
+  /^sticky-note-(?:warm|cool|rose|blue|lavender|peach|foreground|muted)$/,
   /^dark-(?:04|10|40)$/,
   /^status-(?:added|deleted|modified)$/,
   /^chart-[1-5]$/,

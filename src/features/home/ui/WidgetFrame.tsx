@@ -51,6 +51,10 @@ export function WidgetFrame({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onCreatePersona,
+  onCreateProject,
+  onOpenSkills,
+  onOpenAutomations,
 }: WidgetFrameProps) {
   const { t } = useTranslation("home");
   const catalogEntry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
@@ -149,6 +153,11 @@ export function WidgetFrame({
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}
+          onCreatePersona={onCreatePersona}
+          onCreateProject={onCreateProject}
+          onOpenSkills={onOpenSkills}
+          onOpenAutomations={onOpenAutomations}
+          onRemoveWidget={handleRemove}
         />
       </fieldset>
       <UnpinPill

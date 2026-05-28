@@ -9,6 +9,7 @@ import { clampToBounds, snapPoint } from "./snapToGrid";
 
 export const HOME_LAYOUT_REPLACE_KINDS = [
   "clock",
+  "stickyNote",
   "persona",
   "session",
   "project",
@@ -23,6 +24,7 @@ const DEFAULT_CLOCK_ANCHOR = { x: 0.83, y: 0.18 };
 
 const KIND_TO_WIDGET_TYPE = {
   clock: "clock",
+  stickyNote: "stickyNote",
   persona: "agentPin",
   session: "chatPin",
   project: "projectArtifactPin",
@@ -32,6 +34,7 @@ const KIND_TO_WIDGET_TYPE = {
 
 const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   clock: "clock",
+  stickyNote: "stickyNote",
   agentPin: "persona",
   chatPin: "session",
   projectArtifactPin: "project",
@@ -42,6 +45,7 @@ const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
 function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
   switch (kind) {
     case "clock":
+    case "stickyNote":
     case "persona":
     case "session":
     case "project":
@@ -79,6 +83,8 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
       return { automationId: item.targetId };
     case "clock":
       return undefined;
+    case "stickyNote":
+      return { noteId: item.targetId };
     case "skill":
       return { skillId: item.targetId };
     default: {
@@ -100,6 +106,8 @@ function targetIdForWidget(
   switch (kind) {
     case "clock":
       return syntheticTarget(instance.id);
+    case "stickyNote":
+      return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
     case "persona":
       return nonEmptyStateString(state.agentId) ?? syntheticTarget(instance.id);
     case "session":
@@ -213,4 +221,112 @@ export function createDefaultClockLayoutItem(
 ): LayoutItem {
   const [item] = homeWidgetsToLayoutItems([createDefaultClockWidget(bounds)]);
   return item;
+}
+
+export function createDefaultStickyNoteWidgets(): WidgetInstance[] {
+  return [
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: -360,
+      y: -250,
+      z: 1,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:welcome" },
+    },
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: -96,
+      y: -250,
+      z: 2,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:start-project" },
+    },
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: 168,
+      y: -250,
+      z: 3,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:build-agent" },
+    },
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: -360,
+      y: -14,
+      z: 4,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:reuse-workflows" },
+    },
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: -96,
+      y: -14,
+      z: 5,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:manage-automations" },
+    },
+    {
+      id: crypto.randomUUID(),
+      type: "stickyNote",
+      x: 168,
+      y: -14,
+      z: 6,
+      width: 224,
+      height: 196,
+      state: { noteId: "onboarding:shape-home" },
+    },
+  ];
+}
+
+export function defaultStickyNoteId(instance: WidgetInstance): string | null {
+  if (instance.type !== "stickyNote") {
+    return null;
+  }
+
+  const noteId = instance.state?.noteId;
+  return typeof noteId === "string" && noteId.trim() ? noteId.trim() : null;
+}
+
+export function missingDefaultStickyNoteWidgets(
+  instances: WidgetInstance[],
+): WidgetInstance[] {
+  const existingNoteIds = new Set(
+    instances.flatMap((instance) => {
+      const noteId = defaultStickyNoteId(instance);
+      return noteId ? [noteId] : [];
+    }),
+  );
+
+  return createDefaultStickyNoteWidgets().filter((instance) => {
+    const noteId = defaultStickyNoteId(instance);
+    return noteId !== null && !existingNoteIds.has(noteId);
+  });
+}
+
+export function createDefaultHomeWidgets(
+  bounds: CanvasBounds = DEFAULT_CANVAS,
+): WidgetInstance[] {
+  return [
+    ...createDefaultStickyNoteWidgets(),
+    {
+      ...createDefaultClockWidget(bounds),
+      z: 7,
+    },
+  ];
+}
+
+export function createDefaultHomeLayoutItems(
+  bounds?: CanvasBounds,
+): LayoutItem[] {
+  return homeWidgetsToLayoutItems(createDefaultHomeWidgets(bounds));
 }

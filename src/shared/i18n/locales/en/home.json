@@ -67,6 +67,42 @@
       "unavailable": "Unavailable",
       "openAria": "Start chat with {{name}}"
     },
+    "stickyNote": {
+      "label": "Sticky note",
+      "description": "A note pinned to home",
+      "dismiss": "Dismiss sticky note",
+      "starterStickies": "Starter stickies",
+      "notes": {
+        "welcome": {
+          "title": "Welcome to Goose for Block",
+          "body": "Built for Block to explore one AI workspace for all facets of work. This is just the beginning."
+        },
+        "buildAgent": {
+          "title": "Build an agent",
+          "body": "Give Goose a role, model, and instructions for work you repeat.",
+          "action": "Build agent"
+        },
+        "startProject": {
+          "title": "Start a project",
+          "body": "Group chats, files, and working directories around one real effort.",
+          "action": "New project"
+        },
+        "skills": {
+          "title": "Teach Goose a skill",
+          "body": "Save how-to instructions and resources so Goose can apply them when a task calls for it.",
+          "action": "Explore skills"
+        },
+        "shapeHome": {
+          "title": "Make Home yours",
+          "body": "Right-click the canvas to pin chats, agents, projects, skills, and automation output here."
+        },
+        "automations": {
+          "title": "Manage automations",
+          "body": "G2 automations live in Goose now. View, create, and manage scheduled work here.",
+          "action": "Open automations"
+        }
+      }
+    },
     "unpin": {
       "label": "Unpin"
     },

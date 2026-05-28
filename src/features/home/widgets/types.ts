@@ -4,6 +4,7 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 
 export type WidgetCategory =
   | "clock"
+  | "note"
   | "agent"
   | "chat"
   | "project"
@@ -54,6 +55,11 @@ export interface WidgetRenderProps {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onCreatePersona?: () => void;
+  onCreateProject?: () => void;
+  onOpenSkills?: () => void;
+  onOpenAutomations?: () => void;
+  onRemoveWidget?: () => void;
 }
 
 export interface WidgetCatalogEntry {
@@ -76,6 +82,10 @@ export interface WidgetNavigationHandlers {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onCreatePersona?: () => void;
+  onCreateProject?: () => void;
+  onOpenSkills?: () => void;
+  onOpenAutomations?: () => void;
 }
 
 export interface WidgetMutationHandlers {
@@ -110,3 +120,4 @@ export type ChatPinState = { sessionId: string };
 export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };
 export type SkillPinState = { skillId: string };
+export type StickyNoteState = { noteId: string };

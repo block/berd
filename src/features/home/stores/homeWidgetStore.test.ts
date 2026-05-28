@@ -50,6 +50,8 @@ vi.mock("sonner", () => ({
 
 const CANVAS_BOUNDS = { width: 1200, height: 800 };
 const LEGACY_STORAGE_KEY = "goose-internal:home-widgets";
+const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
+  "goose:home:onboarding-stickies-seeded";
 const BACKEND_CLOCK_ID = "00000000-0000-0000-0000-000000000001";
 const SAVED_CLOCK_ID = "00000000-0000-0000-0000-000000000002";
 const INITIAL_CAMERA = {
@@ -192,6 +194,7 @@ beforeEach(() => {
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.warning).mockClear();
   localStorage.clear();
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: {
@@ -226,7 +229,7 @@ describe("homeWidgetStore", () => {
     ]);
   });
 
-  it("seeds a default clock when backend returns zero typed items", async () => {
+  it("seeds default onboarding widgets when backend returns zero typed items", async () => {
     vi.mocked(getLayout).mockResolvedValue(
       layout({ itemRevision: 7, items: [] }),
     );
@@ -244,14 +247,344 @@ describe("homeWidgetStore", () => {
         replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
       }),
     );
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      { kind: "stickyNote", targetId: "onboarding:welcome" },
+      { kind: "stickyNote", targetId: "onboarding:start-project" },
+      { kind: "stickyNote", targetId: "onboarding:build-agent" },
+      { kind: "stickyNote", targetId: "onboarding:reuse-workflows" },
+      { kind: "stickyNote", targetId: "onboarding:manage-automations" },
+      { kind: "stickyNote", targetId: "onboarding:shape-home" },
+      { kind: "clock" },
+    ]);
     expect(useHomeWidgetStore.getState().loadStatus).toBe("ready");
     expect(useHomeWidgetStore.getState().itemRevision).toBe(8);
   });
 
-  it("does not seed a clock when backend layout has other widgets but no clock", async () => {
-    // If the user unpinned the clock, that choice must be respected across
-    // reloads. Auto-seeding only fires for genuinely empty layouts; layouts
-    // with any item are taken as-is.
+  it("backfills onboarding sticky notes into existing layouts once", async () => {
+    localStorage.removeItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY);
+
+    vi.mocked(getLayout).mockResolvedValue(layout({ itemRevision: 11 }));
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 12,
+        items: request.items.map((item) => ({
+          ...item,
+          titleOverride: item.titleOverride ?? null,
+        })),
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        layoutId: HOME_LAYOUT_ID,
+        expectedRevision: 11,
+        replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+      }),
+    );
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      { kind: "clock", zIndex: 2 },
+      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 3 },
+      { kind: "stickyNote", targetId: "onboarding:start-project", zIndex: 4 },
+      { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 5 },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:reuse-workflows",
+        zIndex: 6,
+      },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:manage-automations",
+        zIndex: 7,
+      },
+      { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 8 },
+    ]);
+    expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
+      "5",
+    );
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      loadStatus: "ready",
+      itemRevision: 12,
+    });
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { type: "clock" },
+      { type: "stickyNote", state: { noteId: "onboarding:welcome" } },
+      { type: "stickyNote", state: { noteId: "onboarding:start-project" } },
+      { type: "stickyNote", state: { noteId: "onboarding:build-agent" } },
+      { type: "stickyNote", state: { noteId: "onboarding:reuse-workflows" } },
+      {
+        type: "stickyNote",
+        state: { noteId: "onboarding:manage-automations" },
+      },
+      { type: "stickyNote", state: { noteId: "onboarding:shape-home" } },
+    ]);
+  });
+
+  it("upgrades old two-note onboarding layouts with the new primitive notes", async () => {
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "2");
+
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        itemRevision: 11,
+        items: [
+          {
+            id: "clock-1",
+            kind: "clock",
+            targetId: "widget:clock-1",
+            centerX: 240,
+            centerY: 240,
+            width: 200,
+            height: 200,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-build-agent",
+            kind: "stickyNote",
+            targetId: "onboarding:build-agent",
+            centerX: 0,
+            centerY: 0,
+            width: 224,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-start-project",
+            kind: "stickyNote",
+            targetId: "onboarding:start-project",
+            centerX: 260,
+            centerY: 0,
+            width: 224,
+            height: 196,
+            zIndex: 3,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 12,
+        items: request.items.map((item) => ({
+          ...item,
+          titleOverride: item.titleOverride ?? null,
+        })),
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        layoutId: HOME_LAYOUT_ID,
+        expectedRevision: 11,
+        replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+      }),
+    );
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      { kind: "clock", zIndex: 1 },
+      { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 2 },
+      { kind: "stickyNote", targetId: "onboarding:start-project", zIndex: 3 },
+      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 4 },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:reuse-workflows",
+        zIndex: 5,
+      },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:manage-automations",
+        zIndex: 6,
+      },
+      { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 7 },
+    ]);
+    expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
+      "5",
+    );
+  });
+
+  it("adds automations and welcome notes to layouts that already got the skills and home notes", async () => {
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "3");
+
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        itemRevision: 11,
+        items: [
+          {
+            id: "sticky-build-agent",
+            kind: "stickyNote",
+            targetId: "onboarding:build-agent",
+            centerX: 0,
+            centerY: 0,
+            width: 224,
+            height: 196,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-skills",
+            kind: "stickyNote",
+            targetId: "onboarding:reuse-workflows",
+            centerX: 0,
+            centerY: 240,
+            width: 224,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-home",
+            kind: "stickyNote",
+            targetId: "onboarding:shape-home",
+            centerX: 260,
+            centerY: 240,
+            width: 224,
+            height: 196,
+            zIndex: 3,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 12,
+        items: request.items.map((item) => ({
+          ...item,
+          titleOverride: item.titleOverride ?? null,
+        })),
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 1 },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:reuse-workflows",
+        zIndex: 2,
+      },
+      { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 3 },
+      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 4 },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:manage-automations",
+        zIndex: 5,
+      },
+    ]);
+    expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
+      "5",
+    );
+  });
+
+  it("adds only the welcome note to layouts that already got the full v4 set", async () => {
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "4");
+
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        itemRevision: 11,
+        items: [
+          {
+            id: "sticky-build-agent",
+            kind: "stickyNote",
+            targetId: "onboarding:build-agent",
+            centerX: 0,
+            centerY: 0,
+            width: 224,
+            height: 196,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-project",
+            kind: "stickyNote",
+            targetId: "onboarding:start-project",
+            centerX: 260,
+            centerY: 0,
+            width: 224,
+            height: 196,
+            zIndex: 2,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-skills",
+            kind: "stickyNote",
+            targetId: "onboarding:reuse-workflows",
+            centerX: 0,
+            centerY: 240,
+            width: 224,
+            height: 196,
+            zIndex: 3,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-automations",
+            kind: "stickyNote",
+            targetId: "onboarding:manage-automations",
+            centerX: 260,
+            centerY: 240,
+            width: 224,
+            height: 196,
+            zIndex: 4,
+            titleOverride: null,
+          },
+          {
+            id: "sticky-home",
+            kind: "stickyNote",
+            targetId: "onboarding:shape-home",
+            centerX: 520,
+            centerY: 240,
+            width: 224,
+            height: 196,
+            zIndex: 5,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 12,
+        items: request.items.map((item) => ({
+          ...item,
+          titleOverride: item.titleOverride ?? null,
+        })),
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      { kind: "stickyNote", targetId: "onboarding:build-agent", zIndex: 1 },
+      { kind: "stickyNote", targetId: "onboarding:start-project", zIndex: 2 },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:reuse-workflows",
+        zIndex: 3,
+      },
+      {
+        kind: "stickyNote",
+        targetId: "onboarding:manage-automations",
+        zIndex: 4,
+      },
+      { kind: "stickyNote", targetId: "onboarding:shape-home", zIndex: 5 },
+      { kind: "stickyNote", targetId: "onboarding:welcome", zIndex: 6 },
+    ]);
+    expect(localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY)).toBe(
+      "5",
+    );
+  });
+
+  it("does not backfill onboarding sticky notes after they were offered", async () => {
+    // If the user unpinned the onboarding notes, that choice must be respected
+    // across reloads. The one-time local marker prevents re-adding them.
     const agentPinItem: Layout["items"][number] = {
       id: "agent-1",
       kind: "persona",
@@ -278,7 +611,7 @@ describe("homeWidgetStore", () => {
     expect(useHomeWidgetStore.getState().instances[0].type).toBe("agentPin");
   });
 
-  it("adopts the backend layout when default clock seeding conflicts", async () => {
+  it("adopts the backend layout when default widget seeding conflicts", async () => {
     const conflict = layout({ itemRevision: 9 });
     vi.mocked(getLayout).mockResolvedValue(
       layout({ itemRevision: 7, items: [] }),
@@ -298,7 +631,7 @@ describe("homeWidgetStore", () => {
     expect(toast.warning).not.toHaveBeenCalled();
   });
 
-  it("uses a uuid for the generated default clock id", async () => {
+  it("uses uuids for generated default widget ids", async () => {
     vi.mocked(getLayout).mockResolvedValue(layout({ items: [] }));
     vi.mocked(saveLayoutItems).mockResolvedValue({
       ok: true,
@@ -308,10 +641,12 @@ describe("homeWidgetStore", () => {
     await useHomeWidgetStore.getState().initialize();
 
     const request = vi.mocked(saveLayoutItems).mock.calls[0][0];
-    expect(request.items[0].id).toMatch(
-      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
-    );
-    expect(request.items[0].id).not.toBe("default-clock");
+    for (const item of request.items) {
+      expect(item.id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+      expect(item.id).not.toBe("default-clock");
+    }
   });
 
   it("ignores stale localStorage data and leaves it untouched", async () => {
@@ -393,6 +728,7 @@ describe("homeWidgetStore", () => {
 
     const staleInitialize = useHomeWidgetStore.getState().initialize();
     resetHomeWidgetStoreForTests();
+    localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
     await useHomeWidgetStore.getState().initialize();
 
     staleLoad.resolve(staleLayout);

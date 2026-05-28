@@ -14,6 +14,9 @@ import {
 } from "../stores/homeWidgetStore";
 import { HomeView } from "./HomeView";
 
+const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
+  "goose:home:onboarding-stickies-seeded";
+
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/layout/api/layout")>();
@@ -90,6 +93,8 @@ function renderHomeViewWithTopBarActions() {
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
   vi.mocked(getLayout).mockReset();
+  localStorage.clear();
+  localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: {

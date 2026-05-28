@@ -10,12 +10,26 @@ import {
 } from "@/features/layout/api/layout";
 import { i18n } from "@/shared/i18n";
 import {
-  createDefaultClockLayoutItem,
+  createDefaultHomeLayoutItems,
+  createDefaultStickyNoteWidgets,
+  defaultStickyNoteId,
   homeWidgetsToLayoutItems,
   HOME_LAYOUT_REPLACE_KINDS,
   layoutItemsToHomeWidgets,
 } from "../lib/homeLayoutMapper";
 import type { WidgetInstance } from "../widgets/types";
+
+const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
+  "goose:home:onboarding-stickies-seeded";
+const ONBOARDING_STICKIES_SEEDED_VERSION = 5;
+const ONBOARDING_STICKY_INTRODUCED_VERSION: Record<string, number> = {
+  "onboarding:welcome": 5,
+  "onboarding:build-agent": 1,
+  "onboarding:start-project": 1,
+  "onboarding:reuse-workflows": 3,
+  "onboarding:shape-home": 3,
+  "onboarding:manage-automations": 4,
+};
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type SaveStatus = "idle" | "saving";
@@ -166,6 +180,81 @@ function widgetIdentityKey(instance: WidgetInstance): string {
   return `${instance.type}:${stableStateKey(instance.state)}`;
 }
 
+function onboardingStickiesSeenVersion(): number {
+  try {
+    const value = localStorage.getItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY);
+    const version = value ? Number.parseInt(value, 10) : 0;
+    return Number.isFinite(version) ? version : 0;
+  } catch {
+    return ONBOARDING_STICKIES_SEEDED_VERSION;
+  }
+}
+
+function markOnboardingStickiesSeen(): void {
+  try {
+    localStorage.setItem(
+      ONBOARDING_STICKIES_SEEDED_STORAGE_KEY,
+      String(ONBOARDING_STICKIES_SEEDED_VERSION),
+    );
+  } catch {
+    // Ignore unavailable storage; the layout itself is still the source of truth.
+  }
+}
+
+function clearOnboardingStickiesSeenForTests(): void {
+  try {
+    localStorage.removeItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY);
+  } catch {
+    // Ignore unavailable storage in non-browser tests.
+  }
+}
+
+function hasStickyNote(instances: WidgetInstance[]): boolean {
+  return instances.some((instance) => instance.type === "stickyNote");
+}
+
+function withMissingDefaultStickyNotes(
+  instances: WidgetInstance[],
+): WidgetInstance[] {
+  const seenVersion = onboardingStickiesSeenVersion();
+  if (seenVersion >= ONBOARDING_STICKIES_SEEDED_VERSION) {
+    return instances;
+  }
+
+  const existingNoteIds = new Set(
+    instances.flatMap((instance) => {
+      const noteId = defaultStickyNoteId(instance);
+      return noteId ? [noteId] : [];
+    }),
+  );
+  const missingStickyNotes = createDefaultStickyNoteWidgets().filter(
+    (instance) => {
+      const noteId = defaultStickyNoteId(instance);
+      if (!noteId || existingNoteIds.has(noteId)) {
+        return false;
+      }
+      const introducedVersion =
+        ONBOARDING_STICKY_INTRODUCED_VERSION[noteId] ??
+        ONBOARDING_STICKIES_SEEDED_VERSION;
+      return seenVersion < introducedVersion;
+    },
+  );
+  if (missingStickyNotes.length === 0) {
+    return instances;
+  }
+
+  const maxZ = instances.reduce(
+    (currentMax, instance) => Math.max(currentMax, instance.z),
+    0,
+  );
+  const stickyNotes = missingStickyNotes.map((instance, index) => ({
+    ...instance,
+    z: maxZ + index + 1,
+  }));
+
+  return [...instances, ...stickyNotes];
+}
+
 function mergeAddedWidgetsAfterConflict(
   current: HomeWidgetState,
   attemptedInstances: WidgetInstance[],
@@ -271,18 +360,40 @@ export function createHomeWidgetRuntime({
 
         const instances = layoutItemsToHomeWidgets(layout.items);
         if (instances.length > 0) {
+          const instancesWithMissingNotes =
+            withMissingDefaultStickyNotes(instances);
+          if (instancesWithMissingNotes.length > instances.length) {
+            const result = await saveLayoutItems({
+              layoutId: HOME_LAYOUT_ID,
+              expectedRevision: layout.itemRevision,
+              replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+              items: homeWidgetsToLayoutItems(instancesWithMissingNotes),
+            });
+            if (generation !== runtime.generation) {
+              return;
+            }
+            if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
+              markOnboardingStickiesSeen();
+            }
+            setReadyLayout(result.layout, generation);
+            return;
+          }
+
+          if (hasStickyNote(instances)) {
+            markOnboardingStickiesSeen();
+          }
           setReadyLayout(layout, generation);
           return;
         }
 
-        // Empty layout — seed a default clock so first-run users have
-        // something on the canvas. If the user later unpins it, that
+        // Empty layout — seed default onboarding widgets so first-run users
+        // have something on the canvas. If the user later unpins them, that
         // choice is respected: only an empty layout re-seeds.
         const result = await saveLayoutItems({
           layoutId: HOME_LAYOUT_ID,
           expectedRevision: layout.itemRevision,
           replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-          items: [createDefaultClockLayoutItem()],
+          items: createDefaultHomeLayoutItems(),
         });
         if (generation !== runtime.generation) {
           return;
@@ -290,6 +401,9 @@ export function createHomeWidgetRuntime({
         // During default seeding, a revision conflict means another writer
         // already created a newer backend layout. There are no local edits to
         // preserve yet, so initialization adopts the returned conflict layout.
+        if (hasStickyNote(layoutItemsToHomeWidgets(result.layout.items))) {
+          markOnboardingStickiesSeen();
+        }
         setReadyLayout(result.layout, generation);
         return;
       } catch (error) {
@@ -547,6 +661,7 @@ export function createHomeWidgetRuntime({
     runtime.saveLoopGeneration = null;
     runtime.cameraSaveLoopPromise = null;
     runtime.cameraSaveLoopGeneration = null;
+    clearOnboardingStickiesSeenForTests();
     setState(initialHomeWidgetState);
   }
 

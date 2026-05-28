@@ -20,6 +20,10 @@ export interface HomeViewProps {
   onSelectSession?: (sessionId: string) => void;
   onStartProjectChat?: (projectId: string) => void;
   onOpenAutomation?: (automationId: string) => void;
+  onCreatePersona?: () => void;
+  onCreateProject?: () => void;
+  onOpenSkills?: () => void;
+  onOpenAutomations?: () => void;
 }
 
 export function HomeView({
@@ -29,6 +33,10 @@ export function HomeView({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onCreatePersona,
+  onCreateProject,
+  onOpenSkills,
+  onOpenAutomations,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
   const setTopBarActions = useSetTopBarActions();
@@ -119,6 +127,10 @@ export function HomeView({
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
           onOpenAutomation={onOpenAutomation}
+          onCreatePersona={onCreatePersona}
+          onCreateProject={onCreateProject}
+          onOpenSkills={onOpenSkills}
+          onOpenAutomations={onOpenAutomations}
         />
       ) : null}
       {loadStatus === "loading" ? (

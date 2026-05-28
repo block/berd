@@ -189,6 +189,8 @@ export function AppShellContent({
           onOpenSkill={onOpenSkill}
           onSelectSession={onSelectSession}
           onStartProjectChat={onStartProjectChat}
+          onCreatePersona={onCreatePersona}
+          onCreateProject={onCreateProject}
           onOpenAutomation={(automationId) =>
             onNavigateAutomations({
               surface: "detail",
@@ -196,6 +198,10 @@ export function AppShellContent({
               tab: "details",
               selectedRunKey: null,
             })
+          }
+          onOpenSkills={() => onNavigateSkills(null)}
+          onOpenAutomations={() =>
+            onNavigateAutomations({ surface: "overview" })
           }
         />
       );

@@ -7,6 +7,7 @@ export type LayoutItemKind =
   | "project"
   | "persona"
   | "clock"
+  | "stickyNote"
   | "automation"
   | "skill";
 

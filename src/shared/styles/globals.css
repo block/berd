@@ -284,6 +284,40 @@
   --clock-mark: var(--color-white);
   --clock-hand: var(--color-red-500);
 
+  --sticky-note-warm: color-mix(
+    in srgb,
+    var(--color-yellow-100) 56%,
+    var(--color-white)
+  );
+  --sticky-note-cool: color-mix(
+    in srgb,
+    var(--color-green-100) 52%,
+    var(--color-white)
+  );
+  --sticky-note-rose: color-mix(
+    in srgb,
+    var(--color-pill-pink) 56%,
+    var(--color-white)
+  );
+  --sticky-note-blue: color-mix(
+    in srgb,
+    var(--color-blue-100) 40%,
+    var(--color-white)
+  );
+  --sticky-note-lavender: color-mix(
+    in srgb,
+    var(--color-pill-lavender) 52%,
+    var(--color-white)
+  );
+  --sticky-note-peach: color-mix(
+    in srgb,
+    var(--color-pill-peach) 56%,
+    var(--color-white)
+  );
+  --sticky-note-foreground: var(--foreground);
+  --sticky-note-muted: color-mix(in srgb, var(--foreground) 68%, transparent);
+  --sticky-note-shadow: none;
+
   /* Alpha utility (text-on-canvas overlays) */
   --dark-04: rgba(26, 26, 26, 0.04);
   --dark-10: rgba(26, 26, 26, 0.1);
@@ -546,6 +580,39 @@
      face value so the contrast direction flips cleanly. Hand stays red. */
   --clock-face: #f5f5f5;
   --clock-mark: #1c1c1c;
+  --sticky-note-warm: color-mix(
+    in srgb,
+    var(--color-yellow-100) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-cool: color-mix(
+    in srgb,
+    var(--color-green-100) 22%,
+    var(--color-gray-800)
+  );
+  --sticky-note-rose: color-mix(
+    in srgb,
+    var(--color-pill-pink) 26%,
+    var(--color-gray-800)
+  );
+  --sticky-note-blue: color-mix(
+    in srgb,
+    var(--color-blue-100) 20%,
+    var(--color-gray-800)
+  );
+  --sticky-note-lavender: color-mix(
+    in srgb,
+    var(--color-pill-lavender) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-peach: color-mix(
+    in srgb,
+    var(--color-pill-peach) 24%,
+    var(--color-gray-800)
+  );
+  --sticky-note-foreground: var(--foreground);
+  --sticky-note-muted: color-mix(in srgb, var(--foreground) 64%, transparent);
+  --sticky-note-shadow: none;
 
   --dot-color-base: rgba(255, 255, 255, 0.12);
 
@@ -686,6 +753,14 @@
   --color-clock-face: var(--clock-face);
   --color-clock-mark: var(--clock-mark);
   --color-clock-hand: var(--clock-hand);
+  --color-sticky-note-warm: var(--sticky-note-warm);
+  --color-sticky-note-cool: var(--sticky-note-cool);
+  --color-sticky-note-rose: var(--sticky-note-rose);
+  --color-sticky-note-blue: var(--sticky-note-blue);
+  --color-sticky-note-lavender: var(--sticky-note-lavender);
+  --color-sticky-note-peach: var(--sticky-note-peach);
+  --color-sticky-note-foreground: var(--sticky-note-foreground);
+  --color-sticky-note-muted: var(--sticky-note-muted);
 
   /* Alpha overlays */
   --color-dark-04: var(--dark-04);
@@ -749,6 +824,7 @@
   --shadow-card: var(--shadow-card);
   --shadow-elevated: var(--shadow-elevated);
   --shadow-chat: var(--shadow-chat);
+  --shadow-sticky-note: var(--sticky-note-shadow);
   --shadow-popover: var(--shadow-popover);
   --shadow-popover-inverse: var(--shadow-popover-inverse);
   --shadow-modal: var(--shadow-modal);

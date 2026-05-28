@@ -5,8 +5,12 @@ import {
   HOME_LAYOUT_REPLACE_KINDS,
   createDefaultClockLayoutItem,
   createDefaultClockWidget,
+  createDefaultHomeLayoutItems,
+  createDefaultHomeWidgets,
+  createDefaultStickyNoteWidgets,
   homeWidgetsToLayoutItems,
   layoutItemsToHomeWidgets,
+  missingDefaultStickyNoteWidgets,
 } from "./homeLayoutMapper";
 
 function layoutItem(overrides: Partial<LayoutItem>): LayoutItem {
@@ -28,6 +32,7 @@ describe("homeLayoutMapper", () => {
   it("maps layout kinds to home widget types including projects and skills", () => {
     const widgets = layoutItemsToHomeWidgets([
       layoutItem({ kind: "clock", targetId: "widget:clock-1" }),
+      layoutItem({ kind: "stickyNote", targetId: "onboarding:build-agent" }),
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "session-1" }),
       layoutItem({ kind: "project", targetId: "project-1" }),
@@ -37,6 +42,7 @@ describe("homeLayoutMapper", () => {
 
     expect(widgets.map((widget) => widget.type)).toEqual([
       "clock",
+      "stickyNote",
       "agentPin",
       "chatPin",
       "projectArtifactPin",
@@ -45,6 +51,7 @@ describe("homeLayoutMapper", () => {
     ]);
     expect(HOME_LAYOUT_REPLACE_KINDS).toEqual([
       "clock",
+      "stickyNote",
       "persona",
       "session",
       "project",
@@ -97,16 +104,18 @@ describe("homeLayoutMapper", () => {
 
   it("populates entity state only for non-synthetic targets", () => {
     const widgets = layoutItemsToHomeWidgets([
+      layoutItem({ kind: "stickyNote", targetId: "onboarding:build-agent" }),
       layoutItem({ kind: "persona", targetId: "agent-1" }),
       layoutItem({ kind: "session", targetId: "widget:session-pin" }),
       layoutItem({ kind: "project", targetId: "project-1" }),
       layoutItem({ kind: "automation", targetId: "automation-1" }),
     ]);
 
-    expect(widgets[0].state).toEqual({ agentId: "agent-1" });
-    expect(widgets[1].state).toBeUndefined();
-    expect(widgets[2].state).toEqual({ projectId: "project-1" });
-    expect(widgets[3].state).toEqual({ automationId: "automation-1" });
+    expect(widgets[0].state).toEqual({ noteId: "onboarding:build-agent" });
+    expect(widgets[1].state).toEqual({ agentId: "agent-1" });
+    expect(widgets[2].state).toBeUndefined();
+    expect(widgets[3].state).toEqual({ projectId: "project-1" });
+    expect(widgets[4].state).toEqual({ automationId: "automation-1" });
   });
 
   it("uses synthetic targets for clocks and widgets without entity state", () => {
@@ -120,10 +129,18 @@ describe("homeLayoutMapper", () => {
       },
       {
         id: "00000000-0000-0000-0000-000000000002",
-        type: "agentPin",
+        type: "stickyNote",
         x: 0,
         y: 0,
         z: 2,
+        state: { noteId: "onboarding:build-agent" },
+      },
+      {
+        id: "00000000-0000-0000-0000-000000000003",
+        type: "agentPin",
+        x: 0,
+        y: 0,
+        z: 3,
       },
     ];
 
@@ -131,7 +148,8 @@ describe("homeLayoutMapper", () => {
       homeWidgetsToLayoutItems(widgets).map((item) => item.targetId),
     ).toEqual([
       "widget:00000000-0000-0000-0000-000000000001",
-      "widget:00000000-0000-0000-0000-000000000002",
+      "onboarding:build-agent",
+      "widget:00000000-0000-0000-0000-000000000003",
     ]);
   });
 
@@ -217,6 +235,56 @@ describe("homeLayoutMapper", () => {
       targetId: `widget:${item.id}`,
       centerX: 888,
       centerY: 144,
+    });
+  });
+
+  it("creates default home widgets with onboarding sticky notes and a clock", () => {
+    const widgets = createDefaultHomeWidgets();
+    const items = createDefaultHomeLayoutItems();
+
+    expect(widgets.map((widget) => widget.type)).toEqual([
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "clock",
+    ]);
+    expect(widgets.map((widget) => widget.z)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(items.map((item) => item.kind)).toEqual([
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "stickyNote",
+      "clock",
+    ]);
+    expect(items.map((item) => item.targetId)).toEqual([
+      "onboarding:welcome",
+      "onboarding:start-project",
+      "onboarding:build-agent",
+      "onboarding:reuse-workflows",
+      "onboarding:manage-automations",
+      "onboarding:shape-home",
+      `widget:${items[6].id}`,
+    ]);
+  });
+
+  it("returns only missing default sticky notes", () => {
+    const defaultStickies = createDefaultStickyNoteWidgets();
+    const missingStickies = missingDefaultStickyNoteWidgets([
+      defaultStickies[0],
+      defaultStickies[1],
+      defaultStickies[4],
+      defaultStickies[5],
+      defaultStickies[2],
+    ]);
+
+    expect(missingStickies).toHaveLength(1);
+    expect(missingStickies[0].state).toEqual({
+      noteId: "onboarding:reuse-workflows",
     });
   });
 });

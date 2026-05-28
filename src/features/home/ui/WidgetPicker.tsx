@@ -27,6 +27,7 @@ import type { Persona } from "@/shared/types/agents";
 import { cn } from "@/shared/lib/cn";
 import { Input } from "@/shared/ui/input";
 import { Popover, PopoverAnchor, PopoverContent } from "@/shared/ui/popover";
+import { missingDefaultStickyNoteWidgets } from "../lib/homeLayoutMapper";
 import { HOME_WIDGET_CATEGORIES } from "../widgets/catalog";
 import {
   SKILL_LIST_QUERY_KEY,
@@ -41,6 +42,7 @@ interface WidgetPickerProps {
   instances: WidgetInstance[];
   onClose: () => void;
   onSelect: (type: string, state?: Record<string, unknown>) => void;
+  onSelectStarterStickies: (widgets: WidgetInstance[]) => void;
 }
 
 type EntityCategory = "agent" | "chat" | "automation" | "project" | "skill";
@@ -325,6 +327,7 @@ export function WidgetPicker({
   instances,
   onClose,
   onSelect,
+  onSelectStarterStickies,
 }: WidgetPickerProps) {
   const { t } = useTranslation("home");
   const searchInputId = useId();
@@ -364,6 +367,10 @@ export function WidgetPicker({
     skills: skills ?? [],
     automationFallbackTitle: t("widgets.automationOutputPin.fallbackTitle"),
   });
+  const missingStarterStickies = useMemo(
+    () => missingDefaultStickyNoteWidgets(instances),
+    [instances],
+  );
 
   useEffect(() => {
     if (open) {
@@ -527,10 +534,15 @@ export function WidgetPicker({
             onSelectOption={selectOption}
             pickerMessage={pickerMessage}
             onSelectClock={() => onSelect("clock")}
+            onSelectStarterStickies={() =>
+              onSelectStarterStickies(missingStarterStickies)
+            }
             clockLabel={t("widgets.clock.label")}
             clockPinned={instances.some(
               (instance) => instance.type === "clock",
             )}
+            starterStickiesLabel={t("widgets.stickyNote.starterStickies")}
+            starterStickiesPinned={missingStarterStickies.length === 0}
             backLabel={t("widgets.picker.back")}
             title={t(`widgets.picker.selectTitles.${activePanel}`)}
             isLoadingMoreSessions={isLoadingMoreSessions}
@@ -598,8 +610,11 @@ interface PanelStageTwoProps {
   onSelectOption: (option: PickerOption) => void;
   pickerMessage: string | null;
   onSelectClock: () => void;
+  onSelectStarterStickies: () => void;
   clockLabel: string;
   clockPinned: boolean;
+  starterStickiesLabel: string;
+  starterStickiesPinned: boolean;
   backLabel: string;
   title: string;
   isLoadingMoreSessions: boolean;
@@ -618,8 +633,11 @@ function PanelStageTwo({
   onSelectOption,
   pickerMessage,
   onSelectClock,
+  onSelectStarterStickies,
   clockLabel,
   clockPinned,
+  starterStickiesLabel,
+  starterStickiesPinned,
   backLabel,
   title,
   isLoadingMoreSessions,
@@ -642,19 +660,16 @@ function PanelStageTwo({
       <div className="rounded-dropdown bg-card p-3">
         {activePanel === "clock" ? (
           <div className="space-y-0">
-            <button
-              type="button"
-              disabled={clockPinned}
-              aria-disabled={clockPinned || undefined}
-              onClick={onSelectClock}
-              className={cn(
-                "flex w-full items-center gap-3 py-3 text-left text-sm text-foreground transition-colors hover:text-muted-foreground",
-                clockPinned &&
-                  "cursor-not-allowed opacity-50 pointer-events-none",
-              )}
-            >
-              <span className="min-w-0 flex-1 truncate">{clockLabel}</span>
-            </button>
+            <WidgetOptionRow
+              label={clockLabel}
+              pinned={clockPinned}
+              onSelect={onSelectClock}
+            />
+            <WidgetOptionRow
+              label={starterStickiesLabel}
+              pinned={starterStickiesPinned}
+              onSelect={onSelectStarterStickies}
+            />
           </div>
         ) : (
           <>
@@ -699,6 +714,29 @@ function PanelStageTwo({
         )}
       </div>
     </div>
+  );
+}
+
+interface WidgetOptionRowProps {
+  label: string;
+  pinned: boolean;
+  onSelect: () => void;
+}
+
+function WidgetOptionRow({ label, pinned, onSelect }: WidgetOptionRowProps) {
+  return (
+    <button
+      type="button"
+      disabled={pinned}
+      aria-disabled={pinned || undefined}
+      onClick={onSelect}
+      className={cn(
+        "flex w-full items-center gap-3 border-b border-border/80 py-3 text-left text-sm text-foreground transition-colors last:border-b-0 hover:text-muted-foreground",
+        pinned && "cursor-not-allowed opacity-50 pointer-events-none",
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </button>
   );
 }
 

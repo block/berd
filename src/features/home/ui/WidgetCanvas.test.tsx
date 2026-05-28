@@ -220,10 +220,27 @@ function chatWidget(overrides: Partial<WidgetInstance> = {}): WidgetInstance {
   });
 }
 
+function stickyNoteWidget(
+  overrides: Partial<WidgetInstance> = {},
+): WidgetInstance {
+  return widget({
+    id: "sticky-note-widget",
+    type: "stickyNote",
+    x: -320,
+    y: -250,
+    width: 224,
+    height: 196,
+    state: { noteId: "onboarding:build-agent" },
+    ...overrides,
+  });
+}
+
 type RenderCanvasOptions = WidgetNavigationHandlers & {
   instances?: WidgetInstance[];
   mutations?: Partial<WidgetMutationHandlers>;
   animateCameraTransition?: boolean;
+  onCreatePersona?: () => void;
+  onCreateProject?: () => void;
 };
 
 function PickerTestProvider({ children }: { children: ReactNode }) {
@@ -412,6 +429,108 @@ describe("WidgetCanvas", () => {
     );
 
     expect(widgetNode.className).toContain("transition-[left,top]");
+  });
+
+  it("renders sticky note widgets with actionable CTAs", async () => {
+    const user = userEvent.setup();
+    const onCreatePersona = vi.fn();
+    const onCreateProject = vi.fn();
+    const onOpenSkills = vi.fn();
+    const onOpenAutomations = vi.fn();
+    const removeWidget = vi.fn();
+
+    renderCanvas({
+      instances: [
+        stickyNoteWidget({
+          id: "welcome-sticky-note-widget",
+          state: { noteId: "onboarding:welcome" },
+        }),
+        stickyNoteWidget(),
+        stickyNoteWidget({
+          id: "project-sticky-note-widget",
+          state: { noteId: "onboarding:start-project" },
+        }),
+        stickyNoteWidget({
+          id: "workflow-sticky-note-widget",
+          state: { noteId: "onboarding:reuse-workflows" },
+        }),
+        stickyNoteWidget({
+          id: "home-sticky-note-widget",
+          state: { noteId: "onboarding:shape-home" },
+        }),
+        stickyNoteWidget({
+          id: "automations-sticky-note-widget",
+          state: { noteId: "onboarding:manage-automations" },
+        }),
+      ],
+      mutations: { removeWidget },
+      onCreatePersona,
+      onCreateProject,
+      onOpenSkills,
+      onOpenAutomations,
+    });
+
+    expect(screen.getByText("Welcome to Goose for Block")).toBeInTheDocument();
+    expect(screen.getByText("Build an agent")).toBeInTheDocument();
+    expect(screen.getByText("Start a project")).toBeInTheDocument();
+    expect(screen.getByText("Teach Goose a skill")).toBeInTheDocument();
+    expect(screen.getByText("Make Home yours")).toBeInTheDocument();
+    expect(screen.getByText("Manage automations")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /build agent/i }));
+    await user.click(screen.getByRole("button", { name: /new project/i }));
+    await user.click(screen.getByRole("button", { name: /explore skills/i }));
+    await user.click(screen.getByRole("button", { name: /open automations/i }));
+    await user.click(
+      screen.getAllByRole("button", { name: /dismiss sticky note/i })[0],
+    );
+
+    expect(onCreatePersona).toHaveBeenCalledTimes(1);
+    expect(onCreateProject).toHaveBeenCalledTimes(1);
+    expect(onOpenSkills).toHaveBeenCalledTimes(1);
+    expect(onOpenAutomations).toHaveBeenCalledTimes(1);
+    expect(removeWidget).toHaveBeenCalledWith("welcome-sticky-note-widget");
+    expect(screen.queryByRole("button", { name: /make home/i })).toBeNull();
+  });
+
+  it("drags sticky note widgets through the same widget frame pipeline", async () => {
+    const user = userEvent.setup();
+    const moveWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({
+      instances: [stickyNoteWidget()],
+      mutations: { moveWidget },
+    });
+
+    const canvas = container.firstElementChild as Element;
+    const stickyNode = container.querySelector(HOME_WIDGET_NODE_SELECTOR);
+    expect(stickyNode).not.toBeNull();
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: stickyNode as Element,
+        coords: { clientX: 24, clientY: 34 },
+      },
+      {
+        target: canvas,
+        coords: { clientX: 54, clientY: 82 },
+      },
+      {
+        keys: "[/MouseLeft]",
+        target: canvas,
+        coords: { clientX: 54, clientY: 82 },
+      },
+    ]);
+
+    expect(moveWidget).toHaveBeenCalledWith(
+      "sticky-note-widget",
+      -290,
+      -202,
+      CANVAS_CONSTRAINTS,
+      { bringToFront: true },
+    );
   });
 
   it("allows child widget clicks when the pointer does not drag", () => {
@@ -752,6 +871,97 @@ describe("WidgetCanvas", () => {
       undefined,
       CANVAS_CONSTRAINTS,
     );
+  });
+
+  it("offers Starter stickies and restores only missing onboarding notes", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({
+      instances: [
+        stickyNoteWidget({
+          id: "welcome-sticky",
+          state: { noteId: "onboarding:welcome" },
+        }),
+        stickyNoteWidget({
+          id: "build-agent-sticky",
+          state: { noteId: "onboarding:build-agent" },
+        }),
+        stickyNoteWidget({
+          id: "project-sticky",
+          state: { noteId: "onboarding:start-project" },
+        }),
+        stickyNoteWidget({
+          id: "home-sticky",
+          state: { noteId: "onboarding:shape-home" },
+        }),
+        stickyNoteWidget({
+          id: "automation-sticky",
+          state: { noteId: "onboarding:manage-automations" },
+        }),
+      ],
+      mutations: { addWidget },
+    });
+
+    await openPickerPanel(user, container, "widgets");
+    await user.click(
+      screen.getByRole("button", { name: /^starter stickies$/i }),
+    );
+
+    expect(addWidget).toHaveBeenCalledTimes(1);
+    expect(addWidget).toHaveBeenCalledWith(
+      "stickyNote",
+      100,
+      120,
+      { noteId: "onboarding:reuse-workflows" },
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
+  it("disables Starter stickies when all onboarding notes are pinned", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+
+    const { container } = renderCanvas({
+      instances: [
+        stickyNoteWidget({
+          id: "welcome-sticky",
+          state: { noteId: "onboarding:welcome" },
+        }),
+        stickyNoteWidget({
+          id: "build-agent-sticky",
+          state: { noteId: "onboarding:build-agent" },
+        }),
+        stickyNoteWidget({
+          id: "project-sticky",
+          state: { noteId: "onboarding:start-project" },
+        }),
+        stickyNoteWidget({
+          id: "skills-sticky",
+          state: { noteId: "onboarding:reuse-workflows" },
+        }),
+        stickyNoteWidget({
+          id: "home-sticky",
+          state: { noteId: "onboarding:shape-home" },
+        }),
+        stickyNoteWidget({
+          id: "automation-sticky",
+          state: { noteId: "onboarding:manage-automations" },
+        }),
+      ],
+      mutations: { addWidget },
+    });
+
+    await openPickerPanel(user, container, "widgets");
+
+    const starterStickiesRow = screen.getByRole("button", {
+      name: /^starter stickies$/i,
+    });
+    expect(starterStickiesRow).toBeDisabled();
+    await user.click(starterStickiesRow);
+
+    expect(addWidget).not.toHaveBeenCalled();
   });
 
   it("disables the Clock row when a clock is already pinned", async () => {

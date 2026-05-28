@@ -35,6 +35,8 @@ interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
   mutations: WidgetMutationHandlers;
   animateCameraTransition?: boolean;
+  onCreatePersona?: () => void;
+  onCreateProject?: () => void;
 }
 
 interface PickerState {
@@ -152,6 +154,46 @@ function renderedWidgetContentStyle({
   };
 }
 
+function starterStickyPlacementsNearAnchor(
+  widgets: WidgetInstance[],
+  anchor: { x: number; y: number },
+) {
+  if (widgets.length === 0) {
+    return [];
+  }
+
+  const bounds = widgets.reduce(
+    (current, widget) => {
+      const size = widgetSizeForInstance(widget);
+      return {
+        minX: Math.min(current.minX, widget.x),
+        minY: Math.min(current.minY, widget.y),
+        maxX: Math.max(current.maxX, widget.x + size.width),
+        maxY: Math.max(current.maxY, widget.y + size.height),
+      };
+    },
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    },
+  );
+  const groupCenter = {
+    x: (bounds.minX + bounds.maxX) / 2,
+    y: (bounds.minY + bounds.maxY) / 2,
+  };
+
+  return widgets.map((widget) => {
+    const size = widgetSizeForInstance(widget);
+    return {
+      widget,
+      centerX: anchor.x + (widget.x + size.width / 2 - groupCenter.x),
+      centerY: anchor.y + (widget.y + size.height / 2 - groupCenter.y),
+    };
+  });
+}
+
 const HOME_MIN_ZOOM_BPS = 5_000;
 const HOME_MAX_ZOOM_BPS = 20_000;
 
@@ -184,6 +226,10 @@ export function WidgetCanvas({
   onSelectSession,
   onStartProjectChat,
   onOpenAutomation,
+  onCreatePersona,
+  onCreateProject,
+  onOpenSkills,
+  onOpenAutomations,
 }: WidgetCanvasProps) {
   const { t } = useTranslation("home");
   const camera = useHomeWidgetStore((state) => state.camera) ?? DEFAULT_CAMERA;
@@ -412,6 +458,10 @@ export function WidgetCanvas({
                   onSelectSession={onSelectSession}
                   onStartProjectChat={onStartProjectChat}
                   onOpenAutomation={onOpenAutomation}
+                  onCreatePersona={onCreatePersona}
+                  onCreateProject={onCreateProject}
+                  onOpenSkills={onOpenSkills}
+                  onOpenAutomations={onOpenAutomations}
                 />
                 <button
                   type="button"
@@ -460,6 +510,22 @@ export function WidgetCanvas({
             state,
             constraints,
           );
+          closePicker();
+        }}
+        onSelectStarterStickies={(widgets) => {
+          const placements = starterStickyPlacementsNearAnchor(widgets, {
+            x: picker.worldX,
+            y: picker.worldY,
+          });
+          for (const { widget, centerX, centerY } of placements) {
+            mutations.addWidget(
+              widget.type,
+              centerX,
+              centerY,
+              widget.state,
+              constraints,
+            );
+          }
           closePicker();
         }}
       />
