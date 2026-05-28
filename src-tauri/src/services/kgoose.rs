@@ -1,8 +1,12 @@
 use crate::services::distro_bundle::{DistroBundleState, KgooseDistroConfig};
 use bytes::Bytes;
-use reqwest::header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE};
+use reqwest::{
+    header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE},
+    redirect::Policy,
+    StatusCode,
+};
 use serde_json::Value;
-use std::{env, sync::OnceLock, time::Duration};
+use std::{env, fmt, sync::OnceLock, time::Duration};
 use tokio::time::timeout;
 
 const KGOOSE_BASE_URL_ENV: &str = "GOOSE_INTERNAL_KGOOSE_BASE_URL";
@@ -10,6 +14,8 @@ const KGOOSE_PATH_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PATH";
 const KGOOSE_PLAYPEN_ENV: &str = "GOOSE_INTERNAL_KGOOSE_PLAYPEN";
 const DEFAULT_KGOOSE_BASE_URL: &str = "https://kgoose.stage.sqprod.co/";
 const DEFAULT_KGOOSE_PATH: &str = "cash-app/goose";
+const KGOOSE_NETWORK_ACCESS_MESSAGE: &str =
+    "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.";
 const MAX_ERROR_BODY_CHARS: usize = 500;
 const KGOOSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -20,9 +26,19 @@ pub(crate) async fn post_json(
     endpoint: &str,
     body: Value,
 ) -> Result<Value, String> {
+    post_json_detailed(distro_state, endpoint, body)
+        .await
+        .map_err(|error| error.user_message())
+}
+
+pub(crate) async fn post_json_detailed(
+    distro_state: &DistroBundleState,
+    endpoint: &str,
+    body: Value,
+) -> Result<Value, KgooseJsonError> {
     let url = build_url(endpoint, distro_state.kgoose_config())?;
     let request = add_playpen_baggage(json_post_request(url.clone()));
-    send_json_request(request, url, &body).await
+    send_json_request_detailed(request, url, &body).await
 }
 
 /// Posts JSON to a fully resolved external URL without distro routing or playpen baggage.
@@ -44,36 +60,212 @@ async fn send_json_request(
     url: reqwest::Url,
     body: &Value,
 ) -> Result<Value, String> {
+    send_json_request_detailed(request, url, body)
+        .await
+        .map_err(|error| error.user_message())
+}
+
+async fn send_json_request_detailed(
+    request: reqwest::RequestBuilder,
+    url: reqwest::Url,
+    body: &Value,
+) -> Result<Value, KgooseJsonError> {
     let response = request
         .timeout(KGOOSE_JSON_REQUEST_TIMEOUT)
         .json(body)
         .send()
         .await
-        .map_err(|error| format!("Failed to call kgoose at {}: {error}", url.as_str()))?;
+        .map_err(|error| KgooseJsonError::request(&url, error))?;
 
     let status = response.status();
-    let response_body = response.text().await.map_err(|error| {
-        format!(
-            "Failed to read kgoose response from {}: {error}",
-            url.as_str()
-        )
-    })?;
+    let content_type = response_content_type(response.headers());
+    let response_body = response
+        .text()
+        .await
+        .map_err(|error| KgooseJsonError::read(&url, error))?;
 
     if !status.is_success() {
-        return Err(format!(
-            "kgoose request to {} failed with {}: {}",
-            url.as_str(),
-            status,
-            truncate_error_body(&response_body)
+        let body_preview = truncate_error_body(&response_body);
+        return Err(KgooseJsonError::response(
+            Some(status),
+            content_type,
+            format!(
+                "kgoose request to {} failed with {}: {}",
+                url.as_str(),
+                status,
+                body_preview
+            ),
         ));
     }
 
     serde_json::from_str(&response_body).map_err(|error| {
-        format!(
-            "Failed to parse kgoose response from {}: {error}",
-            url.as_str()
+        KgooseJsonError::response(
+            Some(status),
+            content_type,
+            format!(
+                "Failed to parse kgoose response from {}: {error}",
+                url.as_str()
+            ),
         )
     })
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KgooseRequestErrorKind {
+    Timeout,
+    Connect,
+    Redirect,
+    Other,
+}
+
+impl KgooseRequestErrorKind {
+    fn from_reqwest_error(error: &reqwest::Error) -> Self {
+        if error.is_timeout() {
+            Self::Timeout
+        } else if error.is_connect() {
+            Self::Connect
+        } else if error.is_redirect() {
+            Self::Redirect
+        } else {
+            Self::Other
+        }
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Connect => "connect",
+            Self::Redirect => "redirect",
+            Self::Other => "request",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct KgooseJsonError {
+    message: String,
+    kind: &'static str,
+    status: Option<StatusCode>,
+    content_type: Option<String>,
+    request_error_kind: Option<KgooseRequestErrorKind>,
+    likely_access_failure: bool,
+}
+
+impl KgooseJsonError {
+    fn request(url: &reqwest::Url, error: reqwest::Error) -> Self {
+        let kind = KgooseRequestErrorKind::from_reqwest_error(&error);
+        Self {
+            message: format!("Failed to call kgoose at {}: {error}", url.as_str()),
+            kind: "request",
+            status: None,
+            content_type: None,
+            request_error_kind: Some(kind),
+            likely_access_failure: is_access_request_error_kind(kind),
+        }
+    }
+
+    fn read(url: &reqwest::Url, error: reqwest::Error) -> Self {
+        Self {
+            message: format!(
+                "Failed to read kgoose response from {}: {error}",
+                url.as_str()
+            ),
+            kind: "read",
+            status: None,
+            content_type: None,
+            request_error_kind: None,
+            likely_access_failure: false,
+        }
+    }
+
+    fn response(status: Option<StatusCode>, content_type: Option<String>, message: String) -> Self {
+        let kind = match status {
+            Some(status) if status.is_success() => "json_parse",
+            Some(_) => "http_status",
+            None => "read",
+        };
+        Self {
+            message,
+            kind,
+            status,
+            content_type,
+            request_error_kind: None,
+            likely_access_failure: status.is_some_and(is_access_status),
+        }
+    }
+
+    pub(crate) fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    pub(crate) fn is_likely_access_failure(&self) -> bool {
+        self.likely_access_failure
+    }
+
+    pub(crate) fn user_message(&self) -> String {
+        if self.is_likely_access_failure() {
+            KGOOSE_NETWORK_ACCESS_MESSAGE.to_string()
+        } else {
+            self.to_string()
+        }
+    }
+
+    pub(crate) fn status(&self) -> Option<StatusCode> {
+        self.status
+    }
+
+    pub(crate) fn content_type(&self) -> Option<&str> {
+        self.content_type.as_deref()
+    }
+
+    pub(crate) fn request_error_kind(&self) -> Option<KgooseRequestErrorKind> {
+        self.request_error_kind
+    }
+}
+
+impl fmt::Display for KgooseJsonError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl From<String> for KgooseJsonError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            kind: "configuration",
+            status: None,
+            content_type: None,
+            request_error_kind: None,
+            likely_access_failure: false,
+        }
+    }
+}
+
+fn response_content_type(headers: &reqwest::header::HeaderMap) -> Option<String> {
+    headers
+        .get(CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string)
+}
+
+fn is_access_status(status: StatusCode) -> bool {
+    status.is_redirection()
+        || matches!(
+            status,
+            StatusCode::UNAUTHORIZED
+                | StatusCode::FORBIDDEN
+                | StatusCode::PROXY_AUTHENTICATION_REQUIRED
+        )
+}
+
+fn is_access_request_error_kind(kind: KgooseRequestErrorKind) -> bool {
+    matches!(
+        kind,
+        KgooseRequestErrorKind::Timeout
+            | KgooseRequestErrorKind::Connect
+            | KgooseRequestErrorKind::Redirect
+    )
 }
 
 pub(crate) async fn open_sse_stream(
@@ -90,16 +282,24 @@ pub(crate) async fn open_sse_stream(
         None => request,
     };
 
-    let response = request
-        .send()
-        .await
-        .map_err(|error| format!("Failed to open kgoose stream at {}: {error}", url.as_str()))?;
+    let response = request.send().await.map_err(|error| {
+        let kind = KgooseRequestErrorKind::from_reqwest_error(&error);
+        if is_access_request_error_kind(kind) {
+            KGOOSE_NETWORK_ACCESS_MESSAGE.to_string()
+        } else {
+            format!("Failed to open kgoose stream at {}: {error}", url.as_str())
+        }
+    })?;
     let status = response.status();
     if status.is_success() {
         return Ok(response);
     }
 
     let response_body = response.text().await.unwrap_or_default();
+    if is_access_status(status) {
+        return Err(KGOOSE_NETWORK_ACCESS_MESSAGE.to_string());
+    }
+
     Err(format!(
         "kgoose stream to {} failed with {}: {}",
         url.as_str(),
@@ -143,6 +343,7 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .connect_timeout(KGOOSE_CONNECT_TIMEOUT)
+            .redirect(Policy::none())
             .build()
             .expect("failed to build kgoose HTTP client")
     })
@@ -259,9 +460,11 @@ fn truncate_error_body(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_url, build_url, playpen_baggage, truncate_error_body, KgooseDistroConfig,
+        build_sse_url, build_url, is_access_request_error_kind, playpen_baggage,
+        truncate_error_body, KgooseDistroConfig, KgooseJsonError, KgooseRequestErrorKind,
         KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
     };
+    use reqwest::StatusCode;
     use std::env;
     use std::sync::Mutex;
 
@@ -349,6 +552,70 @@ mod tests {
 
         assert_eq!(truncated.chars().count(), 503);
         assert!(truncated.ends_with("..."));
+    }
+
+    #[test]
+    fn classifies_access_failures_from_transport_and_status() {
+        for kind in [
+            KgooseRequestErrorKind::Timeout,
+            KgooseRequestErrorKind::Connect,
+            KgooseRequestErrorKind::Redirect,
+        ] {
+            assert!(is_access_request_error_kind(kind));
+        }
+
+        for status in [
+            StatusCode::FOUND,
+            StatusCode::UNAUTHORIZED,
+            StatusCode::FORBIDDEN,
+            StatusCode::PROXY_AUTHENTICATION_REQUIRED,
+        ] {
+            let error = KgooseJsonError::response(
+                Some(status),
+                Some("text/html".to_string()),
+                "http status".to_string(),
+            );
+
+            assert!(error.is_likely_access_failure());
+        }
+    }
+
+    #[test]
+    fn does_not_classify_service_or_json_failures_as_access() {
+        let service_error = KgooseJsonError::response(
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+            Some("application/json".to_string()),
+            "service error".to_string(),
+        );
+        let json_error = KgooseJsonError::response(
+            Some(StatusCode::OK),
+            Some("application/json".to_string()),
+            "json parse error".to_string(),
+        );
+
+        assert!(!is_access_request_error_kind(KgooseRequestErrorKind::Other));
+        assert!(!service_error.is_likely_access_failure());
+        assert!(!json_error.is_likely_access_failure());
+    }
+
+    #[test]
+    fn string_api_uses_warp_message_for_access_failures() {
+        let access_error = KgooseJsonError::response(
+            Some(StatusCode::FOUND),
+            Some("text/html".to_string()),
+            "302 html body".to_string(),
+        );
+        let service_error = KgooseJsonError::response(
+            Some(StatusCode::INTERNAL_SERVER_ERROR),
+            Some("application/json".to_string()),
+            "service unavailable".to_string(),
+        );
+
+        assert_eq!(
+            access_error.user_message(),
+            "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again."
+        );
+        assert_eq!(service_error.user_message(), "service unavailable");
     }
 
     #[test]

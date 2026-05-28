@@ -10,6 +10,7 @@
     "submit": "Submit",
     "submitting": "Submitting…",
     "submitError": "Failed to submit feedback",
+    "networkAccessError": "Unable to submit feedback. Please check that you're connected to Cloudflare WARP and try again.",
     "successTitle": "Thank you!",
     "successBody": "Your feedback has been submitted.",
     "viewTicket": "View ticket",

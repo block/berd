@@ -888,6 +888,23 @@ describe("AutomationsView", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders kgoose access failures on the overview", async () => {
+    vi.mocked(getAutomationTiles).mockRejectedValue(
+      "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.",
+    );
+
+    renderAutomationsView();
+
+    expect(
+      await screen.findByText("Automations failed to load"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Unable to reach the internal service. Please check that you're connected to Cloudflare WARP and try again.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("edits a generic automation", async () => {
     const user = userEvent.setup();
     renderAutomationsView();

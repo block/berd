@@ -3,7 +3,10 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { submitFeedbackIssue } from "@/shared/api/feedback";
+import {
+  FeedbackSubmissionError,
+  submitFeedbackIssue,
+} from "@/shared/api/feedback";
 import { getPlatform } from "@/shared/lib/platform";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -118,12 +121,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       });
       setSuccess({ issueUrl: result.issueUrl });
     } catch (submitError) {
-      const message =
-        typeof submitError === "string"
-          ? submitError
-          : submitError instanceof Error
-            ? submitError.message
-            : t("dialog.submitError");
+      const message = getSubmitErrorMessage(submitError, t);
       setError(message);
       toast.error(message);
     } finally {
@@ -289,4 +287,23 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       />
     </>
   );
+}
+
+function getSubmitErrorMessage(
+  error: unknown,
+  t: (key: string) => string,
+): string {
+  if (
+    error instanceof FeedbackSubmissionError &&
+    error.code === "networkAccess"
+  ) {
+    return t("dialog.networkAccessError");
+  }
+  if (typeof error === "string") {
+    return error;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return t("dialog.submitError");
 }

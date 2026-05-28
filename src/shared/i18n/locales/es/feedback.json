@@ -10,6 +10,7 @@
     "submit": "Enviar",
     "submitting": "Enviando…",
     "submitError": "No se pudo enviar el comentario",
+    "networkAccessError": "No se pueden enviar los comentarios. Comprueba que estes conectado a Cloudflare WARP e intentalo de nuevo.",
     "successTitle": "¡Gracias!",
     "successBody": "Tu comentario ha sido enviado.",
     "viewTicket": "Ver ticket",

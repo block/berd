@@ -47,6 +47,16 @@ const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 const isTransientRefreshError = (msg: string | null | undefined): boolean =>
   !!msg && /being refreshed|try again later/i.test(msg);
 
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return fallback;
+}
+
 type AutomationSurfaceMode = "overview" | "history";
 
 interface AutomationsWorkbenchProps {
@@ -273,9 +283,7 @@ export function AutomationsWorkbench({
       await invalidateAutomationQueries();
     },
     onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : t("edit.saveError"),
-      );
+      setMutationError(errorMessage(error, t("edit.saveError")));
     },
   });
 
@@ -292,9 +300,7 @@ export function AutomationsWorkbench({
       await invalidateAutomationQueries();
     },
     onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : t("delete.error"),
-      );
+      setMutationError(errorMessage(error, t("delete.error")));
     },
   });
 
@@ -327,9 +333,7 @@ export function AutomationsWorkbench({
       }
     },
     onError: (error) => {
-      setMutationError(
-        error instanceof Error ? error.message : t("duplicate.error"),
-      );
+      setMutationError(errorMessage(error, t("duplicate.error")));
     },
   });
 
@@ -587,7 +591,10 @@ export function AutomationsWorkbench({
               ) : automationsQuery.error ? (
                 <EmptyState
                   title={t("list.loadErrorTitle")}
-                  body={automationsQuery.error.message}
+                  body={errorMessage(
+                    automationsQuery.error,
+                    t("list.loadErrorTitle"),
+                  )}
                 />
               ) : automations.length ? (
                 <AutomationsOverview
