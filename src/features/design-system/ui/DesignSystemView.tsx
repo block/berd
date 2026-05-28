@@ -328,7 +328,6 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
     "Short hover or focus labels for controls that need compact explanation.",
 };
 
-const densityOptions = ["compact", "comfortable", "spacious"] as const;
 const otpPreviewSlots = [
   "slot-1",
   "slot-2",
@@ -1960,7 +1959,6 @@ function useRuntimeTokens(tokenNames: string[]) {
   const theme = useTheme();
   const [values, setValues] = useState<Record<string, string>>({});
   const refreshKey = [
-    theme.density,
     theme.isLoading,
     theme.primaryColor,
     theme.resolvedTheme,
@@ -1984,14 +1982,7 @@ function useRuntimeTokens(tokenNames: string[]) {
 }
 
 function ThemeControls() {
-  const {
-    themeMode,
-    setThemeMode,
-    primaryColor,
-    setPrimaryColor,
-    density,
-    setDensity,
-  } = useTheme();
+  const { themeMode, setThemeMode, primaryColor, setPrimaryColor } = useTheme();
 
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
@@ -2031,21 +2022,6 @@ function ThemeControls() {
           value={primaryColor}
         />
       </label>
-
-      <ButtonGroup aria-label="Density">
-        {densityOptions.map((value) => (
-          <Button
-            key={value}
-            type="button"
-            size="sm"
-            variant={density === value ? "secondary" : "outline"}
-            aria-pressed={density === value}
-            onClick={() => setDensity(value)}
-          >
-            {value}
-          </Button>
-        ))}
-      </ButtonGroup>
     </div>
   );
 }
@@ -3026,12 +3002,12 @@ function ButtonPage() {
     <>
       <PageIntro
         title="Button"
-        description="Button variants and sizes running inside the real Goose app shell, with the active theme, primary color, and density applied."
+        description="Button variants and sizes running inside the real Goose app shell, with the active theme and primary color applied."
       />
       <ComponentSpec name="Button" />
 
       <ComponentPlayground
-        description="Try the main Button props against the current theme, primary color, and density settings."
+        description="Try the main Button props against the current theme and primary color."
         preview={
           <Button
             type="button"
@@ -3382,7 +3358,7 @@ function TabsPage() {
     <>
       <PageIntro
         title="Tabs"
-        description="Section switching primitives that should preserve clear active state across themes and density settings."
+        description="Section switching primitives that should preserve clear active state across themes."
       />
       <ComponentSpec name="Tabs" />
 
@@ -3479,7 +3455,7 @@ function ToggleGroupPage() {
       <ComponentSpec name="Toggle Group" />
 
       <ComponentPlayground
-        description="Try the ToggleGroup props against the current theme and density settings."
+        description="Try the ToggleGroup props against the current theme."
         preview={
           playgroundType === "single" ? (
             <ToggleGroup
@@ -4623,7 +4599,6 @@ function useLiveRuntimeTokens(tokenNames: string[], refreshKey: number) {
   const [values, setValues] = useState<Record<string, string>>({});
   const tokenKey = tokenNames.join("|");
   const themeKey = [
-    theme.density,
     theme.isLoading,
     theme.primaryColor,
     theme.resolvedTheme,
@@ -4845,7 +4820,7 @@ function SpacingPage() {
     <>
       <PageIntro
         title="Spacing"
-        description="Runtime variables for app chrome spacing and control sizing. Density work should make this layer more complete."
+        description="Runtime variables for app chrome spacing and control sizing."
       />
       <Surface
         title="Spacing"

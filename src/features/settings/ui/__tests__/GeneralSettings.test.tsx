@@ -59,9 +59,6 @@ describe("GeneralSettings appearance section", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     localStorage.clear();
-    document.documentElement.removeAttribute("data-density");
-    document.documentElement.style.removeProperty("--density-spacing");
-    document.documentElement.style.removeProperty("--spacing");
   });
 
   it("selects default light and dark theme modes", async () => {
@@ -100,28 +97,6 @@ describe("GeneralSettings appearance section", () => {
     await waitFor(() => {
       expect(localStorage.getItem("goose-primary-color")).toBeNull();
     });
-  });
-
-  it("updates interface density from the appearance controls", async () => {
-    const user = userEvent.setup();
-
-    renderGeneralSettings();
-
-    const compact = screen.getByRole("button", { name: "Compact" });
-
-    await user.click(compact);
-
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-density")).toBe("compact");
-      expect(document.documentElement.dataset.density).toBe("compact");
-      expect(
-        document.documentElement.style.getPropertyValue("--density-spacing"),
-      ).toBe("");
-      expect(document.documentElement.style.getPropertyValue("--spacing")).toBe(
-        "",
-      );
-    });
-    expect(compact).toHaveAttribute("aria-pressed", "true");
   });
 
   it("restores Agent Tools composer tips", async () => {

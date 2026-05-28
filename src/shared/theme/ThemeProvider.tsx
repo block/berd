@@ -1,6 +1,5 @@
 import * as React from "react";
 
-type Density = "compact" | "comfortable" | "spacious";
 type ThemeMode = "system" | "light" | "dark";
 
 type ThemeProviderProps = {
@@ -18,19 +17,16 @@ type ThemeProviderState = {
   customPrimaryColor: string | null;
   setPrimaryColor: (color: string) => void;
   resetPrimaryColor: () => void;
-  density: Density;
-  setDensity: (density: Density) => void;
 };
 
 const LEGACY_THEME_STORAGE_KEY = "goose-theme";
 const THEME_MODE_STORAGE_KEY = "goose-theme-mode";
 const PRIMARY_COLOR_STORAGE_KEY = "goose-primary-color";
-const DENSITY_STORAGE_KEY = "goose-density";
+const DEPRECATED_DENSITY_STORAGE_KEY = "goose-density";
 const LEGACY_THEME_CACHE_STORAGE_KEY = "goose-theme-cache-v3";
 const LIGHT_THEME_PRIMARY = "#1a1a1a";
 const DARK_THEME_PRIMARY = "#ffffff";
 
-const DENSITIES = ["compact", "comfortable", "spacious"] as const;
 const THEME_MODES = ["system", "light", "dark"] as const;
 
 const ThemeProviderContext = React.createContext<
@@ -42,10 +38,6 @@ type RGB = {
   g: number;
   b: number;
 };
-
-function isDensity(value: string | null): value is Density {
-  return DENSITIES.includes(value as Density);
-}
 
 function isThemeMode(value: string | null): value is ThemeMode {
   return THEME_MODES.includes(value as ThemeMode);
@@ -124,14 +116,6 @@ function applyResolvedMode(isDark: boolean) {
   root.style.colorScheme = isDark ? "dark" : "light";
 }
 
-function applyDensityAttribute(root: HTMLElement, density: Density) {
-  if (density === "comfortable") {
-    root.removeAttribute("data-density");
-  } else {
-    root.dataset.density = density;
-  }
-}
-
 function readInitialThemeMode(): ThemeMode {
   const storedThemeMode = window.localStorage.getItem(THEME_MODE_STORAGE_KEY);
 
@@ -180,10 +164,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   >(() =>
     normalizeHexColor(window.localStorage.getItem(PRIMARY_COLOR_STORAGE_KEY)),
   );
-  const [density, setDensityState] = React.useState<Density>(() => {
-    const storedDensity = window.localStorage.getItem(DENSITY_STORAGE_KEY);
-    return isDensity(storedDensity) ? storedDensity : "comfortable";
-  });
 
   const resolvedTheme = getResolvedMode(themeMode, systemPrefersDark);
   const isDark = resolvedTheme === "dark";
@@ -192,6 +172,8 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
 
   React.useEffect(() => {
     window.localStorage.removeItem(LEGACY_THEME_CACHE_STORAGE_KEY);
+    window.localStorage.removeItem(DEPRECATED_DENSITY_STORAGE_KEY);
+    window.document.documentElement.removeAttribute("data-density");
   }, []);
 
   React.useLayoutEffect(() => {
@@ -218,10 +200,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   }, [themeMode]);
 
   React.useEffect(() => {
-    window.localStorage.setItem(DENSITY_STORAGE_KEY, density);
-  }, [density]);
-
-  React.useEffect(() => {
     if (customPrimaryColor) {
       window.localStorage.setItem(
         PRIMARY_COLOR_STORAGE_KEY,
@@ -231,10 +209,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       window.localStorage.removeItem(PRIMARY_COLOR_STORAGE_KEY);
     }
   }, [customPrimaryColor]);
-
-  React.useLayoutEffect(() => {
-    applyDensityAttribute(window.document.documentElement, density);
-  }, [density]);
 
   const setThemeMode = React.useCallback((nextThemeMode: ThemeMode) => {
     setThemeModeState(nextThemeMode);
@@ -251,10 +225,6 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     setCustomPrimaryColor(null);
   }, []);
 
-  const setDensity = React.useCallback((nextDensity: Density) => {
-    setDensityState(nextDensity);
-  }, []);
-
   const value = React.useMemo(
     () => ({
       themeMode,
@@ -267,17 +237,13 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
       customPrimaryColor,
       setPrimaryColor,
       resetPrimaryColor,
-      density,
-      setDensity,
     }),
     [
       customPrimaryColor,
-      density,
       isDark,
       primaryColor,
       resetPrimaryColor,
       resolvedTheme,
-      setDensity,
       setPrimaryColor,
       setThemeMode,
       themePrimaryColor,

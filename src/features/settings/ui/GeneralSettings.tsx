@@ -12,7 +12,6 @@ import {
 } from "@/shared/ui/select";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
-import { ButtonGroup } from "@/shared/ui/button-group";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import { Check, Moon, Sun, SunMoon, Trash2 } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
@@ -23,12 +22,6 @@ import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPr
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
-
-const DENSITY_OPTIONS = [
-  { value: "compact" },
-  { value: "comfortable" },
-  { value: "spacious" },
-] as const;
 
 interface AboutAppInfo {
   name: string;
@@ -109,8 +102,6 @@ export function GeneralSettings() {
     customPrimaryColor,
     setPrimaryColor,
     resetPrimaryColor,
-    density,
-    setDensity,
   } = useTheme();
   const gooseIcon = getProviderIcon("goose", "size-6");
 
@@ -324,26 +315,6 @@ export function GeneralSettings() {
               {t("appearance.primary.reset")}
             </Button>
           </div>
-        </SettingRow>
-
-        <SettingRow
-          label={t("appearance.density.label")}
-          description={t("appearance.density.description")}
-        >
-          <ButtonGroup aria-label={t("appearance.density.label")}>
-            {DENSITY_OPTIONS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                size="sm"
-                variant={density === option.value ? "secondary" : "outline"}
-                aria-pressed={density === option.value}
-                onClick={() => setDensity(option.value)}
-              >
-                {t(`appearance.density.options.${option.value}`)}
-              </Button>
-            ))}
-          </ButtonGroup>
         </SettingRow>
       </SettingsSection>
 

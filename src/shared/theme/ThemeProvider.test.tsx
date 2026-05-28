@@ -1,7 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import globalsCss from "../styles/globals.css?raw";
 import { ThemeProvider, useTheme } from "./ThemeProvider";
 
 function createMediaQueryList(initialMatches: boolean) {
@@ -54,11 +53,9 @@ function ThemeConsumer() {
     primaryColor,
     themePrimaryColor,
     customPrimaryColor,
-    density,
     setThemeMode,
     setPrimaryColor,
     resetPrimaryColor,
-    setDensity,
   } = useTheme();
 
   return (
@@ -71,7 +68,6 @@ function ThemeConsumer() {
       <span data-testid="custom-primary-color">
         {customPrimaryColor ?? "theme"}
       </span>
-      <span data-testid="density">{density}</span>
       <button onClick={() => setThemeMode("system")} type="button">
         Use System
       </button>
@@ -86,9 +82,6 @@ function ThemeConsumer() {
       </button>
       <button onClick={resetPrimaryColor} type="button">
         Reset Primary
-      </button>
-      <button onClick={() => setDensity("compact")} type="button">
-        Set Compact
       </button>
     </div>
   );
@@ -291,9 +284,10 @@ describe("ThemeProvider", () => {
     });
   });
 
-  it("updates density and persists it", async () => {
-    const user = userEvent.setup();
+  it("clears deprecated density preferences", async () => {
     createMediaQueryList(false);
+    localStorage.setItem("goose-density", "compact");
+    document.documentElement.dataset.density = "compact";
 
     render(
       <ThemeProvider>
@@ -301,24 +295,9 @@ describe("ThemeProvider", () => {
       </ThemeProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: "Set Compact" }));
-
     await waitFor(() => {
-      expect(screen.getByTestId("density")).toHaveTextContent("compact");
-      expect(localStorage.getItem("goose-density")).toBe("compact");
-      expect(document.documentElement.dataset.density).toBe("compact");
+      expect(localStorage.getItem("goose-density")).toBeNull();
+      expect(document.documentElement).not.toHaveAttribute("data-density");
     });
-  });
-
-  it("keeps density spacing values in CSS", () => {
-    expect(globalsCss).toContain('[data-density="compact"]');
-    expect(globalsCss).toContain("--density-spacing: 0.75;");
-    expect(globalsCss).toContain("--spacing: 0.1875rem;");
-    expect(globalsCss).toContain('[data-density="spacious"]');
-    expect(globalsCss).toContain("--density-spacing: 1.25;");
-    expect(globalsCss).toContain("--spacing: 0.3125rem;");
-    expect(globalsCss).toContain(
-      "padding: calc(0.5rem * var(--density-spacing));",
-    );
   });
 });

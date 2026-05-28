@@ -21,15 +21,6 @@
       "description": "Reproduce avatares de video en bucle en chats, listas de agentes y vistas previas.",
       "label": "Avatares animados"
     },
-    "density": {
-      "description": "Ajusta el espaciado de los elementos de la interfaz",
-      "label": "Densidad de la interfaz",
-      "options": {
-        "comfortable": "Cómoda",
-        "compact": "Compacta",
-        "spacious": "Espaciosa"
-      }
-    },
     "theme": {
       "darkLabel": "Oscuro",
       "description": "Elige cómo se ve Goose: claro, oscuro o según tu sistema.",
