@@ -185,15 +185,17 @@ export function ConnectionsSettings() {
 
   const nowMs = Date.now();
 
-  const sortedRows = OAUTH_PROVIDERS.map((entry) => ({
-    entry,
-    status: resolveStatus(connectionsByName.get(entry.provider), nowMs),
-  })).sort((a, b) => {
-    const bucketDiff =
-      STATUS_PRIORITY[a.status.kind] - STATUS_PRIORITY[b.status.kind];
-    if (bucketDiff !== 0) return bucketDiff;
-    return a.entry.displayName.localeCompare(b.entry.displayName);
-  });
+  const sortedRows = OAUTH_PROVIDERS.filter((entry) => entry.hidden !== true)
+    .map((entry) => ({
+      entry,
+      status: resolveStatus(connectionsByName.get(entry.provider), nowMs),
+    }))
+    .sort((a, b) => {
+      const bucketDiff =
+        STATUS_PRIORITY[a.status.kind] - STATUS_PRIORITY[b.status.kind];
+      if (bucketDiff !== 0) return bucketDiff;
+      return a.entry.displayName.localeCompare(b.entry.displayName);
+    });
 
   return (
     <SettingsPage contentClassName="space-y-8">

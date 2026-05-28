@@ -34,6 +34,11 @@ export interface OAuthProviderEntry {
   displayName: string;
   description: string;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
+  // Hidden from the Connections UI in this app. Used for providers that have
+  // no `sq agent-tools` subcommand backing them (or, for `github`, where the
+  // agent path goes through the `gh` CLI rather than this OAuth surface).
+  // The entry stays in the catalog so this file remains a 1:1 mirror of G2.
+  hidden?: boolean;
 }
 
 // Mirrors G2's OAUTH_PROVIDERS + oauthConfig.displayName + oauthDescriptions.
@@ -70,6 +75,7 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "GitHub",
     description: "Access your GitHub repositories and issues",
     Icon: GitHubIcon,
+    hidden: true,
   },
   {
     provider: "google-calendar",
@@ -94,6 +100,7 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Square API",
     description: "Access your Square data and transactions",
     Icon: SquareIcon,
+    hidden: true,
   },
   {
     provider: "glean",
@@ -173,6 +180,7 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Figma",
     description: "Access your Figma files and design resources",
     Icon: FigmaIcon,
+    hidden: true,
   },
   {
     provider: "pagerduty",
@@ -197,12 +205,14 @@ export const OAUTH_PROVIDERS: OAuthProviderEntry[] = [
     displayName: "Oracle-Finance",
     description: "Get access to Oracle Finance data",
     Icon: OracleIcon,
+    hidden: true,
   },
   {
     provider: "google-tag-manager",
     displayName: "Google Tag Manager",
     description: "Access and manage your resources in Google Tag Manager",
     Icon: GoogleTagManagerIcon,
+    hidden: true,
   },
   {
     provider: "sales",
