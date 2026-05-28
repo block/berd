@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -84,9 +84,11 @@ describe("GeneralSettings appearance section", () => {
 
     renderGeneralSettings();
 
-    fireEvent.change(screen.getByTestId("primary-color-input"), {
-      target: { value: "#22c55e" },
-    });
+    await user.click(screen.getByRole("button", { name: "Custom color" }));
+
+    const hexInput = screen.getByLabelText("Hex");
+    await user.clear(hexInput);
+    await user.type(hexInput, "#22c55e");
 
     await waitFor(() => {
       expect(localStorage.getItem("goose-primary-color")).toBe("#22c55e");

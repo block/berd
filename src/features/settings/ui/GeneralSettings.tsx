@@ -1,3 +1,4 @@
+import { ColorPicker } from "@/shared/ui/color-picker";
 import { useTranslation } from "react-i18next";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
@@ -22,6 +23,11 @@ import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPr
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
+
+const PRIMARY_COLOR_PRESETS = [
+  { id: "#1a1a1a", label: "#1a1a1a", color: "#1a1a1a" },
+  { id: "#ffffff", label: "#ffffff", color: "#ffffff" },
+];
 
 interface AboutAppInfo {
   name: string;
@@ -288,16 +294,13 @@ export function GeneralSettings() {
           description={t("appearance.primary.description")}
         >
           <div className="flex items-center gap-2">
-            <label className="sr-only" htmlFor="primary-color-input">
-              {t("appearance.primary.label")}
-            </label>
-            <input
-              className="h-9 w-12 cursor-pointer rounded-lg border border-border bg-background p-1"
-              data-testid="primary-color-input"
-              id="primary-color-input"
-              onChange={(event) => setPrimaryColor(event.target.value)}
-              type="color"
+            <ColorPicker
               value={primaryColor}
+              onChange={setPrimaryColor}
+              label={t("appearance.primary.label")}
+              presets={PRIMARY_COLOR_PRESETS}
+              swatchSize="sm"
+              variant="swatches"
             />
             <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
               {customPrimaryColor

@@ -800,6 +800,31 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Color Picker",
+    source: "src/shared/ui/color-picker.tsx",
+    exports: ["ColorPicker", "ColorPickerProps", "ColorSwatch", "isHexColor"],
+    slots: [],
+    cva: [],
+    tokenClasses: [
+      "bg-background",
+      "bg-foreground",
+      "border-border",
+      "text-background",
+    ],
+    stateClasses: [
+      "focus-visible:outline-none",
+      "focus-visible:ring-[#666666]/35",
+      "focus-visible:ring-2",
+      "hover:scale-110",
+    ],
+    sourceTokenClasses: [
+      "bg-background",
+      "bg-foreground",
+      "border-border",
+      "text-background",
+    ],
+  },
+  {
     name: "Command",
     source: "src/shared/ui/command.tsx",
     exports: [
