@@ -282,7 +282,7 @@ export function CreateProjectDialog({
           {/* Scrollable form body. */}
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8">
             <div className="group/field space-y-2">
-              <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
+              <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                 {t("dialog.nameLabel")}{" "}
                 <span className="text-destructive">*</span>
               </Label>
@@ -298,7 +298,7 @@ export function CreateProjectDialog({
             </div>
 
             <div className="group/field space-y-2">
-              <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
+              <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                 {t("dialog.describeLabel")}
               </Label>
               <textarea
@@ -312,7 +312,7 @@ export function CreateProjectDialog({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="group/field space-y-2">
-                <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
+                <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                   {t("dialog.folderLabel")}
                 </Label>
                 <button
@@ -340,7 +340,7 @@ export function CreateProjectDialog({
               </div>
 
               <div className="group/field space-y-2">
-                <Label className="text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100">
+                <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                   {t("dialog.modelLabel")}
                 </Label>
                 <Select

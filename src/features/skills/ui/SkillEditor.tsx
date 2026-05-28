@@ -51,7 +51,7 @@ const SELECT_TRIGGER_CLASS =
 const INSTRUCTIONS_TEXTAREA_CLASS =
   "h-full min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] font-mono text-[13px] leading-relaxed text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
 const FIELD_LABEL_CLASS =
-  "text-[10px] leading-3 font-normal text-[#242424] opacity-40 group-hover/field:opacity-100 group-focus-within/field:opacity-100";
+  "text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground";
 const SECTION_GAP_CLASS = "group/field space-y-2";
 
 interface SkillEditorProps {
