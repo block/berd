@@ -43,6 +43,7 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { AgentProviderCard } from "./AgentProviderCard";
 import { ModelProviderRow } from "./ModelProviderRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import {
   catalogEntryToTemplate,
   formValueToDraft,
@@ -113,7 +114,15 @@ interface PendingCustomProviderDelete {
   reject: (error: unknown) => void;
 }
 
-export function ProvidersSettings() {
+interface ProvidersSettingsProps {
+  onStartTroubleshootingChat?: (
+    request: AgentSetupTroubleshootingRequest,
+  ) => void;
+}
+
+export function ProvidersSettings({
+  onStartTroubleshootingChat,
+}: ProvidersSettingsProps) {
   const { t } = useTranslation(["settings", "common"]);
   const distro = useDistroStore((state) => state.manifest);
   const [showAllModels, setShowAllModels] = useState(false);
@@ -377,7 +386,11 @@ export function ProvidersSettings() {
 
         <div className="grid grid-cols-2 gap-3">
           {agents.map((agent) => (
-            <AgentProviderCard key={agent.id} provider={agent} />
+            <AgentProviderCard
+              key={agent.id}
+              provider={agent}
+              onStartTroubleshootingChat={onStartTroubleshootingChat}
+            />
           ))}
         </div>
       </section>

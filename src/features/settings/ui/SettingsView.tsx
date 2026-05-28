@@ -7,15 +7,26 @@ import { ConnectionsSettings } from "@/features/connections/ui/ConnectionsSettin
 import { ExtensionsSettings } from "@/features/extensions/ui/ExtensionsSettings";
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { PageShell } from "@/shared/ui/page-shell";
+import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 
 interface SettingsViewProps {
   activeSection: SectionId;
+  onStartTroubleshootingChat?: (
+    request: AgentSetupTroubleshootingRequest,
+  ) => void;
 }
 
-export function SettingsView({ activeSection }: SettingsViewProps) {
+export function SettingsView({
+  activeSection,
+  onStartTroubleshootingChat,
+}: SettingsViewProps) {
   return (
     <PageShell contentWidth="narrow" contentClassName="gap-0">
-      {activeSection === "providers" && <ProvidersSettings />}
+      {activeSection === "providers" && (
+        <ProvidersSettings
+          onStartTroubleshootingChat={onStartTroubleshootingChat}
+        />
+      )}
       {activeSection === "extensions" && <ExtensionsSettings />}
       {activeSection === "connections" && <ConnectionsSettings />}
       {activeSection === "doctor" && <DoctorSettings />}

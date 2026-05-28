@@ -65,6 +65,7 @@ import {
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
+import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
@@ -683,7 +684,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     async (
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
-      options: { activate?: boolean } = {},
+      options: { activate?: boolean; providerId?: string } = {},
     ) => {
       const shouldActivate = options.activate !== false;
       const tStart = performance.now();
@@ -691,7 +692,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
       );
       const providerId =
-        project?.preferredProvider ?? selectedProvider ?? "goose";
+        options.providerId ??
+        project?.preferredProvider ??
+        selectedProvider ??
+        "goose";
       const sessionModelPreference =
         await resolveSupportedSessionModelPreference(
           providerId,
@@ -1021,6 +1025,26 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       projects,
       agentBuilder.guardNavigation,
     ],
+  );
+
+  const handleStartProviderTroubleshootingChat = useCallback(
+    (request: AgentSetupTroubleshootingRequest) => {
+      agentBuilder.guardNavigation(() => {
+        void createNewTab(request.title, undefined, { providerId: "goose" })
+          .then((session) => {
+            useChatStore.getState().enqueueMessage(session.id, {
+              text: request.prompt,
+            });
+          })
+          .catch((error) => {
+            console.error(
+              "Failed to start provider troubleshooting chat:",
+              error,
+            );
+          });
+      });
+    },
+    [agentBuilder.guardNavigation, createNewTab],
   );
 
   const handleNewChatInProject = useCallback(
@@ -1811,6 +1835,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onOpenAgent={handleStartChatWithAgent}
               onOpenAutomation={handleOpenAutomationFromSearch}
               onOpenSkill={handleStartChatWithSkill}
+              onStartProviderTroubleshootingChat={
+                handleStartProviderTroubleshootingChat
+              }
             />
             {activeView !== "chat" &&
             !(

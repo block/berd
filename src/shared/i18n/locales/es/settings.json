@@ -274,7 +274,10 @@
     "agents": {
       "description": "Goose está integrado en tu espacio de trabajo. Instala otros para ampliar tu configuración.",
       "errors": {
-        "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal."
+        "genericSetupFailure": "La configuración tuvo un tropiezo.",
+        "installVerificationFailed": "La instalación terminó, pero no se encontró la CLI en PATH. Puede que tengas que reiniciar tu terminal.",
+        "unknownPath": "esa ruta",
+        "unknownPlatform": "otra plataforma"
       },
       "installLabel": "Instalar {{name}}",
       "progress": {
@@ -289,7 +292,8 @@
         "inProgress": "Configuración en curso",
         "setupFailed": "La configuración falló"
       },
-      "title": "Arneses de agentes"
+      "title": "Arneses de agentes",
+      "troubleshootInChat": "Solucionar en chat"
     },
     "custom": {
       "actions": {

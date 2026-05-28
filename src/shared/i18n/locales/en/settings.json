@@ -274,7 +274,10 @@
     "agents": {
       "description": "Goose is built into your workspace. Install others to add new agents.",
       "errors": {
-        "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal."
+        "genericSetupFailure": "Setup hit a snag.",
+        "installVerificationFailed": "Install finished, but the CLI isn't on your PATH. Try restarting your terminal.",
+        "unknownPath": "that path",
+        "unknownPlatform": "another platform"
       },
       "installLabel": "Install {{name}}",
       "progress": {
@@ -289,7 +292,8 @@
         "inProgress": "Setup in progress",
         "setupFailed": "Setup failed"
       },
-      "title": "Agent harnesses"
+      "title": "Agent harnesses",
+      "troubleshootInChat": "Troubleshoot in chat"
     },
     "custom": {
       "actions": {

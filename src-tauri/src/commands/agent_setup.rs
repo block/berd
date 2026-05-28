@@ -24,7 +24,10 @@ const AGENT_COMMAND_DEFS: &[AgentCommandDef] = &[
     AgentCommandDef {
         id: "codex-acp",
         binary_name: "codex-acp",
-        install_command: Some("npm install -g @openai/codex @zed-industries/codex-acp"),
+        // The unqualified @openai/codex dist-tag can resolve to a platform package.
+        install_command: Some(
+            "npm install -g @openai/codex@0.134.0-alpha.3 @zed-industries/codex-acp",
+        ),
         auth_command: Some("codex login"),
         auth_status_command: Some("codex login status"),
     },

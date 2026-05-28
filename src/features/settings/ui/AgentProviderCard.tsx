@@ -4,7 +4,12 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
-import { IconCheck, IconAlertTriangle, IconPlus } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconAlertTriangle,
+  IconMessageCircle,
+  IconPlus,
+} from "@tabler/icons-react";
 import {
   checkAgentAuth,
   installAgent,
@@ -14,6 +19,16 @@ import {
 import { getProviderInventory } from "@/features/providers/api/inventory";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
+import {
+  analyzeAgentSetupFailure,
+  buildAgentSetupTroubleshootingRequest,
+  type AgentSetupFailureAnalysis,
+  type AgentSetupTroubleshootingRequest,
+} from "@/features/providers/lib/agentSetupTroubleshooting";
+import {
+  getAgentSetupFailureSimulation,
+  getSimulatedAgentSetupFailureLines,
+} from "@/features/providers/lib/agentSetupFailureSimulation";
 import type {
   ProviderDisplayInfo,
   ProviderSetupStatus,
@@ -32,23 +47,34 @@ const MAX_OUTPUT_LINES = 50;
 
 interface AgentProviderCardProps {
   provider: ProviderDisplayInfo;
+  onStartTroubleshootingChat?: (
+    request: AgentSetupTroubleshootingRequest,
+  ) => void;
 }
 
 function deriveInstalled(status: ProviderSetupStatus): boolean {
   return status === "built_in" || status === "connected";
 }
 
-export function AgentProviderCard({ provider }: AgentProviderCardProps) {
+export function AgentProviderCard({
+  provider,
+  onStartTroubleshootingChat,
+}: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const isBuiltIn = provider.status === "built_in";
   const supportsInstall = provider.supportsInstall === true;
   const supportsAuth = provider.supportsAuth === true;
   const supportsAuthStatus = provider.supportsAuthStatus === true;
   const hasBinary = !!provider.binaryName;
-  const inventoryInstalled = deriveInstalled(provider.status);
+  const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
+  const forceMissingForSimulation = Boolean(setupFailureSimulation);
+  const inventoryInstalled =
+    !forceMissingForSimulation && deriveInstalled(provider.status);
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
   const [setupError, setSetupError] = useState<string | null>(null);
+  const [setupFailureAnalysis, setSetupFailureAnalysis] =
+    useState<AgentSetupFailureAnalysis | null>(null);
   const [installStatus, setInstallStatus] = useState<InstallStatus>(
     inventoryInstalled ? "installed" : "missing",
   );
@@ -59,6 +85,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   );
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
+  const setupOutputLinesRef = useRef<OutputLine[]>([]);
   const lineCounterRef = useRef(0);
   const isMountedRef = useRef(true);
   const unlistenRef = useRef<(() => void) | null>(null);
@@ -99,7 +126,8 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   }, [clearListener]);
 
   useEffect(() => {
-    const installed = deriveInstalled(provider.status);
+    const installed =
+      !forceMissingForSimulation && deriveInstalled(provider.status);
     const nextInstallStatus = installed ? "installed" : "missing";
     setInstallStatus((current) =>
       current === nextInstallStatus ? current : nextInstallStatus,
@@ -138,6 +166,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     provider.status,
     supportsAuthStatus,
     setAuthHint,
+    forceMissingForSimulation,
   ]);
 
   const refreshInstallStatusFromInventory =
@@ -149,15 +178,22 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
         (entry) => entry.providerId === provider.id,
       );
       const installed =
-        isBuiltIn ||
-        (inventoryEntry?.category === "agent" && inventoryEntry.configured);
+        !forceMissingForSimulation &&
+        (isBuiltIn ||
+          (inventoryEntry?.category === "agent" && inventoryEntry.configured));
       setInstallStatus(installed ? "installed" : "missing");
       if (!installed) {
         setAuthStatus("unknown");
         setAuthHint(false);
       }
       return installed;
-    }, [isBuiltIn, mergeInventoryEntries, provider.id, setAuthHint]);
+    }, [
+      forceMissingForSimulation,
+      isBuiltIn,
+      mergeInventoryEntries,
+      provider.id,
+      setAuthHint,
+    ]);
 
   useEffect(() => {
     if (outputRef.current && outputLengthRef.current !== setupOutput.length) {
@@ -169,17 +205,18 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
   const appendOutput = useCallback((line: string) => {
     lineCounterRef.current += 1;
     const entry: OutputLine = { id: lineCounterRef.current, text: line };
-    setSetupOutput((prev) => {
-      const next = [...prev, entry];
-      return next.length > MAX_OUTPUT_LINES
-        ? next.slice(-MAX_OUTPUT_LINES)
-        : next;
-    });
+    const next = [...setupOutputLinesRef.current, entry];
+    const trimmed =
+      next.length > MAX_OUTPUT_LINES ? next.slice(-MAX_OUTPUT_LINES) : next;
+    setupOutputLinesRef.current = trimmed;
+    setSetupOutput(trimmed);
   }, []);
 
   async function handleConnect() {
     setSetupError(null);
+    setSetupFailureAnalysis(null);
     setSetupOutput([]);
+    setupOutputLinesRef.current = [];
     lineCounterRef.current = 0;
 
     if (supportsInstall && installStatus === "missing") {
@@ -202,6 +239,16 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     unlistenRef.current = unlisten;
 
     try {
+      if (setupFailureSimulation) {
+        for (const line of getSimulatedAgentSetupFailureLines(
+          provider,
+          setupFailureSimulation,
+        )) {
+          appendOutput(line);
+        }
+        throw new Error("Command exited with code 1");
+      }
+
       await installAgent(provider.id);
       clearListener();
       if (!isMountedRef.current) return;
@@ -213,7 +260,13 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
         if (!installed) {
           setAuthStatus("unknown");
           setAuthHint(false);
-          setSetupError(t("providers.agents.errors.installVerificationFailed"));
+          const message = t(
+            "providers.agents.errors.installVerificationFailed",
+          );
+          setSetupError(message);
+          setSetupFailureAnalysis(
+            analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
+          );
           setSetupPhase("idle");
           return;
         }
@@ -228,7 +281,11 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     } catch (err) {
       clearListener();
       if (!isMountedRef.current) return;
-      setSetupError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setSetupError(message);
+      setSetupFailureAnalysis(
+        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
+      );
       setSetupPhase("idle");
     }
   }
@@ -237,6 +294,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     if (!supportsAuth) return;
     setSetupPhase("authenticating");
     setSetupOutput([]);
+    setupOutputLinesRef.current = [];
 
     clearListener();
     const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
@@ -253,7 +311,11 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
       const installed = await refreshInstallStatusFromInventory();
       if (!isMountedRef.current) return;
       if (!installed) {
-        setSetupError(t("providers.agents.errors.installVerificationFailed"));
+        const message = t("providers.agents.errors.installVerificationFailed");
+        setSetupError(message);
+        setSetupFailureAnalysis(
+          analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
+        );
         setSetupPhase("idle");
         return;
       }
@@ -263,14 +325,45 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     } catch (err) {
       clearListener();
       if (!isMountedRef.current) return;
-      setSetupError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setSetupError(message);
+      setSetupFailureAnalysis(
+        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
+      );
       setSetupPhase("idle");
     }
   }
 
   function handleRetry() {
     setSetupError(null);
+    setSetupFailureAnalysis(null);
     void handleConnect();
+  }
+
+  function getSetupFailureMessage() {
+    if (!setupError) return null;
+
+    if (!setupFailureAnalysis) {
+      return setupError;
+    }
+
+    return t("providers.agents.errors.genericSetupFailure");
+  }
+
+  function handleTroubleshoot() {
+    if (!setupError || !setupFailureAnalysis || !onStartTroubleshootingChat) {
+      return;
+    }
+
+    const userMessage = getSetupFailureMessage() ?? setupError;
+    onStartTroubleshootingChat(
+      buildAgentSetupTroubleshootingRequest({
+        provider,
+        analysis: setupFailureAnalysis,
+        userMessage,
+        commandError: setupError,
+      }),
+    );
   }
 
   const isReady =
@@ -362,29 +455,6 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     return null;
   }
 
-  function renderStatusText() {
-    if (isBuiltIn || isReady) return null;
-    if (setupError) return t("providers.agents.status.setupFailed");
-
-    return null;
-  }
-
-  function renderAction() {
-    if (isBuiltIn || isReady) return null;
-
-    if (isActive) return null;
-
-    if (setupError) {
-      return (
-        <Button type="button" variant="outline" size="xs" onClick={handleRetry}>
-          {t("common:actions.retry")}
-        </Button>
-      );
-    }
-
-    return null;
-  }
-
   function renderSetupOutput(scrollToEnd = false) {
     if (setupOutput.length === 0) return null;
 
@@ -434,8 +504,7 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
     );
   }
 
-  const statusText = renderStatusText();
-  const action = renderAction();
+  const setupFailureMessage = getSetupFailureMessage();
 
   return (
     <div
@@ -462,36 +531,39 @@ export function AgentProviderCard({ provider }: AgentProviderCardProps) {
         {renderStatusIndicator()}
       </div>
 
-      {(statusText || action) && (
-        <div className="mt-3 flex items-center justify-between">
-          <div className="flex items-center gap-1.5">
-            {statusText && (
-              <>
-                <span
-                  className={cn(
-                    "size-1.5 rounded-full",
-                    setupError
-                      ? "bg-destructive"
-                      : isActive
-                        ? "bg-primary animate-pulse"
-                        : "bg-muted-foreground/40",
-                  )}
-                />
-                <span className="text-xs text-muted-foreground">
-                  {statusText}
-                </span>
-              </>
-            )}
-          </div>
-          {action}
-        </div>
-      )}
-
       {renderSetupProgress()}
 
       {setupError && !isActive && (
         <div className="mt-3 space-y-2 border-t pt-3">
-          <p className="text-xs text-destructive">{setupError}</p>
+          <div className="rounded-md bg-destructive/10 px-3 py-2.5">
+            <div className="flex flex-col gap-2">
+              <p className="min-w-0 text-xs font-medium leading-relaxed text-destructive">
+                {setupFailureMessage}
+              </p>
+              <div className="flex items-center justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost-light"
+                  size="xs"
+                  onClick={handleRetry}
+                >
+                  {t("common:actions.retry")}
+                </Button>
+                {setupFailureAnalysis && onStartTroubleshootingChat ? (
+                  <Button
+                    type="button"
+                    variant="default"
+                    size="xs"
+                    leftIcon={<IconMessageCircle aria-hidden="true" />}
+                    onClick={handleTroubleshoot}
+                    className="w-fit"
+                  >
+                    {t("providers.agents.troubleshootInChat")}
+                  </Button>
+                ) : null}
+              </div>
+            </div>
+          </div>
           {renderSetupOutput()}
         </div>
       )}

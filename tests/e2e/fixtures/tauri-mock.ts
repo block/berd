@@ -24,75 +24,93 @@ export function buildInitScript(options?: {
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
+  providerCatalog?: unknown[];
+  providerInventory?: unknown[];
+  agentSetupFailure?: {
+    providerId: string;
+    lines: string[];
+    errorMessage: string;
+  };
 }): string {
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
+  const providerCatalog = JSON.stringify(options?.providerCatalog ?? []);
+  const providerInventory = JSON.stringify(
+    options?.providerInventory ?? [
+      {
+        providerId: "claude",
+        providerName: "Claude",
+        description: "Claude provider",
+        defaultModel: "claude-sonnet-4-20250514",
+        configured: true,
+        providerType: "Preferred",
+        category: "model",
+        configKeys: [],
+        setupSteps: [],
+        supportsRefresh: true,
+        refreshing: false,
+        lastUpdatedAt: null,
+        lastRefreshAttemptAt: null,
+        lastRefreshError: null,
+        stale: false,
+        modelSelectionHint: null,
+        models: [
+          {
+            id: "claude-sonnet-4-20250514",
+            name: "Claude Sonnet 4",
+            family: "Claude",
+            recommended: true,
+          },
+        ],
+      },
+      {
+        providerId: "openai",
+        providerName: "OpenAI",
+        description: "OpenAI provider",
+        defaultModel: "gpt-4.1",
+        configured: true,
+        providerType: "Preferred",
+        category: "model",
+        configKeys: [],
+        setupSteps: [],
+        supportsRefresh: true,
+        refreshing: false,
+        lastUpdatedAt: null,
+        lastRefreshAttemptAt: null,
+        lastRefreshError: null,
+        stale: false,
+        modelSelectionHint: null,
+        models: [
+          {
+            id: "gpt-4.1",
+            name: "GPT-4.1",
+            family: "OpenAI",
+            recommended: true,
+          },
+        ],
+      },
+    ],
+  );
+  const agentSetupFailure = JSON.stringify(options?.agentSetupFailure ?? null);
 
   return `
     (() => {
       const PERSONAS = ${personas};
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
+      const PROVIDER_CATALOG = ${providerCatalog};
+      const PROVIDER_INVENTORY = ${providerInventory};
+      const AGENT_SETUP_FAILURE = ${agentSetupFailure};
       const DISTRO = {
         present: false,
       };
       const FAKE_ACP_URL = "ws://127.0.0.1:0/mock-acp";
       const ACP_SESSIONS = [];
-      const PROVIDER_INVENTORY = [
-        {
-          providerId: "claude",
-          providerName: "Claude",
-          description: "Claude provider",
-          defaultModel: "claude-sonnet-4-20250514",
-          configured: true,
-          providerType: "Preferred",
-          category: "model",
-          configKeys: [],
-          setupSteps: [],
-          supportsRefresh: true,
-          refreshing: false,
-          lastUpdatedAt: null,
-          lastRefreshAttemptAt: null,
-          lastRefreshError: null,
-          stale: false,
-          modelSelectionHint: null,
-          models: [
-            {
-              id: "claude-sonnet-4-20250514",
-              name: "Claude Sonnet 4",
-              family: "Claude",
-              recommended: true,
-            },
-          ],
-        },
-        {
-          providerId: "openai",
-          providerName: "OpenAI",
-          description: "OpenAI provider",
-          defaultModel: "gpt-4.1",
-          configured: true,
-          providerType: "Preferred",
-          category: "model",
-          configKeys: [],
-          setupSteps: [],
-          supportsRefresh: true,
-          refreshing: false,
-          lastUpdatedAt: null,
-          lastRefreshAttemptAt: null,
-          lastRefreshError: null,
-          stale: false,
-          modelSelectionHint: null,
-          models: [
-            {
-              id: "gpt-4.1",
-              name: "GPT-4.1",
-              family: "OpenAI",
-              recommended: true,
-            },
-          ],
-        },
-      ];
+      const CALLBACKS = new Map();
+      const EVENT_LISTENERS = new Map();
+      let nextCallbackId = 1;
+      let nextEventId = 1;
 
       localStorage.setItem("goose:defaultProvider", "goose");
       localStorage.setItem(
@@ -217,6 +235,29 @@ export function buildInitScript(options?: {
         return { jsonrpc: "2.0", id, result };
       }
 
+      function providerEntries(providerIds) {
+        const ids = Array.isArray(providerIds) ? providerIds.filter(Boolean) : [];
+        if (ids.length === 0) {
+          return clone(PROVIDER_INVENTORY);
+        }
+        return clone(PROVIDER_INVENTORY.filter((entry) => ids.includes(entry.providerId)));
+      }
+
+      function emitTauriEvent(event, payload) {
+        const listeners = EVENT_LISTENERS.get(event);
+        if (!listeners) {
+          return;
+        }
+        for (const [eventId, handlerId] of listeners.entries()) {
+          const callback = CALLBACKS.get(handlerId);
+          callback?.({
+            id: eventId,
+            event,
+            payload,
+          });
+        }
+      }
+
       function handleAcpRequest(message) {
         switch (message.method) {
           case "initialize":
@@ -302,10 +343,15 @@ export function buildInitScript(options?: {
             return jsonRpcResult(message.id, { stopReason: "end_turn" });
           }
           case "_goose/providers/list":
-            return jsonRpcResult(message.id, { entries: PROVIDER_INVENTORY });
+          case "_goose/unstable/providers/list":
+            return jsonRpcResult(message.id, {
+              entries: providerEntries(message.params?.providerIds),
+            });
           case "_goose/providers/setup/catalog/list":
-            return jsonRpcResult(message.id, { providers: [] });
+          case "_goose/unstable/providers/setup/catalog/list":
+            return jsonRpcResult(message.id, { providers: clone(PROVIDER_CATALOG) });
           case "_goose/providers/inventory/refresh":
+          case "_goose/unstable/providers/inventory/refresh":
             return jsonRpcResult(message.id, { started: [], skipped: [] });
           case "_goose/defaults/read":
           case "_goose/defaults/save":
@@ -551,6 +597,39 @@ export function buildInitScript(options?: {
                 fileContents: agentSourceToMarkdown(source),
               });
             }
+            case "check_agent_installed":
+              return Promise.resolve(
+                providerEntries([args?.providerId]).some((entry) => entry.configured),
+              );
+            case "check_agent_auth":
+              return Promise.resolve(false);
+            case "install_agent":
+              if (AGENT_SETUP_FAILURE?.providerId === args?.providerId) {
+                for (const line of AGENT_SETUP_FAILURE.lines ?? []) {
+                  emitTauriEvent("agent-setup:output", {
+                    providerId: args?.providerId,
+                    line,
+                  });
+                }
+                return Promise.reject(new Error(AGENT_SETUP_FAILURE.errorMessage));
+              }
+              return Promise.resolve(null);
+            case "authenticate_agent":
+              return Promise.resolve(null);
+            case "plugin:event|listen": {
+              const eventId = nextEventId++;
+              const listeners = EVENT_LISTENERS.get(args?.event) ?? new Map();
+              listeners.set(eventId, args?.handler);
+              EVENT_LISTENERS.set(args?.event, listeners);
+              return Promise.resolve(eventId);
+            }
+            case "plugin:event|unlisten": {
+              EVENT_LISTENERS.get(args?.event)?.delete(args?.eventId);
+              return Promise.resolve(null);
+            }
+            case "plugin:event|emit":
+              emitTauriEvent(args?.event, args?.payload);
+              return Promise.resolve(null);
 
             // ---- Fallback ----
             default:
@@ -560,11 +639,30 @@ export function buildInitScript(options?: {
         },
 
         transformCallback(callback, once) {
-          return Math.floor(Math.random() * 1_000_000);
+          const id = nextCallbackId++;
+          CALLBACKS.set(id, once ? (...args) => {
+            CALLBACKS.delete(id);
+            callback(...args);
+          } : callback);
+          return id;
+        },
+
+        unregisterCallback(id) {
+          CALLBACKS.delete(id);
+        },
+
+        runCallback(id, args) {
+          CALLBACKS.get(id)?.(...(Array.isArray(args) ? args : [args]));
         },
 
         convertFileSrc(path) {
           return path;
+        },
+      };
+
+      window.__TAURI_EVENT_PLUGIN_INTERNALS__ = {
+        unregisterListener(event, eventId) {
+          EVENT_LISTENERS.get(event)?.delete(eventId);
         },
       };
     })();

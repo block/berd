@@ -15,6 +15,7 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import type { AgentSourceEntry } from "@/shared/api/agents";
+import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type {
   AppNavigationUpdateOptions,
   AppView,
@@ -72,6 +73,9 @@ interface AppShellContentProps {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
+  onStartProviderTroubleshootingChat: (
+    request: AgentSetupTroubleshootingRequest,
+  ) => void;
 }
 
 export function AppShellContent({
@@ -107,6 +111,7 @@ export function AppShellContent({
   onOpenAgent,
   onOpenAutomation,
   onOpenSkill,
+  onStartProviderTroubleshootingChat,
 }: AppShellContentProps) {
   switch (activeView) {
     case "design-system":
@@ -114,7 +119,12 @@ export function AppShellContent({
         <DesignSystemView activeSection={activeDesignSystemSection} />
       ) : null;
     case "settings":
-      return <SettingsView activeSection={activeSettingsSection} />;
+      return (
+        <SettingsView
+          activeSection={activeSettingsSection}
+          onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
+        />
+      );
     case "automations":
       return (
         <AutomationsWorkbench

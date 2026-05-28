@@ -6,19 +6,21 @@ import { AgentProviderCard } from "../AgentProviderCard";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import enSettings from "@/shared/i18n/locales/en/settings.json";
+import { AGENT_SETUP_FAILURE_SIMULATION_KEY } from "@/features/providers/lib/agentSetupFailureSimulation";
 
 const checkAgentInstalled = vi.fn();
 const checkAgentAuth = vi.fn();
 const installAgent = vi.fn();
 const authenticateAgent = vi.fn();
 const getProviderInventory = vi.fn();
+const onAgentSetupOutput = vi.fn();
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) => checkAgentInstalled(...args),
   checkAgentAuth: (...args: unknown[]) => checkAgentAuth(...args),
   installAgent: (...args: unknown[]) => installAgent(...args),
   authenticateAgent: (...args: unknown[]) => authenticateAgent(...args),
-  onAgentSetupOutput: vi.fn(async () => vi.fn()),
+  onAgentSetupOutput: (...args: unknown[]) => onAgentSetupOutput(...args),
 }));
 
 vi.mock("@/features/providers/api/inventory", () => ({
@@ -46,7 +48,9 @@ function createProvider(
 describe("AgentProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem(AGENT_SETUP_FAILURE_SIMULATION_KEY);
     useProviderInventoryStore.getState().setEntries([]);
+    onAgentSetupOutput.mockResolvedValue(vi.fn());
   });
 
   it("shows the checking indicator and does not show sign in while auth status is checking", async () => {
@@ -85,6 +89,7 @@ describe("AgentProviderCard", () => {
 
   it("verifies install through provider inventory and reports failure when core still marks it unconfigured", async () => {
     const user = userEvent.setup();
+    const onStartTroubleshootingChat = vi.fn();
     installAgent.mockResolvedValue(undefined);
     getProviderInventory.mockResolvedValue([
       {
@@ -112,6 +117,7 @@ describe("AgentProviderCard", () => {
           supportsAuth: false,
           supportsAuthStatus: false,
         })}
+        onStartTroubleshootingChat={onStartTroubleshootingChat}
       />,
     );
 
@@ -121,11 +127,17 @@ describe("AgentProviderCard", () => {
       expect(getProviderInventory).toHaveBeenCalledWith(["claude-acp"]);
     });
     expect(checkAgentInstalled).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(
-        /install finished, but the cli isn't on your path/i,
-      ),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: /troubleshoot in chat/i }),
+    );
+    expect(onStartTroubleshootingChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: expect.stringContaining(
+          "Install finished, but the CLI isn't on your PATH",
+        ),
+      }),
+    );
     expect(
       useProviderInventoryStore.getState().entries.get("claude-acp")
         ?.configured,
@@ -136,5 +148,80 @@ describe("AgentProviderCard", () => {
     expect(
       enSettings.providers.agents.errors.installVerificationFailed,
     ).toContain("Install finished");
+  });
+
+  it("explains npm setup failures and starts a troubleshooting chat with raw output", async () => {
+    const user = userEvent.setup();
+    const onStartTroubleshootingChat = vi.fn();
+    let outputHandler: ((line: string) => void) | undefined;
+
+    onAgentSetupOutput.mockImplementation(
+      async (_providerId: string, callback: (line: string) => void) => {
+        outputHandler = callback;
+        return vi.fn();
+      },
+    );
+    installAgent.mockImplementation(async () => {
+      outputHandler?.("npm error code EEXIST");
+      outputHandler?.("npm error path /opt/homebrew/bin/claude");
+      outputHandler?.("npm error EEXIST: file already exists");
+      throw new Error("Command exited with code 1");
+    });
+
+    renderWithProviders(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "not_installed",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        onStartTroubleshootingChat={onStartTroubleshootingChat}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /install claude/i }));
+
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: /troubleshoot in chat/i }),
+    );
+
+    expect(onStartTroubleshootingChat).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Troubleshoot Claude setup",
+        prompt: expect.stringContaining("/opt/homebrew/bin/claude"),
+      }),
+    );
+  });
+
+  it("can force a connected provider into a dev setup failure simulation", async () => {
+    const user = userEvent.setup();
+    localStorage.setItem(
+      AGENT_SETUP_FAILURE_SIMULATION_KEY,
+      JSON.stringify({
+        providerId: "claude-acp",
+        path: "/tmp/claude-agent-acp",
+      }),
+    );
+
+    renderWithProviders(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "connected",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+          binaryName: "claude-agent-acp",
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /install claude/i }));
+
+    expect(installAgent).not.toHaveBeenCalled();
+    expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
+    expect(screen.getByText(/\/tmp\/claude-agent-acp/i)).toBeInTheDocument();
   });
 });

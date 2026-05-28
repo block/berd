@@ -46,6 +46,13 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
       },
     },
+    {
+      name: "provider-setup",
+      testMatch: ["**/provider-setup-failure.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
   ],
   webServer: {
     // Opt-in reuse only. Reusing arbitrary local processes makes the suite
