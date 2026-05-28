@@ -12,6 +12,7 @@
  */
 export const KEEP_ENABLED: ReadonlySet<string> = new Set([
   "developer",
+  "extensionmanager",
   "skills",
   "summon",
 ]);
