@@ -192,7 +192,7 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
-  --surface-agent-profile-bg: #f5f5f3;
+  --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: #242424;
   --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
   --surface-agent-profile-fg-muted: rgba(36, 36, 36, 0.45);
@@ -447,7 +447,7 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
-  --surface-agent-profile-bg: var(--color-gray-900);
+  --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: var(--color-gray-50);
   --surface-agent-profile-fg-80: color-mix(
     in srgb,

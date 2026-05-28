@@ -452,7 +452,6 @@ export function SkillsView({
       <>
         <SkillDetailPage
           skill={activeSkill}
-          onBack={() => setActiveSkill(null)}
           onEdit={handleEdit}
           onReveal={handleReveal}
           onShare={handleShare}

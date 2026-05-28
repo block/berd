@@ -406,7 +406,6 @@ export function AgentsView({
       <>
         <AgentDetailPage
           persona={activePersona}
-          onBack={() => setActivePersona(null)}
           onEdit={handleEditPersona}
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}

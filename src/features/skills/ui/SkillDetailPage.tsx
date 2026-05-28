@@ -1,4 +1,3 @@
-import type { ButtonHTMLAttributes, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconDots,
@@ -10,23 +9,20 @@ import {
 } from "@tabler/icons-react";
 import { PinIcon } from "lucide-react";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
+import { AgentProfileLayout } from "@/features/agents/ui/AgentProfileLayout";
+import { AgentIdentityRail } from "@/features/agents/ui/AgentIdentityRail";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { Button } from "@/shared/ui/button";
-import { DetailField } from "@/shared/ui/detail-field";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
-import { PageColumns } from "@/shared/ui/page-columns";
-import { DetailPageShell, PageHeader } from "@/shared/ui/page-shell";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import type { SkillInfo } from "../api/skills";
 
 interface SkillDetailPageProps {
   skill: SkillInfo | null;
-  onBack: () => void;
   onEdit: (skill: SkillInfo) => void;
   onReveal: (skill: SkillInfo) => void;
   onShare: (skill: SkillInfo) => void;
@@ -34,44 +30,18 @@ interface SkillDetailPageProps {
   onDelete: (skill: SkillInfo) => void;
 }
 
-interface SkillHeaderActionButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement> {
-  label: string;
-  icon: ReactNode;
-  tooltipSide?: "top" | "right" | "bottom" | "left";
-}
-
-function SkillHeaderActionButton({
-  label,
-  icon,
-  type = "button",
-  tooltipSide = "top",
-  ...props
-}: SkillHeaderActionButtonProps) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          type={type}
-          size="icon-xs"
-          variant="outline-flat"
-          aria-label={label}
-          {...props}
-        >
-          {icon}
-          <span className="sr-only">{label}</span>
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent side={tooltipSide} align="center" sideOffset={8}>
-        <p>{label}</p>
-      </TooltipContent>
-    </Tooltip>
-  );
-}
+const INSTRUCTIONS_LABEL_CLASS =
+  "text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted";
+const INSTRUCTIONS_PANEL_CLASS =
+  "min-h-[24rem] w-full overflow-y-auto rounded-card-chat bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
+const ACTION_BUTTON_CLASS =
+  "size-9 rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
+const PRIMARY_ACTION_BUTTON_CLASS =
+  "size-9 rounded-full !bg-surface-agent-profile-fg !text-surface-agent-profile-control-bg hover:!bg-surface-agent-profile-action-bg-hover";
+const ACTION_ICON_CLASS = "size-3.5";
 
 export function SkillDetailPage({
   skill,
-  onBack,
   onEdit,
   onReveal,
   onShare,
@@ -111,47 +81,70 @@ export function SkillDetailPage({
   const revealLabel = t("view.reveal");
   const moreLabel = t("view.more");
   const isReadonly = skill.readonly;
+
   const actions = (
     <>
-      <SkillHeaderActionButton
-        label={pinLabel}
-        icon={<PinIcon className="size-3.5" />}
-        tooltipSide="top"
+      {!isReadonly ? (
+        <Button
+          type="button"
+          size="icon"
+          aria-label={editLabel}
+          title={editLabel}
+          onClick={() => onEdit(skill)}
+          className={PRIMARY_ACTION_BUTTON_CLASS}
+        >
+          <IconPencil className={ACTION_ICON_CLASS} />
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="icon"
+        variant="ghost"
+        aria-label={pinLabel}
+        title={pinLabel}
         onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
         disabled={isPinningToHome}
-      />
+        className={ACTION_BUTTON_CLASS}
+      >
+        <PinIcon className={ACTION_ICON_CLASS} />
+      </Button>
       {onStartChat ? (
-        <SkillHeaderActionButton
-          label={startChatLabel}
-          icon={<IconMessagePlus className="size-3.5" />}
-          tooltipSide="top"
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          aria-label={startChatLabel}
+          title={startChatLabel}
           onClick={() => onStartChat(skill)}
-        />
+          className={ACTION_BUTTON_CLASS}
+        >
+          <IconMessagePlus className={ACTION_ICON_CLASS} />
+        </Button>
       ) : null}
       {!isReadonly ? (
         <>
-          <SkillHeaderActionButton
-            label={editLabel}
-            icon={<IconPencil className="size-3.5" />}
-            tooltipSide="top"
-            onClick={() => onEdit(skill)}
-          />
-          <SkillHeaderActionButton
-            label={revealLabel}
-            icon={<IconFolderOpen className="size-3.5" />}
-            tooltipSide="top"
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={revealLabel}
+            title={revealLabel}
             onClick={() => onReveal(skill)}
-          />
+            className={ACTION_BUTTON_CLASS}
+          >
+            <IconFolderOpen className={ACTION_ICON_CLASS} />
+          </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
                 type="button"
-                size="icon-xs"
-                variant="outline-flat"
+                size="icon"
+                variant="ghost"
                 aria-label={moreLabel}
+                title={moreLabel}
+                className={ACTION_BUTTON_CLASS}
               >
-                <IconDots className="size-3.5" />
-                <span className="sr-only">{moreLabel}</span>
+                <IconDots className={ACTION_ICON_CLASS} />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent variant="inverse" align="end" sideOffset={8}>
@@ -173,90 +166,55 @@ export function SkillDetailPage({
     </>
   );
 
+  const metadata = [
+    {
+      label: t("view.source"),
+      value: sourceLabels.join(" · "),
+    },
+    ...(skill.projectLinks.length > 0
+      ? [
+          {
+            label: t("view.projects"),
+            value: skill.projectLinks
+              .map((project) => project.name)
+              .join(" · "),
+          },
+        ]
+      : []),
+    ...(isReadonly
+      ? []
+      : [
+          {
+            label: t("view.location"),
+            value: skill.fileLocation,
+            wrap: true,
+          },
+        ]),
+  ];
+
   return (
-    <DetailPageShell>
-      <div className="space-y-5 border-b border-border pb-6">
-        <Button
-          type="button"
-          variant="back"
-          size="sm"
-          className="w-fit"
-          onClick={onBack}
-        >
-          {t("view.backToSkills")}
-        </Button>
-
-        <PageHeader
+    <AgentProfileLayout
+      animateSections={false}
+      identityRail={
+        <AgentIdentityRail
+          className="pt-6"
           title={skill.name}
-          variant="detail"
           description={skill.description}
-          actionsPlacement="below"
-          descriptionClassName="max-w-3xl leading-relaxed"
+          metadata={metadata}
           actions={actions}
-          actionsClassName="gap-2"
         />
-      </div>
-
-      {isReadonly ? (
-        <section className="space-y-4 pb-6">
-          <DetailField label={t("view.instructions")} />
-          <MessageResponse className="min-w-0 text-sm leading-6">
+      }
+    >
+      <section className="space-y-3 pt-6" aria-labelledby="skill-instructions">
+        <h2 id="skill-instructions" className={INSTRUCTIONS_LABEL_CLASS}>
+          {t("view.instructions")}
+        </h2>
+        <div className={INSTRUCTIONS_PANEL_CLASS}>
+          <MessageResponse className="min-w-0 text-sm leading-relaxed">
             {skill.instructions || " "}
           </MessageResponse>
-        </section>
-      ) : (
-        <PageColumns
-          defaultSidebarSize={28}
-          minSidebarSize={22}
-          maxSidebarSize={36}
-          minContentSize={52}
-          sidebar={
-            <aside className="space-y-5">
-              <section className="space-y-5 border-b border-border pb-5">
-                <DetailField
-                  label={t("view.source")}
-                  contentClassName="space-y-1 text-foreground"
-                >
-                  {sourceLabels.map((label) => (
-                    <p key={label}>{label}</p>
-                  ))}
-                </DetailField>
-
-                {skill.projectLinks.length > 0 ? (
-                  <DetailField
-                    label={t("view.projects")}
-                    contentClassName="space-y-1.5"
-                  >
-                    {skill.projectLinks.map((project) => (
-                      <div key={`${project.id}-${project.workingDir}`}>
-                        <p>{project.name}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {project.workingDir}
-                        </p>
-                      </div>
-                    ))}
-                  </DetailField>
-                ) : null}
-
-                <DetailField
-                  label={t("view.location")}
-                  contentAs="p"
-                  contentClassName="break-all text-foreground"
-                >
-                  {skill.fileLocation}
-                </DetailField>
-              </section>
-            </aside>
-          }
-        >
-          <section className="space-y-4 pb-6">
-            <DetailField label={t("view.instructions")} />
-            <MessageResponse className="min-w-0 text-sm leading-6">
-              {skill.instructions || " "}
-            </MessageResponse>
-          </section>
-        </PageColumns>
-      )}
-    </DetailPageShell>
+        </div>
+      </section>
+    </AgentProfileLayout>
   );
 }

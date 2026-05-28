@@ -527,9 +527,9 @@ export function AutomationDetailPage({
             <div className="min-w-0 space-y-4">
               <AutomationLatestResultCard tile={tile} />
 
-              <section className="space-y-4 rounded-card-chat bg-card p-4">
+              <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-sm font-medium text-foreground">
+                  <h2 className="text-[10px] leading-3 font-normal text-muted-foreground">
                     {t("details.instructions")}
                   </h2>
                   {isEditingInstructions ? (
@@ -572,28 +572,30 @@ export function AutomationDetailPage({
                     </Button>
                   )}
                 </div>
-                {isEditingInstructions ? (
-                  <Textarea
-                    aria-label={t("edit.fields.instructions")}
-                    value={instructionsDraft}
-                    onChange={(event) =>
-                      setInstructionsDraft(event.target.value)
-                    }
-                    disabled={isSavingInstructions}
-                    placeholder={t("details.noInstructions")}
-                    rows={12}
-                    className="min-h-[360px] resize-y rounded-md text-[14px] leading-relaxed"
-                  />
-                ) : instructionsText ? (
-                  <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {instructionsText}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">
-                    {t("details.noInstructions")}
-                  </div>
-                )}
-              </section>
+                <section className="rounded-card-chat bg-card p-4">
+                  {isEditingInstructions ? (
+                    <Textarea
+                      aria-label={t("edit.fields.instructions")}
+                      value={instructionsDraft}
+                      onChange={(event) =>
+                        setInstructionsDraft(event.target.value)
+                      }
+                      disabled={isSavingInstructions}
+                      placeholder={t("details.noInstructions")}
+                      rows={12}
+                      className="min-h-[360px] resize-y rounded-md text-[14px] leading-relaxed"
+                    />
+                  ) : instructionsText ? (
+                    <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                      {instructionsText}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {t("details.noInstructions")}
+                    </div>
+                  )}
+                </section>
+              </div>
             </div>
           </div>
         </TabsContent>

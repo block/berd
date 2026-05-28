@@ -243,7 +243,7 @@ describe("SkillsView", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Back to skills" }),
+      screen.getByRole("heading", { name: "test-writer" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Write tests...")).toBeInTheDocument();
     expect(
@@ -414,12 +414,8 @@ describe("SkillsView", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Back to skills" }),
+      screen.getByRole("heading", { name: "code-review" }),
     ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Back to skills" }));
-
-    expect(onActiveSkillIdChange).toHaveBeenCalledWith(null, undefined);
   });
 
   it("replaces a missing controlled skill detail with the list route", async () => {
@@ -461,22 +457,6 @@ describe("SkillsView", () => {
     );
   });
 
-  it("returns to the list after viewing a skill detail", async () => {
-    listSkills.mockResolvedValue(mockSkills);
-    const user = userEvent.setup();
-
-    render(<SkillsView />);
-    await screen.findByText("code-review");
-
-    await user.click(
-      screen.getByRole("button", { name: "Open code-review details" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Back to skills" }));
-
-    expect(screen.getByText("code-review")).toBeInTheDocument();
-    expect(screen.getByText("test-writer")).toBeInTheDocument();
-  });
-
   it("stays on the detail page after renaming a skill", async () => {
     const renamedSkill: SkillInfo = {
       ...mockSkills[1],
@@ -514,9 +494,6 @@ describe("SkillsView", () => {
       );
     });
     await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: "Back to skills" }),
-      ).toBeInTheDocument();
       expect(
         screen.getByRole("heading", { name: "renamed-review" }),
       ).toBeInTheDocument();

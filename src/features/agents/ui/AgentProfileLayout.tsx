@@ -14,8 +14,7 @@ interface AgentProfileLayoutProps {
 }
 
 const SURFACE_CLASS = cn(
-  "agents-transition-surface relative min-h-full py-6 pl-6 pr-8",
-  "bg-[radial-gradient(circle_at_1px_1px,var(--surface-agent-profile-dot)_1px,transparent_0)] bg-[length:32px_32px]",
+  "agents-transition-surface relative min-h-full bg-dot-grid py-6 pl-6 pr-8",
 );
 
 function AgentProfileContent({
@@ -87,7 +86,7 @@ export function AgentProfileLayout({
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-surface-agent-profile-bg">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
       <div className="min-h-0 flex-1 overflow-y-auto">
         {onSubmit ? (
           <form

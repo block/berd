@@ -44,7 +44,6 @@ import {
 
 interface AgentDetailPageProps {
   persona: Persona;
-  onBack: () => void;
   onEdit: (persona: Persona) => void;
   onDuplicate: (persona: Persona) => void;
   onDelete: (persona: Persona) => void;
@@ -62,7 +61,7 @@ const AVATAR_FIELD_INPUT_CLASS =
 const AVATAR_FIELD_LABEL_CLASS =
   "text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
-  "min-h-[24rem] w-full overflow-y-auto rounded-[10px] px-3 py-2 text-[16px] leading-8 text-surface-agent-profile-fg lg:min-h-[29rem]";
+  "min-h-[24rem] w-full overflow-y-auto rounded-card-chat bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -79,7 +78,6 @@ function formatDate(value: string): string {
 
 export function AgentDetailPage({
   persona,
-  onBack,
   onEdit,
   onDuplicate,
   onDelete,
@@ -354,19 +352,6 @@ export function AgentDetailPage({
     </Button>
   );
 
-  const backToAgentsControl = (
-    <Button
-      type="button"
-      variant="ghost"
-      size="sm"
-      onClick={onBack}
-      className="h-9 rounded-full bg-surface-agent-profile-control-bg px-3 text-sm text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover"
-    >
-      <ArrowLeft className="size-3.5" />
-      {t("view.backToAgents")}
-    </Button>
-  );
-
   return (
     <AgentProfileLayout
       animateSections={false}
@@ -375,7 +360,7 @@ export function AgentDetailPage({
         <AgentIdentityRail
           avatar={avatarPreview}
           title={persona.displayName}
-          leadingControl={showAvatarSection ? null : backToAgentsControl}
+          leadingControl={null}
           metadata={showAvatarSection ? [] : metadata}
           actions={showAvatarSection ? null : profileActions}
           modeControl={showAvatarSection ? backToProfileControl : null}
@@ -407,7 +392,7 @@ export function AgentDetailPage({
       ) : (
         <div className="space-y-6">
           <section
-            className="agents-unpaired-enter space-y-5 border-y border-surface-agent-profile-border py-6"
+            className="agents-unpaired-enter space-y-3 pt-6"
             style={{ animationDelay: "80ms" }}
             aria-labelledby="agent-instructions"
           >
@@ -422,7 +407,7 @@ export function AgentDetailPage({
               </span>
             </div>
             <div className={INSTRUCTIONS_PANEL_CLASS}>
-              <MessageResponse className="min-w-0 max-w-[68ch] text-[16px] leading-8">
+              <MessageResponse className="min-w-0 text-sm leading-relaxed">
                 {persona.systemPrompt || " "}
               </MessageResponse>
             </div>

@@ -4,11 +4,12 @@ import { cn } from "@/shared/lib/cn";
 interface AgentIdentityMetadataItem {
   label: string;
   value: string;
+  wrap?: boolean;
 }
 
 interface AgentIdentityRailProps {
   actions?: ReactNode;
-  avatar: ReactNode;
+  avatar?: ReactNode;
   className?: string;
   description?: ReactNode;
   leadingControl?: ReactNode;
@@ -31,15 +32,15 @@ export function AgentIdentityRail({
     <div className={cn("w-full space-y-5", className)}>
       {leadingControl ? <div>{leadingControl}</div> : null}
 
-      <div data-agent-layout-slot="avatar">{avatar}</div>
+      {avatar ? <div data-agent-layout-slot="avatar">{avatar}</div> : null}
 
       <div className="space-y-4">
-        <div className="space-y-2">
+        <div className="space-y-3">
           <h1 className="break-words text-[28px] font-normal leading-8 text-surface-agent-profile-fg">
             {title}
           </h1>
           {description ? (
-            <div className="text-xs leading-4 text-surface-agent-profile-fg-muted">
+            <div className="text-sm leading-relaxed text-surface-agent-profile-fg-muted">
               {description}
             </div>
           ) : null}
@@ -54,7 +55,12 @@ export function AgentIdentityRail({
                 <dt className="text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted">
                   {item.label}
                 </dt>
-                <dd className="truncate text-[14px] leading-5 text-surface-agent-profile-fg-80">
+                <dd
+                  className={cn(
+                    "text-[14px] leading-5 text-surface-agent-profile-fg-80",
+                    item.wrap ? "break-all" : "truncate",
+                  )}
+                >
                   {item.value}
                 </dd>
               </div>
