@@ -108,6 +108,21 @@ bundle:
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" pnpm tauri build
 
+# Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
+bundle-debug:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    ./scripts/prepare-goose-sidecar.sh
+
+    # Use a temporary config overlay so normal release bundles keep devtools disabled.
+    DEBUG_CONFIG="$(mktemp -t goose-tauri-debug.XXXXXX.json)"
+    trap 'rm -f "$DEBUG_CONFIG"' EXIT
+    jq '.app.windows[0].devtools = true' src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
+
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+      pnpm tauri build --features devtools --config "$DEBUG_CONFIG"
+
 # ── Test ─────────────────────────────────────────────────────
 
 test:
