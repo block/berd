@@ -230,7 +230,7 @@ export function ChatView({
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
     >
-      <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
+      <div className="page-transition flex h-full min-w-0 gap-4 pl-1 pr-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
         <div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col",

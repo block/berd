@@ -127,7 +127,7 @@ export function WorkspaceActionsMenu({
         <div className="ml-auto flex items-center gap-1.5">
           <Button
             type="button"
-            variant="ghost-light"
+            variant="quiet"
             size="xs"
             disabled={disabled || runningAction !== null}
             onClick={() =>
@@ -144,7 +144,7 @@ export function WorkspaceActionsMenu({
           </Button>
           <Button
             type="button"
-            variant="ghost-light"
+            variant="quiet"
             size="xs"
             disabled={disabled || runningAction !== null}
             onClick={() =>

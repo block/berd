@@ -77,6 +77,7 @@ export function SplitButton<T extends string = string>({
           {actions.map((action) => (
             <DropdownMenuItem
               key={action.id}
+              className="font-light"
               disabled={disabled || action.disabled}
               onSelect={() => {
                 onActionSelect(action.id);

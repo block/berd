@@ -99,7 +99,6 @@ export function ChatRightRail({
         style={
           {
             width: AGENT_BUILDER_RAIL_W,
-            paddingBlock: "var(--spacing-app-panel-gutter-top)",
             ...builderColumnStyle,
           } as CSSProperties
         }

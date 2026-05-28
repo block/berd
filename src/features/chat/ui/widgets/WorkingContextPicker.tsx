@@ -211,7 +211,7 @@ export function WorkingContextPicker({
           >
             <IconFolder className="size-4 shrink-0 text-muted-foreground" />
             <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate font-normal text-foreground">
+              <span className="block truncate text-foreground">
                 {activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet")}
               </span>
               <span className="block truncate text-xs text-muted-foreground">
@@ -227,11 +227,11 @@ export function WorkingContextPicker({
         <PopoverContent
           align="start"
           sideOffset={6}
-          className="max-h-80 w-[var(--radix-popover-trigger-width)] min-w-56 overflow-y-auto p-1.5"
+          className="max-h-80 w-[var(--radix-popover-trigger-width)] min-w-56 overflow-y-auto p-1.5 font-light"
         >
           {hasWorktrees ? (
             <div>
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-medium uppercase tracking-wider text-muted-foreground">
+              <p className="px-2 pb-1.5 pt-1 text-xxs font-light text-sidebar-foreground/55">
                 {t("contextPanel.picker.worktrees")}
               </p>
               {worktrees.map((wt) => (
@@ -265,7 +265,7 @@ export function WorkingContextPicker({
             <div
               className={hasWorktrees ? "mt-1 border-t border-border pt-1" : ""}
             >
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-medium uppercase tracking-wider text-muted-foreground">
+              <p className="px-2 pb-1.5 pt-1 text-xxs font-light text-sidebar-foreground/55">
                 {t("contextPanel.picker.allBranches")}
               </p>
               {localBranches.map((branch) => {
@@ -291,7 +291,7 @@ export function WorkingContextPicker({
                   >
                     <IconGitBranch className="size-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
-                      <span className="block truncate font-normal text-foreground">
+                      <span className="block truncate text-foreground">
                         {branch}
                       </span>
                       {branchMeta ? (

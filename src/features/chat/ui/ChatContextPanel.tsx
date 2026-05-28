@@ -3,10 +3,8 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { cn } from "@/shared/lib/cn";
 import { ContextPanel } from "./ContextPanel";
 
-const CP_PAD_X = 12;
-const CP_PAD_Y = "var(--spacing-app-panel-gutter-top)";
 const CP_PANEL_W = 315;
-export const CP_TOTAL_W = CP_PANEL_W + CP_PAD_X * 2;
+export const CP_TOTAL_W = CP_PANEL_W;
 const CP_FADE_S = 0.15;
 const CP_REFLOW_MS = 200;
 const CP_COMPACT_QUERY = "(max-width: 900px)";
@@ -73,11 +71,7 @@ export function ChatContextPanel({
                 ? ({
                     "--context-panel-width": `${CP_PANEL_W}px`,
                   } as CSSProperties)
-                : {
-                    width: CP_TOTAL_W,
-                    paddingBlock: CP_PAD_Y,
-                    paddingInline: CP_PAD_X,
-                  }
+                : { width: CP_TOTAL_W }
             }
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

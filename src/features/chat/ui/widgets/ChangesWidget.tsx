@@ -34,8 +34,8 @@ function ChangedFileRow({
       type="button"
       disabled={isDeleted}
       className={cn(
-        "relative flex w-full select-none items-center gap-2 px-3 py-1.5 text-left",
-        "before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border/70 before:content-['']",
+        "relative flex w-full select-none items-center gap-2 px-4 py-1.5 text-left",
+        "before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 before:content-['']",
         "transition-colors duration-100",
         isDeleted ? "cursor-default opacity-60" : "hover:bg-muted/80",
       )}
@@ -52,7 +52,7 @@ function ChangedFileRow({
             {dir}
           </span>
         )}
-        <span className="shrink-0 whitespace-nowrap text-sm font-normal text-foreground">
+        <span className="shrink-0 whitespace-nowrap text-sm font-light text-foreground">
           {name}
         </span>
       </div>

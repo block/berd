@@ -13,7 +13,7 @@ interface WidgetProps {
 }
 
 const SECTION_HEADER_TEXT_CLASS =
-  "min-w-0 overflow-hidden text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground";
+  "min-w-0 overflow-hidden text-xxs font-light text-sidebar-foreground/55";
 
 export function Widget({
   title,
@@ -60,10 +60,14 @@ export function Widget({
           {action && <div className="shrink-0">{action}</div>}
         </div>
         {isOpen && !flush && (
-          <div className="pt-2 text-sm text-foreground">{children}</div>
+          <div className="pt-2 text-sm font-light text-foreground">
+            {children}
+          </div>
         )}
       </div>
-      {isOpen && flush ? <div className="pt-1.5">{children}</div> : null}
+      {isOpen && flush ? (
+        <div className="pt-1.5 font-light">{children}</div>
+      ) : null}
     </section>
   );
 }

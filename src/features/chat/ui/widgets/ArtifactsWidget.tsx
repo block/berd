@@ -103,7 +103,7 @@ export function ArtifactsWidget({
           >
             <button
               type="button"
-              className="relative flex w-full select-none items-center gap-2 px-3 py-1.5 text-left transition-colors duration-100 before:pointer-events-none before:absolute before:inset-x-3 before:top-0 before:h-px before:bg-border/70 before:content-[''] hover:bg-muted/80"
+              className="relative flex w-full select-none items-center gap-2 px-4 py-1.5 text-left transition-colors duration-100 before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 before:content-[''] hover:bg-muted/80"
               onClick={() => void openResolvedPath(artifact.resolvedPath)}
             >
               <Icon className="size-4 shrink-0 text-muted-foreground" />
