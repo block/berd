@@ -183,18 +183,6 @@ export function UpdaterProvider({
 
           setDownloadProgress(100);
           setStatusValue("ready");
-          toast.success(t("updates.toast.ready.title"), {
-            description: t("updates.toast.ready.description", {
-              version: update.version,
-            }),
-            duration: Infinity,
-            action: {
-              label: t("updates.actions.restart"),
-              onClick: () => {
-                void relaunch();
-              },
-            },
-          });
         } catch (error) {
           recordError(error);
         }
@@ -209,7 +197,7 @@ export function UpdaterProvider({
         }
       }
     },
-    [recordError, relaunch, setStatusValue, t],
+    [recordError, setStatusValue],
   );
 
   const downloadAndInstall = useCallback(async () => {

@@ -4,10 +4,9 @@ import {
   useUpdaterContext,
 } from "@/features/updates/hooks/useUpdater";
 import { cn } from "@/shared/lib/cn";
-import { Button } from "@/shared/ui/button";
+import { Button, type ButtonProps } from "@/shared/ui/button";
 import { Progress } from "@/shared/ui/progress";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
-import { Spinner } from "@/shared/ui/spinner";
 
 const STATUS_KEY: Record<UpdateStatus, string> = {
   unavailable: "unavailable",
@@ -30,6 +29,10 @@ function isCheckDisabled(status: UpdateStatus) {
     status === "ready"
   );
 }
+
+const updateActionButtonProps = {
+  size: "default",
+} satisfies Pick<ButtonProps, "size">;
 
 export function UpdatesSettings() {
   const { t } = useTranslation("settings");
@@ -72,23 +75,20 @@ export function UpdatesSettings() {
           {status === "ready" ? (
             <Button
               type="button"
-              size="sm"
+              {...updateActionButtonProps}
               onClick={() => void relaunch()}
-              className="h-9 rounded-lg bg-[#f37021] px-4 text-sm font-medium text-black hover:bg-[#ff8735]"
             >
               {t("updates.actions.restart")}
             </Button>
           ) : (
             <Button
               type="button"
-              size="sm"
+              {...updateActionButtonProps}
               onClick={() => void checkForUpdate()}
               disabled={!enabled || isCheckDisabled(status)}
-              className={cn(
-                "h-9 rounded-lg bg-[#f37021] px-4 text-sm font-medium text-black hover:bg-[#ff8735]",
-                "disabled:bg-[#f37021]/70 disabled:text-black/70",
-              )}
-              rightIcon={isBusy ? <Spinner decorative /> : undefined}
+              feedbackState={isBusy ? "loading" : "idle"}
+              loadingLabel={actionLabel}
+              preserveWidth
             >
               {actionLabel}
             </Button>
