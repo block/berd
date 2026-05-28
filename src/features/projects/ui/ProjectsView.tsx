@@ -195,6 +195,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
                   <div className="min-w-0 flex-1 flex items-start gap-3">
                     <ProjectIcon
                       icon={project.icon}
+                      color={project.color}
                       className="mt-0.5 size-4 shrink-0 text-foreground"
                       imageClassName="mt-0.5 size-4 shrink-0 rounded-[4px]"
                     />

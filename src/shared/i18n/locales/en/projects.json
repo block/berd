@@ -5,6 +5,7 @@
     "chooseColor": "Choose a project color",
     "color": "Color",
     "colorAria": "Color {{color}}",
+    "colorBlockIcon": "Color block",
     "customColor": "Custom color",
     "describePlaceholder": "Describe your project, goals, subject etc",
     "describeLabel": "What are you trying to achieve?",

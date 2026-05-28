@@ -60,7 +60,11 @@ interface PickerOption {
   pinned: boolean;
   /** Per-row rendering hint so the panel can show an icon / colored pill */
   leading?:
-    | { kind: "projectIcon"; icon: string | null | undefined }
+    | {
+        kind: "projectIcon";
+        icon: string | null | undefined;
+        color: string | null | undefined;
+      }
     | { kind: "skillPill"; name: string; color: string | null }
     | null;
 }
@@ -219,7 +223,11 @@ function projectOptions(
         .filter(Boolean)
         .join(" "),
       pinned: pinnedIds.has(project.id),
-      leading: { kind: "projectIcon", icon: project.icon },
+      leading: {
+        kind: "projectIcon",
+        icon: project.icon,
+        color: project.color,
+      },
     }));
 }
 
@@ -791,6 +799,7 @@ function PickerRow({ option, isLast, onSelect }: PickerRowProps) {
       {option.leading?.kind === "projectIcon" ? (
         <ProjectIcon
           icon={option.leading.icon}
+          color={option.leading.color}
           className="size-5 shrink-0"
           imageClassName="size-5 shrink-0"
         />

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import { ProjectColorSwatch } from "@/features/projects/ui/ProjectColorSwatch";
+import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -82,7 +82,13 @@ export function SidebarProjectList({
             onClick={() => onNavigate?.("projects")}
             className="rounded-lg text-sidebar-foreground hover:bg-transparent hover:text-sidebar-foreground"
           >
-            <ProjectColorSwatch color={project.color} projectId={project.id} />
+            <ProjectIcon
+              icon={project.icon}
+              color={project.color}
+              projectId={project.id}
+              className="size-3 rounded-[3px]"
+              imageClassName="size-4 rounded-[4px]"
+            />
           </Button>
         ))}
       </div>

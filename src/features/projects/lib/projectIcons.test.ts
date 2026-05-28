@@ -14,10 +14,19 @@ describe("projectIcons", () => {
     expect(normalizeProjectIcon("\u{1F4C1}")).toBe(DEFAULT_PROJECT_ICON);
   });
 
-  it("preserves explicit icon values", () => {
-    expect(normalizeProjectIcon("tabler:code")).toBe("tabler:code");
+  it("normalizes legacy preset icons to the default color-block sentinel", () => {
+    expect(normalizeProjectIcon("tabler:code")).toBe(DEFAULT_PROJECT_ICON);
+    expect(normalizeProjectIcon("tabler:brand-github")).toBe(
+      DEFAULT_PROJECT_ICON,
+    );
+  });
+
+  it("preserves image-backed icon values", () => {
     expect(normalizeProjectIcon("data:image/png;base64,aWNvbg==")).toBe(
       "data:image/png;base64,aWNvbg==",
+    );
+    expect(normalizeProjectIcon(fileProjectIconValue("/tmp/logo.svg"))).toBe(
+      "file:/tmp/logo.svg",
     );
   });
 

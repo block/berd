@@ -1,15 +1,15 @@
 import { IconUpload } from "@tabler/icons-react";
-import { Spinner } from "@/shared/ui/spinner";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import type { ProjectIconCandidate } from "../api/projects";
-import { PROJECT_TABLER_ICONS, isImageProjectIcon } from "../lib/projectIcons";
+import { DEFAULT_PROJECT_ICON, isImageProjectIcon } from "../lib/projectIcons";
+import { ProjectColorSwatch } from "./ProjectColorSwatch";
 import { ProjectIcon } from "./ProjectIcon";
 
 interface ProjectIconPickerProps {
   icon: string;
+  color: string;
   iconCandidates: ProjectIconCandidate[];
-  iconScanPending: boolean;
   error?: string | null;
   onChooseIcon: (icon: string) => void;
   onChooseCustomIcon: () => void;
@@ -17,80 +17,79 @@ interface ProjectIconPickerProps {
 
 export function ProjectIconPicker({
   icon,
+  color,
   iconCandidates,
-  iconScanPending,
   error,
   onChooseIcon,
   onChooseCustomIcon,
 }: ProjectIconPickerProps) {
   const { t } = useTranslation("projects");
+  const selectedColorIcon = !isImageProjectIcon(icon);
   const selectedCustomIcon =
     isImageProjectIcon(icon) &&
     !iconCandidates.some((candidate) => candidate.icon === icon);
+  const scannedIconRailWidth = iconCandidates.length
+    ? `${iconCandidates.length * 44}px`
+    : "0px";
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-muted-foreground">
-          {t("dialog.icon")}
-        </span>
-        {iconScanPending && (
-          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
-            <Spinner className="size-3" />
-            {t("dialog.scanningIcons")}
-          </span>
-        )}
-      </div>
+    <div className="group/field space-y-2">
+      <span className="block text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+        {t("dialog.icon")}
+      </span>
       <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/20 p-2">
-        <div className="grid grid-cols-[repeat(auto-fit,minmax(2.5rem,1fr))] justify-items-center gap-2">
-          {iconCandidates.map((candidate) => (
-            <button
-              key={candidate.id}
-              type="button"
-              onClick={() => onChooseIcon(candidate.icon)}
-              className={cn(
-                "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
-                icon === candidate.icon
-                  ? "border-foreground"
-                  : "border-border/80",
-              )}
-              title={t("dialog.iconCandidateTitle", {
-                sourceDir: candidate.sourceDir,
-                label: candidate.label,
-              })}
-              aria-label={t("dialog.iconAria", { icon: candidate.label })}
-            >
-              <ProjectIcon
-                icon={candidate.icon}
-                imageClassName="size-5 rounded-[4px]"
-              />
-            </button>
-          ))}
-          {PROJECT_TABLER_ICONS.map((tablerIcon) => {
-            const label = t(tablerIcon.labelKey);
-            return (
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => onChooseIcon(DEFAULT_PROJECT_ICON)}
+            className={cn(
+              "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
+              selectedColorIcon ? "border-foreground" : "border-border/80",
+            )}
+            title={t("dialog.colorBlockIcon")}
+            aria-label={t("dialog.iconAria", {
+              icon: t("dialog.colorBlockIcon"),
+            })}
+          >
+            <ProjectColorSwatch color={color} className="size-5" />
+          </button>
+          <div
+            className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden transition-[max-width,opacity] duration-500 ease-out motion-reduce:transition-none"
+            style={{
+              maxWidth: scannedIconRailWidth,
+              opacity: iconCandidates.length ? 1 : 0,
+            }}
+          >
+            {iconCandidates.map((candidate, index) => (
               <button
-                key={tablerIcon.value}
+                key={candidate.id}
                 type="button"
-                onClick={() => onChooseIcon(tablerIcon.value)}
+                onClick={() => onChooseIcon(candidate.icon)}
                 className={cn(
-                  "flex size-9 items-center justify-center rounded-md border bg-background text-foreground transition-colors hover:bg-muted",
-                  icon === tablerIcon.value
+                  "flex size-9 shrink-0 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
+                  icon === candidate.icon
                     ? "border-foreground"
                     : "border-border/80",
                 )}
-                title={label}
-                aria-label={t("dialog.iconAria", { icon: label })}
+                style={{ animationDelay: `${Math.min(index * 35, 140)}ms` }}
+                title={t("dialog.iconCandidateTitle", {
+                  sourceDir: candidate.sourceDir,
+                  label: candidate.label,
+                })}
+                aria-label={t("dialog.iconAria", { icon: candidate.label })}
               >
-                <ProjectIcon icon={tablerIcon.value} />
+                <ProjectIcon
+                  icon={candidate.icon}
+                  imageClassName="size-5 rounded-[4px]"
+                />
               </button>
-            );
-          })}
+            ))}
+          </div>
           <button
             type="button"
             onClick={onChooseCustomIcon}
             className={cn(
-              "col-span-2 flex h-9 min-w-[88px] items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
+              "flex h-9 min-w-[88px] items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
               selectedCustomIcon ? "border-foreground" : "border-border/80",
             )}
             title={

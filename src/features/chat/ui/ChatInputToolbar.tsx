@@ -256,6 +256,7 @@ export function ChatInputToolbar({
             triggerTitle={projectTitle}
             icon={
               <ProjectSelectorIcon
+                icon={selectedProject?.icon}
                 color={selectedProject?.color}
                 projectId={selectedProject?.id}
               />
@@ -281,6 +282,7 @@ export function ChatInputToolbar({
                       : undefined,
                     icon: (
                       <ProjectSelectorIcon
+                        icon={project.icon}
                         color={project.color}
                         projectId={project.id}
                       />

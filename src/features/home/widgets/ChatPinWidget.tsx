@@ -123,6 +123,7 @@ export function ChatPinWidget({
           >
             <ProjectIcon
               icon={project.icon}
+              color={project.color}
               className="h-full w-full shrink-0"
               imageClassName="h-full w-full shrink-0"
             />

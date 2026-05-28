@@ -69,6 +69,7 @@ export function ArchivedProjectsSection() {
             <div className="flex min-w-0 items-center gap-2">
               <ProjectIcon
                 icon={project.icon}
+                color={project.color}
                 className="size-4 shrink-0 text-foreground"
                 imageClassName="size-4 shrink-0 rounded-[4px]"
               />

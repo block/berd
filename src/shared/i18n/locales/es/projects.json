@@ -5,6 +5,7 @@
     "chooseColor": "Elegir un color del proyecto",
     "color": "Color",
     "colorAria": "Color {{color}}",
+    "colorBlockIcon": "Bloque de color",
     "customColor": "Color personalizado",
     "describePlaceholder": "Describe tu proyecto, objetivos, tema, etc.",
     "describeLabel": "¿Qué intentas lograr?",

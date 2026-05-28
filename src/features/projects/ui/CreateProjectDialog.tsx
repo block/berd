@@ -25,10 +25,12 @@ import {
   hasEquivalentWorkingDir,
   parseEditorText,
 } from "../lib/projectPromptText";
+import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
 import { pillCssColor } from "../lib/pillTones";
 import { ProjectColorPicker } from "./ProjectColorPicker";
+import { ProjectIconPicker } from "./ProjectIconPicker";
 import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 
 function getDefaultProjectName(path: string | null | undefined): string {
@@ -69,14 +71,20 @@ export function CreateProjectDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acpProviders, setAcpProviders] = useState<AcpProvider[]>([]);
-  // Icon picker UI is removed from the redesigned form, but ProjectInfo.icon
-  // is still consumed elsewhere. We carry the icon value through the form
-  // (defaulting to DEFAULT_PROJECT_ICON for new projects, preserving the
-  // existing value when editing) so we don't accidentally clobber it.
-  const [icon, setIcon] = useState<string>(DEFAULT_PROJECT_ICON);
-  // First working directory selected via the folder picker. Edits write
-  // through to the prompt text (via insertWorkingDir) so the underlying
-  // include-directives storage stays the source of truth.
+  const {
+    icon,
+    iconCandidates,
+    iconError,
+    chooseIcon,
+    chooseCustomIcon,
+    resetIcon,
+  } = useProjectIconSelection({
+    isOpen,
+    prompt: buildEditorText(workingDirs, prompt),
+  });
+  // First working directory selected via the folder picker. The persisted
+  // workingDirs list stays the source of truth, while prompt text remains
+  // the user's project description.
   const [workingDir, setWorkingDir] = useState<string>("");
 
   const isEditing = !!editingProject;
@@ -117,6 +125,13 @@ export function CreateProjectDialog({
     }
   };
 
+  const handleChooseCustomIcon = async () => {
+    await chooseCustomIcon({
+      title: t("dialog.customIconDialogTitle"),
+      filterName: t("dialog.iconFileFilter"),
+    });
+  };
+
   // Pre-fill fields when the dialog opens or when the project identity changes,
   // but NOT on every parent re-render (which would reset user edits mid-typing).
   const prevOpenRef = useRef(false);
@@ -135,7 +150,7 @@ export function CreateProjectDialog({
       setName(editingProject.name);
       setPrompt(editingProject.prompt);
       setWorkingDirs(editingProject.workingDirs);
-      setIcon(editingProject.icon || DEFAULT_PROJECT_ICON);
+      resetIcon(editingProject.icon || DEFAULT_PROJECT_ICON);
       setColor(editingProject.color || DEFAULT_PROJECT_COLOR);
       setPreferredProvider(editingProject.preferredProvider ?? null);
       setWorkingDir(editingProject.workingDirs[0] ?? "");
@@ -145,13 +160,13 @@ export function CreateProjectDialog({
       setName(getDefaultProjectName(initialWorkingDir));
       setPrompt("");
       setWorkingDirs(seedDir ? [seedDir] : []);
-      setIcon(DEFAULT_PROJECT_ICON);
+      resetIcon(DEFAULT_PROJECT_ICON);
       setColor(DEFAULT_PROJECT_COLOR);
       setPreferredProvider(null);
       setWorkingDir(seedDir);
       setError(null);
     }
-  }, [isOpen, editingProject, initialWorkingDir]);
+  }, [isOpen, editingProject, initialWorkingDir, resetIcon]);
 
   const canSave = name.trim().length > 0 && !saving;
 
@@ -159,7 +174,7 @@ export function CreateProjectDialog({
     setName("");
     setPrompt("");
     setWorkingDirs([]);
-    setIcon(DEFAULT_PROJECT_ICON);
+    resetIcon(DEFAULT_PROJECT_ICON);
     setColor(DEFAULT_PROJECT_COLOR);
     setPreferredProvider(null);
     setWorkingDir("");
@@ -172,10 +187,8 @@ export function CreateProjectDialog({
     if (!canSave) return;
     setSaving(true);
     setError(null);
-    // Prompt buffer is the source of truth for workingDirs (encoded as
-    // `include:` directives). If the folder picker captured a dir but the
-    // prompt buffer hasn't been seeded yet (e.g. user picked then edited
-    // the prompt), the prompt buffer wins.
+    // Preserve typed include-directives for older project prompts, while the
+    // folder picker keeps its own workingDirs state in the redesigned form.
     const { prompt: parsedPrompt, workingDirs: parsedWorkingDirs } =
       parseEditorText(prompt);
     const savedWorkingDirs = [...workingDirs];
@@ -281,6 +294,15 @@ export function CreateProjectDialog({
 
           {/* Scrollable form body. */}
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8">
+            <ProjectIconPicker
+              icon={icon}
+              color={color}
+              iconCandidates={iconCandidates}
+              error={iconError}
+              onChooseIcon={chooseIcon}
+              onChooseCustomIcon={handleChooseCustomIcon}
+            />
+
             <div className="group/field space-y-2">
               <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                 {t("dialog.nameLabel")}{" "}

@@ -1,9 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { open } from "@tauri-apps/plugin-dialog";
 import type { ProjectInfo } from "../../api/projects";
-import { createProject, updateProject } from "../../api/projects";
+import {
+  createProject,
+  scanProjectIcons,
+  updateProject,
+} from "../../api/projects";
 import { CreateProjectDialog } from "../CreateProjectDialog";
 
 // ── ResizeObserver polyfill (needed by Radix Select in jsdom) ────────
@@ -56,6 +60,10 @@ vi.mock("../../api/projects", () => ({
     useWorktrees: false,
     order: 0,
     archivedAt: null,
+  }),
+  scanProjectIcons: vi.fn().mockResolvedValue([]),
+  readProjectIcon: vi.fn().mockResolvedValue({
+    icon: "data:image/png;base64,aWNvbg==",
   }),
 }));
 
@@ -305,6 +313,29 @@ describe("CreateProjectDialog", () => {
         [],
         false,
       );
+    });
+
+    it("scans the selected working directory for project icons", async () => {
+      vi.useFakeTimers();
+      try {
+        render(
+          <CreateProjectDialog
+            {...defaultProps}
+            isOpen={true}
+            initialWorkingDir="/home/user/my-repo"
+          />,
+        );
+
+        expect(screen.queryByText("Scanning...")).not.toBeInTheDocument();
+
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(250);
+        });
+
+        expect(scanProjectIcons).toHaveBeenCalledWith(["/home/user/my-repo"]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 

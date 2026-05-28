@@ -28,6 +28,7 @@ import {
   isImageProjectIcon,
   normalizeProjectIcon,
 } from "../lib/projectIcons";
+import { ProjectColorSwatch } from "./ProjectColorSwatch";
 
 type TablerIconComponent = ComponentType<{
   className?: string;
@@ -57,10 +58,14 @@ const tablerIconsByValue = new Map<string, TablerIconComponent>([
 
 export function ProjectIcon({
   icon,
+  color,
+  projectId,
   className,
   imageClassName,
 }: {
   icon: string | null | undefined;
+  color?: string | null;
+  projectId?: string;
   className?: string;
   imageClassName?: string;
 }) {
@@ -84,6 +89,16 @@ export function ProjectIcon({
         alt=""
         className={cn("size-4 rounded-[3px] object-contain", imageClassName)}
         onError={() => setFailedImageIcon(normalizedIcon)}
+      />
+    );
+  }
+
+  if (normalizedIcon === DEFAULT_PROJECT_ICON && color) {
+    return (
+      <ProjectColorSwatch
+        color={color}
+        projectId={projectId}
+        className={className}
       />
     );
   }

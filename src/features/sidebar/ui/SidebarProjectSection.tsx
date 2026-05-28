@@ -8,7 +8,7 @@ import {
 import type { AppView } from "@/app/AppShell";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import { ProjectColorSwatch } from "@/features/projects/ui/ProjectColorSwatch";
+import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { SidebarChatRow } from "./SidebarChatRow";
@@ -190,9 +190,12 @@ export function SidebarProjectSection({
         >
           <span className="relative flex h-4 w-4 flex-shrink-0 items-center justify-center text-sidebar-foreground">
             <span className="absolute group-hover:opacity-0">
-              <ProjectColorSwatch
+              <ProjectIcon
+                icon={project.icon}
                 color={project.color}
                 projectId={project.id}
+                className="size-3 rounded-[3px]"
+                imageClassName="size-4 rounded-[4px]"
               />
             </span>
             {isExpanded ? (
