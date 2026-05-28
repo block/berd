@@ -775,6 +775,29 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       border: "--border / 80%",
     },
   ],
+  glass: [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--surface-composer",
+      textIcon: "--foreground",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--surface-composer / 80%",
+      textIcon: "--foreground",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "--surface-composer",
+      textIcon: "--foreground",
+      border: "none; contained by --shadow-chat",
+    },
+  ],
   ghost: [
     {
       anatomy: "Button",

@@ -274,6 +274,32 @@ describe("MessageTimeline", () => {
     expect(scrollTo).not.toHaveBeenCalled();
   });
 
+  it("collapses Jump to latest to an icon button when footer status is visible", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "First token"),
+    ];
+    renderWithProviders(
+      <MessageTimeline
+        messages={messages}
+        streamingMessageId="assistant-1"
+        footer={<div data-testid="composer-footer" />}
+        footerStatus={<div>Responding...</div>}
+      />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, { scrollTop: 450 });
+
+    fireEvent.wheel(scroller, { deltaY: -40 });
+
+    expect(await screen.findByText("Responding...")).toBeInTheDocument();
+    const jumpButton = await screen.findByRole("button", {
+      name: "Jump to latest",
+    });
+    expect(jumpButton).toHaveClass("h-8", "w-8");
+    expect(screen.queryByText("Jump to latest")).not.toBeInTheDocument();
+  });
+
   it("does not run sticky MCP app auto-scroll while detached", async () => {
     const messages = [
       message("user-1", "user", "Question"),

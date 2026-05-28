@@ -24,6 +24,8 @@ const buttonVariants = cva(
           "border border-border/80 bg-background shadow-none hover:bg-accent hover:text-accent-foreground",
         secondary:
           "border border-input bg-accent text-accent-foreground hover:bg-accent",
+        glass:
+          "bg-surface-composer text-foreground shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-composer/80 hover:text-foreground active:bg-surface-composer data-[state=open]:bg-surface-composer aria-expanded:bg-surface-composer",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         "ghost-light":
           "font-normal hover:bg-accent hover:text-accent-foreground",
@@ -133,6 +135,8 @@ const buttonIconSizeClasses = {
   string
 >;
 
+type ButtonSize = VariantProps<typeof buttonVariants>["size"];
+
 type ButtonIconProps = {
   className?: string;
   size?: number | string;
@@ -171,10 +175,16 @@ function hasExplicitIconDimensions(icon: React.ReactElement<ButtonIconProps>) {
   );
 }
 
+function isIconOnlyButtonSize(
+  size: ButtonSize,
+): size is Extract<NonNullable<ButtonSize>, `icon${string}`> {
+  return typeof size === "string" && size.startsWith("icon");
+}
+
 function renderButtonIcon(
   icon: React.ReactNode,
   slot: "button-left-icon" | "button-right-icon",
-  size: VariantProps<typeof buttonVariants>["size"],
+  size: ButtonSize,
 ) {
   if (!icon) {
     return null;
@@ -198,6 +208,24 @@ function renderButtonIcon(
       {content}
     </span>
   );
+}
+
+function renderIconOnlyButtonChildren(
+  children: React.ReactNode,
+  size: ButtonSize,
+) {
+  if (!isIconOnlyButtonSize(size)) {
+    return children;
+  }
+
+  const iconSizeClass = buttonIconSizeClasses[size];
+  return React.isValidElement<ButtonIconProps>(children) &&
+    children.type !== React.Fragment &&
+    !hasExplicitIconDimensions(children)
+    ? React.cloneElement(children, {
+        className: cn(iconSizeClass, children.props.className),
+      })
+    : children;
 }
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> &
@@ -240,12 +268,15 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     const [displayStatus, setDisplayStatus] =
       React.useState<ButtonFeedbackState>(feedbackState);
     const Comp = asChild ? Slot : "button";
+    const renderedChildren = asChild
+      ? children
+      : renderIconOnlyButtonChildren(children, size);
     const childContent =
       asChild &&
       React.isValidElement<{ children?: React.ReactNode }>(children) &&
       children.type !== React.Fragment
         ? children.props.children
-        : children;
+        : renderedChildren;
     const resolvedLeftIcon =
       variant === "back"
         ? (leftIcon ?? <IconArrowLeft aria-hidden="true" />)
@@ -335,7 +366,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     ) : (
       renderStatusContent(displayStatus, true)
     );
-    const buttonContent = hasFeedbackContent ? statusContent : children;
+    const buttonContent = hasFeedbackContent ? statusContent : renderedChildren;
     const asChildContent =
       asChild && hasFeedbackContent
         ? React.isValidElement<{ children?: React.ReactNode }>(children) &&

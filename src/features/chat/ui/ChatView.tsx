@@ -78,6 +78,11 @@ export function ChatView({
     controller.chatState === "compacting";
   const shouldShowLoadingIndicator =
     showIndicator && !controller.isLoadingHistory;
+  const loadingChatState = controller.chatState as
+    | "thinking"
+    | "streaming"
+    | "waiting"
+    | "compacting";
   const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
   const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
   let sendDisabledReason: string | undefined;
@@ -125,101 +130,94 @@ export function ChatView({
   // browser handles native scroll latching between the composer's text and the
   // conversation. It stays mounted across loading, empty, and populated states
   // (passed as `footer`) so it never remounts and loses focus or draft text.
-  const composerFooter = (
-    <>
-      <AnimatePresence initial={false}>
-        {shouldShowLoadingIndicator ? (
-          <LoadingGoose
-            key="loading-indicator"
-            chatState={
-              controller.chatState as
-                | "thinking"
-                | "streaming"
-                | "waiting"
-                | "compacting"
-            }
-          />
-        ) : null}
-      </AnimatePresence>
-      <div className="px-4">
-        <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
-          <ChatInput
-            surface="bare"
-            placeholder={
-              isAgentBuilderSession
-                ? agentBuilderComposerPlaceholder
-                : undefined
-            }
-            controls={
-              effectiveSession?.intent === "build-agent"
-                ? {
-                    agentModelPicker: false,
-                    projectPicker: false,
-                  }
-                : undefined
-            }
-            composerActions={{
-              onSend: controller.handleSend,
-              disabled:
-                controller.projectMetadataPending ||
-                controller.isCompactingContext,
-              sendDisabled: effectiveSession?.creationState != null,
-              sendDisabledReason,
-              queuedMessage: controller.queue.queuedMessage,
-              onDismissQueue: controller.queue.dismiss,
-              onStop: controller.stopStreaming,
-              isStreaming:
-                controller.chatState === "streaming" ||
-                controller.chatState === "thinking",
-            }}
-            initialValue={controller.draftValue}
-            onDraftChange={controller.handleDraftChange}
-            selectedSkills={controller.selectedSkills}
-            onSkillsChange={controller.handleSkillsChange}
-            personaPicker={{
-              personas: controller.personas,
-              selectedPersonaId: controller.selectedPersonaId,
-              onPersonaChange: controller.handlePersonaChange,
-            }}
-            agentModelPicker={{
-              providers: controller.pickerAgents,
-              providersLoading: controller.providersLoading,
-              selectedProvider: controller.selectedProvider,
-              onProviderChange: controller.handleProviderChange,
-              currentModelId: controller.currentModelId,
-              currentModelProviderId: controller.currentModelProviderId,
-              currentModel: controller.currentModelName ?? undefined,
-              availableModels: controller.availableModels,
-              modelsLoading: controller.modelsLoading,
-              modelStatusMessage: controller.modelStatusMessage,
-              onModelChange: controller.handleModelChange,
-              onPickerOpen: controller.handlePickerOpen,
-            }}
-            projectPicker={{
-              selectedProjectId: controller.selectedProjectId,
-              availableProjects: controller.availableProjects,
-              onProjectChange: controller.handleProjectChange,
-              onCreateProject: (options) =>
-                onCreateProject?.({
-                  onCreated: (projectId) => {
-                    controller.handleProjectChange(projectId);
-                    options?.onCreated?.(projectId);
-                  },
-                }),
-            }}
-            contextUsage={{
-              contextTokens: controller.tokenState.accumulatedTotal,
-              contextLimit: controller.tokenState.contextLimit,
-              isContextUsageReady: controller.isContextUsageReady,
-              onCompactContext: controller.compactConversation,
-              canCompactContext: controller.canCompactContext,
-              isCompactingContext: controller.isCompactingContext,
-              supportsCompactionControls: controller.supportsCompactionControls,
-            }}
-          />
-        </div>
+  const footerStatus = shouldShowLoadingIndicator ? (
+    <AnimatePresence initial={false}>
+      <div className="flex h-8 items-center rounded-full bg-surface-composer px-3 shadow-[var(--shadow-chat)] backdrop-blur-md">
+        <LoadingGoose
+          key="loading-indicator"
+          chatState={loadingChatState}
+          className="mb-0 px-0"
+        />
       </div>
-    </>
+    </AnimatePresence>
+  ) : null;
+  const composerFooter = (
+    <div className="px-4">
+      <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
+        <ChatInput
+          surface="bare"
+          placeholder={
+            isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
+          }
+          controls={
+            effectiveSession?.intent === "build-agent"
+              ? {
+                  agentModelPicker: false,
+                  projectPicker: false,
+                }
+              : undefined
+          }
+          composerActions={{
+            onSend: controller.handleSend,
+            disabled:
+              controller.projectMetadataPending ||
+              controller.isCompactingContext,
+            sendDisabled: effectiveSession?.creationState != null,
+            sendDisabledReason,
+            queuedMessage: controller.queue.queuedMessage,
+            onDismissQueue: controller.queue.dismiss,
+            onStop: controller.stopStreaming,
+            isStreaming:
+              controller.chatState === "streaming" ||
+              controller.chatState === "thinking",
+          }}
+          initialValue={controller.draftValue}
+          onDraftChange={controller.handleDraftChange}
+          selectedSkills={controller.selectedSkills}
+          onSkillsChange={controller.handleSkillsChange}
+          personaPicker={{
+            personas: controller.personas,
+            selectedPersonaId: controller.selectedPersonaId,
+            onPersonaChange: controller.handlePersonaChange,
+          }}
+          agentModelPicker={{
+            providers: controller.pickerAgents,
+            providersLoading: controller.providersLoading,
+            selectedProvider: controller.selectedProvider,
+            onProviderChange: controller.handleProviderChange,
+            currentModelId: controller.currentModelId,
+            currentModelProviderId: controller.currentModelProviderId,
+            currentModel: controller.currentModelName ?? undefined,
+            availableModels: controller.availableModels,
+            modelsLoading: controller.modelsLoading,
+            modelStatusMessage: controller.modelStatusMessage,
+            onModelChange: controller.handleModelChange,
+            onPickerOpen: controller.handlePickerOpen,
+          }}
+          projectPicker={{
+            selectedProjectId: controller.selectedProjectId,
+            availableProjects: controller.availableProjects,
+            onProjectChange: controller.handleProjectChange,
+            onCreateProject: (options) =>
+              onCreateProject?.({
+                onCreated: (projectId) => {
+                  controller.handleProjectChange(projectId);
+                  options?.onCreated?.(projectId);
+                },
+              }),
+          }}
+          contextUsage={{
+            contextTokens: controller.tokenState.accumulatedTotal,
+            contextLimit: controller.tokenState.contextLimit,
+            isContextUsageReady: controller.isContextUsageReady,
+            onCompactContext: controller.compactConversation,
+            canCompactContext: controller.canCompactContext,
+            isCompactingContext: controller.isCompactingContext,
+            supportsCompactionControls: controller.supportsCompactionControls,
+          }}
+        />
+      </div>
+    </div>
   );
 
   const conversationPlaceholder = controller.isLoadingHistory ? (
@@ -258,6 +256,7 @@ export function ChatView({
               showPlaceholder={controller.isLoadingHistory}
               placeholder={conversationPlaceholder}
               footer={composerFooter}
+              footerStatus={footerStatus}
             />
           </div>
         </div>

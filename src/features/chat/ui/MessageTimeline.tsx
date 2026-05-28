@@ -10,7 +10,7 @@ import {
   type WheelEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { ArrowDown } from "lucide-react";
+import { IconArrowDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { Button } from "@/shared/ui/button";
@@ -35,6 +35,9 @@ interface MessageTimelineProps {
   /** Pinned to the bottom inside the scroll container so it scrolls natively
       with the conversation behind it (the floating chat composer). */
   footer?: ReactNode;
+  /** Status or activity surface shown in the footer control row above the
+      composer, next to Jump to latest when both are visible. */
+  footerStatus?: ReactNode;
   /** Shown in place of the message list (empty state or loading skeleton)
       while keeping the scroll container and sticky footer mounted, so the
       composer never remounts between empty, loading, and populated states. */
@@ -89,6 +92,7 @@ export function MessageTimeline({
   className,
   tailPaddingPx,
   footer,
+  footerStatus,
   placeholder,
   showPlaceholder,
 }: MessageTimelineProps) {
@@ -435,18 +439,43 @@ export function MessageTimeline({
     scrollToBottom("smooth");
   };
 
+  const hasFooterStatus = footerStatus != null;
+  const jumpToLatestLabel = t("timeline.jumpToLatest");
   const jumpToLatestButton = userDetached ? (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={handleJumpToLatest}
-      leftIcon={<ArrowDown />}
-      className="bg-background/95 shadow-sm"
-    >
-      {t("timeline.jumpToLatest")}
-    </Button>
+    hasFooterStatus ? (
+      <Button
+        type="button"
+        variant="glass"
+        size="icon-sm"
+        onClick={handleJumpToLatest}
+        aria-label={jumpToLatestLabel}
+        title={jumpToLatestLabel}
+      >
+        <IconArrowDown aria-hidden="true" />
+      </Button>
+    ) : (
+      <Button
+        type="button"
+        variant="glass"
+        size="sm"
+        onClick={handleJumpToLatest}
+        leftIcon={<IconArrowDown />}
+      >
+        {jumpToLatestLabel}
+      </Button>
+    )
   ) : null;
+  const footerControlRow =
+    footer && (footerStatus || jumpToLatestButton) ? (
+      <div className="mb-2 flex justify-center gap-2 px-4">
+        {footerStatus ? (
+          <div className="pointer-events-auto">{footerStatus}</div>
+        ) : null}
+        {jumpToLatestButton ? (
+          <div className="pointer-events-auto">{jumpToLatestButton}</div>
+        ) : null}
+      </div>
+    ) : null;
 
   const messageList = (
     <div
@@ -551,13 +580,7 @@ export function MessageTimeline({
               data-testid="message-timeline-footer"
               className="pointer-events-none sticky bottom-4 z-10 flex flex-col"
             >
-              {jumpToLatestButton ? (
-                <div className="mb-2 flex justify-center">
-                  <div className="pointer-events-auto">
-                    {jumpToLatestButton}
-                  </div>
-                </div>
-              ) : null}
+              {footerControlRow}
               {footer}
             </div>
           ) : null}

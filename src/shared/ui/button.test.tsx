@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { IconArrowNarrowLeft } from "@tabler/icons-react";
+import { IconArrowDown, IconArrowNarrowLeft } from "@tabler/icons-react";
 import { Button } from "./button";
 
 describe("Button", () => {
@@ -52,10 +52,31 @@ describe("Button", () => {
 
     const button = screen.getByRole("button", { name: "Back" });
 
-    expect(screen.getByTestId("icon")).not.toHaveClass("size-3");
+    expect(screen.getByTestId("icon")).toHaveClass("size-3");
     expect(button.className).toContain(
       "[&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
     );
+  });
+
+  it("applies icon button sizing to arrow icons with width-like icon names", () => {
+    render(
+      <Button size="icon-sm" aria-label="Jump to latest">
+        <IconArrowDown data-testid="icon" />
+      </Button>,
+    );
+
+    expect(screen.getByTestId("icon")).toHaveClass("size-3.5");
+  });
+
+  it("preserves explicit child icon class size on icon-only buttons", () => {
+    render(
+      <Button size="icon-sm" aria-label="Jump to latest">
+        <IconArrowDown data-testid="icon" className="size-4" />
+      </Button>,
+    );
+
+    expect(screen.getByTestId("icon")).toHaveClass("size-4");
+    expect(screen.getByTestId("icon")).not.toHaveClass("size-3.5");
   });
 
   it("keeps child icons and labels as one inline button row", () => {

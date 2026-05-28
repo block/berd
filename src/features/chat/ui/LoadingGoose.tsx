@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { motion, useReducedMotion } from "motion/react";
 import { Shimmer } from "@/shared/ui/ai-elements/shimmer";
+import { cn } from "@/shared/lib/cn";
 
 export type LoadingChatState =
   | "idle"
@@ -11,6 +12,7 @@ export type LoadingChatState =
 
 interface LoadingGooseProps {
   chatState?: LoadingChatState;
+  className?: string;
 }
 
 const LOADING_FADE_S = 0.45;
@@ -29,7 +31,10 @@ const MESSAGE_KEY_BY_STATE: Record<
   compacting: "compacting",
 };
 
-export function LoadingGoose({ chatState = "idle" }: LoadingGooseProps) {
+export function LoadingGoose({
+  chatState = "idle",
+  className,
+}: LoadingGooseProps) {
   const { t } = useTranslation("chat");
   const shouldReduceMotion = useReducedMotion();
   if (chatState === "idle") {
@@ -40,7 +45,10 @@ export function LoadingGoose({ chatState = "idle" }: LoadingGooseProps) {
 
   return (
     <motion.div
-      className="px-4"
+      className={cn(
+        "mb-3 flex min-h-4 items-center px-1 text-xs text-muted-foreground",
+        className,
+      )}
       role="status"
       aria-label={message}
       initial={{ opacity: 0 }}
@@ -48,25 +56,21 @@ export function LoadingGoose({ chatState = "idle" }: LoadingGooseProps) {
       exit={{ opacity: 0 }}
       transition={{ duration: shouldReduceMotion ? 0 : LOADING_FADE_S }}
     >
-      <div className="max-w-3xl mx-auto w-full">
-        <div className="py-2 text-xs text-muted-foreground">
-          {shouldReduceMotion ? (
-            <span>{message}</span>
-          ) : (
-            <Shimmer
-              as="span"
-              className="text-xs"
-              tone="soft"
-              delay={LOADING_SHIMMER_DELAY_S}
-              duration={LOADING_SHIMMER_S}
-              spread={LOADING_SHIMMER_SPREAD}
-              repeatDelay={LOADING_SHIMMER_REPEAT_DELAY_S}
-            >
-              {message}
-            </Shimmer>
-          )}
-        </div>
-      </div>
+      {shouldReduceMotion ? (
+        <span>{message}</span>
+      ) : (
+        <Shimmer
+          as="span"
+          className="text-xs"
+          tone="soft"
+          delay={LOADING_SHIMMER_DELAY_S}
+          duration={LOADING_SHIMMER_S}
+          spread={LOADING_SHIMMER_SPREAD}
+          repeatDelay={LOADING_SHIMMER_REPEAT_DELAY_S}
+        >
+          {message}
+        </Shimmer>
+      )}
     </motion.div>
   );
 }
