@@ -52,14 +52,14 @@ interface AgentDetailPageProps {
 }
 
 const CONTEXT_LABEL_CLASS =
-  "text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted";
+  "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const ACTION_BUTTON_CLASS =
   "size-9 rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
 const ACTION_ICON_CLASS = "size-3.5";
 const AVATAR_FIELD_INPUT_CLASS =
   "h-[42px] rounded-full border-0 bg-surface-agent-profile-control-bg px-4 text-[14px] leading-[15px] text-surface-agent-profile-fg shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-surface-agent-profile-fg-placeholder hover:shadow-agent-profile-input-hover focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-agent-profile-input-focus";
 const AVATAR_FIELD_LABEL_CLASS =
-  "text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted";
+  "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
   "min-h-[24rem] w-full overflow-y-auto rounded-card-chat bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
 
@@ -400,7 +400,7 @@ export function AgentDetailPage({
               <h2 id="agent-instructions" className={CONTEXT_LABEL_CLASS}>
                 {t("view.instructions")}
               </h2>
-              <span className="shrink-0 text-[10px] leading-3 text-surface-agent-profile-fg-faint">
+              <span className="shrink-0 text-xs leading-4 text-surface-agent-profile-fg-faint">
                 {t("common:labels.characterCount", {
                   count: persona.systemPrompt.length,
                 })}

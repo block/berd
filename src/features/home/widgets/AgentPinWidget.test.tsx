@@ -111,6 +111,7 @@ describe("AgentPinWidget", () => {
       "group-focus-within:opacity-100",
       "bg-card/90",
       "text-foreground",
+      "translate-y-2",
       "backdrop-blur-md",
     );
     expect(container.querySelector(media)).toBeInTheDocument();

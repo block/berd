@@ -19,7 +19,14 @@
     "ringAria": "Context: {{percent}}% used"
   },
   "errors": {
-    "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again."
+    "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
+    "voiceInputFailedTitle": "Voice dictation failed",
+    "voiceInputNoMicrophoneDescription": "Connect or select a microphone, then try voice dictation again.",
+    "voiceInputNoMicrophoneTitle": "No microphone found",
+    "voiceInputPermissionDescription": "Allow microphone access for Goose in System Settings, then try voice dictation again.",
+    "voiceInputPermissionTitle": "Microphone access is blocked",
+    "voiceInputUnavailableDescription": "Another app may be using your microphone, or macOS could not start recording. Close other recording apps and try again.",
+    "voiceInputUnavailableTitle": "Microphone is unavailable"
   },
   "contextPanel": {
     "actions": {
@@ -114,6 +121,7 @@
   },
   "input": {
     "ariaLabel": "Chat message input",
+    "agentBuilderPlaceholder": "Describe your agent.",
     "placeholder": "Chat with {{agent}} or @ to add an agent or skill"
   },
   "loading": {
@@ -166,6 +174,7 @@
     "placeholder": "Start a conversation"
   },
   "emptyState": {
+    "buildAgentPrompt": "What do you want your agent to do?",
     "startAConversation": "Start a conversation"
   },
   "skeleton": {

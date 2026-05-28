@@ -196,6 +196,7 @@ function starterStickyPlacementsNearAnchor(
 
 const HOME_MIN_ZOOM_BPS = 5_000;
 const HOME_MAX_ZOOM_BPS = 20_000;
+const WIDGET_TEXT_SCALE_MULTIPLIER = 1.08;
 
 function homeCanvasZoomConstraints(
   constraints: LayoutConstraints,
@@ -413,6 +414,7 @@ export function WidgetCanvas({
             size.width / defaultSize.width,
             size.height / defaultSize.height,
           );
+          const widgetTextScale = widgetScale * WIDGET_TEXT_SCALE_MULTIPLIER;
           const widgetStyle = {
             ...renderedWidgetStyle({
               position: renderPosition,
@@ -421,6 +423,7 @@ export function WidgetCanvas({
               zoom: viewport.zoom,
             }),
             "--widget-scale": widgetScale,
+            "--widget-text-scale": widgetTextScale,
           } as React.CSSProperties;
           return (
             // biome-ignore lint/a11y/noStaticElementInteractions: freeform widget node captures canvas drag gestures; WidgetFrame owns semantics.

@@ -9,6 +9,7 @@ import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Separator } from "@/shared/ui/separator";
+import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
 import {
   Sheet,
   SheetContent,
@@ -405,7 +406,8 @@ function SidebarGroupLabel({
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
       className={cn(
-        "text-sidebar-foreground/70 ring-ring flex h-8 shrink-0 items-center rounded-md px-2 text-xs outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        "text-sidebar-foreground/70 ring-ring flex h-8 shrink-0 items-center rounded-md px-2 leading-5 outline-hidden transition-[margin,opacity] duration-200 ease-linear focus-visible:ring-2 [&>svg]:size-4 [&>svg]:shrink-0",
+        SIDEBAR_GROUP_LABEL_TEXT_CLASS,
         "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
         className,
       )}

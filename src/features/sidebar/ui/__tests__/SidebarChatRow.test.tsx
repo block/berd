@@ -246,6 +246,27 @@ describe("SidebarChatRow", () => {
     ).toBeInTheDocument();
   });
 
+  it("does not show selection actions in the chat options menu", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        onSelectionChange={vi.fn()}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for idle chat/i }),
+    );
+
+    expect(
+      screen.queryByRole("menuitem", { name: /select idle chat/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("shows the unpin-from-home option for an already pinned chat", async () => {
     const user = userEvent.setup();
     useHomeWidgetStore.setState({

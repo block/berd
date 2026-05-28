@@ -278,6 +278,37 @@ describe("ChatInput", () => {
     expect(screen.getByText("No project")).toBeInTheDocument();
   });
 
+  it("shows project color swatches in the project selector menu", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        availableProjects={[
+          {
+            id: "project-1",
+            name: "goose2",
+            workingDirs: ["/Users/wesb/dev/goose2"],
+            icon: "tabler:folder-code",
+            color: "sage",
+          },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+
+    const swatch = document.querySelector(
+      '[data-project-color-swatch="project-1"]',
+    );
+    expect(swatch).toBeInTheDocument();
+    expect(swatch).toHaveClass("size-3", "rounded-[3px]");
+    expect(swatch).not.toHaveClass("ring-1");
+    expect(swatch).toHaveAttribute(
+      "style",
+      expect.stringContaining("--color-pill-sage"),
+    );
+  });
+
   it("shows no project in the toolbar when no project is selected", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(screen.getByText("No project")).toBeInTheDocument();

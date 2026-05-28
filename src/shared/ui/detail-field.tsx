@@ -34,7 +34,7 @@ export function DetailField({
       >
         <p
           className={cn(
-            "text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground",
+            "text-xs font-medium uppercase tracking-[0.12em] text-muted-foreground",
             labelClassName,
           )}
         >

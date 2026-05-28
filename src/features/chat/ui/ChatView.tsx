@@ -78,6 +78,8 @@ export function ChatView({
     controller.chatState === "compacting";
   const shouldShowLoadingIndicator =
     showIndicator && !controller.isLoadingHistory;
+  const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
+  const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
   let sendDisabledReason: string | undefined;
   if (effectiveSession?.creationState === "pending") {
     sendDisabledReason = t("toolbar.sessionStarting");
@@ -143,6 +145,11 @@ export function ChatView({
         <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput
             surface="bare"
+            placeholder={
+              isAgentBuilderSession
+                ? agentBuilderComposerPlaceholder
+                : undefined
+            }
             controls={
               effectiveSession?.intent === "build-agent"
                 ? {
@@ -220,7 +227,9 @@ export function ChatView({
   ) : (
     <div className="flex w-full flex-1 items-center justify-center px-6">
       <p className="text-3xl font-light text-foreground">
-        {t("emptyState.startAConversation")}
+        {isAgentBuilderSession
+          ? agentBuilderEmptyPrompt
+          : t("emptyState.startAConversation")}
       </p>
     </div>
   );

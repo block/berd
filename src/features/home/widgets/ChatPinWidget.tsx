@@ -11,6 +11,8 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { InlineMarkdownText } from "@/shared/ui/inline-markdown-text";
+import { cn } from "@/shared/lib/cn";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import type { WidgetRenderProps } from "./types";
@@ -59,25 +61,26 @@ export function ChatPinWidget({
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (session) onSelectSession?.(session.id);
   });
+  const isCompact = (instance.height ?? 80) <= 96;
 
   return (
     <button
       type="button"
       onClick={handleClick}
       aria-label={t("widgets.chatPin.openAria", { title })}
-      className="flex h-full w-full flex-col rounded-card-chat bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col overflow-hidden rounded-card-chat bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
       style={{
         padding: "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",
       }}
     >
       <span
-        className="flex min-w-0 items-start text-foreground"
+        className="flex min-w-0 shrink-0 items-start text-foreground"
         style={{
           gap: "clamp(0.4rem, calc(0.5rem * var(--widget-scale, 1)), 0.9rem)",
           fontSize:
-            "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+            "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.625rem)",
           lineHeight:
-            "clamp(1rem, calc(1.125rem * var(--widget-scale, 1)), 1.9rem)",
+            "clamp(1.05rem, calc(1.125rem * var(--widget-text-scale, var(--widget-scale, 1))), 2rem)",
         }}
       >
         <IconMessageCircle
@@ -90,14 +93,21 @@ export function ChatPinWidget({
               "clamp(0.85rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
           }}
         />
-        <span className="min-w-0 break-words line-clamp-2">{title}</span>
+        <InlineMarkdownText
+          className={cn(
+            "min-w-0",
+            isCompact ? "truncate" : "break-words line-clamp-2",
+          )}
+        >
+          {title}
+        </InlineMarkdownText>
       </span>
       <span
-        className="mt-auto flex min-w-0 items-center text-foreground/40"
+        className="mt-1 flex min-w-0 shrink-0 items-center overflow-hidden text-foreground/40"
         style={{
           gap: "clamp(0.3rem, calc(0.375rem * var(--widget-scale, 1)), 0.7rem)",
           fontSize:
-            "clamp(0.625rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+            "clamp(0.6875rem, calc(0.625rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.0625rem)",
         }}
       >
         {project ? (
@@ -118,7 +128,7 @@ export function ChatPinWidget({
             />
           </span>
         ) : null}
-        <span className="min-w-0 break-words line-clamp-2">{footerLabel}</span>
+        <span className="min-w-0 truncate">{footerLabel}</span>
       </span>
     </button>
   );

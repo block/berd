@@ -279,7 +279,13 @@ describe("useOpenAiRealtimeDictation", () => {
       });
 
       expect(result.current.isRecording).toBe(false);
-      expect(mockToastError).toHaveBeenCalledWith("mic denied");
+      expect(mockToastError).toHaveBeenCalledWith(
+        "Microphone access is blocked",
+        {
+          description:
+            "Allow microphone access for Goose in System Settings, then try voice dictation again.",
+        },
+      );
     });
 
     it("cleans up and toasts on session creation failure", async () => {
@@ -294,7 +300,9 @@ describe("useOpenAiRealtimeDictation", () => {
       });
 
       expect(result.current.isRecording).toBe(false);
-      expect(mockToastError).toHaveBeenCalledWith("session failed");
+      expect(mockToastError).toHaveBeenCalledWith("Voice dictation failed", {
+        description: "session failed",
+      });
       expect(mockTrack.stop).toHaveBeenCalled();
     });
 
@@ -310,7 +318,9 @@ describe("useOpenAiRealtimeDictation", () => {
       });
 
       expect(result.current.isRecording).toBe(false);
-      expect(mockToastError).toHaveBeenCalledWith("webrtc failed");
+      expect(mockToastError).toHaveBeenCalledWith("Voice dictation failed", {
+        description: "webrtc failed",
+      });
       expect(mockPeerConnection.close).toHaveBeenCalled();
       expect(mockAudioCapture.close).toHaveBeenCalled();
     });

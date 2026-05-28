@@ -529,7 +529,7 @@ export function AutomationDetailPage({
 
               <div className="space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-[10px] leading-3 font-normal text-muted-foreground">
+                  <h2 className="text-xs leading-4 font-medium text-muted-foreground">
                     {t("details.instructions")}
                   </h2>
                   {isEditingInstructions ? (

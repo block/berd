@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  CheckSquare,
   Mail,
   MailOpen,
   MoreHorizontal,
@@ -301,17 +300,6 @@ export function SidebarChatRow({
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem
-            onClick={() => {
-              onSelectionChange?.(id, !selected);
-            }}
-            disabled={selectionActionsDisabled}
-          >
-            <CheckSquare className="size-3.5" />
-            {t(selected ? "actions.deselectChat" : "actions.selectChat", {
-              title: displayTitle,
-            })}
-          </DropdownMenuItem>
           <DropdownMenuItem onClick={startRename}>
             <Pencil className="size-3.5" />
             {t("common:actions.rename")}

@@ -13,6 +13,7 @@ import {
   getOutputSummary,
 } from "@/features/automations/lib/automationFormatting";
 import { cn } from "@/shared/lib/cn";
+import { InlineMarkdownText } from "@/shared/ui/inline-markdown-text";
 
 function statusDotClass(status: string | number | undefined) {
   const normalized = String(status ?? "").toLowerCase();
@@ -94,9 +95,9 @@ export function ExpandableHistoryRow({
                 aria-hidden="true"
               />
             </span>
-            <span className="line-clamp-2 text-sm text-muted-foreground">
+            <InlineMarkdownText className="line-clamp-2 text-sm text-muted-foreground">
               {summary ?? result.sessionId ?? t("history.noSessionId")}
-            </span>
+            </InlineMarkdownText>
             {showAutomationTitle ? (
               <span className="text-xs text-muted-foreground">
                 {statusLabel}

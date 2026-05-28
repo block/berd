@@ -293,4 +293,29 @@ describe("ChatView MCP app messaging", () => {
     });
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
   });
+
+  it("uses agent-building copy for empty builder sessions", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+    });
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    expect(screen.getByText("emptyState.buildAgentPrompt")).toBeTruthy();
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      placeholder?: string;
+    };
+    expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
+  });
 });

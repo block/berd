@@ -43,6 +43,7 @@ import { ContextualTip } from "@/shared/ui/contextual-tip";
 export function ChatInput({
   composerActions,
   initialValue = "",
+  placeholder,
   onDraftChange,
   selectedSkills: selectedSkillsProp,
   onSkillsChange,
@@ -452,6 +453,7 @@ export function ChatInput({
     agentDisplayName,
     scopedControls.voice && dictation.isRecording,
     scopedControls.voice && dictation.isTranscribing,
+    placeholder,
   );
   const agentToolsTip = useMemo(
     () =>

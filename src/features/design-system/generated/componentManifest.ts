@@ -1381,6 +1381,16 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [],
   },
   {
+    name: "Inline Markdown Text",
+    source: "src/shared/ui/inline-markdown-text.tsx",
+    exports: ["InlineMarkdownText"],
+    slots: [],
+    cva: [],
+    tokenClasses: ["bg-muted"],
+    stateClasses: [],
+    sourceTokenClasses: ["bg-muted"],
+  },
+  {
     name: "Input Group",
     source: "src/shared/ui/input-group.tsx",
     exports: [

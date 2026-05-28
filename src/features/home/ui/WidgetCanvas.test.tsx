@@ -25,6 +25,7 @@ const HOME_WIDGET_NODE_SELECTOR = `[${HOME_WIDGET_NODE_ATTR}]`;
 const mocks = vi.hoisted(() => ({
   saveCamera: vi.fn(),
   getAutomationTiles: vi.fn(),
+  getAutomationTile: vi.fn(),
   loadMoreSessions: vi.fn(),
   hasMoreSessions: false,
   isLoadingMoreSessions: false,
@@ -135,6 +136,7 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
 
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: mocks.getAutomationTiles,
+  getAutomationTile: mocks.getAutomationTile,
 }));
 
 vi.mock("@/features/projects/stores/projectStore", () => ({
@@ -325,6 +327,7 @@ describe("WidgetCanvas", () => {
         },
       ],
     });
+    mocks.getAutomationTile.mockResolvedValue({});
     HTMLElement.prototype.setPointerCapture = vi.fn();
     HTMLElement.prototype.releasePointerCapture = vi.fn();
   });
@@ -402,6 +405,9 @@ describe("WidgetCanvas", () => {
     expect(widgetNode.style.top).toBe("63px");
     expect(widgetNode.style.width).toBe("300px");
     expect(widgetNode.style.height).toBe("300px");
+    expect(widgetNode.style.getPropertyValue("--widget-text-scale")).toBe(
+      "1.08",
+    );
     expect(widgetContent.style.transform).toBe("scale(1.25)");
     expect(widgetContent.style.transformOrigin).toBe("top left");
     expect(widgetContent.style.width).toBe("240px");
@@ -1120,6 +1126,36 @@ describe("WidgetCanvas", () => {
     expect(screen.getByText(/Alpha Project/)).toBeVisible();
   });
 
+  it("clips minimized chat pins and renders markdown titles", () => {
+    const originalSession = mocks.sessions[0];
+    mocks.sessions[0] = {
+      ...originalSession,
+      title: "**Find Claude Code Session file**",
+    };
+
+    try {
+      renderCanvas({
+        instances: [
+          chatWidget({
+            state: { sessionId: "session-1" },
+            width: 188,
+            height: 72,
+          }),
+        ],
+      });
+
+      const emphasizedTitle = screen.getByText("Find Claude Code Session file");
+      expect(emphasizedTitle.tagName).toBe("STRONG");
+      expect(screen.queryByText(/\*\*Find Claude Code Session file\*\*/)).toBe(
+        null,
+      );
+      expect(emphasizedTitle.closest("button")).toHaveClass("overflow-hidden");
+      expect(screen.getByText(/Alpha Project/)).toHaveClass("truncate");
+    } finally {
+      mocks.sessions[0] = originalSession;
+    }
+  });
+
   it("adds a project artifact pin with the selected project id", async () => {
     const user = userEvent.setup();
     const addWidget = vi.fn();
@@ -1187,6 +1223,37 @@ describe("WidgetCanvas", () => {
       { automationId: "automation-1" },
       expect.objectContaining({ maxItems: 100 }),
     );
+  });
+
+  it("renders automation widget output with inline markdown formatting", async () => {
+    mocks.getAutomationTiles.mockResolvedValue({
+      tiles: [
+        {
+          id: "automation-1",
+          title: "Daily Bird Poem",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          lastSuccessAt: "2026-05-20T12:00:00.000Z",
+          latestRenderedData: {
+            summary: "Today's poem features the **Great Blue Heron**.",
+          },
+        },
+      ],
+    });
+
+    renderCanvas({
+      instances: [
+        widget({
+          id: "automation-widget",
+          type: "automationOutputPin",
+          width: 244,
+          height: 213,
+        }),
+      ],
+    });
+
+    const emphasizedText = await screen.findByText("Great Blue Heron");
+    expect(emphasizedText.tagName).toBe("STRONG");
+    expect(screen.queryByText(/\*\*Great Blue Heron\*\*/)).toBeNull();
   });
 
   it("keeps loaded automations cached across panel switches", async () => {

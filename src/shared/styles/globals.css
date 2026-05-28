@@ -1309,19 +1309,19 @@ code[data-streamdown="inline-code"],
 
 .gallery-card-enter,
 .agents-gallery-card-enter {
-  animation: agents-gallery-card-enter 0.48s cubic-bezier(0.16, 1, 0.3, 1) both;
-  filter: blur(18px);
+  animation: agents-gallery-card-enter 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  filter: blur(12px);
   opacity: 0;
-  transform: scale(0.95);
+  transform: scale(0.97);
   transform-origin: center;
   will-change: filter, opacity, transform;
 }
 
 @keyframes agents-gallery-card-enter {
   from {
-    filter: blur(18px);
+    filter: blur(12px);
     opacity: 0;
-    transform: scale(0.95);
+    transform: scale(0.97);
   }
   to {
     filter: blur(0);

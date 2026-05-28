@@ -8,6 +8,8 @@ import type { Persona } from "@/shared/types/agents";
 import { PersonaCard } from "@/features/agents/ui/PersonaCard";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
 
+const GALLERY_CARD_STAGGER_MS = 55;
+
 interface PersonaGalleryProps {
   personas: Persona[];
   activePersonaId?: string;
@@ -171,7 +173,9 @@ export function PersonaGallery({
         <div
           key={persona.id}
           className="agents-gallery-card-enter"
-          style={{ animationDelay: `${(index + 1) * 115}ms` }}
+          style={{
+            animationDelay: `${(index + 1) * GALLERY_CARD_STAGGER_MS}ms`,
+          }}
         >
           <PersonaCard
             persona={persona}

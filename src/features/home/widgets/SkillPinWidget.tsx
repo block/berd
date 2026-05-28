@@ -196,9 +196,9 @@ export const SkillPinWidget = memo(function SkillPinWidget({
           className="max-w-full truncate"
           style={{
             fontSize:
-              "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.75rem)",
+              "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.875rem)",
             lineHeight:
-              "clamp(1.125rem, calc(1.25rem * var(--widget-scale, 1)), 2.25rem)",
+              "clamp(1.2rem, calc(1.25rem * var(--widget-text-scale, var(--widget-scale, 1))), 2.375rem)",
           }}
         >
           {label}

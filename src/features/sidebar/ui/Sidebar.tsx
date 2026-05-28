@@ -499,7 +499,7 @@ export function Sidebar({
       )}
       style={{ width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-chrome border border-sidebar-border/80 bg-sidebar backdrop-blur-md">
+      <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
         <div
           className={cn(
             "flex-shrink-0",

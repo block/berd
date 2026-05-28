@@ -107,6 +107,7 @@ export interface ChatInputControls {
 export interface ChatInputProps {
   composerActions: ChatInputComposerActions;
   initialValue?: string;
+  placeholder?: string;
   onDraftChange?: (text: string) => void;
   selectedSkills?: ChatSkillDraft[];
   onSkillsChange?: (skills: ChatSkillDraft[]) => void;

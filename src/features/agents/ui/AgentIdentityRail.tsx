@@ -52,7 +52,7 @@ export function AgentIdentityRail({
           <dl className="grid gap-3 border-y border-surface-agent-profile-border py-4">
             {metadata.map((item) => (
               <div key={item.label} className="min-w-0 space-y-1">
-                <dt className="text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted">
+                <dt className="text-xs leading-4 font-medium text-surface-agent-profile-fg-muted">
                   {item.label}
                 </dt>
                 <dd

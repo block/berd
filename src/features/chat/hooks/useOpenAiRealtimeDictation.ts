@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   createOpenAiRealtimeSession,
@@ -20,6 +21,11 @@ interface UseOpenAiRealtimeDictationOptions {
   disabled?: boolean;
   onRecordingStart?: () => void;
   onTranscriptText: (text: string) => void;
+}
+
+interface DictationErrorToast {
+  description?: string;
+  title: string;
 }
 
 const LOGGED_REALTIME_EVENT_TYPES = new Set([
@@ -45,6 +51,57 @@ function getErrorMessage(error: unknown) {
   }
 }
 
+function getErrorName(error: unknown) {
+  return error instanceof Error ? error.name : "";
+}
+
+function formatDictationStartErrorToast(
+  error: unknown,
+  t: ReturnType<typeof useTranslation<"chat">>["t"],
+): DictationErrorToast {
+  const errorName = getErrorName(error);
+  const message = getErrorMessage(error);
+
+  if (
+    errorName === "NotAllowedError" ||
+    errorName === "PermissionDeniedError" ||
+    errorName === "SecurityError" ||
+    /not allowed|denied|permission/i.test(message)
+  ) {
+    return {
+      title: t("errors.voiceInputPermissionTitle"),
+      description: t("errors.voiceInputPermissionDescription"),
+    };
+  }
+
+  if (
+    errorName === "NotFoundError" ||
+    errorName === "DevicesNotFoundError" ||
+    /no microphone|no audio input|requested device not found/i.test(message)
+  ) {
+    return {
+      title: t("errors.voiceInputNoMicrophoneTitle"),
+      description: t("errors.voiceInputNoMicrophoneDescription"),
+    };
+  }
+
+  if (
+    errorName === "NotReadableError" ||
+    errorName === "TrackStartError" ||
+    errorName === "AbortError"
+  ) {
+    return {
+      title: t("errors.voiceInputUnavailableTitle"),
+      description: t("errors.voiceInputUnavailableDescription"),
+    };
+  }
+
+  return {
+    title: t("errors.voiceInputFailedTitle"),
+    description: message || undefined,
+  };
+}
+
 function closeRealtimeResources(resources: {
   audioCapture?: AudioBufferCapture | null;
   dataChannel?: RTCDataChannel | null;
@@ -64,6 +121,7 @@ export function useOpenAiRealtimeDictation({
   onRecordingStart,
   onTranscriptText,
 }: UseOpenAiRealtimeDictationOptions) {
+  const { t } = useTranslation("chat");
   const [isRecording, setIsRecording] = useState(false);
   const [isStarting, setIsStarting] = useState(false);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -309,16 +367,18 @@ export function useOpenAiRealtimeDictation({
         streamRef.current = null;
         setIsRecording(false);
         setIsTranscribing(false);
-        const message = getErrorMessage(error);
+        const toastContent = formatDictationStartErrorToast(error, t);
         console.error("OpenAI realtime voice input failed", error);
-        toast.error(message || "Voice input failed");
+        toast.error(toastContent.title, {
+          description: toastContent.description,
+        });
       }
     } finally {
       if (!isStaleRun()) {
         setIsStarting(false);
       }
     }
-  }, [handleRealtimeEvent, isEnabled, isRecording, isStarting]);
+  }, [handleRealtimeEvent, isEnabled, isRecording, isStarting, t]);
 
   const stopRecording = useCallback(() => {
     cleanup();

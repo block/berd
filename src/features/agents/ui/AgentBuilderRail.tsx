@@ -216,6 +216,8 @@ export function AgentBuilderRail({
   const nameFieldValue =
     data && !isPlaceholderAgentName(data.name) ? data.name : "";
   const contentFieldValue = data?.content ?? "";
+  const isPlaceholderContent = contentFieldValue === PLACEHOLDER_AGENT_BODY;
+  const instructionsFieldValue = isPlaceholderContent ? "" : contentFieldValue;
   const providerRequired = provider.trim().length > 0;
   const modelRequired = model.trim().length > 0;
   const avatarRequired = Boolean(effectiveAvatar);
@@ -529,11 +531,17 @@ export function AgentBuilderRail({
       />
 
       <label className="block text-sm" htmlFor="builder-rail-instructions">
-        <span className={FIELD_LABEL_CLASS}>{t("editor.systemPrompt")}</span>
+        <span className={FIELD_LABEL_CLASS}>
+          {t("builderRail.instructionsLabel")}
+        </span>
         <Textarea
           id="builder-rail-instructions"
-          value={data.content}
-          placeholder={t("builderRail.instructionsPlaceholder")}
+          value={instructionsFieldValue}
+          placeholder={
+            isPlaceholderContent
+              ? PLACEHOLDER_AGENT_BODY
+              : t("builderRail.instructionsPlaceholder")
+          }
           onChange={(event) => update({ content: event.target.value })}
           rows={8}
           className={cn(FIELD_CLASS, "min-h-32 resize-y")}

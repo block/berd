@@ -149,13 +149,25 @@ describe("AgentBuilderRail", () => {
         targetAgentSlug="draft-1"
       />,
     );
-    fireEvent.change(
-      screen.getByLabelText(/what do you want this agent to do/i),
-      {
-        target: { value: "Be snarky." },
-      },
-    );
+    fireEvent.change(screen.getByLabelText(/agent instructions/i), {
+      target: { value: "Be snarky." },
+    });
     expect(update).toHaveBeenCalledWith({ content: "Be snarky." });
+  });
+
+  it("renders the placeholder draft body as muted placeholder text", () => {
+    mockHook();
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+      />,
+    );
+
+    const textarea = screen.getByLabelText(/agent instructions/i);
+    expect(textarea).toHaveValue("");
+    expect(textarea).toHaveAttribute("placeholder", "Draft in progress.");
   });
 
   it("does not render the custom avatar URL field", () => {

@@ -208,7 +208,9 @@ describe("Sidebar", () => {
       projectId: "project-1",
     });
 
-    renderSidebar({ projects: [mockProject()] });
+    const { container } = renderSidebar({
+      projects: [mockProject({ color: "sage" })],
+    });
 
     expect(
       screen.queryByRole("button", { name: "Create a project" }),
@@ -217,6 +219,14 @@ describe("Sidebar", () => {
       screen.getByRole("button", { name: "Start a chat" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Project One")).toBeInTheDocument();
+    const swatch = container.querySelector(
+      '[data-project-color-swatch="project-1"]',
+    );
+    expect(swatch).toBeInTheDocument();
+    expect(swatch).toHaveAttribute(
+      "style",
+      expect.stringContaining("--color-pill-sage"),
+    );
   });
 
   it("expands loaded project chats from the view more chats control", async () => {

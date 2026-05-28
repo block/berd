@@ -7,6 +7,8 @@ import type { SkillInfo } from "../api/skills";
 import { compareSkillsByName } from "../lib/skillsHelpers";
 import { SkillCard } from "./SkillCard";
 
+const GALLERY_CARD_STAGGER_MS = 55;
+
 interface SkillsGridProps {
   skills: SkillInfo[];
   isLoading?: boolean;
@@ -68,7 +70,7 @@ export function SkillsGrid({
         onClick={onCreateSkill}
         aria-label={t("view.newSkill")}
         className={cn(
-          "gallery-card-enter group flex h-full w-full items-center justify-center rounded-tile border border-transparent p-4",
+          "gallery-card-enter group flex h-full min-h-[12.5rem] w-full items-center justify-center rounded-tile border border-transparent p-4",
           "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
           "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
@@ -79,8 +81,10 @@ export function SkillsGrid({
       {sorted.map((skill, index) => (
         <div
           key={skill.id}
-          className="gallery-card-enter"
-          style={{ animationDelay: `${(index + 1) * 115}ms` }}
+          className="gallery-card-enter h-full"
+          style={{
+            animationDelay: `${(index + 1) * GALLERY_CARD_STAGGER_MS}ms`,
+          }}
         >
           <SkillCard
             skill={skill}

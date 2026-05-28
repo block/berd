@@ -216,6 +216,27 @@ describe("AutomationsView", () => {
     expect(screen.getByText("Revenue was up.")).toBeInTheDocument();
   });
 
+  it("renders markdown emphasis in overview summaries", async () => {
+    vi.mocked(getAutomationTiles).mockResolvedValue({
+      tiles: [
+        {
+          id: "automation-1",
+          title: "Daily bird poem",
+          latestRunStatus: "TILE_RUN_STATUS_SUCCESS",
+          latestRenderedData: {
+            summary: "Today's poem features the **Great Blue Heron**.",
+          },
+        },
+      ],
+    });
+
+    renderAutomationsView();
+
+    const emphasizedText = await screen.findByText("Great Blue Heron");
+    expect(emphasizedText.tagName).toBe("STRONG");
+    expect(screen.queryByText(/\*\*Great Blue Heron\*\*/)).toBeNull();
+  });
+
   it("opens automation details from the overview", async () => {
     const user = userEvent.setup();
     renderAutomationsView();

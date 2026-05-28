@@ -18,8 +18,10 @@ export function getChatInputPlaceholder(
   agent: string,
   isRecording: boolean,
   isTranscribing: boolean,
+  override?: string,
 ): string {
   if (isRecording) return t("toolbar.voiceInputRecording");
   if (isTranscribing) return t("toolbar.voiceInputTranscribing");
+  if (override) return override;
   return t("input.placeholder", { agent });
 }

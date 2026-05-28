@@ -31,7 +31,7 @@ interface SkillDetailPageProps {
 }
 
 const INSTRUCTIONS_LABEL_CLASS =
-  "text-[10px] leading-3 font-normal text-surface-agent-profile-fg-muted";
+  "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
   "min-h-[24rem] w-full overflow-y-auto rounded-card-chat bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
 const ACTION_BUTTON_CLASS =

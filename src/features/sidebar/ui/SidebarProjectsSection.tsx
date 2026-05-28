@@ -4,6 +4,7 @@ import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
@@ -50,8 +51,10 @@ interface SidebarProjectsSectionProps {
   onToggleRecentsSection: () => void;
 }
 
-const SECTION_HEADER_TEXT_CLASS =
-  "text-[10px] font-light text-muted-foreground";
+const SECTION_HEADER_TEXT_CLASS = cn(
+  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+  "text-muted-foreground",
+);
 
 export function SidebarProjectsSection({
   projects,

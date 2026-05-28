@@ -11,6 +11,7 @@ import {
 } from "@/features/automations/lib/automationFormatting";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { InlineMarkdownText } from "@/shared/ui/inline-markdown-text";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import type { WidgetRenderProps } from "./types";
 
@@ -175,9 +176,9 @@ export function AutomationOutputWidget({
           className="truncate text-foreground"
           style={{
             fontSize:
-              "clamp(0.8125rem, calc(0.875rem * var(--widget-scale, 1)), 1.5rem)",
+              "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.625rem)",
             lineHeight:
-              "clamp(0.95rem, calc(0.9375rem * var(--widget-scale, 1)), 1.6rem)",
+              "clamp(1rem, calc(0.9375rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.7rem)",
           }}
         >
           {title}
@@ -187,7 +188,7 @@ export function AutomationOutputWidget({
           style={{
             gap: "clamp(0.3rem, calc(0.375rem * var(--widget-scale, 1)), 0.7rem)",
             fontSize:
-              "clamp(0.625rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
+              "clamp(0.6875rem, calc(0.625rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.0625rem)",
           }}
         >
           <span
@@ -219,22 +220,22 @@ export function AutomationOutputWidget({
         }}
       >
         {outputSummary ? (
-          <p
-            className="text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]"
+          <InlineMarkdownText
+            className="block text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]"
             style={{
               fontSize:
-                "clamp(0.75rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+                "clamp(0.8125rem, calc(0.75rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.375rem)",
               lineHeight: "1.4",
             }}
           >
             {outputSummary}
-          </p>
+          </InlineMarkdownText>
         ) : (
           <p
             className="italic text-muted-foreground"
             style={{
               fontSize:
-                "clamp(0.75rem, calc(0.75rem * var(--widget-scale, 1)), 1.25rem)",
+                "clamp(0.8125rem, calc(0.75rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.375rem)",
             }}
           >
             {t("widgets.automationOutputPin.noOutput")}

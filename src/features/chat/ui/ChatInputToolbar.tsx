@@ -254,7 +254,12 @@ export function ChatInputToolbar({
             value={selectedProjectId ?? NO_PROJECT_VALUE}
             triggerLabel={projectLabel}
             triggerTitle={projectTitle}
-            icon={<ProjectSelectorIcon icon={selectedProject?.icon} />}
+            icon={
+              <ProjectSelectorIcon
+                color={selectedProject?.color}
+                projectId={selectedProject?.id}
+              />
+            }
             triggerVariant="toolbar"
             triggerSize="sm"
             menuLabel={t("toolbar.chooseProject")}
@@ -274,7 +279,12 @@ export function ChatInputToolbar({
                     description: project.workingDirs.length
                       ? project.workingDirs.join(", ")
                       : undefined,
-                    icon: <ProjectSelectorIcon icon={project.icon} />,
+                    icon: (
+                      <ProjectSelectorIcon
+                        color={project.color}
+                        projectId={project.id}
+                      />
+                    ),
                   })),
                 ],
               },

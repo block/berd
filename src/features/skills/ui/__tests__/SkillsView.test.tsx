@@ -261,8 +261,8 @@ describe("SkillsView", () => {
       ".gallery-card-enter",
     );
     expect(revealItems).toHaveLength(mockSkills.length + 1);
-    expect(revealItems[1]).toHaveStyle({ animationDelay: "115ms" });
-    expect(revealItems[2]).toHaveStyle({ animationDelay: "230ms" });
+    expect(revealItems[1]).toHaveStyle({ animationDelay: "55ms" });
+    expect(revealItems[2]).toHaveStyle({ animationDelay: "110ms" });
   });
 
   it("filters skills with page-local search", async () => {

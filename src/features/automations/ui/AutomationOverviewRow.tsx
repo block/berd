@@ -10,6 +10,7 @@ import {
   latestRunTimestampFromTile,
 } from "@/features/automations/lib/automationFormatting";
 import { cn } from "@/shared/lib/cn";
+import { InlineMarkdownText } from "@/shared/ui/inline-markdown-text";
 
 function activityDotClass(status: string | number | undefined) {
   const normalized = String(status ?? "").toLowerCase();
@@ -119,9 +120,9 @@ export function AutomationOverviewRow({
         </span>
 
         {latestResultSummary ? (
-          <span className="mt-2 block truncate text-sm text-muted-foreground">
+          <InlineMarkdownText className="mt-2 block truncate text-sm text-muted-foreground">
             {latestResultSummary}
-          </span>
+          </InlineMarkdownText>
         ) : null}
 
         <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
