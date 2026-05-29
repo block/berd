@@ -1,5 +1,12 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { useTheme } from "@/shared/theme/ThemeProvider";
+import { buttonVariants } from "@/shared/ui/button";
+
+const toastActionButtonClassName = buttonVariants({
+  size: "xxs",
+  className:
+    "!rounded-full !bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:!ring-2 focus-visible:!ring-ring",
+});
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { isDark } = useTheme();
@@ -27,6 +34,9 @@ const Toaster = ({ ...props }: ToasterProps) => {
           backdropFilter: "var(--backdrop-composer-glass)",
           boxShadow: "var(--shadow-popover)",
           WebkitBackdropFilter: "var(--backdrop-composer-glass)",
+        },
+        classNames: {
+          actionButton: toastActionButtonClassName,
         },
       }}
       {...props}

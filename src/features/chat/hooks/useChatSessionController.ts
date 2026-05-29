@@ -19,6 +19,7 @@ import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/provi
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import {
   composeSystemPrompt,
+  formatPersonaSystemPrompt,
   resolveProjectDefaultArtifactRoot,
 } from "@/features/projects/lib/chatProjectContext";
 import { setStoredModelPreference } from "../lib/modelPreferences";
@@ -302,8 +303,11 @@ export function useChatSessionController({
   }, [activeWorkspace?.branch, activeWorkspace?.path]);
   const effectiveSystemPrompt = useMemo(
     () =>
-      composeSystemPrompt(selectedPersona?.systemPrompt, workingContextPrompt),
-    [selectedPersona?.systemPrompt, workingContextPrompt],
+      composeSystemPrompt(
+        formatPersonaSystemPrompt(selectedPersona),
+        workingContextPrompt,
+      ),
+    [selectedPersona, workingContextPrompt],
   );
 
   const prepareCurrentSession = useCallback(

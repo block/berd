@@ -527,7 +527,7 @@ describe("ChatInput", () => {
     expect(input).toHaveValue("");
   });
 
-  it("selecting an @mention creates a sticky assistant chip and completes the mention text", async () => {
+  it("selecting a persona @mention creates a sticky assistant chip and removes the mention text", async () => {
     const user = userEvent.setup();
     render(<StatefulChatInput />);
 
@@ -535,7 +535,7 @@ describe("ChatInput", () => {
     await user.type(input, "@Rev");
     await user.click(screen.getByRole("option", { name: /reviewer/i }));
 
-    expect(input).toHaveValue("@Reviewer ");
+    expect(input).toHaveValue("");
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
@@ -713,11 +713,7 @@ describe("ChatInput", () => {
     await user.type(input, "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith(
-      "@Reviewer hello",
-      "reviewer",
-      undefined,
-    );
+    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined);
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 });

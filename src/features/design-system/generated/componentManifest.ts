@@ -2481,7 +2481,11 @@ export const designSystemComponentManifest = [
     slots: [],
     cva: [],
     tokenClasses: [],
-    stateClasses: [],
+    stateClasses: [
+      "focus-visible:!ring-2",
+      "focus-visible:!ring-ring",
+      "hover:!bg-primary/90",
+    ],
     sourceTokenClasses: [],
   },
   {

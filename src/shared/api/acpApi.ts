@@ -191,6 +191,32 @@ export async function updateWorkingDir(
   });
 }
 
+export async function setSessionSystemPrompt(
+  sessionId: string,
+  text: string,
+): Promise<void> {
+  const client = await getClient();
+  await client.extMethod("_goose/unstable/session/system-prompt/set", {
+    sessionId,
+    mode: "set",
+    text,
+  });
+}
+
+export async function appendSessionSystemPrompt(
+  sessionId: string,
+  key: string,
+  text: string,
+): Promise<void> {
+  const client = await getClient();
+  await client.extMethod("_goose/unstable/session/system-prompt/set", {
+    sessionId,
+    mode: "append",
+    key,
+    text,
+  });
+}
+
 export async function updateSessionProject(
   sessionId: string,
   projectId: string | null,

@@ -82,6 +82,28 @@ function replaceMentionQuery(
   };
 }
 
+function removeMentionQuery(
+  text: string,
+  mentionStartIndex: number,
+  mentionQuery: string,
+) {
+  const before = text.slice(0, mentionStartIndex);
+  const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
+  const needsSpace =
+    before.length > 0 &&
+    after.length > 0 &&
+    !/\s$/.test(before) &&
+    !/^\s/.test(after) &&
+    !/^[.,!?;:)]/.test(after);
+  const separator = needsSpace ? " " : "";
+  const newText = `${before}${separator}${after}`;
+
+  return {
+    newText,
+    cursorPosition: before.length + separator.length,
+  };
+}
+
 /**
  * Combines persona + skill + file mention detection, filtering, and selection handlers.
  * Keeps ChatInput under the file-size limit by centralising mention logic.
@@ -246,11 +268,10 @@ export function useMentionHandlers({
 
   const handlePersonaMentionSelect = useCallback(
     (persona: Persona) => {
-      const { newText, cursorPosition } = replaceMentionQuery(
+      const { newText, cursorPosition } = removeMentionQuery(
         text,
         mentionStartIndex,
         mentionQuery,
-        persona.displayName,
       );
       pendingCursorRef.current = cursorPosition;
       setText(newText);

@@ -1,5 +1,6 @@
 import type { ProjectInfo } from "../api/projects";
 import { resolvePath } from "@/shared/api/pathResolver";
+import type { Persona } from "@/shared/types/agents";
 
 export interface ProjectFolderOption {
   id: string;
@@ -55,6 +56,28 @@ export function getProjectFolderOption(
     name: getProjectFolderName(d),
     path: d,
   }));
+}
+
+export function formatPersonaSystemPrompt(
+  persona:
+    | Pick<Persona, "id" | "displayName" | "systemPrompt">
+    | null
+    | undefined,
+): string | undefined {
+  const instructions = trimValue(persona?.systemPrompt);
+  if (!persona || !instructions) {
+    return undefined;
+  }
+
+  return `<active-persona>
+Your current name and identity in this conversation is "${persona.displayName}". If the user asks who you are, answer as "${persona.displayName}", not as Goose.
+
+Use the persona instructions below as active system-level guidance for your behavior, tone, and defaults. Do not treat the persona name as a user command, mention, delegation request, or subagent invocation.
+
+Persona id: ${persona.id}
+Persona instructions:
+${instructions}
+</active-persona>`;
 }
 
 export function composeSystemPrompt(

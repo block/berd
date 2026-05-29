@@ -88,14 +88,13 @@ export async function acpSendMessage(
     throw new Error("Session not prepared. Call acpPrepareSession first.");
   }
 
+  await directAcp.appendSessionSystemPrompt(
+    sessionId,
+    "client_system_prompt",
+    systemPrompt?.trim() ? systemPrompt : "",
+  );
+
   const content: ContentBlock[] = [];
-  if (systemPrompt?.trim()) {
-    content.push({
-      type: "text",
-      text: systemPrompt,
-      annotations: { audience: ["assistant"] },
-    });
-  }
   if (assistantPrompt?.trim()) {
     content.push({
       type: "text",

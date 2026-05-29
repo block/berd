@@ -4,10 +4,14 @@ const mockLoadSession = vi.fn();
 const mockNewSession = vi.fn();
 const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
+const mockPrompt = vi.fn();
+const mockAppendSessionSystemPrompt = vi.fn();
 
 vi.mock("../acpApi", () => ({
   listProviders: vi.fn(),
-  prompt: vi.fn(),
+  prompt: (...args: unknown[]) => mockPrompt(...args),
+  appendSessionSystemPrompt: (...args: unknown[]) =>
+    mockAppendSessionSystemPrompt(...args),
   setModel: (...args: unknown[]) => mockSetModel(...args),
   setProvider: (...args: unknown[]) => mockSetProvider(...args),
   listSessions: vi.fn(),
@@ -27,6 +31,47 @@ vi.mock("../acpNotificationHandler", () => ({
 vi.mock("../sessionSearch", () => ({
   searchSessionsViaExports: vi.fn(),
 }));
+
+describe("acpSendMessage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("updates the session system prompt before sending only user-visible prompt content", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-1",
+      "goose",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-1", "hello", {
+      systemPrompt: "You are Starfriend.",
+      assistantPrompt: "Use these skills for this request: goose-help.",
+    });
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledWith(
+      "acp-session-1",
+      "client_system_prompt",
+      "You are Starfriend.",
+    );
+    expect(mockPrompt).toHaveBeenCalledWith(
+      "acp-session-1",
+      [
+        {
+          type: "text",
+          text: "Use these skills for this request: goose-help.",
+          annotations: { audience: ["assistant"] },
+        },
+        { type: "text", text: "hello" },
+      ],
+      undefined,
+    );
+  });
+});
 
 describe("acpLoadSession", () => {
   beforeEach(() => {
