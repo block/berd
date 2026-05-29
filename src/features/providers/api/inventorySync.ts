@@ -2,7 +2,12 @@ import type {
   ProviderInventoryEntryDto,
   RefreshProviderInventoryResponseUnstable as RefreshProviderInventoryResponse,
 } from "@aaif/goose-sdk";
-import { getProviderInventory, refreshProviderInventory } from "./inventory";
+import {
+  getProviderInventory,
+  refreshProviderInventory,
+  type GetProviderInventoryOptions,
+  type RawSupportedModelsCache,
+} from "./inventory";
 
 export const INVENTORY_POLL_DELAYS_MS = [250, 500, 750, 1000, 1500, 2000];
 
@@ -13,6 +18,8 @@ interface SyncProviderInventoryOptions {
   getInventory?: GetProviderInventory;
   refreshInventory?: RefreshProviderInventory;
   initialRefresh?: RefreshProviderInventoryResponse;
+  rawSupportedModelsCache?: RawSupportedModelsCache;
+  rawSupportedModelsProviderIds?: ReadonlySet<string>;
   onEntries?: (entries: ProviderInventoryEntryDto[]) => void;
   sleep?: (ms: number) => Promise<void>;
 }
@@ -59,6 +66,8 @@ export async function syncProviderInventory(
     getInventory = getProviderInventory,
     refreshInventory = refreshProviderInventory,
     initialRefresh,
+    rawSupportedModelsCache = new Map(),
+    rawSupportedModelsProviderIds,
     onEntries,
     sleep = defaultSleep,
   }: SyncProviderInventoryOptions = {},
@@ -70,7 +79,17 @@ export async function syncProviderInventory(
     ...refresh.started,
     ...skippedProviderIds(refresh),
   ]);
-  const immediateEntries = await getInventory(immediateProviderIds);
+  const inventoryOptions: GetProviderInventoryOptions = {
+    rawSupportedModelsCache,
+  };
+  if (rawSupportedModelsProviderIds) {
+    inventoryOptions.rawSupportedModelsProviderIds =
+      rawSupportedModelsProviderIds;
+  }
+  const immediateEntries = await getInventory(
+    immediateProviderIds,
+    inventoryOptions,
+  );
   mergeEntries(entriesByProviderId, immediateEntries);
   onEntries?.(immediateEntries);
 
@@ -93,7 +112,7 @@ export async function syncProviderInventory(
 
   for (const delayMs of INVENTORY_POLL_DELAYS_MS) {
     await sleep(delayMs);
-    const entries = await getInventory(polledProviderIds);
+    const entries = await getInventory(polledProviderIds, inventoryOptions);
     mergeEntries(entriesByProviderId, entries);
     onEntries?.(entries);
     if (entries.every((entry) => !entry.refreshing)) {

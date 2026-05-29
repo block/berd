@@ -111,6 +111,9 @@ export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
       const agents = getAgentProvidersFromEntries(catalogEntries);
       const entries = await getProviderInventory(
         providersWithInventory(agents),
+        {
+          includeRawSupportedModels: false,
+        },
       );
       const nextInventoryEntries = new Map(
         useProviderInventoryStore.getState().entries,

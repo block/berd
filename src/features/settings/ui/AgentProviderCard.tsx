@@ -171,7 +171,9 @@ export function AgentProviderCard({
 
   const refreshInstallStatusFromInventory =
     useCallback(async (): Promise<boolean> => {
-      const entries = await getProviderInventory([provider.id]);
+      const entries = await getProviderInventory([provider.id], {
+        includeRawSupportedModels: false,
+      });
       if (!isMountedRef.current) return false;
       mergeInventoryEntries(entries);
       const inventoryEntry = entries.find(

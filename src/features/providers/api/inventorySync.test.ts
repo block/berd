@@ -50,17 +50,23 @@ describe("syncProviderInventory", () => {
     getInventory
       .mockResolvedValueOnce([inventoryEntry("anthropic", true)])
       .mockResolvedValueOnce([inventoryEntry("anthropic", false)]);
+    const rawSupportedModelsProviderIds = new Set(["anthropic"]);
 
     const result = await syncProviderInventory(["anthropic"], {
       getInventory,
       refreshInventory,
+      rawSupportedModelsProviderIds,
       onEntries,
       sleep,
     });
 
     expect(refreshInventory).toHaveBeenCalledWith(["anthropic"]);
-    expect(getInventory).toHaveBeenNthCalledWith(1, ["anthropic"]);
-    expect(getInventory).toHaveBeenNthCalledWith(2, ["anthropic"]);
+    const firstOptions = getInventory.mock.calls[0]?.[1];
+    expect(firstOptions).toEqual({
+      rawSupportedModelsCache: expect.any(Map),
+      rawSupportedModelsProviderIds,
+    });
+    expect(getInventory.mock.calls[1]?.[1]).toBe(firstOptions);
     expect(sleep).toHaveBeenCalledTimes(1);
     expect(sleep).toHaveBeenCalledWith(INVENTORY_POLL_DELAYS_MS[0]);
     expect(onEntries).toHaveBeenCalledTimes(2);
@@ -83,7 +89,9 @@ describe("syncProviderInventory", () => {
     });
 
     expect(refreshInventory).not.toHaveBeenCalled();
-    expect(getInventory).toHaveBeenCalledWith(["anthropic"]);
+    expect(getInventory).toHaveBeenCalledWith(["anthropic"], {
+      rawSupportedModelsCache: expect.any(Map),
+    });
     expect(result.refresh).toBe(initialRefresh);
     expect(result.settled).toBe(true);
   });
@@ -109,7 +117,9 @@ describe("syncProviderInventory", () => {
     });
 
     expect(result.polledProviderIds).toEqual(["anthropic"]);
-    expect(getInventory).toHaveBeenNthCalledWith(2, ["anthropic"]);
+    expect(getInventory).toHaveBeenNthCalledWith(2, ["anthropic"], {
+      rawSupportedModelsCache: expect.any(Map),
+    });
     expect(result.settled).toBe(true);
   });
 

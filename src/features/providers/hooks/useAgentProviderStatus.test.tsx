@@ -122,10 +122,10 @@ describe("useAgentProviderStatus", () => {
       await result.current.refresh();
     });
 
-    expect(getProviderInventory).toHaveBeenCalledWith([
-      "claude-acp",
-      "amp-acp",
-    ]);
+    expect(getProviderInventory).toHaveBeenCalledWith(
+      ["claude-acp", "amp-acp"],
+      { includeRawSupportedModels: false },
+    );
     expect(result.current.readyAgentIds.has("goose")).toBe(true);
     expect(result.current.readyAgentIds.has("claude-acp")).toBe(false);
     expect(result.current.readyAgentIds.has("amp-acp")).toBe(true);

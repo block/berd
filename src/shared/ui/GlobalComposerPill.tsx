@@ -34,7 +34,10 @@ import type {
   ModelOption,
 } from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { getProviderInventory } from "@/features/providers/api/inventory";
+import {
+  getProviderInventory,
+  getSupportedRawModelProviderIds,
+} from "@/features/providers/api/inventory";
 import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
@@ -444,7 +447,9 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     let cancelled = false;
     void (async () => {
       try {
-        const entries = await getProviderInventory();
+        const entries = await getProviderInventory(undefined, {
+          rawSupportedModelsProviderIds: getSupportedRawModelProviderIds(),
+        });
         if (!cancelled) {
           mergeInventoryEntries(entries);
         }

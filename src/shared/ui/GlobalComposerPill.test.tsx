@@ -64,6 +64,7 @@ vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
 
 vi.mock("@/features/providers/api/inventory", () => ({
   getProviderInventory: vi.fn().mockResolvedValue([]),
+  getSupportedRawModelProviderIds: vi.fn(() => new Set()),
 }));
 
 vi.mock("@/shared/api/acpConnection", () => ({

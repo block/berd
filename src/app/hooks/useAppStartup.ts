@@ -162,15 +162,24 @@ export function useAppStartup() {
         }
       };
 
+      const rawSupportedModelsCache = new Map<
+        string,
+        Promise<string[] | null>
+      >();
+
       const loadProvidersAndInventory = async () => {
         const t0 = performance.now();
         store.setProvidersLoading(true);
         inventoryStore.setLoading(true);
         try {
-          const { getProviderInventory } = await import(
-            "@/features/providers/api/inventory"
-          );
-          const entries = await getProviderInventory();
+          const { getProviderInventory, getSupportedRawModelProviderIds } =
+            await import("@/features/providers/api/inventory");
+          const rawSupportedModelsProviderIds =
+            getSupportedRawModelProviderIds();
+          const entries = await getProviderInventory(undefined, {
+            rawSupportedModelsCache,
+            rawSupportedModelsProviderIds,
+          });
 
           // Populate inventory store
           inventoryStore.setEntries(entries);
@@ -204,13 +213,15 @@ export function useAppStartup() {
         );
       };
 
-      // Catalog loading has its own fallback/error state and should not block
-      // sessions, personas, or configured provider inventory during startup.
-      void loadProviderCatalog();
+      // Catalog loading has its own fallback/error state. Inventory waits for it
+      // so raw model hydration can stay inside the supported provider set.
+      const providerCatalogLoad = loadProviderCatalog();
 
       await loadDistroBundle();
 
-      const providersAndInventoryLoad = loadProvidersAndInventory();
+      const providersAndInventoryLoad = providerCatalogLoad.then(
+        loadProvidersAndInventory,
+      );
 
       await Promise.allSettled([
         loadPersonas(),
@@ -221,10 +232,17 @@ export function useAppStartup() {
       // provider list is available.
       void providersAndInventoryLoad.then(async (entries) => {
         try {
-          const { backgroundRefreshInventory } = await import(
-            "@/features/providers/api/inventory"
-          );
-          await backgroundRefreshInventory(inventoryStore, entries);
+          const {
+            backgroundRefreshInventory,
+            getSupportedInventoryRefreshProviderIds,
+            getSupportedRawModelProviderIds,
+          } = await import("@/features/providers/api/inventory");
+          await backgroundRefreshInventory(inventoryStore, {
+            initialEntries: entries,
+            rawSupportedModelsCache,
+            rawSupportedModelsProviderIds: getSupportedRawModelProviderIds(),
+            refreshProviderIds: getSupportedInventoryRefreshProviderIds(),
+          });
         } catch (err) {
           console.error(
             "Failed to refresh provider inventory on startup:",

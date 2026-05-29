@@ -124,7 +124,9 @@ describe("AgentProviderCard", () => {
     await user.click(screen.getByRole("button", { name: /install claude/i }));
 
     await waitFor(() => {
-      expect(getProviderInventory).toHaveBeenCalledWith(["claude-acp"]);
+      expect(getProviderInventory).toHaveBeenCalledWith(["claude-acp"], {
+        includeRawSupportedModels: false,
+      });
     });
     expect(checkAgentInstalled).not.toHaveBeenCalled();
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
