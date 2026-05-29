@@ -162,11 +162,6 @@ export function useAppStartup() {
         }
       };
 
-      const rawSupportedModelsCache = new Map<
-        string,
-        Promise<string[] | null>
-      >();
-
       const loadProvidersAndInventory = async () => {
         const t0 = performance.now();
         store.setProvidersLoading(true);
@@ -177,7 +172,6 @@ export function useAppStartup() {
           const rawSupportedModelsProviderIds =
             getSupportedRawModelProviderIds();
           const entries = await getProviderInventory(undefined, {
-            rawSupportedModelsCache,
             rawSupportedModelsProviderIds,
           });
 
@@ -239,7 +233,6 @@ export function useAppStartup() {
           } = await import("@/features/providers/api/inventory");
           await backgroundRefreshInventory(inventoryStore, {
             initialEntries: entries,
-            rawSupportedModelsCache,
             rawSupportedModelsProviderIds: getSupportedRawModelProviderIds(),
             refreshProviderIds: getSupportedInventoryRefreshProviderIds(),
           });

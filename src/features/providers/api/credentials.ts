@@ -5,6 +5,7 @@ import type {
 } from "@aaif/goose-sdk";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 import { getClient } from "@/shared/api/acpConnection";
+import { clearRawSupportedModelsCache } from "./inventory";
 
 export type ProviderStatus = ProviderConfigStatusDto;
 export type ProviderFieldSaveInput = ProviderConfigFieldUpdate;
@@ -24,21 +25,34 @@ export async function saveProviderConfig(
   fields: ProviderFieldSaveInput[],
 ): Promise<ProviderConfigChangeResponse> {
   const client = await getClient();
-  return client.goose.GooseUnstableProvidersConfigSave({ providerId, fields });
+  const response = await client.goose.GooseUnstableProvidersConfigSave({
+    providerId,
+    fields,
+  });
+  clearRawSupportedModelsCache([providerId]);
+  return response;
 }
 
 export async function authenticateProviderConfig(
   providerId: string,
 ): Promise<ProviderConfigChangeResponse> {
   const client = await getClient();
-  return client.goose.GooseUnstableProvidersConfigAuthenticate({ providerId });
+  const response = await client.goose.GooseUnstableProvidersConfigAuthenticate({
+    providerId,
+  });
+  clearRawSupportedModelsCache([providerId]);
+  return response;
 }
 
 export async function deleteProviderConfig(
   providerId: string,
 ): Promise<ProviderConfigChangeResponse> {
   const client = await getClient();
-  return client.goose.GooseUnstableProvidersConfigDelete({ providerId });
+  const response = await client.goose.GooseUnstableProvidersConfigDelete({
+    providerId,
+  });
+  clearRawSupportedModelsCache([providerId]);
+  return response;
 }
 
 export async function checkAllProviderStatus(): Promise<ProviderStatus[]> {

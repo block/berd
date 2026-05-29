@@ -1,7 +1,9 @@
 import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  RAW_SUPPORTED_MODELS_CACHE_TTL_MS,
   backgroundRefreshInventory,
+  clearRawSupportedModelsCache,
   fetchProviderSupportedModels,
   getProviderInventory,
 } from "./inventory";
@@ -17,6 +19,11 @@ vi.mock("@/shared/api/acpConnection", () => ({
     goose: mockClient,
   })),
 }));
+
+beforeEach(() => {
+  clearRawSupportedModelsCache();
+  vi.useRealTimers();
+});
 
 function providerEntry(
   overrides: Partial<ProviderInventoryEntryDto>,
@@ -37,6 +44,26 @@ function providerEntry(
     stale: false,
     ...overrides,
   };
+}
+
+function mockConfiguredInventory(providerId = "databricks_v2") {
+  mockClient.GooseUnstableProvidersList.mockResolvedValue({
+    entries: [
+      providerEntry({
+        providerId,
+        providerName: providerId,
+        configured: true,
+        models: [],
+      }),
+    ],
+  });
+}
+
+function mockSupportedModels(...models: string[]) {
+  mockClient.GooseUnstableProvidersSupportedModelsList.mockResolvedValue({
+    providerId: "databricks_v2",
+    models,
+  });
 }
 
 describe("backgroundRefreshInventory", () => {
@@ -306,7 +333,6 @@ describe("getProviderInventory", () => {
 
   it("caches raw supported model failures as null for the shared cache", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const cache = new Map<string, Promise<string[] | null>>();
     mockClient.GooseUnstableProvidersList.mockResolvedValue({
       entries: [
         providerEntry({
@@ -321,12 +347,8 @@ describe("getProviderInventory", () => {
       new Error("supported-models endpoint not implemented"),
     );
 
-    const firstEntries = await getProviderInventory(undefined, {
-      rawSupportedModelsCache: cache,
-    });
-    const secondEntries = await getProviderInventory(undefined, {
-      rawSupportedModelsCache: cache,
-    });
+    const firstEntries = await getProviderInventory();
+    const secondEntries = await getProviderInventory();
 
     expect(
       mockClient.GooseUnstableProvidersSupportedModelsList,
@@ -337,5 +359,40 @@ describe("getProviderInventory", () => {
     ]);
     expect(secondEntries[0]?.models).toEqual(firstEntries[0]?.models);
     warn.mockRestore();
+  });
+
+  it("reuses raw supported models within five minutes and refetches after expiry", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-05-29T12:00:00.000Z"));
+    mockConfiguredInventory();
+    mockSupportedModels("claude-opus-4-8");
+
+    await getProviderInventory();
+    await getProviderInventory();
+    expect(
+      mockClient.GooseUnstableProvidersSupportedModelsList,
+    ).toHaveBeenCalledTimes(1);
+
+    vi.setSystemTime(
+      new Date(Date.now() + RAW_SUPPORTED_MODELS_CACHE_TTL_MS + 1),
+    );
+    await getProviderInventory();
+
+    expect(
+      mockClient.GooseUnstableProvidersSupportedModelsList,
+    ).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears requested providers from the shared raw supported model cache", async () => {
+    mockConfiguredInventory();
+    mockSupportedModels("claude-opus-4-8");
+
+    await getProviderInventory();
+    clearRawSupportedModelsCache(["databricks_v2"]);
+    await getProviderInventory();
+
+    expect(
+      mockClient.GooseUnstableProvidersSupportedModelsList,
+    ).toHaveBeenCalledTimes(2);
   });
 });

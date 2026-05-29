@@ -66,7 +66,7 @@ export async function syncProviderInventory(
     getInventory = getProviderInventory,
     refreshInventory = refreshProviderInventory,
     initialRefresh,
-    rawSupportedModelsCache = new Map(),
+    rawSupportedModelsCache,
     rawSupportedModelsProviderIds,
     onEntries,
     sleep = defaultSleep,
@@ -79,9 +79,10 @@ export async function syncProviderInventory(
     ...refresh.started,
     ...skippedProviderIds(refresh),
   ]);
-  const inventoryOptions: GetProviderInventoryOptions = {
-    rawSupportedModelsCache,
-  };
+  const inventoryOptions: GetProviderInventoryOptions = {};
+  if (rawSupportedModelsCache) {
+    inventoryOptions.rawSupportedModelsCache = rawSupportedModelsCache;
+  }
   if (rawSupportedModelsProviderIds) {
     inventoryOptions.rawSupportedModelsProviderIds =
       rawSupportedModelsProviderIds;

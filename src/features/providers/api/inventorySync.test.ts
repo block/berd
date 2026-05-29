@@ -63,7 +63,6 @@ describe("syncProviderInventory", () => {
     expect(refreshInventory).toHaveBeenCalledWith(["anthropic"]);
     const firstOptions = getInventory.mock.calls[0]?.[1];
     expect(firstOptions).toEqual({
-      rawSupportedModelsCache: expect.any(Map),
       rawSupportedModelsProviderIds,
     });
     expect(getInventory.mock.calls[1]?.[1]).toBe(firstOptions);
@@ -89,9 +88,7 @@ describe("syncProviderInventory", () => {
     });
 
     expect(refreshInventory).not.toHaveBeenCalled();
-    expect(getInventory).toHaveBeenCalledWith(["anthropic"], {
-      rawSupportedModelsCache: expect.any(Map),
-    });
+    expect(getInventory).toHaveBeenCalledWith(["anthropic"], {});
     expect(result.refresh).toBe(initialRefresh);
     expect(result.settled).toBe(true);
   });
@@ -117,9 +114,7 @@ describe("syncProviderInventory", () => {
     });
 
     expect(result.polledProviderIds).toEqual(["anthropic"]);
-    expect(getInventory).toHaveBeenNthCalledWith(2, ["anthropic"], {
-      rawSupportedModelsCache: expect.any(Map),
-    });
+    expect(getInventory).toHaveBeenNthCalledWith(2, ["anthropic"], {});
     expect(result.settled).toBe(true);
   });
 

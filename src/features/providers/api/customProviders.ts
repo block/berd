@@ -11,6 +11,7 @@ import type {
   CustomProviderFormat,
   CustomProviderUpsertRequest,
 } from "../lib/customProviderTypes";
+import { clearRawSupportedModelsCache } from "./inventory";
 
 async function getProviderClient() {
   const client = await getClient();
@@ -41,7 +42,9 @@ export async function createCustomProvider(
   input: CustomProviderUpsertRequest,
 ): Promise<CustomProviderCreateResponse> {
   const client = await getProviderClient();
-  return client.GooseUnstableProvidersCustomCreate(input);
+  const response = await client.GooseUnstableProvidersCustomCreate(input);
+  clearRawSupportedModelsCache([response.providerId]);
+  return response;
 }
 
 export async function readCustomProvider(
@@ -56,12 +59,21 @@ export async function updateCustomProvider(
   input: CustomProviderUpsertRequest,
 ): Promise<CustomProviderUpdateResponse> {
   const client = await getProviderClient();
-  return client.GooseUnstableProvidersCustomUpdate({ ...input, providerId });
+  const response = await client.GooseUnstableProvidersCustomUpdate({
+    ...input,
+    providerId,
+  });
+  clearRawSupportedModelsCache([providerId]);
+  return response;
 }
 
 export async function deleteCustomProvider(
   providerId: string,
 ): Promise<CustomProviderDeleteResponse> {
   const client = await getProviderClient();
-  return client.GooseUnstableProvidersCustomDelete({ providerId });
+  const response = await client.GooseUnstableProvidersCustomDelete({
+    providerId,
+  });
+  clearRawSupportedModelsCache([providerId]);
+  return response;
 }

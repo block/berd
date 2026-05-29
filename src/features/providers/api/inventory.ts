@@ -14,7 +14,16 @@ import {
 } from "../providerCatalog";
 import { useProviderCatalogStore } from "../stores/providerCatalogStore";
 
-export type RawSupportedModelsCache = Map<string, Promise<string[] | null>>;
+interface RawSupportedModelsCacheEntry {
+  promise: Promise<string[] | null>;
+  expiresAtMs: number;
+}
+
+export type RawSupportedModelsCache = Map<string, RawSupportedModelsCacheEntry>;
+
+export const RAW_SUPPORTED_MODELS_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const defaultRawSupportedModelsCache: RawSupportedModelsCache = new Map();
 
 export interface GetProviderInventoryOptions {
   includeRawSupportedModels?: boolean;
@@ -54,8 +63,13 @@ function fetchRawSupportedModelsCached(
   providerId: string,
   cache?: RawSupportedModelsCache,
 ): Promise<string[] | null> {
-  const cached = cache?.get(providerId);
-  if (cached) return cached;
+  const activeCache = cache ?? defaultRawSupportedModelsCache;
+  const now = Date.now();
+  const cached = activeCache.get(providerId);
+  if (cached) {
+    if (cached.expiresAtMs > now) return cached.promise;
+    activeCache.delete(providerId);
+  }
 
   const rawModels = fetchProviderSupportedModels(providerId).catch((err) => {
     console.warn(
@@ -64,8 +78,24 @@ function fetchRawSupportedModelsCached(
     );
     return null;
   });
-  cache?.set(providerId, rawModels);
+  activeCache.set(providerId, {
+    promise: rawModels,
+    expiresAtMs: now + RAW_SUPPORTED_MODELS_CACHE_TTL_MS,
+  });
   return rawModels;
+}
+
+export function clearRawSupportedModelsCache(
+  providerIds?: Iterable<string>,
+): void {
+  if (!providerIds) {
+    defaultRawSupportedModelsCache.clear();
+    return;
+  }
+
+  for (const providerId of providerIds) {
+    defaultRawSupportedModelsCache.delete(providerId);
+  }
 }
 
 async function mergeRawSupportedModels(
@@ -173,17 +203,21 @@ export async function backgroundRefreshInventory(
   },
   {
     initialEntries,
-    rawSupportedModelsCache = new Map(),
+    rawSupportedModelsCache,
     rawSupportedModelsProviderIds = getSupportedRawModelProviderIds(),
     refreshProviderIds = getSupportedInventoryRefreshProviderIds(),
   }: BackgroundRefreshInventoryOptions = {},
 ): Promise<void> {
+  const inventoryOptions: GetProviderInventoryOptions = {
+    rawSupportedModelsProviderIds,
+  };
+  if (rawSupportedModelsCache) {
+    inventoryOptions.rawSupportedModelsCache = rawSupportedModelsCache;
+  }
+
   const entries = initialEntries?.length
     ? initialEntries
-    : await getProviderInventory(undefined, {
-        rawSupportedModelsCache,
-        rawSupportedModelsProviderIds,
-      });
+    : await getProviderInventory(undefined, inventoryOptions);
 
   if (!initialEntries?.length) {
     inventoryStore.mergeEntries(entries);
@@ -206,8 +240,7 @@ export async function backgroundRefreshInventory(
   const { syncProviderInventory } = await import("./inventorySync");
   await syncProviderInventory(configuredProviderIds, {
     initialRefresh: refresh,
-    rawSupportedModelsCache,
-    rawSupportedModelsProviderIds,
+    ...inventoryOptions,
     onEntries: (entries) => inventoryStore.mergeEntries(entries),
   });
 }
