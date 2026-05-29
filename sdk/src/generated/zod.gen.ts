@@ -81,6 +81,31 @@ export const zUpdateWorkingDirRequestUnstable = z.object({
 });
 
 /**
+ * How a session system prompt update should be applied.
+ */
+export const zSessionSystemPromptMode = z.union([
+    z.literal('set'),
+    z.literal('append')
+]);
+
+/**
+ * Set, append, or clear system prompt text for a session.
+ *
+ * `mode: "set"` replaces Goose's base system prompt. `mode: "append"` adds an
+ * instruction under "Additional Instructions". Reusing a key replaces the
+ * previous value for that mode/key; sending empty text clears it.
+ */
+export const zSetSessionSystemPromptRequestUnstable = z.object({
+    sessionId: z.string(),
+    mode: zSessionSystemPromptMode.optional().default('append'),
+    key: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    text: z.string()
+});
+
+/**
  * Delete a session.
  */
 export const zDeleteSessionRequest = z.object({
@@ -215,6 +240,18 @@ export const zProviderInventoryEntryDto = z.object({
  */
 export const zListProvidersResponseUnstable = z.object({
     entries: z.array(zProviderInventoryEntryDto)
+});
+
+/**
+ * List the raw model identifiers returned by a provider's live supported-models API.
+ */
+export const zProviderSupportedModelsListRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zProviderSupportedModelsListResponseUnstable = z.object({
+    providerId: z.string(),
+    models: z.array(z.string())
 });
 
 /**
@@ -1062,6 +1099,7 @@ export const zExtRequest = z.object({
             zGooseToolCallRequestUnstable,
             zReadResourceRequestUnstable,
             zUpdateWorkingDirRequestUnstable,
+            zSetSessionSystemPromptRequestUnstable,
             zDeleteSessionRequest,
             zGetExtensionsRequestUnstable,
             zAddConfigExtensionRequestUnstable,
@@ -1069,6 +1107,7 @@ export const zExtRequest = z.object({
             zToggleConfigExtensionRequestUnstable,
             zGetSessionExtensionsRequestUnstable,
             zListProvidersRequestUnstable,
+            zProviderSupportedModelsListRequestUnstable,
             zProviderCatalogListRequestUnstable,
             zProviderSetupCatalogListRequestUnstable,
             zProviderCatalogTemplateRequestUnstable,
@@ -1131,6 +1170,7 @@ export const zExtResponse = z.union([
                 zGetExtensionsResponseUnstable,
                 zGetSessionExtensionsResponseUnstable,
                 zListProvidersResponseUnstable,
+                zProviderSupportedModelsListResponseUnstable,
                 zProviderCatalogListResponseUnstable,
                 zProviderSetupCatalogListResponseUnstable,
                 zProviderCatalogTemplateResponseUnstable,

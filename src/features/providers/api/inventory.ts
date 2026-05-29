@@ -1,9 +1,47 @@
 import type {
   ProviderInventoryEntryDto,
+  ProviderInventoryModelDto,
   RefreshProviderInventoryResponseUnstable as RefreshProviderInventoryResponse,
 } from "@aaif/goose-sdk";
 import { getClient } from "@/shared/api/acpConnection";
 import { perfLog } from "@/shared/lib/perfLog";
+import { humanizeRawModelId } from "../lib/humanizeModelId";
+
+export async function fetchProviderSupportedModels(
+  providerId: string,
+): Promise<string[]> {
+  const client = await getClient();
+  const t0 = performance.now();
+  const response = await client.goose.GooseUnstableProvidersSupportedModelsList(
+    { providerId },
+  );
+  perfLog(
+    `[perf:inventory] fetchProviderSupportedModels done in ${(performance.now() - t0).toFixed(1)}ms providerId=${providerId} (n=${response.models.length})`,
+  );
+  return response.models;
+}
+
+async function mergeRawSupportedModels(
+  entry: ProviderInventoryEntryDto,
+): Promise<ProviderInventoryEntryDto> {
+  if (!entry.configured) return entry;
+  let rawIds: string[];
+  try {
+    rawIds = await fetchProviderSupportedModels(entry.providerId);
+  } catch (err) {
+    console.warn(
+      `[inventory] fetchProviderSupportedModels failed for providerId=${entry.providerId}:`,
+      err,
+    );
+    return entry;
+  }
+  const existingIds = new Set(entry.models.map((m) => m.id));
+  const additions: ProviderInventoryModelDto[] = rawIds
+    .filter((id) => !existingIds.has(id))
+    .map((id) => ({ id, name: humanizeRawModelId(id), recommended: false }));
+  if (additions.length === 0) return entry;
+  return { ...entry, models: [...entry.models, ...additions] };
+}
 
 export async function getProviderInventory(
   providerIds: string[] = [],
@@ -16,7 +54,7 @@ export async function getProviderInventory(
   perfLog(
     `[perf:inventory] getProviderInventory done in ${(performance.now() - t0).toFixed(1)}ms (n=${response.entries.length})`,
   );
-  return response.entries;
+  return Promise.all(response.entries.map(mergeRawSupportedModels));
 }
 
 export async function refreshProviderInventory(

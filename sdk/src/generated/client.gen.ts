@@ -82,6 +82,8 @@ import type {
   ProviderConfigStatusResponseUnstable,
   ProviderSetupCatalogListRequestUnstable,
   ProviderSetupCatalogListResponseUnstable,
+  ProviderSupportedModelsListRequestUnstable,
+  ProviderSupportedModelsListResponseUnstable,
   ReadResourceRequestUnstable,
   ReadResourceResponseUnstable,
   RefreshProviderInventoryRequestUnstable,
@@ -89,6 +91,7 @@ import type {
   RemoveConfigExtensionRequestUnstable,
   RemoveExtensionRequestUnstable,
   RenameSessionRequestUnstable,
+  SetSessionSystemPromptRequestUnstable,
   ToggleConfigExtensionRequestUnstable,
   UnarchiveSessionRequestUnstable,
   UpdateSessionProjectRequestUnstable,
@@ -126,6 +129,7 @@ import {
   zProviderConfigReadResponseUnstable,
   zProviderConfigStatusResponseUnstable,
   zProviderSetupCatalogListResponseUnstable,
+  zProviderSupportedModelsListResponseUnstable,
   zReadResourceResponseUnstable,
   zRefreshProviderInventoryResponseUnstable,
   zUpdateSourceResponseUnstable,
@@ -182,6 +186,15 @@ export class GooseExtClient {
   ): Promise<void> {
     await this.conn.extMethod(
       "_goose/unstable/session/working-dir/update",
+      params,
+    );
+  }
+
+  async GooseUnstableSessionSystemPromptSet(
+    params: SetSessionSystemPromptRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/session/system-prompt/set",
       params,
     );
   }
@@ -248,6 +261,18 @@ export class GooseExtClient {
     return zListProvidersResponseUnstable.parse(
       raw,
     ) as ListProvidersResponseUnstable;
+  }
+
+  async GooseUnstableProvidersSupportedModelsList(
+    params: ProviderSupportedModelsListRequestUnstable,
+  ): Promise<ProviderSupportedModelsListResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/providers/supported-models/list",
+      params,
+    );
+    return zProviderSupportedModelsListResponseUnstable.parse(
+      raw,
+    ) as ProviderSupportedModelsListResponseUnstable;
   }
 
   async GooseUnstableProvidersCatalogList(

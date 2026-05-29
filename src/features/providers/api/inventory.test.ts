@@ -1,10 +1,15 @@
 import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { backgroundRefreshInventory } from "./inventory";
+import {
+  backgroundRefreshInventory,
+  fetchProviderSupportedModels,
+  getProviderInventory,
+} from "./inventory";
 
 const mockClient = vi.hoisted(() => ({
   GooseUnstableProvidersList: vi.fn(),
   GooseUnstableProvidersInventoryRefresh: vi.fn(),
+  GooseUnstableProvidersSupportedModelsList: vi.fn(),
 }));
 
 vi.mock("@/shared/api/acpConnection", () => ({
@@ -37,6 +42,10 @@ function providerEntry(
 describe("backgroundRefreshInventory", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockClient.GooseUnstableProvidersSupportedModelsList.mockResolvedValue({
+      providerId: "",
+      models: [],
+    });
   });
 
   it("merges fetched inventory before returning when no providers are configured", async () => {
@@ -100,5 +109,111 @@ describe("backgroundRefreshInventory", () => {
     ).toHaveBeenCalledWith({
       providerIds: ["openai"],
     });
+  });
+});
+
+describe("fetchProviderSupportedModels", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("returns the raw model IDs from the ACP response", async () => {
+    mockClient.GooseUnstableProvidersSupportedModelsList.mockResolvedValue({
+      providerId: "databricks_v2",
+      models: ["claude-opus-4-8", "goose-claude-opus-4-7"],
+    });
+
+    const models = await fetchProviderSupportedModels("databricks_v2");
+
+    expect(models).toEqual(["claude-opus-4-8", "goose-claude-opus-4-7"]);
+    expect(
+      mockClient.GooseUnstableProvidersSupportedModelsList,
+    ).toHaveBeenCalledWith({ providerId: "databricks_v2" });
+  });
+});
+
+describe("getProviderInventory", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("appends raw supported model IDs not already present in the recommended list", async () => {
+    mockClient.GooseUnstableProvidersList.mockResolvedValue({
+      entries: [
+        providerEntry({
+          providerId: "databricks_v2",
+          providerName: "Databricks AI Gateway",
+          configured: true,
+          models: [
+            {
+              id: "goose-claude-opus-4-7",
+              name: "Claude Opus 4.7",
+              recommended: true,
+              contextLimit: 200000,
+            },
+          ],
+        }),
+      ],
+    });
+    mockClient.GooseUnstableProvidersSupportedModelsList.mockResolvedValue({
+      providerId: "databricks_v2",
+      models: ["goose-claude-opus-4-7", "claude-opus-4-8"],
+    });
+
+    const entries = await getProviderInventory();
+
+    expect(entries[0]?.models).toEqual([
+      {
+        id: "goose-claude-opus-4-7",
+        name: "Claude Opus 4.7",
+        recommended: true,
+        contextLimit: 200000,
+      },
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8", recommended: false },
+    ]);
+  });
+
+  it("skips the raw fetch for providers that are not configured", async () => {
+    mockClient.GooseUnstableProvidersList.mockResolvedValue({
+      entries: [
+        providerEntry({
+          providerId: "anthropic",
+          providerName: "Anthropic",
+          configured: false,
+        }),
+      ],
+    });
+
+    const entries = await getProviderInventory();
+
+    expect(
+      mockClient.GooseUnstableProvidersSupportedModelsList,
+    ).not.toHaveBeenCalled();
+    expect(entries[0]?.models).toEqual([]);
+  });
+
+  it("falls back to the recommended list when the raw fetch fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockClient.GooseUnstableProvidersList.mockResolvedValue({
+      entries: [
+        providerEntry({
+          providerId: "databricks_v2",
+          providerName: "Databricks AI Gateway",
+          configured: true,
+          models: [{ id: "goose-claude-opus-4-7", name: "Claude Opus 4.7" }],
+        }),
+      ],
+    });
+    mockClient.GooseUnstableProvidersSupportedModelsList.mockRejectedValue(
+      new Error("supported-models endpoint not implemented"),
+    );
+
+    const entries = await getProviderInventory();
+
+    expect(entries[0]?.models).toEqual([
+      { id: "goose-claude-opus-4-7", name: "Claude Opus 4.7" },
+    ]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
