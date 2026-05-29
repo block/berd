@@ -597,7 +597,13 @@ function PanelStageOne({
           key={category}
           type="button"
           onClick={() => onSelectCategory(category)}
-          className="rounded-pill bg-popover-inverse px-4 py-2 text-sm text-popover-inverse-foreground transition-opacity hover:opacity-70 disabled:opacity-50"
+          className={cn(
+            "rounded-pill bg-popover-inverse px-4 py-2 text-sm text-popover-inverse-foreground",
+            "transition-[transform,background-color,opacity] duration-200 ease-out",
+            "hover:scale-[1.03] hover:bg-popover-inverse/85",
+            "active:scale-[0.97] active:duration-75",
+            "disabled:opacity-50",
+          )}
         >
           {getSectionLabel(category)}
         </button>

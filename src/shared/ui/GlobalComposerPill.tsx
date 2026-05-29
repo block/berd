@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   IconArrowUp,
   IconCheck,
@@ -73,6 +80,8 @@ interface ModelGroup {
 }
 
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
+
+const TEXTAREA_MAX_HEIGHT_PX = 200;
 
 function compareLabels(left: string, right: string) {
   return left.localeCompare(right, undefined, { sensitivity: "base" });
@@ -204,6 +213,17 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   const personas = useAgentStore(selectPersonas);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+
+  const resizeTextarea = useCallback(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
+  }, []);
+
+  useLayoutEffect(() => {
+    resizeTextarea();
+  });
   const {
     attachments,
     addBrowserFiles,
@@ -650,7 +670,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
               }}
               onPaste={handlePaste}
               placeholder={effectivePlaceholder}
-              className="focus-override h-10 flex-1 resize-none appearance-none overflow-hidden border-0 bg-transparent py-2.5 text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
+              className="focus-override min-h-10 max-h-[200px] flex-1 resize-none appearance-none overflow-y-auto scrollbar-none border-0 bg-transparent py-2.5 text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
             />
           </PopoverAnchor>
           <MentionAutocomplete
@@ -675,8 +695,10 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
         <div
           aria-hidden={expanded}
           className={cn(
-            "flex shrink-0 items-center gap-2 transition-opacity duration-150",
-            expanded && "pointer-events-none opacity-0",
+            "flex shrink-0 items-center gap-2 overflow-hidden transition-[max-width,opacity,margin-left] duration-150 ease-out",
+            expanded
+              ? "pointer-events-none -ml-3 max-w-0 opacity-0"
+              : "max-w-32 opacity-100",
           )}
         >
           <button

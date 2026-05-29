@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
@@ -61,6 +61,9 @@ export function SearchView({
   const { t, i18n } = useTranslation(["search", "sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const inputRef = useRef<HTMLInputElement>(null);
+  const [railEl, setRailEl] = useState<HTMLDivElement | null>(null);
+  const [leftFadeAmount, setLeftFadeAmount] = useState(0);
+  const [rightFadeAmount, setRightFadeAmount] = useState(0);
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
   const trimmedQuery = query.trim();
@@ -119,6 +122,48 @@ export function SearchView({
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  const updateFades = useCallback(() => {
+    if (!railEl) return;
+    const maxScroll = railEl.scrollWidth - railEl.clientWidth;
+    if (maxScroll <= 0) {
+      setLeftFadeAmount(0);
+      setRightFadeAmount(0);
+      return;
+    }
+    const threshold = Math.min(120, maxScroll);
+    const distanceFromStart = railEl.scrollLeft;
+    const distanceToEnd = maxScroll - railEl.scrollLeft;
+    setLeftFadeAmount(Math.max(0, Math.min(1, distanceFromStart / threshold)));
+    setRightFadeAmount(Math.max(0, Math.min(1, distanceToEnd / threshold)));
+  }, [railEl]);
+
+  useEffect(() => {
+    if (!railEl) return;
+    railEl.addEventListener("scroll", updateFades, { passive: true });
+    const ro = new ResizeObserver(updateFades);
+    ro.observe(railEl);
+    return () => {
+      railEl.removeEventListener("scroll", updateFades);
+      ro.disconnect();
+    };
+  }, [railEl, updateFades]);
+
+  // Recompute fades when the rendered result counts change. The listener
+  // effect above catches scroll + container resize; this dep list catches
+  // the case where the same rail stays mounted but the cards inside it
+  // change (different query → different scrollWidth).
+  // biome-ignore lint/correctness/useExhaustiveDependencies: result-length deps are intentional triggers, not values read inside.
+  useEffect(() => {
+    updateFades();
+  }, [
+    updateFades,
+    chatResults.length,
+    extensionResults.length,
+    agentResults.length,
+    skillResults.length,
+    automationResults.length,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -277,8 +322,7 @@ export function SearchView({
 
       {showResults && (
         <div
-          data-testid="search-results-rail"
-          className="absolute flex gap-9 overflow-x-auto pb-4 scrollbar-none"
+          className="absolute"
           style={{
             left: 37,
             right: 24,
@@ -286,15 +330,25 @@ export function SearchView({
             height: "var(--search-results-height)",
           }}
         >
-          {resultSections.map((section) => (
-            <SearchResultsCard
-              key={section.key}
-              label={section.label}
-              tone={section.tone}
-            >
-              {section.children}
-            </SearchResultsCard>
-          ))}
+          <div
+            ref={setRailEl}
+            data-testid="search-results-rail"
+            className="flex h-full gap-9 overflow-x-auto pb-4 scrollbar-none"
+            style={{
+              maskImage: `linear-gradient(to right, transparent 0%, black ${80 * leftFadeAmount}px, black calc(100% - ${80 * rightFadeAmount}px), transparent 100%)`,
+              WebkitMaskImage: `linear-gradient(to right, transparent 0%, black ${80 * leftFadeAmount}px, black calc(100% - ${80 * rightFadeAmount}px), transparent 100%)`,
+            }}
+          >
+            {resultSections.map((section) => (
+              <SearchResultsCard
+                key={section.key}
+                label={section.label}
+                tone={section.tone}
+              >
+                {section.children}
+              </SearchResultsCard>
+            ))}
+          </div>
         </div>
       )}
 

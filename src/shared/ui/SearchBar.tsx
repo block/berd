@@ -31,10 +31,10 @@ const searchBarSizes = {
     hideIcon: false,
   },
   pill: {
-    wrapper: "rounded-full bg-muted px-4 py-2.5",
+    wrapper: "flex items-center rounded-full bg-muted px-4 py-2.5",
     icon: "",
     input:
-      "h-auto border-none bg-transparent px-0 text-sm font-normal text-foreground shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-foreground! placeholder:opacity-40",
+      "h-auto appearance-none border-none bg-transparent px-0 text-sm font-normal leading-none text-foreground shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0 placeholder:text-foreground! placeholder:opacity-40",
     inputVariant: "ghost" as const,
     hideIcon: true,
   },
