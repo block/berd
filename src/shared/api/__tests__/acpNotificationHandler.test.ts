@@ -813,6 +813,140 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("replay preserves ordered user text and image chunks", async () => {
+    const replaySessionId = "replay-user-image-session";
+    useChatStore.setState({
+      loadingSessionIds: new Set<string>([replaySessionId]),
+    });
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "user-1",
+        content: {
+          type: "text",
+          text: "what is in this image?",
+        },
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "user-1",
+        content: {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+        },
+      },
+    } as never);
+
+    const buffer = getReplayBuffer(replaySessionId);
+    expect(buffer).toHaveLength(1);
+    expect(buffer?.[0]).toMatchObject({
+      id: "user-1",
+      role: "user",
+      content: [
+        { type: "text", text: "what is in this image?" },
+        { type: "image", data: "iVBORw0KGgo=", mimeType: "image/png" },
+      ],
+      metadata: {
+        userVisible: true,
+        agentVisible: true,
+      },
+    });
+  });
+
+  it("replay keeps image-only user messages visible", async () => {
+    const replaySessionId = "replay-user-image-only-session";
+    useChatStore.setState({
+      loadingSessionIds: new Set<string>([replaySessionId]),
+    });
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "user-image-only",
+        content: {
+          type: "image",
+          uri: "file:///tmp/screenshot.png",
+          mimeType: "image/png",
+        },
+      },
+    } as never);
+
+    const buffer = getReplayBuffer(replaySessionId);
+    expect(buffer).toHaveLength(1);
+    expect(buffer?.[0]).toMatchObject({
+      id: "user-image-only",
+      role: "user",
+      content: [
+        {
+          type: "image",
+          uri: "file:///tmp/screenshot.png",
+          mimeType: "image/png",
+        },
+      ],
+      metadata: {
+        userVisible: true,
+        agentVisible: true,
+      },
+    });
+  });
+
+  it("replay appends assistant image chunks in message order", async () => {
+    const replaySessionId = "replay-assistant-image-session";
+    useChatStore.setState({
+      loadingSessionIds: new Set<string>([replaySessionId]),
+    });
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: {
+          type: "text",
+          text: "here is the generated image:",
+        },
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: replaySessionId,
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        messageId: "assistant-1",
+        content: {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+          uri: "file:///tmp/generated.png",
+        },
+      },
+    } as never);
+
+    const buffer = getReplayBuffer(replaySessionId);
+    expect(buffer).toHaveLength(1);
+    expect(buffer?.[0]).toMatchObject({
+      id: "assistant-1",
+      role: "assistant",
+      content: [
+        { type: "text", text: "here is the generated image:" },
+        {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+          uri: "file:///tmp/generated.png",
+        },
+      ],
+    });
+  });
+
   it("replay preserves timestamps from goose metadata on user and assistant chunks", async () => {
     const replaySessionId = "replay-timestamp-session";
     const userCreated = 1_700_000_000;

@@ -14,7 +14,10 @@ import type {
 } from "@/shared/types/messages";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { AcpNotificationHandler } from "./acpConnection";
-import { handleReplayUserMessageChunk } from "./acpSkillReplayChips";
+import {
+  clearSkillReplayChips,
+  handleReplayUserMessageChunk,
+} from "./acpSkillReplayChips";
 import {
   attachMcpAppPayload,
   extractToolStructuredContent,
@@ -375,20 +378,24 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         getReplayCreated(update),
         getReplayAssistantMessageMetadata(sessionId, update),
       );
-      if (msg && update.content.type === "text" && "text" in update.content) {
+      if (update.content.type === "text" && "text" in update.content) {
         const last = msg.content[msg.content.length - 1];
         if (last?.type === "text") {
           (last as { type: "text"; text: string }).text += update.content.text;
         } else {
           msg.content.push({ type: "text", text: update.content.text });
         }
+      } else if (update.content.type === "image") {
+        msg.content.push({ ...update.content });
       }
       break;
     }
 
     case "user_message_chunk": {
       clearReplayAssistantMessage(sessionId);
-      if (update.content.type !== "text" || !("text" in update.content)) break;
+      if (update.content.type !== "text" && update.content.type !== "image") {
+        break;
+      }
       const messageId = getReplayMessageId(update) ?? crypto.randomUUID();
       handleReplayUserMessageChunk(
         sessionId,
@@ -772,6 +779,7 @@ function ensureLiveAssistantMessage(
 export function clearMessageTracking(): void {
   activeMessagePresets.clear();
   clearReplayAssistantTracking();
+  clearSkillReplayChips();
 }
 
 const handler: AcpNotificationHandler = {

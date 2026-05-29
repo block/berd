@@ -3,7 +3,11 @@ import {
   ensureReplayBuffer,
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
-import type { MessageChip, TextContent } from "@/shared/types/messages";
+import type {
+  ImageContent,
+  MessageChip,
+  TextContent,
+} from "@/shared/types/messages";
 
 const pendingReplayChips = new Map<string, Map<string, MessageChip[]>>();
 
@@ -42,14 +46,13 @@ export function skillInstructionToChips(text: string): MessageChip[] {
 export function handleReplayUserMessageChunk(
   sessionId: string,
   messageId: string,
-  content: { text: string },
+  content: TextContent | ImageContent,
   created?: number,
 ): void {
   const buffer = ensureReplayBuffer(sessionId);
   const existing = getBufferedMessage(sessionId, messageId);
-  const ann = getTextAnnotations(content);
 
-  if (isAssistantOnly(ann)) {
+  if (content.type === "text" && isAssistantOnly(content.annotations)) {
     const chips = skillInstructionToChips(content.text);
     if (chips.length > 0) {
       attachReplayChips(sessionId, messageId, existing, chips);
@@ -57,14 +60,14 @@ export function handleReplayUserMessageChunk(
     return;
   }
 
-  const textBlock = makeTextBlock(content.text, ann);
+  const contentBlock = makeContentBlock(content);
   const chips = getPendingReplayChips(sessionId, messageId);
   if (!existing) {
     buffer.push({
       id: messageId,
       role: "user",
       created: created ?? Date.now(),
-      content: [textBlock],
+      content: [contentBlock],
       metadata: {
         userVisible: true,
         agentVisible: true,
@@ -75,7 +78,7 @@ export function handleReplayUserMessageChunk(
     if (created !== undefined) {
       existing.created = created;
     }
-    existing.content.push(textBlock);
+    existing.content.push(contentBlock);
     attachReplayChips(sessionId, messageId, existing, chips);
   }
   clearPendingReplayChips(sessionId, messageId);
@@ -83,16 +86,6 @@ export function handleReplayUserMessageChunk(
 
 export function clearSkillReplayChips(): void {
   pendingReplayChips.clear();
-}
-
-function getTextAnnotations(content: {
-  text: string;
-  annotations?: unknown;
-}): TextContent["annotations"] | undefined {
-  const rawAnn = content.annotations;
-  return typeof rawAnn === "object" && rawAnn !== null
-    ? (rawAnn as TextContent["annotations"])
-    : undefined;
 }
 
 function isAssistantOnly(ann?: TextContent["annotations"]) {
@@ -118,11 +111,12 @@ function attachReplayChips(
   }
 }
 
-function makeTextBlock(
-  text: string,
-  ann?: TextContent["annotations"],
-): TextContent {
-  return ann
-    ? { type: "text", text, annotations: ann }
-    : { type: "text", text };
+function makeContentBlock(content: TextContent | ImageContent) {
+  return content.type === "text" ? makeTextBlock(content) : { ...content };
+}
+
+function makeTextBlock(content: TextContent): TextContent {
+  return content.annotations
+    ? { type: "text", text: content.text, annotations: content.annotations }
+    : { type: "text", text: content.text };
 }
