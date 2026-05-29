@@ -17,7 +17,7 @@
 
 @font-face {
   font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/CashSans-Regular.woff2")
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Regular.woff2")
     format("woff2");
   font-weight: 400;
   font-style: normal;
@@ -26,7 +26,7 @@
 
 @font-face {
   font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/CashSans-RegularItalic.woff2")
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-RegularItalic.woff2")
     format("woff2");
   font-weight: 400;
   font-style: italic;
@@ -35,7 +35,7 @@
 
 @font-face {
   font-family: "Cash Sans";
-  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/CashSans-Light.woff2")
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Light.woff2")
     format("woff2");
   font-weight: 300;
   font-style: normal;
