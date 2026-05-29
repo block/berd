@@ -41,10 +41,10 @@
     "openFixUrl": "Open fix URL"
   },
   "bulkActions": {
-    "archiveConfirmDescription_one": "Archive {{displayCount}} selected chat?",
-    "archiveConfirmDescription_other": "Archive {{displayCount}} selected chats?",
-    "archiveConfirmTitle_one": "Archive selected chat?",
-    "archiveConfirmTitle_other": "Archive selected chats?",
+    "archiveConfirmDescription_one": "You can restore it in Settings.",
+    "archiveConfirmDescription_other": "You can restore them in Settings.",
+    "archiveConfirmTitle_one": "Archive 1 chat?",
+    "archiveConfirmTitle_other": "Archive {{displayCount}} chats?",
     "archiving": "Archiving...",
     "failed_one": "{{displayCount}} action failed",
     "failed_other": "{{displayCount}} actions failed"

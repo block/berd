@@ -41,10 +41,10 @@
     "openFixUrl": "Abrir URL de solución"
   },
   "bulkActions": {
-    "archiveConfirmDescription_one": "¿Archivar {{displayCount}} chat seleccionado?",
-    "archiveConfirmDescription_other": "¿Archivar {{displayCount}} chats seleccionados?",
-    "archiveConfirmTitle_one": "¿Archivar chat seleccionado?",
-    "archiveConfirmTitle_other": "¿Archivar chats seleccionados?",
+    "archiveConfirmDescription_one": "Puedes restaurarlo en Configuración.",
+    "archiveConfirmDescription_other": "Puedes restaurarlos en Configuración.",
+    "archiveConfirmTitle_one": "¿Archivar 1 chat?",
+    "archiveConfirmTitle_other": "¿Archivar {{displayCount}} chats?",
     "archiving": "Archivando...",
     "failed_one": "{{displayCount}} acción falló",
     "failed_other": "{{displayCount}} acciones fallaron"

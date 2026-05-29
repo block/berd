@@ -29,6 +29,22 @@ export async function saveExportedSessionFile(
   return invoke("save_exported_session_file", { defaultFilename, contents });
 }
 
+export interface SessionExportItem {
+  filename: string;
+  contents: string;
+}
+
+export interface SessionExportBatchResult {
+  folder: string;
+  files: string[];
+}
+
+export async function saveExportedSessionFiles(
+  items: SessionExportItem[],
+): Promise<SessionExportBatchResult | null> {
+  return invoke("save_exported_session_files", { items });
+}
+
 export async function pathExists(path: string): Promise<boolean> {
   return invoke("path_exists", { path });
 }

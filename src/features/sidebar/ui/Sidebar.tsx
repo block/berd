@@ -316,6 +316,24 @@ export function Sidebar({
   );
   const selectedCount = selectedSessionIds.size;
   const clearSelection = () => setSelectedSessionIds(new Set());
+  useEffect(() => {
+    if (selectedCount === 0) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target) return;
+      if (target.closest("[data-sidebar-chat-row]")) return;
+      if (
+        target.closest('[role="menu"]') ||
+        target.closest('[role="dialog"]') ||
+        target.closest('[role="alertdialog"]')
+      ) {
+        return;
+      }
+      setSelectedSessionIds(new Set());
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [selectedCount]);
   const reportBulkFailure = (failedCount: number) => {
     toast.error(
       t("common:bulkActions.failed", {
@@ -836,6 +854,7 @@ export function Sidebar({
         })}
         cancelLabel={t("common:actions.cancel")}
         confirmLabel={t("common:actions.archive")}
+        confirmVariant="default"
         loadingLabel={t("common:bulkActions.archiving")}
         isLoading={isApplyingSelectionAction}
         onConfirm={() => confirmArchiveSelected(onArchiveChat)}

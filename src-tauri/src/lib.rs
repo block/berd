@@ -204,6 +204,7 @@ pub fn run() {
             commands::system::get_home_dir,
             commands::system::open_in_chrome,
             commands::system::save_exported_session_file,
+            commands::system::save_exported_session_files,
             commands::system::path_exists,
             commands::system::list_directory_entries,
             commands::system::inspect_attachment_paths,

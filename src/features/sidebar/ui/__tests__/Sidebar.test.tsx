@@ -556,7 +556,7 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("menuitem", { name: /^archive$/i }));
 
     expect(
-      screen.getByRole("dialog", { name: /archive selected chats/i }),
+      screen.getByRole("dialog", { name: /archive \d+ chats/i }),
     ).toBeInTheDocument();
     expect(onArchiveChat).not.toHaveBeenCalled();
 

@@ -29,7 +29,10 @@ import {
   acpExportSession,
   acpImportSession,
 } from "@/shared/api/acp";
-import { saveExportedSessionFile } from "@/shared/api/system";
+import {
+  saveExportedSessionFile,
+  saveExportedSessionFiles,
+} from "@/shared/api/system";
 import { defaultExportFilename, downloadJson } from "../lib/exportSession";
 import {
   areSetsEqual,
@@ -117,14 +120,21 @@ export function SessionHistoryView({
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedCount = selectedSessionIds.size;
-  const selectedSessions = useMemo(
-    () =>
-      activeSessions.filter((session) => selectedSessionIds.has(session.id)),
-    [activeSessions, selectedSessionIds],
-  );
   const clearSelection = useCallback(() => {
     setSelectedSessionIds(new Set());
   }, []);
+  useEffect(() => {
+    if (selectedCount === 0) return;
+    const handleMouseDown = (event: MouseEvent) => {
+      const container = scrollRef.current;
+      const target = event.target as Node | null;
+      if (!container || !target || !container.contains(target)) return;
+      if ((target as Element).closest?.("[data-session-card]")) return;
+      clearSelection();
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    return () => document.removeEventListener("mousedown", handleMouseDown);
+  }, [clearSelection, selectedCount]);
   const reportBulkFailure = useCallback(
     (failedCount: number) => {
       toast.error(
@@ -137,7 +147,6 @@ export function SessionHistoryView({
     [t],
   );
   const {
-    applySelectionAction,
     archiveConfirmOpen,
     archiveSelectionCount,
     confirmArchiveSelected,
@@ -500,28 +509,40 @@ export function SessionHistoryView({
     [isSessionNotFoundError, loadSessions, removeSession],
   );
 
-  const duplicateSelectedSessions = useCallback(async () => {
-    const sessionIds = selectedSessions.map((session) => session.id);
-    const result = await applySelectionAction(async (sessionId) => {
-      try {
-        await acpDuplicateSession(sessionId);
-      } catch (error) {
-        if (isSessionNotFoundError(error)) {
-          removeSession(sessionId);
+  const handleExportSelected = useCallback(async () => {
+    const sessionIds = Array.from(selectedSessionIds);
+    if (sessionIds.length === 0) return;
+
+    const titleById = new Map(
+      activeSessions.map((session) => [session.id, session.title ?? "session"]),
+    );
+
+    try {
+      const items = await Promise.all(
+        sessionIds.map(async (id) => ({
+          filename: defaultExportFilename(titleById.get(id) ?? "session"),
+          contents: await acpExportSession(id),
+        })),
+      );
+
+      if (window.__TAURI_INTERNALS__) {
+        const result = await saveExportedSessionFiles(items);
+        if (!result) return;
+        toast.success(
+          `Exported ${result.files.length} chats to ${result.folder}`,
+        );
+      } else {
+        for (const item of items) {
+          downloadJson(item.contents, item.filename);
         }
-        throw error;
+        toast.success(`Exported ${items.length} chats`);
       }
-    }, new Set(sessionIds));
-    if (result) {
-      await loadSessions();
+      clearSelection();
+    } catch (error) {
+      console.error("Bulk export failed:", error);
+      toast.error("Failed to export chats");
     }
-  }, [
-    applySelectionAction,
-    isSessionNotFoundError,
-    loadSessions,
-    removeSession,
-    selectedSessions,
-  ]);
+  }, [activeSessions, clearSelection, selectedSessionIds]);
 
   const handleImportSession = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -618,8 +639,8 @@ export function SessionHistoryView({
         onArchive={handleArchive}
         onArchiveSelected={requestArchiveSelected}
         onExport={handleExport}
+        onExportSelected={handleExportSelected}
         onDuplicate={handleDuplicate}
-        onDuplicateSelected={duplicateSelectedSessions}
       />
     ),
     [
@@ -631,8 +652,8 @@ export function SessionHistoryView({
       requestArchiveSelected,
       clearSelection,
       handleDuplicate,
-      duplicateSelectedSessions,
       handleExport,
+      handleExportSelected,
       handleSelectResult,
       isApplyingSelectionAction,
       onRenameChat,
@@ -861,6 +882,7 @@ export function SessionHistoryView({
         })}
         cancelLabel={t("common:actions.cancel")}
         confirmLabel={t("common:actions.archive")}
+        confirmVariant="default"
         loadingLabel={t("common:bulkActions.archiving")}
         isLoading={isApplyingSelectionAction}
         onConfirm={() => confirmArchiveSelected(handleArchive)}

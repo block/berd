@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  Archive,
   Mail,
   MailOpen,
   MoreHorizontal,
   Pencil,
   PinIcon,
-  Trash2,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
@@ -189,6 +189,7 @@ export function SidebarChatRow({
     // biome-ignore lint/a11y/noStaticElementInteractions: wrapper handles drag and context menu, interactive content is the inner Button
     <div
       data-session-id={id}
+      data-sidebar-chat-row
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/x-session-id", id);
@@ -300,10 +301,12 @@ export function SidebarChatRow({
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem onClick={startRename}>
-            <Pencil className="size-3.5" />
-            {t("common:actions.rename")}
-          </DropdownMenuItem>
+          {!shouldApplyToSelection && (
+            <DropdownMenuItem onClick={startRename}>
+              <Pencil className="size-3.5" />
+              {t("common:actions.rename")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onClick={() =>
               isPinnedToHome ? unpinFromHome() : void pinToHome()
@@ -356,7 +359,7 @@ export function SidebarChatRow({
             }}
             disabled={shouldApplyToSelection && selectionActionsDisabled}
           >
-            <Trash2 className="size-3.5" />
+            <Archive className="size-3.5" />
             {t("common:actions.archive")}
           </DropdownMenuItem>
         </DropdownMenuContent>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Archive,
   ArchiveRestore,
   CheckSquare,
   Copy,
@@ -8,7 +9,6 @@ import {
   MoreHorizontal,
   Package,
   Pencil,
-  Trash2,
 } from "lucide-react";
 import {
   getDisplaySessionTitle,
@@ -53,8 +53,8 @@ interface SessionCardProps {
   onArchiveSelected?: () => void;
   onUnarchive?: (id: string) => void;
   onExport?: (id: string) => void;
+  onExportSelected?: () => void;
   onDuplicate?: (id: string) => void;
-  onDuplicateSelected?: () => void;
 }
 
 export function SessionCard({
@@ -80,8 +80,8 @@ export function SessionCard({
   onArchiveSelected,
   onUnarchive,
   onExport,
+  onExportSelected,
   onDuplicate,
-  onDuplicateSelected,
 }: SessionCardProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
@@ -141,6 +141,7 @@ export function SessionCard({
 
   return (
     <div
+      data-session-card
       className={cn(
         "group relative flex min-h-20 flex-col justify-between gap-1 rounded-card-chat bg-card p-3 text-left transition-shadow",
         "hover:shadow-card",
@@ -312,33 +313,37 @@ export function SessionCard({
             </>
           ) : (
             <>
-              <DropdownMenuItem onClick={startRename}>
-                <Pencil className="size-3.5" />
-                {t("common:actions.rename")}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => {
-                  setMenuOpen(false);
-                  onExport?.(id);
-                }}
-              >
-                <Download className="size-3.5" />
-                {t("common:actions.export")}
-              </DropdownMenuItem>
+              {!shouldApplyToSelection && (
+                <DropdownMenuItem onClick={startRename}>
+                  <Pencil className="size-3.5" />
+                  {t("common:actions.rename")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);
                   if (shouldApplyToSelection) {
-                    onDuplicateSelected?.();
+                    onExportSelected?.();
                     return;
                   }
-                  onDuplicate?.(id);
+                  onExport?.(id);
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
-                <Copy className="size-3.5" />
-                {t("common:actions.duplicate")}
+                <Download className="size-3.5" />
+                {t("common:actions.export")}
               </DropdownMenuItem>
+              {!shouldApplyToSelection && (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onDuplicate?.(id);
+                  }}
+                >
+                  <Copy className="size-3.5" />
+                  {t("common:actions.duplicate")}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);
@@ -350,7 +355,7 @@ export function SessionCard({
                 }}
                 disabled={shouldApplyToSelection && selectionActionsDisabled}
               >
-                <Trash2 className="size-3.5" />
+                <Archive className="size-3.5" />
                 {t("common:actions.archive")}
               </DropdownMenuItem>
             </>

@@ -1,5 +1,5 @@
 use base64::Engine;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Window};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
@@ -136,6 +136,89 @@ pub async fn save_exported_session_file(
         .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
 
     Ok(Some(path.to_string_lossy().into_owned()))
+}
+
+#[derive(Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionExportItem {
+    pub filename: String,
+    pub contents: String,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionExportBatchResult {
+    pub folder: String,
+    pub files: Vec<String>,
+}
+
+#[tauri::command]
+pub async fn save_exported_session_files(
+    window: Window,
+    items: Vec<SessionExportItem>,
+) -> Result<Option<SessionExportBatchResult>, String> {
+    if items.is_empty() {
+        return Ok(None);
+    }
+
+    let desktop =
+        dirs::desktop_dir().unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join("Desktop"));
+
+    let mut dialog = window
+        .dialog()
+        .file()
+        .set_title("Export chats")
+        .set_directory(desktop);
+
+    #[cfg(desktop)]
+    {
+        dialog = dialog.set_parent(&window);
+    }
+
+    let Some(folder) = dialog.blocking_pick_folder() else {
+        return Ok(None);
+    };
+
+    let folder_path = folder
+        .into_path()
+        .map_err(|_| "Selected folder path is not available".to_string())?;
+
+    let mut used: HashSet<String> = HashSet::new();
+    let mut written: Vec<String> = Vec::with_capacity(items.len());
+
+    for item in items {
+        let resolved = resolve_export_filename(&folder_path, &item.filename, &used);
+        let path = folder_path.join(&resolved);
+        std::fs::write(&path, &item.contents)
+            .map_err(|e| format!("Failed to write file '{}': {}", path.display(), e))?;
+        used.insert(resolved.clone());
+        written.push(resolved);
+    }
+
+    Ok(Some(SessionExportBatchResult {
+        folder: folder_path.to_string_lossy().into_owned(),
+        files: written,
+    }))
+}
+
+fn resolve_export_filename(folder: &Path, filename: &str, used: &HashSet<String>) -> String {
+    if !folder.join(filename).exists() && !used.contains(filename) {
+        return filename.to_string();
+    }
+
+    let (stem, ext) = match filename.rsplit_once('.') {
+        Some((s, e)) => (s.to_string(), format!(".{}", e)),
+        None => (filename.to_string(), String::new()),
+    };
+
+    for n in 2..=9999 {
+        let candidate = format!("{}-{}{}", stem, n, ext);
+        if !folder.join(&candidate).exists() && !used.contains(&candidate) {
+            return candidate;
+        }
+    }
+
+    format!("{}-{}{}", stem, 9999, ext)
 }
 
 #[tauri::command]
