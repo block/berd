@@ -33,6 +33,7 @@ import {
   saveExportedSessionFile,
   saveExportedSessionFiles,
 } from "@/shared/api/system";
+import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import { defaultExportFilename, downloadJson } from "../lib/exportSession";
 import {
   areSetsEqual,
@@ -509,6 +510,14 @@ export function SessionHistoryView({
     [isSessionNotFoundError, loadSessions, removeSession],
   );
 
+  const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();
+  const handlePinSelectedToHome = useCallback(async () => {
+    const ids = Array.from(selectedSessionIds);
+    if (ids.length === 0) return;
+    await pinBatchToHome("chat", ids);
+    clearSelection();
+  }, [clearSelection, pinBatchToHome, selectedSessionIds]);
+
   const handleExportSelected = useCallback(async () => {
     const sessionIds = Array.from(selectedSessionIds);
     if (sessionIds.length === 0) return;
@@ -641,6 +650,8 @@ export function SessionHistoryView({
         onExport={handleExport}
         onExportSelected={handleExportSelected}
         onDuplicate={handleDuplicate}
+        onPinSelectedToHome={handlePinSelectedToHome}
+        isPinningSelectedToHome={isPinningBatch}
       />
     ),
     [
@@ -654,6 +665,8 @@ export function SessionHistoryView({
       handleDuplicate,
       handleExport,
       handleExportSelected,
+      handlePinSelectedToHome,
+      isPinningBatch,
       handleSelectResult,
       isApplyingSelectionAction,
       onRenameChat,

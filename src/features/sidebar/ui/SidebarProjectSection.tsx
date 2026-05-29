@@ -50,6 +50,8 @@ export function SidebarProjectSection({
   onSelectionClear,
   onSelectionChange,
   onArchiveSelected,
+  onPinSelectedToHome,
+  isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onNavigate,
@@ -75,6 +77,8 @@ export function SidebarProjectSection({
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
   onArchiveSelected?: () => void;
+  onPinSelectedToHome?: () => void;
+  isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   onNavigate?: (view: AppView) => void;
@@ -275,6 +279,8 @@ export function SidebarProjectSection({
                 onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}
                 onArchiveSelected={onArchiveSelected}
+                onPinSelectedToHome={onPinSelectedToHome}
+                isPinningSelectedToHome={isPinningSelectedToHome}
                 onMarkSelectedRead={onMarkSelectedRead}
                 onMarkSelectedUnread={onMarkSelectedUnread}
               />

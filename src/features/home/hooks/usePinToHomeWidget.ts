@@ -87,6 +87,42 @@ function centerForTopLeft(
   };
 }
 
+function chooseOpenPlacementTopLeft({
+  constraints,
+  instances,
+  size,
+  viewportCenter,
+}: {
+  constraints: LayoutConstraints | null;
+  instances: WidgetInstance[];
+  size: WidgetSize;
+  viewportCenter: { x: number; y: number };
+}): { x: number; y: number } {
+  const firstPoint = placedTopLeft(viewportCenter, size, constraints);
+  if (isOpenPlacement(firstPoint, size, instances)) {
+    return firstPoint;
+  }
+
+  const startAngle = Math.random() * Math.PI * 2;
+  const angleStep = Math.PI * (3 - Math.sqrt(5));
+  for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS; attempt += 1) {
+    const ring = Math.floor(attempt / 8) + 1;
+    const radius = ring * PLACEMENT_STEP;
+    const angle = startAngle + attempt * angleStep;
+    const candidateCenter = {
+      x: viewportCenter.x + Math.cos(angle) * radius,
+      y: viewportCenter.y + Math.sin(angle) * radius,
+    };
+    const candidatePoint = placedTopLeft(candidateCenter, size, constraints);
+
+    if (isOpenPlacement(candidatePoint, size, instances)) {
+      return candidatePoint;
+    }
+  }
+
+  return firstPoint;
+}
+
 export function choosePinPlacementCenter({
   constraints,
   instances,
@@ -102,33 +138,13 @@ export function choosePinPlacementCenter({
     width: 1,
     height: 1,
   };
-  const firstPoint = placedTopLeft(viewportCenter, defaultSize, constraints);
-  if (isOpenPlacement(firstPoint, defaultSize, instances)) {
-    return centerForTopLeft(firstPoint, defaultSize);
-  }
-
-  const startAngle = Math.random() * Math.PI * 2;
-  const angleStep = Math.PI * (3 - Math.sqrt(5));
-  for (let attempt = 0; attempt < PLACEMENT_ATTEMPTS; attempt += 1) {
-    const ring = Math.floor(attempt / 8) + 1;
-    const radius = ring * PLACEMENT_STEP;
-    const angle = startAngle + attempt * angleStep;
-    const candidateCenter = {
-      x: viewportCenter.x + Math.cos(angle) * radius,
-      y: viewportCenter.y + Math.sin(angle) * radius,
-    };
-    const candidatePoint = placedTopLeft(
-      candidateCenter,
-      defaultSize,
-      constraints,
-    );
-
-    if (isOpenPlacement(candidatePoint, defaultSize, instances)) {
-      return centerForTopLeft(candidatePoint, defaultSize);
-    }
-  }
-
-  return centerForTopLeft(firstPoint, defaultSize);
+  const topLeft = chooseOpenPlacementTopLeft({
+    constraints,
+    instances,
+    size: defaultSize,
+    viewportCenter,
+  });
+  return centerForTopLeft(topLeft, defaultSize);
 }
 
 export function isPinnedToHome(
@@ -257,4 +273,116 @@ export function usePinToHomeWidget(target: PinToHomeTarget) {
     pinToHome,
     unpinFromHome,
   };
+}
+
+export function usePinBatchToHome() {
+  const { t } = useTranslation("home");
+  const [isPinningBatch, setIsPinningBatch] = useState(false);
+
+  const pinBatchToHome = useCallback(
+    async (kind: PinToHomeTargetKind, ids: string[]) => {
+      const normalizedIds: string[] = [];
+      const seen = new Set<string>();
+      for (const id of ids) {
+        const normalized = normalizedTargetId(id);
+        if (normalized && !seen.has(normalized)) {
+          normalizedIds.push(normalized);
+          seen.add(normalized);
+        }
+      }
+      if (normalizedIds.length === 0) {
+        return;
+      }
+
+      setIsPinningBatch(true);
+      try {
+        const initialState = useHomeWidgetStore.getState();
+        await initialState.initialize();
+
+        const readyState = useHomeWidgetStore.getState();
+        if (readyState.loadStatus !== "ready") {
+          toast.error(t("widgets.pinBatchToHome.error"));
+          return;
+        }
+
+        const config = PIN_TARGET_CONFIG[kind];
+        const widgetSize = HOME_WIDGET_CATALOG_BY_ID[config.widgetType]
+          ?.defaultSize ?? { width: 1, height: 1 };
+
+        const toPin: string[] = [];
+        let skipped = 0;
+        for (const id of normalizedIds) {
+          if (isPinnedToHome(readyState.instances, { kind, id })) {
+            skipped += 1;
+          } else {
+            toPin.push(id);
+          }
+        }
+
+        if (toPin.length === 0) {
+          toast.success(t("widgets.pinBatchToHome.allPinned"));
+          return;
+        }
+
+        const cols = Math.ceil(Math.sqrt(toPin.length));
+        const cellW = widgetSize.width + PLACEMENT_PADDING;
+        const cellH = widgetSize.height + PLACEMENT_PADDING;
+        const rows = Math.ceil(toPin.length / cols);
+        const bboxSize: WidgetSize = {
+          width: cols * cellW - PLACEMENT_PADDING,
+          height: rows * cellH - PLACEMENT_PADDING,
+        };
+
+        const camera = readyState.camera ?? {
+          centerX: 0,
+          centerY: 0,
+          zoomBps: 10_000,
+        };
+        const origin = chooseOpenPlacementTopLeft({
+          constraints: readyState.constraints,
+          instances: readyState.instances,
+          size: bboxSize,
+          viewportCenter: { x: camera.centerX, y: camera.centerY },
+        });
+
+        toPin.forEach((id, idx) => {
+          const col = idx % cols;
+          const row = Math.floor(idx / cols);
+          const centerX = origin.x + col * cellW + widgetSize.width / 2;
+          const centerY = origin.y + row * cellH + widgetSize.height / 2;
+          readyState.addWidget(
+            config.widgetType,
+            centerX,
+            centerY,
+            { [config.stateKey]: id },
+            readyState.constraints ?? undefined,
+          );
+        });
+
+        if (skipped > 0) {
+          toast.success(
+            t("widgets.pinBatchToHome.successPartial", {
+              count: toPin.length,
+              displayCount: toPin.length,
+              skipped,
+            }),
+          );
+        } else {
+          toast.success(
+            t("widgets.pinBatchToHome.success", {
+              count: toPin.length,
+              displayCount: toPin.length,
+            }),
+          );
+        }
+      } catch {
+        toast.error(t("widgets.pinBatchToHome.error"));
+      } finally {
+        setIsPinningBatch(false);
+      }
+    },
+    [t],
+  );
+
+  return { pinBatchToHome, isPinningBatch };
 }

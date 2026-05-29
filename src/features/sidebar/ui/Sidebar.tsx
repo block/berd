@@ -35,6 +35,7 @@ import {
   toggleSessionSelection as getToggledSessionSelection,
 } from "@/features/sessions/lib/sessionSelection";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
+import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
 import { Button } from "@/shared/ui/button";
 import { Switch } from "@/shared/ui/switch";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -356,6 +357,12 @@ export function Sidebar({
     onFailure: reportBulkFailure,
   });
 
+  const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();
+  const handlePinSelectedToHome = useCallback(async () => {
+    await pinBatchToHome("chat", Array.from(selectedSessionIds));
+    setSelectedSessionIds(new Set());
+  }, [pinBatchToHome, selectedSessionIds]);
+
   useEffect(() => {
     setSelectedSessionIds((current) => {
       const next = normalizeSelectedSessionIds({
@@ -627,6 +634,8 @@ export function Sidebar({
                   onSelectionClear={clearSelection}
                   onSelectionChange={toggleSessionSelection}
                   onArchiveSelected={requestArchiveSelected}
+                  onPinSelectedToHome={handlePinSelectedToHome}
+                  isPinningSelectedToHome={isPinningBatch}
                   onMarkSelectedRead={() =>
                     void applySelectionAction(onMarkChatRead)
                   }

@@ -110,6 +110,14 @@
       "error": "Could not pin to home.",
       "success": "Pinned to home."
     },
+    "pinBatchToHome": {
+      "allPinned": "All selected chats are already pinned to home.",
+      "error": "Could not pin chats to home.",
+      "success_one": "Pinned 1 chat to home.",
+      "success_other": "Pinned {{displayCount}} chats to home.",
+      "successPartial_one": "Pinned 1 chat to home. {{skipped}} already pinned.",
+      "successPartial_other": "Pinned {{displayCount}} chats to home. {{skipped}} already pinned."
+    },
     "unpinFromHome": {
       "error": "Could not unpin from home.",
       "success": "Unpinned from home."

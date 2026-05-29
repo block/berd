@@ -41,6 +41,8 @@ interface SidebarProjectsSectionProps {
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
   onArchiveSelected?: () => void;
+  onPinSelectedToHome?: () => void;
+  isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
@@ -84,6 +86,8 @@ export function SidebarProjectsSection({
   onSelectionClear,
   onSelectionChange,
   onArchiveSelected,
+  onPinSelectedToHome,
+  isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onReorderProject,
@@ -186,6 +190,8 @@ export function SidebarProjectsSection({
             onSelectionClear={onSelectionClear}
             onSelectionChange={onSelectionChange}
             onArchiveSelected={onArchiveSelected}
+            onPinSelectedToHome={onPinSelectedToHome}
+            isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             onReorderProject={onReorderProject}
@@ -307,6 +313,8 @@ export function SidebarProjectsSection({
             onSelectionClear={onSelectionClear}
             onSelectionChange={onSelectionChange}
             onArchiveSelected={onArchiveSelected}
+            onPinSelectedToHome={onPinSelectedToHome}
+            isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             isOpen={recentsSectionOpen}

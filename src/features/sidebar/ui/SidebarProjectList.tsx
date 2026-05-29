@@ -32,6 +32,8 @@ export function SidebarProjectList({
   onSelectionClear,
   onSelectionChange,
   onArchiveSelected,
+  onPinSelectedToHome,
+  isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
   onReorderProject,
@@ -59,6 +61,8 @@ export function SidebarProjectList({
   onSelectionClear?: () => void;
   onSelectionChange?: (sessionId: string, selected: boolean) => void;
   onArchiveSelected?: () => void;
+  onPinSelectedToHome?: () => void;
+  isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
   onReorderProject?: (fromId: string, toId: string) => void;
@@ -169,6 +173,8 @@ export function SidebarProjectList({
             onSelectionClear={onSelectionClear}
             onSelectionChange={onSelectionChange}
             onArchiveSelected={onArchiveSelected}
+            onPinSelectedToHome={onPinSelectedToHome}
+            isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
             hasMoreSessions={hasMoreSessions}

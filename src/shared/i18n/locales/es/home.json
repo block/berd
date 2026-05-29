@@ -110,6 +110,14 @@
       "error": "No se pudo fijar en inicio.",
       "success": "Fijado en inicio."
     },
+    "pinBatchToHome": {
+      "allPinned": "Todos los chats seleccionados ya están fijados en inicio.",
+      "error": "No se pudieron fijar los chats en inicio.",
+      "success_one": "Se fijó 1 chat en inicio.",
+      "success_other": "Se fijaron {{displayCount}} chats en inicio.",
+      "successPartial_one": "Se fijó 1 chat en inicio. {{skipped}} ya estaban fijados.",
+      "successPartial_other": "Se fijaron {{displayCount}} chats en inicio. {{skipped}} ya estaban fijados."
+    },
     "unpinFromHome": {
       "error": "No se pudo desfijar de inicio.",
       "success": "Desfijado de inicio."

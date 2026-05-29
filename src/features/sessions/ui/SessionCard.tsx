@@ -9,12 +9,14 @@ import {
   MoreHorizontal,
   Package,
   Pencil,
+  PinIcon,
 } from "lucide-react";
 import {
   getDisplaySessionTitle,
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
@@ -55,6 +57,8 @@ interface SessionCardProps {
   onExport?: (id: string) => void;
   onExportSelected?: () => void;
   onDuplicate?: (id: string) => void;
+  onPinSelectedToHome?: () => void;
+  isPinningSelectedToHome?: boolean;
 }
 
 export function SessionCard({
@@ -82,11 +86,19 @@ export function SessionCard({
   onExport,
   onExportSelected,
   onDuplicate,
+  onPinSelectedToHome,
+  isPinningSelectedToHome = false,
 }: SessionCardProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const [menuOpen, setMenuOpen] = useExclusiveMenu();
   const [editing, setEditing] = useState(false);
+  const {
+    isPinned: isPinnedToHome,
+    isPinning: isPinningToHome,
+    pinToHome,
+    unpinFromHome,
+  } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
   const displayTitle = getDisplaySessionTitle(
     title,
@@ -319,6 +331,36 @@ export function SessionCard({
                   {t("common:actions.rename")}
                 </DropdownMenuItem>
               )}
+              <DropdownMenuItem
+                onClick={() => {
+                  setMenuOpen(false);
+                  if (shouldApplyToSelection) {
+                    onPinSelectedToHome?.();
+                    return;
+                  }
+                  if (isPinnedToHome) {
+                    unpinFromHome();
+                    return;
+                  }
+                  void pinToHome();
+                }}
+                disabled={
+                  shouldApplyToSelection
+                    ? isPinningSelectedToHome
+                    : isPinningToHome
+                }
+              >
+                <PinIcon className="size-3.5" />
+                {shouldApplyToSelection
+                  ? isPinningSelectedToHome
+                    ? t("common:actions.pinningToHome")
+                    : t("common:actions.pinToHome")
+                  : isPinnedToHome
+                    ? t("common:actions.unpinFromHome")
+                    : isPinningToHome
+                      ? t("common:actions.pinningToHome")
+                      : t("common:actions.pinToHome")}
+              </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);

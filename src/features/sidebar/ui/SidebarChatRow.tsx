@@ -56,6 +56,8 @@ interface SidebarChatRowProps {
   onRename?: (id: string, nextTitle: string) => void;
   onArchive?: (id: string) => void;
   onArchiveSelected?: () => void;
+  onPinSelectedToHome?: () => void;
+  isPinningSelectedToHome?: boolean;
   onMarkRead?: (id: string) => void;
   onMarkUnread?: (id: string) => void;
   onMarkSelectedRead?: () => void;
@@ -81,6 +83,8 @@ export function SidebarChatRow({
   onRename,
   onArchive,
   onArchiveSelected,
+  onPinSelectedToHome,
+  isPinningSelectedToHome = false,
   onMarkRead,
   onMarkUnread,
   onMarkSelectedRead,
@@ -308,17 +312,31 @@ export function SidebarChatRow({
             </DropdownMenuItem>
           )}
           <DropdownMenuItem
-            onClick={() =>
-              isPinnedToHome ? unpinFromHome() : void pinToHome()
+            onClick={() => {
+              if (shouldApplyToSelection) {
+                onPinSelectedToHome?.();
+                return;
+              }
+              if (isPinnedToHome) {
+                unpinFromHome();
+                return;
+              }
+              void pinToHome();
+            }}
+            disabled={
+              shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
             }
-            disabled={isPinningToHome}
           >
             <PinIcon className="size-3.5" />
-            {isPinnedToHome
-              ? t("common:actions.unpinFromHome")
-              : isPinningToHome
+            {shouldApplyToSelection
+              ? isPinningSelectedToHome
                 ? t("common:actions.pinningToHome")
-                : t("common:actions.pinToHome")}
+                : t("common:actions.pinToHome")
+              : isPinnedToHome
+                ? t("common:actions.unpinFromHome")
+                : isPinningToHome
+                  ? t("common:actions.pinningToHome")
+                  : t("common:actions.pinToHome")}
           </DropdownMenuItem>
           {hasUnread ? (
             <DropdownMenuItem
