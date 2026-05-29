@@ -11,7 +11,6 @@ import {
   IconSettings,
 } from "@tabler/icons-react";
 import { SkillIcon } from "@/features/skills/ui/SkillIcon";
-import { GooseIcon } from "@/shared/ui/icons/GooseIcon";
 import { cn } from "@/shared/lib/cn";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -525,31 +524,11 @@ export function Sidebar({
       style={{ width }}
     >
       <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
-        <div
-          className={cn(
-            "flex-shrink-0",
-            collapsed ? "px-1.5 pb-1.5 pt-3" : "px-3 pb-2 pt-5",
-          )}
-        >
-          <div
-            className={cn(
-              "flex items-center",
-              collapsed ? "justify-center" : "justify-between",
-            )}
-          >
-            <button
-              type="button"
-              className="inline-flex border-0 bg-transparent p-0 text-sidebar-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              onClick={() => onNavigate?.("home")}
-              aria-label={t("navigation.gooseHome")}
-              title={t("navigation.gooseHome")}
-            >
-              <span className="inline-flex">
-                <GooseIcon className="text-sidebar-foreground" />
-              </span>
-            </button>
-          </div>
-        </div>
+        {/* The goose home affordance now lives in the TopBar (left of the
+            panel toggle) so it survives when the panel is collapsed. This
+            spacer + the nav's own py-1 give the same ~6px top inset as the
+            settings row's py-1.5 at the bottom, keeping the panel symmetric. */}
+        <div className="flex-shrink-0 pt-0.5" aria-hidden="true" />
 
         <div className="relative flex-1 min-h-0 overflow-hidden">
           <div

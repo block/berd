@@ -1739,6 +1739,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           sidebarCollapsed,
           canGoBack: navigationAvailability.canGoBack,
           canGoForward: navigationAvailability.canGoForward,
+          onGoHome: () => handleNavigate("home"),
           onToggleSidebar: toggleSidebar,
           onGoBack: goBack,
           onGoForward: goForward,

@@ -13,6 +13,7 @@ import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BreadcrumbTrail } from "@/shared/ui/breadcrumb";
 import { Button } from "@/shared/ui/button";
+import { GooseIcon } from "@/shared/ui/icons/GooseIcon";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
 
@@ -30,6 +31,7 @@ interface TopBarProps {
   chromeInsets?: TopBarChromeInsets;
   showContextPanelToggle?: boolean;
   sidebarCollapsed?: boolean;
+  onGoHome?: () => void;
   onGoBack?: () => void;
   onGoForward?: () => void;
   onToggleContextPanel?: () => void;
@@ -54,6 +56,7 @@ export function TopBar({
   chromeInsets = { leading: "trafficLights" },
   showContextPanelToggle = false,
   sidebarCollapsed = false,
+  onGoHome,
   onGoBack,
   onGoForward,
   onToggleContextPanel,
@@ -95,6 +98,22 @@ export function TopBar({
         data-tauri-drag-region
       />
       <div className="flex items-center gap-[var(--spacing-app-top-bar-button-gap)]">
+        {onGoHome ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
+              "size-[var(--spacing-app-top-bar-control)]",
+              "text-foreground hover:text-foreground",
+            )}
+            onClick={onGoHome}
+            aria-label={t("navigation.gooseHome")}
+            title={t("navigation.gooseHome")}
+          >
+            <GooseIcon className="size-5" />
+          </Button>
+        ) : null}
         <Button
           type="button"
           variant="ghost"
