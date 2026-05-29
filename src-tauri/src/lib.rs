@@ -199,6 +199,7 @@ pub fn run() {
             commands::agent_setup::install_agent,
             commands::agent_setup::authenticate_agent,
             commands::path_resolver::resolve_path,
+            commands::diagnostics::probe_kgoose_connectivity,
             commands::distro::get_distro_bundle,
             commands::system::get_home_dir,
             commands::system::open_in_chrome,

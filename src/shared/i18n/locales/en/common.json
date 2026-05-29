@@ -96,6 +96,14 @@
         "title": "Goose couldn't start",
         "description": "The local Goose service didn't start. Try again, or copy the startup details and open the logs folder to share them with support."
       },
+      "networkWarp": {
+        "title": "Goose can't reach Block's internal services",
+        "description": "It looks like you aren't connected to Cloudflare WARP.",
+        "steps": {
+          "connect": "Connect to WARP",
+          "retry": "Click Retry"
+        }
+      },
       "unknown": {
         "title": "Goose couldn't start",
         "description": "Goose couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."
@@ -103,6 +111,7 @@
       "copyDetails": "Copy details",
       "openLogsFolder": "Open logs folder",
       "technicalDetails": "Technical details",
+      "connectivityProbeLabel": "Connectivity probe",
       "copySuccess": "Startup details copied.",
       "copyFailed": "We couldn't copy startup details.",
       "openLogsFailed": "We couldn't open the logs folder."

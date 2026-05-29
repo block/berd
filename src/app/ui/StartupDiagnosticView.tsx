@@ -53,6 +53,27 @@ export function StartupDiagnosticView({
           </p>
         </div>
 
+        {issue.kind === "network-warp" ? (
+          <ol className="flex w-full max-w-sm flex-col gap-3 self-center text-left">
+            <li className="flex items-center gap-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                1
+              </span>
+              <span className="text-base font-semibold text-foreground">
+                {t("startup.error.networkWarp.steps.connect")}
+              </span>
+            </li>
+            <li className="flex items-center gap-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-border text-sm font-medium text-muted-foreground">
+                2
+              </span>
+              <span className="text-sm text-muted-foreground">
+                {t("startup.error.networkWarp.steps.retry")}
+              </span>
+            </li>
+          </ol>
+        ) : null}
+
         <div className="flex flex-wrap justify-center gap-2">
           <Button
             type="button"
@@ -90,6 +111,16 @@ export function StartupDiagnosticView({
           <pre className="mt-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 text-xs text-muted-foreground">
             {issue.rawError}
           </pre>
+          {issue.connectivityProbe ? (
+            <>
+              <div className="mt-3 text-xs font-medium text-muted-foreground">
+                {t("startup.error.connectivityProbeLabel")}
+              </div>
+              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md bg-background p-3 text-xs text-muted-foreground">
+                {issue.connectivityProbe}
+              </pre>
+            </>
+          ) : null}
         </details>
       </div>
     </div>

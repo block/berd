@@ -1711,8 +1711,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   ]);
 
   const startupIssue = useMemo(
-    () => (startup.error ? buildStartupDiagnosticIssue(startup.error) : null),
-    [startup.error],
+    () =>
+      startup.error
+        ? buildStartupDiagnosticIssue(startup.error, startup.probe)
+        : null,
+    [startup.error, startup.probe],
   );
   const forceStartupLoading =
     import.meta.env.DEV &&

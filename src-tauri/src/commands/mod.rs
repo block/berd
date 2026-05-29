@@ -6,6 +6,7 @@ pub mod automations;
 pub mod avatars;
 pub mod cache;
 pub mod connections;
+pub mod diagnostics;
 pub mod distro;
 pub mod doctor;
 pub mod feedback;

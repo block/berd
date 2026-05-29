@@ -1,16 +1,28 @@
-export type StartupErrorKind = "goose-serve" | "unknown";
+export type StartupErrorKind = "goose-serve" | "network-warp" | "unknown";
 
 export interface StartupDiagnosticIssue {
   kind: StartupErrorKind;
   titleKey: string;
   descriptionKey: string;
   rawError: string;
+  connectivityProbe: string | null;
+}
+
+export interface KgooseProbeReport {
+  likelyWarpFailure: boolean;
+  status: number | null;
+  kind: string;
+  message: string;
 }
 
 const ERROR_COPY_KEYS = {
   "goose-serve": {
     titleKey: "common:startup.error.gooseServe.title",
     descriptionKey: "common:startup.error.gooseServe.description",
+  },
+  "network-warp": {
+    titleKey: "common:startup.error.networkWarp.title",
+    descriptionKey: "common:startup.error.networkWarp.description",
   },
   unknown: {
     titleKey: "common:startup.error.unknown.title",
@@ -23,9 +35,17 @@ const ERROR_COPY_KEYS = {
 
 export function buildStartupDiagnosticIssue(
   error: unknown,
+  probe?: KgooseProbeReport | null,
 ): StartupDiagnosticIssue {
   const rawError = serializeRawError(error);
-  const kind = classifyStartupErrorFromRaw(rawError);
+  const baseKind = classifyStartupErrorFromRaw(rawError);
+  // The Rust probe is authoritative for WARP failures; it can only upgrade
+  // an "unknown" classification, never override a `goose-serve` failure
+  // where we already have a precise startup reason.
+  const kind =
+    baseKind === "unknown" && probe?.likelyWarpFailure
+      ? "network-warp"
+      : baseKind;
   const keys = ERROR_COPY_KEYS[kind];
 
   return {
@@ -33,7 +53,12 @@ export function buildStartupDiagnosticIssue(
     titleKey: keys.titleKey,
     descriptionKey: keys.descriptionKey,
     rawError,
+    connectivityProbe: probe ? serializeProbe(probe) : null,
   };
+}
+
+function serializeProbe(probe: KgooseProbeReport): string {
+  return JSON.stringify(probe, null, 2);
 }
 
 export function classifyStartupError(error: unknown): StartupErrorKind {
@@ -71,13 +96,17 @@ export function serializeRawError(error: unknown): string {
 export function buildStartupDiagnosticReport(
   issue: StartupDiagnosticIssue,
 ): string {
-  return [
+  const sections = [
     `app timestamp: ${new Date().toISOString()}`,
     `kind: ${issue.kind}`,
     "",
     "raw error:",
     issue.rawError,
-  ].join("\n");
+  ];
+  if (issue.connectivityProbe) {
+    sections.push("", "connectivity probe:", issue.connectivityProbe);
+  }
+  return sections.join("\n");
 }
 
 function serializeValue(value: unknown, seen: WeakSet<object>): unknown {

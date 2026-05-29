@@ -69,6 +69,30 @@ function monitorConnection(client: GooseClient): void {
 }
 
 async function initializeConnection(): Promise<GooseClient> {
+  // Dev-only: inject a real failure into startup so the WARP probe runs
+  // for real against kgoose. `VITE_DEV_STARTUP_ERROR=warp just dev` lets
+  // us experience the diagnostic UI with whatever real WARP state the
+  // machine has, rather than simulating the probe result.
+  if (import.meta.env.DEV) {
+    const variant = import.meta.env.VITE_DEV_STARTUP_ERROR;
+    // Treat empty string as unset so an accidental `VITE_DEV_STARTUP_ERROR=`
+    // in a shell profile or `.env.local` doesn't lock the app into the
+    // diagnostic UI with no way out.
+    if (typeof variant === "string" && variant !== "") {
+      if (variant === "goose-serve") {
+        throw new Error(
+          "Failed to spawn goose serve (binary: goosed): simulated dev failure",
+        );
+      }
+      if (variant === "unknown") {
+        throw new Error("Simulated dev startup failure");
+      }
+      // Default ("warp" or anything else non-empty) mimics the upstream
+      // "Invalid params" we saw in the wild — the probe decides the copy.
+      throw new Error("Invalid params (simulated dev failure)");
+    }
+  }
+
   const tStart = performance.now();
   const wsUrl: string = await invoke("get_goose_serve_url");
   perfLog(

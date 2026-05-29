@@ -5,6 +5,7 @@ use reqwest::{
     redirect::Policy,
     StatusCode,
 };
+use serde::Serialize;
 use serde_json::Value;
 use std::{env, fmt, sync::OnceLock, time::Duration};
 use tokio::time::timeout;
@@ -20,6 +21,7 @@ const MAX_ERROR_BODY_CHARS: usize = 500;
 const KGOOSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const KGOOSE_SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
+const KGOOSE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(crate) async fn post_json(
     distro_state: &DistroBundleState,
@@ -268,6 +270,53 @@ fn is_access_request_error_kind(kind: KgooseRequestErrorKind) -> bool {
     )
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct KgooseProbeResult {
+    pub likely_warp_failure: bool,
+    pub status: Option<u16>,
+    pub kind: &'static str,
+    pub message: String,
+}
+
+/// Issues a `HEAD` request against the configured kgoose base URL (no endpoint
+/// path) and classifies the response. Used by the startup-error diagnostic
+/// flow to distinguish a WARP/network failure from a backend bug.
+pub(crate) async fn probe_connectivity(
+    distro_state: &DistroBundleState,
+) -> Result<KgooseProbeResult, String> {
+    let url = build_url("", distro_state.kgoose_config())?;
+    Ok(probe_url(url).await)
+}
+
+async fn probe_url(url: reqwest::Url) -> KgooseProbeResult {
+    let request = add_playpen_baggage(client().head(url.clone())).timeout(KGOOSE_PROBE_TIMEOUT);
+    match request.send().await {
+        Ok(response) => {
+            let status = response.status();
+            KgooseProbeResult {
+                likely_warp_failure: is_access_status(status),
+                status: Some(status.as_u16()),
+                kind: "http_status",
+                message: format!("kgoose probe to {} returned {}", url.as_str(), status),
+            }
+        }
+        Err(error) => {
+            let kind = KgooseRequestErrorKind::from_reqwest_error(&error);
+            KgooseProbeResult {
+                likely_warp_failure: is_access_request_error_kind(kind),
+                status: None,
+                kind: "request",
+                message: format!(
+                    "kgoose probe to {} failed ({}): {error}",
+                    url.as_str(),
+                    kind.as_str()
+                ),
+            }
+        }
+    }
+}
+
 pub(crate) async fn open_sse_stream(
     url: reqwest::Url,
     last_event_id: Option<HeaderValue>,
@@ -460,13 +509,15 @@ fn truncate_error_body(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_url, build_url, is_access_request_error_kind, playpen_baggage,
+        build_sse_url, build_url, is_access_request_error_kind, playpen_baggage, probe_url,
         truncate_error_body, KgooseDistroConfig, KgooseJsonError, KgooseRequestErrorKind,
         KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
     };
     use reqwest::StatusCode;
     use std::env;
     use std::sync::Mutex;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     // All tests that mutate GOOSE_INTERNAL_KGOOSE_* must use this lock.
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -650,5 +701,59 @@ mod tests {
         assert_eq!(playpen_baggage(), None);
 
         env::remove_var(KGOOSE_PLAYPEN_ENV);
+    }
+
+    async fn spawn_probe_server(raw_response: &'static [u8]) -> reqwest::Url {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut socket, _)) = listener.accept().await {
+                let mut buffer = [0u8; 1024];
+                let _ = socket.read(&mut buffer).await;
+                let _ = socket.write_all(raw_response).await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        reqwest::Url::parse(&format!("http://{}/", addr)).unwrap()
+    }
+
+    #[tokio::test]
+    async fn probe_flags_redirect_to_access_as_warp_failure() {
+        let url = spawn_probe_server(
+            b"HTTP/1.1 302 Found\r\nLocation: https://sqprod.cloudflareaccess.com/\r\nContent-Length: 0\r\n\r\n",
+        )
+        .await;
+
+        let result = probe_url(url).await;
+
+        assert!(result.likely_warp_failure);
+        assert_eq!(result.status, Some(302));
+        assert_eq!(result.kind, "http_status");
+    }
+
+    #[tokio::test]
+    async fn probe_does_not_flag_upstream_404_as_warp_failure() {
+        let url = spawn_probe_server(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n").await;
+
+        let result = probe_url(url).await;
+
+        assert!(!result.likely_warp_failure);
+        assert_eq!(result.status, Some(404));
+        assert_eq!(result.kind, "http_status");
+    }
+
+    #[tokio::test]
+    async fn probe_flags_connect_failure_as_warp_failure() {
+        // Bind then drop the listener so the port is almost certainly free.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        drop(listener);
+        let url = reqwest::Url::parse(&format!("http://{}/", addr)).unwrap();
+
+        let result = probe_url(url).await;
+
+        assert!(result.likely_warp_failure);
+        assert_eq!(result.status, None);
+        assert_eq!(result.kind, "request");
     }
 }

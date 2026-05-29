@@ -96,6 +96,14 @@
         "title": "Goose no pudo iniciarse",
         "description": "El servicio local de Goose no se inició. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
       },
+      "networkWarp": {
+        "title": "Goose no puede acceder a los servicios internos de Block",
+        "description": "Parece que no estás conectado a Cloudflare WARP.",
+        "steps": {
+          "connect": "Conéctate a WARP",
+          "retry": "Haz clic en Reintentar"
+        }
+      },
       "unknown": {
         "title": "Goose no pudo iniciarse",
         "description": "Goose no pudo terminar de iniciarse. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."
@@ -103,6 +111,7 @@
       "copyDetails": "Copiar detalles",
       "openLogsFolder": "Abrir carpeta de logs",
       "technicalDetails": "Detalles técnicos",
+      "connectivityProbeLabel": "Sondeo de conectividad",
       "copySuccess": "Detalles de inicio copiados.",
       "copyFailed": "No pudimos copiar los detalles de inicio.",
       "openLogsFailed": "No pudimos abrir la carpeta de logs."

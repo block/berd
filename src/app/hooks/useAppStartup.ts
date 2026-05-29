@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
@@ -17,6 +18,37 @@ import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import type { KgooseProbeReport } from "../lib/startupDiagnostics";
+
+const STARTUP_PROBE_TIMEOUT_MS = 5_000;
+
+async function runStartupConnectivityProbe(): Promise<KgooseProbeReport | null> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const probePromise = invoke<KgooseProbeReport>("probe_kgoose_connectivity");
+    const timeout = new Promise<KgooseProbeReport>((resolve) => {
+      timeoutId = setTimeout(() => {
+        // A hung probe is itself evidence the network path is broken;
+        // surface that as a likely WARP failure so the UI can suggest the
+        // right next step instead of waiting forever.
+        resolve({
+          likelyWarpFailure: true,
+          status: null,
+          kind: "request",
+          message: "kgoose probe timed out",
+        });
+      }, STARTUP_PROBE_TIMEOUT_MS);
+    });
+    return await Promise.race([probePromise, timeout]);
+  } catch (probeError) {
+    console.error("Failed to probe kgoose connectivity:", probeError);
+    return null;
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
+}
 
 export function filterStartupProvidersForDistro(
   providers: AcpProvider[],
@@ -40,6 +72,7 @@ export function filterStartupProvidersForDistro(
 export function useAppStartup() {
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [probe, setProbe] = useState<KgooseProbeReport | null>(null);
   const [attempt, setAttempt] = useState(0);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `attempt` is bumped by `retry()` to force a re-run
@@ -50,6 +83,7 @@ export function useAppStartup() {
       perfLog("[perf:startup] useAppStartup begin");
       setReady(false);
       setError(null);
+      setProbe(null);
 
       const tConn = performance.now();
       setNotificationHandler(notificationHandler);
@@ -202,9 +236,11 @@ export function useAppStartup() {
         `[perf:startup] useAppStartup complete in ${(performance.now() - tStartup).toFixed(1)}ms`,
       );
     })()
-      .catch((err) => {
+      .catch(async (err) => {
         console.error("Failed to complete app startup:", err);
+        const probeResult = await runStartupConnectivityProbe();
         if (!cancelled) {
+          setProbe(probeResult);
           setError(err);
         }
       })
@@ -223,5 +259,5 @@ export function useAppStartup() {
     setAttempt((value) => value + 1);
   }, []);
 
-  return { ready, error, retry };
+  return { ready, error, probe, retry };
 }
