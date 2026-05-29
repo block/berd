@@ -214,7 +214,7 @@ export function ContextPanel({
     <Tabs
       value={activeTab}
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
-      className="flex h-full min-w-0 flex-1 flex-col gap-0"
+      className="flex h-full min-h-0 max-h-full min-w-0 flex-1 flex-col gap-0"
     >
       <div className="shrink-0 border-b border-border/80 px-4 pb-2 pt-2.5">
         <TabsList variant="weight">
@@ -227,7 +227,7 @@ export function ContextPanel({
         </TabsList>
       </div>
 
-      <TabsContent value="details" className="flex-1 overflow-y-auto">
+      <TabsContent value="details" className="min-h-0 flex-1 overflow-y-auto">
         <div className="pb-3">
           <WorkspaceWidget
             projectName={projectName}
@@ -269,7 +269,7 @@ export function ContextPanel({
         </div>
       </TabsContent>
 
-      <TabsContent value="files" className="flex-1 overflow-y-auto">
+      <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
         <FilesList projectWorkingDirs={projectWorkingDirs} />
       </TabsContent>
     </Tabs>

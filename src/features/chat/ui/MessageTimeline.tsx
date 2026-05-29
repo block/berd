@@ -479,7 +479,7 @@ export function MessageTimeline({
 
   const messageList = (
     <div
-      className="mx-auto w-full max-w-3xl flex-1 pt-4"
+      className="mx-auto w-full max-w-[var(--chat-transcript-container-max-width)] flex-1 px-[var(--chat-transcript-inline-padding)] pt-4"
       style={{ paddingBottom: footer ? 16 : (tailPaddingPx ?? 16) }}
     >
       {visibleMessages.map((message, index) => {

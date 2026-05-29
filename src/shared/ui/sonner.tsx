@@ -19,8 +19,12 @@ const Toaster = ({ ...props }: ToasterProps) => {
       expand
       visibleToasts={3}
       gap={8}
-      offset={{ bottom: 88, right: 12 }}
-      mobileOffset={{ bottom: 132, left: 16, right: 16 }}
+      offset={{ bottom: "var(--toast-bottom-offset)", right: 12 }}
+      mobileOffset={{
+        bottom: "var(--toast-mobile-bottom-offset)",
+        left: 16,
+        right: 16,
+      }}
       style={
         {
           "--normal-bg": "var(--surface-composer-glass)",

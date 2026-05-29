@@ -7,7 +7,32 @@ const CP_PANEL_W = 315;
 export const CP_TOTAL_W = CP_PANEL_W;
 const CP_FADE_S = 0.15;
 const CP_REFLOW_MS = 200;
-const CP_COMPACT_QUERY = "(max-width: 900px)";
+export const CHAT_CONTEXT_PANEL_COMPACT_QUERY = "(max-width: 900px)";
+
+export function useChatContextPanelCompactViewport() {
+  const [isCompactViewport, setIsCompactViewport] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) {
+      return false;
+    }
+    return window.matchMedia(CHAT_CONTEXT_PANEL_COMPACT_QUERY).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return;
+
+    const mediaQuery = window.matchMedia(CHAT_CONTEXT_PANEL_COMPACT_QUERY);
+    setIsCompactViewport(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsCompactViewport(event.matches);
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+    return () => mediaQuery.removeEventListener("change", handleChange);
+  }, []);
+
+  return isCompactViewport;
+}
 
 interface ChatContextPanelProps {
   activeSessionId: string;
@@ -27,23 +52,9 @@ export function ChatContextPanel({
   sessionWorkingDir,
 }: ChatContextPanelProps) {
   const shouldReduceMotion = useReducedMotion();
-  const [isCompactViewport, setIsCompactViewport] = useState(false);
+  const isCompactViewport = useChatContextPanelCompactViewport();
   const fadeTransition = { duration: shouldReduceMotion ? 0 : CP_FADE_S };
   const reflowDuration = shouldReduceMotion ? 0 : CP_REFLOW_MS;
-
-  useEffect(() => {
-    if (!window.matchMedia) return;
-
-    const mediaQuery = window.matchMedia(CP_COMPACT_QUERY);
-    setIsCompactViewport(mediaQuery.matches);
-
-    const handleChange = (event: MediaQueryListEvent) => {
-      setIsCompactViewport(event.matches);
-    };
-
-    mediaQuery.addEventListener("change", handleChange);
-    return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
 
   return (
     <div
@@ -63,7 +74,7 @@ export function ChatContextPanel({
             className={cn(
               "flex",
               isCompactViewport
-                ? "absolute bottom-3 right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 w-[min(var(--context-panel-width),calc(100%-1.5rem))]"
+                ? "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]"
                 : "h-full",
             )}
             style={
@@ -78,7 +89,12 @@ export function ChatContextPanel({
             exit={{ opacity: 0 }}
             transition={fadeTransition}
           >
-            <aside className="flex min-w-0 flex-1 overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
+            <aside
+              className={cn(
+                "flex min-w-0 flex-1 overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md",
+                isCompactViewport ? "max-h-full shadow-popover" : "h-full",
+              )}
+            >
               <ContextPanel
                 sessionId={activeSessionId}
                 projectName={project?.name}

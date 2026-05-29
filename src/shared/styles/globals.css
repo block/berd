@@ -457,6 +457,16 @@
   --section-padding-vertical: 100px;
   --section-heading-margin-bottom: 75px;
 
+  /* Chat layout */
+  --chat-transcript-max-width: 768px;
+  --chat-transcript-inline-padding: 16px;
+  --chat-transcript-container-max-width: calc(
+    var(--chat-transcript-max-width) +
+    (var(--chat-transcript-inline-padding) * 2)
+  );
+  --chat-user-message-max-width: 640px;
+  --chat-composer-max-width: 768px;
+
   /* Motion */
   --ease-spring: cubic-bezier(0.33, 1, 0.68, 1);
   --duration-fast: 0.15s;
@@ -874,8 +884,11 @@
   --spacing-app-top-bar-control: 24px;
   --spacing-app-top-bar-button-gap: 4px;
   --spacing-app-panel-gutter-top: 4px;
+  --spacing-app-panel-gutter-inline: 12px;
   --spacing-app-panel-gutter-bottom: 12px;
   --spacing-app-page-bottom: 6rem;
+  --toast-bottom-offset: var(--spacing-app-panel-gutter-bottom);
+  --toast-mobile-bottom-offset: 16px;
   --spacing-input: 3.25rem;
   --spacing-input-sm: 2.75rem;
   --spacing-button: 2.75rem;
@@ -887,6 +900,7 @@
   --text-body-alex: 14px;
   --text-input-alex: 16px;
   --text-title-alex: 24px;
+  --text-app-top-bar-title-compact: 20px;
 
   --breakpoint-desktop: 1440px;
 
@@ -1041,6 +1055,36 @@
       filter: blur(0);
       transform: translateY(0);
     }
+  }
+}
+
+:root[data-global-composer-visible="true"] {
+  --toast-bottom-offset: 88px;
+  --toast-mobile-bottom-offset: 132px;
+}
+
+@keyframes text-shimmer {
+  0% {
+    background-position:
+      130% center,
+      0 0;
+  }
+  70%,
+  100% {
+    background-position:
+      -30% center,
+      0 0;
+  }
+}
+
+.shimmer-text {
+  animation: text-shimmer var(--shimmer-duration) linear var(--shimmer-delay)
+    infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shimmer-text {
+    animation: none !important;
   }
 }
 

@@ -148,7 +148,7 @@ export function AppShellLayout({
           onMouseDown={onResizeStart}
           onDoubleClick={onResizeDoubleClick}
           className={cn(
-            "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-hidden",
+            "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-visible",
             contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
           )}
           style={{
@@ -156,7 +156,7 @@ export function AppShellLayout({
             maxHeight: contentUnderTopBar
               ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
               : "calc(100% - var(--spacing-app-panel-gutter-bottom))",
-            width: sidebarCollapsed ? 0 : resizeHandleWidth,
+            width: 0,
             opacity: sidebarCollapsed ? 0 : 1,
             transition: isResizing
               ? "none"

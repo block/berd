@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   t: vi.fn((key: string) => key),
   useChatSessionController: vi.fn(),
   usePinToHomeWidget: vi.fn(),
+  isContextPanelOpen: false,
 }));
 
 vi.mock("motion/react", () => ({
@@ -85,7 +86,7 @@ vi.mock("@/features/home/hooks/usePinToHomeWidget", () => ({
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
-      isContextPanelOpen: false,
+      isContextPanelOpen: mocks.isContextPanelOpen,
       setContextPanelOpen: vi.fn(),
     }),
 }));
@@ -103,6 +104,18 @@ function TopBarActionsHost() {
   return <div data-testid="topbar-actions">{actions}</div>;
 }
 
+function mockMatchMedia(matches: boolean) {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    })),
+  });
+}
+
 describe("ChatView MCP app messaging", () => {
   beforeEach(() => {
     mocks.messageTimelineSpy.mockClear();
@@ -111,6 +124,8 @@ describe("ChatView MCP app messaging", () => {
     mocks.handleSend.mockClear();
     mocks.pinToHome.mockClear();
     mocks.unpinFromHome.mockClear();
+    mocks.isContextPanelOpen = false;
+    mockMatchMedia(false);
     mocks.usePinToHomeWidget.mockReturnValue({
       isPinned: false,
       isPinning: false,
@@ -292,6 +307,35 @@ describe("ChatView MCP app messaging", () => {
       projectPicker: false,
     });
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
+  });
+
+  it("uses an inline rail gap only while the context panel takes layout space", () => {
+    mocks.isContextPanelOpen = true;
+    mockMatchMedia(false);
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    const { unmount } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    expect(document.querySelector(".page-transition")).toHaveClass(
+      "gap-[var(--spacing-app-panel-gutter-inline)]",
+    );
+
+    unmount();
+    mockMatchMedia(true);
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    expect(document.querySelector(".page-transition")).not.toHaveClass(
+      "gap-[var(--spacing-app-panel-gutter-inline)]",
+    );
   });
 
   it("uses agent-building copy for empty builder sessions", () => {

@@ -165,19 +165,23 @@ function BreadcrumbSeparator({
 }
 
 function BreadcrumbTrail({
+  className,
   items,
+  listClassName,
   pageProps,
   variant = "default",
 }: {
+  className?: string;
   items: BreadcrumbTrailItem[];
+  listClassName?: string;
   pageProps?: BreadcrumbPagePassthroughProps;
   variant?: BreadcrumbListVariant;
 }) {
   const { className: pageClassName, ...restPageProps } = pageProps ?? {};
 
   return (
-    <Breadcrumb>
-      <BreadcrumbList variant={variant}>
+    <Breadcrumb className={className}>
+      <BreadcrumbList variant={variant} className={listClassName}>
         {items.map((item, index) => {
           const isFirst = index === 0;
           const isLast = index === items.length - 1;
@@ -187,6 +191,8 @@ function BreadcrumbTrail({
           const topBarItemClassName =
             variant === "top-bar"
               ? cn(
+                  "min-w-0",
+                  isLast ? "shrink" : "shrink-0",
                   breadcrumbTopBarToneTransitionClassName,
                   breadcrumbTopBarToneClassNames[topBarTone],
                   index > 1 && breadcrumbTopBarEnterClassName,
@@ -215,7 +221,9 @@ function BreadcrumbTrail({
                     variant={variant}
                     tone={topBarTone}
                     className={
-                      variant === "top-bar" ? "text-inherit" : undefined
+                      variant === "top-bar"
+                        ? "block min-w-0 truncate text-inherit"
+                        : undefined
                     }
                     onClick={(event) => {
                       event.preventDefault();
@@ -236,7 +244,8 @@ function BreadcrumbTrail({
                     }
                     tone={topBarTone}
                     className={cn(
-                      variant === "top-bar" && "text-inherit",
+                      variant === "top-bar" &&
+                        "block min-w-0 truncate text-inherit",
                       pageClassName,
                     )}
                   >

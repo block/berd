@@ -17,7 +17,7 @@ const SIDEBAR_DEFAULT_HEIGHT_RATIO = 2 / 3;
 const SIDEBAR_MIN_HEIGHT = 320;
 const SIDEBAR_SNAP_COLLAPSE_THRESHOLD = 100;
 const APP_SHELL_PANEL_GUTTER_BOTTOM_FALLBACK = 12;
-const APP_SHELL_TOP_BAR_HEIGHT = 56;
+const APP_SHELL_TOP_BAR_HEIGHT_FALLBACK = 52;
 const APP_SHELL_HORIZONTAL_CHROME_WIDTH = 28;
 const MIN_MAIN_CONTENT_WIDTH = 532;
 const MIN_WINDOW_HEIGHT = 600;
@@ -36,6 +36,29 @@ function getExpandedSidebarFitWidth(sidebarWidth: number) {
   );
 }
 
+function getViewportWidth() {
+  return typeof window === "undefined"
+    ? getExpandedSidebarFitWidth(SIDEBAR_DEFAULT_WIDTH)
+    : window.innerWidth;
+}
+
+function getMaxSidebarWidthForViewport(viewportWidth: number) {
+  return (
+    viewportWidth - APP_SHELL_HORIZONTAL_CHROME_WIDTH - MIN_MAIN_CONTENT_WIDTH
+  );
+}
+
+function getResponsiveSidebarWidth(
+  preferredWidth: number,
+  viewportWidth: number,
+) {
+  const maxVisibleWidth = getMaxSidebarWidthForViewport(viewportWidth);
+  if (maxVisibleWidth < SIDEBAR_MIN_WIDTH) {
+    return preferredWidth;
+  }
+  return Math.max(SIDEBAR_MIN_WIDTH, Math.min(preferredWidth, maxVisibleWidth));
+}
+
 function getAppPanelGutterBottom() {
   if (typeof window === "undefined") {
     return APP_SHELL_PANEL_GUTTER_BOTTOM_FALLBACK;
@@ -52,18 +75,34 @@ function getAppPanelGutterBottom() {
     : APP_SHELL_PANEL_GUTTER_BOTTOM_FALLBACK;
 }
 
+function getAppTopBarHeight() {
+  if (typeof window === "undefined") {
+    return APP_SHELL_TOP_BAR_HEIGHT_FALLBACK;
+  }
+
+  const topBarHeight = Number.parseFloat(
+    window
+      .getComputedStyle(document.documentElement)
+      .getPropertyValue("--spacing-app-top-bar"),
+  );
+
+  return Number.isFinite(topBarHeight)
+    ? topBarHeight
+    : APP_SHELL_TOP_BAR_HEIGHT_FALLBACK;
+}
+
 function getSidebarFrameHeight() {
   if (typeof window === "undefined") {
     return (
       MIN_WINDOW_HEIGHT -
-      APP_SHELL_TOP_BAR_HEIGHT -
+      APP_SHELL_TOP_BAR_HEIGHT_FALLBACK -
       APP_SHELL_PANEL_GUTTER_BOTTOM_FALLBACK
     );
   }
 
   return Math.max(
     SIDEBAR_MIN_HEIGHT,
-    window.innerHeight - APP_SHELL_TOP_BAR_HEIGHT - getAppPanelGutterBottom(),
+    window.innerHeight - getAppTopBarHeight() - getAppPanelGutterBottom(),
   );
 }
 
@@ -144,13 +183,17 @@ async function syncWindowMinimumSize() {
 
 export function useResizableSidebar() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [viewportWidth, setViewportWidth] = useState(getViewportWidth);
   const [sidebarLayout, setSidebarLayout] = usePersistedState(
     SIDEBAR_LAYOUT_STORAGE_KEY,
     getDefaultSidebarLayout(),
     validateSidebarLayoutPreference,
   );
   const [isResizing, setIsResizing] = useState(false);
-  const sidebarWidth = sidebarLayout.width;
+  const preferredSidebarWidth = sidebarLayout.width;
+  const sidebarWidth = sidebarCollapsed
+    ? preferredSidebarWidth
+    : getResponsiveSidebarWidth(preferredSidebarWidth, viewportWidth);
   const sidebarHeight = sidebarLayout.height;
   const patchSidebarLayout = useCallback(
     (patch: Partial<SidebarLayoutPreference>) => {
@@ -165,7 +208,9 @@ export function useResizableSidebar() {
   const sidebarOuterHeight = sidebarCollapsed ? 0 : sidebarHeight;
 
   const expandSidebar = useCallback(async () => {
-    const expandedFitWidth = getExpandedSidebarFitWidth(sidebarWidth);
+    const expandedFitWidth = getExpandedSidebarFitWidth(
+      getResponsiveSidebarWidth(preferredSidebarWidth, getViewportWidth()),
+    );
 
     try {
       await ensureWindowWidth(expandedFitWidth);
@@ -174,7 +219,7 @@ export function useResizableSidebar() {
     }
 
     setSidebarCollapsed(false);
-  }, [sidebarWidth]);
+  }, [preferredSidebarWidth]);
 
   const collapseSidebar = useCallback(() => {
     setSidebarCollapsed(true);
@@ -302,12 +347,13 @@ export function useResizableSidebar() {
   }, []);
 
   useEffect(() => {
-    if (sidebarCollapsed) {
-      return;
-    }
-
     const handleWindowResize = () => {
-      if (window.innerWidth < getExpandedSidebarFitWidth(sidebarWidth)) {
+      const nextViewportWidth = getViewportWidth();
+      setViewportWidth(nextViewportWidth);
+      if (
+        !sidebarCollapsed &&
+        getMaxSidebarWidthForViewport(nextViewportWidth) < SIDEBAR_MIN_WIDTH
+      ) {
         setSidebarCollapsed(true);
       }
     };
@@ -315,7 +361,7 @@ export function useResizableSidebar() {
     handleWindowResize();
     window.addEventListener("resize", handleWindowResize);
     return () => window.removeEventListener("resize", handleWindowResize);
-  }, [sidebarCollapsed, sidebarWidth]);
+  }, [sidebarCollapsed]);
 
   useEffect(() => {
     const handleWindowResize = () => {

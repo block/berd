@@ -1782,6 +1782,28 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const forceStartupLoading =
     import.meta.env.DEV &&
     new URLSearchParams(window.location.search).has("startupLoading");
+  const showGlobalComposer =
+    startup.ready &&
+    !forceStartupLoading &&
+    !startupIssue &&
+    children == null &&
+    activeView !== "chat" &&
+    !(activeView === "automations" && automationsRoute.surface === "builder");
+
+  useEffect(() => {
+    if (showGlobalComposer) {
+      document.documentElement.setAttribute(
+        "data-global-composer-visible",
+        "true",
+      );
+    } else {
+      document.documentElement.removeAttribute("data-global-composer-visible");
+    }
+
+    return () => {
+      document.documentElement.removeAttribute("data-global-composer-visible");
+    };
+  }, [showGlobalComposer]);
 
   if (forceStartupLoading || !startup.ready) {
     return <StartupLoadingView />;
@@ -1918,11 +1940,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                 handleStartProviderTroubleshootingChat
               }
             />
-            {activeView !== "chat" &&
-            !(
-              activeView === "automations" &&
-              automationsRoute.surface === "builder"
-            ) ? (
+            {showGlobalComposer ? (
               <GlobalComposerPill onSend={handleGlobalCompose} />
             ) : null}
           </>

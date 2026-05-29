@@ -5,6 +5,20 @@ import { useResizableSidebar } from "./useResizableSidebar";
 
 type ResizableSidebar = ReturnType<typeof useResizableSidebar>;
 
+function setWindowWidth(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    value: width,
+  });
+}
+
+function setWindowHeight(height: number) {
+  Object.defineProperty(window, "innerHeight", {
+    configurable: true,
+    value: height,
+  });
+}
+
 function dragSidebar(
   sidebar: ResizableSidebar,
   axis: "width" | "height" | "both",
@@ -34,6 +48,12 @@ function dragSidebar(
 describe("useResizableSidebar", () => {
   beforeEach(() => {
     window.localStorage.clear();
+    setWindowWidth(1024);
+    setWindowHeight(768);
+    document.documentElement.style.removeProperty("--spacing-app-top-bar");
+    document.documentElement.style.removeProperty(
+      "--spacing-app-panel-gutter-bottom",
+    );
   });
 
   it("starts expanded at the default width", () => {
@@ -177,5 +197,90 @@ describe("useResizableSidebar", () => {
 
     expect(result.current.sidebarWidth).toBe(defaultWidth);
     expect(result.current.sidebarHeight).toBe(defaultHeight);
+  });
+
+  it("shrinks a wide sidebar before collapsing on narrow windows", () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 420,
+        height: 400,
+        heightCustomized: true,
+      }),
+    );
+    setWindowWidth(800);
+
+    const { result } = renderHook(() => useResizableSidebar());
+
+    expect(result.current.isCollapsed).toBe(false);
+    expect(result.current.sidebarWidth).toBe(240);
+  });
+
+  it("restores the preferred sidebar width when space returns", async () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 420,
+        height: 400,
+        heightCustomized: true,
+      }),
+    );
+    setWindowWidth(800);
+    const { result } = renderHook(() => useResizableSidebar());
+
+    expect(result.current.sidebarWidth).toBe(240);
+
+    act(() => {
+      setWindowWidth(1024);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    await waitFor(() => {
+      expect(result.current.sidebarWidth).toBe(420);
+    });
+  });
+
+  it("collapses only after the minimum sidebar width no longer fits", async () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 420,
+        height: 400,
+        heightCustomized: true,
+      }),
+    );
+    setWindowWidth(740);
+
+    const { result } = renderHook(() => useResizableSidebar());
+
+    await waitFor(() => {
+      expect(result.current.isCollapsed).toBe(true);
+    });
+  });
+
+  it("uses app chrome tokens for the maximum sidebar height", () => {
+    setWindowHeight(900);
+    document.documentElement.style.setProperty("--spacing-app-top-bar", "52px");
+    document.documentElement.style.setProperty(
+      "--spacing-app-panel-gutter-bottom",
+      "12px",
+    );
+    const { result } = renderHook(() => useResizableSidebar());
+
+    act(() => {
+      result.current.handleHeightResizeStart({
+        clientX: 0,
+        clientY: 0,
+        preventDefault: vi.fn(),
+      } as unknown as ReactMouseEvent);
+    });
+    act(() => {
+      document.dispatchEvent(
+        new MouseEvent("mousemove", { clientX: 0, clientY: 1000 }),
+      );
+      document.dispatchEvent(new MouseEvent("mouseup"));
+    });
+
+    expect(result.current.sidebarHeight).toBe(836);
   });
 });

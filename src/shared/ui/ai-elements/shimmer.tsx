@@ -28,8 +28,7 @@ export interface TextShimmerProps {
   duration?: number;
   spread?: number;
   delay?: number;
-  repeatDelay?: number;
-  tone?: "default" | "soft";
+  tone?: "default" | "soft" | "strong";
 }
 
 const ShimmerComponent = ({
@@ -39,7 +38,6 @@ const ShimmerComponent = ({
   duration = 2,
   spread = 2,
   delay = 0,
-  repeatDelay = 0,
   tone = "default",
 }: TextShimmerProps) => {
   const MotionComponent = getMotionComponent(
@@ -52,44 +50,46 @@ const ShimmerComponent = ({
   );
   const shimmerColors = useMemo(
     () =>
-      tone === "soft"
+      tone === "strong"
         ? {
             base: "var(--color-muted-foreground)",
-            highlight:
-              "color-mix(in srgb, var(--color-foreground) 72%, var(--color-muted-foreground) 28%)",
+            highlight: "var(--color-foreground)",
           }
-        : {
-            base: "var(--color-muted-foreground)",
-            highlight: "var(--color-background)",
-          },
+        : tone === "soft"
+          ? {
+              base: "var(--color-muted-foreground)",
+              highlight:
+                "color-mix(in srgb, var(--color-foreground) 72%, var(--color-muted-foreground) 28%)",
+            }
+          : {
+              base: "var(--color-muted-foreground)",
+              highlight: "var(--color-background)",
+            },
     [tone],
   );
 
   return (
     <MotionComponent
-      animate={{ backgroundPosition: "0% center" }}
       className={cn(
+        "shimmer-text",
         "relative inline-block bg-[length:250%_100%,auto] bg-clip-text text-transparent",
-        "[--bg:linear-gradient(90deg,#0000_calc(50%-var(--spread)),var(--shimmer-highlight),#0000_calc(50%+var(--spread)))] [background-repeat:no-repeat,padding-box]",
+        "[background-repeat:no-repeat,padding-box]",
         className,
       )}
-      initial={{ backgroundPosition: "100% center" }}
       style={
         {
           "--spread": `${dynamicSpread}px`,
+          "--bg":
+            "linear-gradient(90deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))",
+          "--shimmer-delay": `${delay}s`,
+          "--shimmer-duration": `${duration}s`,
           "--shimmer-base": shimmerColors.base,
           "--shimmer-highlight": shimmerColors.highlight,
           backgroundImage:
             "var(--bg), linear-gradient(var(--shimmer-base), var(--shimmer-base))",
+          backgroundPosition: "130% center, 0 0",
         } as CSSProperties
       }
-      transition={{
-        delay,
-        duration,
-        ease: "linear",
-        repeat: Number.POSITIVE_INFINITY,
-        repeatDelay,
-      }}
     >
       {children}
     </MotionComponent>

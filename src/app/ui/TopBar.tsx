@@ -8,6 +8,7 @@ import {
   IconMessageReport,
   IconSearch,
 } from "@tabler/icons-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
@@ -16,6 +17,10 @@ import { Button } from "@/shared/ui/button";
 import { GooseIcon } from "@/shared/ui/icons/GooseIcon";
 
 type TopBarLeadingChromeInset = "compact" | "trafficLights";
+type TopBarBreadcrumbDisplay = "full" | "compact" | "current";
+
+const TOP_BAR_COMPACT_BREADCRUMB_WIDTH = 1180;
+const TOP_BAR_CURRENT_BREADCRUMB_WIDTH = 920;
 
 export interface TopBarChromeInsets {
   leading: TopBarLeadingChromeInset;
@@ -46,6 +51,43 @@ export interface TopBarBreadcrumb {
   onClick?: () => void;
 }
 
+function getTopBarBreadcrumbDisplay(): TopBarBreadcrumbDisplay {
+  if (typeof window === "undefined") {
+    return "full";
+  }
+
+  if (window.innerWidth <= TOP_BAR_CURRENT_BREADCRUMB_WIDTH) {
+    return "current";
+  }
+
+  if (window.innerWidth <= TOP_BAR_COMPACT_BREADCRUMB_WIDTH) {
+    return "compact";
+  }
+
+  return "full";
+}
+
+function useTopBarBreadcrumbDisplay() {
+  const [display, setDisplay] = useState<TopBarBreadcrumbDisplay>(
+    getTopBarBreadcrumbDisplay,
+  );
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDisplay(getTopBarBreadcrumbDisplay());
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+
+    return () => {
+      window.removeEventListener("resize", handleResize);
+    };
+  }, []);
+
+  return display;
+}
+
 export function TopBar({
   breadcrumbs,
   canGoBack = false,
@@ -66,6 +108,14 @@ export function TopBar({
 }: TopBarProps) {
   const { t } = useTranslation(["sidebar", "feedback"]);
   const viewActions = useTopBarActions();
+  const breadcrumbDisplay = useTopBarBreadcrumbDisplay();
+  const visibleBreadcrumbs = useMemo(
+    () =>
+      breadcrumbDisplay === "current" && breadcrumbs.length > 0
+        ? [breadcrumbs[breadcrumbs.length - 1]]
+        : breadcrumbs,
+    [breadcrumbDisplay, breadcrumbs],
+  );
   const sidebarLabel = sidebarCollapsed
     ? t("actions.expand")
     : t("actions.collapse");
@@ -88,7 +138,7 @@ export function TopBar({
   return (
     <header
       className={cn(
-        "flex h-[var(--spacing-app-top-bar)] items-center gap-3 pr-4",
+        "flex h-[var(--spacing-app-top-bar)] min-w-0 items-center gap-2 pr-4",
         className,
       )}
       data-tauri-drag-region
@@ -97,7 +147,7 @@ export function TopBar({
         className={cn("h-full shrink-0", leadingSpaceClassName)}
         data-tauri-drag-region
       />
-      <div className="flex items-center gap-[var(--spacing-app-top-bar-button-gap)]">
+      <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         {onGoHome ? (
           <Button
             type="button"
@@ -167,16 +217,26 @@ export function TopBar({
           />
         </Button>
       </div>
-      <BreadcrumbTrail
-        items={breadcrumbs}
-        variant="top-bar"
-        pageProps={{ "data-tauri-drag-region": true }}
-      />
-      <div className="min-w-0 flex-1 self-stretch" data-tauri-drag-region />
+      <div
+        className="flex min-w-0 flex-1 items-center self-stretch overflow-hidden"
+        data-tauri-drag-region
+      >
+        <BreadcrumbTrail
+          className="min-w-0 max-w-full overflow-hidden"
+          items={visibleBreadcrumbs}
+          listClassName={cn(
+            "min-w-0 max-w-full overflow-hidden",
+            breadcrumbDisplay !== "full" &&
+              "text-[var(--text-app-top-bar-title-compact)] leading-none",
+          )}
+          variant="top-bar"
+          pageProps={{ "data-tauri-drag-region": true }}
+        />
+      </div>
       {viewActions ? (
-        <div className="flex items-center gap-2">{viewActions}</div>
+        <div className="flex shrink-0 items-center gap-2">{viewActions}</div>
       ) : null}
-      <div className="flex items-center gap-[var(--spacing-app-top-bar-button-gap)]">
+      <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         <Button
           type="button"
           variant="ghost"

@@ -124,6 +124,30 @@ describe("MessageBubble", () => {
     expect(el?.className).toContain("flex-row-reverse");
   });
 
+  it("keeps user messages capped while allowing assistant messages to fill the transcript lane", () => {
+    const { container } = render(
+      <>
+        <MessageBubble message={userMessage("hello")} />
+        <MessageBubble
+          message={assistantMessage([{ type: "text", text: "response" }])}
+        />
+      </>,
+    );
+
+    const userContent = container.querySelector(
+      '[data-role="user-message-content"]',
+    );
+    const assistantContent = container.querySelector(
+      '[data-role="assistant-message-content"]',
+    );
+
+    expect(userContent).toHaveClass(
+      "max-w-[var(--chat-user-message-max-width)]",
+    );
+    expect(assistantContent).toHaveClass("w-full");
+    expect(assistantContent?.className).not.toContain("max-w-[85%]");
+  });
+
   it("renders assistant message with avatar", () => {
     const { container } = render(
       <MessageBubble

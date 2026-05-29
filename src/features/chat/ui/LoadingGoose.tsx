@@ -16,10 +16,9 @@ interface LoadingGooseProps {
 }
 
 const LOADING_FADE_S = 0.45;
-const LOADING_SHIMMER_S = 3;
-const LOADING_SHIMMER_SPREAD = 3;
+const LOADING_SHIMMER_S = 2.2;
+const LOADING_SHIMMER_SPREAD = 5;
 const LOADING_SHIMMER_DELAY_S = 0.35;
-const LOADING_SHIMMER_REPEAT_DELAY_S = 0.9;
 
 const MESSAGE_KEY_BY_STATE: Record<
   Exclude<LoadingChatState, "idle">,
@@ -62,11 +61,10 @@ export function LoadingGoose({
         <Shimmer
           as="span"
           className="text-xs"
-          tone="soft"
+          tone="strong"
           delay={LOADING_SHIMMER_DELAY_S}
           duration={LOADING_SHIMMER_S}
           spread={LOADING_SHIMMER_SPREAD}
-          repeatDelay={LOADING_SHIMMER_REPEAT_DELAY_S}
         >
           {message}
         </Shimmer>

@@ -503,7 +503,7 @@ export function ChatInput({
       >
         {showAgentToolsTip && agentToolsTip ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center px-2 pb-3 sm:px-4">
-            <div className="max-w-3xl">
+            <div className="max-w-[var(--chat-composer-max-width)]">
               <ContextualTip
                 className="pointer-events-auto"
                 actionLabel={t("agentToolsTip.turnOff")}
@@ -518,7 +518,7 @@ export function ChatInput({
             </div>
           </div>
         ) : null}
-        <div className="mx-auto max-w-3xl">
+        <div className="mx-auto max-w-[var(--chat-composer-max-width)]">
           <Popover open={mentionOpen}>
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}
             <div

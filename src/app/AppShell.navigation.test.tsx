@@ -168,6 +168,7 @@ describe("AppShell global navigation", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
     mockCreatePersonaSource.mockReset();
@@ -234,6 +235,27 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("transparent");
+  });
+
+  it("reserves toast space only while the global composer is visible", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await waitFor(() => {
+      expect(document.documentElement).toHaveAttribute(
+        "data-global-composer-visible",
+        "true",
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(document.documentElement).not.toHaveAttribute(
+      "data-global-composer-visible",
+    );
   });
 
   it("opens a blank chat before ACP session creation finishes", async () => {

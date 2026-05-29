@@ -12,6 +12,21 @@ describe("LoadingGoose", () => {
     expect(screen.getByRole("status", { name: thinking })).toBeInTheDocument();
   });
 
+  it("uses a valid spaced calc expression for the shimmer gradient", () => {
+    render(<LoadingGoose chatState="thinking" />);
+
+    expect(screen.getByText(thinking)).toHaveStyle({
+      "--bg":
+        "linear-gradient(90deg, #0000 calc(50% - var(--spread)), var(--shimmer-highlight), #0000 calc(50% + var(--spread)))",
+    });
+  });
+
+  it("keeps the shimmer animation running", () => {
+    render(<LoadingGoose chatState="thinking" />);
+
+    expect(screen.getByText(thinking)).toHaveClass("shimmer-text");
+  });
+
   it("renders responding copy for active response states", () => {
     const { rerender } = render(<LoadingGoose chatState="streaming" />);
 

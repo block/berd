@@ -14,7 +14,7 @@ export function ChatLoadingSkeleton() {
       role="status"
       aria-label={t("skeleton.loadingConversation")}
     >
-      <div className="mx-auto w-full max-w-3xl py-4 space-y-6 px-4">
+      <div className="mx-auto w-full max-w-[var(--chat-transcript-container-max-width)] space-y-6 px-[var(--chat-transcript-inline-padding)] py-4">
         {/* Date separator skeleton */}
         <div className="flex items-center gap-3">
           <div className="h-px flex-1 bg-border/80" />
@@ -24,7 +24,7 @@ export function ChatLoadingSkeleton() {
 
         {/* User message */}
         <div className="flex justify-end">
-          <div className="space-y-2 max-w-[70%]">
+          <div className="space-y-2 max-w-[var(--chat-user-message-max-width)]">
             <Skeleton className="h-4 w-64 rounded-card-sm" />
           </div>
         </div>
@@ -44,7 +44,7 @@ export function ChatLoadingSkeleton() {
 
         {/* User message */}
         <div className="flex justify-end">
-          <div className="space-y-2 max-w-[70%]">
+          <div className="space-y-2 max-w-[var(--chat-user-message-max-width)]">
             <Skeleton className="h-4 w-48 rounded-card-sm" />
           </div>
         </div>

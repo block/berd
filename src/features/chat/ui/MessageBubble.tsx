@@ -343,8 +343,6 @@ export const MessageBubble = memo(function MessageBubble({
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
     .join("\n");
-  const hasMcpApp = content.some((block) => block.type === "mcpApp");
-
   if (role === "system") {
     return (
       <div className="flex justify-center px-4 py-2">
@@ -398,7 +396,7 @@ export const MessageBubble = memo(function MessageBubble({
   return (
     <div
       className={cn(
-        "flex px-4 py-1",
+        "flex py-1",
         "animate-in fade-in duration-200 motion-reduce:animate-none",
         isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
@@ -431,13 +429,14 @@ export const MessageBubble = memo(function MessageBubble({
         </div>
       ) : null}
       <div
+        data-role={
+          isUser ? "user-message-content" : "assistant-message-content"
+        }
         className={cn(
           "group relative min-w-0 flex flex-col gap-1 pb-8",
           isUser
-            ? "max-w-[640px] items-end"
-            : hasMcpApp
-              ? "w-full items-start"
-              : "max-w-[85%] items-start",
+            ? "max-w-[var(--chat-user-message-max-width)] items-end"
+            : "w-full items-start",
         )}
       >
         {showAssistantIdentity ? (

@@ -8,13 +8,17 @@ import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
+import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
-import type { ChatSession } from "../stores/chatSessionStore";
+import {
+  useChatSessionStore,
+  type ChatSession,
+} from "../stores/chatSessionStore";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 
 interface ChatViewProps {
@@ -48,10 +52,19 @@ export function ChatView({
     onCreatePersonaRequested: onCreatePersona,
   });
   const effectiveSession = controller.session ?? activeSession ?? null;
+  const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
+  const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
   const isAgentBuilderSession =
     effectiveSession?.intent === "build-agent" &&
     Boolean(
       effectiveSession.targetAgentPath && effectiveSession.targetAgentSlug,
+    );
+  const hasVisibleRightRail =
+    isAgentBuilderSession ||
+    Boolean(
+      effectiveSession?.id &&
+        isContextPanelOpen &&
+        !isContextPanelCompactViewport,
     );
   const agentBuilderChatColumnStyle = isAgentBuilderSession
     ? ({
@@ -143,7 +156,7 @@ export function ChatView({
   ) : null;
   const composerFooter = (
     <div className="px-4">
-      <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
+      <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
         <ChatInput
           surface="bare"
           placeholder={
@@ -237,7 +250,12 @@ export function ChatView({
       messages={controller.messages}
       sessionCwd={controller.sessionArtifactCwd}
     >
-      <div className="page-transition flex h-full min-w-0 gap-4 pl-1 pr-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
+      <div
+        className={cn(
+          "page-transition flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
+          hasVisibleRightRail && "gap-[var(--spacing-app-panel-gutter-inline)]",
+        )}
+      >
         <div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col",
