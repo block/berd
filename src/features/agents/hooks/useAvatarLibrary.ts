@@ -19,6 +19,8 @@ interface CachedAvatarMediaEntry {
   media: ResolvedAvatarMedia;
 }
 
+const AVATAR_LIBRARY_STALE_TIME_MS = 24 * 60 * 60 * 1000;
+
 export interface AvatarLibraryState {
   catalog: AvatarCatalog | null;
   cachedAvatarMediaById: Record<string, CachedAvatarMediaEntry>;
@@ -94,6 +96,20 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [cachedAvatarMediaById, setCachedAvatarMediaById] = useState<
     Record<string, CachedAvatarMediaEntry>
   >({});
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      setCatalogRetryToken((value) => value + 1);
+    }, AVATAR_LIBRARY_STALE_TIME_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [enabled]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: catalogRetryToken intentionally retriggers catalog loading when Retry is clicked.
   useEffect(() => {

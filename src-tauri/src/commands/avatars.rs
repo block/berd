@@ -16,7 +16,7 @@ const ARTIFACTORY_BASE: &str =
     "https://global.block-artifacts.com/artifactory/goose-internal/avatars/";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
-const CATALOG_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const CATALOG_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const METADATA_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);
 const METADATA_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const ASSET_CONNECT_TIMEOUT: Duration = Duration::from_secs(3);

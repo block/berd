@@ -20,6 +20,7 @@ type ArtifactsQueryOptions<TData> = Pick<
 };
 
 const fallbackQueryClient = new QueryClient();
+const ARTIFACTS_QUERY_STALE_TIME_MS = 24 * 60 * 60 * 1000;
 
 export function useArtifacts<TData = Artifacts>(
   options: ArtifactsQueryOptions<TData> = {},
@@ -30,7 +31,7 @@ export function useArtifacts<TData = Artifacts>(
     {
       queryKey: ARTIFACTS_QUERY_KEY,
       queryFn: getArtifacts,
-      staleTime: Number.POSITIVE_INFINITY,
+      staleTime: ARTIFACTS_QUERY_STALE_TIME_MS,
       ...options,
       enabled: Boolean(queryClient) && (options.enabled ?? true),
     },
