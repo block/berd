@@ -13,7 +13,13 @@ import {
   stopAutomationBuilderStream,
   type AutomationBuilderStatus,
   type AutomationDraft,
+  type AutomationDraftState,
 } from "@/features/automations/api/automationBuilder";
+import {
+  getAutomationTile,
+  updateAutomationTile,
+  type AutomationTile,
+} from "@/features/automations/api/kgooseAutomations";
 import {
   createUserMessage,
   getTextContent,
@@ -25,7 +31,41 @@ const RECONNECT_AFTER_COMPLETED_DELAY_MS = 1_000;
 const MAX_PENDING_COMPLETED_RECONNECTS = 3;
 
 interface UseAutomationBuilderSessionOptions {
+  /**
+   * When set, the session enters edit mode: the rail seeds from the existing
+   * tile and approval calls `update_automation_tile` instead of
+   * `create_automation_tile`.
+   */
+  automationId?: string;
   onAutomationCreated?: (automationId?: string) => void;
+  onAutomationUpdated?: (automationId?: string) => void;
+}
+
+function buildSeedDraftFromTile(tile: AutomationTile): AutomationDraft | null {
+  if (!tile.id) return null;
+  const instructions = Array.isArray(tile.instructions)
+    ? tile.instructions
+    : [];
+  const humanReadableInstructions = Array.isArray(
+    tile.humanReadableInstructions,
+  )
+    ? tile.humanReadableInstructions
+    : [];
+  return {
+    toolRequestId: `edit-${tile.id}`,
+    toolName: "automation edit",
+    title: typeof tile.title === "string" ? tile.title : undefined,
+    schedule: typeof tile.schedule === "string" ? tile.schedule : undefined,
+    instructions,
+    humanReadableInstructions,
+    enableNotifications:
+      typeof tile.enableNotifications === "boolean"
+        ? tile.enableNotifications
+        : undefined,
+    timeZone: typeof tile.timeZone === "string" ? tile.timeZone : undefined,
+    rawArguments: {},
+    creationMode: "createTile",
+  };
 }
 
 function messagesEquivalent(a: Message, b: Message) {
@@ -103,8 +143,12 @@ function createDeferred() {
 }
 
 export function useAutomationBuilderSession({
+  automationId,
   onAutomationCreated,
+  onAutomationUpdated,
 }: UseAutomationBuilderSessionOptions = {}) {
+  const isEditing = Boolean(automationId);
+  const [seedDraft, setSeedDraft] = useState<AutomationDraft | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<AutomationBuilderStatus>("initialized");
@@ -151,10 +195,25 @@ export function useAutomationBuilderSession({
     setStreamingMessageId(null);
   }, []);
 
-  const draftState = useMemo(
+  const messageDraftState = useMemo(
     () => findAutomationDraftState(messages),
     [messages],
   );
+  // In edit mode, fall back to the seed draft (synthesized from the existing
+  // tile) until the chat emits its own draft via a tool call.
+  const draftState = useMemo<AutomationDraftState>(() => {
+    if (messageDraftState.draft || !seedDraft) {
+      return messageDraftState;
+    }
+    return {
+      draft: seedDraft,
+      blockedToolRequest: null,
+      createRequested: false,
+      created: false,
+      createdAutomationId: undefined,
+      failed: false,
+    };
+  }, [messageDraftState, seedDraft]);
   const effectiveDraftState = useMemo(() => {
     if (
       !locallyCreatedAutomation ||
@@ -211,6 +270,31 @@ export function useAutomationBuilderSession({
         : { toolRequestId: activeDraftToolRequestId, overrides: {} },
     );
   }, [activeDraftToolRequestId]);
+
+  // Fetch the existing tile in edit mode and synthesize the seed draft.
+  useEffect(() => {
+    if (!automationId) {
+      setSeedDraft(null);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await getAutomationTile(automationId);
+        if (cancelled) return;
+        if (response.tileInfo) {
+          setSeedDraft(buildSeedDraftFromTile(response.tileInfo));
+        }
+      } catch (error) {
+        if (cancelled) return;
+        console.error("Failed to load automation for editing:", error);
+        setError("Couldn't load this automation to edit.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [automationId]);
 
   useEffect(() => {
     if (mergedDraftState.created) {
@@ -414,9 +498,20 @@ export function useAutomationBuilderSession({
 
       let pushed = false;
       try {
+        const editContext =
+          !sessionIdRef.current && seedDraft
+            ? {
+                title: seedDraft.title,
+                schedule: seedDraft.schedule,
+                timeZone: seedDraft.timeZone,
+                instructions: seedDraft.instructions,
+                humanReadableInstructions: seedDraft.humanReadableInstructions,
+              }
+            : undefined;
         const result = await pushAutomationBuilderUserMessage(
           trimmed,
           sessionIdRef.current ?? undefined,
+          editContext,
         );
         pushed = true;
         const nextSessionId = result.sessionId ?? sessionIdRef.current;
@@ -441,17 +536,27 @@ export function useAutomationBuilderSession({
         operationInFlightRef.current = false;
       }
     },
-    [addErrorMessage, isSubmitting, markTurnProcessing, setSessionIdValue],
+    [
+      addErrorMessage,
+      isSubmitting,
+      markTurnProcessing,
+      seedDraft,
+      setSessionIdValue,
+    ],
   );
 
   const approveDraft = useCallback(async () => {
-    const currentSessionId = sessionIdRef.current;
     if (
-      !currentSessionId ||
       !mergedDraftState.draft ||
       isSubmitting ||
       operationInFlightRef.current
     ) {
+      return false;
+    }
+    const currentSessionId = sessionIdRef.current;
+    // Create path needs an active chat session to acknowledge the tool call.
+    // Edit path bypasses the chat — it calls update_automation_tile directly.
+    if (!isEditing && !currentSessionId) {
       return false;
     }
 
@@ -460,6 +565,29 @@ export function useAutomationBuilderSession({
     setError(null);
     try {
       const draft = mergedDraftState.draft;
+
+      if (isEditing && automationId) {
+        const result = await updateAutomationTile({
+          id: automationId,
+          title: draft.title,
+          schedule: draft.schedule,
+          updateSchedule: true,
+          timeZone: draft.timeZone,
+          instructions: draft.instructions,
+          updateInstructions: true,
+          enableNotifications: draft.enableNotifications,
+        });
+        if (result.success !== true) {
+          throw new Error(result.errorMsg || "Failed to update automation.");
+        }
+        setLocallyCreatedAutomation({
+          toolRequestId: draft.toolRequestId,
+          automationId,
+        });
+        onAutomationUpdated?.(automationId);
+        return true;
+      }
+
       let shouldOpenStream = true;
       const result = await createAutomationTileFromDraft(draft);
       if (result.success !== true || !result.tileId) {
@@ -471,16 +599,18 @@ export function useAutomationBuilderSession({
       });
 
       try {
-        await acknowledgeAutomationTileDraft(
-          currentSessionId,
-          draft.toolRequestId,
-        );
+        if (currentSessionId) {
+          await acknowledgeAutomationTileDraft(
+            currentSessionId,
+            draft.toolRequestId,
+          );
+        }
       } catch (acknowledgementError) {
         const message = automationBuilderErrorMessage(acknowledgementError);
         setMessages((current) => [...current, message]);
         shouldOpenStream = false;
       }
-      if (shouldOpenStream) {
+      if (shouldOpenStream && currentSessionId) {
         await markTurnProcessing(currentSessionId);
       }
       return true;
@@ -495,10 +625,13 @@ export function useAutomationBuilderSession({
     }
   }, [
     addErrorMessage,
+    automationId,
     clearPendingTurn,
-    mergedDraftState.draft,
+    isEditing,
     isSubmitting,
     markTurnProcessing,
+    mergedDraftState.draft,
+    onAutomationUpdated,
     setStatusValue,
   ]);
 

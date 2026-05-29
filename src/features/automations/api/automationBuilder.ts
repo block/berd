@@ -45,6 +45,43 @@ export function buildAutomationPreferencePrompt(
   return `${AUTOMATION_PREFERENCE_PROMPT_BASE} The user's current local time is ${hhmm} in time zone ${timeZone}. When the user does not specify a time of day for the schedule, default the schedule's hour and minute to this current local time (${hhmm}); do not invent another default time.`;
 }
 
+export interface AutomationEditContext {
+  title?: string;
+  schedule?: string;
+  timeZone?: string;
+  instructions: string[];
+  humanReadableInstructions: string[];
+}
+
+export function buildAutomationEditContextPrompt(
+  context: AutomationEditContext,
+): string {
+  const titleLine = context.title
+    ? `Title: ${context.title}`
+    : "Title: (untitled)";
+  const scheduleLine = context.schedule
+    ? `Schedule (cron): ${context.schedule}${context.timeZone ? ` in ${context.timeZone}` : ""}`
+    : "Schedule: not set";
+  const instructionsList =
+    context.humanReadableInstructions.length > 0
+      ? context.humanReadableInstructions
+      : context.instructions;
+  const instructionsBlock =
+    instructionsList.length > 0
+      ? `Current instructions:\n${instructionsList.map((step, i) => `${i + 1}. ${step}`).join("\n")}`
+      : "Current instructions: (none)";
+
+  return [
+    "The user is editing an existing automation. Help them refine it.",
+    "Treat the state below as the current automation. Only propose a new draft (via tile__render_tile with render_type='automation', tile_type='summary') after the user describes what they want to change.",
+    "If the user asks an open-ended question first, answer it without emitting a draft.",
+    "",
+    titleLine,
+    scheduleLine,
+    instructionsBlock,
+  ].join("\n");
+}
+
 export type AutomationBuilderStatus = KgooseSessionStatus;
 
 export interface AutomationBuilderStreamEvent {
@@ -295,6 +332,7 @@ function basePushRequest(sessionId?: string) {
 export function buildAutomationBuilderUserMessageRequest(
   text: string,
   sessionId?: string,
+  editContext?: AutomationEditContext,
 ) {
   const userMessage = {
     messageContents: [
@@ -305,20 +343,31 @@ export function buildAutomationBuilderUserMessageRequest(
     ],
   };
   if (!sessionId) {
+    const hiddenMessages = [
+      {
+        hidden: true,
+        messageContents: [
+          {
+            type: "MESSAGE_TYPE_TEXT",
+            text: { text: buildAutomationPreferencePrompt() },
+          },
+        ],
+      },
+    ];
+    if (editContext) {
+      hiddenMessages.push({
+        hidden: true,
+        messageContents: [
+          {
+            type: "MESSAGE_TYPE_TEXT",
+            text: { text: buildAutomationEditContextPrompt(editContext) },
+          },
+        ],
+      });
+    }
     return {
       ...basePushRequest(sessionId),
-      messages: [
-        {
-          hidden: true,
-          messageContents: [
-            {
-              type: "MESSAGE_TYPE_TEXT",
-              text: { text: buildAutomationPreferencePrompt() },
-            },
-          ],
-        },
-        userMessage,
-      ],
+      messages: [...hiddenMessages, userMessage],
     };
   }
 
@@ -404,8 +453,13 @@ export function buildTileApprovalAcknowledgementRequest(
 export async function pushAutomationBuilderUserMessage(
   text: string,
   sessionId?: string,
+  editContext?: AutomationEditContext,
 ): Promise<PushAutomationBuilderResponse> {
-  const request = buildAutomationBuilderUserMessageRequest(text, sessionId);
+  const request = buildAutomationBuilderUserMessageRequest(
+    text,
+    sessionId,
+    editContext,
+  );
   const response = await invoke<unknown>("push_automation_builder_messages", {
     request,
   });

@@ -7,14 +7,23 @@ import { useAutomationBuilderSession } from "@/features/automations/hooks/useAut
 import { AutomationDraftRail } from "@/features/automations/ui/AutomationDraftRail";
 
 interface AutomationBuilderViewProps {
+  automationId?: string;
   onAutomationCreated?: (automationId?: string) => void;
+  onAutomationUpdated?: (automationId?: string) => void;
 }
 
 export function AutomationBuilderView({
+  automationId,
   onAutomationCreated,
+  onAutomationUpdated,
 }: AutomationBuilderViewProps) {
   const { t } = useTranslation("automations");
-  const builder = useAutomationBuilderSession({ onAutomationCreated });
+  const isEditing = Boolean(automationId);
+  const builder = useAutomationBuilderSession({
+    automationId,
+    onAutomationCreated,
+    onAutomationUpdated,
+  });
   const composerFooter = (
     <>
       {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}
@@ -22,6 +31,7 @@ export function AutomationBuilderView({
         <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput
             surface="bare"
+            placeholder={isEditing ? t("builder.editPlaceholder") : undefined}
             controls={{
               agentModelPicker: false,
               projectPicker: false,
@@ -42,10 +52,10 @@ export function AutomationBuilderView({
       <div>
         <IconSparkles className="mx-auto size-4 text-foreground" />
         <h3 className="mt-3 text-sm font-medium text-foreground">
-          {t("builder.emptyTitle")}
+          {isEditing ? t("builder.editEmptyTitle") : t("builder.emptyTitle")}
         </h3>
         <p className="mt-1 max-w-md text-sm text-muted-foreground">
-          {t("builder.emptyBody")}
+          {isEditing ? t("builder.editEmptyBody") : t("builder.emptyBody")}
         </p>
       </div>
     </div>
@@ -71,6 +81,7 @@ export function AutomationBuilderView({
         draftState={builder.draftState}
         error={builder.error}
         isSubmitting={builder.isSubmitting}
+        isEditing={isEditing}
         sessionId={builder.sessionId}
         status={builder.status}
         onApprove={builder.approveDraft}

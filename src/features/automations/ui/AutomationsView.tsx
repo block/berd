@@ -6,6 +6,7 @@ import {
   IconCopy,
   IconPlus,
   IconRefresh,
+  IconSparkles,
   IconTrash,
 } from "@tabler/icons-react";
 import { PinIcon } from "lucide-react";
@@ -412,6 +413,24 @@ export function AutomationsWorkbench({
             type="button"
             variant="page-header"
             size="xs"
+            onClick={() => {
+              if (!detailTile.id) return;
+              setNavigationRoute({
+                surface: "builder",
+                automationId: detailTile.id,
+              });
+            }}
+            disabled={!detailTile.id}
+            aria-label={t("actions.editWithChat")}
+            title={t("actions.editWithChat")}
+            leftIcon={<IconSparkles aria-hidden="true" />}
+          >
+            {t("actions.editWithChat")}
+          </Button>
+          <Button
+            type="button"
+            variant="page-header"
+            size="xs"
             onClick={() => duplicateMutate(detailTile)}
             disabled={
               isUpdating || isDuplicating || !canDuplicateAutomation(detailTile)
@@ -485,6 +504,7 @@ export function AutomationsWorkbench({
     pinToHome,
     refetchAutomations,
     refetchDetail,
+    setNavigationRoute,
     setTopBarActions,
     t,
     unpinFromHome,
@@ -493,6 +513,7 @@ export function AutomationsWorkbench({
   if (currentRoute.surface === "builder") {
     return (
       <AutomationBuilderView
+        automationId={currentRoute.automationId}
         onAutomationCreated={(automationId) => {
           if (automationId) {
             selectCreatedAutomation(automationId);
@@ -500,6 +521,14 @@ export function AutomationsWorkbench({
           void automationsQuery.refetch().then(() => {
             if (!automationId) return;
             scheduleDelayedAutomationsRefetch();
+          });
+        }}
+        onAutomationUpdated={(automationId) => {
+          if (automationId) {
+            selectCreatedAutomation(automationId);
+          }
+          void automationsQuery.refetch().then(() => {
+            void refetchDetail();
           });
         }}
       />

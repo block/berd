@@ -1,7 +1,6 @@
 import {
   IconAlertTriangle,
   IconCheck,
-  IconChevronDown,
   IconPlayerStop,
   IconSparkles,
 } from "@tabler/icons-react";
@@ -36,6 +35,7 @@ interface AutomationDraftRailProps {
   draftState: AutomationDraftState;
   error: string | null;
   isSubmitting: boolean;
+  isEditing?: boolean;
   sessionId: string | null;
   status: AutomationBuilderStatus;
   onApprove: () => void;
@@ -95,6 +95,7 @@ export function AutomationDraftRail({
   draftState,
   error,
   isSubmitting,
+  isEditing = false,
   sessionId,
   status,
   onApprove,
@@ -178,12 +179,20 @@ export function AutomationDraftRail({
       )}
       aria-label={t("builder.previewAriaLabel")}
     >
-      <div className="flex items-center justify-between rounded-pill bg-card/40 px-4 py-3 text-sm text-foreground">
+      <div className="flex flex-col gap-3 rounded-pill bg-card/40 px-4 py-3 text-sm text-foreground">
         <span className="flex min-w-0 items-center gap-2">
           <IconSparkles className="size-4 shrink-0 text-foreground" />
-          <span className="truncate">{t("builder.previewEyebrow")}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {isEditing
+              ? t("builder.editingEyebrow")
+              : t("builder.previewEyebrow")}
+          </span>
         </span>
-        <IconChevronDown className="size-4 shrink-0 text-muted-foreground" />
+        {draft?.title ? (
+          <p className="truncate text-sm font-medium text-foreground">
+            {draft.title}
+          </p>
+        ) : null}
       </div>
 
       <div className="mt-5 min-h-0 flex-1 overflow-y-auto">
@@ -425,7 +434,13 @@ export function AutomationDraftRail({
             leftIcon={<IconCheck aria-hidden="true" />}
             onClick={onApprove}
           >
-            {isSubmitting ? t("builder.processing") : t("builder.create")}
+            {isSubmitting
+              ? isEditing
+                ? t("builder.saving")
+                : t("builder.processing")
+              : isEditing
+                ? t("builder.saveChanges")
+                : t("builder.create")}
           </Button>
         ) : null}
         <div className="flex min-h-4 items-center gap-2 text-xs text-muted-foreground">
