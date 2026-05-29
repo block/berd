@@ -50,6 +50,7 @@ vi.mock("sonner", () => ({
 
 const CANVAS_BOUNDS = { width: 1200, height: 800 };
 const LEGACY_STORAGE_KEY = "goose-internal:home-widgets";
+const CLEAN_UP_SNAPSHOT_STORAGE_KEY = "goose:home:clean-up-snapshot";
 const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
   "goose:home:onboarding-stickies-seeded";
 const BACKEND_CLOCK_ID = "00000000-0000-0000-0000-000000000001";
@@ -825,6 +826,147 @@ describe("homeWidgetStore", () => {
     await flushMicrotasks();
   });
 
+  it("adds widgets into the organized layout while preserving the restore snapshot", async () => {
+    setReadyHomeState({
+      instances: [
+        clockWidget({
+          id: BACKEND_CLOCK_ID,
+          x: 0,
+          y: 0,
+          z: 1,
+          width: 240,
+          height: 240,
+        }),
+      ],
+    });
+    useHomeWidgetStore.setState({
+      cleanUpSnapshot: [
+        {
+          id: BACKEND_CLOCK_ID,
+          type: "clock",
+          x: 240,
+          y: 240,
+          z: 3,
+          width: 300,
+          height: 300,
+        },
+      ],
+    });
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({ items: request.items, itemRevision: 5 }),
+    }));
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 500, 500, { agentId: "a1" }, CANVAS_BOUNDS);
+
+    const added = useHomeWidgetStore
+      .getState()
+      .instances.find((instance) => instance.type === "agentPin");
+    expect(added).toMatchObject({
+      x: 384,
+      y: 0,
+      z: 2,
+      width: 200,
+      height: 220,
+      state: { agentId: "a1" },
+    });
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).toEqual([
+      {
+        id: BACKEND_CLOCK_ID,
+        type: "clock",
+        x: 240,
+        y: 240,
+        z: 3,
+        width: 300,
+        height: 300,
+      },
+      expect.objectContaining({
+        id: added?.id,
+        type: "agentPin",
+        x: 408,
+        y: 384,
+        z: 2,
+        width: 200,
+        height: 220,
+      }),
+    ]);
+    await flushMicrotasks();
+    expect(saveLayoutItems).toHaveBeenCalledTimes(1);
+
+    useHomeWidgetStore.getState().toggleCleanUpWidgets(CANVAS_BOUNDS);
+
+    expect(useHomeWidgetStore.getState().instances).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: BACKEND_CLOCK_ID,
+          x: 240,
+          y: 240,
+          z: 3,
+          width: 300,
+          height: 300,
+        }),
+        expect.objectContaining({
+          id: added?.id,
+          type: "agentPin",
+          x: 408,
+          y: 384,
+          z: 2,
+          width: 200,
+          height: 220,
+          state: { agentId: "a1" },
+        }),
+      ]),
+    );
+  });
+
+  it("restores the previous cleanup snapshot when organized add save fails", async () => {
+    const previousSnapshot = [
+      {
+        id: BACKEND_CLOCK_ID,
+        type: "clock",
+        x: 240,
+        y: 240,
+        z: 3,
+        width: 300,
+        height: 300,
+      },
+    ];
+    setReadyHomeState({
+      instances: [
+        clockWidget({
+          id: BACKEND_CLOCK_ID,
+          x: 0,
+          y: 0,
+          z: 1,
+          width: 240,
+          height: 240,
+        }),
+      ],
+    });
+    useHomeWidgetStore.setState({ cleanUpSnapshot: previousSnapshot });
+    localStorage.setItem(
+      CLEAN_UP_SNAPSHOT_STORAGE_KEY,
+      JSON.stringify(previousSnapshot),
+    );
+    vi.mocked(saveLayoutItems).mockRejectedValue("write failed");
+
+    useHomeWidgetStore
+      .getState()
+      .addWidget("agentPin", 500, 500, { agentId: "a1" }, CANVAS_BOUNDS);
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).toHaveLength(2);
+
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).toEqual(
+      previousSnapshot,
+    );
+    expect(localStorage.getItem(CLEAN_UP_SNAPSHOT_STORAGE_KEY)).toBe(
+      JSON.stringify(previousSnapshot),
+    );
+  });
+
   it("does not mutate or save before a backend layout is ready", () => {
     useHomeWidgetStore.setState({
       instances: [{ id: "w1", type: "clock", x: 0, y: 0, z: 1 }],
@@ -1129,6 +1271,27 @@ describe("homeWidgetStore", () => {
     );
   });
 
+  it("clears cleanup snapshot when a cleanup save conflicts", async () => {
+    const conflict = layout({ itemRevision: 11 });
+    setReadyHomeState({
+      instances: [
+        clockWidget({ id: BACKEND_CLOCK_ID, x: 48, y: 72, z: 5, width: 300 }),
+      ],
+    });
+    vi.mocked(saveLayoutItems).mockResolvedValue({
+      ok: false,
+      reason: "revisionConflict",
+      layout: conflict,
+    });
+
+    useHomeWidgetStore.getState().toggleCleanUpWidgets(CANVAS_BOUNDS);
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).not.toBeNull();
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).toBeNull();
+    expect(localStorage.getItem(CLEAN_UP_SNAPSHOT_STORAGE_KEY)).toBeNull();
+  });
+
   it("retries newly added widgets on top of the latest layout after a conflict", async () => {
     const conflict = layout({
       itemRevision: 11,
@@ -1216,6 +1379,22 @@ describe("homeWidgetStore", () => {
     expect(toast.error).toHaveBeenCalledWith(
       "home:widgetLayer.toasts.saveFailed",
     );
+  });
+
+  it("clears cleanup snapshot when a cleanup save fails", async () => {
+    setReadyHomeState({
+      instances: [
+        clockWidget({ id: BACKEND_CLOCK_ID, x: 48, y: 72, z: 5, width: 300 }),
+      ],
+    });
+    vi.mocked(saveLayoutItems).mockRejectedValue("write failed");
+
+    useHomeWidgetStore.getState().toggleCleanUpWidgets(CANVAS_BOUNDS);
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).not.toBeNull();
+    await flushMicrotasks();
+
+    expect(useHomeWidgetStore.getState().cleanUpSnapshot).toBeNull();
+    expect(localStorage.getItem(CLEAN_UP_SNAPSHOT_STORAGE_KEY)).toBeNull();
   });
 
   it("clears saving state after a synchronous save error", async () => {

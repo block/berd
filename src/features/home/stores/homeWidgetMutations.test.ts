@@ -3,6 +3,7 @@ import type { LayoutConstraints } from "@/features/layout/api/layout";
 import type { WidgetInstance } from "../widgets/types";
 import {
   addWidgetMutation,
+  cleanUpWidgetsMutation,
   moveWidgetMutation,
   resizeWidgetMutation,
 } from "./homeWidgetMutations";
@@ -95,5 +96,87 @@ describe("homeWidgetMutations", () => {
         height: 360,
       }),
     ]);
+  });
+
+  it("cleans up widgets into a catalog-sorted grid in one mutation", () => {
+    const widgets: WidgetInstance[] = [
+      clockWidget({ id: "agent", type: "agentPin", x: 500, y: 500, z: 7 }),
+      clockWidget({ id: "clock", x: 0, y: 0, z: 1 }),
+      clockWidget({ id: "chat", type: "chatPin", x: 1000, y: 500, z: 2 }),
+      clockWidget({ id: "skill", type: "skillPin", x: 1000, y: 0, z: 3 }),
+    ];
+
+    expect(cleanUpWidgetsMutation(widgets)).toEqual([
+      clockWidget({
+        id: "agent",
+        type: "agentPin",
+        x: 384,
+        y: 0,
+        z: 2,
+        width: 200,
+        height: 220,
+      }),
+      clockWidget({
+        id: "clock",
+        x: 0,
+        y: 0,
+        z: 1,
+        width: 240,
+        height: 240,
+      }),
+      clockWidget({
+        id: "chat",
+        type: "chatPin",
+        x: 744,
+        y: 0,
+        z: 3,
+        width: 188,
+        height: 80,
+      }),
+      clockWidget({
+        id: "skill",
+        type: "skillPin",
+        x: 1080,
+        y: 0,
+        z: 4,
+        width: 240,
+        height: 56,
+      }),
+    ]);
+  });
+
+  it("skips no-op cleanup mutations when widgets are already organized", () => {
+    const widgets: WidgetInstance[] = [
+      clockWidget({ id: "clock", x: 0, y: 0, z: 1, width: 240, height: 240 }),
+      clockWidget({
+        id: "agent",
+        type: "agentPin",
+        x: 384,
+        y: 0,
+        z: 2,
+        width: 200,
+        height: 220,
+      }),
+      clockWidget({
+        id: "chat",
+        type: "chatPin",
+        x: 744,
+        y: 0,
+        z: 3,
+        width: 188,
+        height: 80,
+      }),
+      clockWidget({
+        id: "skill",
+        type: "skillPin",
+        x: 1080,
+        y: 0,
+        z: 4,
+        width: 240,
+        height: 56,
+      }),
+    ];
+
+    expect(cleanUpWidgetsMutation(widgets)).toBeNull();
   });
 });

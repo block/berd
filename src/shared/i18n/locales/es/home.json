@@ -118,7 +118,9 @@
       "label": "Cambiar tamaño de {{widget}}"
     },
     "canvasControls": {
-      "recenterTitle": "Recentrar objetos fijados"
+      "cleanUpTitle": "Ordenar pins",
+      "recenterTitle": "Recentrar objetos fijados",
+      "restoreTitle": "Revertir diseño"
     },
     "picker": {
       "back": "Volver",

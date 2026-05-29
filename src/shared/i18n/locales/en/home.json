@@ -118,7 +118,9 @@
       "label": "Resize {{widget}}"
     },
     "canvasControls": {
-      "recenterTitle": "Recenter pinned objects"
+      "cleanUpTitle": "Clean up pins",
+      "recenterTitle": "Recenter pinned objects",
+      "restoreTitle": "Revert layout"
     },
     "picker": {
       "back": "Back",

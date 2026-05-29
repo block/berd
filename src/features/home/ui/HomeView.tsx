@@ -1,4 +1,4 @@
-import { Crosshair } from "lucide-react";
+import { Crosshair, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
@@ -40,7 +40,7 @@ export function HomeView({
 }: HomeViewProps) {
   const { t } = useTranslation("home");
   const setTopBarActions = useSetTopBarActions();
-  const [recenterMotionActive, setRecenterMotionActive] = useState(false);
+  const [layoutMotionActive, setLayoutMotionActive] = useState(false);
   const {
     instances,
     loadStatus,
@@ -51,31 +51,37 @@ export function HomeView({
     camera,
     constraints,
     saveCamera,
+    cleanUpSnapshot,
+    toggleCleanUpWidgets,
   } = useHomeWidgetLayoutController();
   const recenterTarget = useMemo(
     () => widgetCenterOfGravity(instances),
     [instances],
   );
   const recenterTitle = t("widgets.canvasControls.recenterTitle");
+  const cleanUpTitle = t("widgets.canvasControls.cleanUpTitle");
+  const restoreTitle = t("widgets.canvasControls.restoreTitle");
+  const cleanUpControlTitle = cleanUpSnapshot ? restoreTitle : cleanUpTitle;
+  const hasCleanableWidgets = recenterTarget !== null;
 
   useEffect(() => {
-    if (!recenterMotionActive) {
+    if (!layoutMotionActive) {
       return;
     }
 
     const timer = window.setTimeout(() => {
-      setRecenterMotionActive(false);
+      setLayoutMotionActive(false);
     }, 280);
 
     return () => window.clearTimeout(timer);
-  }, [recenterMotionActive]);
+  }, [layoutMotionActive]);
 
   const handleRecenter = useCallback(() => {
     if (!camera || !recenterTarget) {
       return;
     }
 
-    setRecenterMotionActive(true);
+    setLayoutMotionActive(true);
     const nextCamera = {
       centerX: recenterTarget.x,
       centerY: recenterTarget.y,
@@ -86,6 +92,11 @@ export function HomeView({
     );
   }, [camera, constraints, recenterTarget, saveCamera]);
 
+  const handleCleanUp = useCallback(() => {
+    setLayoutMotionActive(true);
+    toggleCleanUpWidgets(constraints ?? undefined);
+  }, [constraints, toggleCleanUpWidgets]);
+
   useEffect(() => {
     if (loadStatus !== "ready") {
       setTopBarActions(null);
@@ -93,21 +104,36 @@ export function HomeView({
     }
 
     setTopBarActions(
-      <Button
-        type="button"
-        variant="page-header"
-        size="xs"
-        onClick={handleRecenter}
-        disabled={!recenterTarget}
-        aria-label={recenterTitle}
-        title={recenterTitle}
-        leftIcon={<Crosshair aria-hidden="true" />}
-      />,
+      <>
+        <Button
+          type="button"
+          variant="page-header"
+          size="xs"
+          onClick={handleCleanUp}
+          disabled={!hasCleanableWidgets}
+          aria-label={cleanUpControlTitle}
+          title={cleanUpControlTitle}
+          leftIcon={<LayoutGrid aria-hidden="true" />}
+        />
+        <Button
+          type="button"
+          variant="page-header"
+          size="xs"
+          onClick={handleRecenter}
+          disabled={!recenterTarget}
+          aria-label={recenterTitle}
+          title={recenterTitle}
+          leftIcon={<Crosshair aria-hidden="true" />}
+        />
+      </>,
     );
 
     return () => setTopBarActions(null);
   }, [
+    cleanUpControlTitle,
+    handleCleanUp,
     handleRecenter,
+    hasCleanableWidgets,
     loadStatus,
     recenterTarget,
     recenterTitle,
@@ -120,7 +146,7 @@ export function HomeView({
         <WidgetCanvas
           instances={instances}
           mutations={widgetMutations}
-          animateCameraTransition={recenterMotionActive}
+          animateCameraTransition={layoutMotionActive}
           onOpenProject={onOpenProject}
           onOpenSkill={onOpenSkill}
           onOpenAgent={onOpenAgent}
@@ -221,6 +247,10 @@ function useHomeWidgetLayoutController() {
   const moveWidget = useHomeWidgetStore((state) => state.moveWidget);
   const resizeWidget = useHomeWidgetStore((state) => state.resizeWidget);
   const bumpZ = useHomeWidgetStore((state) => state.bumpZ);
+  const cleanUpSnapshot = useHomeWidgetStore((state) => state.cleanUpSnapshot);
+  const toggleCleanUpWidgets = useHomeWidgetStore(
+    (state) => state.toggleCleanUpWidgets,
+  );
   const removeWidget = useHomeWidgetStore((state) => state.removeWidget);
   const updateWidgetState = useHomeWidgetStore(
     (state) => state.updateWidgetState,
@@ -259,5 +289,7 @@ function useHomeWidgetLayoutController() {
     camera,
     constraints,
     saveCamera,
+    cleanUpSnapshot,
+    toggleCleanUpWidgets,
   };
 }

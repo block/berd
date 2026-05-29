@@ -68,6 +68,8 @@ type CameraState = Pick<
 
 type HomeWidgetRuntimeOptions = {
   getState: () => HomeWidgetState;
+  onItemSaveConfirmed?: () => void;
+  onItemSaveDiscarded?: () => void;
   setState: (patch: StatePatch) => void;
 };
 
@@ -299,6 +301,8 @@ function mergeAddedWidgetsAfterConflict(
 
 export function createHomeWidgetRuntime({
   getState,
+  onItemSaveConfirmed,
+  onItemSaveDiscarded,
   setState,
 }: HomeWidgetRuntimeOptions) {
   const runtime: RuntimeState = {
@@ -520,6 +524,7 @@ export function createHomeWidgetRuntime({
                 ...adoptSavedItems(result.layout, current),
                 error: null,
               }));
+              onItemSaveDiscarded?.();
               toast.warning(i18n.t("home:widgetLayer.toasts.conflict"));
               break;
             }
@@ -531,6 +536,9 @@ export function createHomeWidgetRuntime({
                 : layoutItemsToHomeWidgets(result.layout.items),
               error: null,
             }));
+            if (!runtime.queuedInstances) {
+              onItemSaveConfirmed?.();
+            }
           } catch {
             if (generation !== runtime.generation) {
               break;
@@ -543,6 +551,7 @@ export function createHomeWidgetRuntime({
                 : {}),
               error: null,
             }));
+            onItemSaveDiscarded?.();
             toast.error(i18n.t("home:widgetLayer.toasts.saveFailed"));
             break;
           }

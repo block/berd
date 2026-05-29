@@ -2,11 +2,14 @@ import type { LayoutConstraints } from "@/features/layout/api/layout";
 import { resolveWidgetResize } from "../lib/homeWidgetResize";
 import {
   clampToLayoutConstraints,
+  GRID_SIZE,
   isLayoutConstraints,
   snapPoint,
+  snapTo,
 } from "../lib/snapToGrid";
 import {
   clampWidgetSize,
+  HOME_WIDGET_CATALOG,
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
 } from "../widgets/catalog";
@@ -24,6 +27,14 @@ type AddWidgetOptions = {
   state?: Record<string, unknown>;
   bounds?: LayoutConstraints;
 };
+
+const CLEAN_UP_GRID_GAP = 48;
+const CLEAN_UP_GROUP_GAP = 96;
+const CLEAN_UP_MAX_GROUP_ROWS = 4;
+
+const WIDGET_TYPE_ORDER = new Map(
+  HOME_WIDGET_CATALOG.map((entry, index) => [entry.id, index] as const),
+);
 
 function maxZ(instances: WidgetInstance[]): number {
   return instances.reduce((max, instance) => Math.max(max, instance.z), 0);
@@ -71,6 +82,77 @@ function resolvePosition(
     return snapped;
   }
   return clampToLayoutConstraints(snapped, size, bounds);
+}
+
+function cleanUpStride(maxSize: number): number {
+  return Math.ceil((maxSize + CLEAN_UP_GRID_GAP) / GRID_SIZE) * GRID_SIZE;
+}
+
+function cleanUpSize(type: string): WidgetSize {
+  const entry = HOME_WIDGET_CATALOG_BY_ID[type];
+  const size = clampWidgetSize(type, entry.defaultSize);
+
+  return {
+    width: Math.round(size.width),
+    height: Math.round(size.height),
+  };
+}
+
+function catalogSortOrder(instance: WidgetInstance): number {
+  return WIDGET_TYPE_ORDER.get(instance.type) ?? Number.MAX_SAFE_INTEGER;
+}
+
+function sortedForCleanUp(instances: WidgetInstance[]): WidgetInstance[] {
+  return [...instances].sort((left, right) => {
+    const typeOrder = catalogSortOrder(left) - catalogSortOrder(right);
+    if (typeOrder !== 0) {
+      return typeOrder;
+    }
+
+    const zOrder = left.z - right.z;
+    if (zOrder !== 0) {
+      return zOrder;
+    }
+
+    return left.id.localeCompare(right.id);
+  });
+}
+
+function widgetGroupBounds(instances: WidgetInstance[]): {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+} {
+  return instances.reduce(
+    (bounds, instance) => {
+      const size = widgetSizeForInstance(instance);
+      return {
+        minX: Math.min(bounds.minX, instance.x),
+        minY: Math.min(bounds.minY, instance.y),
+        maxX: Math.max(bounds.maxX, instance.x + size.width),
+        maxY: Math.max(bounds.maxY, instance.y + size.height),
+      };
+    },
+    {
+      minX: Number.POSITIVE_INFINITY,
+      minY: Number.POSITIVE_INFINITY,
+      maxX: Number.NEGATIVE_INFINITY,
+      maxY: Number.NEGATIVE_INFINITY,
+    },
+  );
+}
+
+function groupedForCleanUp(instances: WidgetInstance[]): WidgetInstance[][] {
+  const groups = new Map<string, WidgetInstance[]>();
+
+  for (const instance of sortedForCleanUp(instances)) {
+    const group = groups.get(instance.type) ?? [];
+    group.push(instance);
+    groups.set(instance.type, group);
+  }
+
+  return [...groups.values()];
 }
 
 function isStateMergeNoop(
@@ -204,6 +286,120 @@ export function resizeWidgetMutation(
   }
 
   return next;
+}
+
+export function cleanUpWidgetsMutation(
+  instances: WidgetInstance[],
+  bounds?: LayoutConstraints,
+): WidgetInstance[] | null {
+  const cleanableInstances = instances.filter(
+    (instance) => HOME_WIDGET_CATALOG_BY_ID[instance.type],
+  );
+  if (cleanableInstances.length === 0) {
+    return null;
+  }
+
+  const groups = groupedForCleanUp(cleanableInstances);
+  const currentBounds = widgetGroupBounds(cleanableInstances);
+  const origin = snapPoint({
+    x: currentBounds.minX,
+    y: currentBounds.minY,
+  });
+  const nextById = new Map<string, WidgetInstance>();
+  let changed = false;
+  let groupX = origin.x;
+
+  groups.forEach((group) => {
+    const entry = HOME_WIDGET_CATALOG_BY_ID[group[0]?.type ?? ""];
+    if (!entry) {
+      return;
+    }
+
+    const normalizedSize = cleanUpSize(entry.id);
+    const strideX = cleanUpStride(normalizedSize.width);
+    const strideY = cleanUpStride(normalizedSize.height);
+    const rows = Math.min(CLEAN_UP_MAX_GROUP_ROWS, group.length);
+    const columns = Math.ceil(group.length / rows);
+
+    group.forEach((instance, index) => {
+      const position = {
+        x: snapTo(groupX + Math.floor(index / rows) * strideX),
+        y: snapTo(origin.y + (index % rows) * strideY),
+      };
+      const resolvedPosition = isLayoutConstraints(bounds)
+        ? clampToLayoutConstraints(position, normalizedSize, bounds)
+        : position;
+      const next = {
+        ...instance,
+        ...resolvedPosition,
+        z: nextById.size + 1,
+        width: normalizedSize.width,
+        height: normalizedSize.height,
+      };
+
+      if (
+        instance.x !== next.x ||
+        instance.y !== next.y ||
+        instance.z !== next.z ||
+        instance.width !== next.width ||
+        instance.height !== next.height
+      ) {
+        changed = true;
+      }
+
+      nextById.set(instance.id, next);
+    });
+
+    groupX = snapTo(groupX + columns * strideX + CLEAN_UP_GROUP_GAP);
+  });
+
+  if (!changed) {
+    return null;
+  }
+
+  return instances.map((instance) => nextById.get(instance.id) ?? instance);
+}
+
+export type WidgetLayoutSnapshotItem = Pick<
+  WidgetInstance,
+  "height" | "id" | "type" | "width" | "x" | "y" | "z"
+>;
+
+export function restoreWidgetsLayoutMutation(
+  instances: WidgetInstance[],
+  snapshot: WidgetLayoutSnapshotItem[],
+): WidgetInstance[] | null {
+  const snapshotById = new Map(snapshot.map((item) => [item.id, item]));
+  let changed = false;
+  const next = instances.map((instance) => {
+    const item = snapshotById.get(instance.id);
+    if (!item || item.type !== instance.type) {
+      return instance;
+    }
+
+    const restored = {
+      ...instance,
+      x: item.x,
+      y: item.y,
+      z: item.z,
+      ...(item.width === undefined ? {} : { width: item.width }),
+      ...(item.height === undefined ? {} : { height: item.height }),
+    };
+
+    if (
+      restored.x !== instance.x ||
+      restored.y !== instance.y ||
+      restored.z !== instance.z ||
+      restored.width !== instance.width ||
+      restored.height !== instance.height
+    ) {
+      changed = true;
+    }
+
+    return restored;
+  });
+
+  return changed ? next : null;
 }
 
 export function bumpZMutation(

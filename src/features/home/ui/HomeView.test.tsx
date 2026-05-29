@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -7,7 +7,12 @@ import {
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
 import type { Layout } from "@/features/layout/api/layout";
-import { getLayout, HOME_LAYOUT_ID } from "@/features/layout/api/layout";
+import {
+  getLayout,
+  HOME_LAYOUT_ID,
+  saveLayoutCamera,
+  saveLayoutItems,
+} from "@/features/layout/api/layout";
 import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
@@ -23,6 +28,7 @@ vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   return {
     ...actual,
     getLayout: vi.fn(),
+    saveLayoutCamera: vi.fn(),
     saveLayoutItems: vi.fn(),
   };
 });
@@ -93,6 +99,16 @@ function renderHomeViewWithTopBarActions() {
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
   vi.mocked(getLayout).mockReset();
+  vi.mocked(saveLayoutItems).mockReset();
+  vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ items: request.items, itemRevision: 2 }),
+  }));
+  vi.mocked(saveLayoutCamera).mockReset();
+  vi.mocked(saveLayoutCamera).mockImplementation(async (request) => ({
+    ok: true,
+    layout: layout({ camera: request.camera, cameraRevision: 2 }),
+  }));
   localStorage.clear();
   localStorage.setItem(ONBOARDING_STICKIES_SEEDED_STORAGE_KEY, "5");
   Object.defineProperty(navigator, "clipboard", {
@@ -219,5 +235,83 @@ describe("HomeView", () => {
       centerY: 300,
       zoomBps: 10_000,
     });
+  });
+
+  it("exposes a top-bar cleanup action that toggles between organized and restored layouts", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "persona",
+            targetId: "agent-1",
+            centerX: 600,
+            centerY: 610,
+            width: 200,
+            height: 220,
+            zIndex: 7,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 120,
+            centerY: 120,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000003",
+            kind: "session",
+            targetId: "session-1",
+            centerX: 1094,
+            centerY: 540,
+            width: 188,
+            height: 80,
+            zIndex: 2,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000004",
+            kind: "skill",
+            targetId: "skill-1",
+            centerX: 1120,
+            centerY: 28,
+            width: 240,
+            height: 56,
+            zIndex: 3,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithTopBarActions();
+    await screen.findByText("widget canvas");
+
+    expect(screen.queryByText("Clean up")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Clean up pins" }));
+
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { id: "00000000-0000-0000-0000-000000000001", x: 384, y: 0, z: 2 },
+      { id: "00000000-0000-0000-0000-000000000002", x: 0, y: 0, z: 1 },
+      { id: "00000000-0000-0000-0000-000000000003", x: 744, y: 0, z: 3 },
+      { id: "00000000-0000-0000-0000-000000000004", x: 1080, y: 0, z: 4 },
+    ]);
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(1));
+
+    await user.click(screen.getByRole("button", { name: "Revert layout" }));
+
+    expect(useHomeWidgetStore.getState().instances).toMatchObject([
+      { id: "00000000-0000-0000-0000-000000000001", x: 500, y: 500, z: 7 },
+      { id: "00000000-0000-0000-0000-000000000002", x: 0, y: 0, z: 1 },
+      { id: "00000000-0000-0000-0000-000000000003", x: 1000, y: 500, z: 2 },
+      { id: "00000000-0000-0000-0000-000000000004", x: 1000, y: 0, z: 3 },
+    ]);
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(2));
   });
 });
