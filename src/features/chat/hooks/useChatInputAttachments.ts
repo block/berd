@@ -72,16 +72,6 @@ async function createImageAttachmentFromFile(
   }
 }
 
-export function normalizeDialogSelection(
-  selected: string | string[] | null,
-): string[] {
-  if (!selected) {
-    return [];
-  }
-
-  return Array.isArray(selected) ? selected : [selected];
-}
-
 export function useChatInputAttachments() {
   const [attachments, setAttachments] = useState<ChatAttachmentDraft[]>([]);
   const attachmentsRef = useRef(attachments);

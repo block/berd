@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ImagePlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
@@ -21,6 +22,7 @@ import {
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Textarea } from "@/shared/ui/textarea";
+import { useFeedbackImageAttachments } from "./useFeedbackImageAttachments";
 
 interface FeedbackDialogProps {
   open: boolean;
@@ -55,6 +57,19 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  const {
+    attachments,
+    attachmentFiles,
+    attachmentPaths,
+    canAddImages,
+    clearAttachments,
+    handleAddImages,
+    handlePasteImages,
+    removeAttachment,
+  } = useFeedbackImageAttachments({
+    disabled: submitting,
+    setError,
+  });
 
   const trimmedTitle = title.trim();
   const trimmedDescription = description.trim();
@@ -62,11 +77,14 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
     trimmedTitle.length > 0 && trimmedDescription.length > 0 && !submitting;
   const isDirty =
     success === null &&
-    (trimmedTitle.length > 0 || trimmedDescription.length > 0);
+    (trimmedTitle.length > 0 ||
+      trimmedDescription.length > 0 ||
+      attachments.length > 0);
 
   function resetForm() {
     setTitle("");
     setDescription("");
+    clearAttachments();
     setError(null);
     setSubmitting(false);
     setSuccess(null);
@@ -78,11 +96,12 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
     }
     setTitle("");
     setDescription("");
+    clearAttachments();
     setError(null);
     setSubmitting(false);
     setSuccess(null);
     setDiscardOpen(false);
-  }, [open]);
+  }, [clearAttachments, open]);
 
   const handleClose = () => {
     if (submitting) {
@@ -118,7 +137,10 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       const result = await submitFeedbackIssue({
         title: trimmedTitle,
         description: enhancedDescription,
+        attachmentPaths,
+        attachmentFiles,
       });
+      clearAttachments();
       setSuccess({ issueUrl: result.issueUrl });
     } catch (submitError) {
       const message = getSubmitErrorMessage(submitError, t);
@@ -158,10 +180,11 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
           onOpenChange(true);
         }}
       >
-        <EditDialogContent size="lg">
+        <EditDialogContent size="md">
           <EditDialogHeader
             title={t("dialog.title")}
             description={t("dialog.description")}
+            className="px-5 py-3.5"
           />
           {success ? (
             <>
@@ -195,9 +218,11 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
             <>
               <EditDialogForm
                 id={FEEDBACK_FORM_ID}
+                className="space-y-3 px-5 pb-4"
                 onSubmit={(event) => {
                   void handleSubmit(event);
                 }}
+                onPaste={handlePasteImages}
               >
                 <div className="space-y-1.5">
                   <Label
@@ -216,6 +241,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                     }}
                     placeholder={t("dialog.titlePlaceholder")}
                     disabled={submitting}
+                    className="h-8 rounded-md"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -233,9 +259,68 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                       setError(null);
                     }}
                     placeholder={t("dialog.descriptionPlaceholder")}
-                    rows={6}
+                    rows={3}
                     disabled={submitting}
+                    className="min-h-[72px] rounded-md py-2"
                   />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium text-muted-foreground">
+                    {t("dialog.attachmentsLabel")}
+                  </Label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-auto w-full justify-start gap-2 rounded-md px-3 py-2 text-left"
+                    onClick={handleAddImages}
+                    disabled={!canAddImages}
+                  >
+                    <span className="flex size-6 shrink-0 items-center justify-center rounded border border-border bg-background">
+                      <ImagePlus className="size-3.5" aria-hidden="true" />
+                    </span>
+                    <span className="flex min-w-0 flex-col items-start gap-0.5">
+                      <span className="text-xs font-medium text-foreground">
+                        {t("dialog.addImages")}
+                      </span>
+                      <span className="text-[11px] font-normal leading-snug text-muted-foreground">
+                        {t("dialog.attachmentsHelp")}
+                      </span>
+                    </span>
+                  </Button>
+                  {attachments.length > 0 ? (
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {attachments.map((attachment) => (
+                        <div
+                          key={attachment.id}
+                          className="flex min-w-0 items-center gap-2 rounded-md border border-border bg-muted/20 p-2"
+                        >
+                          <img
+                            src={attachment.previewUrl}
+                            alt=""
+                            className="size-9 shrink-0 rounded object-cover"
+                          />
+                          <span
+                            className="min-w-0 flex-1 truncate text-xs text-foreground"
+                            title={attachment.name}
+                          >
+                            {attachment.name}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-sm"
+                            onClick={() => removeAttachment(attachment.id)}
+                            disabled={submitting}
+                            aria-label={t("dialog.removeAttachment", {
+                              name: attachment.name,
+                            })}
+                          >
+                            <X className="size-3.5" aria-hidden="true" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
                 {error ? (
                   <p
@@ -246,7 +331,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                   </p>
                 ) : null}
               </EditDialogForm>
-              <EditDialogFooter>
+              <EditDialogFooter className="px-5 py-3">
                 <Button
                   type="button"
                   variant="ghost"

@@ -22,6 +22,12 @@ describe("feedback api", () => {
     await expect(
       submitFeedbackIssue({ title: "Bug", description: "Details" }),
     ).resolves.toEqual({ issueUrl: "https://linear.test/ISSUE-1" });
+    expect(mockInvoke).toHaveBeenLastCalledWith("submit_feedback_issue", {
+      title: "Bug",
+      description: "Details",
+      attachmentPaths: [],
+      attachmentFiles: [],
+    });
 
     mockInvoke.mockResolvedValueOnce({
       issue_url: "https://linear.test/ISSUE-2",
@@ -29,6 +35,36 @@ describe("feedback api", () => {
     await expect(
       submitFeedbackIssue({ title: "Bug", description: "Details" }),
     ).resolves.toEqual({ issueUrl: "https://linear.test/ISSUE-2" });
+  });
+
+  it("passes image attachments through to the Tauri command", async () => {
+    mockInvoke.mockResolvedValueOnce({});
+
+    await submitFeedbackIssue({
+      title: "Bug",
+      description: "Details",
+      attachmentPaths: ["/tmp/screenshot.png"],
+      attachmentFiles: [
+        {
+          name: "pasted.png",
+          mimeType: "image/png",
+          base64: "aW1hZ2U=",
+        },
+      ],
+    });
+
+    expect(mockInvoke).toHaveBeenCalledWith("submit_feedback_issue", {
+      title: "Bug",
+      description: "Details",
+      attachmentPaths: ["/tmp/screenshot.png"],
+      attachmentFiles: [
+        {
+          name: "pasted.png",
+          mimeType: "image/png",
+          base64: "aW1hZ2U=",
+        },
+      ],
+    });
   });
 
   it("normalizes structured network access errors", async () => {

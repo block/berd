@@ -3,6 +3,14 @@ import { invoke } from "@tauri-apps/api/core";
 export interface SubmitFeedbackIssueInput {
   title: string;
   description: string;
+  attachmentPaths?: string[];
+  attachmentFiles?: FeedbackAttachmentFileInput[];
+}
+
+export interface FeedbackAttachmentFileInput {
+  name: string;
+  mimeType: string;
+  base64: string;
 }
 
 export interface SubmitFeedbackIssueResult {
@@ -31,6 +39,8 @@ export async function submitFeedbackIssue(
     response = await invoke<unknown>("submit_feedback_issue", {
       title: input.title,
       description: input.description,
+      attachmentPaths: input.attachmentPaths ?? [],
+      attachmentFiles: input.attachmentFiles ?? [],
     });
   } catch (error) {
     throw normalizeFeedbackSubmissionError(error);

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useTranslation } from "react-i18next";
-import { normalizeDialogSelection } from "./useChatInputAttachments";
+import { normalizeDialogSelection } from "@/shared/lib/dialogSelection";
 
 interface UseChatInputFilePickerOptions {
   disabled: boolean;

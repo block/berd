@@ -2,6 +2,7 @@ use crate::services::distro_bundle::{DistroBundleState, KgooseDistroConfig};
 use bytes::Bytes;
 use reqwest::{
     header::{HeaderValue, ACCEPT, CACHE_CONTROL, CONTENT_TYPE},
+    multipart::Form,
     redirect::Policy,
     StatusCode,
 };
@@ -20,6 +21,7 @@ const KGOOSE_NETWORK_ACCESS_MESSAGE: &str =
 const MAX_ERROR_BODY_CHARS: usize = 500;
 const KGOOSE_CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+const KGOOSE_UPLOAD_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const KGOOSE_SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const KGOOSE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -41,6 +43,20 @@ pub(crate) async fn post_json_detailed(
     let url = build_url(endpoint, distro_state.kgoose_config())?;
     let request = add_playpen_baggage(json_post_request(url.clone()));
     send_json_request_detailed(request, url, &body).await
+}
+
+pub(crate) async fn post_multipart_detailed(
+    distro_state: &DistroBundleState,
+    endpoint: &str,
+    form: Form,
+) -> Result<Value, KgooseJsonError> {
+    let url = build_url(endpoint, distro_state.kgoose_config())?;
+    let request = add_playpen_baggage(
+        upload_client()
+            .post(url.clone())
+            .header(ACCEPT, "application/json"),
+    );
+    send_multipart_request_detailed(request, url, form).await
 }
 
 /// Posts JSON to a fully resolved external URL without distro routing or playpen baggage.
@@ -79,6 +95,27 @@ async fn send_json_request_detailed(
         .await
         .map_err(|error| KgooseJsonError::request(&url, error))?;
 
+    response_to_json_value(url, response).await
+}
+
+async fn send_multipart_request_detailed(
+    request: reqwest::RequestBuilder,
+    url: reqwest::Url,
+    form: Form,
+) -> Result<Value, KgooseJsonError> {
+    let response = request
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|error| KgooseJsonError::multipart_request(&url, error))?;
+
+    response_to_json_value(url, response).await
+}
+
+async fn response_to_json_value(
+    url: reqwest::Url,
+    response: reqwest::Response,
+) -> Result<Value, KgooseJsonError> {
     let status = response.status();
     let content_type = response_content_type(response.headers());
     let response_body = response
@@ -156,13 +193,32 @@ pub(crate) struct KgooseJsonError {
 impl KgooseJsonError {
     fn request(url: &reqwest::Url, error: reqwest::Error) -> Self {
         let kind = KgooseRequestErrorKind::from_reqwest_error(&error);
+        Self::request_with_kind(url, error, kind, is_access_request_error_kind(kind))
+    }
+
+    fn multipart_request(url: &reqwest::Url, error: reqwest::Error) -> Self {
+        let kind = KgooseRequestErrorKind::from_reqwest_error(&error);
+        Self::request_with_kind(
+            url,
+            error,
+            kind,
+            is_multipart_access_request_error_kind(kind),
+        )
+    }
+
+    fn request_with_kind(
+        url: &reqwest::Url,
+        error: reqwest::Error,
+        kind: KgooseRequestErrorKind,
+        likely_access_failure: bool,
+    ) -> Self {
         Self {
             message: format!("Failed to call kgoose at {}: {error}", url.as_str()),
             kind: "request",
             status: None,
             content_type: None,
             request_error_kind: Some(kind),
-            likely_access_failure: is_access_request_error_kind(kind),
+            likely_access_failure,
         }
     }
 
@@ -317,6 +373,13 @@ async fn probe_url(url: reqwest::Url) -> KgooseProbeResult {
     }
 }
 
+fn is_multipart_access_request_error_kind(kind: KgooseRequestErrorKind) -> bool {
+    matches!(
+        kind,
+        KgooseRequestErrorKind::Connect | KgooseRequestErrorKind::Redirect
+    )
+}
+
 pub(crate) async fn open_sse_stream(
     url: reqwest::Url,
     last_event_id: Option<HeaderValue>,
@@ -395,6 +458,18 @@ fn client() -> &'static reqwest::Client {
             .redirect(Policy::none())
             .build()
             .expect("failed to build kgoose HTTP client")
+    })
+}
+
+fn upload_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .connect_timeout(KGOOSE_CONNECT_TIMEOUT)
+            .read_timeout(KGOOSE_UPLOAD_READ_TIMEOUT)
+            .redirect(Policy::none())
+            .build()
+            .expect("failed to build kgoose upload HTTP client")
     })
 }
 
@@ -509,9 +584,10 @@ fn truncate_error_body(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_sse_url, build_url, is_access_request_error_kind, playpen_baggage, probe_url,
-        truncate_error_body, KgooseDistroConfig, KgooseJsonError, KgooseRequestErrorKind,
-        KGOOSE_BASE_URL_ENV, KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
+        build_sse_url, build_url, is_access_request_error_kind,
+        is_multipart_access_request_error_kind, playpen_baggage, probe_url, truncate_error_body,
+        KgooseDistroConfig, KgooseJsonError, KgooseRequestErrorKind, KGOOSE_BASE_URL_ENV,
+        KGOOSE_PATH_ENV, KGOOSE_PLAYPEN_ENV,
     };
     use reqwest::StatusCode;
     use std::env;
@@ -647,6 +723,19 @@ mod tests {
         assert!(!is_access_request_error_kind(KgooseRequestErrorKind::Other));
         assert!(!service_error.is_likely_access_failure());
         assert!(!json_error.is_likely_access_failure());
+    }
+
+    #[test]
+    fn does_not_classify_multipart_timeouts_as_access_failures() {
+        assert!(!is_multipart_access_request_error_kind(
+            KgooseRequestErrorKind::Timeout
+        ));
+        assert!(is_multipart_access_request_error_kind(
+            KgooseRequestErrorKind::Connect
+        ));
+        assert!(is_multipart_access_request_error_kind(
+            KgooseRequestErrorKind::Redirect
+        ));
     }
 
     #[test]
