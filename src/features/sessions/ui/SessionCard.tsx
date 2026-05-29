@@ -151,6 +151,41 @@ export function SessionCard({
   const relativeTime = formatRelativeTimeToNow(updatedAt);
   const hasSubtitle = Boolean(projectName || relativeTime || personaName);
 
+  if (editing) {
+    // Render only the input while editing. Mirrors the sidebar's pattern so
+    // the click-overlay button and the meatball trigger aren't mounted to
+    // compete for focus with Radix's menu-close focus restoration.
+    return (
+      <div
+        data-session-card
+        className={cn(
+          "group relative flex min-h-20 flex-col justify-center rounded-card-chat bg-card p-3 text-left",
+          selected && "ring-1 ring-inset ring-foreground",
+          archivedAt && "opacity-60",
+        )}
+      >
+        <Input
+          ref={inputRef}
+          type="text"
+          value={draftTitle}
+          onChange={(e) => setDraftTitle(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              commitRename();
+            }
+            if (e.key === "Escape") {
+              e.preventDefault();
+              cancelRename();
+            }
+          }}
+          className="text-sm"
+        />
+      </div>
+    );
+  }
+
   return (
     <div
       data-session-card
@@ -179,32 +214,10 @@ export function SessionCard({
         aria-pressed={selectionEnabled ? selected : undefined}
       />
 
-      {/* Title — editable or static */}
-      {editing ? (
-        <Input
-          ref={inputRef}
-          type="text"
-          value={draftTitle}
-          onChange={(e) => setDraftTitle(e.target.value)}
-          onBlur={commitRename}
-          onClick={(e) => e.stopPropagation()}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              commitRename();
-            }
-            if (e.key === "Escape") {
-              e.preventDefault();
-              cancelRename();
-            }
-          }}
-          className="relative z-10 text-sm"
-        />
-      ) : (
-        <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-foreground">
-          {displayTitle}
-        </p>
-      )}
+      {/* Title */}
+      <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-foreground">
+        {displayTitle}
+      </p>
 
       {hasSubtitle && (
         <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-foreground/40">
