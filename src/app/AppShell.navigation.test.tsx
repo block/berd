@@ -236,6 +236,48 @@ describe("AppShell global navigation", () => {
     ).toBe("transparent");
   });
 
+  it("opens a blank chat before ACP session creation finishes", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalled();
+    });
+
+    const draftSessionId = useChatSessionStore.getState().activeSessionId;
+    expect(draftSessionId).toEqual(expect.any(String));
+    expect(draftSessionId).not.toBe("created-session");
+    expect(
+      useChatSessionStore.getState().getSession(draftSessionId ?? ""),
+    ).toMatchObject({
+      creationState: "pending",
+      workingDir: "~",
+    });
+
+    act(() => {
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "created-session",
+      );
+    });
+    expect(
+      useChatSessionStore.getState().getSession("created-session"),
+    ).toMatchObject({
+      creationState: undefined,
+      workingDir: "~",
+    });
+  });
+
   it("goes back and forward through Skills detail subroutes", async () => {
     const user = userEvent.setup();
     render(<AppShell />);

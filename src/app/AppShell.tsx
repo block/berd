@@ -106,6 +106,11 @@ type AppNavigationHistory = {
   isApplying: boolean;
 };
 
+type ResolvedSessionModelPreference = Awaited<
+  ReturnType<typeof resolveSupportedSessionModelPreference>
+>;
+type MaybePromise<T> = T | Promise<T>;
+
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
   "goose:design-system-inspector-visible";
@@ -136,7 +141,7 @@ function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
 }
 
 function getOptimisticSessionCwd(
-  project: ProjectInfo,
+  project?: ProjectInfo | null,
   inheritedWorkspacePath?: string | null,
 ): string {
   const workspacePath = inheritedWorkspacePath?.trim();
@@ -144,7 +149,7 @@ function getOptimisticSessionCwd(
     return workspacePath;
   }
 
-  const projectWorkingDir = project.workingDirs
+  const projectWorkingDir = (project?.workingDirs ?? [])
     .map((directory) => directory.trim())
     .find((directory) => directory.length > 0);
   return projectWorkingDir ?? "~";
@@ -685,6 +690,81 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     });
   }, [activeView, ensureHomeSession, migrationSettled]);
 
+  const startDraftSessionCreation = useCallback(
+    ({
+      session,
+      sessionModelPreference,
+      workingDir,
+      projectId,
+    }: {
+      session: ChatSession;
+      sessionModelPreference: MaybePromise<ResolvedSessionModelPreference>;
+      workingDir: MaybePromise<string>;
+      projectId?: string;
+    }) => {
+      void Promise.all([
+        Promise.resolve(sessionModelPreference),
+        Promise.resolve(workingDir),
+      ])
+        .then(([resolvedSessionModelPreference, resolvedWorkingDir]) =>
+          acpCreateSession(
+            resolvedSessionModelPreference.providerId,
+            resolvedWorkingDir,
+            {
+              projectId,
+              modelId: resolvedSessionModelPreference.modelId,
+            },
+          ).then(({ sessionId }) => ({
+            sessionId,
+            sessionModelPreference: resolvedSessionModelPreference,
+            workingDir: resolvedWorkingDir,
+          })),
+        )
+        .then(({ sessionId, sessionModelPreference, workingDir }) => {
+          const sessionStore = useChatSessionStore.getState();
+          const latestSession = sessionStore.getSession(session.id);
+          if (!latestSession || latestSession.archivedAt) {
+            return;
+          }
+          const shouldRemainActive =
+            sessionStore.activeSessionId === session.id;
+          promoteChatSessionId(session.id, sessionId);
+          promoteDraftSession(session.id, sessionId, {
+            providerId: sessionModelPreference.providerId,
+            modelId: sessionModelPreference.modelId,
+            modelName: sessionModelPreference.modelName,
+            workingDir,
+          });
+          replaceNavigationSessionId(session.id, sessionId);
+          if (shouldRemainActive) {
+            setActiveSession(sessionId);
+            setChatActiveSession(sessionId);
+          }
+        })
+        .catch((error) => {
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Failed to create session.";
+          const chatStore = useChatStore.getState();
+          markSessionCreationFailed(session.id, message);
+          chatStore.addMessage(
+            session.id,
+            createSystemNotificationMessage(message, "error"),
+          );
+          chatStore.setError(session.id, message);
+        });
+    },
+    [
+      markSessionCreationFailed,
+      promoteChatSessionId,
+      promoteDraftSession,
+      replaceNavigationSessionId,
+      setActiveSession,
+      setChatActiveSession,
+    ],
+  );
+
   const createNewTab = useCallback(
     async (
       title = DEFAULT_CHAT_TITLE,
@@ -745,40 +825,66 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         return existingDraft;
       }
 
-      const workingDir = await resolveSessionCwd(
+      if (!shouldActivate) {
+        const workingDir = await resolveSessionCwd(
+          project,
+          inheritedWorkspace?.path,
+        );
+        const session = await createSession({
+          title,
+          projectId: project?.id,
+          providerId: sessionModelPreference.providerId,
+          workingDir,
+          modelId: sessionModelPreference.modelId,
+          modelName: sessionModelPreference.modelName,
+        });
+        if (inheritedWorkspace) {
+          setActiveWorkspace(session.id, inheritedWorkspace);
+        }
+        perfLog(
+          `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
+        );
+        return session;
+      }
+
+      const optimisticWorkingDir = getOptimisticSessionCwd(
         project,
         inheritedWorkspace?.path,
       );
-      const session = await createSession({
+      const session = createDraftSession({
         title,
         projectId: project?.id,
-        providerId: sessionModelPreference.providerId,
-        workingDir,
-        modelId: sessionModelPreference.modelId,
-        modelName: sessionModelPreference.modelName,
+        providerId,
+        workingDir: optimisticWorkingDir,
       });
       if (inheritedWorkspace) {
         setActiveWorkspace(session.id, inheritedWorkspace);
       }
-      if (shouldActivate) {
-        clearSettingsSectionUrl();
-        setActiveSession(session.id);
-        setActiveView("chat");
-        setChatActiveSession(session.id);
-      }
+      clearSettingsSectionUrl();
+      setActiveSession(session.id);
+      setActiveView("chat");
+      setChatActiveSession(session.id);
       perfLog(
-        `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
+        `[perf:newtab] ${session.id.slice(0, 8)} created draft in ${(performance.now() - tStart).toFixed(1)}ms`,
       );
+      startDraftSessionCreation({
+        session,
+        sessionModelPreference,
+        workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
+        projectId: project?.id,
+      });
       return session;
     },
     [
       selectedProvider,
       createSession,
+      createDraftSession,
       patchSession,
       providerInventoryEntries,
       setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
+      startDraftSessionCreation,
     ],
   );
 
@@ -855,71 +961,27 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       perfLog(
         `[perf:newtab] ${session.id.slice(0, 8)} created project draft in ${(performance.now() - tStart).toFixed(1)}ms`,
       );
-      void Promise.all([
-        resolveSupportedSessionModelPreference(
+      startDraftSessionCreation({
+        session,
+        sessionModelPreference: resolveSupportedSessionModelPreference(
           providerId,
           providerInventoryEntries,
           project.preferredModel ?? undefined,
         ),
-        resolveSessionCwd(project, inheritedWorkspace?.path),
-      ])
-        .then(([sessionModelPreference, workingDir]) =>
-          acpCreateSession(sessionModelPreference.providerId, workingDir, {
-            projectId: project.id,
-            modelId: sessionModelPreference.modelId,
-          }).then(({ sessionId }) => ({
-            sessionId,
-            sessionModelPreference,
-            workingDir,
-          })),
-        )
-        .then(({ sessionId, sessionModelPreference, workingDir }) => {
-          const sessionStore = useChatSessionStore.getState();
-          const latestSession = sessionStore.getSession(session.id);
-          if (!latestSession || latestSession.archivedAt) {
-            return;
-          }
-          const shouldActivate = sessionStore.activeSessionId === session.id;
-          promoteChatSessionId(session.id, sessionId);
-          promoteDraftSession(session.id, sessionId, {
-            providerId: sessionModelPreference.providerId,
-            modelId: sessionModelPreference.modelId,
-            modelName: sessionModelPreference.modelName,
-            workingDir,
-          });
-          replaceNavigationSessionId(session.id, sessionId);
-          if (shouldActivate) {
-            setActiveSession(sessionId);
-            setChatActiveSession(sessionId);
-          }
-        })
-        .catch((error) => {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Failed to create session.";
-          const chatStore = useChatStore.getState();
-          markSessionCreationFailed(session.id, message);
-          chatStore.addMessage(
-            session.id,
-            createSystemNotificationMessage(message, "error"),
-          );
-          chatStore.setError(session.id, message);
-        });
+        workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
+        projectId: project.id,
+      });
       return session;
     },
     [
       selectedProvider,
       createDraftSession,
-      markSessionCreationFailed,
       patchSession,
-      promoteChatSessionId,
-      promoteDraftSession,
       providerInventoryEntries,
-      replaceNavigationSessionId,
       setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
+      startDraftSessionCreation,
     ],
   );
 

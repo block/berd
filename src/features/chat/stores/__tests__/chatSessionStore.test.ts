@@ -230,6 +230,25 @@ describe("chatSessionStore", () => {
         creationError: "boom",
       });
     });
+
+    it("keeps a stable client session id when promoting a draft session", () => {
+      const draft = useChatSessionStore.getState().createDraftSession({
+        title: "New Chat",
+        providerId: "openai",
+        workingDir: "/tmp/project",
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession(draft.id, "acp-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("acp-session"),
+      ).toMatchObject({
+        id: "acp-session",
+        clientSessionId: draft.id,
+      });
+    });
   });
 
   describe("loadSessions", () => {

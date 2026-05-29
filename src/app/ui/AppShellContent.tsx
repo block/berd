@@ -183,7 +183,7 @@ export function AppShellContent({
     case "chat":
       return activeSession ? (
         <ChatView
-          key={activeSession.id}
+          key={activeSession.clientSessionId ?? activeSession.id}
           sessionId={activeSession.id}
           activeSession={activeSession}
           onCreatePersona={onCreatePersona}

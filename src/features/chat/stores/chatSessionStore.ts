@@ -35,6 +35,7 @@ export interface ChatSession {
   userSetName?: boolean;
   creationState?: "pending" | "failed";
   creationError?: string;
+  clientSessionId?: string;
   intent?: "build-agent" | null;
   targetAgentPath?: string | null;
   targetAgentSlug?: string | null;
@@ -305,8 +306,9 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     }
     const now = new Date().toISOString();
     const providerId = opts.providerId ?? "goose";
+    const id = crypto.randomUUID();
     const chatSession: ChatSession = {
-      id: crypto.randomUUID(),
+      id,
       title: opts.title ?? DEFAULT_CHAT_TITLE,
       projectId: opts.projectId,
       providerId,
@@ -318,6 +320,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       updatedAt: now,
       messageCount: 0,
       creationState: "pending",
+      clientSessionId: id,
       intent: null,
       targetAgentPath: null,
       targetAgentSlug: null,
