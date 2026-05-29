@@ -16,7 +16,7 @@ const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const REFRESH_MARKER_FILE: &str = "refresh.marker";
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
-const CACHE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+const CACHE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const DOWNLOAD_CONCURRENCY: usize = 4;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
