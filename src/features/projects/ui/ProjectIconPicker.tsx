@@ -6,6 +6,10 @@ import { DEFAULT_PROJECT_ICON, isImageProjectIcon } from "../lib/projectIcons";
 import { ProjectColorSwatch } from "./ProjectColorSwatch";
 import { ProjectIcon } from "./ProjectIcon";
 
+const ICON_GRID_CELL_REM = 2.25;
+const ICON_GRID_GAP_REM = 0.5;
+const UPLOAD_BUTTON_GRID_SPAN = 3;
+
 interface ProjectIconPickerProps {
   icon: string;
   color: string;
@@ -28,9 +32,10 @@ export function ProjectIconPicker({
   const selectedCustomIcon =
     isImageProjectIcon(icon) &&
     !iconCandidates.some((candidate) => candidate.icon === icon);
-  const scannedIconRailWidth = iconCandidates.length
-    ? `${iconCandidates.length * 44}px`
-    : "0px";
+  const iconButtonCount = iconCandidates.length + 1 + UPLOAD_BUTTON_GRID_SPAN;
+  const iconGridWidthRem =
+    iconButtonCount * ICON_GRID_CELL_REM +
+    Math.max(iconButtonCount - 1, 0) * ICON_GRID_GAP_REM;
 
   return (
     <div className="group/field space-y-2">
@@ -38,35 +43,32 @@ export function ProjectIconPicker({
         {t("dialog.icon")}
       </span>
       <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/20 p-2">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onChooseIcon(DEFAULT_PROJECT_ICON)}
-            className={cn(
-              "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
-              selectedColorIcon ? "border-foreground" : "border-border/80",
-            )}
-            title={t("dialog.colorBlockIcon")}
-            aria-label={t("dialog.iconAria", {
-              icon: t("dialog.colorBlockIcon"),
-            })}
-          >
-            <ProjectColorSwatch color={color} className="size-5" />
-          </button>
+        <div className="flex items-start">
           <div
-            className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden transition-[max-width,opacity] duration-500 ease-out motion-reduce:transition-none"
-            style={{
-              maxWidth: scannedIconRailWidth,
-              opacity: iconCandidates.length ? 1 : 0,
-            }}
+            className="grid max-w-full grid-cols-[repeat(auto-fill,minmax(2.25rem,2.25rem))] auto-rows-[2.25rem] justify-between gap-x-2 gap-y-2 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+            style={{ width: `min(100%, ${iconGridWidthRem}rem)` }}
           >
+            <button
+              type="button"
+              onClick={() => onChooseIcon(DEFAULT_PROJECT_ICON)}
+              className={cn(
+                "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
+                selectedColorIcon ? "border-foreground" : "border-border/80",
+              )}
+              title={t("dialog.colorBlockIcon")}
+              aria-label={t("dialog.iconAria", {
+                icon: t("dialog.colorBlockIcon"),
+              })}
+            >
+              <ProjectColorSwatch color={color} className="size-5" />
+            </button>
             {iconCandidates.map((candidate, index) => (
               <button
                 key={candidate.id}
                 type="button"
                 onClick={() => onChooseIcon(candidate.icon)}
                 className={cn(
-                  "flex size-9 shrink-0 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
+                  "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
                   icon === candidate.icon
                     ? "border-foreground"
                     : "border-border/80",
@@ -84,28 +86,31 @@ export function ProjectIconPicker({
                 />
               </button>
             ))}
+            <button
+              type="button"
+              onClick={onChooseCustomIcon}
+              className={cn(
+                "col-span-3 flex h-9 w-fit min-w-[88px] items-center justify-center gap-1.5 justify-self-start rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
+                selectedCustomIcon ? "border-foreground" : "border-border/80",
+              )}
+              title={
+                selectedCustomIcon
+                  ? t("dialog.customIcon")
+                  : t("dialog.uploadIcon")
+              }
+              aria-label={t("dialog.customIcon")}
+            >
+              {selectedCustomIcon ? (
+                <ProjectIcon
+                  icon={icon}
+                  imageClassName="size-4 rounded-[3px]"
+                />
+              ) : (
+                <IconUpload className="size-3.5" />
+              )}
+              <span>{t("dialog.uploadIcon")}</span>
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onChooseCustomIcon}
-            className={cn(
-              "flex h-9 min-w-[88px] items-center justify-center gap-1.5 rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
-              selectedCustomIcon ? "border-foreground" : "border-border/80",
-            )}
-            title={
-              selectedCustomIcon
-                ? t("dialog.customIcon")
-                : t("dialog.uploadIcon")
-            }
-            aria-label={t("dialog.customIcon")}
-          >
-            {selectedCustomIcon ? (
-              <ProjectIcon icon={icon} imageClassName="size-4 rounded-[3px]" />
-            ) : (
-              <IconUpload className="size-3.5" />
-            )}
-            <span>{t("dialog.uploadIcon")}</span>
-          </button>
         </div>
       </div>
       {error && <p className="text-xs text-destructive">{error}</p>}
