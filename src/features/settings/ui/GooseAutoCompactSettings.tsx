@@ -79,14 +79,12 @@ export function GooseAutoCompactSettings() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
-        <p className="min-w-0 text-sm font-medium">
-          {t(`${translationKeyPrefix}.label`)}
-        </p>
+        <p className="min-w-0 text-sm">{t(`${translationKeyPrefix}.label`)}</p>
         <div className="flex items-center gap-1.5 text-xs text-foreground">
           {isSavingThreshold ? (
             <Spinner className="size-3 text-muted-foreground" />
           ) : null}
-          <span className="shrink-0 font-medium">{autoCompactValueLabel}</span>
+          <span className="shrink-0">{autoCompactValueLabel}</span>
         </div>
       </div>
 

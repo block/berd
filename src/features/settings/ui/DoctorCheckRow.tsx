@@ -70,7 +70,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
         />
 
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="text-sm font-medium">{check.label}</span>
+          <span className="text-sm">{check.label}</span>
           <span className="break-words text-xs text-muted-foreground">
             {check.message}
           </span>

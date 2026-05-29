@@ -11,7 +11,10 @@
 @custom-variant dark (&:is([data-theme="dark"] *, .dark *));
 
 /* ═══════════════════════════════════════════════════════════
-   Cash Sans — three weights from Block CDN
+   Cash Sans — Light/Regular/Medium/Semibold/Bold from Block CDN.
+   The /woff2/ path segment is required; omitting it 403s (BOT-627).
+   Without 500/600/700 declared the browser synthesizes faux-bold
+   from Regular for font-medium/semibold/bold, so we declare them.
    Self-host (Regulator PR #2308 pattern) is the longer-term move.
    ═══════════════════════════════════════════════════════════ */
 
@@ -38,6 +41,33 @@
   src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Light.woff2")
     format("woff2");
   font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cash Sans";
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Medium.woff2")
+    format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cash Sans";
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Semibold.woff2")
+    format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cash Sans";
+  src: url("https://cash-f.squarecdn.com/static/fonts/cashsans/v2/woff2/CashSans-Bold.woff2")
+    format("woff2");
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }

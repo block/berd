@@ -376,7 +376,7 @@ export function ProvidersSettings({
 
       <section>
         <div className="mb-3">
-          <h4 className="text-sm font-semibold">
+          <h4 className="text-base text-foreground">
             {t("providers.agents.title")}
           </h4>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -400,7 +400,7 @@ export function ProvidersSettings({
       <section>
         <div className="mb-3">
           <div className="flex items-center gap-2">
-            <h4 className="text-sm font-semibold">
+            <h4 className="text-base text-foreground">
               {t("providers.models.title")}
             </h4>
             {loading ? (

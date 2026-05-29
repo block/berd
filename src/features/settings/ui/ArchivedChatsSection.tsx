@@ -55,14 +55,14 @@ export function ArchivedChatsSection() {
 
   return (
     <div className="space-y-3">
-      <h4 className="text-sm font-semibold">{t("chats.sectionTitle")}</h4>
+      <h4 className="text-base text-foreground">{t("chats.sectionTitle")}</h4>
       {!loadingArchivedChats && archivedChats.length === 0 ? (
         <p className="text-xs text-muted-foreground">{t("chats.empty")}</p>
       ) : null}
       {archivedChats.map((session) => (
         <div
           key={session.id}
-          className="flex items-center justify-between gap-3 rounded-card-sm border border-border bg-card px-3 py-2 text-card-foreground"
+          className="flex items-center justify-between gap-3 rounded-card-sm bg-card px-3 py-2 text-card-foreground"
         >
           <div className="min-w-0">
             <div className="truncate text-sm">

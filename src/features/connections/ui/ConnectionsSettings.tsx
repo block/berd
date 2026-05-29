@@ -136,7 +136,7 @@ function ConnectionRow({
           <entry.Icon className="h-5 w-5" />
         </div>
         <div className="flex min-w-0 flex-1 flex-col">
-          <p className="text-sm font-medium">{entry.displayName}</p>
+          <p className="text-sm">{entry.displayName}</p>
           <p className="text-xs text-muted-foreground">{entry.description}</p>
           <StatusBadge status={status} />
         </div>
@@ -217,25 +217,27 @@ export function ConnectionsSettings({
         className="gap-5"
       >
         <div>
-          <h4 className="text-sm font-semibold">{t("connections.title")}</h4>
+          <h4 className="text-base text-foreground">
+            {t("connections.title")}
+          </h4>
           <p className="mt-1 text-xs text-muted-foreground">
             {t("connections.description")}
           </p>
-          <TabsList variant="buttons" className="mt-4">
-            <TabsTrigger value="companyManaged" variant="buttons">
+          <TabsList variant="weight" className="mt-4">
+            <TabsTrigger value="companyManaged" variant="weight">
               {t("connections.tabs.companyManaged")}
             </TabsTrigger>
-            <TabsTrigger value="custom" variant="buttons">
+            <TabsTrigger value="custom" variant="weight">
               {t("connections.tabs.custom")}
             </TabsTrigger>
-            <TabsTrigger value="gooseCapabilities" variant="buttons">
+            <TabsTrigger value="gooseCapabilities" variant="weight">
               {t("connections.tabs.gooseCapabilities")}
             </TabsTrigger>
           </TabsList>
         </div>
 
         <TabsContent value="companyManaged">
-          <div className="overflow-hidden rounded-xl border border-border bg-background divide-y divide-border">
+          <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
             {sortedRows.map(({ entry, status }) => (
               <ConnectionRow
                 key={entry.provider}

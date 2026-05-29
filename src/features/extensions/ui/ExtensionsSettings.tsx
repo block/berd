@@ -184,7 +184,7 @@ export function ExtensionsSettings({
     if (sectionExtensions.length === 0) return null;
     return (
       <section>
-        <div className="grid">
+        <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
           {sectionExtensions.map((ext) => (
             <ExtensionItem
               key={ext.config_key}
@@ -260,54 +260,53 @@ export function ExtensionsSettings({
         ) : null}
       </div>
 
-      {isLoading ? (
-        <div className="grid">
-          {[1, 2, 3, 4, 5, 6].map((i) => (
-            <div
-              key={i}
-              className="h-20 animate-pulse border-b border-border/70 py-4"
-            >
-              <div className="h-4 w-2/5 rounded bg-muted/50" />
-              <div className="mt-2 h-3 w-3/5 rounded bg-muted/40" />
-            </div>
-          ))}
-        </div>
-      ) : visibleSourceExtensions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
-      ) : visibleExtensions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          {t("extensions.noResults")}
-        </p>
-      ) : (
-        <div className="space-y-8">
-          {effectiveFilter !== "gooseCapabilities"
-            ? renderSection(primaryExtensions)
-            : null}
+      <div className="mt-6">
+        {isLoading ? (
+          <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
+            {[1, 2, 3, 4, 5, 6].map((i) => (
+              <div key={i} className="h-20 animate-pulse px-4 py-4">
+                <div className="h-4 w-2/5 rounded bg-muted/50" />
+                <div className="mt-2 h-3 w-3/5 rounded bg-muted/40" />
+              </div>
+            ))}
+          </div>
+        ) : visibleSourceExtensions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{emptyMessage}</p>
+        ) : visibleExtensions.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            {t("extensions.noResults")}
+          </p>
+        ) : (
+          <div className="space-y-8">
+            {effectiveFilter !== "gooseCapabilities"
+              ? renderSection(primaryExtensions)
+              : null}
 
-          {shouldShowGooseCapabilities
-            ? renderSection(gooseCapabilities)
-            : null}
+            {shouldShowGooseCapabilities
+              ? renderSection(gooseCapabilities)
+              : null}
 
-          {showGooseCapabilitiesToggle ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowGooseCapabilities((current) => !current)}
-              className="w-full text-muted-foreground"
-            >
-              {showGooseCapabilities
-                ? t("extensions.hideGooseCapabilities")
-                : t("extensions.showGooseCapabilities", {
-                    count: gooseCapabilities.length,
-                  })}
-              {!showGooseCapabilities ? (
-                <IconChevronDown className="size-3" />
-              ) : null}
-            </Button>
-          ) : null}
-        </div>
-      )}
+            {showGooseCapabilitiesToggle ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowGooseCapabilities((current) => !current)}
+                className="w-full text-muted-foreground"
+              >
+                {showGooseCapabilities
+                  ? t("extensions.hideGooseCapabilities")
+                  : t("extensions.showGooseCapabilities", {
+                      count: gooseCapabilities.length,
+                    })}
+                {!showGooseCapabilities ? (
+                  <IconChevronDown className="size-3" />
+                ) : null}
+              </Button>
+            ) : null}
+          </div>
+        )}
+      </div>
 
       {modalMode === "add" && (
         <ExtensionModal onSubmit={handleSubmit} onClose={handleModalClose} />

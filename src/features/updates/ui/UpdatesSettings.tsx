@@ -58,12 +58,10 @@ export function UpdatesSettings() {
 
   return (
     <SettingsPage contentClassName="space-y-6">
-      <section className="overflow-hidden rounded-lg border border-border bg-background px-6 py-5">
+      <section className="overflow-hidden rounded-lg bg-background px-6 py-5">
         <div className="space-y-1">
-          <h4 className="text-sm font-semibold leading-5">
-            {t("updates.card.title")}
-          </h4>
-          <p className="text-sm leading-5 text-muted-foreground">
+          <h4 className="text-sm text-foreground">{t("updates.card.title")}</h4>
+          <p className="text-xs leading-4 text-muted-foreground">
             {t("updates.card.description")}
           </p>
         </div>

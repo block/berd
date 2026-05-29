@@ -84,7 +84,7 @@ describe("GeneralSettings appearance section", () => {
 
     renderGeneralSettings();
 
-    await user.click(screen.getByRole("button", { name: "Custom color" }));
+    await user.click(screen.getByRole("button", { name: "Custom" }));
 
     const hexInput = screen.getByLabelText("Hex");
     await user.clear(hexInput);
@@ -94,7 +94,7 @@ describe("GeneralSettings appearance section", () => {
       expect(localStorage.getItem("goose-primary-color")).toBe("#22c55e");
     });
 
-    await user.click(screen.getByTestId("primary-color-reset"));
+    await user.click(screen.getByRole("button", { name: "Use theme" }));
 
     await waitFor(() => {
       expect(localStorage.getItem("goose-primary-color")).toBeNull();

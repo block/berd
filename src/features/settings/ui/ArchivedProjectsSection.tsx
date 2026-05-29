@@ -57,14 +57,16 @@ export function ArchivedProjectsSection() {
   return (
     <>
       <div className="space-y-3">
-        <h4 className="text-sm font-semibold">{t("projects.sectionTitle")}</h4>
+        <h4 className="text-base text-foreground">
+          {t("projects.sectionTitle")}
+        </h4>
         {!loadingArchived && archivedProjects.length === 0 ? (
           <p className="text-xs text-muted-foreground">{t("projects.empty")}</p>
         ) : null}
         {archivedProjects.map((project) => (
           <div
             key={project.id}
-            className="flex items-center justify-between gap-3 rounded-card-sm border border-border bg-card px-3 py-2 text-card-foreground"
+            className="flex items-center justify-between gap-3 rounded-card-sm bg-card px-3 py-2 text-card-foreground"
           >
             <div className="flex min-w-0 items-center gap-2">
               <ProjectIcon

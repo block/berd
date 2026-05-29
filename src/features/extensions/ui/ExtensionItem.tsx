@@ -44,14 +44,12 @@ export function ExtensionItem({
   return (
     <div
       className={cn(
-        "flex min-h-20 items-center justify-between gap-3 border-b border-border/70 py-4",
+        "flex min-h-20 items-center justify-between gap-3 px-4 py-4",
         className,
       )}
     >
       <div className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">
-          {displayName}
-        </span>
+        <span className="block truncate text-sm">{displayName}</span>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {getSubtitle(extension)}
         </p>

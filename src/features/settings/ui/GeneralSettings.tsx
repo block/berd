@@ -24,11 +24,6 @@ import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPre
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 
-const PRIMARY_COLOR_PRESETS = [
-  { id: "#1a1a1a", label: "#1a1a1a", color: "#1a1a1a" },
-  { id: "#ffffff", label: "#ffffff", color: "#ffffff" },
-];
-
 interface AboutAppInfo {
   name: string;
   version: string;
@@ -55,7 +50,7 @@ function SettingRow({
       )}
     >
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium">{label}</p>
+        <p className="text-sm">{label}</p>
         {description ? (
           <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
         ) : null}
@@ -74,8 +69,8 @@ function SettingsSection({
 }) {
   return (
     <section className="space-y-3">
-      {title ? <h4 className="text-sm font-semibold">{title}</h4> : null}
-      <div className="overflow-hidden rounded-xl border border-border bg-background divide-y divide-border">
+      {title ? <h4 className="text-base text-foreground">{title}</h4> : null}
+      <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
         {children}
       </div>
     </section>
@@ -86,9 +81,7 @@ function AboutInfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-4">
       <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right text-sm font-medium">
-        {value}
-      </span>
+      <span className="min-w-0 truncate text-right text-sm">{value}</span>
     </div>
   );
 }
@@ -104,11 +97,23 @@ export function GeneralSettings() {
   const {
     themeMode,
     setThemeMode,
-    primaryColor,
+    themePrimaryColor,
     customPrimaryColor,
     setPrimaryColor,
     resetPrimaryColor,
   } = useTheme();
+
+  // The picker is self-contained: a "follow theme" swatch (clears the custom
+  // override so the primary tracks the active light/dark theme) plus the
+  // built-in custom-color swatch. No separate status label or reset button.
+  const THEME_PRIMARY_PRESET_ID = "theme";
+  const primaryColorPresets = [
+    {
+      id: THEME_PRIMARY_PRESET_ID,
+      label: t("appearance.primary.reset"),
+      color: themePrimaryColor,
+    },
+  ];
   const gooseIcon = getProviderIcon("goose", "size-6");
 
   useEffect(() => {
@@ -209,7 +214,7 @@ export function GeneralSettings() {
       <SettingsSection title={t("appearance.title")}>
         <div className="space-y-3 px-4 py-4">
           <div>
-            <p className="text-sm font-medium">{t("appearance.theme.label")}</p>
+            <p className="text-sm">{t("appearance.theme.label")}</p>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {t("appearance.theme.description")}
             </p>
@@ -262,7 +267,7 @@ export function GeneralSettings() {
                 >
                   <ThemeIcon className="h-4 w-4 shrink-0" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate font-medium">{option.label}</div>
+                    <div className="truncate">{option.label}</div>
                     {option.description ? (
                       <div className="truncate text-xs text-muted-foreground">
                         {option.description}
@@ -293,31 +298,19 @@ export function GeneralSettings() {
           label={t("appearance.primary.label")}
           description={t("appearance.primary.description")}
         >
-          <div className="flex items-center gap-2">
-            <ColorPicker
-              value={primaryColor}
-              onChange={setPrimaryColor}
-              label={t("appearance.primary.label")}
-              presets={PRIMARY_COLOR_PRESETS}
-              swatchSize="sm"
-              variant="swatches"
-            />
-            <span className="rounded-full border border-border bg-background px-2.5 py-1 text-xs font-medium text-muted-foreground">
-              {customPrimaryColor
-                ? t("appearance.primary.custom")
-                : t("appearance.primary.theme")}
-            </span>
-            <Button
-              data-testid="primary-color-reset"
-              disabled={!customPrimaryColor}
-              onClick={resetPrimaryColor}
-              size="xs"
-              type="button"
-              variant="outline"
-            >
-              {t("appearance.primary.reset")}
-            </Button>
-          </div>
+          <ColorPicker
+            value={customPrimaryColor ?? THEME_PRIMARY_PRESET_ID}
+            onChange={(value) =>
+              value === THEME_PRIMARY_PRESET_ID
+                ? resetPrimaryColor()
+                : setPrimaryColor(value)
+            }
+            label={t("appearance.primary.label")}
+            presets={primaryColorPresets}
+            customColorLabel={t("appearance.primary.custom")}
+            swatchSize="sm"
+            variant="swatches"
+          />
         </SettingRow>
       </SettingsSection>
 
@@ -328,7 +321,7 @@ export function GeneralSettings() {
         >
           <Button
             type="button"
-            variant="outline"
+            variant="default"
             onClick={() => setClearCacheDialogOpen(true)}
           >
             <Trash2 className="size-4" />
@@ -343,7 +336,7 @@ export function GeneralSettings() {
             <div className="flex size-6 items-center justify-center [&>*]:size-6">
               {gooseIcon}
             </div>
-            <span className="mt-2 block text-sm font-medium">
+            <span className="mt-2 block text-sm">
               {t("compaction.goose.label")}
             </span>
             <p className="mt-1 text-xs text-muted-foreground">

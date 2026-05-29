@@ -511,9 +511,8 @@ export function AgentProviderCard({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-lg border bg-background p-3 transition-colors",
-        isActive &&
-          "border-primary/50 bg-linear-to-b from-primary/10 to-primary/10",
+        "flex flex-col rounded-lg bg-background p-3 transition-colors",
+        isActive && "bg-linear-to-b from-primary/10 to-primary/10",
       )}
     >
       <div className="flex items-start justify-between">

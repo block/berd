@@ -173,7 +173,7 @@ export function DoctorSettings() {
               key={group.category}
               className="mx-auto w-full max-w-xl space-y-2"
             >
-              <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <h4 className="text-xs uppercase tracking-wide text-muted-foreground">
                 {group.categoryLabel}
               </h4>
               <div className="space-y-2">
