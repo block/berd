@@ -14,6 +14,7 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ExtensionEntry } from "@/features/extensions/types";
+import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type {
@@ -27,6 +28,7 @@ import type { DesignSystemSection } from "@/features/design-system/ui/designSyst
 interface AppShellContentProps {
   activeView: AppView;
   activeSettingsSection: SectionId;
+  activeConnectionsTab: ConnectionsTab;
   activeSkillsSkillId: string | null;
   activeAgentsPersonaId: string | null;
   activeAutomationsRoute: AutomationNavigationRoute;
@@ -45,6 +47,7 @@ interface AppShellContentProps {
     route: AutomationNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onConnectionsTabChange: (tab: ConnectionsTab) => void;
   onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
@@ -81,6 +84,7 @@ interface AppShellContentProps {
 export function AppShellContent({
   activeView,
   activeSettingsSection,
+  activeConnectionsTab,
   activeSkillsSkillId,
   activeAgentsPersonaId,
   activeAutomationsRoute,
@@ -90,6 +94,7 @@ export function AppShellContent({
   onNavigateSkills,
   onNavigateAgents,
   onNavigateAutomations,
+  onConnectionsTabChange,
   onSkillsBreadcrumbLabelChange,
   onAgentsBreadcrumbLabelChange,
   onAutomationsBreadcrumbLabelChange,
@@ -122,6 +127,8 @@ export function AppShellContent({
       return (
         <SettingsView
           activeSection={activeSettingsSection}
+          activeConnectionsTab={activeConnectionsTab}
+          onConnectionsTabChange={onConnectionsTabChange}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
         />
       );

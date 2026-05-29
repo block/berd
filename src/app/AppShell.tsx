@@ -11,8 +11,11 @@ import {
   SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
+import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
+import { isCompanyManagedExtension } from "@/features/connections/lib/managedExtensions";
+import { classifyExtension } from "@/features/extensions/lib/extensionCategories";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
@@ -230,6 +233,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeSettingsSection, setActiveSettingsSection] = useState<SectionId>(
     initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
   );
+  const [activeConnectionsTab, setActiveConnectionsTab] =
+    useState<ConnectionsTab>("companyManaged");
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
   const [designSystemInspectorVisible, setDesignSystemInspectorVisible] =
@@ -1280,8 +1285,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const handleOpenExtensionFromSearch = useCallback(
-    (_entry: ExtensionEntry) => {
-      openSettings("extensions");
+    (entry: ExtensionEntry) => {
+      setActiveConnectionsTab(
+        isCompanyManagedExtension(entry)
+          ? "companyManaged"
+          : classifyExtension(entry) === "gooseCapabilities"
+            ? "gooseCapabilities"
+            : "custom",
+      );
+      openSettings("connections");
     },
     [openSettings],
   );
@@ -1804,6 +1816,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             <AppShellContent
               activeView={activeView}
               activeSettingsSection={activeSettingsSection}
+              activeConnectionsTab={activeConnectionsTab}
               activeSkillsSkillId={skillsSkillId}
               activeAgentsPersonaId={agentsPersonaId}
               activeAutomationsRoute={automationsRoute}
@@ -1813,6 +1826,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}
               onNavigateAutomations={navigateAutomations}
+              onConnectionsTabChange={setActiveConnectionsTab}
               onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
               onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
               onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}

@@ -19,6 +19,15 @@ vi.mock("@/features/migration/api/migration", () => ({
 const extensions: ExtensionEntry[] = [
   {
     type: "stdio",
+    name: "Airtable",
+    description: "Managed through Connections",
+    cmd: "npx",
+    args: [],
+    config_key: "airtable",
+    enabled: true,
+  },
+  {
+    type: "stdio",
     name: "github",
     description: "Issue tracker",
     cmd: "npx",
@@ -102,6 +111,64 @@ describe("ExtensionsSettings", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("switch", { name: /enable developer/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides company-managed extensions in the custom tab variant", () => {
+    render(
+      <ExtensionsSettings
+        variant="custom"
+        hideCompanyManagedExtensions
+        showAddAction={false}
+      />,
+    );
+
+    expect(screen.queryByText("Airtable")).not.toBeInTheDocument();
+    expect(screen.getByText("github")).toBeInTheDocument();
+  });
+
+  it("only lists disabled extensions visible in the current variant banner", () => {
+    useMigrationStore.getState().setStatus({
+      done: true,
+      completedAt: "2026-05-19T12:00:00Z",
+      disabledExtensions: [
+        { configKey: "airtable", name: "Airtable" },
+        { configKey: "github", name: "GitHub" },
+      ],
+    });
+
+    render(
+      <ExtensionsSettings
+        variant="custom"
+        hideCompanyManagedExtensions
+        showAddAction={false}
+      />,
+    );
+
+    expect(
+      screen.getByText("Some extensions are now enabled on demand"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/GitHub/)).toBeInTheDocument();
+    expect(screen.queryByText(/Airtable/)).not.toBeInTheDocument();
+  });
+
+  it("hides the disabled banner when only hidden managed extensions were disabled", () => {
+    useMigrationStore.getState().setStatus({
+      done: true,
+      completedAt: "2026-05-19T12:00:00Z",
+      disabledExtensions: [{ configKey: "airtable", name: "Airtable" }],
+    });
+
+    render(
+      <ExtensionsSettings
+        variant="custom"
+        hideCompanyManagedExtensions
+        showAddAction={false}
+      />,
+    );
+
+    expect(
+      screen.queryByText("Some extensions are now enabled on demand"),
     ).not.toBeInTheDocument();
   });
 

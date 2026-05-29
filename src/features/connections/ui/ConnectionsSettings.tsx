@@ -13,9 +13,11 @@ import {
   OAUTH_PROVIDERS,
   type OAuthProviderEntry,
 } from "@/features/connections/catalog";
+import { ExtensionsSettings } from "@/features/extensions/ui/ExtensionsSettings";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 
 const CONNECTIONS_REFETCH_INTERVAL_MS = 5_000;
 const SECONDS_IN_DAY = 86_400;
@@ -25,6 +27,13 @@ const DEFAULT_G2_BASE_URL = "https://g2.sqprod.co";
 const G2_BASE_URL =
   import.meta.env.VITE_GOOSE_INTERNAL_G2_BASE_URL ?? DEFAULT_G2_BASE_URL;
 const RETURN_URL = "goose-internal://connect-return";
+
+export type ConnectionsTab = "companyManaged" | "custom" | "gooseCapabilities";
+
+interface ConnectionsSettingsProps {
+  activeTab: ConnectionsTab;
+  onActiveTabChange: (tab: ConnectionsTab) => void;
+}
 
 type ConnectionStatus =
   | { kind: "active" }
@@ -147,7 +156,10 @@ function ConnectionRow({
   );
 }
 
-export function ConnectionsSettings() {
+export function ConnectionsSettings({
+  activeTab,
+  onActiveTabChange,
+}: ConnectionsSettingsProps) {
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
 
@@ -198,20 +210,61 @@ export function ConnectionsSettings() {
     });
 
   return (
-    <SettingsPage contentClassName="space-y-8">
-      <section className="space-y-3">
+    <SettingsPage contentClassName="space-y-6">
+      <Tabs
+        value={activeTab}
+        onValueChange={(value) => onActiveTabChange(value as ConnectionsTab)}
+        className="gap-5"
+      >
         <div>
           <h4 className="text-sm font-semibold">{t("connections.title")}</h4>
           <p className="mt-1 text-xs text-muted-foreground">
             {t("connections.description")}
           </p>
+          <TabsList variant="buttons" className="mt-4">
+            <TabsTrigger value="companyManaged" variant="buttons">
+              {t("connections.tabs.companyManaged")}
+            </TabsTrigger>
+            <TabsTrigger value="custom" variant="buttons">
+              {t("connections.tabs.custom")}
+            </TabsTrigger>
+            <TabsTrigger value="gooseCapabilities" variant="buttons">
+              {t("connections.tabs.gooseCapabilities")}
+            </TabsTrigger>
+          </TabsList>
         </div>
-        <div className="overflow-hidden rounded-xl border border-border bg-background divide-y divide-border">
-          {sortedRows.map(({ entry, status }) => (
-            <ConnectionRow key={entry.provider} entry={entry} status={status} />
-          ))}
-        </div>
-      </section>
+
+        <TabsContent value="companyManaged">
+          <div className="overflow-hidden rounded-xl border border-border bg-background divide-y divide-border">
+            {sortedRows.map(({ entry, status }) => (
+              <ConnectionRow
+                key={entry.provider}
+                entry={entry}
+                status={status}
+              />
+            ))}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="custom">
+          {activeTab === "custom" ? (
+            <ExtensionsSettings
+              variant="custom"
+              hideCompanyManagedExtensions
+              showAddAction
+            />
+          ) : null}
+        </TabsContent>
+
+        <TabsContent value="gooseCapabilities">
+          {activeTab === "gooseCapabilities" ? (
+            <ExtensionsSettings
+              variant="gooseCapabilities"
+              showAddAction={false}
+            />
+          ) : null}
+        </TabsContent>
+      </Tabs>
     </SettingsPage>
   );
 }

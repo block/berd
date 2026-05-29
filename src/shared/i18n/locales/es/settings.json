@@ -69,6 +69,8 @@
     "description": "Conecta Goose con apps, servicios y capacidades integradas.",
     "search": "Buscar extensiones",
     "empty": "No hay extensiones configuradas.",
+    "emptyCustom": "No hay extensiones personalizadas configuradas.",
+    "emptyGooseCapabilities": "No hay capacidades de Goose configuradas.",
     "noResults": "Ninguna extensión coincide con tu búsqueda.",
     "addExtension": "Agregar extensión",
     "editExtension": "Editar extensión",
@@ -183,6 +185,11 @@
   "connections": {
     "title": "Conexiones",
     "description": "Inicia sesión en apps y servicios que Goose puede usar en tu nombre.",
+    "tabs": {
+      "companyManaged": "Administradas por la empresa",
+      "custom": "Personalizadas",
+      "gooseCapabilities": "Capacidades de Goose"
+    },
     "connect": "Conectar",
     "reconnect": "Reconectar",
     "extendAccess": "Ampliar acceso",

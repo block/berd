@@ -6,13 +6,12 @@ import {
   Settings2,
   Stethoscope,
 } from "lucide-react";
-import { IconApps, IconPlug } from "@tabler/icons-react";
+import { IconPlug } from "@tabler/icons-react";
 
 export const SETTINGS_SECTIONS = [
   { id: "general", labelKey: "nav.general", icon: Settings2 },
   { id: "providers", labelKey: "nav.providers", icon: IconPlug },
   { id: "connections", labelKey: "nav.connections", icon: Link2 },
-  { id: "extensions", labelKey: "nav.extensions", icon: IconApps },
   { id: "archive", labelKey: "nav.archive", icon: Archive },
   { id: "updates", labelKey: "nav.updates", icon: RefreshCw },
   { id: "doctor", labelKey: "nav.doctor", icon: Stethoscope },
@@ -27,6 +26,7 @@ export type SectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
 export const DEFAULT_SETTINGS_SECTION: SectionId = "general";
 
 const LEGACY_SECTION_REDIRECTS: Record<string, SectionId> = {
+  extensions: "connections",
   projects: "archive",
   chats: "archive",
   voice: "general",

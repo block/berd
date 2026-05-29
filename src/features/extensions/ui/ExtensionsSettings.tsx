@@ -7,6 +7,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { isCompanyManagedExtension } from "@/features/connections/lib/managedExtensions";
 import { useMigrationStore } from "@/features/migration/stores/migrationStore";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
@@ -23,6 +24,14 @@ import {
 import type { ExtensionEntry } from "../types";
 import { ExtensionItem } from "./ExtensionItem";
 import { ExtensionModal } from "./ExtensionModal";
+
+type ExtensionsSettingsVariant = "standalone" | "custom" | "gooseCapabilities";
+
+interface ExtensionsSettingsProps {
+  variant?: ExtensionsSettingsVariant;
+  hideCompanyManagedExtensions?: boolean;
+  showAddAction?: boolean;
+}
 
 function FilterButton({
   active,
@@ -45,7 +54,11 @@ function FilterButton({
   );
 }
 
-export function ExtensionsSettings() {
+export function ExtensionsSettings({
+  variant = "standalone",
+  hideCompanyManagedExtensions = false,
+  showAddAction = variant === "standalone" || variant === "custom",
+}: ExtensionsSettingsProps = {}) {
   const { t } = useTranslation("settings");
   const setTopBarActions = useSetTopBarActions();
   const {
@@ -63,6 +76,11 @@ export function ExtensionsSettings() {
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
+    if (!showAddAction) {
+      setTopBarActions(null);
+      return () => setTopBarActions(null);
+    }
+
     setTopBarActions(
       <Button
         type="button"
@@ -75,7 +93,7 @@ export function ExtensionsSettings() {
       </Button>,
     );
     return () => setTopBarActions(null);
-  }, [handleAdd, setTopBarActions, t]);
+  }, [handleAdd, setTopBarActions, showAddAction, t]);
   const [activeFilter, setActiveFilter] = useState<ExtensionFilter>("all");
   const [showGooseCapabilities, setShowGooseCapabilities] = useState(false);
   const disabledExtensions = useMigrationStore(
@@ -85,18 +103,47 @@ export function ExtensionsSettings() {
     (state) => state.bannerDismissedAt,
   );
   const dismissBanner = useMigrationStore((state) => state.dismissBanner);
+
+  const visibleSourceExtensions = useMemo(
+    () =>
+      hideCompanyManagedExtensions
+        ? extensions.filter(
+            (extension) => !isCompanyManagedExtension(extension),
+          )
+        : extensions,
+    [extensions, hideCompanyManagedExtensions],
+  );
+  const visibleSourceExtensionKeys = useMemo(
+    () =>
+      new Set(visibleSourceExtensions.map((extension) => extension.config_key)),
+    [visibleSourceExtensions],
+  );
+  const visibleDisabledExtensions = useMemo(
+    () =>
+      disabledExtensions.filter((extension) =>
+        visibleSourceExtensionKeys.has(extension.configKey),
+      ),
+    [disabledExtensions, visibleSourceExtensionKeys],
+  );
   const showDisabledBanner =
-    disabledExtensions.length > 0 && !bannerDismissedAt;
+    visibleDisabledExtensions.length > 0 && !bannerDismissedAt;
+
+  const effectiveFilter: ExtensionFilter =
+    variant === "custom"
+      ? "appsServices"
+      : variant === "gooseCapabilities"
+        ? "gooseCapabilities"
+        : activeFilter;
 
   const filteredExtensions = useMemo(
     () =>
       filterExtensions({
-        extensions,
+        extensions: visibleSourceExtensions,
         searchTerm,
-        activeFilter,
+        activeFilter: effectiveFilter,
         getCategoryLabel: (category) => t(`extensions.categories.${category}`),
       }),
-    [activeFilter, extensions, searchTerm, t],
+    [effectiveFilter, searchTerm, t, visibleSourceExtensions],
   );
 
   const { primaryExtensions, gooseCapabilities } = useMemo(
@@ -105,21 +152,33 @@ export function ExtensionsSettings() {
   );
 
   const visibleExtensions =
-    activeFilter === "gooseCapabilities"
+    effectiveFilter === "gooseCapabilities"
       ? gooseCapabilities
-      : [...primaryExtensions, ...gooseCapabilities];
+      : variant === "custom"
+        ? primaryExtensions
+        : [...primaryExtensions, ...gooseCapabilities];
   const hasSearch = searchTerm.trim().length > 0;
   const shouldShowGooseCapabilities =
-    activeFilter === "gooseCapabilities" || showGooseCapabilities || hasSearch;
+    effectiveFilter === "gooseCapabilities" ||
+    showGooseCapabilities ||
+    hasSearch;
   const showGooseCapabilitiesToggle =
-    activeFilter !== "gooseCapabilities" &&
+    variant === "standalone" &&
+    effectiveFilter !== "gooseCapabilities" &&
     !hasSearch &&
     gooseCapabilities.length > 0;
 
   const categoryCounts = useMemo(
-    () => getExtensionCategoryCounts(extensions),
-    [extensions],
+    () => getExtensionCategoryCounts(visibleSourceExtensions),
+    [visibleSourceExtensions],
   );
+
+  const emptyMessage =
+    variant === "custom"
+      ? t("extensions.emptyCustom")
+      : variant === "gooseCapabilities"
+        ? t("extensions.emptyGooseCapabilities")
+        : t("extensions.empty");
 
   const renderSection = (sectionExtensions: ExtensionEntry[]) => {
     if (sectionExtensions.length === 0) return null;
@@ -148,7 +207,9 @@ export function ExtensionsSettings() {
           <AlertDescription>
             <p>
               {t("extensions.disabledBanner.description", {
-                names: disabledExtensions.map((ext) => ext.name).join(", "),
+                names: visibleDisabledExtensions
+                  .map((ext) => ext.name)
+                  .join(", "),
               })}
             </p>
           </AlertDescription>
@@ -176,25 +237,27 @@ export function ExtensionsSettings() {
           placeholder={t("extensions.search")}
           aria-label={t("extensions.search")}
         />
-        <FilterRow>
-          <FilterButton
-            active={activeFilter === "all"}
-            onClick={() => setActiveFilter("all")}
-          >
-            {t("extensions.filters.all")}
-          </FilterButton>
-          {EXTENSION_CATEGORIES.map((category) =>
-            categoryCounts[category] > 0 ? (
-              <FilterButton
-                key={category}
-                active={activeFilter === category}
-                onClick={() => setActiveFilter(category)}
-              >
-                {t(`extensions.categories.${category}`)}
-              </FilterButton>
-            ) : null,
-          )}
-        </FilterRow>
+        {variant === "standalone" ? (
+          <FilterRow>
+            <FilterButton
+              active={activeFilter === "all"}
+              onClick={() => setActiveFilter("all")}
+            >
+              {t("extensions.filters.all")}
+            </FilterButton>
+            {EXTENSION_CATEGORIES.map((category) =>
+              categoryCounts[category] > 0 ? (
+                <FilterButton
+                  key={category}
+                  active={activeFilter === category}
+                  onClick={() => setActiveFilter(category)}
+                >
+                  {t(`extensions.categories.${category}`)}
+                </FilterButton>
+              ) : null,
+            )}
+          </FilterRow>
+        ) : null}
       </div>
 
       {isLoading ? (
@@ -209,15 +272,15 @@ export function ExtensionsSettings() {
             </div>
           ))}
         </div>
-      ) : extensions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("extensions.empty")}</p>
+      ) : visibleSourceExtensions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
       ) : visibleExtensions.length === 0 ? (
         <p className="text-sm text-muted-foreground">
           {t("extensions.noResults")}
         </p>
       ) : (
         <div className="space-y-8">
-          {activeFilter !== "gooseCapabilities"
+          {effectiveFilter !== "gooseCapabilities"
             ? renderSection(primaryExtensions)
             : null}
 
