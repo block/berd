@@ -69,6 +69,7 @@ interface AgentsViewProps {
   ) => void;
   onBreadcrumbLabelChange?: (label: string | null) => void;
   onStartAgentBuilderSession?: (args?: { slug?: string }) => void;
+  onStartChatWithAgent?: (personaId: string) => void;
 }
 
 export function AgentsView({
@@ -76,6 +77,7 @@ export function AgentsView({
   onActivePersonaIdChange,
   onBreadcrumbLabelChange,
   onStartAgentBuilderSession,
+  onStartChatWithAgent,
 }: AgentsViewProps = {}) {
   const { t } = useTranslation(["agents", "common"]);
   const isActivePersonaControlled = activePersonaId !== undefined;
@@ -150,6 +152,13 @@ export function AgentsView({
   const handleSelectPersona = useCallback(
     (persona: Persona) => setActivePersona(persona.id),
     [setActivePersona],
+  );
+
+  const handleStartChat = useCallback(
+    (persona: Persona) => {
+      onStartChatWithAgent?.(persona.id);
+    },
+    [onStartChatWithAgent],
   );
 
   const handleEditPersona = useCallback(
@@ -406,6 +415,7 @@ export function AgentsView({
       <>
         <AgentDetailPage
           persona={activePersona}
+          onStartChat={handleStartChat}
           onEdit={handleEditPersona}
           onDuplicate={handleDuplicatePersona}
           onDelete={handleDeletePersona}
@@ -435,6 +445,7 @@ export function AgentsView({
         <PersonaGallery
           personas={personas}
           onSelectPersona={handleSelectPersona}
+          onStartChatPersona={handleStartChat}
           onEditPersona={handleEditPersona}
           onDuplicatePersona={handleDuplicatePersona}
           onDeletePersona={handleDeletePersona}

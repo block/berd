@@ -25,7 +25,9 @@ const buttonVariants = cva(
         secondary:
           "border border-input bg-accent text-accent-foreground hover:bg-accent",
         glass:
-          "bg-surface-composer text-foreground shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-composer/80 hover:text-foreground active:bg-surface-composer data-[state=open]:bg-surface-composer aria-expanded:bg-surface-composer",
+          "bg-surface-composer text-foreground shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-composer-hover hover:text-foreground active:bg-surface-composer data-[state=open]:bg-surface-composer aria-expanded:bg-surface-composer",
+        "glass-strong":
+          "bg-surface-glass-strong text-surface-glass-strong-fg shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-glass-strong-hover hover:text-surface-glass-strong-fg active:bg-surface-glass-strong data-[state=open]:bg-surface-glass-strong aria-expanded:bg-surface-glass-strong",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         "ghost-light":
           "font-normal hover:bg-accent hover:text-accent-foreground",

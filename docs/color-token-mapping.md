@@ -47,7 +47,8 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | --- | --- | --- |
 | `canvas-base`, `canvas-project-tint` | Goose's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
 | `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
-| `surface-composer`, `surface-composer-glass` | Composer-specific translucent surfaces. | `bg-surface-composer` |
+| `surface-composer`, `surface-composer-glass`, `surface-composer-hover` | Composer-specific translucent surfaces and their hover counterpart. | `bg-surface-composer` |
+| `surface-glass-strong`, `surface-glass-strong-hover`, `surface-glass-strong-fg` | Stronger glass controls that sit over artwork or other visually busy media where ordinary foreground-on-glass can lose contrast. | `bg-surface-glass-strong text-surface-glass-strong-fg` |
 | `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |
 | `surface-agent-profile-*` | Agent profile and avatar-editing surfaces are product-specific and theme-aware; their light and dark values do not perfectly match shared shadcn tokens. | `bg-surface-agent-profile-bg text-surface-agent-profile-fg` |
 | `message-user-bg` | User message bubble fill is a chat-specific surface that should not become a broad card or muted token. | `bg-message-user-bg` |

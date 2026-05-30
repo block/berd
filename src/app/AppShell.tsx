@@ -252,6 +252,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
+  const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
+    useState(0);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
   const [skillsBreadcrumbLabel, setSkillsBreadcrumbLabel] = useState<
@@ -1038,6 +1040,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const handleStartChatWithAgent = useCallback(
     (agentId: string) => {
       agentBuilder.guardNavigation(() => {
+        if (activeView === "agents" && agentsPersonaId === agentId) {
+          setGlobalComposerFocusRequest((request) => request + 1);
+          return;
+        }
+
         void createNewTab(DEFAULT_CHAT_TITLE)
           .then((session) => {
             patchSession(session.id, { personaId: agentId });
@@ -1047,7 +1054,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           });
       });
     },
-    [createNewTab, patchSession, agentBuilder.guardNavigation],
+    [
+      activeView,
+      agentsPersonaId,
+      createNewTab,
+      patchSession,
+      agentBuilder.guardNavigation,
+    ],
   );
 
   const handleGlobalCompose = useCallback(
@@ -1941,7 +1954,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               }
             />
             {showGlobalComposer ? (
-              <GlobalComposerPill onSend={handleGlobalCompose} />
+              <GlobalComposerPill
+                focusRequest={globalComposerFocusRequest}
+                onSend={handleGlobalCompose}
+                suggestedPersonaId={
+                  activeView === "agents" ? agentsPersonaId : null
+                }
+              />
             ) : null}
           </>
         )}

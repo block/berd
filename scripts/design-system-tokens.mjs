@@ -95,7 +95,7 @@ const allowedBridgeNames = new Set([
 
 const allowedBridgePatterns = [
   /^canvas-(?:base|project-tint)$/,
-  /^surface-(?:composer(?:-glass)?|editor-panel)$/,
+  /^surface-(?:composer(?:-glass|-hover)?|editor-panel|glass-strong(?:-(?:hover|fg))?)$/,
   /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
   /^message-user-bg$/,
   /^chip-(?:file|chat|project|agent|skill|automation)-(?:bg|fg)$/,

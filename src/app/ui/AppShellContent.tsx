@@ -156,6 +156,7 @@ export function AppShellContent({
           onActivePersonaIdChange={onNavigateAgents}
           onBreadcrumbLabelChange={onAgentsBreadcrumbLabelChange}
           onStartAgentBuilderSession={onStartAgentBuilderSession}
+          onStartChatWithAgent={onOpenAgent}
         />
       );
     case "projects":

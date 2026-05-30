@@ -73,6 +73,27 @@ describe("AgentsView entry points", () => {
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({});
   });
 
+  it("clicking detail Start chat calls onStartChatWithAgent with the persona id", () => {
+    const onStartChatWithAgent = vi.fn();
+    useAgentStore.setState({ personas: [persona] });
+
+    render(
+      <AgentsView
+        activePersonaId={persona.id}
+        onStartChatWithAgent={onStartChatWithAgent}
+      />,
+    );
+
+    const startChatButton = screen.getByRole("button", {
+      name: "detail.startChat",
+    });
+    expect(startChatButton).toHaveClass("bg-surface-agent-profile-control-bg");
+
+    fireEvent.click(startChatButton);
+
+    expect(onStartChatWithAgent).toHaveBeenCalledWith(persona.id);
+  });
+
   it("clicking detail edit calls onStartAgentBuilderSession with the source slug", () => {
     const onStartAgentBuilderSession = vi.fn();
     useAgentStore.setState({ personas: [persona] });
@@ -119,7 +140,7 @@ describe("AgentsView entry points", () => {
 
     render(<AgentsView />);
 
-    fireEvent.click(screen.getByRole("button", { name: "card.ariaLabel" }));
+    fireEvent.click(screen.getByRole("button", { name: "card.viewAria" }));
 
     expect(startViewTransition).toHaveBeenCalledTimes(1);
     expect(

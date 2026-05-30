@@ -126,6 +126,7 @@
     "builtIn": "Built-in",
     "characterCount": "{{count}} chars",
     "custom": "Custom",
+    "default": "Default",
     "goose": "Goose",
     "loading": "Loading...",
     "none": "None",

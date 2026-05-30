@@ -52,7 +52,15 @@
   "card": {
     "ariaLabel": "Agente: {{name}}",
     "fileBacked": "Desde archivo",
-    "options": "Opciones del agente"
+    "options": "Opciones del agente",
+    "view": "Ver",
+    "chat": "Chatear",
+    "viewAria": "Ver {{name}}",
+    "chatAria": "Chatear con {{name}}"
+  },
+  "detail": {
+    "startChat": "Iniciar chat",
+    "moreActions": "Más acciones"
   },
   "config": {
     "ariaLabel": "Configuración del agente",

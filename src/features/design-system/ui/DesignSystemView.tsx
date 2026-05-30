@@ -803,6 +803,29 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       border: "none; contained by --shadow-chat",
     },
   ],
+  "glass-strong": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--surface-glass-strong",
+      textIcon: "--surface-glass-strong-fg",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--surface-glass-strong-hover",
+      textIcon: "--surface-glass-strong-fg",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "--surface-glass-strong",
+      textIcon: "--surface-glass-strong-fg",
+      border: "none; contained by --shadow-chat",
+    },
+  ],
   ghost: [
     {
       anatomy: "Button",

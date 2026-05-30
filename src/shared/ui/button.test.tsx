@@ -132,6 +132,17 @@ describe("Button", () => {
     expect(icon).toHaveClass("size-3");
   });
 
+  it("renders the strong glass variant with strong glass tokens", () => {
+    render(<Button variant="glass-strong">View</Button>);
+
+    const button = screen.getByRole("button", { name: "View" });
+    expect(button).toHaveClass(
+      "bg-surface-glass-strong",
+      "text-surface-glass-strong-fg",
+      "hover:bg-surface-glass-strong-hover",
+    );
+  });
+
   it("disables and marks the button busy while loading", () => {
     render(
       <Button

@@ -126,6 +126,7 @@
     "builtIn": "Integrada",
     "characterCount": "{{count}} caracteres",
     "custom": "Personalizada",
+    "default": "Predeterminado",
     "goose": "Goose",
     "loading": "Cargando...",
     "none": "Ninguno",

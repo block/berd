@@ -52,7 +52,15 @@
   "card": {
     "ariaLabel": "Agent: {{name}}",
     "fileBacked": "File-backed",
-    "options": "Agent options"
+    "options": "Agent options",
+    "view": "View",
+    "chat": "Chat",
+    "viewAria": "View {{name}}",
+    "chatAria": "Chat with {{name}}"
+  },
+  "detail": {
+    "startChat": "Start chat",
+    "moreActions": "More actions"
   },
   "config": {
     "ariaLabel": "Agent configuration",

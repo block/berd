@@ -5,6 +5,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -105,9 +106,33 @@ function setProjectStore() {
   });
 }
 
-function renderGlobalComposer(onSend = vi.fn()) {
-  render(<GlobalComposerPill onSend={onSend} />);
+function renderGlobalComposer(
+  onSend = vi.fn(),
+  props: Partial<ComponentProps<typeof GlobalComposerPill>> = {},
+) {
+  render(<GlobalComposerPill onSend={onSend} {...props} />);
   return onSend;
+}
+
+function setPersonas() {
+  useAgentStore.setState({
+    personas: [
+      {
+        id: "persona-1",
+        displayName: "Research Scout",
+        systemPrompt: "Gather context.",
+        isBuiltin: false,
+        writable: true,
+      },
+      {
+        id: "persona-2",
+        displayName: "UX Critic",
+        systemPrompt: "Review flows.",
+        isBuiltin: false,
+        writable: true,
+      },
+    ],
+  });
 }
 
 function mockImagePath(path: string, name: string) {
@@ -171,6 +196,57 @@ describe("GlobalComposerPill", () => {
       createObjectURL: vi.fn(() => "blob:preview"),
       revokeObjectURL: vi.fn(),
     });
+  });
+
+  it("preselects a suggested persona and sends with that persona", async () => {
+    const user = userEvent.setup();
+    setPersonas();
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    expect(screen.getByText("Research Scout")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      personaId: "persona-1",
+    });
+  });
+
+  it("does not reselect the suggested persona after the user clears it", async () => {
+    const user = userEvent.setup();
+    setPersonas();
+    const { rerender } = render(
+      <GlobalComposerPill onSend={vi.fn()} suggestedPersonaId="persona-1" />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /clear active assistant/i }),
+    );
+    rerender(
+      <GlobalComposerPill onSend={vi.fn()} suggestedPersonaId="persona-1" />,
+    );
+
+    expect(screen.queryByText("Research Scout")).not.toBeInTheDocument();
+  });
+
+  it("focuses the textarea when focusRequest increments", () => {
+    const { rerender } = render(
+      <GlobalComposerPill onSend={vi.fn()} focusRequest={0} />,
+    );
+    const textbox = screen.getByRole("textbox");
+
+    rerender(<GlobalComposerPill onSend={vi.fn()} focusRequest={1} />);
+
+    expect(textbox).toHaveFocus();
+  });
+
+  it("does not focus the textarea when mounted with a consumed focusRequest", () => {
+    render(<GlobalComposerPill onSend={vi.fn()} focusRequest={1} />);
+
+    expect(screen.getByRole("textbox")).not.toHaveFocus();
   });
 
   it("attaches an image through the picker and sends it without text", async () => {

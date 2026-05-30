@@ -5,6 +5,8 @@ import {
   ArrowLeft,
   Copy,
   Download,
+  MessageCircle,
+  MoreHorizontal,
   MousePointer2,
   Pencil,
   PinIcon,
@@ -15,6 +17,13 @@ import { avatarRef, isBundledAvatarRef } from "@/shared/avatars/catalog";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { Button } from "@/shared/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
 import type { Persona } from "@/shared/types/agents";
@@ -23,7 +32,6 @@ import {
   canDeletePersona,
   canEditPersona,
   getPersonaProviderLabel,
-  getPersonaSource,
 } from "@/features/agents/lib/personaPresentation";
 import {
   AGENT_PROFILE_FIELDS_TRANSITION_NAME,
@@ -44,6 +52,7 @@ import {
 
 interface AgentDetailPageProps {
   persona: Persona;
+  onStartChat?: (persona: Persona) => void;
   onEdit: (persona: Persona) => void;
   onDuplicate: (persona: Persona) => void;
   onDelete: (persona: Persona) => void;
@@ -53,9 +62,11 @@ interface AgentDetailPageProps {
 
 const CONTEXT_LABEL_CLASS =
   "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
-const ACTION_BUTTON_CLASS =
-  "size-9 rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
-const ACTION_ICON_CLASS = "size-3.5";
+const SECONDARY_ACTION_CLASS =
+  "rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-surface-agent-profile-fg";
+const OVERFLOW_TRIGGER_CLASS =
+  "rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
+const ACTION_ICON_CLASS = "size-3";
 const AVATAR_FIELD_INPUT_CLASS =
   "h-[42px] rounded-full border-0 bg-surface-agent-profile-control-bg px-4 text-[14px] leading-[15px] text-surface-agent-profile-fg shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-surface-agent-profile-fg-placeholder hover:shadow-agent-profile-input-hover focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-agent-profile-input-focus";
 const AVATAR_FIELD_LABEL_CLASS =
@@ -78,6 +89,7 @@ function formatDate(value: string): string {
 
 export function AgentDetailPage({
   persona,
+  onStartChat,
   onEdit,
   onDuplicate,
   onDelete,
@@ -86,7 +98,6 @@ export function AgentDetailPage({
 }: AgentDetailPageProps) {
   const { t } = useTranslation(["agents", "common"]);
   const acpProviders = useAgentStore((s) => s.providers);
-  const personaSource = getPersonaSource(persona);
   const isEditable = canEditPersona(persona);
   const isDeletable = canDeletePersona(persona);
   const {
@@ -121,22 +132,17 @@ export function AgentDetailPage({
     !isBundledAvatarRef(normalizedAvatarValue ?? "") &&
     normalizedAvatarValue !== personaAvatarValue &&
     !avatarSavePending;
-  const sourceLabel =
-    personaSource === "builtin"
-      ? t("common:labels.builtIn")
-      : t("card.fileBacked");
   const providerLabel = getPersonaProviderLabel(
     persona.provider,
     acpProviders,
-    t("common:labels.none"),
+    t("common:labels.default"),
   );
-  const modelLabel = persona.model || t("common:labels.none");
+  const modelLabel = persona.model || t("common:labels.default");
   const createdLabel = persona.createdAt ? formatDate(persona.createdAt) : null;
   const updatedLabel = persona.updatedAt ? formatDate(persona.updatedAt) : null;
   const avatarTransitionName = getAgentAvatarTransitionName(persona.id);
   const fallbackAvatarSrc = resolveAgentIcon(persona.id);
   const metadata = [
-    { label: t("view.source"), value: sourceLabel },
     { label: t("editor.provider"), value: providerLabel },
     { label: t("editor.model"), value: modelLabel },
     createdLabel ? { label: t("view.created"), value: createdLabel } : null,
@@ -267,75 +273,88 @@ export function AgentDetailPage({
     </div>
   );
 
+  const pinLabel = isPinnedToHome
+    ? t("common:actions.unpinFromHome")
+    : t("common:actions.pinToHome");
+
   const profileActions = (
     <>
+      {onStartChat ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={() => onStartChat(persona)}
+          leftIcon={<MessageCircle />}
+          className={SECONDARY_ACTION_CLASS}
+        >
+          {t("detail.startChat")}
+        </Button>
+      ) : null}
       {isEditable ? (
         <Button
           type="button"
-          size="icon"
-          aria-label={t("common:actions.edit")}
-          title={t("common:actions.edit")}
+          variant="ghost"
+          size="sm"
           onClick={() => onEdit(persona)}
-          className="size-9 rounded-full !bg-surface-agent-profile-fg !text-surface-agent-profile-control-bg hover:!bg-surface-agent-profile-action-bg-hover"
+          leftIcon={<Pencil />}
+          className={SECONDARY_ACTION_CLASS}
         >
-          <Pencil className={ACTION_ICON_CLASS} />
+          {t("common:actions.edit")}
         </Button>
       ) : null}
       <Button
         type="button"
-        size="icon"
         variant="ghost"
-        aria-label={
-          isPinnedToHome
-            ? t("common:actions.unpinFromHome")
-            : t("common:actions.pinToHome")
-        }
-        title={
-          isPinnedToHome
-            ? t("common:actions.unpinFromHome")
-            : t("common:actions.pinToHome")
-        }
+        size="sm"
         onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
         disabled={isPinningToHome}
-        className={ACTION_BUTTON_CLASS}
+        leftIcon={<PinIcon />}
+        className={SECONDARY_ACTION_CLASS}
       >
-        <PinIcon className={ACTION_ICON_CLASS} />
+        {pinLabel}
       </Button>
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={t("common:actions.duplicate")}
-        title={t("common:actions.duplicate")}
-        onClick={() => onDuplicate(persona)}
-        className={ACTION_BUTTON_CLASS}
-      >
-        <Copy className={ACTION_ICON_CLASS} />
-      </Button>
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={t("common:actions.export")}
-        title={t("common:actions.export")}
-        onClick={() => onExport(persona)}
-        className={ACTION_BUTTON_CLASS}
-      >
-        <Download className={ACTION_ICON_CLASS} />
-      </Button>
-      {isDeletable ? (
-        <Button
-          type="button"
-          size="icon"
-          variant="ghost"
-          aria-label={t("common:actions.delete")}
-          title={t("common:actions.delete")}
-          onClick={() => onDelete(persona)}
-          className="size-9 rounded-full bg-surface-agent-profile-control-bg text-destructive shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-destructive"
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            type="button"
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t("detail.moreActions")}
+            title={t("detail.moreActions")}
+            className={OVERFLOW_TRIGGER_CLASS}
+          >
+            <MoreHorizontal className={ACTION_ICON_CLASS} />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          variant="inverse"
+          align="end"
+          alignOffset={-2}
+          sideOffset={4}
         >
-          <Trash2 className={ACTION_ICON_CLASS} />
-        </Button>
-      ) : null}
+          <DropdownMenuItem onSelect={() => onDuplicate(persona)}>
+            <Copy className="size-3.5" />
+            {t("common:actions.duplicate")}
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => onExport(persona)}>
+            <Download className="size-3.5" />
+            {t("common:actions.export")}
+          </DropdownMenuItem>
+          {isDeletable ? (
+            <>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={() => onDelete(persona)}
+              >
+                <Trash2 className="size-3.5" />
+                {t("common:actions.delete")}
+              </DropdownMenuItem>
+            </>
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </>
   );
 

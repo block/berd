@@ -30,6 +30,7 @@ import { getAgentAvatarTransitionName } from "@/features/agents/lib/agentViewTra
 interface PersonaCardProps {
   persona: Persona;
   onSelect?: (persona: Persona) => void;
+  onStartChat?: (persona: Persona) => void;
   onEdit?: (persona: Persona) => void;
   onDuplicate?: (persona: Persona) => void;
   onDelete?: (persona: Persona) => void;
@@ -49,6 +50,7 @@ interface PersonaCardProps {
 export const PersonaCard = memo(function PersonaCard({
   persona,
   onSelect,
+  onStartChat,
   onEdit,
   onDuplicate,
   onDelete,
@@ -70,35 +72,22 @@ export const PersonaCard = memo(function PersonaCard({
   } = usePinToHomeWidget({ kind: "agent", id: persona.id });
   const avatarTransitionName = getAgentAvatarTransitionName(persona.id);
 
-  const handleCardKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.target !== event.currentTarget || menuOpen) {
-      return;
-    }
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      onSelect?.(persona);
-    }
-  };
-
   const optionsMenu = (
     <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant="ghost"
+          variant="glass"
           size="icon-xs"
           aria-label={t("card.options")}
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           className={cn(
-            "size-7 shrink-0 rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg",
-            "transition-colors hover:bg-surface-agent-profile-fg hover:text-surface-agent-profile-control-bg",
-            "focus-visible:bg-surface-agent-profile-fg focus-visible:text-surface-agent-profile-control-bg",
-            "active:bg-surface-agent-profile-fg active:text-surface-agent-profile-control-bg",
-            "data-[state=open]:bg-surface-agent-profile-fg data-[state=open]:text-surface-agent-profile-control-bg",
-            "aria-expanded:bg-surface-agent-profile-fg aria-expanded:text-surface-agent-profile-control-bg",
-            menuOpen &&
-              "bg-surface-agent-profile-fg text-surface-agent-profile-control-bg",
+            "size-7 shrink-0 rounded-full opacity-0 pointer-events-none",
+            "transition-[opacity,background-color,color,backdrop-filter] duration-200",
+            "group-hover:pointer-events-auto group-hover:opacity-100",
+            "focus-visible:pointer-events-auto focus-visible:opacity-100",
+            "data-[state=open]:pointer-events-auto data-[state=open]:opacity-100",
           )}
         >
           <IconDots className="size-3.5" />
@@ -109,6 +98,7 @@ export const PersonaCard = memo(function PersonaCard({
         align="end"
         alignOffset={-2}
         sideOffset={4}
+        className="shadow-mini"
       >
         <DropdownMenuItem
           onSelect={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
@@ -148,48 +138,80 @@ export const PersonaCard = memo(function PersonaCard({
     </DropdownMenu>
   );
 
+  const hoverActionsOverlay =
+    onSelect || onStartChat ? (
+      <div
+        className={cn(
+          "pointer-events-none absolute inset-x-0 bottom-6 z-10 flex items-center justify-center gap-2 opacity-0",
+          "transition-opacity duration-200",
+          "group-hover:opacity-100 focus-within:opacity-100",
+        )}
+      >
+        {onSelect ? (
+          <Button
+            type="button"
+            variant="glass-strong"
+            size="sm"
+            onClick={() => onSelect(persona)}
+            aria-label={t("card.viewAria", { name: persona.displayName })}
+            className="pointer-events-auto rounded-full"
+          >
+            {t("card.view")}
+          </Button>
+        ) : null}
+        {onStartChat ? (
+          <Button
+            type="button"
+            variant="glass-strong"
+            size="sm"
+            onClick={() => onStartChat(persona)}
+            aria-label={t("card.chatAria", { name: persona.displayName })}
+            className="pointer-events-auto rounded-full"
+          >
+            {t("card.chat")}
+          </Button>
+        ) : null}
+      </div>
+    ) : null;
+
   return (
-    // biome-ignore lint/a11y/useSemanticElements: card contains nested menu buttons, so a native button is not valid here
     <div
-      aria-label={t("card.ariaLabel", { name: persona.displayName })}
-      role="button"
-      onClick={() => !menuOpen && onSelect?.(persona)}
-      onKeyDown={handleCardKeyDown}
-      tabIndex={0}
       className={cn(
-        "group relative flex w-full cursor-pointer flex-col gap-4",
+        "group relative flex w-full flex-col gap-4",
         "rounded-card bg-transparent p-2",
         "transition-colors duration-200",
-        "focus-visible:outline-none",
         isActive && "bg-muted/40",
       )}
     >
-      <div
-        className="relative aspect-square w-full overflow-hidden rounded-card-sm"
-        style={{ viewTransitionName: avatarTransitionName }}
-      >
-        {avatarMedia ? (
-          <AvatarMedia
-            media={avatarMedia}
-            alt={persona.displayName}
-            lazy
-            loadingStrategy="visible-video"
-            className={cn(
-              "object-contain transition-transform duration-300",
-              "group-hover:scale-[1.02]",
-            )}
-          />
-        ) : (
-          <img
-            alt=""
-            aria-hidden="true"
-            src={fallbackIconSrc}
-            className={cn(
-              "pointer-events-none size-full object-contain transition-transform duration-300",
-              "group-hover:scale-[1.02]",
-            )}
-          />
-        )}
+      <div className="relative">
+        <div
+          className="relative aspect-square w-full overflow-hidden rounded-card-sm"
+          style={{ viewTransitionName: avatarTransitionName }}
+        >
+          {avatarMedia ? (
+            <AvatarMedia
+              media={avatarMedia}
+              alt={persona.displayName}
+              lazy
+              loadingStrategy="visible-video"
+              className={cn(
+                "object-contain transition-transform duration-300",
+                "group-hover:scale-[1.02]",
+              )}
+            />
+          ) : (
+            <img
+              alt=""
+              aria-hidden="true"
+              src={fallbackIconSrc}
+              className={cn(
+                "pointer-events-none size-full object-contain transition-transform duration-300",
+                "group-hover:scale-[1.02]",
+              )}
+            />
+          )}
+        </div>
+        {hoverActionsOverlay}
       </div>
 
       <div className="flex flex-col gap-2">

@@ -69,14 +69,36 @@ describe("PersonaCard", () => {
     expect(screen.getByText("You are a coding assistant.")).toBeInTheDocument();
   });
 
-  it("calls onSelect on click", async () => {
+  it("calls onSelect when the View action is clicked", async () => {
     const onSelect = vi.fn();
     const user = userEvent.setup();
     const persona = makePersona();
     render(<PersonaCard persona={persona} onSelect={onSelect} />);
 
-    await user.click(screen.getByLabelText(/^agent: /i));
+    const viewButton = screen.getByRole("button", {
+      name: /^view goose default$/i,
+    });
+    expect(viewButton).toHaveClass("bg-surface-glass-strong");
+    expect(viewButton.parentElement).toHaveClass(
+      "opacity-0",
+      "focus-within:opacity-100",
+    );
+    expect(viewButton.parentElement).not.toHaveClass("hidden");
+
+    await user.click(viewButton);
     expect(onSelect).toHaveBeenCalledWith(persona);
+  });
+
+  it("calls onStartChat when the Chat action is clicked", async () => {
+    const onStartChat = vi.fn();
+    const user = userEvent.setup();
+    const persona = makePersona();
+    render(<PersonaCard persona={persona} onStartChat={onStartChat} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /^chat with goose default$/i }),
+    );
+    expect(onStartChat).toHaveBeenCalledWith(persona);
   });
 
   it("shows dropdown menu on options button click", async () => {
@@ -90,8 +112,18 @@ describe("PersonaCard", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /agent options/i }));
-    expect(screen.getByRole("menu")).toBeInTheDocument();
+    const optionsButton = screen.getByRole("button", {
+      name: /agent options/i,
+    });
+    expect(optionsButton).toHaveClass(
+      "opacity-0",
+      "group-hover:opacity-100",
+      "focus-visible:opacity-100",
+      "data-[state=open]:opacity-100",
+    );
+
+    await user.click(optionsButton);
+    expect(screen.getByRole("menu")).toHaveClass("shadow-mini");
     expect(
       screen.getByRole("menuitem", { name: /pin to home/i }),
     ).toBeInTheDocument();
@@ -116,24 +148,6 @@ describe("PersonaCard", () => {
     await user.click(screen.getByRole("button", { name: /agent options/i }));
     const deleteBtn = screen.queryByRole("menuitem", { name: /delete/i });
     expect(deleteBtn).toBeNull();
-  });
-
-  it("does not trigger selection when keyboard opens the options menu", async () => {
-    const onSelect = vi.fn();
-    const user = userEvent.setup();
-    render(
-      <PersonaCard
-        persona={makePersona()}
-        onSelect={onSelect}
-        onDuplicate={vi.fn()}
-      />,
-    );
-
-    screen.getByRole("button", { name: /agent options/i }).focus();
-    await user.keyboard("{Enter}");
-
-    expect(screen.getByRole("menu")).toBeInTheDocument();
-    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("renders an illustrated agent icon image", () => {

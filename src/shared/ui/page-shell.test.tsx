@@ -16,7 +16,7 @@ describe("PageShell", () => {
     const fade = container.querySelector("[aria-hidden='true']");
 
     expect(fade).toBeInstanceOf(HTMLElement);
-    expect(fade).toHaveClass("absolute", "bottom-0");
+    expect(fade).toHaveClass("absolute", "bottom-0", "h-36");
     expect(fade?.parentElement).not.toBe(contentGroup);
     expect(fade?.parentElement).not.toBe(contentColumn);
   });

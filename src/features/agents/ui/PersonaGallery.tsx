@@ -14,6 +14,7 @@ interface PersonaGalleryProps {
   personas: Persona[];
   activePersonaId?: string;
   onSelectPersona: (persona: Persona) => void;
+  onStartChatPersona?: (persona: Persona) => void;
   onEditPersona: (persona: Persona) => void;
   onDuplicatePersona: (persona: Persona) => void;
   onDeletePersona: (persona: Persona) => void;
@@ -46,6 +47,7 @@ export function PersonaGallery({
   personas,
   activePersonaId,
   onSelectPersona,
+  onStartChatPersona,
   onEditPersona,
   onDuplicatePersona,
   onDeletePersona,
@@ -181,6 +183,7 @@ export function PersonaGallery({
             persona={persona}
             isActive={persona.id === activePersonaId}
             onSelect={onSelectPersona}
+            onStartChat={onStartChatPersona}
             onEdit={onEditPersona}
             onDuplicate={onDuplicatePersona}
             onDelete={onDeletePersona}

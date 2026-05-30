@@ -63,14 +63,14 @@ export function BottomFade({
     <div
       ref={ref}
       className={cn(
-        "pointer-events-none sticky bottom-0 left-0 h-64 w-full",
+        "pointer-events-none sticky bottom-0 left-0 h-36 w-full",
         className,
       )}
       style={{
         opacity,
         background: `linear-gradient(to bottom, transparent 0%, ${surface} 100%)`,
-        backdropFilter: "blur(3px)",
-        WebkitBackdropFilter: "blur(3px)",
+        backdropFilter: "blur(2px)",
+        WebkitBackdropFilter: "blur(2px)",
         maskImage:
           "linear-gradient(to bottom, transparent 0%, rgba(0,0,0,0.4) 50%, black 100%)",
         WebkitMaskImage:

@@ -211,6 +211,7 @@
   --canvas-base: #f5f5f5;
   --canvas-project-tint: #d6dde7; /* slight cool tilt for project chats */
   --surface-composer: rgba(255, 255, 255, 0.2);
+  --surface-composer-hover: rgba(255, 255, 255, 0.45);
   --surface-editor-panel-neutral: color-mix(
     in srgb,
     var(--color-gray-300) 52%,
@@ -235,6 +236,9 @@
   --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
   --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
   --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
+  --surface-glass-strong: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass-strong-fg: #242424;
   --message-user-bg: var(--color-gray-75);
 
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
@@ -515,6 +519,7 @@
   --canvas-base: #1a1a1a;
   --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
+  --surface-composer-hover: rgba(255, 255, 255, 0.14);
   --surface-editor-panel-neutral: var(--color-gray-800);
   --surface-editor-panel: color-mix(
     in oklab,
@@ -562,6 +567,9 @@
   --surface-agent-profile-control-bg-hover: var(--color-gray-700);
   --surface-agent-profile-action-fg: var(--color-gray-900);
   --surface-agent-profile-action-bg-hover: var(--color-gray-300);
+  --surface-glass-strong: rgba(255, 255, 255, 0.72);
+  --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
+  --surface-glass-strong-fg: var(--color-gray-900);
   --message-user-bg: var(--color-gray-700);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
@@ -726,6 +734,7 @@
   --color-canvas-base: var(--canvas-base);
   --color-canvas-project-tint: var(--canvas-project-tint);
   --color-surface-composer: var(--surface-composer);
+  --color-surface-composer-hover: var(--surface-composer-hover);
   --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-editor-panel: var(--surface-editor-panel);
   --color-surface-agent-profile-bg: var(--surface-agent-profile-bg);
@@ -753,6 +762,9 @@
   --color-surface-agent-profile-action-bg-hover: var(
     --surface-agent-profile-action-bg-hover
   );
+  --color-surface-glass-strong: var(--surface-glass-strong);
+  --color-surface-glass-strong-hover: var(--surface-glass-strong-hover);
+  --color-surface-glass-strong-fg: var(--surface-glass-strong-fg);
   --color-message-user-bg: var(--message-user-bg);
 
   /* Composer chip tones */

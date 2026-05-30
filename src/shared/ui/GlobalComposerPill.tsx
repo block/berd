@@ -66,7 +66,9 @@ export interface GlobalComposeOptions {
 }
 
 interface GlobalComposerPillProps {
+  focusRequest?: number;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
+  suggestedPersonaId?: string | null;
 }
 
 interface ModelSelection {
@@ -188,7 +190,11 @@ function getPreferredModel(
   return model ? modelOptionToSelection(model, fallbackProviderId) : null;
 }
 
-export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
+export function GlobalComposerPill({
+  focusRequest = 0,
+  onSend,
+  suggestedPersonaId = null,
+}: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const selectedProvider = useAgentStore((state) => state.selectedProvider);
   const projects = useProjectStore((state) => state.projects);
@@ -216,6 +222,10 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
   const personas = useAgentStore(selectPersonas);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const lastFocusRequestRef = useRef(focusRequest);
+  const routePersonaIdRef = useRef<string | null>(suggestedPersonaId);
+  const personaSelectionSourceRef = useRef<"none" | "route" | "user">("none");
+  const userTouchedRoutePersonaRef = useRef(false);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -255,11 +265,56 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
     [personas, selectedPersonaId],
   );
+  const hasDraftContent =
+    text.trim().length > 0 ||
+    attachments.length > 0 ||
+    selectedSkills.length > 0 ||
+    modelOverride !== null ||
+    selectedProjectId !== null;
+
+  useEffect(() => {
+    if (routePersonaIdRef.current !== suggestedPersonaId) {
+      routePersonaIdRef.current = suggestedPersonaId;
+      userTouchedRoutePersonaRef.current = false;
+    }
+
+    if (!suggestedPersonaId) {
+      if (personaSelectionSourceRef.current === "route" && !hasDraftContent) {
+        setSelectedPersonaId(null);
+        personaSelectionSourceRef.current = "none";
+      }
+      return;
+    }
+
+    if (
+      !hasDraftContent &&
+      !userTouchedRoutePersonaRef.current &&
+      selectedPersonaId !== suggestedPersonaId
+    ) {
+      setSelectedPersonaId(suggestedPersonaId);
+      personaSelectionSourceRef.current = "route";
+    }
+  }, [hasDraftContent, selectedPersonaId, suggestedPersonaId]);
+
+  useEffect(() => {
+    if (focusRequest <= lastFocusRequestRef.current) {
+      lastFocusRequestRef.current = focusRequest;
+      return;
+    }
+    lastFocusRequestRef.current = focusRequest;
+    textareaRef.current?.focus();
+  }, [focusRequest]);
 
   const handleRemoveSelectedSkill = useCallback((skillId: string) => {
     setSelectedSkills((current) =>
       current.filter((skill) => skill.id !== skillId),
     );
+  }, []);
+
+  const handlePersonaChange = useCallback((personaId: string | null) => {
+    setSelectedPersonaId(personaId);
+    personaSelectionSourceRef.current = personaId ? "user" : "none";
+    userTouchedRoutePersonaRef.current = true;
   }, []);
 
   const placeholder = t("globalPill.placeholder");
@@ -364,7 +419,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
     text,
     setText,
     textareaRef,
-    onPersonaChange: setSelectedPersonaId,
+    onPersonaChange: handlePersonaChange,
     onSkillMentionSelect: handleSkillMentionSelected,
   });
 
@@ -413,6 +468,8 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
       setModelOverride(null);
       setSelectedProjectId(null);
       setSelectedPersonaId(null);
+      personaSelectionSourceRef.current = "none";
+      userTouchedRoutePersonaRef.current = false;
       setSelectedSkills([]);
       return true;
     },
@@ -615,7 +672,7 @@ export function GlobalComposerPill({ onSend }: GlobalComposerPillProps) {
           <ChatInputSelectionChips
             persona={selectedPersona}
             skills={selectedSkills}
-            onClearPersona={() => setSelectedPersonaId(null)}
+            onClearPersona={() => handlePersonaChange(null)}
             onRemoveSkill={handleRemoveSelectedSkill}
           />
         </div>
