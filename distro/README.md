@@ -12,6 +12,7 @@ Current supported files:
 - `config.yaml` — optional Goose config passed to `goose serve`
 - `bin/` — optional executables or helper scripts prepended to `PATH` for `goose serve`
 - `skills/` — optional bundled skills seeded into the user's global skills directory
+- `agents/` — optional bundled agents seeded into the user's global agents directory
 
 ## How it is discovered
 
@@ -92,12 +93,21 @@ When the Tauri shell launches the long-lived `goose serve` process, it applies t
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
 - uses `kgoose` as the default endpoint for KGoose-backed features
 - installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
+- installs `distro/agents/<name>.md` entries into `~/.agents/agents/<name>.md`
+- warms newly seeded agent `app-avatar:` media once when network access is available
 
 This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
 
 Bundled skills reinstall existing copies only when the installed `SKILL.md`
 frontmatter has `metadata.gooseInternalBundled: true`. Existing unmarked user
 skills are left untouched.
+
+Bundled agents use the same `metadata.gooseInternalBundled: true` convention.
+The app records which bundled agent files were seeded so deleted starter agents
+do not reappear on later launches. Existing unmarked user agents are left
+untouched. During pre-launch iteration, existing seeded agents that still carry
+the bundled marker are refreshed when the bundled source file changes, so updates
+to starter-agent instructions can reach internal installs before launch.
 
 ## Development notes
 

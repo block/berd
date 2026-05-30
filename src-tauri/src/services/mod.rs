@@ -1,4 +1,5 @@
 pub mod acp;
+pub mod bundled_agents;
 pub mod bundled_skills;
 pub mod distro_bundle;
 pub(crate) mod kgoose;

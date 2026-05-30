@@ -2,7 +2,7 @@ mod commands;
 mod services;
 mod types;
 
-use services::{bundled_skills, distro_bundle::DistroBundleState};
+use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState};
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
@@ -74,9 +74,9 @@ pub fn run() {
 
             let distro_state = DistroBundleState::new(app.handle());
             if let Some(bundle) = distro_state.bundle() {
-                let bundle = bundle.clone();
+                let skills_bundle = bundle.clone();
                 tauri::async_runtime::spawn(async move {
-                    match bundled_skills::seed_bundled_skills(&bundle) {
+                    match bundled_skills::seed_bundled_skills(&skills_bundle) {
                         Ok(count) if count > 0 => {
                             log::info!("Seeded {count} bundled skill(s)");
                         }
@@ -84,6 +84,36 @@ pub fn run() {
                         Err(error) => log::warn!("Failed to seed bundled skills: {error}"),
                     }
                 });
+
+                match bundled_agents::seed_bundled_agents(bundle) {
+                    Ok(result) => {
+                        if result.seeded_count > 0 {
+                            log::info!("Seeded {} bundled agent(s)", result.seeded_count);
+                        }
+                        if !result.avatar_refs_to_warm.is_empty() {
+                            let avatars_app = app.handle().clone();
+                            tauri::async_runtime::spawn(async move {
+                                match commands::avatars::warm_avatar_refs(
+                                    avatars_app,
+                                    result.avatar_refs_to_warm,
+                                )
+                                .await
+                                {
+                                    Ok(count) if count > 0 => {
+                                        log::info!("Warmed {count} bundled agent avatar(s)");
+                                    }
+                                    Ok(_) => {}
+                                    Err(error) => {
+                                        log::warn!(
+                                            "Failed to warm bundled agent avatar cache: {error}"
+                                        );
+                                    }
+                                }
+                            });
+                        }
+                    }
+                    Err(error) => log::warn!("Failed to seed bundled agents: {error}"),
+                }
             }
             app.manage(distro_state);
             app.manage(commands::automations::AutomationStreamState::default());

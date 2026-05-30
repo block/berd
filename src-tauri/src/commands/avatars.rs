@@ -3,7 +3,7 @@ use reqwest::{StatusCode, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::Write;
 use std::path::{Component, Path, PathBuf};
@@ -316,6 +316,40 @@ pub async fn clear_avatar_cache(app: AppHandle) -> Result<(), String> {
     let _cache_guard = avatar_cache_lock().lock().await;
     let paths = avatar_cache_paths(&app)?;
     clear_avatar_cache_paths(&paths).await
+}
+
+pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Result<usize, String> {
+    let avatar_ids = avatar_refs
+        .iter()
+        .filter_map(|avatar_ref| parse_avatar_ref(avatar_ref).ok())
+        .collect::<BTreeSet<_>>();
+    if avatar_ids.is_empty() {
+        return Ok(0);
+    }
+
+    let _cache_guard = avatar_cache_lock().lock().await;
+    let paths = avatar_cache_paths(&app)?;
+    clean_part_files(&paths)?;
+    let catalog = current_catalog(&paths)
+        .await
+        .map_err(|error| error.to_string())?;
+    let client = asset_http_client()?;
+    let format = platform_avatar_format();
+    let mut warmed = 0usize;
+
+    for avatar_id in avatar_ids {
+        let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
+            log::warn!("Bundled agent avatar '{avatar_id}' was not found in the avatar catalog");
+            continue;
+        };
+        match ensure_entry(&client, &paths, &catalog, entry, format).await {
+            Ok(_) => warmed += 1,
+            Err(error) => log::warn!("Failed to warm bundled agent avatar '{avatar_id}': {error}"),
+        }
+    }
+
+    prune_obsolete_versions(&paths, &catalog.catalog_version)?;
+    Ok(warmed)
 }
 
 async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String> {
