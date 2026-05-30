@@ -218,14 +218,14 @@ export function TopBar({
         </Button>
       </div>
       <div
-        className="flex min-w-0 flex-1 items-center self-stretch overflow-hidden"
+        className="flex min-w-0 flex-1 items-center self-stretch overflow-x-clip overflow-y-visible"
         data-tauri-drag-region
       >
         <BreadcrumbTrail
-          className="min-w-0 max-w-full overflow-hidden"
+          className="min-w-0 max-w-full overflow-x-clip overflow-y-visible"
           items={visibleBreadcrumbs}
           listClassName={cn(
-            "min-w-0 max-w-full overflow-hidden",
+            "min-w-0 max-w-full overflow-x-clip overflow-y-visible",
             breadcrumbDisplay !== "full" &&
               "text-[var(--text-app-top-bar-title-compact)] leading-none",
           )}

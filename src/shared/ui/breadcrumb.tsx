@@ -39,6 +39,7 @@ const breadcrumbTopBarToneTransitionClassName =
 
 const breadcrumbTopBarEnterClassName =
   "motion-safe:animate-in motion-safe:fade-in-0 motion-reduce:animate-none";
+const breadcrumbTopBarTextClipClassName = "py-1 -my-1";
 
 function BreadcrumbList({
   className,
@@ -222,7 +223,10 @@ function BreadcrumbTrail({
                     tone={topBarTone}
                     className={
                       variant === "top-bar"
-                        ? "block min-w-0 truncate text-inherit"
+                        ? cn(
+                            "block min-w-0 truncate text-inherit",
+                            breadcrumbTopBarTextClipClassName,
+                          )
                         : undefined
                     }
                     onClick={(event) => {
@@ -245,7 +249,10 @@ function BreadcrumbTrail({
                     tone={topBarTone}
                     className={cn(
                       variant === "top-bar" &&
-                        "block min-w-0 truncate text-inherit",
+                        cn(
+                          "block min-w-0 truncate text-inherit",
+                          breadcrumbTopBarTextClipClassName,
+                        ),
                       pageClassName,
                     )}
                   >
