@@ -83,6 +83,11 @@ vi.mock("@/shared/api/acp", () => ({
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: new Set(["goose", "claude-acp", "codex-acp"]),
+    agentReadiness: new Map([
+      ["goose", "ready"],
+      ["claude-acp", "ready"],
+      ["codex-acp", "ready"],
+    ]),
     loading: false,
     refresh: vi.fn(),
   }),

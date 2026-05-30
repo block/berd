@@ -35,6 +35,12 @@ describe("useAgentModelPickerState", () => {
         "cursor-agent",
         "claude-acp",
       ]),
+      agentReadiness: new Map([
+        ["goose", "ready"],
+        ["codex-acp", "ready"],
+        ["cursor-agent", "ready"],
+        ["claude-acp", "ready"],
+      ]),
       loading: false,
       refresh: mockRefreshAgentProviderStatus,
     });
@@ -254,15 +260,20 @@ describe("useAgentModelPickerState", () => {
     );
 
     expect(result.current.pickerAgents).toEqual([
-      { id: "goose", label: "Goose" },
-      { id: "codex-acp", label: "Codex" },
-      { id: "cursor-agent", label: "Cursor Agent" },
+      { id: "goose", label: "Goose", readiness: "ready" },
+      { id: "codex-acp", label: "Codex", readiness: "ready" },
+      { id: "cursor-agent", label: "Cursor Agent", readiness: "ready" },
     ]);
   });
 
-  it("hides curated agents that are not ready", () => {
+  it("shows curated agents that are not ready with setup actions", () => {
     mockUseAgentProviderStatus.mockReturnValue({
       readyAgentIds: new Set(["goose", "cursor-agent"]),
+      agentReadiness: new Map([
+        ["goose", "ready"],
+        ["codex-acp", "not_installed"],
+        ["cursor-agent", "ready"],
+      ]),
       loading: false,
       refresh: mockRefreshAgentProviderStatus,
     });
@@ -279,8 +290,14 @@ describe("useAgentModelPickerState", () => {
     );
 
     expect(result.current.pickerAgents).toEqual([
-      { id: "goose", label: "Goose" },
-      { id: "cursor-agent", label: "Cursor Agent" },
+      { id: "goose", label: "Goose", readiness: "ready" },
+      {
+        id: "codex-acp",
+        label: "Codex",
+        readiness: "not_installed",
+        setupAction: "install",
+      },
+      { id: "cursor-agent", label: "Cursor Agent", readiness: "ready" },
     ]);
   });
 });

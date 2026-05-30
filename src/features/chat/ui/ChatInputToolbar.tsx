@@ -11,7 +11,6 @@ import {
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { IconLibraryPlusFilled } from "@tabler/icons-react";
-import type { AcpProvider } from "@/shared/api/acp";
 import { cn } from "@/shared/lib/cn";
 import { ChatInputSelector } from "./ChatInputSelector";
 import { ContextRing } from "./ContextRing";
@@ -33,6 +32,7 @@ import { supportsContextCompactionControls } from "../lib/autoCompact";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { ProjectSelectorIcon } from "./ProjectSelectorIcon";
 import type {
+  AgentPickerOption,
   ChatInputAgentModelPicker,
   ChatInputContextUsage,
   ChatInputPersonaPicker,
@@ -137,14 +137,14 @@ export function ChatInputToolbar({
 
   const agentProviders = useMemo(() => {
     const seen = new Set<string>();
-    const available: AcpProvider[] = [];
+    const available: AgentPickerOption[] = [];
     for (const provider of providers) {
       if (seen.has(provider.id)) {
         continue;
       }
       seen.add(provider.id);
       available.push({
-        id: provider.id,
+        ...provider,
         label:
           getCatalogEntryFromEntries(catalogEntries, provider.id)
             ?.displayName ?? provider.label,

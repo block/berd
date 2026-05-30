@@ -207,6 +207,8 @@
     "generalChatWithoutProject": "General chat without project context",
     "loading": "Loading...",
     "loadingModels": "Loading models...",
+    "install": "Install",
+    "connect": "Connect",
     "model": "Model",
     "allModels": "All models",
     "searchModels": "Search models...",

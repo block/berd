@@ -8,7 +8,7 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { resolveSelectedAgentId } from "../lib/agentProviderResolution";
-import type { ModelOption } from "../types";
+import type { AgentPickerOption, ModelOption } from "../types";
 
 interface UseAgentModelPickerStateOptions {
   providers: AcpProvider[];
@@ -35,8 +35,11 @@ export function useAgentModelPickerState({
     isRefreshingProvider,
     getError,
   } = useProviderModels();
-  const { readyAgentIds, refresh: refreshAgentProviderStatus } =
-    useAgentProviderStatus();
+  const {
+    readyAgentIds,
+    agentReadiness,
+    refresh: refreshAgentProviderStatus,
+  } = useAgentProviderStatus();
 
   const selectedAgentId = useMemo(
     () =>
@@ -49,13 +52,14 @@ export function useAgentModelPickerState({
   );
 
   const pickerAgents = useMemo(() => {
-    const visible = new Map<string, { id: string; label: string }>();
+    const visible = new Map<string, AgentPickerOption>();
 
     visible.set("goose", {
       id: "goose",
       label:
         getCatalogEntryFromEntries(catalogEntries, "goose")?.displayName ??
         "Goose",
+      readiness: "ready",
     });
 
     for (const provider of providers) {
@@ -64,15 +68,24 @@ export function useAgentModelPickerState({
           catalogEntries,
           provider.id,
         ) ?? (!catalogLoaded ? provider.id : null);
-      if (!agentId || agentId === "goose" || !readyAgentIds.has(agentId)) {
+      if (!agentId || agentId === "goose") {
         continue;
       }
 
+      const catalogEntry = getCatalogEntryFromEntries(catalogEntries, agentId);
+      const readiness = agentReadiness.get(agentId) ?? "not_ready";
+      const setupAction =
+        readiness === "ready"
+          ? undefined
+          : readiness === "not_installed" && catalogEntry?.supportsInstall
+            ? "install"
+            : "connect";
+
       visible.set(agentId, {
         id: agentId,
-        label:
-          getCatalogEntryFromEntries(catalogEntries, agentId)?.displayName ??
-          provider.label,
+        label: catalogEntry?.displayName ?? provider.label,
+        readiness,
+        setupAction,
       });
     }
 
@@ -82,11 +95,13 @@ export function useAgentModelPickerState({
         label:
           getCatalogEntryFromEntries(catalogEntries, selectedAgentId)
             ?.displayName ?? selectedAgentId,
+        readiness: "ready",
       });
     }
 
     return [...visible.values()];
   }, [
+    agentReadiness,
     catalogEntries,
     catalogLoaded,
     providers,
@@ -133,9 +148,13 @@ export function useAgentModelPickerState({
         return;
       }
 
+      if (!readyAgentIds.has(providerId)) {
+        return;
+      }
+
       onProviderSelected(providerId);
     },
-    [onProviderSelected, selectedProvider],
+    [onProviderSelected, readyAgentIds, selectedProvider],
   );
 
   const handleModelChange = useCallback(

@@ -1,4 +1,5 @@
 import type { AcpProvider } from "@/shared/api/acp";
+import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { Persona } from "@/shared/types/agents";
 import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
 
@@ -63,8 +64,15 @@ export interface ChatInputPersonaPicker {
   onPersonaChange?: (personaId: string | null) => void;
 }
 
+export type AgentPickerSetupAction = "install" | "connect";
+
+export interface AgentPickerOption extends AcpProvider {
+  readiness?: AgentProviderReadiness;
+  setupAction?: AgentPickerSetupAction;
+}
+
 export interface ChatInputAgentModelPicker {
-  providers?: AcpProvider[];
+  providers?: AgentPickerOption[];
   providersLoading?: boolean;
   selectedProvider?: string;
   onProviderChange?: (providerId: string) => void;

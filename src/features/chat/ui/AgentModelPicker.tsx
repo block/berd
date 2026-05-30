@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import type { AcpProvider } from "@/shared/api/acp";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
@@ -15,12 +15,12 @@ import {
   resolveDisplayModelLabel,
   resolvePickerTriggerLabel,
 } from "../lib/modelDisplayLabel";
-import type { ModelOption } from "../types";
+import type { AgentPickerOption, ModelOption } from "../types";
 import { AllModelsList, RecommendedModelList } from "./AgentModelPickerLists";
 import { PickerItem } from "./AgentModelPickerItem";
 
 interface AgentModelPickerProps {
-  agents: AcpProvider[];
+  agents: AgentPickerOption[];
   selectedAgentId: string;
   onAgentChange: (agentId: string) => void;
   currentModelId?: string | null;
@@ -77,9 +77,15 @@ export function AgentModelPicker({
       })
     : selectedAgentLabel;
 
-  const handleAgentSelect = (agentId: string) => {
-    if (agentId !== selectedAgentId) {
-      onAgentChange(agentId);
+  const handleAgentSelect = (agent: AgentPickerOption) => {
+    if (agent.readiness && agent.readiness !== "ready") {
+      requestOpenSettings("providers");
+      setOpen(false);
+      return;
+    }
+
+    if (agent.id !== selectedAgentId) {
+      onAgentChange(agent.id);
       setModelView("recommended");
     }
   };
@@ -206,14 +212,25 @@ export function AgentModelPicker({
                   <div className="space-y-0.5 p-1">
                     {agents.map((agent) => {
                       const isSelected = agent.id === selectedAgentId;
+                      const isReady =
+                        !agent.readiness || agent.readiness === "ready";
+                      const setupLabel =
+                        agent.setupAction === "install"
+                          ? t("toolbar.install")
+                          : t("toolbar.connect");
                       const agentIcon = getProviderIcon(agent.id, "size-4");
 
                       return (
                         <PickerItem
                           key={agent.id}
-                          onClick={() => handleAgentSelect(agent.id)}
+                          onClick={() => handleAgentSelect(agent)}
                           selected={isSelected}
                           data-selected={isSelected || undefined}
+                          className={cn(
+                            "group justify-between",
+                            !isReady &&
+                              "opacity-40 hover:opacity-100 focus-visible:opacity-100",
+                          )}
                         >
                           {agentIcon ? (
                             <span className="shrink-0">{agentIcon}</span>
@@ -223,6 +240,10 @@ export function AgentModelPicker({
                           </span>
                           {isSelected ? (
                             <IconCheck className="size-4 shrink-0 text-muted-foreground" />
+                          ) : !isReady ? (
+                            <span className="shrink-0 rounded-full border border-border bg-background px-1.5 py-0.5 text-xxs font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
+                              {setupLabel}
+                            </span>
                           ) : null}
                         </PickerItem>
                       );

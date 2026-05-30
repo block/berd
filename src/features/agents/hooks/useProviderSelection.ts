@@ -14,18 +14,7 @@ export function useProviderSelection() {
   const { readyAgentIds, loading: readyAgentsLoading } =
     useAgentProviderStatus();
 
-  const providers = useMemo(
-    () =>
-      allProviders.filter((provider) => {
-        const agentId =
-          resolveAgentProviderCatalogIdStrictFromEntries(
-            catalogEntries,
-            provider.id,
-          ) ?? provider.id;
-        return readyAgentIds.has(agentId);
-      }),
-    [allProviders, catalogEntries, readyAgentIds],
-  );
+  const providers = allProviders;
 
   const selectedProvider = useMemo(() => {
     const selectedAgentId = resolveAgentProviderCatalogIdStrictFromEntries(
