@@ -177,7 +177,7 @@ describe("ModelProviderRow", () => {
     ]);
   });
 
-  it("shows the connected row while model inventory is still loading", async () => {
+  it("shows the connected row while models are still loading", async () => {
     const user = userEvent.setup();
 
     render(
@@ -187,7 +187,7 @@ describe("ModelProviderRow", () => {
         onSaveFields={onSaveFields}
         onRemoveConfig={onRemoveConfig}
         onCompleteNativeSetup={onCompleteNativeSetup}
-        inventorySyncing={true}
+        modelSyncing={true}
       />,
     );
 
@@ -196,7 +196,7 @@ describe("ModelProviderRow", () => {
     expect(screen.getByText(/loading models/i)).toBeInTheDocument();
   });
 
-  it("shows a non-blocking inventory warning without replacing the connected state", async () => {
+  it("shows a non-blocking model warning without replacing the connected state", async () => {
     const user = userEvent.setup();
 
     render(
@@ -206,7 +206,7 @@ describe("ModelProviderRow", () => {
         onSaveFields={onSaveFields}
         onRemoveConfig={onRemoveConfig}
         onCompleteNativeSetup={onCompleteNativeSetup}
-        inventoryWarning="Model refresh failed"
+        modelWarning="Model refresh failed"
       />,
     );
 

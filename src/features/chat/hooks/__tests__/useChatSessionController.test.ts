@@ -16,7 +16,6 @@ const mockResolveSessionCwd = vi.fn();
 const mockGooseDefaultsRead = vi.fn();
 const mockGoosePreferencesRead = vi.fn();
 const mockGoosePreferencesSave = vi.fn();
-const mockUseProviderInventory = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
 const mockUseMessageQueue = vi.fn();
@@ -79,10 +78,6 @@ vi.mock("@/shared/api/acpConnection", () => ({
         mockGoosePreferencesSave(...args),
     },
   }),
-}));
-
-vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
-  useProviderInventory: () => mockUseProviderInventory(),
 }));
 
 vi.mock("../useChat", () => ({
@@ -196,6 +191,14 @@ describe("useChatSessionController", () => {
     useProviderCatalogStore.getState().reset();
     useProviderCatalogStore.getState().setEntries([
       {
+        id: "goose",
+        displayName: "Goose",
+        category: "agent",
+        description: "Goose",
+        setupMethod: "none",
+        group: "default",
+      },
+      {
         id: "openai",
         displayName: "OpenAI",
         category: "model",
@@ -224,9 +227,6 @@ describe("useChatSessionController", () => {
     mockPreSeedDraftAgent.mockResolvedValue({
       path: "/Users/x/.agents/agents/draft-from-chat.md",
       slug: "draft-from-chat",
-    });
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: () => undefined,
     });
     mockPickerState.pickerAgents = [{ id: "goose", label: "Goose" }];
     mockPickerState.availableModels = [];

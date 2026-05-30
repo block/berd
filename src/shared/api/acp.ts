@@ -39,18 +39,6 @@ export async function discoverAcpProviders(): Promise<AcpProvider[]> {
   return resolveProvidersCatalog(providers);
 }
 
-/**
- * Derive ACP providers from already-fetched inventory entries,
- * avoiding a duplicate `_goose/providers/list` RPC.
- */
-export function discoverAcpProvidersFromEntries(
-  entries: Parameters<typeof directAcp.buildProviderListFromEntries>[0],
-): AcpProvider[] {
-  return resolveProvidersCatalog(
-    directAcp.buildProviderListFromEntries(entries),
-  );
-}
-
 function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
   const seen = new Set<string>();
 

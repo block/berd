@@ -1209,7 +1209,7 @@ export function useChatSessionController({
       }
 
       sessionStore.patchSession(sessionId, patch);
-      // Consume pending state synchronously so an inventory-refresh-driven
+      // Consume pending state synchronously so a model-refresh-driven
       // re-render of this effect cannot replay it.
       setPendingProviderId(undefined);
       setPendingPersonaId(undefined);

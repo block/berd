@@ -83,9 +83,6 @@ export function setStoredModelPreference(
 
 export function clearStoredModelPreference(agentId: string): void {
   const next = readStoredModelPreferences();
-  if (!(agentId in next)) {
-    return;
-  }
   delete next[agentId];
   persistStoredModelPreferences(next);
 }

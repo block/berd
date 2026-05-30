@@ -10,7 +10,7 @@ import {
 } from "@/shared/ui/select";
 import type { ProviderType } from "@/shared/types/agents";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
+import { useProviderModels } from "@/features/providers/hooks/useProviderModels";
 
 export interface ProviderModelFieldsClasses {
   sectionGap?: string;
@@ -41,13 +41,10 @@ export function ProviderModelFields({
 }: ProviderModelFieldsProps) {
   const { t } = useTranslation(["agents", "common"]);
   const acpProviders = useAgentStore((s) => s.providers);
-  const { getEntry, getModelsForAgent } = useProviderInventory();
+  const { getModelsForAgent, getError } = useProviderModels();
 
   const availableModels = provider ? getModelsForAgent(provider) : [];
-  const providerInventory = provider ? getEntry(provider) : undefined;
-  const modelStatusMessage =
-    providerInventory?.modelSelectionHint ??
-    providerInventory?.lastRefreshError;
+  const modelStatusMessage = provider ? getError(provider) : null;
   const hasSavedModelOutsideInventory =
     Boolean(model) && !availableModels.some((entry) => entry.id === model);
   const modelSelectValue = hasSavedModelOutsideInventory

@@ -11,13 +11,12 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import {
+  checkAgentInstalled,
   checkAgentAuth,
   installAgent,
   authenticateAgent,
   onAgentSetupOutput,
 } from "@/features/providers/api/agentSetup";
-import { getProviderInventory } from "@/features/providers/api/inventory";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
 import {
   analyzeAgentSetupFailure,
@@ -35,7 +34,7 @@ import type {
 } from "@/shared/types/providers";
 
 type SetupPhase = "idle" | "checking" | "installing" | "authenticating";
-type InstallStatus = "installed" | "missing";
+type InstallStatus = "checking" | "installed" | "missing";
 type AuthStatus = "checking" | "authenticated" | "unauthenticated" | "unknown";
 
 interface OutputLine {
@@ -56,6 +55,22 @@ function deriveInstalled(status: ProviderSetupStatus): boolean {
   return status === "built_in" || status === "connected";
 }
 
+function initialInstallStatus({
+  forceMissingForSimulation,
+  hasBinary,
+  isBuiltIn,
+  status,
+}: {
+  forceMissingForSimulation: boolean;
+  hasBinary: boolean;
+  isBuiltIn: boolean;
+  status: ProviderSetupStatus;
+}): InstallStatus {
+  if (forceMissingForSimulation) return "missing";
+  if (isBuiltIn || !hasBinary || deriveInstalled(status)) return "installed";
+  return "checking";
+}
+
 export function AgentProviderCard({
   provider,
   onStartTroubleshootingChat,
@@ -68,18 +83,21 @@ export function AgentProviderCard({
   const hasBinary = !!provider.binaryName;
   const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
   const forceMissingForSimulation = Boolean(setupFailureSimulation);
-  const inventoryInstalled =
-    !forceMissingForSimulation && deriveInstalled(provider.status);
+  const initialInstall = initialInstallStatus({
+    forceMissingForSimulation,
+    hasBinary,
+    isBuiltIn,
+    status: provider.status,
+  });
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [setupFailureAnalysis, setSetupFailureAnalysis] =
     useState<AgentSetupFailureAnalysis | null>(null);
-  const [installStatus, setInstallStatus] = useState<InstallStatus>(
-    inventoryInstalled ? "installed" : "missing",
-  );
+  const [installStatus, setInstallStatus] =
+    useState<InstallStatus>(initialInstall);
   const [authStatus, setAuthStatus] = useState<AuthStatus>(
-    supportsAuthStatus && inventoryInstalled && !isBuiltIn
+    supportsAuthStatus && initialInstall === "installed" && !isBuiltIn
       ? "checking"
       : "unknown",
   );
@@ -93,10 +111,6 @@ export function AgentProviderCard({
   const icon = getProviderIcon(provider.id, "size-6");
   const isActive = setupPhase !== "idle";
   const authStorageKey = `agent-provider-auth:${provider.id}`;
-  const mergeInventoryEntries = useProviderInventoryStore(
-    (state) => state.mergeEntries,
-  );
-
   const setAuthHint = useCallback(
     (value: boolean) => {
       if (value) {
@@ -126,76 +140,93 @@ export function AgentProviderCard({
   }, [clearListener]);
 
   useEffect(() => {
-    const installed =
-      !forceMissingForSimulation && deriveInstalled(provider.status);
-    const nextInstallStatus = installed ? "installed" : "missing";
-    setInstallStatus((current) =>
-      current === nextInstallStatus ? current : nextInstallStatus,
-    );
+    let cancelled = false;
 
-    if (!installed) {
+    const applyMissing = () => {
+      if (cancelled || !isMountedRef.current) return;
+      setInstallStatus("missing");
       setAuthStatus("unknown");
       setAuthHint(false);
-      return;
-    }
+    };
 
-    if (isBuiltIn) {
-      setAuthStatus("unknown");
-      return;
-    }
+    const applyInstalled = () => {
+      if (cancelled || !isMountedRef.current) return;
+      setInstallStatus("installed");
 
-    if (supportsAuthStatus) {
+      if (isBuiltIn) {
+        setAuthStatus("unknown");
+        return;
+      }
+
+      if (!supportsAuthStatus) {
+        setAuthStatus(getAuthHint() ? "authenticated" : "unknown");
+        return;
+      }
+
       setAuthStatus("checking");
-      checkAgentAuth(provider.id)
+      void checkAgentAuth(provider.id)
         .then((authenticated) => {
-          if (!isMountedRef.current) return;
+          if (cancelled || !isMountedRef.current) return;
           setAuthStatus(authenticated ? "authenticated" : "unauthenticated");
         })
         .catch(() => {
-          if (!isMountedRef.current) return;
+          if (cancelled || !isMountedRef.current) return;
           setAuthStatus("unauthenticated");
         });
-      return;
+    };
+
+    if (forceMissingForSimulation) {
+      applyMissing();
+    } else if (isBuiltIn || !hasBinary) {
+      applyInstalled();
+    } else {
+      setInstallStatus((current) =>
+        current === "installed" ? current : "checking",
+      );
+      void checkAgentInstalled(provider.id)
+        .then((installed) => {
+          if (installed) {
+            applyInstalled();
+          } else {
+            applyMissing();
+          }
+        })
+        .catch(() => {
+          applyMissing();
+        });
     }
 
-    setAuthStatus(getAuthHint() ? "authenticated" : "unknown");
+    return () => {
+      cancelled = true;
+    };
   }, [
+    forceMissingForSimulation,
     getAuthHint,
+    hasBinary,
     isBuiltIn,
     provider.id,
-    provider.status,
     supportsAuthStatus,
     setAuthHint,
-    forceMissingForSimulation,
   ]);
 
-  const refreshInstallStatusFromInventory =
-    useCallback(async (): Promise<boolean> => {
-      const entries = await getProviderInventory([provider.id], {
-        includeRawSupportedModels: false,
-      });
-      if (!isMountedRef.current) return false;
-      mergeInventoryEntries(entries);
-      const inventoryEntry = entries.find(
-        (entry) => entry.providerId === provider.id,
-      );
-      const installed =
-        !forceMissingForSimulation &&
-        (isBuiltIn ||
-          (inventoryEntry?.category === "agent" && inventoryEntry.configured));
-      setInstallStatus(installed ? "installed" : "missing");
-      if (!installed) {
-        setAuthStatus("unknown");
-        setAuthHint(false);
-      }
-      return installed;
-    }, [
-      forceMissingForSimulation,
-      isBuiltIn,
-      mergeInventoryEntries,
-      provider.id,
-      setAuthHint,
-    ]);
+  const refreshInstallStatus = useCallback(async (): Promise<boolean> => {
+    const installed =
+      !forceMissingForSimulation &&
+      (isBuiltIn || !hasBinary || (await checkAgentInstalled(provider.id)));
+    if (!isMountedRef.current) return false;
+    setInstallStatus(installed ? "installed" : "missing");
+    if (!installed) {
+      setAuthStatus("unknown");
+      setAuthHint(false);
+    }
+    return installed;
+  }, [
+    forceMissingForSimulation,
+    hasBinary,
+    isBuiltIn,
+    provider.id,
+    setAuthHint,
+  ]);
 
   useEffect(() => {
     if (outputRef.current && outputLengthRef.current !== setupOutput.length) {
@@ -257,7 +288,7 @@ export function AgentProviderCard({
 
       if (hasBinary && provider.binaryName) {
         setSetupPhase("checking");
-        const installed = await refreshInstallStatusFromInventory();
+        const installed = await refreshInstallStatus();
         if (!isMountedRef.current) return;
         if (!installed) {
           setAuthStatus("unknown");
@@ -310,7 +341,7 @@ export function AgentProviderCard({
       await authenticateAgent(provider.id);
       clearListener();
       if (!isMountedRef.current) return;
-      const installed = await refreshInstallStatusFromInventory();
+      const installed = await refreshInstallStatus();
       if (!isMountedRef.current) return;
       if (!installed) {
         const message = t("providers.agents.errors.installVerificationFailed");
@@ -378,7 +409,9 @@ export function AgentProviderCard({
     authStatus !== "checking" &&
     authStatus !== "authenticated";
   const needsInstall = installStatus === "missing" && supportsInstall;
-  const isChecking = installStatus === "installed" && authStatus === "checking";
+  const isChecking =
+    installStatus === "checking" ||
+    (installStatus === "installed" && authStatus === "checking");
 
   if (provider.showOnlyWhenInstalled && installStatus !== "installed")
     return null;

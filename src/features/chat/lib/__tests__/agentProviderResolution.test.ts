@@ -22,8 +22,6 @@ const catalogEntries: ProviderCatalogEntry[] = [
   },
 ];
 
-const noInventory = () => undefined;
-
 describe("resolveSelectedAgentId", () => {
   it("returns goose when no provider is selected", () => {
     expect(
@@ -31,7 +29,6 @@ describe("resolveSelectedAgentId", () => {
         catalogEntries,
         catalogLoaded: true,
         selectedProvider: undefined,
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("goose");
   });
@@ -42,7 +39,6 @@ describe("resolveSelectedAgentId", () => {
         catalogEntries,
         catalogLoaded: true,
         selectedProvider: "claude-acp",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("claude-acp");
   });
@@ -53,73 +49,46 @@ describe("resolveSelectedAgentId", () => {
         catalogEntries,
         catalogLoaded: true,
         selectedProvider: "openai",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("goose");
   });
 
-  it("preserves persisted claude-acp during empty inventory before catalog loads", () => {
+  it("preserves persisted claude-acp before catalog loads", () => {
     expect(
       resolveSelectedAgentId({
         catalogEntries: [],
         catalogLoaded: false,
         selectedProvider: "claude-acp",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("claude-acp");
   });
 
-  it("preserves unknown provider before catalog loads when inventory is empty", () => {
+  it("preserves unknown provider before catalog loads", () => {
     expect(
       resolveSelectedAgentId({
         catalogEntries: [],
         catalogLoaded: false,
         selectedProvider: "some-future-agent",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("some-future-agent");
   });
 
-  it("falls back to goose for model provider identified by inventory before catalog", () => {
-    const getEntry = (id: string) =>
-      id === "openai"
-        ? ({
-            providerId: "openai",
-            category: "model" as const,
-            configured: true,
-            refreshing: false,
-            models: [],
-          } as never)
-        : undefined;
-
+  it("preserves model providers before catalog loads", () => {
     expect(
       resolveSelectedAgentId({
         catalogEntries: [],
         catalogLoaded: false,
         selectedProvider: "openai",
-        getProviderInventoryEntry: getEntry,
       }),
-    ).toBe("goose");
+    ).toBe("openai");
   });
 
-  it("preserves agent provider identified by inventory before catalog", () => {
-    const getEntry = (id: string) =>
-      id === "claude-acp"
-        ? ({
-            providerId: "claude-acp",
-            category: "agent" as const,
-            configured: true,
-            refreshing: false,
-            models: [],
-          } as never)
-        : undefined;
-
+  it("preserves agent provider before catalog loads", () => {
     expect(
       resolveSelectedAgentId({
         catalogEntries: [],
         catalogLoaded: false,
         selectedProvider: "claude-acp",
-        getProviderInventoryEntry: getEntry,
       }),
     ).toBe("claude-acp");
   });
@@ -130,7 +99,6 @@ describe("resolveSelectedAgentId", () => {
         catalogEntries,
         catalogLoaded: true,
         selectedProvider: "openai",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("goose");
   });
@@ -141,7 +109,6 @@ describe("resolveSelectedAgentId", () => {
         catalogEntries,
         catalogLoaded: true,
         selectedProvider: "nonexistent-provider",
-        getProviderInventoryEntry: noInventory,
       }),
     ).toBe("goose");
   });

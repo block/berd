@@ -15,15 +15,15 @@ import {
   renderInlineCodeMessage,
 } from "./modelProviderHelpers";
 
-interface InventorySyncMessageProps {
+interface ModelRefreshMessageProps {
   syncing: boolean;
   warning?: string | null;
 }
 
-export function InventorySyncMessage({
+export function ModelRefreshMessage({
   syncing,
   warning,
-}: InventorySyncMessageProps) {
+}: ModelRefreshMessageProps) {
   const { t } = useTranslation("settings");
 
   if (syncing) {
@@ -59,8 +59,8 @@ interface ConnectedFieldsPanelProps {
   editingKey: string | null;
   draftValues: Record<string, string>;
   saving: boolean;
-  inventorySyncing: boolean;
-  inventoryWarning?: string | null;
+  modelSyncing: boolean;
+  modelWarning?: string | null;
   showSavedState: boolean;
   error: string;
   setupMessage: string | null;
@@ -78,8 +78,8 @@ export function ConnectedFieldsPanel({
   editingKey,
   draftValues,
   saving,
-  inventorySyncing,
-  inventoryWarning,
+  modelSyncing,
+  modelWarning,
   showSavedState,
   error,
   setupMessage,
@@ -196,10 +196,7 @@ export function ConnectedFieldsPanel({
         </Button>
       </div>
       {renderSetupMessage(setupMessage)}
-      <InventorySyncMessage
-        syncing={inventorySyncing}
-        warning={inventoryWarning}
-      />
+      <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );
@@ -211,8 +208,8 @@ interface SetupFieldsPanelProps {
   fieldValueMap: Map<string, ProviderFieldValue>;
   draftValues: Record<string, string>;
   saving: boolean;
-  inventorySyncing: boolean;
-  inventoryWarning?: string | null;
+  modelSyncing: boolean;
+  modelWarning?: string | null;
   showSavedState: boolean;
   error: string;
   setupMethod: ProviderSetupMethod;
@@ -229,8 +226,8 @@ export function SetupFieldsPanel({
   fieldValueMap,
   draftValues,
   saving,
-  inventorySyncing,
-  inventoryWarning,
+  modelSyncing,
+  modelWarning,
   showSavedState,
   error,
   setupMethod,
@@ -307,10 +304,7 @@ export function SetupFieldsPanel({
       {setupMethod === "cloud_credentials" && setupMessage
         ? renderSetupMessage(setupMessage)
         : null}
-      <InventorySyncMessage
-        syncing={inventorySyncing}
-        warning={inventoryWarning}
-      />
+      <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>
   );

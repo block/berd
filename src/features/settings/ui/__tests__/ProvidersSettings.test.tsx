@@ -1,8 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
@@ -10,16 +7,11 @@ import { ProvidersSettings } from "../ProvidersSettings";
 
 const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
-  useCustomProviders: vi.fn(),
   checkAgentInstalled: vi.fn(),
 }));
 
 vi.mock("@/features/providers/hooks/useCredentials", () => ({
   useCredentials: () => mocks.useCredentials(),
-}));
-
-vi.mock("@/features/providers/hooks/useCustomProviders", () => ({
-  useCustomProviders: () => mocks.useCustomProviders(),
 }));
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
@@ -30,27 +22,6 @@ vi.mock("@/features/providers/api/agentSetup", () => ({
   authenticateAgent: vi.fn(),
   onAgentSetupOutput: vi.fn(async () => vi.fn()),
 }));
-
-function providerEntry(
-  overrides: Partial<ProviderInventoryEntryDto>,
-): ProviderInventoryEntryDto {
-  return {
-    providerId: "custom_openai",
-    providerName: "Custom OpenAI",
-    description: "",
-    defaultModel: "",
-    configured: true,
-    providerType: "Custom",
-    category: "model",
-    configKeys: [],
-    setupSteps: [],
-    supportsRefresh: true,
-    refreshing: false,
-    models: [],
-    stale: false,
-    ...overrides,
-  };
-}
 
 const providerCatalog: ProviderCatalogEntry[] = [
   {
@@ -129,39 +100,18 @@ describe("ProvidersSettings", () => {
     vi.clearAllMocks();
     useProviderCatalogStore.getState().setEntries(providerCatalog);
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
-    useProviderInventoryStore.getState().setEntries([]);
+    mocks.checkAgentInstalled.mockResolvedValue(true);
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
       loading: false,
       saving: false,
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
-      inventoryWarnings: new Map<string, string>(),
+      modelWarnings: new Map<string, string>(),
       getConfig: vi.fn(),
       save: vi.fn(),
       remove: vi.fn(),
       completeNativeSetup: vi.fn(),
-    });
-    mocks.useCustomProviders.mockReturnValue({
-      catalog: [],
-      catalogLoading: false,
-      saving: false,
-      savingProviderIds: new Set<string>(),
-      deletingProviderIds: new Set<string>(),
-      syncingProviderIds: new Set<string>(),
-      inventoryWarnings: new Map<string, string>(),
-      statusByProviderId: new Map(),
-      configuredIds: new Set<string>(),
-      loadCatalog: vi.fn().mockResolvedValue([]),
-      getTemplate: vi.fn(),
-      read: vi.fn(),
-      create: vi.fn(),
-      update: vi.fn(),
-      remove: vi.fn().mockResolvedValue({
-        providerId: "custom_acme",
-        refresh: { started: [], skipped: [] },
-      }),
-      saveDraft: vi.fn(),
     });
   });
 
@@ -183,7 +133,7 @@ describe("ProvidersSettings", () => {
       saving: false,
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
-      inventoryWarnings: new Map<string, string>(),
+      modelWarnings: new Map<string, string>(),
       getConfig: vi.fn(),
       save: vi.fn(),
       remove: vi.fn(),
@@ -203,7 +153,7 @@ describe("ProvidersSettings", () => {
       saving: false,
       savingProviderIds: new Set<string>(),
       syncingProviderIds: new Set<string>(),
-      inventoryWarnings: new Map<string, string>(),
+      modelWarnings: new Map<string, string>(),
       getConfig: vi.fn(),
       save: vi.fn(),
       remove: vi.fn(),
@@ -234,149 +184,16 @@ describe("ProvidersSettings", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("uses agent inventory configured state and does not probe local install on initial render", () => {
-    useProviderInventoryStore.getState().setEntries([
-      providerEntry({
-        providerId: "claude-acp",
-        providerName: "Claude",
-        providerType: "Claude",
-        category: "agent",
-        configured: true,
-      }),
-      providerEntry({
-        providerId: "amp-acp",
-        providerName: "Amp",
-        providerType: "Amp",
-        category: "agent",
-        configured: true,
-      }),
-      providerEntry({
-        providerId: "codex-acp",
-        providerName: "Codex",
-        providerType: "Codex",
-        category: "agent",
-        configured: true,
-      }),
-    ]);
-
-    render(<ProvidersSettings />);
-
-    expect(screen.getAllByText("Claude").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Amp").length).toBeGreaterThan(0);
-    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
-    expect(
-      screen.queryByRole("button", { name: /install claude/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /install amp/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /install codex/i }),
-    ).not.toBeInTheDocument();
-    expect(mocks.checkAgentInstalled).not.toHaveBeenCalled();
-  });
-
-  it("shows custom inventory providers with edit and delete actions", () => {
-    useProviderInventoryStore.getState().setEntries([
-      providerEntry({
-        providerId: "custom_acme",
-        providerName: "Acme Models",
-        models: [
-          {
-            id: "acme-fast",
-            name: "acme-fast",
-          },
-        ],
-      }),
-    ]);
-
-    render(<ProvidersSettings />);
-
-    expect(screen.getByText("Acme Models")).toBeInTheDocument();
-    expect(screen.queryByText("1 model")).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /edit acme models/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /delete acme models/i }),
-    ).toBeInTheDocument();
-  });
-
   it("hides non-allowlisted model and custom providers for a distro", () => {
     useDistroStore.setState({
       loaded: true,
       manifest: { present: true, providerAllowlist: "databricks" },
     });
-    useProviderInventoryStore.getState().setEntries([
-      providerEntry({
-        providerId: "custom_acme",
-        providerName: "Acme Models",
-      }),
-    ]);
-
     render(<ProvidersSettings />);
 
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
-  });
-
-  it("confirms before deleting a custom provider", async () => {
-    const user = userEvent.setup();
-    const remove = vi.fn().mockResolvedValue({
-      providerId: "custom_acme",
-      refresh: { started: [], skipped: [] },
-    });
-    mocks.useCustomProviders.mockReturnValue({
-      ...mocks.useCustomProviders(),
-      remove,
-    });
-    useProviderInventoryStore.getState().setEntries([
-      providerEntry({
-        providerId: "custom_acme",
-        providerName: "Acme Models",
-      }),
-    ]);
-
-    render(<ProvidersSettings />);
-
-    await user.click(
-      screen.getByRole("button", { name: /delete acme models/i }),
-    );
-    expect(
-      screen.getByRole("alertdialog", { name: /delete acme models/i }),
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /cancel/i }));
-
-    expect(remove).not.toHaveBeenCalled();
-  });
-
-  it("keeps a provider visible and shows an error when delete fails", async () => {
-    const user = userEvent.setup();
-    const remove = vi.fn().mockRejectedValue(new Error("delete exploded"));
-    mocks.useCustomProviders.mockReturnValue({
-      ...mocks.useCustomProviders(),
-      remove,
-    });
-    useProviderInventoryStore.getState().setEntries([
-      providerEntry({
-        providerId: "custom_acme",
-        providerName: "Acme Models",
-      }),
-    ]);
-
-    render(<ProvidersSettings />);
-
-    await user.click(
-      screen.getByRole("button", { name: /delete acme models/i }),
-    );
-    await user.click(screen.getByRole("button", { name: /^delete$/i }));
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "delete exploded",
-    );
-    expect(screen.getByText("Acme Models")).toBeInTheDocument();
   });
 });

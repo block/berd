@@ -2,11 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
-import {
-  discoverAcpProvidersFromEntries,
-  type AcpProvider,
-} from "@/shared/api/acp";
+import type { AcpProvider } from "@/shared/api/acp";
 import { setNotificationHandler, getClient } from "@/shared/api/acpConnection";
 import notificationHandler from "@/shared/api/acpNotificationHandler";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -15,8 +11,10 @@ import {
   parseProviderAllowlist,
 } from "@/features/providers/distroProviderConstraints";
 import { getModelProviders } from "@/features/providers/providerCatalog";
-import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
+import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
+import { getModelCacheRefreshProviderIds } from "@/features/providers/modelCacheRefresh";
+import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import type { KgooseProbeReport } from "../lib/startupDiagnostics";
 
@@ -93,26 +91,21 @@ export function useAppStartup() {
       );
 
       const store = useAgentStore.getState();
-      const inventoryStore = useProviderInventoryStore.getState();
-      const catalogStore = useProviderCatalogStore.getState();
+      const modelCacheStore = useProviderModelCacheStore.getState();
       const distroStore = useDistroStore.getState();
 
-      const applyProvidersFromInventory = (
-        entries: Parameters<typeof discoverAcpProvidersFromEntries>[0],
-        validated = false,
-      ) => {
-        const providers = discoverAcpProvidersFromEntries(entries);
+      modelCacheStore.loadPersisted();
+
+      const applyCuratedProviders = (validated = true) => {
         const providerAllowlist = parseProviderAllowlist(
           useDistroStore.getState().manifest,
         );
-        store.setProviders(
-          filterStartupProvidersForDistro(
-            providers,
-            providerAllowlist,
-            getModelProviders(),
-          ),
-          validated,
+        const providers = filterStartupProvidersForDistro(
+          getCuratedAgentProviders(),
+          providerAllowlist,
+          getModelProviders(),
         );
+        store.setProviders(providers, validated);
         return providers;
       };
 
@@ -144,57 +137,10 @@ export function useAppStartup() {
         }
       };
 
-      const loadProviderCatalog = async () => {
-        const t0 = performance.now();
-        try {
-          const entries = await catalogStore.load();
-          const inventoryEntries = [
-            ...useProviderInventoryStore.getState().entries.values(),
-          ];
-          if (inventoryEntries.length > 0) {
-            applyProvidersFromInventory(inventoryEntries, true);
-          }
-          perfLog(
-            `[perf:startup] loadProviderCatalog done in ${(performance.now() - t0).toFixed(1)}ms (n=${entries.length})`,
-          );
-        } catch (err) {
-          console.error("Failed to load provider catalog on startup:", err);
-        }
-      };
-
-      const loadProvidersAndInventory = async () => {
-        const t0 = performance.now();
-        store.setProvidersLoading(true);
-        inventoryStore.setLoading(true);
-        try {
-          const { getProviderInventory, getSupportedRawModelProviderIds } =
-            await import("@/features/providers/api/inventory");
-          const rawSupportedModelsProviderIds =
-            getSupportedRawModelProviderIds();
-          const entries = await getProviderInventory(undefined, {
-            rawSupportedModelsProviderIds,
-          });
-
-          // Populate inventory store
-          inventoryStore.setEntries(entries);
-
-          // Derive ACP providers from the same response
-          const providers = applyProvidersFromInventory(entries, true);
-
-          perfLog(
-            `[perf:startup] loadProvidersAndInventory done in ${(performance.now() - t0).toFixed(1)}ms (entries=${entries.length}, providers=${providers.length})`,
-          );
-          return entries;
-        } catch (err) {
-          console.error(
-            "Failed to load providers and inventory on startup:",
-            err,
-          );
-          return [];
-        } finally {
-          store.setProvidersLoading(false);
-          inventoryStore.setLoading(false);
-        }
+      const refreshProviderModels = async () => {
+        await modelCacheStore.refreshAllModelProviders(
+          getModelCacheRefreshProviderIds(useDistroStore.getState().manifest),
+        );
       };
 
       const loadSessionState = async () => {
@@ -207,42 +153,16 @@ export function useAppStartup() {
         );
       };
 
-      // Catalog loading has its own fallback/error state. Inventory waits for it
-      // so raw model hydration can stay inside the supported provider set.
-      const providerCatalogLoad = loadProviderCatalog();
+      applyCuratedProviders(false);
 
       await loadDistroBundle();
+      applyCuratedProviders(true);
 
-      const providersAndInventoryLoad = providerCatalogLoad.then(
-        loadProvidersAndInventory,
-      );
-
-      await Promise.allSettled([
-        loadPersonas(),
-        providersAndInventoryLoad,
-        loadSessionState(),
-      ]);
-      // Background refresh updates stale inventory after the first usable
-      // provider list is available.
-      void providersAndInventoryLoad.then(async (entries) => {
-        try {
-          const {
-            backgroundRefreshInventory,
-            getSupportedInventoryRefreshProviderIds,
-            getSupportedRawModelProviderIds,
-          } = await import("@/features/providers/api/inventory");
-          await backgroundRefreshInventory(inventoryStore, {
-            initialEntries: entries,
-            rawSupportedModelsProviderIds: getSupportedRawModelProviderIds(),
-            refreshProviderIds: getSupportedInventoryRefreshProviderIds(),
-          });
-        } catch (err) {
-          console.error(
-            "Failed to refresh provider inventory on startup:",
-            err,
-          );
-        }
+      void refreshProviderModels().catch((err) => {
+        console.error("Failed to refresh provider models on startup:", err);
       });
+
+      await Promise.allSettled([loadPersonas(), loadSessionState()]);
       perfLog(
         `[perf:startup] useAppStartup complete in ${(performance.now() - tStartup).toFixed(1)}ms`,
       );

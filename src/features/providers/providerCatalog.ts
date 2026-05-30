@@ -73,6 +73,38 @@ export function resolveAgentProviderCatalogIdStrict(
   );
 }
 
+export function resolveModelProviderCatalogIdStrictFromEntries(
+  entries: ProviderCatalogEntry[],
+  providerId: string,
+): string | null {
+  const directMatch = entries.find((provider) => provider.id === providerId);
+  if (directMatch?.category === "model") {
+    return directMatch.id;
+  }
+
+  const normalized = normalizeProviderKey(providerId);
+  for (const provider of entries) {
+    if (provider.category !== "model") {
+      continue;
+    }
+    const aliases = [provider.id, ...(provider.aliases ?? [])];
+    if (aliases.some((alias) => normalizeProviderKey(alias) === normalized)) {
+      return provider.id;
+    }
+  }
+
+  return null;
+}
+
+export function resolveModelProviderCatalogIdStrict(
+  providerId: string,
+): string | null {
+  return resolveModelProviderCatalogIdStrictFromEntries(
+    getProviderCatalog(),
+    providerId,
+  );
+}
+
 function normalizedAliasMatchesCandidate(alias: string, candidate: string) {
   const normalizedAlias = normalizeProviderKey(alias);
   if (!normalizedAlias) {

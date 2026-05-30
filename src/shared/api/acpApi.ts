@@ -5,7 +5,7 @@ import type {
   PromptResponse,
   SessionInfo,
 } from "@agentclientprotocol/sdk";
-import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
+import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { getClient } from "./acpConnection";
 import { perfLog } from "@/shared/lib/perfLog";
 
@@ -34,43 +34,13 @@ export interface AcpSessionsPage {
   nextCursor: string | null;
 }
 
-export const DEPRECATED_PROVIDER_IDS = new Set([
-  "claude-code",
-  "codex",
-  "gemini-cli",
-]);
 export const DEFAULT_PROVIDER: AcpProvider = {
   id: "goose",
   label: "Goose (Default)",
 };
 
-/**
- * Build the ACP provider list from raw inventory entries.
- *
- * Shared by both `listProviders` (which fetches entries via RPC) and
- * `discoverAcpProvidersFromEntries` in acp.ts (which reuses
- * already-fetched entries at startup).
- */
-export function buildProviderListFromEntries(
-  entries: Array<
-    Pick<ProviderInventoryEntryDto, "providerId" | "providerName" | "category">
-  >,
-): AcpProvider[] {
-  return [
-    DEFAULT_PROVIDER,
-    ...entries
-      .filter((entry) => !DEPRECATED_PROVIDER_IDS.has(entry.providerId))
-      .filter((entry) => entry.category === "agent")
-      .map((entry) => ({ id: entry.providerId, label: entry.providerName })),
-  ];
-}
-
 export async function listProviders(): Promise<AcpProvider[]> {
-  const client = await getClient();
-  const result = await client.goose.GooseUnstableProvidersList({
-    providerIds: [],
-  });
-  return buildProviderListFromEntries(result.entries);
+  return getCuratedAgentProviders();
 }
 
 function mapSessionInfo(info: SessionInfo): AcpSessionInfo {

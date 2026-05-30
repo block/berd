@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { AgentProviderCard } from "../AgentProviderCard";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import enSettings from "@/shared/i18n/locales/en/settings.json";
 import { AGENT_SETUP_FAILURE_SIMULATION_KEY } from "@/features/providers/lib/agentSetupFailureSimulation";
 
@@ -12,7 +11,6 @@ const checkAgentInstalled = vi.fn();
 const checkAgentAuth = vi.fn();
 const installAgent = vi.fn();
 const authenticateAgent = vi.fn();
-const getProviderInventory = vi.fn();
 const onAgentSetupOutput = vi.fn();
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
@@ -21,10 +19,6 @@ vi.mock("@/features/providers/api/agentSetup", () => ({
   installAgent: (...args: unknown[]) => installAgent(...args),
   authenticateAgent: (...args: unknown[]) => authenticateAgent(...args),
   onAgentSetupOutput: (...args: unknown[]) => onAgentSetupOutput(...args),
-}));
-
-vi.mock("@/features/providers/api/inventory", () => ({
-  getProviderInventory: (...args: unknown[]) => getProviderInventory(...args),
 }));
 
 function createProvider(
@@ -49,7 +43,7 @@ describe("AgentProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem(AGENT_SETUP_FAILURE_SIMULATION_KEY);
-    useProviderInventoryStore.getState().setEntries([]);
+    checkAgentInstalled.mockResolvedValue(false);
     onAgentSetupOutput.mockResolvedValue(vi.fn());
   });
 
@@ -87,27 +81,37 @@ describe("AgentProviderCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("verifies install through provider inventory and reports failure when core still marks it unconfigured", async () => {
+  it("detects an installed local agent even when catalog status starts as not installed", async () => {
+    checkAgentInstalled.mockResolvedValue(true);
+    checkAgentAuth.mockResolvedValue(false);
+
+    renderWithProviders(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "not_installed",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
+    });
+    expect(
+      await screen.findByRole("button", { name: /sign in/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /install claude/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("verifies install through the local CLI check and reports failure when the binary is still missing", async () => {
     const user = userEvent.setup();
     const onStartTroubleshootingChat = vi.fn();
     installAgent.mockResolvedValue(undefined);
-    getProviderInventory.mockResolvedValue([
-      {
-        providerId: "claude-acp",
-        providerName: "Claude",
-        description: "",
-        defaultModel: "",
-        configured: false,
-        providerType: "Claude",
-        category: "agent",
-        configKeys: [],
-        setupSteps: [],
-        supportsRefresh: true,
-        refreshing: false,
-        models: [],
-        stale: false,
-      },
-    ]);
+    checkAgentInstalled.mockResolvedValue(false);
 
     renderWithProviders(
       <AgentProviderCard
@@ -121,14 +125,13 @@ describe("AgentProviderCard", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /install claude/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /install claude/i }),
+    );
 
     await waitFor(() => {
-      expect(getProviderInventory).toHaveBeenCalledWith(["claude-acp"], {
-        includeRawSupportedModels: false,
-      });
+      expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
     });
-    expect(checkAgentInstalled).not.toHaveBeenCalled();
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
     await user.click(
       screen.getByRole("button", { name: /troubleshoot in chat/i }),
@@ -140,10 +143,6 @@ describe("AgentProviderCard", () => {
         ),
       }),
     );
-    expect(
-      useProviderInventoryStore.getState().entries.get("claude-acp")
-        ?.configured,
-    ).toBe(false);
   });
 
   it("has localized install verification failure copy", () => {
@@ -182,7 +181,9 @@ describe("AgentProviderCard", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /install claude/i }));
+    await user.click(
+      await screen.findByRole("button", { name: /install claude/i }),
+    );
 
     expect(await screen.findByText("Setup hit a snag.")).toBeInTheDocument();
 

@@ -58,7 +58,7 @@ describe("AgentModelPicker", () => {
     expect(trigger).not.toHaveTextContent("opus");
   });
 
-  it("uses the inventory model label for a matching raw model id", () => {
+  it("uses the available model label for a matching raw model id", () => {
     render(
       <AgentModelPicker
         agents={AGENTS}
@@ -77,7 +77,7 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("Claude Opus 4.6");
   });
 
-  it("uses a stored human model name before inventory resolves", () => {
+  it("uses a stored human model name before models resolve", () => {
     render(
       <AgentModelPicker
         agents={AGENTS}
@@ -96,7 +96,7 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("Claude Opus 4.6");
   });
 
-  it("allows id-as-display-name labels after inventory resolves", () => {
+  it("allows id-as-display-name labels after models resolve", () => {
     render(
       <AgentModelPicker
         agents={AGENTS}
@@ -404,7 +404,7 @@ describe("AgentModelPicker", () => {
     expect(screen.getByText("Loading models...")).toBeInTheDocument();
   });
 
-  it("shows an empty-state message when no inventory models are available", async () => {
+  it("shows an empty-state message when no models are available", async () => {
     const user = userEvent.setup();
 
     render(

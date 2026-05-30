@@ -1,14 +1,15 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useProviderModelCacheStore } from "../stores/providerModelCacheStore";
 import { useCredentials } from "./useCredentials";
 
 const mocks = vi.hoisted(() => ({
   checkAllProviderStatus: vi.fn(),
   deleteProviderConfig: vi.fn(),
   getProviderConfig: vi.fn(),
-  refreshProviderInventory: vi.fn(),
   saveProviderConfig: vi.fn(),
-  syncProviderInventory: vi.fn(),
+  refreshProviderModels: vi.fn(),
+  invalidateProvider: vi.fn(),
 }));
 
 vi.mock("@/features/providers/api/credentials", () => ({
@@ -18,23 +19,11 @@ vi.mock("@/features/providers/api/credentials", () => ({
   saveProviderConfig: mocks.saveProviderConfig,
 }));
 
-vi.mock("@/features/providers/api/inventorySync", () => ({
-  syncProviderInventory: mocks.syncProviderInventory,
-}));
-
-vi.mock("@/features/providers/api/inventory", () => ({
-  refreshProviderInventory: mocks.refreshProviderInventory,
-}));
-
 describe("useCredentials", () => {
   const saveResponse = {
     status: {
       providerId: "anthropic",
       isConfigured: true,
-    },
-    refresh: {
-      started: ["anthropic"],
-      skipped: [],
     },
   };
   const deleteResponse = {
@@ -42,19 +31,16 @@ describe("useCredentials", () => {
       providerId: "anthropic",
       isConfigured: false,
     },
-    refresh: {
-      started: [],
-      skipped: [
-        {
-          providerId: "anthropic",
-          reason: "not_configured",
-        },
-      ],
-    },
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
+    useProviderModelCacheStore.setState({
+      providers: new Map(),
+      refreshingProviderIds: new Set(),
+      refreshProviderModels: mocks.refreshProviderModels,
+      invalidateProvider: mocks.invalidateProvider,
+    });
     mocks.checkAllProviderStatus.mockResolvedValue([
       {
         providerId: "anthropic",
@@ -63,22 +49,10 @@ describe("useCredentials", () => {
     ]);
     mocks.saveProviderConfig.mockResolvedValue(saveResponse);
     mocks.deleteProviderConfig.mockResolvedValue(deleteResponse);
-    mocks.refreshProviderInventory.mockResolvedValue({
-      started: ["anthropic"],
-      skipped: [],
-    });
-    mocks.syncProviderInventory.mockResolvedValue({
-      entries: [],
-      refresh: {
-        started: ["anthropic"],
-        skipped: [],
-      },
-      settled: true,
-      polledProviderIds: ["anthropic"],
-    });
+    mocks.refreshProviderModels.mockResolvedValue(undefined);
   });
 
-  it("saves secret fields through the credential API and syncs inventory without requiring restart", async () => {
+  it("saves secret fields through the credential API and refreshes provider models without requiring restart", async () => {
     const { result } = renderHook(() => useCredentials());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -92,22 +66,16 @@ describe("useCredentials", () => {
       ]);
     });
 
-    const fields = [
+    expect(mocks.saveProviderConfig).toHaveBeenCalledWith("anthropic", [
       {
         key: "ANTHROPIC_API_KEY",
         value: "sk-ant-test",
       },
-    ];
-
-    expect(mocks.saveProviderConfig).toHaveBeenCalledWith("anthropic", fields);
+    ]);
+    expect(mocks.invalidateProvider).toHaveBeenCalledWith("anthropic");
     await waitFor(() =>
-      expect(mocks.syncProviderInventory.mock.calls[0]?.[0]).toEqual([
-        "anthropic",
-      ]),
-    );
-    expect(mocks.syncProviderInventory.mock.calls[0]?.[1]).toEqual(
-      expect.objectContaining({
-        initialRefresh: saveResponse.refresh,
+      expect(mocks.refreshProviderModels).toHaveBeenCalledWith("anthropic", {
+        force: true,
       }),
     );
     expect(result.current).not.toHaveProperty("needsRestart");
@@ -115,7 +83,7 @@ describe("useCredentials", () => {
   });
 
   it("records refresh failure as a provider warning without rejecting the save", async () => {
-    mocks.syncProviderInventory.mockRejectedValueOnce(
+    mocks.refreshProviderModels.mockRejectedValueOnce(
       new Error("model list failed"),
     );
     const { result } = renderHook(() => useCredentials());
@@ -133,43 +101,46 @@ describe("useCredentials", () => {
 
     expect(mocks.saveProviderConfig).toHaveBeenCalled();
     await waitFor(() =>
-      expect(result.current.inventoryWarnings.get("anthropic")).toContain(
+      expect(result.current.modelWarnings.get("anthropic")).toContain(
         "model list failed",
       ),
     );
   });
 
   it("suppresses stale refresh errors after deleting provider config", async () => {
-    mocks.syncProviderInventory.mockResolvedValueOnce({
-      entries: [
-        {
-          providerId: "anthropic",
-          lastRefreshError: "old refresh failure",
-          refreshing: false,
-        },
-      ],
-      refresh: deleteResponse.refresh,
-      settled: true,
-      polledProviderIds: ["anthropic"],
+    let rejectRefresh!: (error: Error) => void;
+    const refreshPromise = new Promise<void>((_resolve, reject) => {
+      rejectRefresh = reject;
     });
+    mocks.refreshProviderModels.mockReturnValueOnce(refreshPromise);
     const { result } = renderHook(() => useCredentials());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {
+      await result.current.save("anthropic", [
+        {
+          key: "ANTHROPIC_API_KEY",
+          value: "sk-ant-test",
+          isSecret: true,
+        },
+      ]);
+    });
+    expect(result.current.syncingProviderIds.has("anthropic")).toBe(true);
+
+    await act(async () => {
       await result.current.remove("anthropic");
     });
+    await act(async () => {
+      rejectRefresh(new Error("old refresh failure"));
+      await refreshPromise.catch(() => undefined);
+    });
 
-    await waitFor(() =>
-      expect(result.current.syncingProviderIds.has("anthropic")).toBe(false),
-    );
-    expect(result.current.inventoryWarnings.has("anthropic")).toBe(false);
+    expect(mocks.invalidateProvider).toHaveBeenCalledWith("anthropic");
+    expect(result.current.modelWarnings.has("anthropic")).toBe(false);
+    expect(result.current.syncingProviderIds.has("anthropic")).toBe(false);
   });
 
-  it("invalidates native OAuth secrets before refreshing provider status", async () => {
-    const refreshResponse = {
-      started: ["chatgpt_codex"],
-      skipped: [],
-    };
+  it("refreshes native OAuth status before refreshing provider models", async () => {
     mocks.checkAllProviderStatus
       .mockResolvedValueOnce([
         {
@@ -183,7 +154,6 @@ describe("useCredentials", () => {
           isConfigured: true,
         },
       ]);
-    mocks.refreshProviderInventory.mockResolvedValueOnce(refreshResponse);
 
     const { result } = renderHook(() => useCredentials());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -193,26 +163,15 @@ describe("useCredentials", () => {
       await result.current.completeNativeSetup("chatgpt_codex");
     });
 
-    expect(mocks.refreshProviderInventory).toHaveBeenCalledWith([
-      "chatgpt_codex",
-    ]);
-    expect(
-      mocks.refreshProviderInventory.mock.invocationCallOrder[0],
-    ).toBeLessThan(mocks.checkAllProviderStatus.mock.invocationCallOrder[1]);
-    expect(mocks.syncProviderInventory).toHaveBeenCalledWith(
-      ["chatgpt_codex"],
-      expect.objectContaining({
-        initialRefresh: refreshResponse,
-      }),
-    );
+    expect(mocks.checkAllProviderStatus).toHaveBeenCalledTimes(2);
+    expect(mocks.invalidateProvider).toHaveBeenCalledWith("chatgpt_codex");
+    expect(mocks.refreshProviderModels).toHaveBeenCalledWith("chatgpt_codex", {
+      force: true,
+    });
     expect(result.current.configuredIds.has("chatgpt_codex")).toBe(true);
   });
 
   it("uses native OAuth ACP result without an extra status refresh", async () => {
-    const refreshResponse = {
-      started: ["chatgpt_codex"],
-      skipped: [],
-    };
     mocks.checkAllProviderStatus.mockResolvedValueOnce([
       {
         providerId: "chatgpt_codex",
@@ -229,56 +188,14 @@ describe("useCredentials", () => {
           providerId: "chatgpt_codex",
           isConfigured: true,
         },
-        refresh: refreshResponse,
-      });
+      } as never);
     });
 
-    expect(mocks.refreshProviderInventory).not.toHaveBeenCalled();
     expect(mocks.checkAllProviderStatus).toHaveBeenCalledTimes(1);
-    expect(mocks.syncProviderInventory).toHaveBeenCalledWith(
-      ["chatgpt_codex"],
-      expect.objectContaining({
-        initialRefresh: refreshResponse,
-      }),
-    );
-    expect(result.current.configuredIds.has("chatgpt_codex")).toBe(true);
-  });
-
-  it("refreshes native OAuth status when initial inventory refresh fails", async () => {
-    mocks.checkAllProviderStatus
-      .mockResolvedValueOnce([
-        {
-          providerId: "chatgpt_codex",
-          isConfigured: false,
-        },
-      ])
-      .mockResolvedValueOnce([
-        {
-          providerId: "chatgpt_codex",
-          isConfigured: true,
-        },
-      ]);
-    mocks.refreshProviderInventory.mockRejectedValueOnce(
-      new Error("refresh unavailable"),
-    );
-
-    const { result } = renderHook(() => useCredentials());
-    await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.configuredIds.has("chatgpt_codex")).toBe(false);
-
-    await act(async () => {
-      await result.current.completeNativeSetup("chatgpt_codex");
+    expect(mocks.invalidateProvider).toHaveBeenCalledWith("chatgpt_codex");
+    expect(mocks.refreshProviderModels).toHaveBeenCalledWith("chatgpt_codex", {
+      force: true,
     });
-
-    expect(mocks.refreshProviderInventory).toHaveBeenCalledWith([
-      "chatgpt_codex",
-    ]);
     expect(result.current.configuredIds.has("chatgpt_codex")).toBe(true);
-    expect(mocks.syncProviderInventory).toHaveBeenCalledWith(
-      ["chatgpt_codex"],
-      expect.objectContaining({
-        initialRefresh: undefined,
-      }),
-    );
   });
 });

@@ -34,13 +34,8 @@ import type {
   ModelOption,
 } from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import {
-  getProviderInventory,
-  getSupportedRawModelProviderIds,
-} from "@/features/providers/api/inventory";
-import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
+import { useProviderModels } from "@/features/providers/hooks/useProviderModels";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -198,10 +193,11 @@ export function GlobalComposerPill({
   const { t } = useTranslation("chat");
   const selectedProvider = useAgentStore((state) => state.selectedProvider);
   const projects = useProjectStore((state) => state.projects);
-  const { getModelsForAgent } = useProviderInventory();
-  const mergeInventoryEntries = useProviderInventoryStore(
-    (state) => state.mergeEntries,
-  );
+  const {
+    getModelsForAgent,
+    refreshAllModelProviders,
+    modelCacheRefreshProviderIds,
+  } = useProviderModels();
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
@@ -501,27 +497,15 @@ export function GlobalComposerPill({
       return;
     }
 
-    let cancelled = false;
-    void (async () => {
-      try {
-        const entries = await getProviderInventory(undefined, {
-          rawSupportedModelsProviderIds: getSupportedRawModelProviderIds(),
-        });
-        if (!cancelled) {
-          mergeInventoryEntries(entries);
-        }
-      } catch (error) {
+    void refreshAllModelProviders(modelCacheRefreshProviderIds).catch(
+      (error) => {
         console.error(
-          "Failed to sync provider inventory from global composer:",
+          "Failed to refresh provider models from global composer:",
           error,
         );
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [modelPickerOpen, mergeInventoryEntries]);
+      },
+    );
+  }, [modelCacheRefreshProviderIds, modelPickerOpen, refreshAllModelProviders]);
 
   useEffect(() => {
     if (selectedAgentId !== "goose") {

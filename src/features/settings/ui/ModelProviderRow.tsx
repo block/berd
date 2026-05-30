@@ -37,7 +37,7 @@ import {
 } from "./modelProviderHelpers";
 import {
   ConnectedFieldsPanel,
-  InventorySyncMessage,
+  ModelRefreshMessage,
   SetupFieldsPanel,
 } from "./ModelProviderPanels";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
@@ -58,8 +58,8 @@ interface ModelProviderRowProps {
     result?: ProviderConfigChangeResponse,
   ) => Promise<void>;
   saving?: boolean;
-  inventorySyncing?: boolean;
-  inventoryWarning?: string | null;
+  modelSyncing?: boolean;
+  modelWarning?: string | null;
 }
 
 export function ModelProviderRow({
@@ -69,8 +69,8 @@ export function ModelProviderRow({
   onRemoveConfig,
   onCompleteNativeSetup,
   saving = false,
-  inventorySyncing = false,
-  inventoryWarning = null,
+  modelSyncing = false,
+  modelWarning = null,
 }: ModelProviderRowProps) {
   const { t } = useTranslation("settings");
   const [expanded, setExpanded] = useState(false);
@@ -386,10 +386,7 @@ export function ModelProviderRow({
               <span>{t("providers.waitingForSignIn")}</span>
             </div>
           ) : null}
-          <InventorySyncMessage
-            syncing={inventorySyncing}
-            warning={inventoryWarning}
-          />
+          <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
           <ProviderSetupOutput lines={setupOutput} />
           {setupError ? (
             <p className="text-xs text-destructive">{setupError}</p>
@@ -407,8 +404,8 @@ export function ModelProviderRow({
           editingKey={editingKey}
           draftValues={draftValues}
           saving={saving}
-          inventorySyncing={inventorySyncing}
-          inventoryWarning={inventoryWarning}
+          modelSyncing={modelSyncing}
+          modelWarning={modelWarning}
           showSavedState={showSavedState}
           error={error}
           setupMessage={setupMessage}
@@ -429,8 +426,8 @@ export function ModelProviderRow({
           fieldValueMap={fieldValueMap}
           draftValues={draftValues}
           saving={saving}
-          inventorySyncing={inventorySyncing}
-          inventoryWarning={inventoryWarning}
+          modelSyncing={modelSyncing}
+          modelWarning={modelWarning}
           showSavedState={showSavedState}
           error={error}
           setupMethod={provider.setupMethod}
@@ -450,10 +447,7 @@ export function ModelProviderRow({
         className="focus-override mx-3 space-y-2 rounded-b-lg border-x border-b px-3 py-3 outline-none"
       >
         {renderSetupMessage(setupMessage)}
-        <InventorySyncMessage
-          syncing={inventorySyncing}
-          warning={inventoryWarning}
-        />
+        <ModelRefreshMessage syncing={modelSyncing} warning={modelWarning} />
       </div>
     );
   }
@@ -484,7 +478,7 @@ export function ModelProviderRow({
         {isConnected ? (
           <IconCheck className="size-4 flex-shrink-0 text-success" />
         ) : null}
-        {inventorySyncing ? (
+        {modelSyncing ? (
           <Spinner className="size-3.5 flex-shrink-0 text-primary" />
         ) : null}
         {!isConnected && authenticating ? (

@@ -112,7 +112,7 @@
     "readOnlyFile": "This agent is loaded from a file. You can review it here, but editing is disabled.",
     "saveFailed": "Failed to save agent.",
     "savedModelUnavailable": "{{model}} (saved, unavailable)",
-    "savedModelUnavailableHelp": "This agent uses a saved model that is not in the current provider inventory.",
+    "savedModelUnavailableHelp": "This agent uses a saved model that is not in the current provider model list.",
     "saving": "Saving...",
     "systemPrompt": "What do you want this agent to do?",
     "systemPromptPlaceholder": "Describe the agent's goal and instructions",

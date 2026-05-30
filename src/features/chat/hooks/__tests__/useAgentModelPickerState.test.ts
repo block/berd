@@ -3,51 +3,50 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useAgentModelPickerState } from "../useAgentModelPickerState";
 
-const mockUseProviderInventory = vi.fn();
+const mockUseProviderModels = vi.fn();
+const mockRefreshAgentProviderStatus = vi.fn();
+const mockUseAgentProviderStatus = vi.fn();
 
-vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
-  useProviderInventory: () => mockUseProviderInventory(),
+vi.mock("@/features/providers/hooks/useProviderModels", () => ({
+  useProviderModels: () => mockUseProviderModels(),
+}));
+
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => mockUseAgentProviderStatus(),
 }));
 
 describe("useAgentModelPickerState", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     useProviderCatalogStore.getState().reset();
+    mockUseProviderModels.mockReturnValue({
+      configuredModelProviderIds: [],
+      modelCacheRefreshProviderIds: [],
+      getModelsForAgent: () => [],
+      refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+      isRefreshingProvider: () => false,
+      getError: () => null,
+    });
+    mockRefreshAgentProviderStatus.mockResolvedValue(undefined);
+    mockUseAgentProviderStatus.mockReturnValue({
+      readyAgentIds: new Set([
+        "goose",
+        "codex-acp",
+        "cursor-agent",
+        "claude-acp",
+      ]),
+      loading: false,
+      refresh: mockRefreshAgentProviderStatus,
+    });
   });
 
-  it("switches to goose when the current provider is goose-backed", () => {
+  it("switches to goose when requested", () => {
     const onProviderSelected = vi.fn();
-
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map([
-        [
-          "anthropic",
-          {
-            providerId: "anthropic",
-            configured: true,
-            refreshing: false,
-            models: [],
-          },
-        ],
-      ]),
-      getEntry: (providerId: string) =>
-        providerId === "anthropic"
-          ? {
-              providerId: "anthropic",
-              configured: true,
-              refreshing: false,
-              models: [],
-            }
-          : undefined,
-      configuredModelProviderEntries: [],
-      getModelsForAgent: () => [],
-      loading: false,
-    });
 
     const { result } = renderHook(() =>
       useAgentModelPickerState({
-        providers: [{ id: "anthropic", label: "Anthropic" }],
-        selectedProvider: "anthropic",
+        providers: [{ id: "goose", label: "Goose" }],
+        selectedProvider: "databricks_v2",
         onProviderSelected,
       }),
     );
@@ -61,14 +60,6 @@ describe("useAgentModelPickerState", () => {
 
   it("treats goose as a no-op only when goose is already selected", () => {
     const onProviderSelected = vi.fn();
-
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map(),
-      getEntry: () => undefined,
-      configuredModelProviderEntries: [],
-      getModelsForAgent: () => [],
-      loading: false,
-    });
 
     const { result } = renderHook(() =>
       useAgentModelPickerState({
@@ -87,28 +78,28 @@ describe("useAgentModelPickerState", () => {
 
   it("passes the selected model provider through for goose model picks", () => {
     const onModelSelected = vi.fn();
-
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map(),
-      getEntry: () => undefined,
-      configuredModelProviderEntries: [],
+    mockUseProviderModels.mockReturnValue({
+      configuredModelProviderIds: ["databricks_v2"],
+      modelCacheRefreshProviderIds: ["databricks_v2"],
       getModelsForAgent: () => [
         {
           id: "claude-sonnet-4",
           name: "claude-sonnet-4",
           displayName: "Claude Sonnet 4",
-          providerId: "anthropic",
-          providerName: "Anthropic",
+          providerId: "databricks_v2",
+          providerName: "Databricks AI Gateway",
           recommended: true,
         },
       ],
-      loading: false,
+      refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+      isRefreshingProvider: () => false,
+      getError: () => null,
     });
 
     const { result } = renderHook(() =>
       useAgentModelPickerState({
         providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "openai",
+        selectedProvider: "databricks_v2",
         onProviderSelected: vi.fn(),
         onModelSelected,
       }),
@@ -123,8 +114,8 @@ describe("useAgentModelPickerState", () => {
       name: "claude-sonnet-4",
       displayName: "Claude Sonnet 4",
       provider: undefined,
-      providerId: "anthropic",
-      providerName: "Anthropic",
+      providerId: "databricks_v2",
+      providerName: "Databricks AI Gateway",
       recommended: true,
     });
   });
@@ -139,10 +130,9 @@ describe("useAgentModelPickerState", () => {
       providerName: "Custom Ollama",
     };
 
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map(),
-      getEntry: () => undefined,
-      configuredModelProviderEntries: [],
+    mockUseProviderModels.mockReturnValue({
+      configuredModelProviderIds: ["ollama", "custom_ollama"],
+      modelCacheRefreshProviderIds: ["ollama", "custom_ollama"],
       getModelsForAgent: () => [
         {
           id: "llama3.2",
@@ -153,7 +143,9 @@ describe("useAgentModelPickerState", () => {
         },
         customModel,
       ],
-      loading: false,
+      refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+      isRefreshingProvider: () => false,
+      getError: () => null,
     });
 
     const { result } = renderHook(() =>
@@ -180,60 +172,33 @@ describe("useAgentModelPickerState", () => {
     });
   });
 
-  it("routes unresolved model providers through Goose before the catalog loads", () => {
+  it("routes model providers through Goose", () => {
     const getModelsForAgent = vi.fn((agentId: string) =>
       agentId === "goose"
         ? [
             {
               id: "gpt-5.4",
               name: "GPT-5.4",
-              providerId: "openai",
-              providerName: "OpenAI",
-            },
-            {
-              id: "claude-sonnet-4",
-              name: "Claude Sonnet 4",
-              providerId: "anthropic",
-              providerName: "Anthropic",
+              providerId: "databricks_v2",
+              providerName: "Databricks AI Gateway",
             },
           ]
         : [],
     );
 
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map([
-        [
-          "openai",
-          {
-            providerId: "openai",
-            providerName: "OpenAI",
-            category: "model",
-            configured: true,
-            refreshing: false,
-            models: [],
-          },
-        ],
-      ]),
-      getEntry: (providerId: string) =>
-        providerId === "openai"
-          ? {
-              providerId: "openai",
-              providerName: "OpenAI",
-              category: "model",
-              configured: true,
-              refreshing: false,
-              models: [],
-            }
-          : undefined,
-      configuredModelProviderEntries: [],
+    mockUseProviderModels.mockReturnValue({
+      configuredModelProviderIds: ["databricks_v2"],
+      modelCacheRefreshProviderIds: ["databricks_v2"],
       getModelsForAgent,
-      loading: false,
+      refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+      isRefreshingProvider: () => false,
+      getError: () => null,
     });
 
     const { result } = renderHook(() =>
       useAgentModelPickerState({
         providers: [{ id: "goose", label: "Goose" }],
-        selectedProvider: "openai",
+        selectedProvider: "databricks_v2",
         onProviderSelected: vi.fn(),
       }),
     );
@@ -242,10 +207,10 @@ describe("useAgentModelPickerState", () => {
     expect(getModelsForAgent).toHaveBeenCalledWith("goose");
     expect(
       result.current.availableModels.map((model) => model.providerId),
-    ).toEqual(["openai", "anthropic"]);
+    ).toEqual(["databricks_v2"]);
   });
 
-  it("preserves unresolved agent providers before the catalog loads when inventory identifies an agent", () => {
+  it("preserves curated agent providers", () => {
     const getModelsForAgent = vi.fn(() => [
       {
         id: "current",
@@ -255,34 +220,13 @@ describe("useAgentModelPickerState", () => {
       },
     ]);
 
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map([
-        [
-          "codex-acp",
-          {
-            providerId: "codex-acp",
-            providerName: "Codex",
-            category: "agent",
-            configured: true,
-            refreshing: false,
-            models: [],
-          },
-        ],
-      ]),
-      getEntry: (providerId: string) =>
-        providerId === "codex-acp"
-          ? {
-              providerId: "codex-acp",
-              providerName: "Codex",
-              category: "agent",
-              configured: true,
-              refreshing: false,
-              models: [],
-            }
-          : undefined,
-      configuredModelProviderEntries: [],
+    mockUseProviderModels.mockReturnValue({
+      configuredModelProviderIds: [],
+      modelCacheRefreshProviderIds: ["codex-acp"],
       getModelsForAgent,
-      loading: false,
+      refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+      isRefreshingProvider: () => false,
+      getError: () => null,
     });
 
     const { result } = renderHook(() =>
@@ -297,55 +241,12 @@ describe("useAgentModelPickerState", () => {
     expect(getModelsForAgent).toHaveBeenCalledWith("codex-acp");
   });
 
-  it("shows configured inventory agent providers before the catalog loads", () => {
-    mockUseProviderInventory.mockReturnValue({
-      entries: new Map([
-        [
-          "codex-acp",
-          {
-            providerId: "codex-acp",
-            providerName: "Codex",
-            category: "agent",
-            configured: true,
-            refreshing: false,
-            models: [],
-          },
-        ],
-        [
-          "cursor-agent",
-          {
-            providerId: "cursor-agent",
-            providerName: "Cursor",
-            category: "agent",
-            configured: true,
-            refreshing: false,
-            models: [],
-          },
-        ],
-        [
-          "unconfigured-agent",
-          {
-            providerId: "unconfigured-agent",
-            providerName: "Unconfigured",
-            category: "agent",
-            configured: false,
-            refreshing: false,
-            models: [],
-          },
-        ],
-      ]),
-      getEntry: () => undefined,
-      configuredModelProviderEntries: [],
-      getModelsForAgent: () => [],
-      loading: false,
-    });
-
+  it("shows curated agent providers", () => {
     const { result } = renderHook(() =>
       useAgentModelPickerState({
         providers: [
           { id: "codex-acp", label: "Codex" },
           { id: "cursor-agent", label: "Cursor" },
-          { id: "unconfigured-agent", label: "Unconfigured" },
         ],
         selectedProvider: "goose",
         onProviderSelected: vi.fn(),
@@ -355,7 +256,31 @@ describe("useAgentModelPickerState", () => {
     expect(result.current.pickerAgents).toEqual([
       { id: "goose", label: "Goose" },
       { id: "codex-acp", label: "Codex" },
-      { id: "cursor-agent", label: "Cursor" },
+      { id: "cursor-agent", label: "Cursor Agent" },
+    ]);
+  });
+
+  it("hides curated agents that are not ready", () => {
+    mockUseAgentProviderStatus.mockReturnValue({
+      readyAgentIds: new Set(["goose", "cursor-agent"]),
+      loading: false,
+      refresh: mockRefreshAgentProviderStatus,
+    });
+
+    const { result } = renderHook(() =>
+      useAgentModelPickerState({
+        providers: [
+          { id: "codex-acp", label: "Codex" },
+          { id: "cursor-agent", label: "Cursor" },
+        ],
+        selectedProvider: "goose",
+        onProviderSelected: vi.fn(),
+      }),
+    );
+
+    expect(result.current.pickerAgents).toEqual([
+      { id: "goose", label: "Goose" },
+      { id: "cursor-agent", label: "Cursor Agent" },
     ]);
   });
 });

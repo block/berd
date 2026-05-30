@@ -1,11 +1,11 @@
 import { useState, useEffect, useCallback } from "react";
-import { checkAgentAuth } from "@/features/providers/api/agentSetup";
-import { getProviderInventory } from "@/features/providers/api/inventory";
+import {
+  checkAgentAuth,
+  checkAgentInstalled,
+} from "@/features/providers/api/agentSetup";
 import { getAgentProvidersFromEntries } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 
 interface UseAgentProviderStatusReturn {
   readyAgentIds: Set<string>;
@@ -15,7 +15,6 @@ interface UseAgentProviderStatusReturn {
 
 async function checkAgentProviderReady(
   provider: ProviderCatalogEntry,
-  inventoryEntries: Map<string, ProviderInventoryEntryDto>,
 ): Promise<boolean> {
   if (provider.category !== "agent") {
     return false;
@@ -25,14 +24,14 @@ async function checkAgentProviderReady(
     return true;
   }
 
-  const inventoryEntry = inventoryEntries.get(provider.id);
-  const installed =
-    inventoryEntry?.category === "agent" && inventoryEntry.configured;
-  if (!installed) {
-    return false;
-  }
-
   try {
+    if (provider.binaryName) {
+      const installed = await checkAgentInstalled(provider.id);
+      if (!installed) {
+        return false;
+      }
+    }
+
     if (provider.supportsAuthStatus) {
       return checkAgentAuth(provider.id);
     }
@@ -51,20 +50,13 @@ async function checkAgentProviderReady(
 
 const INITIAL_READY_AGENTS = new Set<string>(["goose"]);
 
-function providersWithInventory(agents: ProviderCatalogEntry[]): string[] {
-  return agents
-    .filter((provider) => provider.setupMethod !== "none")
-    .map((provider) => provider.id);
-}
-
 async function checkReadyAgentIds(
   agents: ProviderCatalogEntry[],
-  inventoryEntries: Map<string, ProviderInventoryEntryDto>,
 ): Promise<Set<string>> {
   const readiness = await Promise.all(
     agents.map(async (provider) => ({
       id: provider.id,
-      isReady: await checkAgentProviderReady(provider, inventoryEntries),
+      isReady: await checkAgentProviderReady(provider),
     })),
   );
   const readyIds = readiness
@@ -75,10 +67,6 @@ async function checkReadyAgentIds(
 
 export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
-  const inventoryEntries = useProviderInventoryStore((state) => state.entries);
-  const mergeInventoryEntries = useProviderInventoryStore(
-    (state) => state.mergeEntries,
-  );
   const [readyAgentIds, setReadyAgentIds] =
     useState<Set<string>>(INITIAL_READY_AGENTS);
   const [loading, setLoading] = useState(true);
@@ -87,7 +75,7 @@ export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
     let cancelled = false;
     const agents = getAgentProvidersFromEntries(catalogEntries);
     setLoading(true);
-    checkReadyAgentIds(agents, inventoryEntries)
+    checkReadyAgentIds(agents)
       .then((nextReadyAgentIds) => {
         if (!cancelled) {
           setReadyAgentIds(nextReadyAgentIds);
@@ -102,37 +90,21 @@ export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
     return () => {
       cancelled = true;
     };
-  }, [catalogEntries, inventoryEntries]);
+  }, [catalogEntries]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
       const catalogEntries = useProviderCatalogStore.getState().entries;
       const agents = getAgentProvidersFromEntries(catalogEntries);
-      const entries = await getProviderInventory(
-        providersWithInventory(agents),
-        {
-          includeRawSupportedModels: false,
-        },
-      );
-      const nextInventoryEntries = new Map(
-        useProviderInventoryStore.getState().entries,
-      );
-      for (const entry of entries) {
-        nextInventoryEntries.set(entry.providerId, entry);
-      }
-      mergeInventoryEntries(entries);
-      const nextReadyAgentIds = await checkReadyAgentIds(
-        agents,
-        nextInventoryEntries,
-      );
+      const nextReadyAgentIds = await checkReadyAgentIds(agents);
       if (catalogEntries === useProviderCatalogStore.getState().entries) {
         setReadyAgentIds(nextReadyAgentIds);
       }
     } finally {
       setLoading(false);
     }
-  }, [mergeInventoryEntries]);
+  }, []);
 
   return {
     readyAgentIds,

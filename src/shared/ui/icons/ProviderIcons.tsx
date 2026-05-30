@@ -444,6 +444,7 @@ const PROVIDER_ICON_MAP: Record<string, (className: string) => ReactNode> = {
   bedrock: (className) => <BedrockIcon className={className} />,
   aws_bedrock: (className) => <BedrockIcon className={className} />,
   databricks: (className) => <DatabricksIcon className={className} />,
+  databricks_v2: (className) => <DatabricksIcon className={className} />,
   gcp_vertex_ai: (className) => <VertexAIIcon className={className} />,
   ollama: (className) => <OllamaIcon className={className} />,
   openrouter: (className) => <OpenRouterIcon className={className} />,

@@ -12,7 +12,7 @@ export interface SessionModelPreference {
   modelName?: string;
 }
 
-interface ProviderInventoryEntryLike {
+interface ProviderModelsLike {
   models: Array<{
     id: string;
   }>;
@@ -59,13 +59,17 @@ export function resolveSessionModelPreference({
 
 export function sanitizeSessionModelPreference(
   preference: SessionModelPreference,
-  inventoryEntry?: ProviderInventoryEntryLike | null,
+  providerModels?: ProviderModelsLike | null,
 ): SessionModelPreference {
-  if (!preference.modelId || !inventoryEntry) {
+  if (!preference.modelId || !providerModels) {
     return preference;
   }
 
-  if (inventoryEntry.models.some((model) => model.id === preference.modelId)) {
+  if (providerModels.models.length === 0) {
+    return preference;
+  }
+
+  if (providerModels.models.some((model) => model.id === preference.modelId)) {
     return preference;
   }
 

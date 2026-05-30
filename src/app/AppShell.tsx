@@ -67,7 +67,6 @@ import {
 } from "@/features/chat/hooks/replayBuffer";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import type { SkillInfo } from "@/features/skills/api/skills";
@@ -341,7 +340,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     openCreateProjectDialog,
     openEditProjectDialog,
   } = useProjectDialog({ onProjectCreated: refreshProjectsAfterDialogSave });
-  const providerInventoryEntries = useProviderInventoryStore((s) => s.entries);
   const startup = useAppStartup();
   const startupReady = startup.ready && !startup.error;
   const migrationGate = useMigrationGate(startupReady);
@@ -565,7 +563,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         const sessionModelPreference =
           await resolveSupportedSessionModelPreference(
             providerAtStart,
-            providerInventoryEntries,
+            undefined,
           );
         const project = homeSession.projectId
           ? (projects.find(
@@ -586,7 +584,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           homeSession;
         const liveHomeSession = readLiveHomeSession();
         // Once a provider+model is set, don't let stored preferences re-seed
-        // on inventory refreshes — that would clobber explicit user picks.
+        // on model refreshes — that would clobber explicit user picks.
         if (liveHomeSession.providerId && liveHomeSession.modelId) {
           const result = await applyLatestSessionConfig({
             sessionId: homeSession.id,
@@ -642,7 +640,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       const sessionModelPreference =
         await resolveSupportedSessionModelPreference(
           providerAtStart,
-          providerInventoryEntries,
+          undefined,
         );
       const resolvedProviderId = resolveProviderAfterAwait(
         providerAtStart,
@@ -677,7 +675,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     createSession,
     hasHydratedSessions,
     homeSession,
-    providerInventoryEntries,
     projects,
     sessionsLoading,
     patchSession,
@@ -786,7 +783,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       const sessionModelPreference =
         await resolveSupportedSessionModelPreference(
           providerId,
-          providerInventoryEntries,
+          undefined,
           project?.preferredModel ?? undefined,
         );
       const sessionState = useChatSessionStore.getState();
@@ -882,7 +879,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       createSession,
       createDraftSession,
       patchSession,
-      providerInventoryEntries,
       setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
@@ -967,7 +963,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         session,
         sessionModelPreference: resolveSupportedSessionModelPreference(
           providerId,
-          providerInventoryEntries,
+          undefined,
           project.preferredModel ?? undefined,
         ),
         workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
@@ -979,7 +975,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       selectedProvider,
       createDraftSession,
       patchSession,
-      providerInventoryEntries,
       setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,

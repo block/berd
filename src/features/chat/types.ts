@@ -12,6 +12,10 @@ export interface ModelOption {
   contextLimit?: number | null;
   /** Whether this model should appear in the compact recommended picker. */
   recommended?: boolean;
+  /** Whether this model should show the primary recommendation marker. */
+  featured?: boolean;
+  /** Suggested display order for model picker rows. */
+  sortOrder?: number;
 }
 
 export interface ProjectOption {

@@ -39,13 +39,6 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
   }),
 }));
 
-vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
-  useProviderInventory: () => ({
-    getEntry: vi.fn(() => undefined),
-    getModelsForAgent: vi.fn(() => []),
-  }),
-}));
-
 import { AgentBuilderRail } from "../AgentBuilderRail";
 import { usePersonaSource } from "@/features/agents/hooks/usePersonaSource";
 import {

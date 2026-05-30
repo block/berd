@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useRef } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
-import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
-import { useProviderInventoryStore } from "@/features/providers/stores/providerInventoryStore";
+import { useProviderModels } from "@/features/providers/hooks/useProviderModels";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import {
   getCatalogEntryFromEntries,
   resolveAgentProviderCatalogIdStrictFromEntries,
@@ -28,12 +28,15 @@ export function useAgentModelPickerState({
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
   const {
-    entries: providerInventoryEntries,
-    getEntry: getProviderInventoryEntry,
-    configuredModelProviderEntries,
+    configuredModelProviderIds,
+    modelCacheRefreshProviderIds,
     getModelsForAgent,
-    loading: providerInventoryLoading,
-  } = useProviderInventory();
+    refreshAllModelProviders,
+    isRefreshingProvider,
+    getError,
+  } = useProviderModels();
+  const { readyAgentIds, refresh: refreshAgentProviderStatus } =
+    useAgentProviderStatus();
 
   const selectedAgentId = useMemo(
     () =>
@@ -41,16 +44,9 @@ export function useAgentModelPickerState({
         catalogEntries,
         catalogLoaded,
         selectedProvider,
-        getProviderInventoryEntry,
       }),
-    [
-      catalogEntries,
-      catalogLoaded,
-      getProviderInventoryEntry,
-      selectedProvider,
-    ],
+    [catalogEntries, catalogLoaded, selectedProvider],
   );
-  const selectedProviderInventory = getProviderInventoryEntry(selectedAgentId);
 
   const pickerAgents = useMemo(() => {
     const visible = new Map<string, { id: string; label: string }>();
@@ -67,17 +63,8 @@ export function useAgentModelPickerState({
         resolveAgentProviderCatalogIdStrictFromEntries(
           catalogEntries,
           provider.id,
-        ) ??
-        (!catalogLoaded &&
-        providerInventoryEntries.get(provider.id)?.category === "agent"
-          ? provider.id
-          : null);
-      if (!agentId || agentId === "goose") {
-        continue;
-      }
-
-      const inventoryEntry = providerInventoryEntries.get(agentId);
-      if (!inventoryEntry?.configured && agentId !== selectedAgentId) {
+        ) ?? (!catalogLoaded ? provider.id : null);
+      if (!agentId || agentId === "goose" || !readyAgentIds.has(agentId)) {
         continue;
       }
 
@@ -89,7 +76,7 @@ export function useAgentModelPickerState({
       });
     }
 
-    if (!visible.has(selectedAgentId)) {
+    if (!visible.has(selectedAgentId) && readyAgentIds.has(selectedAgentId)) {
       visible.set(selectedAgentId, {
         id: selectedAgentId,
         label:
@@ -102,8 +89,8 @@ export function useAgentModelPickerState({
   }, [
     catalogEntries,
     catalogLoaded,
-    providerInventoryEntries,
     providers,
+    readyAgentIds,
     selectedAgentId,
   ]);
 
@@ -112,32 +99,21 @@ export function useAgentModelPickerState({
     [getModelsForAgent, selectedAgentId],
   );
 
+  const providerIdsForSelectedAgent =
+    selectedAgentId === "goose"
+      ? configuredModelProviderIds
+      : [selectedAgentId];
+
   const modelsLoading = useMemo(() => {
-    // Show loading only when we have no models to display yet.
-    // If cached models exist, show them immediately — a background refresh
-    // will update the list when it completes.
     if (availableModels.length > 0) {
       return false;
     }
 
-    if (providerInventoryLoading) {
-      return true;
-    }
-
-    if (selectedAgentId === "goose") {
-      return (
-        configuredModelProviderEntries.length > 0 &&
-        configuredModelProviderEntries.some((entry) => entry.refreshing)
-      );
-    }
-
-    return selectedProviderInventory?.refreshing === true;
+    return providerIdsForSelectedAgent.some(isRefreshingProvider);
   }, [
     availableModels.length,
-    configuredModelProviderEntries,
-    providerInventoryLoading,
-    selectedAgentId,
-    selectedProviderInventory?.refreshing,
+    isRefreshingProvider,
+    providerIdsForSelectedAgent,
   ]);
 
   const modelStatusMessage = useMemo(() => {
@@ -145,29 +121,11 @@ export function useAgentModelPickerState({
       return null;
     }
 
-    if (selectedAgentId === "goose") {
-      const entryWithHint = configuredModelProviderEntries.find(
-        (entry) => entry.modelSelectionHint || entry.lastRefreshError,
-      );
-      return (
-        entryWithHint?.modelSelectionHint ??
-        entryWithHint?.lastRefreshError ??
-        null
-      );
-    }
-
     return (
-      selectedProviderInventory?.modelSelectionHint ??
-      selectedProviderInventory?.lastRefreshError ??
+      providerIdsForSelectedAgent.map(getError).find((message) => message) ??
       null
     );
-  }, [
-    availableModels.length,
-    configuredModelProviderEntries,
-    selectedAgentId,
-    selectedProviderInventory?.modelSelectionHint,
-    selectedProviderInventory?.lastRefreshError,
-  ]);
+  }, [availableModels.length, getError, providerIdsForSelectedAgent]);
 
   const handleProviderChange = useCallback(
     (providerId: string) => {
@@ -201,21 +159,23 @@ export function useAgentModelPickerState({
 
   const refreshingRef = useRef(false);
   const handlePickerOpen = useCallback(() => {
-    if (refreshingRef.current || useProviderInventoryStore.getState().loading) {
+    if (refreshingRef.current) {
       return;
     }
     refreshingRef.current = true;
-    import("@/features/providers/api/inventory")
-      .then(({ backgroundRefreshInventory }) =>
-        backgroundRefreshInventory(useProviderInventoryStore.getState()),
-      )
-      .catch((err) =>
-        console.error("Failed to background-refresh inventory:", err),
-      )
+    Promise.all([
+      refreshAgentProviderStatus(),
+      refreshAllModelProviders(modelCacheRefreshProviderIds),
+    ])
+      .catch((err) => console.error("Failed to refresh picker data:", err))
       .finally(() => {
         refreshingRef.current = false;
       });
-  }, []);
+  }, [
+    modelCacheRefreshProviderIds,
+    refreshAgentProviderStatus,
+    refreshAllModelProviders,
+  ]);
 
   return {
     selectedAgentId,

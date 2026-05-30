@@ -67,12 +67,22 @@ describe("provider catalog selectors", () => {
     useProviderCatalogStore.getState().reset();
   });
 
-  it("returns the Goose fallback before the cache is loaded", () => {
-    expect(getCatalogEntry("ollama")).toBeUndefined();
+  it("returns the curated providers by default", () => {
+    expect(getCatalogEntry("databricks_v2")?.displayName).toBe(
+      "Databricks AI Gateway",
+    );
     expect(getAgentProviders().map((provider) => provider.id)).toEqual([
       "goose",
+      "claude-acp",
+      "codex-acp",
+      "copilot-acp",
+      "amp-acp",
+      "cursor-agent",
+      "pi-acp",
     ]);
-    expect(getModelProviders()).toEqual([]);
+    expect(getModelProviders().map((provider) => provider.id)).toEqual([
+      "databricks_v2",
+    ]);
   });
 
   it("uses loaded cache entries for provider selectors", () => {

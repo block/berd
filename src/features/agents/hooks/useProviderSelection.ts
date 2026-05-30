@@ -1,12 +1,42 @@
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useAgentStore } from "../stores/agentStore";
 import { selectSelectedProvider } from "../stores/agentSelectors";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
+import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
+import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 
 export function useProviderSelection() {
-  const providers = useAgentStore((s) => s.providers);
+  const allProviders = useAgentStore((s) => s.providers);
   const providersLoading = useAgentStore((s) => s.providersLoading);
-  const selectedProvider = useAgentStore(selectSelectedProvider);
+  const storedSelectedProvider = useAgentStore(selectSelectedProvider);
   const storeSetSelectedProvider = useAgentStore((s) => s.setSelectedProvider);
+  const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const { readyAgentIds, loading: readyAgentsLoading } =
+    useAgentProviderStatus();
+
+  const providers = useMemo(
+    () =>
+      allProviders.filter((provider) => {
+        const agentId =
+          resolveAgentProviderCatalogIdStrictFromEntries(
+            catalogEntries,
+            provider.id,
+          ) ?? provider.id;
+        return readyAgentIds.has(agentId);
+      }),
+    [allProviders, catalogEntries, readyAgentIds],
+  );
+
+  const selectedProvider = useMemo(() => {
+    const selectedAgentId = resolveAgentProviderCatalogIdStrictFromEntries(
+      catalogEntries,
+      storedSelectedProvider,
+    );
+    if (selectedAgentId && !readyAgentIds.has(selectedAgentId)) {
+      return "goose";
+    }
+    return storedSelectedProvider;
+  }, [catalogEntries, readyAgentIds, storedSelectedProvider]);
 
   const setSelectedProvider = useCallback(
     (providerId: string) => {
@@ -24,7 +54,7 @@ export function useProviderSelection() {
 
   return {
     providers,
-    providersLoading,
+    providersLoading: providersLoading || readyAgentsLoading,
     selectedProvider,
     setSelectedProvider,
     setSelectedProviderWithoutPersist,

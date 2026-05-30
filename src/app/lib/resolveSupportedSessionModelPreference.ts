@@ -1,13 +1,13 @@
-import type { ProviderInventoryEntryDto } from "@aaif/goose-sdk";
 import {
   resolveSessionModelPreference,
   sanitizeSessionModelPreference,
   type SessionModelPreference,
 } from "@/features/chat/lib/sessionModelPreference";
+import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
 
 export async function resolveSupportedSessionModelPreference(
   providerId: string,
-  inventoryEntries: Map<string, ProviderInventoryEntryDto>,
+  _unusedInventoryEntries: unknown,
   preferredModel?: string,
 ): Promise<SessionModelPreference> {
   const sessionModelPreference = resolveSessionModelPreference({
@@ -19,13 +19,9 @@ export async function resolveSupportedSessionModelPreference(
     return sessionModelPreference;
   }
 
-  const inventoryEntry = inventoryEntries.get(
-    sessionModelPreference.providerId,
-  );
+  const models = useProviderModelCacheStore
+    .getState()
+    .getModelsForProvider(sessionModelPreference.providerId);
 
-  if (!inventoryEntry || inventoryEntry.models.length === 0) {
-    return sessionModelPreference;
-  }
-
-  return sanitizeSessionModelPreference(sessionModelPreference, inventoryEntry);
+  return sanitizeSessionModelPreference(sessionModelPreference, { models });
 }

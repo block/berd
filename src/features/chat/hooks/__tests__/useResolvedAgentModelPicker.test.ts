@@ -4,15 +4,10 @@ import { useProviderCatalogStore } from "@/features/providers/stores/providerCat
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useResolvedAgentModelPicker } from "../useResolvedAgentModelPicker";
 
-const mockUseProviderInventory = vi.fn();
 const mockUseAgentModelPickerState = vi.fn();
 const mockGetClient = vi.fn();
 const mockAcpSetModel = vi.fn();
 const mockToastError = vi.fn();
-
-vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
-  useProviderInventory: () => mockUseProviderInventory(),
-}));
 
 vi.mock("../useAgentModelPickerState", () => ({
   useAgentModelPickerState: (args: unknown) =>
@@ -84,24 +79,6 @@ describe("useResolvedAgentModelPicker", () => {
     });
     mockAcpSetModel.mockResolvedValue(undefined);
 
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (providerId: string) =>
-        providerId === "codex-acp"
-          ? {
-              providerId: "codex-acp",
-              category: "agent",
-              defaultModel: "gpt-5.4",
-              models: [
-                {
-                  id: "gpt-5.4",
-                  name: "GPT-5.4",
-                  recommended: true,
-                },
-              ],
-            }
-          : undefined,
-    });
-
     mockUseAgentModelPickerState.mockImplementation(
       ({
         onProviderSelected,
@@ -119,134 +96,6 @@ describe("useResolvedAgentModelPicker", () => {
           onProviderSelected(providerId),
         handleModelChange: vi.fn(),
       }),
-    );
-  });
-
-  it("selects the agent default model when switching to a provider without a saved model", () => {
-    const setPendingProviderId = vi.fn();
-    const setPendingModelSelection = vi.fn();
-    const setGlobalSelectedProvider = vi.fn();
-
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "goose",
-        sessionId: null,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId,
-        setPendingModelSelection,
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
-
-    act(() => {
-      result.current.handleProviderChange("codex-acp");
-    });
-
-    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("codex-acp");
-    expect(setPendingProviderId).toHaveBeenCalledWith("codex-acp");
-    expect(setPendingModelSelection).toHaveBeenCalledWith({
-      id: "gpt-5.4",
-      name: "GPT-5.4",
-      providerId: "codex-acp",
-      source: "default",
-    });
-  });
-
-  it("rolls back a provider switch when the selected default model fails to apply", async () => {
-    useChatSessionStore.getState().addSession({
-      id: "session-1",
-      title: "Chat",
-      providerId: "openai",
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
-      createdAt: "2026-04-21T00:00:00.000Z",
-      updatedAt: "2026-04-21T00:00:00.000Z",
-      messageCount: 0,
-    });
-    const setGlobalSelectedProvider = vi.fn();
-    const applySessionModelSelection = vi
-      .fn()
-      .mockRejectedValueOnce(new Error("set model failed"))
-      .mockResolvedValue(true);
-
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "codex-acp", label: "Codex" },
-        ],
-        selectedProvider: "goose",
-        sessionId: "session-1",
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "openai",
-          modelId: "gpt-4o",
-          modelName: "GPT-4o",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn().mockResolvedValue(true),
-        applySessionModelSelection,
-      }),
-    );
-
-    act(() => {
-      result.current.handleProviderChange("codex-acp");
-    });
-
-    await waitFor(() => {
-      expect(applySessionModelSelection).toHaveBeenCalledTimes(2);
-    });
-    expect(applySessionModelSelection).toHaveBeenNthCalledWith(
-      1,
-      "codex-acp",
-      {
-        id: "gpt-5.4",
-        name: "GPT-5.4",
-        providerId: "codex-acp",
-        source: "default",
-      },
-      expect.any(String),
-    );
-    expect(applySessionModelSelection).toHaveBeenNthCalledWith(
-      2,
-      "openai",
-      {
-        id: "gpt-4o",
-        name: "GPT-4o",
-        providerId: "openai",
-        source: "explicit",
-      },
-      expect.any(String),
-      undefined,
-    );
-    expect(
-      useChatSessionStore.getState().getSession("session-1"),
-    ).toMatchObject({
-      providerId: "openai",
-      modelId: "gpt-4o",
-      modelName: "GPT-4o",
-    });
-    expect(
-      useChatSessionStore.getState().getModelSelectionIntent("session-1"),
-    ).toBeUndefined();
-    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("codex-acp");
-    expect(setGlobalSelectedProvider).toHaveBeenCalledWith("openai");
-    expect(mockToastError).toHaveBeenCalledWith(
-      "Could not switch to GPT-5.4. This chat is still using GPT-4o.",
     );
   });
 
@@ -341,141 +190,6 @@ describe("useResolvedAgentModelPicker", () => {
     expect(setPendingModelSelection).toHaveBeenCalledWith(undefined);
   });
 
-  it("resolves ACP alias defaults to a concrete model when switching agents", () => {
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (providerId: string) =>
-        providerId === "claude-acp"
-          ? {
-              providerId: "claude-acp",
-              defaultModel: "current",
-              models: [
-                {
-                  id: "sonnet",
-                  name: "Claude Sonnet",
-                  recommended: true,
-                },
-                {
-                  id: "opus",
-                  name: "Claude Opus",
-                  recommended: false,
-                },
-              ],
-            }
-          : undefined,
-    });
-
-    const setPendingProviderId = vi.fn();
-    const setPendingModelSelection = vi.fn();
-    const setGlobalSelectedProvider = vi.fn();
-
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "goose",
-        sessionId: null,
-        session: undefined,
-        pendingModelSelection: undefined,
-        setPendingProviderId,
-        setPendingModelSelection,
-        setGlobalSelectedProvider,
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
-
-    act(() => {
-      result.current.handleProviderChange("claude-acp");
-    });
-
-    expect(setPendingModelSelection).toHaveBeenCalledWith({
-      id: "sonnet",
-      name: "Claude Sonnet",
-      providerId: "claude-acp",
-      source: "default",
-    });
-  });
-
-  it("prefers a concrete default model over a session alias like current", () => {
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (providerId: string) =>
-        providerId === "claude-acp"
-          ? {
-              providerId: "claude-acp",
-              defaultModel: "current",
-              models: [
-                {
-                  id: "sonnet",
-                  name: "Claude Sonnet",
-                  recommended: true,
-                },
-              ],
-            }
-          : undefined,
-    });
-
-    mockUseAgentModelPickerState.mockImplementation(
-      ({
-        onProviderSelected,
-      }: {
-        onProviderSelected: (providerId: string) => void;
-      }) => ({
-        pickerAgents: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        availableModels: [
-          {
-            id: "sonnet",
-            name: "Claude Sonnet",
-            recommended: true,
-          },
-        ],
-        modelsLoading: false,
-        modelStatusMessage: null,
-        handleProviderChange: (providerId: string) =>
-          onProviderSelected(providerId),
-        handleModelChange: vi.fn(),
-      }),
-    );
-
-    const { result } = renderHook(() =>
-      useResolvedAgentModelPicker({
-        providers: [
-          { id: "goose", label: "Goose" },
-          { id: "claude-acp", label: "Claude Code" },
-        ],
-        selectedProvider: "claude-acp",
-        sessionId: "session-1",
-        session: {
-          id: "session-1",
-          title: "Chat",
-          providerId: "claude-acp",
-          modelId: "current",
-          modelName: "current",
-          createdAt: "2026-04-21T00:00:00.000Z",
-          updatedAt: "2026-04-21T00:00:00.000Z",
-          messageCount: 0,
-        },
-        pendingModelSelection: undefined,
-        setPendingProviderId: vi.fn(),
-        setPendingModelSelection: vi.fn(),
-        setGlobalSelectedProvider: vi.fn(),
-        prepareSelectedProvider: vi.fn(),
-        applySessionModelSelection: vi.fn().mockResolvedValue(true),
-      }),
-    );
-
-    expect(result.current.effectiveModelSelection).toEqual({
-      id: "sonnet",
-      name: "Claude Sonnet",
-      providerId: "claude-acp",
-      source: "default",
-    });
-  });
-
   it("drops Goose fallback models that are incompatible with a concrete provider", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
@@ -546,7 +260,7 @@ describe("useResolvedAgentModelPicker", () => {
     expect(result.current.effectiveModelSelection).toBeNull();
   });
 
-  it("enforces concrete provider compatibility from inventory before catalog loads", () => {
+  it("enforces concrete provider compatibility before catalog loads", () => {
     useProviderCatalogStore.getState().reset();
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
@@ -558,24 +272,6 @@ describe("useResolvedAgentModelPicker", () => {
         },
       }),
     );
-
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (providerId: string) =>
-        providerId === "openai"
-          ? {
-              providerId: "openai",
-              category: "model",
-              defaultModel: "gpt-5.4",
-              models: [
-                {
-                  id: "gpt-5.4",
-                  name: "GPT-5.4",
-                  recommended: true,
-                },
-              ],
-            }
-          : undefined,
-    });
 
     mockUseAgentModelPickerState.mockImplementation(() => ({
       pickerAgents: [{ id: "goose", label: "Goose" }],
@@ -704,24 +400,6 @@ describe("useResolvedAgentModelPicker", () => {
 
   it("routes unresolved model provider identity through Goose before catalog loads", async () => {
     useProviderCatalogStore.getState().reset();
-
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (providerId: string) =>
-        providerId === "openai"
-          ? {
-              providerId: "openai",
-              category: "model",
-              defaultModel: "gpt-5.4",
-              models: [
-                {
-                  id: "gpt-5.4",
-                  name: "GPT-5.4",
-                  recommended: true,
-                },
-              ],
-            }
-          : undefined,
-    });
 
     mockUseAgentModelPickerState.mockImplementation(
       ({
@@ -887,7 +565,7 @@ describe("useResolvedAgentModelPicker", () => {
     expect(localStorage.getItem("goose:preferredModelsByAgent")).toBeNull();
   });
 
-  it("preserves persisted Claude Code / Opus during empty inventory and catalog", () => {
+  it("preserves persisted Claude Code / Opus during empty models and catalog", () => {
     useProviderCatalogStore.getState().reset();
 
     window.localStorage.setItem(
@@ -900,10 +578,6 @@ describe("useResolvedAgentModelPicker", () => {
         },
       }),
     );
-
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: () => undefined,
-    });
 
     mockUseAgentModelPickerState.mockImplementation(() => ({
       pickerAgents: [{ id: "goose", label: "Goose" }],
@@ -938,7 +612,7 @@ describe("useResolvedAgentModelPicker", () => {
     });
   });
 
-  it("retains selection after validated inventory confirms the agent", () => {
+  it("retains selection after the catalog validates the agent", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
@@ -949,20 +623,6 @@ describe("useResolvedAgentModelPicker", () => {
         },
       }),
     );
-
-    mockUseProviderInventory.mockReturnValue({
-      getEntry: (id: string) =>
-        id === "claude-acp"
-          ? {
-              providerId: "claude-acp",
-              category: "agent",
-              models: [
-                { id: "opus", name: "Claude Opus", recommended: false },
-                { id: "sonnet", name: "Claude Sonnet", recommended: true },
-              ],
-            }
-          : undefined,
-    });
 
     mockUseAgentModelPickerState.mockImplementation(() => ({
       pickerAgents: [

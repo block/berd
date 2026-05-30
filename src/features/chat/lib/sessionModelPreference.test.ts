@@ -76,7 +76,7 @@ describe("resolveSessionModelPreference", () => {
     });
   });
 
-  it("keeps a stored model when the provider inventory still contains it", () => {
+  it("keeps a stored model when the provider model list still contains it", () => {
     expect(
       sanitizeSessionModelPreference(
         {
@@ -95,7 +95,7 @@ describe("resolveSessionModelPreference", () => {
     });
   });
 
-  it("drops a stored model when the provider inventory no longer contains it", () => {
+  it("drops a stored model when the provider model list no longer contains it", () => {
     expect(
       sanitizeSessionModelPreference(
         {

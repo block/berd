@@ -20,7 +20,7 @@ function getModelDisplayName(model: ModelOption) {
   return normalizeLabel(model.displayName) ?? normalizeLabel(model.name);
 }
 
-function findSelectedInventoryModel({
+function findSelectedAvailableModel({
   currentModelId,
   currentModelProviderId,
   availableModels = [],
@@ -57,16 +57,16 @@ export function resolveDisplayModelLabel({
   currentModelProviderId,
   availableModels = [],
 }: ModelDisplayLabelOptions) {
-  const inventoryModel = findSelectedInventoryModel({
+  const availableModel = findSelectedAvailableModel({
     currentModelId,
     currentModelProviderId,
     availableModels,
   });
-  const inventoryLabel = inventoryModel
-    ? getModelDisplayName(inventoryModel)
+  const availableModelLabel = availableModel
+    ? getModelDisplayName(availableModel)
     : null;
-  if (inventoryLabel) {
-    return inventoryLabel;
+  if (availableModelLabel) {
+    return availableModelLabel;
   }
 
   const selectedModelId = normalizeLabel(currentModelId);

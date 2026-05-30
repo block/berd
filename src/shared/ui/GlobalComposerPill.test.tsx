@@ -57,15 +57,12 @@ vi.mock("@/features/chat/hooks/useVoiceDictation", () => ({
   }),
 }));
 
-vi.mock("@/features/providers/hooks/useProviderInventory", () => ({
-  useProviderInventory: () => ({
+vi.mock("@/features/providers/hooks/useProviderModels", () => ({
+  useProviderModels: () => ({
     getModelsForAgent: () => [],
+    refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
+    modelCacheRefreshProviderIds: [],
   }),
-}));
-
-vi.mock("@/features/providers/api/inventory", () => ({
-  getProviderInventory: vi.fn().mockResolvedValue([]),
-  getSupportedRawModelProviderIds: vi.fn(() => new Set()),
 }));
 
 vi.mock("@/shared/api/acpConnection", () => ({

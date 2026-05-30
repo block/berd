@@ -5,7 +5,6 @@ import type {
 } from "@aaif/goose-sdk";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 import { getClient } from "@/shared/api/acpConnection";
-import { clearRawSupportedModelsCache } from "./inventory";
 
 export type ProviderStatus = ProviderConfigStatusDto;
 export type ProviderFieldSaveInput = ProviderConfigFieldUpdate;
@@ -29,7 +28,6 @@ export async function saveProviderConfig(
     providerId,
     fields,
   });
-  clearRawSupportedModelsCache([providerId]);
   return response;
 }
 
@@ -40,7 +38,6 @@ export async function authenticateProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigAuthenticate({
     providerId,
   });
-  clearRawSupportedModelsCache([providerId]);
   return response;
 }
 
@@ -51,7 +48,6 @@ export async function deleteProviderConfig(
   const response = await client.goose.GooseUnstableProvidersConfigDelete({
     providerId,
   });
-  clearRawSupportedModelsCache([providerId]);
   return response;
 }
 

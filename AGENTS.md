@@ -2,11 +2,10 @@
 
 Guidelines for agents working on Goose.
 
-Goose is a standalone Tauri 2 + React 19 desktop app copied from Goose 2. The
-frontend remains a thin client: UI code talks to Goose through `@aaif/goose-sdk`
-and the ACP WebSocket served by `goose serve`. Do not add new Tauri commands or
-renderer-side business logic for data/secrets/providers/sessions; those belong
-in Goose core and should be exposed through typed ACP methods.
+Goose is a standalone Tauri 2 + React 19 desktop. ACP is the main interface
+we use for the actual agent loop - creating and running sessions, finding available
+models, and setting configuration. When available, we work over ACP methods, but the
+UI can handle operations that are not yet in ACP or are client specific.
 
 ## Layout
 

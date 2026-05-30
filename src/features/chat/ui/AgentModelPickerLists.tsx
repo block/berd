@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { IconCheck, IconChevronLeft, IconSearch } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconChevronLeft,
+  IconSearch,
+  IconStar,
+} from "@tabler/icons-react";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { ScrollArea } from "@/shared/ui/scroll-area";
 import {
@@ -60,6 +65,12 @@ function sortModels(
     const rightProvider = getGooseModelProviderLabel(right) ?? "";
     if (leftProvider !== rightProvider) {
       return leftProvider.localeCompare(rightProvider);
+    }
+
+    const leftOrder = left.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    const rightOrder = right.sortOrder ?? Number.MAX_SAFE_INTEGER;
+    if (leftOrder !== rightOrder) {
+      return leftOrder - rightOrder;
     }
 
     return getModelDisplayName(left).localeCompare(getModelDisplayName(right));
@@ -148,6 +159,12 @@ export function RecommendedModelList({
                     {getModelDisplayName(model)}
                   </div>
                 </div>
+                {model.featured ? (
+                  <IconStar
+                    className="size-3 shrink-0 text-muted-foreground/70"
+                    aria-label={t("toolbar.recommended")}
+                  />
+                ) : null}
                 {isSelected ? (
                   <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                 ) : null}
@@ -267,6 +284,12 @@ export function AllModelsList({
                       ) : null}
                     </div>
                   </div>
+                  {model.featured ? (
+                    <IconStar
+                      className="size-3 shrink-0 text-muted-foreground/70"
+                      aria-label={t("toolbar.recommended")}
+                    />
+                  ) : null}
                   {isSelected ? (
                     <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                   ) : null}

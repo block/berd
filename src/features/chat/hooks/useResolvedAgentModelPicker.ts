@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
-import { useProviderInventory } from "@/features/providers/hooks/useProviderInventory";
-import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/providers/providerCatalog";
+import {
+  resolveAgentProviderCatalogIdStrictFromEntries,
+  resolveModelProviderCatalogIdStrictFromEntries,
+} from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { getClient } from "@/shared/api/acpConnection";
 import {
@@ -62,7 +64,6 @@ export function useResolvedAgentModelPicker({
 }: UseResolvedAgentModelPickerOptions) {
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const catalogLoaded = useProviderCatalogStore((state) => state.loaded);
-  const { getEntry: getProviderInventoryEntry } = useProviderInventory();
   // Monotonic version counter shared across onProviderSelected and
   // onModelSelected. Any user interaction (provider OR model change) bumps
   // this, which invalidates in-flight async work from either callback —
@@ -78,14 +79,8 @@ export function useResolvedAgentModelPicker({
         catalogEntries,
         catalogLoaded,
         selectedProvider,
-        getProviderInventoryEntry,
       }),
-    [
-      catalogEntries,
-      catalogLoaded,
-      getProviderInventoryEntry,
-      selectedProvider,
-    ],
+    [catalogEntries, catalogLoaded, selectedProvider],
   );
   const concreteSelectedProviderId = useMemo(() => {
     const resolvedAgentId = resolveAgentProviderCatalogIdStrictFromEntries(
@@ -96,18 +91,13 @@ export function useResolvedAgentModelPicker({
       return null;
     }
 
-    if (!catalogLoaded) {
-      const inventoryEntry = getProviderInventoryEntry(selectedProvider);
-      return inventoryEntry?.category === "model" ? selectedProvider : null;
-    }
-
-    return selectedProvider;
-  }, [
-    catalogEntries,
-    catalogLoaded,
-    getProviderInventoryEntry,
-    selectedProvider,
-  ]);
+    return (
+      resolveModelProviderCatalogIdStrictFromEntries(
+        catalogEntries,
+        selectedProvider,
+      ) ?? selectedProvider
+    );
+  }, [catalogEntries, selectedProvider]);
   const storedModelPreference = useMemo(
     () => getStoredModelPreference(selectedAgentId),
     [selectedAgentId],
@@ -136,31 +126,9 @@ export function useResolvedAgentModelPicker({
         };
       }
 
-      const inventoryEntry = getProviderInventoryEntry(agentId);
-      if (!inventoryEntry) {
-        return null;
-      }
-
-      const resolvedInventoryModel =
-        inventoryEntry.models.find((model) => model.recommended) ??
-        inventoryEntry.models.find((model) => !isModelAlias(model.id)) ??
-        inventoryEntry.models[0];
-
-      if (!resolvedInventoryModel) {
-        return null;
-      }
-
-      return {
-        id: resolvedInventoryModel.id,
-        name: resolvedInventoryModel.name,
-        providerId:
-          inventoryEntry.providerId === agentId
-            ? inventoryEntry.providerId
-            : fallbackProviderId,
-        source: "default" as const,
-      };
+      return null;
     },
-    [getProviderInventoryEntry, gooseDefaultSelection],
+    [gooseDefaultSelection],
   );
 
   useEffect(() => {
@@ -232,7 +200,6 @@ export function useResolvedAgentModelPicker({
           catalogEntries,
           catalogLoaded,
           selectedProvider: providerId,
-          getProviderInventoryEntry,
         });
       const preferredModelSelection = getPreferredSelectionForAgent(
         resolvedRequestedAgentId,
@@ -515,43 +482,42 @@ export function useResolvedAgentModelPicker({
         }
       }
 
-      const inventoryDefaultSelection = getPreferredSelectionForAgent(
+      const defaultSelection = getPreferredSelectionForAgent(
         selectedAgentId,
         selectedProvider,
       );
 
-      if (!inventoryDefaultSelection) {
+      if (!defaultSelection) {
         return null;
       }
 
       const matchingDefaultModel =
         availableModels.find(
           (model) =>
-            model.id === inventoryDefaultSelection.id &&
-            (!inventoryDefaultSelection.providerId ||
+            model.id === defaultSelection.id &&
+            (!defaultSelection.providerId ||
               !model.providerId ||
-              model.providerId === inventoryDefaultSelection.providerId) &&
+              model.providerId === defaultSelection.providerId) &&
             (!concreteSelectedProviderId ||
               !model.providerId ||
               model.providerId === concreteSelectedProviderId),
         ) ?? null;
       const defaultSelectionCompatible =
         !concreteSelectedProviderId ||
-        inventoryDefaultSelection.providerId === concreteSelectedProviderId;
+        defaultSelection.providerId === concreteSelectedProviderId;
 
       if (!matchingDefaultModel && !defaultSelectionCompatible) {
         return null;
       }
 
       return {
-        id: inventoryDefaultSelection.id,
+        id: defaultSelection.id,
         name:
           matchingDefaultModel?.displayName ??
           matchingDefaultModel?.name ??
-          inventoryDefaultSelection.name,
+          defaultSelection.name,
         providerId:
-          matchingDefaultModel?.providerId ??
-          inventoryDefaultSelection.providerId,
+          matchingDefaultModel?.providerId ?? defaultSelection.providerId,
         source: "default",
       };
     }, [
