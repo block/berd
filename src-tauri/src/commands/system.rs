@@ -227,6 +227,38 @@ pub fn path_exists(path: String) -> bool {
     std::path::Path::new(&path).exists()
 }
 
+fn ensure_directory_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("Directory path cannot be empty".to_string());
+    }
+
+    fs::create_dir_all(path)
+        .map_err(|error| format!("Failed to create directory '{}': {}", path.display(), error))?;
+
+    let metadata = fs::metadata(path).map_err(|error| {
+        format!(
+            "Failed to inspect directory '{}': {}",
+            path.display(),
+            error
+        )
+    })?;
+    if !metadata.is_dir() {
+        return Err(format!("Path is not a directory: {}", path.display()));
+    }
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn ensure_directory(path: String) -> Result<(), String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("Directory path cannot be empty".to_string());
+    }
+
+    ensure_directory_path(Path::new(trimmed))
+}
+
 fn read_directory_entries(path: &Path) -> Result<Vec<FileTreeEntry>, String> {
     if !path.exists() {
         return Err(format!("Directory does not exist: {}", path.display()));
@@ -493,9 +525,10 @@ pub async fn list_files_for_mentions(
 #[cfg(test)]
 mod tests {
     use super::{
-        build_file_tree_entry, inspect_attachment_path, inspect_attachment_paths,
-        normalize_attachment_paths, normalize_roots, read_directory_entries, read_image_attachment,
-        scan_files_for_mentions, validate_external_url, MAX_IMAGE_ATTACHMENT_BYTES,
+        build_file_tree_entry, ensure_directory_path, inspect_attachment_path,
+        inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
+        read_directory_entries, read_image_attachment, scan_files_for_mentions,
+        validate_external_url, MAX_IMAGE_ATTACHMENT_BYTES,
     };
     use base64::Engine;
     use std::fs;
@@ -709,6 +742,16 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn ensure_directory_creates_nested_folders() {
+        let dir = tempdir().expect("tempdir");
+        let nested = dir.path().join("goose artifacts").join("chat-1234");
+
+        ensure_directory_path(&nested).expect("directory should be created");
+
+        assert!(nested.is_dir());
     }
 
     #[test]

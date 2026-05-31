@@ -1,5 +1,5 @@
 import type { ProjectInfo } from "../api/projects";
-import { resolvePath } from "@/shared/api/pathResolver";
+import { defaultArtifactRootPath } from "@/shared/artifacts/sessionArtifactLocation";
 import type { Persona } from "@/shared/types/agents";
 
 export interface ProjectFolderOption {
@@ -45,7 +45,7 @@ export function resolveProjectDefaultArtifactRoot(
 }
 
 export async function defaultGlobalArtifactRoot(): Promise<string> {
-  return (await resolvePath({ parts: ["~"] })).path;
+  return defaultArtifactRootPath();
 }
 
 export function getProjectFolderOption(
@@ -78,6 +78,22 @@ Persona id: ${persona.id}
 Persona instructions:
 ${instructions}
 </active-persona>`;
+}
+
+export function formatArtifactFolderInstructions(
+  sessionCwd: string | null | undefined,
+): string | undefined {
+  const workingDirectory = trimValue(sessionCwd);
+  if (!workingDirectory) {
+    return undefined;
+  }
+
+  return `<artifact-folder>
+This general chat uses this shared artifact folder as its working directory:
+${workingDirectory}
+
+When creating a new standalone file, check whether the target filename already exists before writing. If it exists and the user did not explicitly ask to replace or edit that file, use the next clear filename such as "name-2.ext" or ask before overwriting.
+</artifact-folder>`;
 }
 
 export function composeSystemPrompt(

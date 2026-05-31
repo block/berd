@@ -1,5 +1,6 @@
 import type { ProjectInfo } from "../api/projects";
 import { resolvePath } from "@/shared/api/pathResolver";
+import { resolveSessionArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 
 function trimValue(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
@@ -9,7 +10,7 @@ function trimValue(value: string | null | undefined): string | null {
 function buildSessionCwdParts(
   project: ProjectInfo | null | undefined,
   activeWorkspacePath?: string | null,
-): string[] {
+): string[] | null {
   const trimmedWorkspacePath = trimValue(activeWorkspacePath);
   if (trimmedWorkspacePath) {
     return [trimmedWorkspacePath];
@@ -22,16 +23,17 @@ function buildSessionCwdParts(
     return [workingDirs[0]];
   }
 
-  return ["~"];
+  return null;
 }
 
 export async function resolveSessionCwd(
   project: ProjectInfo | null | undefined,
   activeWorkspacePath?: string | null,
 ): Promise<string> {
-  return (
-    await resolvePath({
-      parts: buildSessionCwdParts(project, activeWorkspacePath),
-    })
-  ).path;
+  const cwdParts = buildSessionCwdParts(project, activeWorkspacePath);
+  if (cwdParts) {
+    return (await resolvePath({ parts: cwdParts })).path;
+  }
+
+  return resolveSessionArtifactCwd();
 }

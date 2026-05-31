@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import * as gitApi from "@/shared/api/git";
 import { ContextPanel } from "../ContextPanel";
@@ -9,11 +9,19 @@ const {
   mockRefetch,
   mockRefetchFiles,
   mockListDirectoryEntries,
+  mockGetAllSessionArtifacts,
+  mockEnsureDirectory,
+  mockUpdateWorkingDir,
+  mockOpenDialog,
 } = vi.hoisted(() => ({
   mockUseGitState: vi.fn(),
   mockRefetch: vi.fn(),
   mockRefetchFiles: vi.fn(),
   mockListDirectoryEntries: vi.fn(),
+  mockGetAllSessionArtifacts: vi.fn(),
+  mockEnsureDirectory: vi.fn(),
+  mockUpdateWorkingDir: vi.fn(),
+  mockOpenDialog: vi.fn(),
 }));
 
 vi.mock("@/shared/hooks/useGitState", () => ({
@@ -34,6 +42,15 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@/shared/api/system", () => ({
   listDirectoryEntries: mockListDirectoryEntries,
+  ensureDirectory: mockEnsureDirectory,
+}));
+
+vi.mock("@/shared/api/acpApi", () => ({
+  updateWorkingDir: mockUpdateWorkingDir,
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: mockOpenDialog,
 }));
 
 vi.mock("@/shared/api/git", () => ({
@@ -48,7 +65,7 @@ vi.mock("@/shared/api/git", () => ({
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
   useArtifactPolicyContext: () => ({
-    getAllSessionArtifacts: () => [],
+    getAllSessionArtifacts: mockGetAllSessionArtifacts,
     openResolvedPath: vi.fn(),
     pathExists: () => Promise.resolve(true),
   }),
@@ -78,6 +95,10 @@ describe("ContextPanel", () => {
     mockRefetch.mockResolvedValue(undefined);
     mockRefetchFiles.mockResolvedValue(undefined);
     mockListDirectoryEntries.mockResolvedValue([]);
+    mockEnsureDirectory.mockResolvedValue(undefined);
+    mockUpdateWorkingDir.mockResolvedValue(undefined);
+    mockOpenDialog.mockResolvedValue(null);
+    mockGetAllSessionArtifacts.mockReturnValue([]);
     vi.mocked(gitApi.createWorktree).mockResolvedValue({
       path: "/Users/test/goose2-worktrees/new-worktree",
       branch: "new-worktree",
@@ -188,6 +209,128 @@ describe("ContextPanel", () => {
     expect(
       screen.getByRole("button", { name: /initialize git/i }),
     ).toBeInTheDocument();
+  });
+
+  it("shows artifact folder controls for no-project non-git chats", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/test/custom artifacts");
+    mockUseGitState.mockReturnValue({
+      data: {
+        isGitRepo: false,
+        currentBranch: null,
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [],
+        isWorktree: false,
+        mainWorktreePath: null,
+        localBranches: [],
+      },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-artifact-folder",
+      projectWorkingDirs: [],
+      sessionWorkingDir: "/Users/test/goose artifacts",
+    });
+
+    expect(screen.getByText("General chat")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /change folder/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /change folder/i }),
+    ).toHaveTextContent("Artifact folder");
+    expect(
+      screen.getByRole("button", { name: /change folder/i }),
+    ).toHaveTextContent("goose artifacts");
+
+    await user.click(screen.getByRole("button", { name: /change folder/i }));
+
+    expect(mockOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "/Users/test/goose artifacts",
+        directory: true,
+        multiple: false,
+      }),
+    );
+    await waitFor(() => {
+      expect(localStorage.getItem("goose:artifact-root-path")).toBe(
+        "/Users/test/custom artifacts",
+      );
+    });
+    expect(
+      screen.queryByRole("button", { name: /initialize git/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not show session artifacts for git-backed chats", () => {
+    mockGetAllSessionArtifacts.mockReturnValue([
+      {
+        resolvedPath: "/Users/test/goose2/src/App.tsx",
+        displayPath: "/Users/test/goose2/src/App.tsx",
+        filename: "App.tsx",
+        directoryPath: "/Users/test/goose2/src/",
+        resolvedDirectoryPath: "/Users/test/goose2/src/",
+        versionCount: 1,
+        lastTouchedAt: Date.now(),
+        kind: "file",
+        toolName: "edit_file",
+        toolKind: "edit",
+      },
+    ]);
+
+    renderContextPanel({
+      sessionId: "test-session-git-artifacts-hidden",
+      projectName: "Desktop UX",
+    });
+
+    expect(screen.queryByText("Artifacts")).not.toBeInTheDocument();
+    expect(screen.queryByText("App.tsx")).not.toBeInTheDocument();
+  });
+
+  it("shows session artifacts for non-git chats", () => {
+    mockUseGitState.mockReturnValue({
+      data: {
+        isGitRepo: false,
+        currentBranch: null,
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [],
+        isWorktree: false,
+        mainWorktreePath: null,
+        localBranches: [],
+      },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+    mockGetAllSessionArtifacts.mockReturnValue([
+      {
+        resolvedPath: "/Users/test/report.md",
+        displayPath: "/Users/test/report.md",
+        filename: "report.md",
+        directoryPath: "/Users/test/",
+        resolvedDirectoryPath: "/Users/test/",
+        versionCount: 1,
+        lastTouchedAt: Date.now(),
+        kind: "file",
+        toolName: "write_file",
+        toolKind: "edit",
+      },
+    ]);
+
+    renderContextPanel({
+      sessionId: "test-session-non-git-artifacts-visible",
+      projectWorkingDirs: ["/Users/test"],
+    });
+
+    expect(screen.getByText("Artifacts")).toBeInTheDocument();
+    expect(screen.getByText("report.md")).toBeInTheDocument();
   });
 
   it("shows the working context picker when git repo is available", () => {

@@ -64,7 +64,15 @@
     },
     "errors": {
       "gitRead": "Git status is unavailable right now.",
-      "gitChangesRead": "Git changes are unavailable right now."
+      "gitChangesRead": "Git changes are unavailable right now.",
+      "artifactFolderChange": "Couldn't change the artifact folder."
+    },
+    "artifacts": {
+      "changeFolder": "Change folder",
+      "changeFolderDialogTitle": "Choose artifact folder",
+      "changeFolderSuccess": "Artifact folder updated.",
+      "folderLabel": "Artifact folder",
+      "workspaceLabel": "General chat"
     },
     "picker": {
       "selectContext": "Select worktree or branch",

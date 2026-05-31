@@ -14,7 +14,15 @@ import {
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import { Check, Moon, Sun, SunMoon, Trash2 } from "lucide-react";
+import {
+  Check,
+  FolderOpen,
+  Moon,
+  RotateCcw,
+  Sun,
+  SunMoon,
+  Trash2,
+} from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
 import { getProviderIcon } from "@/shared/ui/icons/ProviderIcons";
 import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
@@ -23,6 +31,7 @@ import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPr
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
+import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPreference";
 
 interface AboutAppInfo {
   name: string;
@@ -94,6 +103,7 @@ export function GeneralSettings() {
   const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
+  const artifactRootPreference = useArtifactRootPreference();
   const {
     themeMode,
     setThemeMode,
@@ -167,6 +177,38 @@ export function GeneralSettings() {
     }
   }
 
+  async function handleChooseArtifactRoot() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        defaultPath: artifactRootPreference.rootPath ?? undefined,
+        directory: true,
+        multiple: false,
+        title: t("general.artifacts.chooseDialogTitle"),
+      });
+
+      if (typeof selected !== "string") {
+        return;
+      }
+
+      await artifactRootPreference.setRootPath(selected);
+      toast.success(t("general.artifacts.saveSuccess"));
+    } catch (error) {
+      console.warn("Failed to choose artifact folder:", error);
+      toast.error(t("general.artifacts.saveError"));
+    }
+  }
+
+  async function handleResetArtifactRoot() {
+    try {
+      await artifactRootPreference.resetRootPath();
+      toast.success(t("general.artifacts.resetSuccess"));
+    } catch (error) {
+      console.warn("Failed to reset artifact folder:", error);
+      toast.error(t("general.artifacts.saveError"));
+    }
+  }
+
   return (
     <SettingsPage contentClassName="space-y-8">
       <SettingsSection>
@@ -197,6 +239,43 @@ export function GeneralSettings() {
               </SelectItem>
             </SelectContent>
           </Select>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.artifacts.label")}
+          description={t("general.artifacts.description")}
+          className="items-start"
+        >
+          <div className="flex max-w-80 flex-col items-end gap-2">
+            <p
+              className="max-w-80 truncate text-right text-xs text-muted-foreground"
+              title={artifactRootPreference.rootPath ?? undefined}
+            >
+              {artifactRootPreference.rootPath ??
+                t("general.artifacts.loading")}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleResetArtifactRoot()}
+                disabled={!artifactRootPreference.hasCustomRoot}
+              >
+                <RotateCcw className="size-4" />
+                {t("general.artifacts.reset")}
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="sm"
+                onClick={() => void handleChooseArtifactRoot()}
+              >
+                <FolderOpen className="size-4" />
+                {t("general.artifacts.change")}
+              </Button>
+            </div>
+          </div>
         </SettingRow>
 
         <SettingRow

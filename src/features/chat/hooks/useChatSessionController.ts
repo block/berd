@@ -19,6 +19,7 @@ import { resolveAgentProviderCatalogIdStrictFromEntries } from "@/features/provi
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import {
   composeSystemPrompt,
+  formatArtifactFolderInstructions,
   formatPersonaSystemPrompt,
   resolveProjectDefaultArtifactRoot,
 } from "@/features/projects/lib/chatProjectContext";
@@ -301,6 +302,10 @@ export function useChatSessionController({
     if (!activeWorkspace?.branch) return undefined;
     return `<active-working-context>\nActive branch: ${activeWorkspace.branch}\nWorking directory: ${activeWorkspace.path}\n</active-working-context>`;
   }, [activeWorkspace?.branch, activeWorkspace?.path]);
+  const artifactFolderInstructions = useMemo(() => {
+    if (project) return undefined;
+    return formatArtifactFolderInstructions(sessionArtifactCwd);
+  }, [project, sessionArtifactCwd]);
   const effectiveSystemPrompt = useMemo(
     () =>
       composeSystemPrompt(
@@ -314,7 +319,8 @@ export function useChatSessionController({
     async (
       providerId: string,
       nextProject = project,
-      nextWorkspacePath: string | null | undefined = activeWorkspace?.path,
+      nextWorkspacePath: string | null | undefined = activeWorkspace?.path ??
+        session?.workingDir,
       requestId?: string,
     ) => {
       if (!sessionId) {
@@ -342,13 +348,14 @@ export function useChatSessionController({
       useChatSessionStore.getState().patchSession(sessionId, { workingDir });
       return true;
     },
-    [activeWorkspace?.path, project, sessionId],
+    [activeWorkspace?.path, project, session?.workingDir, sessionId],
   );
   const prepareCurrentSessionWithModel = useCallback(
     async (
       providerId: string,
       nextProject = project,
-      nextWorkspacePath: string | null | undefined = activeWorkspace?.path,
+      nextWorkspacePath: string | null | undefined = activeWorkspace?.path ??
+        session?.workingDir,
     ) => {
       if (!sessionId) {
         return false;
@@ -438,17 +445,30 @@ export function useChatSessionController({
       });
       return true;
     },
-    [activeWorkspace?.path, prepareCurrentSession, project, sessionId],
+    [
+      activeWorkspace?.path,
+      prepareCurrentSession,
+      project,
+      session?.workingDir,
+      sessionId,
+    ],
   );
   const prepareSelectedProvider = useCallback(
     (providerId: string, options?: ModelSelectionApplyOptions) =>
       prepareCurrentSession(
         providerId,
         options?.nextProject ?? project,
-        options?.nextWorkspacePath ?? activeWorkspace?.path,
+        options?.nextWorkspacePath ??
+          activeWorkspace?.path ??
+          session?.workingDir,
         options?.requestId,
       ),
-    [activeWorkspace?.path, prepareCurrentSession, project],
+    [
+      activeWorkspace?.path,
+      prepareCurrentSession,
+      project,
+      session?.workingDir,
+    ],
   );
 
   const applySessionModelSelection = useCallback<ApplySessionModelSelection>(
@@ -468,7 +488,9 @@ export function useChatSessionController({
       }
       const workingDir = await resolveSessionCwd(
         options?.nextProject ?? project,
-        options?.nextWorkspacePath ?? activeWorkspace?.path,
+        options?.nextWorkspacePath ??
+          activeWorkspace?.path ??
+          session?.workingDir,
       );
       // resolveSessionCwd can yield while the user changes models; do not send
       // a stale provider/model pair to ACP after that happens.
@@ -497,7 +519,7 @@ export function useChatSessionController({
       });
       return true;
     },
-    [activeWorkspace?.path, project, sessionId],
+    [activeWorkspace?.path, project, session?.workingDir, sessionId],
   );
 
   const prevProjectIdRef = useRef(session?.projectId);
@@ -782,10 +804,19 @@ export function useChatSessionController({
       sendOptions?: ChatSendOptions,
       sessionOverride?: Pick<ChatSession, "intent" | "targetAgentPath">,
     ) => {
-      const nextSendOptions = composeBuilderSendOptions(
+      const builderSendOptions = composeBuilderSendOptions(
         sessionOverride ?? session,
         sendOptions,
       );
+      const nextSendOptions = artifactFolderInstructions
+        ? {
+            ...builderSendOptions,
+            assistantPrompt: composeSystemPrompt(
+              artifactFolderInstructions,
+              builderSendOptions.assistantPrompt,
+            ),
+          }
+        : builderSendOptions;
       const shouldPassSendOptions =
         Boolean(sendOptions) || nextSendOptions.assistantPrompt != null;
 
@@ -812,7 +843,13 @@ export function useChatSessionController({
         return true;
       })();
     },
-    [canAutoCompactBeforeSend, compactConversation, sendMessage, session],
+    [
+      artifactFolderInstructions,
+      canAutoCompactBeforeSend,
+      compactConversation,
+      sendMessage,
+      session,
+    ],
   );
   const isLoadingHistory = useChatStore((s) =>
     sessionId

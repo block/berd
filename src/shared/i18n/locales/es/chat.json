@@ -64,7 +64,15 @@
     },
     "errors": {
       "gitRead": "El estado de git no está disponible en este momento.",
-      "gitChangesRead": "Los cambios de git no están disponibles en este momento."
+      "gitChangesRead": "Los cambios de git no están disponibles en este momento.",
+      "artifactFolderChange": "No se pudo cambiar la carpeta de artefactos."
+    },
+    "artifacts": {
+      "changeFolder": "Cambiar carpeta",
+      "changeFolderDialogTitle": "Elegir carpeta de artefactos",
+      "changeFolderSuccess": "Carpeta de artefactos actualizada.",
+      "folderLabel": "Carpeta de artefactos",
+      "workspaceLabel": "Chat general"
     },
     "picker": {
       "selectContext": "Seleccionar árbol de trabajo o rama",

@@ -4,6 +4,7 @@ import { FilesList } from "./FilesList";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { useChangedFiles } from "@/shared/hooks/useChangedFiles";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import { ensureDirectory } from "@/shared/api/system";
 import {
   createBranch,
   createWorktree,
@@ -21,6 +22,9 @@ import { WorkspaceWidget } from "./widgets/WorkspaceWidget";
 import { ChangesWidget } from "./widgets/ChangesWidget";
 import { ArtifactsWidget } from "./widgets/ArtifactsWidget";
 import { openPath } from "@tauri-apps/plugin-opener";
+import { updateWorkingDir } from "@/shared/api/acpApi";
+import { toast } from "sonner";
+import { setArtifactRootPreference } from "@/shared/artifacts/sessionArtifactLocation";
 
 interface ContextPanelProps {
   sessionId: string;
@@ -70,6 +74,8 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
+  const [isChangingArtifactFolder, setIsChangingArtifactFolder] =
+    useState(false);
   const [sectionVisibility, setSectionVisibility] = usePersistedState(
     SECTION_VISIBILITY_STORAGE_KEY,
     DEFAULT_SECTION_VISIBILITY,
@@ -81,12 +87,19 @@ export function ContextPanel({
     (s) => s.activeWorkspaceBySession[sessionId],
   );
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
+  const patchSession = useChatSessionStore((s) => s.patchSession);
 
   const gitTargetPath =
     activeContext?.path ??
     sessionWorkingDir ??
     projectDefaultWorkspaceRoot ??
     null;
+  const fileBrowserRoots =
+    projectWorkingDirs.length > 0
+      ? projectWorkingDirs
+      : sessionWorkingDir
+        ? [sessionWorkingDir]
+        : [];
   const {
     data: gitState,
     error,
@@ -102,6 +115,8 @@ export function ContextPanel({
     isLoading: isFilesLoading,
     refetch: refetchFiles,
   } = useChangedFiles(gitTargetPath, activeTab === "details");
+  const shouldShowChanges = gitState?.isGitRepo !== false;
+  const shouldShowArtifacts = gitState?.isGitRepo === false;
 
   const handleContextChange = useCallback(
     (context: ActiveWorkspace) => {
@@ -141,6 +156,44 @@ export function ContextPanel({
     },
     [refetchAll],
   );
+
+  const handleChangeArtifactFolder = useCallback(async () => {
+    setIsChangingArtifactFolder(true);
+
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        defaultPath: gitTargetPath ?? undefined,
+        directory: true,
+        multiple: false,
+        title: t("contextPanel.artifacts.changeFolderDialogTitle"),
+      });
+
+      if (typeof selected !== "string") {
+        return;
+      }
+
+      await ensureDirectory(selected);
+      await updateWorkingDir(sessionId, selected);
+      setArtifactRootPreference(selected);
+      patchSession(sessionId, { workingDir: selected });
+      setActiveWorkspace(sessionId, { path: selected, branch: null });
+      await refetchAll();
+      toast.success(t("contextPanel.artifacts.changeFolderSuccess"));
+    } catch (error) {
+      console.warn("Failed to change artifact folder:", error);
+      toast.error(t("contextPanel.errors.artifactFolderChange"));
+    } finally {
+      setIsChangingArtifactFolder(false);
+    }
+  }, [
+    gitTargetPath,
+    patchSession,
+    refetchAll,
+    sessionId,
+    setActiveWorkspace,
+    t,
+  ]);
 
   const handleFetch = useCallback(
     async (path: string) => {
@@ -243,34 +296,40 @@ export function ContextPanel({
             onSwitchBranch={handleSwitchBranch}
             onStashAndSwitch={handleStashAndSwitch}
             onInitRepo={handleInitRepo}
+            onChangeArtifactFolder={handleChangeArtifactFolder}
             onFetch={handleFetch}
             onPull={handlePull}
             onCreateBranch={handleCreateBranch}
             onCreateWorktree={handleCreateWorktree}
             onRefresh={handleRefresh}
+            isChangingArtifactFolder={isChangingArtifactFolder}
             isOpen={sectionVisibility.workspace}
             onToggleOpen={() => toggleSection("workspace")}
           />
-          <ChangesWidget
-            files={changedFiles}
-            isLoading={isFilesLoading}
-            error={changedFilesError}
-            isLoadingError={isChangedFilesLoadingError}
-            currentBranch={gitState?.currentBranch ?? null}
-            repoPath={gitTargetPath ?? ""}
-            onOpenFile={handleOpenChangedFile}
-            isOpen={sectionVisibility.changes}
-            onToggleOpen={() => toggleSection("changes")}
-          />
-          <ArtifactsWidget
-            isOpen={sectionVisibility.artifacts}
-            onToggleOpen={() => toggleSection("artifacts")}
-          />
+          {shouldShowChanges && (
+            <ChangesWidget
+              files={changedFiles}
+              isLoading={isFilesLoading}
+              error={changedFilesError}
+              isLoadingError={isChangedFilesLoadingError}
+              currentBranch={gitState?.currentBranch ?? null}
+              repoPath={gitTargetPath ?? ""}
+              onOpenFile={handleOpenChangedFile}
+              isOpen={sectionVisibility.changes}
+              onToggleOpen={() => toggleSection("changes")}
+            />
+          )}
+          {shouldShowArtifacts && (
+            <ArtifactsWidget
+              isOpen={sectionVisibility.artifacts}
+              onToggleOpen={() => toggleSection("artifacts")}
+            />
+          )}
         </div>
       </TabsContent>
 
       <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
-        <FilesList projectWorkingDirs={projectWorkingDirs} />
+        <FilesList projectWorkingDirs={fileBrowserRoots} />
       </TabsContent>
     </Tabs>
   );

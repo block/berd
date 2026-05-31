@@ -49,6 +49,10 @@ export async function pathExists(path: string): Promise<boolean> {
   return invoke("path_exists", { path });
 }
 
+export async function ensureDirectory(path: string): Promise<void> {
+  return invoke("ensure_directory", { path });
+}
+
 export async function listFilesForMentions(
   roots: string[],
   maxResults = 1500,

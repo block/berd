@@ -33,6 +33,9 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
 describe("sessionCwdSelection", () => {
   beforeEach(() => {
     vi.mocked(resolvePath).mockReset();
+    if (typeof window !== "undefined") {
+      window.localStorage.clear();
+    }
   });
 
   it("resolves the first workspace root unchanged", () => {
@@ -65,35 +68,25 @@ describe("sessionCwdSelection", () => {
     ).toBeUndefined();
   });
 
-  it("falls back to home for a pathless project session cwd", async () => {
-    vi.mocked(resolvePath).mockResolvedValue({
-      path: "/Users/wesb",
-    });
-
+  it("falls back to the shared artifact folder for a pathless project session cwd", async () => {
     await expect(
       resolveSessionCwd(
         makeProject({
           workingDirs: [],
         }),
       ),
-    ).resolves.toBe("/Users/wesb");
+    ).resolves.toBe("~/goose artifacts");
 
-    expect(resolvePath).toHaveBeenCalledWith({
-      parts: ["~"],
-    });
+    expect(resolvePath).not.toHaveBeenCalled();
   });
 
   describe("defaultGlobalArtifactRoot", () => {
-    it("resolves the home directory through the path resolver", async () => {
-      vi.mocked(resolvePath).mockResolvedValue({
-        path: "/Users/wesb",
-      });
+    it("returns the default artifact root", async () => {
+      await expect(defaultGlobalArtifactRoot()).resolves.toBe(
+        "~/goose artifacts",
+      );
 
-      await expect(defaultGlobalArtifactRoot()).resolves.toBe("/Users/wesb");
-
-      expect(resolvePath).toHaveBeenCalledWith({
-        parts: ["~"],
-      });
+      expect(resolvePath).not.toHaveBeenCalled();
     });
   });
 });

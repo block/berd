@@ -225,16 +225,50 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    expect(mockAcpCreateSession).toHaveBeenCalledWith("goose", "~", {
-      modelId: undefined,
-      personaId: undefined,
-      projectId: undefined,
-    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "~/goose artifacts",
+      {
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
     expect(
       (container.firstElementChild as HTMLElement).style.getPropertyValue(
         "--project-tint",
       ),
     ).toBe("transparent");
+  });
+
+  it("starts a full blank chat from the saved artifact location", async () => {
+    window.localStorage.setItem(
+      "goose:artifact-root-path",
+      "/Users/test/goose artifacts test",
+    );
+    const user = userEvent.setup();
+
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "/Users/test/goose artifacts test",
+      {
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
+    expect(
+      useChatSessionStore
+        .getState()
+        .getSession(useChatSessionStore.getState().activeSessionId ?? ""),
+    ).toMatchObject({
+      workingDir: "/Users/test/goose artifacts test",
+    });
   });
 
   it("reserves toast space only while the global composer is visible", async () => {
@@ -280,8 +314,11 @@ describe("AppShell global navigation", () => {
       useChatSessionStore.getState().getSession(draftSessionId ?? ""),
     ).toMatchObject({
       creationState: "pending",
-      workingDir: "~",
+      workingDir: "~/goose artifacts",
     });
+    const draftWorkingDir = useChatSessionStore
+      .getState()
+      .getSession(draftSessionId ?? "")?.workingDir;
 
     act(() => {
       pendingSession.resolve({ sessionId: "created-session" });
@@ -296,7 +333,7 @@ describe("AppShell global navigation", () => {
       useChatSessionStore.getState().getSession("created-session"),
     ).toMatchObject({
       creationState: undefined,
-      workingDir: "~",
+      workingDir: draftWorkingDir,
     });
   });
 

@@ -156,6 +156,17 @@
       "description": "Goose mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
       "label": "Consejos de chat"
     },
+    "artifacts": {
+      "change": "Cambiar",
+      "chooseDialogTitle": "Elegir carpeta de artefactos",
+      "description": "Los chats generales guardan archivos generados aquí.",
+      "label": "Ubicación de artefactos",
+      "loading": "Cargando...",
+      "reset": "Restablecer",
+      "resetSuccess": "Ubicación de artefactos restablecida.",
+      "saveError": "No se pudo actualizar la ubicación de artefactos. Inténtalo de nuevo.",
+      "saveSuccess": "Ubicación de artefactos actualizada."
+    },
     "language": {
       "description": "Elige cómo Goose formatea y muestra la interfaz.",
       "english": "Inglés",

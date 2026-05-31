@@ -1,8 +1,15 @@
 import { useTranslation } from "react-i18next";
-import { IconFolder, IconGitBranch, IconRefresh } from "@tabler/icons-react";
+import {
+  IconFolder,
+  IconFolderOpen,
+  IconGitBranch,
+  IconRefresh,
+  IconReplace,
+} from "@tabler/icons-react";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
+import { cn } from "@/shared/lib/cn";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { Widget } from "./Widget";
 import { WorkspaceActionsMenu } from "./WorkspaceActionsMenu";
@@ -24,6 +31,7 @@ interface WorkspaceWidgetProps {
   onInitRepo: (path: string) => Promise<void>;
   onFetch: (path: string) => Promise<void>;
   onPull: (path: string) => Promise<void>;
+  onChangeArtifactFolder?: () => Promise<void> | void;
   onCreateBranch: (
     path: string,
     name: string,
@@ -37,6 +45,7 @@ interface WorkspaceWidgetProps {
     baseBranch?: string,
   ) => Promise<CreatedWorktree>;
   onRefresh: () => void;
+  isChangingArtifactFolder?: boolean;
   isOpen: boolean;
   onToggleOpen: () => void;
 }
@@ -57,15 +66,18 @@ export function WorkspaceWidget({
   onInitRepo,
   onFetch,
   onPull,
+  onChangeArtifactFolder,
   onCreateBranch,
   onCreateWorktree,
   onRefresh,
+  isChangingArtifactFolder = false,
   isOpen,
   onToggleOpen,
 }: WorkspaceWidgetProps) {
   const { t } = useTranslation("chat");
   const primaryWorkspaceRoot =
     activeContext?.path ?? sessionWorkingDir ?? projectWorkingDirs[0] ?? null;
+  const isArtifactWorkspace = !projectName && projectWorkingDirs.length === 0;
 
   const gitErrorMessage =
     error instanceof Error ? error.message : t("contextPanel.errors.gitRead");
@@ -106,6 +118,10 @@ export function WorkspaceWidget({
             />
             <span className="truncate text-foreground">{projectName}</span>
           </div>
+        ) : isArtifactWorkspace ? (
+          <p className="text-foreground">
+            {t("contextPanel.artifacts.workspaceLabel")}
+          </p>
         ) : (
           <p className="text-muted-foreground">
             {t("contextPanel.empty.noProjectAssigned")}
@@ -143,6 +159,36 @@ export function WorkspaceWidget({
               onCreateWorktree={onCreateWorktree}
             />
           </div>
+        ) : isArtifactWorkspace ? (
+          <button
+            type="button"
+            onClick={() => void onChangeArtifactFolder?.()}
+            disabled={!onChangeArtifactFolder || isChangingArtifactFolder}
+            className={cn(
+              "flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2",
+              "text-sm text-foreground transition-colors",
+              "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              "disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent",
+            )}
+            aria-label={t("contextPanel.artifacts.changeFolder")}
+          >
+            <IconFolder className="size-4 shrink-0 text-muted-foreground" />
+            <span className="min-w-0 flex-1 text-left">
+              <span className="block truncate text-foreground">
+                {shortenPath(primaryWorkspaceRoot)}
+              </span>
+              <span className="block truncate text-xs text-muted-foreground">
+                {t("contextPanel.artifacts.folderLabel")}
+              </span>
+            </span>
+            {isChangingArtifactFolder ? (
+              <Spinner className="size-3 shrink-0" />
+            ) : onChangeArtifactFolder ? (
+              <IconReplace className="size-3.5 shrink-0 text-muted-foreground" />
+            ) : (
+              <IconFolderOpen className="size-4 shrink-0 text-muted-foreground" />
+            )}
+          </button>
         ) : (
           <div className="space-y-3">
             <p className="truncate text-muted-foreground">

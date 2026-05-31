@@ -156,6 +156,17 @@
       "description": "Goose will show tips in chat for relevant tools, skills, or workflows.",
       "label": "Chat tips"
     },
+    "artifacts": {
+      "change": "Change",
+      "chooseDialogTitle": "Choose artifact folder",
+      "description": "General chats save generated files here.",
+      "label": "Artifact location",
+      "loading": "Loading...",
+      "reset": "Reset",
+      "resetSuccess": "Artifact location reset.",
+      "saveError": "Couldn't update the artifact location. Try again.",
+      "saveSuccess": "Artifact location updated."
+    },
     "language": {
       "description": "Sets the language Goose uses across menus, buttons, and messages.",
       "english": "English",

@@ -84,6 +84,7 @@ import {
 import { acpCreateSession } from "@/shared/api/acp";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   DESIGN_SYSTEM_SECTIONS,
@@ -151,7 +152,7 @@ function getOptimisticSessionCwd(
   const projectWorkingDir = (project?.workingDirs ?? [])
     .map((directory) => directory.trim())
     .find((directory) => directory.length > 0);
-  return projectWorkingDir ?? "~";
+  return projectWorkingDir ?? getOptimisticArtifactCwd();
 }
 
 function useWindowFullscreenState() {
@@ -619,6 +620,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           resolvedProviderId !== homeSession.providerId || !modelIdToApply;
         patchSession(homeSession.id, {
           providerId: resolvedProviderId,
+          workingDir,
           modelId:
             modelIdToApply ??
             (shouldClearHomeModel ? undefined : homeSession.modelId),

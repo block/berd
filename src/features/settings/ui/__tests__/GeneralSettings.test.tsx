@@ -9,8 +9,16 @@ import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
+const { mockOpenDialog } = vi.hoisted(() => ({
+  mockOpenDialog: vi.fn(),
+}));
+
 vi.mock("@/shared/api/localMediaCaches", () => ({
   clearLocalMediaCaches: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/plugin-dialog", () => ({
+  open: mockOpenDialog,
 }));
 
 vi.mock("sonner", () => ({
@@ -121,6 +129,30 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("updates the default artifact location", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/test/Artifacts");
+
+    renderGeneralSettings();
+
+    await screen.findByText("~/goose artifacts");
+    await user.click(screen.getByRole("button", { name: "Change" }));
+
+    expect(mockOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "~/goose artifacts",
+        directory: true,
+        multiple: false,
+      }),
+    );
+    await waitFor(() => {
+      expect(localStorage.getItem("goose:artifact-root-path")).toBe(
+        "/Users/test/Artifacts",
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith("Artifact location updated.");
   });
 
   it("restores animated avatar playback", async () => {
