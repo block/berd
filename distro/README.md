@@ -94,7 +94,7 @@ When the Tauri shell launches the long-lived `goose serve` process, it applies t
 - uses `kgoose` as the default endpoint for KGoose-backed features
 - installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
 - installs `distro/agents/<name>.md` entries into `~/.agents/agents/<name>.md`
-- warms newly seeded agent `app-avatar:` media once when network access is available
+- warms installed bundled agent `app-avatar:` media when network access is available
 
 This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
 

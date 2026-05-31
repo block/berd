@@ -9,11 +9,12 @@ use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::AsyncWriteExt;
 
 const ARTIFACTORY_BASE: &str =
     "https://global.block-artifacts.com/artifactory/goose-internal/avatars/";
+const AVATAR_CACHE_WARMED_EVENT: &str = "goose:avatar-cache-warmed";
 const LATEST_PATH: &str = "latest.json";
 const MANIFEST_FILE: &str = "manifest.json";
 const CATALOG_TTL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -104,6 +105,12 @@ pub struct CachedAvatar {
     pub catalog_version: String,
     pub collection_id: String,
     pub asset: CachedAvatarAsset,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AvatarCacheWarmedPayload {
+    avatar_refs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -330,12 +337,21 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
     let _cache_guard = avatar_cache_lock().lock().await;
     let paths = avatar_cache_paths(&app)?;
     clean_part_files(&paths)?;
-    let catalog = current_catalog(&paths)
+    let mut catalog = current_catalog(&paths)
         .await
         .map_err(|error| error.to_string())?;
+    if catalog_is_missing_avatar_ids(&catalog, &avatar_ids) {
+        match refresh_cached_catalog(&paths).await {
+            Ok(refreshed) => catalog = refreshed,
+            Err(error) => {
+                log::warn!("Failed to refresh avatar catalog for bundled agent warm-up: {error}");
+            }
+        }
+    }
     let client = asset_http_client()?;
     let format = platform_avatar_format();
     let mut warmed = 0usize;
+    let mut warmed_avatar_refs = Vec::new();
 
     for avatar_id in avatar_ids {
         let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
@@ -343,13 +359,30 @@ pub async fn warm_avatar_refs(app: AppHandle, avatar_refs: Vec<String>) -> Resul
             continue;
         };
         match ensure_entry(&client, &paths, &catalog, entry, format).await {
-            Ok(_) => warmed += 1,
+            Ok(_) => {
+                warmed += 1;
+                warmed_avatar_refs.push(format!("app-avatar:{avatar_id}"));
+            }
             Err(error) => log::warn!("Failed to warm bundled agent avatar '{avatar_id}': {error}"),
         }
     }
 
+    if !warmed_avatar_refs.is_empty() {
+        let payload = AvatarCacheWarmedPayload {
+            avatar_refs: warmed_avatar_refs,
+        };
+        if let Err(error) = app.emit(AVATAR_CACHE_WARMED_EVENT, payload) {
+            log::warn!("Failed to emit avatar cache warm event: {error}");
+        }
+    }
     prune_obsolete_versions(&paths, &catalog.catalog_version)?;
     Ok(warmed)
+}
+
+fn catalog_is_missing_avatar_ids(catalog: &AvatarCatalog, avatar_ids: &BTreeSet<String>) -> bool {
+    avatar_ids
+        .iter()
+        .any(|avatar_id| !catalog.assets.iter().any(|entry| &entry.id == avatar_id))
 }
 
 async fn clear_avatar_cache_paths(paths: &AvatarCachePaths) -> Result<(), String> {
@@ -1474,6 +1507,16 @@ mod tests {
             mutate(&mut catalog);
             assert!(validate_catalog(&catalog).is_err(), "{case}");
         }
+    }
+
+    #[test]
+    fn detects_when_requested_avatar_ids_are_missing_from_cached_catalog() {
+        let catalog = valid_catalog(b"avatar-bytes");
+        let requested = BTreeSet::from(["gloopy-1".to_string()]);
+        assert!(!catalog_is_missing_avatar_ids(&catalog, &requested));
+
+        let requested = BTreeSet::from(["gloopy-1".to_string(), "gloopy-2".to_string()]);
+        assert!(catalog_is_missing_avatar_ids(&catalog, &requested));
     }
 
     #[test]

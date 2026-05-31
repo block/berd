@@ -98,9 +98,19 @@ fn seed_bundled_agents_from_dir(
         let file_name = entry.file_name().to_string_lossy().into_owned();
         let target = target_root.join(&file_name);
         let was_previously_seeded = marker.seeded_files.contains(&file_name);
-        if should_install_agent(&source, &target, was_previously_seeded)? {
-            install_agent_file(&source, &target)?;
-            seeded_count += 1;
+        let installed_or_refreshed =
+            if should_install_agent(&source, &target, was_previously_seeded)? {
+                install_agent_file(&source, &target)?;
+                seeded_count += 1;
+                true
+            } else {
+                false
+            };
+
+        if (installed_or_refreshed || was_previously_seeded)
+            && target.exists()
+            && is_installed_bundled_agent(&target)?
+        {
             if let Some(avatar_ref) = source_agent_avatar_ref(&source)? {
                 avatar_refs_to_warm.insert(avatar_ref);
             }
@@ -147,12 +157,16 @@ fn is_installed_bundled_agent(agent_file: &Path) -> Result<bool, String> {
         return Ok(false);
     }
 
-    let contents = fs::read_to_string(agent_file).map_err(|err| {
-        format!(
-            "Failed to read installed agent '{}': {err}",
-            agent_file.display()
-        )
-    })?;
+    let contents = match fs::read_to_string(agent_file) {
+        Ok(contents) => contents,
+        Err(err) if err.kind() == std::io::ErrorKind::InvalidData => return Ok(false),
+        Err(err) => {
+            return Err(format!(
+                "Failed to read installed agent '{}': {err}",
+                agent_file.display()
+            ));
+        }
+    };
 
     Ok(agent_frontmatter(&contents)
         .and_then(|frontmatter| serde_yaml::from_str::<AgentFrontmatter>(frontmatter).ok())
@@ -335,6 +349,32 @@ mod tests {
     }
 
     #[test]
+    fn does_not_inspect_existing_unmarked_user_agent() {
+        let source = tempdir().unwrap();
+        let target = tempdir().unwrap();
+        write_agent(
+            source.path(),
+            "builderbot.md",
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nBundled.",
+        );
+        fs::create_dir_all(target.path()).unwrap();
+        fs::write(target.path().join("builderbot.md"), [0xff]).unwrap();
+
+        let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+
+        assert_eq!(result.seeded_count, 0);
+        assert!(result.avatar_refs_to_warm.is_empty());
+        assert_eq!(
+            fs::read(target.path().join("builderbot.md")).unwrap(),
+            [0xff]
+        );
+
+        let second_result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
+        assert_eq!(second_result.seeded_count, 0);
+        assert!(second_result.avatar_refs_to_warm.is_empty());
+    }
+
+    #[test]
     fn replaces_edited_seeded_agent_before_launch() {
         let source = tempdir().unwrap();
         let target = tempdir().unwrap();
@@ -367,14 +407,14 @@ mod tests {
         write_agent(
             source.path(),
             "builderbot.md",
-            "---\nname: Builderbot\ndescription: Agent\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal.",
+            "---\nname: Builderbot\ndescription: Agent\navatar: app-avatar:gloopies-20\nmetadata:\n  gooseInternalBundled: true\n---\nOriginal.",
         );
 
         seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
         let result = seed_bundled_agents_from_dir(source.path(), target.path()).unwrap();
 
         assert_eq!(result.seeded_count, 0);
-        assert!(result.avatar_refs_to_warm.is_empty());
+        assert_eq!(result.avatar_refs_to_warm, vec!["app-avatar:gloopies-20"]);
     }
 
     #[cfg(unix)]

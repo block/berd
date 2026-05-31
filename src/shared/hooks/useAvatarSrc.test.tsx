@@ -3,7 +3,12 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ARTIFACTS_QUERY_KEY, type Artifacts } from "@/shared/api/artifacts";
-import { getCachedAvatarForRef } from "@/shared/api/avatars";
+import {
+  avatarCachedRefQueryKey,
+  getCachedAvatarForRef,
+  listenAvatarCacheWarmed,
+  type AvatarCacheWarmedPayload,
+} from "@/shared/api/avatars";
 import {
   listenLocalMediaCachesCleared,
   type LocalMediaCachesClearedPayload,
@@ -20,11 +25,17 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 vi.mock("@/shared/api/avatars", () => ({
+  avatarCachedRefQueryKey: (avatarRef: string) => [
+    "avatars",
+    "cached-ref",
+    avatarRef,
+  ],
   cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
     src: `asset://${asset.path}`,
     mediaType: asset.mimeType.startsWith("video/") ? "video" : "image",
   }),
   getCachedAvatarForRef: vi.fn(),
+  listenAvatarCacheWarmed: vi.fn(),
 }));
 
 vi.mock("@/shared/api/localMediaCaches", () => ({
@@ -32,11 +43,15 @@ vi.mock("@/shared/api/localMediaCaches", () => ({
 }));
 
 const getCachedAvatarForRefMock = vi.mocked(getCachedAvatarForRef);
+const listenAvatarCacheWarmedMock = vi.mocked(listenAvatarCacheWarmed);
 const listenLocalMediaCachesClearedMock = vi.mocked(
   listenLocalMediaCachesCleared,
 );
 let localMediaCachesClearedHandler:
   | ((payload: LocalMediaCachesClearedPayload) => void)
+  | undefined;
+let avatarCacheWarmedHandler:
+  | ((payload: AvatarCacheWarmedPayload) => void)
   | undefined;
 
 function createQueryClient() {
@@ -90,9 +105,15 @@ describe("useAvatarSrc", () => {
   beforeEach(() => {
     getCachedAvatarForRefMock.mockReset();
     localMediaCachesClearedHandler = undefined;
+    avatarCacheWarmedHandler = undefined;
     listenLocalMediaCachesClearedMock.mockReset();
     listenLocalMediaCachesClearedMock.mockImplementation((handler) => {
       localMediaCachesClearedHandler = handler;
+      return Promise.resolve(vi.fn());
+    });
+    listenAvatarCacheWarmedMock.mockReset();
+    listenAvatarCacheWarmedMock.mockImplementation((handler) => {
+      avatarCacheWarmedHandler = handler;
       return Promise.resolve(vi.fn());
     });
   });
@@ -160,6 +181,48 @@ describe("useAvatarSrc", () => {
 
     expect(result.current.media).toBeUndefined();
     expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rechecks uncached app-avatar refs after the backend warms them", async () => {
+    getCachedAvatarForRefMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+        asset: {
+          id: "gloopy-1",
+          path: "/tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+          mimeType: "video/webm",
+        },
+      });
+
+    const { result } = renderHook(
+      () => useAvatarMediaState("app-avatar:gloopy-1"),
+      { wrapper: createWrapper() },
+    );
+
+    await waitFor(() => {
+      expect(result.current.unavailable).toBe(true);
+    });
+
+    await act(async () => {
+      avatarCacheWarmedHandler?.({
+        avatarRefs: ["app-avatar:gloopy-1"],
+      });
+    });
+
+    await waitFor(() => {
+      expect(result.current.media?.src).toBe(
+        "asset:///tmp/goose/avatars/v1/webm/gloopies/gloopy-1.webm",
+      );
+    });
+    expect(result.current.unavailable).toBe(false);
+    expect(getCachedAvatarForRefMock).toHaveBeenCalledTimes(2);
+    expect(avatarCachedRefQueryKey("app-avatar:gloopy-1")).toEqual([
+      "avatars",
+      "cached-ref",
+      "app-avatar:gloopy-1",
+    ]);
   });
 
   it("dedupes repeated app-avatar refs through React Query", async () => {

@@ -2,8 +2,10 @@ import { useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { QueryClientContext } from "@tanstack/react-query";
 import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import {
+  avatarCachedRefQueryKey,
   cachedAssetToMedia,
   getCachedAvatarForRef,
+  listenAvatarCacheWarmed,
 } from "@/shared/api/avatars";
 import { listenLocalMediaCachesCleared } from "@/shared/api/localMediaCaches";
 import { isAppAvatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
@@ -91,7 +93,18 @@ export function useAvatarMediaState(
         return;
       }
       queryClient?.removeQueries({
-        queryKey: ["avatars", "cached-ref", avatarRef],
+        queryKey: avatarCachedRefQueryKey(avatarRef),
+      });
+      setRemoteMedia(undefined);
+      setUnavailable(false);
+      setRetryToken((value) => value + 1);
+    });
+    const unlistenWarmed = listenAvatarCacheWarmed((payload) => {
+      if (!payload.avatarRefs.includes(avatarRef)) {
+        return;
+      }
+      queryClient?.removeQueries({
+        queryKey: avatarCachedRefQueryKey(avatarRef),
       });
       setRemoteMedia(undefined);
       setUnavailable(false);
@@ -100,6 +113,7 @@ export function useAvatarMediaState(
 
     return () => {
       void unlisten.then((cleanup) => cleanup());
+      void unlistenWarmed.then((cleanup) => cleanup());
     };
   }, [avatarRef, queryClient, shouldLoadCachedAvatar]);
 
@@ -125,7 +139,7 @@ export function useAvatarMediaState(
 
     void queryClient
       .fetchQuery({
-        queryKey: ["avatars", "cached-ref", avatarRef],
+        queryKey: avatarCachedRefQueryKey(avatarRef),
         queryFn: async () => {
           try {
             return await getCachedAvatarForRef({ avatarRef });

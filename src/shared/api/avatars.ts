@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import {
   mediaTypeFromMimeType,
   parseAvatarCatalog,
@@ -150,4 +151,30 @@ export function cachedAssetToMedia(asset: {
     src: convertFileSrc(asset.path, "asset"),
     mediaType: mediaTypeFromMimeType(asset.mimeType),
   };
+}
+
+export const AVATAR_CACHE_WARMED_EVENT = "goose:avatar-cache-warmed";
+export const AVATAR_CACHED_REF_QUERY_KEY_PREFIX = [
+  "avatars",
+  "cached-ref",
+] as const;
+
+export interface AvatarCacheWarmedPayload {
+  avatarRefs: string[];
+}
+
+export function avatarCachedRefQueryKey(avatarRef: string) {
+  return [...AVATAR_CACHED_REF_QUERY_KEY_PREFIX, avatarRef] as const;
+}
+
+export function listenAvatarCacheWarmed(
+  handler: (payload: AvatarCacheWarmedPayload) => void,
+) {
+  if (!window.__TAURI_INTERNALS__) {
+    return Promise.resolve(() => {});
+  }
+
+  return listen<AvatarCacheWarmedPayload>(AVATAR_CACHE_WARMED_EVENT, (event) =>
+    handler(event.payload),
+  );
 }

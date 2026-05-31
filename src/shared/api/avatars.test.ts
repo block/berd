@@ -1,12 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AVATAR_CACHE_WARMED_EVENT,
   AvatarLibraryError,
   ensureAvatarCollection,
   getAvatarCatalog,
   getAvatarLibrarySnapshot,
   getCachedAvatarCollections,
   getCachedAvatarForRef,
+  listenAvatarCacheWarmed,
   normalizeAvatarLibraryError,
 } from "./avatars";
 import type { AvatarCatalog } from "@/shared/avatars/catalog";
@@ -14,6 +16,9 @@ import type { AvatarCatalog } from "@/shared/avatars/catalog";
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => `asset://${path}`,
   invoke: vi.fn(),
+}));
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(),
 }));
 
 const invokeMock = vi.mocked(invoke);
@@ -161,5 +166,12 @@ describe("avatars api", () => {
     expect(invokeMock).toHaveBeenCalledWith("get_cached_avatar_for_ref", {
       avatarRef: "app-avatar:gloopy-1",
     });
+  });
+
+  it("does not subscribe to avatar warm events outside Tauri", async () => {
+    await expect(listenAvatarCacheWarmed(vi.fn())).resolves.toEqual(
+      expect.any(Function),
+    );
+    expect(AVATAR_CACHE_WARMED_EVENT).toBe("goose:avatar-cache-warmed");
   });
 });

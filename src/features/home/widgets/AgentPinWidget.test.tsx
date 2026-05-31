@@ -15,11 +15,17 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
 }));
 
 vi.mock("@/shared/api/avatars", () => ({
+  avatarCachedRefQueryKey: (avatarRef: string) => [
+    "avatars",
+    "cached-ref",
+    avatarRef,
+  ],
   cachedAssetToMedia: (asset: { path: string; mimeType: string }) => ({
     src: `asset://${asset.path}`,
     mediaType: asset.mimeType.startsWith("video/") ? "video" : "image",
   }),
   getCachedAvatarForRef: vi.fn(),
+  listenAvatarCacheWarmed: vi.fn(() => Promise.resolve(vi.fn())),
 }));
 
 const getCachedAvatarForRefMock = vi.mocked(getCachedAvatarForRef);
