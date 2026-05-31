@@ -15,6 +15,7 @@ import {
   acpCancelSession,
   acpLoadSession,
 } from "@/shared/api/acp";
+import { resetPersonaHandoff } from "@/shared/api/acpPersonaHandoff";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
   getSessionTitleFromDraft,
@@ -360,6 +361,7 @@ export function useChat(
   const clearChat = useCallback(() => {
     abortRef.current?.abort();
     clearMessages(sessionId);
+    resetPersonaHandoff(sessionId);
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);

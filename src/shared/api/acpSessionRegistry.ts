@@ -61,6 +61,11 @@ export function isSessionPrepared(sessionId: string): boolean {
   return prepared.has(sessionId);
 }
 
+/** Provider id the session is currently prepared against, if known. */
+export function getPreparedProviderId(sessionId: string): string | undefined {
+  return prepared.get(sessionId)?.providerId;
+}
+
 export function registerPreparedSession(
   sessionId: string,
   providerId: string,

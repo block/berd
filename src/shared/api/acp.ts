@@ -11,6 +11,10 @@ import {
   clearActiveMessageId,
 } from "./acpNotificationHandler";
 import { searchSessionsViaExports } from "./sessionSearch";
+import {
+  claimPersonaHandoff,
+  isExternalAgentProvider,
+} from "./acpPersonaHandoff";
 import { perfLog } from "@/shared/lib/perfLog";
 
 export interface AcpProvider {
@@ -76,17 +80,38 @@ export async function acpSendMessage(
     throw new Error("Session not prepared. Call acpPrepareSession first.");
   }
 
-  await directAcp.appendSessionSystemPrompt(
-    sessionId,
-    "client_system_prompt",
-    systemPrompt?.trim() ? systemPrompt : "",
+  const providerId = sessionRegistry.getPreparedProviderId(sessionId);
+
+  // Goose owns prompt assembly and accepts a real system prompt via its ACP
+  // extension. External agent harnesses (Claude Code, Codex, ...) ignore that
+  // method and expose no system-prompt channel, so we hand the persona off
+  // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
+  let personaHandoff: string | null = null;
+  if (isExternalAgentProvider(providerId)) {
+    personaHandoff = claimPersonaHandoff(sessionId, providerId, systemPrompt);
+  } else {
+    await directAcp.appendSessionSystemPrompt(
+      sessionId,
+      "client_system_prompt",
+      systemPrompt?.trim() ? systemPrompt : "",
+    );
+  }
+
+  // Merge the persona handoff (when present) with any skill/builder assistant
+  // prompt into a single assistant-audience block, persona first.
+  const assistantPromptParts = [personaHandoff, assistantPrompt?.trim()].filter(
+    (part): part is string => Boolean(part?.trim()),
   );
+  const mergedAssistantPrompt =
+    assistantPromptParts.length > 0
+      ? assistantPromptParts.join("\n\n")
+      : undefined;
 
   const content: ContentBlock[] = [];
-  if (assistantPrompt?.trim()) {
+  if (mergedAssistantPrompt) {
     content.push({
       type: "text",
-      text: assistantPrompt,
+      text: mergedAssistantPrompt,
       annotations: { audience: ["assistant"] },
     });
   }
