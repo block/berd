@@ -768,7 +768,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     async (
       title = DEFAULT_CHAT_TITLE,
       project?: ProjectInfo,
-      options: { activate?: boolean; providerId?: string } = {},
+      options: {
+        activate?: boolean;
+        providerId?: string;
+        modelId?: string;
+        modelName?: string;
+      } = {},
     ) => {
       const shouldActivate = options.activate !== false;
       const tStart = performance.now();
@@ -780,12 +785,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         project?.preferredProvider ??
         selectedProvider ??
         "goose";
-      const sessionModelPreference =
+      const resolvedSessionModelPreference =
         await resolveSupportedSessionModelPreference(
           providerId,
           undefined,
-          project?.preferredModel ?? undefined,
+          options.modelId ?? project?.preferredModel ?? undefined,
         );
+      const sessionModelPreference =
+        options.modelName &&
+        resolvedSessionModelPreference.modelId === options.modelId
+          ? {
+              ...resolvedSessionModelPreference,
+              modelName: options.modelName,
+            }
+          : resolvedSessionModelPreference;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const inheritedWorkspace = resolveInheritedProjectWorkspace({
@@ -896,13 +909,24 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   });
 
   const createNewProjectDraft = useCallback(
-    async (title = DEFAULT_CHAT_TITLE, project: ProjectInfo) => {
+    async (
+      title = DEFAULT_CHAT_TITLE,
+      project: ProjectInfo,
+      options: {
+        providerId?: string;
+        modelId?: string;
+        modelName?: string;
+      } = {},
+    ) => {
       const tStart = performance.now();
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
       const providerId =
-        project.preferredProvider ?? selectedProvider ?? "goose";
+        options.providerId ??
+        project.preferredProvider ??
+        selectedProvider ??
+        "goose";
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       const inheritedWorkspace = resolveInheritedProjectWorkspace({
@@ -939,6 +963,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         return existingDraft;
       }
 
+      const sessionModelPreference = resolveSupportedSessionModelPreference(
+        providerId,
+        undefined,
+        options.modelId ?? project.preferredModel ?? undefined,
+      ).then((preference) =>
+        options.modelName && preference.modelId === options.modelId
+          ? { ...preference, modelName: options.modelName }
+          : preference,
+      );
       const optimisticWorkingDir = getOptimisticSessionCwd(
         project,
         inheritedWorkspace?.path,
@@ -961,11 +994,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       );
       startDraftSessionCreation({
         session,
-        sessionModelPreference: resolveSupportedSessionModelPreference(
-          providerId,
-          undefined,
-          project.preferredModel ?? undefined,
-        ),
+        sessionModelPreference,
         workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
         projectId: project.id,
       });
@@ -1064,17 +1093,28 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         const project = options?.projectId
           ? projects.find((candidate) => candidate.id === options.projectId)
           : undefined;
+        const chatOptions = {
+          providerId: options?.providerId,
+          modelId: options?.modelId,
+          modelName: options?.modelName,
+        };
         const createChat = project
-          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project)
-          : createNewTab(DEFAULT_CHAT_TITLE);
+          ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
+          : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
         void createChat
           .then((session) => {
-            if (options?.providerId && options.modelId) {
+            if (options?.providerId || options?.modelId) {
               patchSession(session.id, {
-                providerId: options.providerId,
-                modelId: options.modelId,
-                modelName: options.modelName ?? options.modelId,
+                ...(options.providerId
+                  ? { providerId: options.providerId }
+                  : {}),
+                ...(options.modelId
+                  ? {
+                      modelId: options.modelId,
+                      modelName: options.modelName ?? options.modelId,
+                    }
+                  : {}),
               });
             }
             if (options?.personaId) {

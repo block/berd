@@ -20,6 +20,14 @@ function getModelDisplayName(model: ModelOption) {
   return normalizeLabel(model.displayName) ?? normalizeLabel(model.name);
 }
 
+function getDefaultAvailableModelLabel(availableModels: ModelOption[] = []) {
+  const model =
+    availableModels.find((candidate) => candidate.recommended) ??
+    availableModels[0];
+
+  return model ? getModelDisplayName(model) : null;
+}
+
 function findSelectedAvailableModel({
   currentModelId,
   currentModelProviderId,
@@ -80,9 +88,12 @@ export function resolveDisplayModelLabel({
 
 export function resolvePickerTriggerLabel({
   selectedAgentLabel,
+  availableModels = [],
   ...modelOptions
 }: PickerTriggerLabelOptions) {
   return (
-    resolveDisplayModelLabel(modelOptions) ?? normalizeLabel(selectedAgentLabel)
+    resolveDisplayModelLabel({ ...modelOptions, availableModels }) ??
+    getDefaultAvailableModelLabel(availableModels) ??
+    normalizeLabel(selectedAgentLabel)
   );
 }

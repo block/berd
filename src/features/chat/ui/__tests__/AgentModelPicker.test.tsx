@@ -381,6 +381,32 @@ describe("AgentModelPicker", () => {
     expect(trigger).not.toHaveTextContent("·");
   });
 
+  it("uses a recommended model label before falling back to the agent label", () => {
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId={null}
+        currentModelName={null}
+        availableModels={[
+          { id: "gpt-5", name: "GPT 5" },
+          {
+            id: "claude-sonnet-4",
+            name: "Claude Sonnet 4",
+            recommended: true,
+          },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("Claude Sonnet 4");
+  });
+
   it("shows a loading state while models are refreshing", async () => {
     const user = userEvent.setup();
 

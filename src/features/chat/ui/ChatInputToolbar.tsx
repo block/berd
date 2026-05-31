@@ -3,10 +3,10 @@ import {
   Mic,
   ArrowUp,
   Square,
-  Paperclip,
   File,
   FolderOpen,
   Settings2,
+  Plus,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
@@ -223,11 +223,45 @@ export function ChatInputToolbar({
     >
       {/* Left side: pickers */}
       <div
-        className={cn(
-          "flex min-w-0 items-center gap-0.5",
-          isCompact && "flex-1",
-        )}
+        className={cn("flex min-w-0 items-center gap-2", isCompact && "flex-1")}
       >
+        {attachmentsEnabled && (
+          <DropdownMenu>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="composer-action"
+                    size="icon-pill-sm"
+                    disabled={disabled}
+                    aria-label={t("toolbar.attach")}
+                  >
+                    <Plus aria-hidden="true" />
+                  </Button>
+                </DropdownMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("toolbar.attach")}</TooltipContent>
+            </Tooltip>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem
+                onSelect={() => onAttachFiles?.()}
+                disabled={disabled}
+              >
+                <File className="mr-2 h-4 w-4" />
+                {t("toolbar.attachFile")}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() => onAttachFolders?.()}
+                disabled={disabled}
+              >
+                <FolderOpen className="mr-2 h-4 w-4" />
+                {t("toolbar.attachFolder")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
         {agentModelPickerEnabled &&
           (agentProviders.length > 0 || providersLoading) && (
             <AgentModelPicker
@@ -312,35 +346,46 @@ export function ChatInputToolbar({
       </div>
 
       {/* Right side: actions */}
-      <div className={cn("flex shrink-0 items-center", isCompact && "ml-auto")}>
-        <div className="flex items-center gap-px">
+      <div
+        className={cn(
+          "flex shrink-0 items-center gap-2",
+          isCompact && "ml-auto",
+        )}
+      >
+        <div className="flex items-center gap-2">
           {showContextUsage && (
             <Popover
               open={isContextPopoverOpen}
               onOpenChange={setIsContextPopoverOpen}
             >
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size={isCompact ? "icon-sm" : "sm"}
-                  className={cn(
-                    "group rounded-full bg-transparent text-foreground/80 shadow-none hover:bg-transparent hover:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground",
-                    isCompact ? "px-0" : "px-2.5",
-                  )}
-                  aria-label={t("toolbar.contextUsage")}
-                  title={t("toolbar.contextUsageTitle", {
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size={isCompact ? "icon-sm" : "sm"}
+                      className={cn(
+                        "group rounded-full bg-transparent text-foreground/80 shadow-none hover:bg-transparent hover:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground",
+                        isCompact ? "px-0" : "px-2.5",
+                      )}
+                      aria-label={t("toolbar.contextUsage")}
+                    >
+                      <ContextRing
+                        tokens={contextTokens}
+                        limit={contextLimit}
+                        size={16}
+                      />
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>
+                  {t("toolbar.contextUsageTitle", {
                     tokens: formatNumber(contextTokens),
                     limit: formatNumber(contextLimit),
                   })}
-                >
-                  <ContextRing
-                    tokens={contextTokens}
-                    limit={contextLimit}
-                    size={18}
-                  />
-                </Button>
-              </PopoverTrigger>
+                </TooltipContent>
+              </Tooltip>
               <PopoverContent
                 side="top"
                 align="end"
@@ -396,46 +441,13 @@ export function ChatInputToolbar({
             </Popover>
           )}
 
-          {attachmentsEnabled && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={disabled}
-                  aria-label={t("toolbar.attach")}
-                  title={t("toolbar.attach")}
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem
-                  onSelect={() => onAttachFiles?.()}
-                  disabled={disabled}
-                >
-                  <File className="mr-2 h-4 w-4" />
-                  {t("toolbar.attachFile")}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => onAttachFolders?.()}
-                  disabled={disabled}
-                >
-                  <FolderOpen className="mr-2 h-4 w-4" />
-                  {t("toolbar.attachFolder")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-
           <Tooltip>
             <TooltipTrigger asChild>
               <span>
                 <Button
                   type="button"
-                  variant="ghost"
-                  size="icon-sm"
+                  variant="composer-action"
+                  size="icon-pill-sm"
                   disabled={!voiceRecording && (!voiceEnabled || disabled)}
                   onClick={onVoiceToggle}
                   aria-label={
@@ -445,11 +457,11 @@ export function ChatInputToolbar({
                   }
                   className={cn(
                     voiceRecording &&
-                      "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground",
+                      "bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground active:bg-destructive active:text-destructive-foreground",
                     voiceTranscribing && "animate-pulse",
                   )}
                 >
-                  <Mic className="h-4 w-4" />
+                  <Mic aria-hidden="true" />
                 </Button>
               </span>
             </TooltipTrigger>
@@ -465,18 +477,29 @@ export function ChatInputToolbar({
           </Tooltip>
         </div>
 
-        <div className="ml-2">
+        <div>
           {isStreaming && !canSend && !hasQueuedMessage ? (
             <Button
               type="button"
               onClick={onStop}
-              variant="ghost"
-              size="icon-sm"
-              className="rounded-full bg-destructive text-destructive-foreground hover:bg-destructive/90 hover:text-destructive-foreground"
+              variant="composer-action"
+              size="icon-pill-sm"
               aria-label={t("toolbar.stopGeneration")}
               title={t("toolbar.stopGeneration")}
             >
-              <Square className="h-3.5 w-3.5" />
+              <Square aria-hidden="true" />
+            </Button>
+          ) : !sendButtonTooltip ? (
+            <Button
+              type="button"
+              onClick={onSend}
+              disabled={!canSend}
+              variant="composer-action"
+              size="icon-pill-sm"
+              className={cn(!canSend && "cursor-default disabled:opacity-100")}
+              aria-label={t("toolbar.sendMessage")}
+            >
+              <ArrowUp aria-hidden="true" />
             </Button>
           ) : (
             <Tooltip>
@@ -486,17 +509,14 @@ export function ChatInputToolbar({
                     type="button"
                     onClick={onSend}
                     disabled={!canSend}
-                    size="icon-sm"
+                    variant="composer-action"
+                    size="icon-pill-sm"
                     className={cn(
-                      "rounded-full",
-                      "shadow-none",
-                      canSend
-                        ? "bg-foreground text-background hover:bg-foreground/90"
-                        : "cursor-default bg-accent text-muted-foreground disabled:opacity-100",
+                      !canSend && "cursor-default disabled:opacity-100",
                     )}
                     aria-label={sendButtonTooltip ?? t("toolbar.sendMessage")}
                   >
-                    <ArrowUp className="h-4 w-4" />
+                    <ArrowUp aria-hidden="true" />
                   </Button>
                 </span>
               </TooltipTrigger>

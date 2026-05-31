@@ -178,17 +178,24 @@ describe("ChatInput", () => {
     ).toHaveTextContent("GPT-4o");
   });
 
-  it("shows provider label when no current model is selected", () => {
+  it("shows an available model name when no current model is selected", () => {
     render(
       <ChatInput
         onSend={vi.fn()}
-        availableModels={[{ id: "claude-sonnet-4", name: "Claude Sonnet 4" }]}
+        availableModels={[
+          { id: "gpt-5", name: "GPT 5" },
+          {
+            id: "claude-sonnet-4",
+            name: "Claude Sonnet 4",
+            recommended: true,
+          },
+        ]}
         providers={[{ id: "goose", label: "Goose" }]}
       />,
     );
     expect(
       screen.getByRole("button", { name: /choose agent and model/i }),
-    ).toHaveTextContent("Goose");
+    ).toHaveTextContent("Claude Sonnet 4");
   });
 
   it("shows provider label while the current model id is unresolved", () => {

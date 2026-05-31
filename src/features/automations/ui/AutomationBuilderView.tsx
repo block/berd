@@ -28,7 +28,7 @@ export function AutomationBuilderView({
     <>
       {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}
       <div className="px-4">
-        <div className="pointer-events-auto mx-auto w-full max-w-xl rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
+        <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput
             surface="bare"
             placeholder={isEditing ? t("builder.editPlaceholder") : undefined}

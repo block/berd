@@ -33,7 +33,9 @@ interface AgentModelPickerProps {
   loading?: boolean;
   isCompact?: boolean;
   showSelectedModelInTrigger?: boolean;
+  triggerTabIndex?: number;
   onOpen?: () => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 type ModelView = "recommended" | "all";
@@ -52,7 +54,9 @@ export function AgentModelPicker({
   loading = false,
   isCompact = false,
   showSelectedModelInTrigger = true,
+  triggerTabIndex,
   onOpen,
+  onOpenChange,
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
@@ -110,6 +114,7 @@ export function AgentModelPicker({
       open={open}
       onOpenChange={(nextOpen) => {
         setOpen(nextOpen);
+        onOpenChange?.(nextOpen);
         if (nextOpen) onOpen?.();
       }}
     >
@@ -119,6 +124,7 @@ export function AgentModelPicker({
           variant="toolbar"
           size="sm"
           aria-label={t("toolbar.chooseAgentModel")}
+          tabIndex={triggerTabIndex}
           disabled={loading && !selectedAgentLabel}
           leftIcon={getProviderIcon(selectedAgentId, "size-3.5")}
           rightIcon={<IconChevronDown className="opacity-50" />}

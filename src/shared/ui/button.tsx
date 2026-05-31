@@ -37,6 +37,8 @@ const buttonVariants = cva(
           "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
         toolbar:
           "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
+        "composer-action":
+          "bg-accent text-foreground shadow-none hover:bg-muted hover:text-foreground active:bg-secondary/40 active:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-secondary dark:active:bg-secondary dark:data-[state=open]:bg-secondary dark:aria-expanded:bg-secondary",
         "page-header":
           "bg-background text-muted-foreground shadow-none hover:bg-background hover:text-foreground focus-visible:text-foreground active:text-foreground",
         back: "justify-start text-muted-foreground hover:text-foreground",
@@ -54,6 +56,8 @@ const buttonVariants = cva(
           "h-7 w-7 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
         "icon-sm":
           "h-8 w-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
+        "icon-pill-sm":
+          "h-8 w-10 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
         "icon-lg":
           "h-10 w-10 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-5",
       },
@@ -131,6 +135,7 @@ const buttonIconSizeClasses = {
   icon: "size-4",
   "icon-xs": "size-3",
   "icon-sm": "size-3.5",
+  "icon-pill-sm": "size-4",
   "icon-lg": "size-5",
 } satisfies Record<
   NonNullable<VariantProps<typeof buttonVariants>["size"]>,

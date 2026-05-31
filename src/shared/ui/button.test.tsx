@@ -68,6 +68,19 @@ describe("Button", () => {
     expect(screen.getByTestId("icon")).toHaveClass("size-3.5");
   });
 
+  it("applies pill icon button sizing from the size variant", () => {
+    render(
+      <Button size="icon-pill-sm" aria-label="Send">
+        <IconArrowDown data-testid="icon" />
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Send" });
+
+    expect(button).toHaveClass("h-8", "w-10");
+    expect(screen.getByTestId("icon")).toHaveClass("size-4");
+  });
+
   it("preserves explicit child icon class size on icon-only buttons", () => {
     render(
       <Button size="icon-sm" aria-label="Jump to latest">

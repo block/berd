@@ -686,6 +686,7 @@ const buttonTextSizeBySize = {
   icon: "text-sm",
   "icon-xs": "text-xs",
   "icon-sm": "text-sm",
+  "icon-pill-sm": "text-sm",
   "icon-lg": "text-sm",
 } satisfies Record<ButtonSize, string>;
 
@@ -920,6 +921,32 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       state: "Open",
       background: "--accent",
       textIcon: "--accent-foreground",
+    },
+  ],
+  "composer-action": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--accent",
+      textIcon: "--foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--muted; dark: --secondary",
+      textIcon: "--foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Active",
+      background: "--secondary / 40%; dark: --secondary",
+      textIcon: "--foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "--muted; dark: --secondary",
+      textIcon: "--foreground",
     },
   ],
   back: [

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
 
@@ -27,7 +28,8 @@ export function ContextRing({
       width={size}
       height={size}
       viewBox={`0 0 ${size} ${size}`}
-      className="shrink-0"
+      className="h-[var(--context-ring-size)] w-[var(--context-ring-size)] shrink-0"
+      style={{ "--context-ring-size": `${size}px` } as CSSProperties}
       aria-label={t("context.ringAria", { percent })}
     >
       <circle

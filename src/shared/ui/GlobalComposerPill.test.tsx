@@ -17,6 +17,9 @@ const mockInspectAttachmentPaths = vi.fn();
 const mockReadImageAttachment = vi.fn();
 const mockListFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
+const mockGetModelsForAgent = vi.fn();
+const mockRefreshAllModelProviders = vi.fn();
+const mockRefreshAgentProviderStatus = vi.fn();
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...args: unknown[]) => mockOpenDialog(...args),
@@ -59,9 +62,25 @@ vi.mock("@/features/chat/hooks/useVoiceDictation", () => ({
 
 vi.mock("@/features/providers/hooks/useProviderModels", () => ({
   useProviderModels: () => ({
-    getModelsForAgent: () => [],
-    refreshAllModelProviders: vi.fn().mockResolvedValue(undefined),
-    modelCacheRefreshProviderIds: [],
+    configuredModelProviderIds: ["openai", "anthropic"],
+    modelCacheRefreshProviderIds: ["openai", "anthropic"],
+    getModelsForAgent: (agentId: string) => mockGetModelsForAgent(agentId),
+    refreshAllModelProviders: (...args: unknown[]) =>
+      mockRefreshAllModelProviders(...args),
+    isRefreshingProvider: () => false,
+    getError: () => null,
+  }),
+}));
+
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => ({
+    readyAgentIds: new Set(["goose", "claude-acp"]),
+    agentReadiness: new Map([
+      ["goose", "ready"],
+      ["claude-acp", "ready"],
+    ]),
+    loading: false,
+    refresh: mockRefreshAgentProviderStatus,
   }),
 }));
 
@@ -169,6 +188,12 @@ describe("GlobalComposerPill", () => {
     mockReadImageAttachment.mockReset();
     mockListFilesForMentions.mockReset();
     mockResizeImage.mockReset();
+    mockGetModelsForAgent.mockReset();
+    mockGetModelsForAgent.mockReturnValue([]);
+    mockRefreshAllModelProviders.mockReset();
+    mockRefreshAllModelProviders.mockResolvedValue(undefined);
+    mockRefreshAgentProviderStatus.mockReset();
+    mockRefreshAgentProviderStatus.mockResolvedValue(undefined);
     mockOpenDialog.mockResolvedValue(null);
     mockInspectAttachmentPaths.mockResolvedValue([]);
     mockReadImageAttachment.mockResolvedValue({
@@ -185,6 +210,11 @@ describe("GlobalComposerPill", () => {
     localStorage.setItem("goose:defaultProvider", "goose");
     useAgentStore.setState({
       personas: [],
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+      ],
+      providersLoading: false,
       selectedProvider: "goose",
     });
     setProjectStore();
@@ -244,6 +274,38 @@ describe("GlobalComposerPill", () => {
     render(<GlobalComposerPill onSend={vi.fn()} focusRequest={1} />);
 
     expect(screen.getByRole("textbox")).not.toHaveFocus();
+  });
+
+  it("disables send until there is sendable content", async () => {
+    const user = userEvent.setup();
+    const onSend = renderGlobalComposer();
+    const textbox = screen.getByRole("textbox");
+
+    const collapsedSendButton = screen.getByRole("button", {
+      name: /send message/i,
+    });
+    expect(collapsedSendButton).toBeDisabled();
+    expect(collapsedSendButton).toHaveClass(
+      "cursor-default",
+      "disabled:opacity-100",
+    );
+
+    await user.click(textbox);
+    const expandedDisabledSendButton = screen.getByRole("button", {
+      name: /send message/i,
+    });
+    expect(expandedDisabledSendButton).toBeDisabled();
+    expect(expandedDisabledSendButton).toHaveClass(
+      "cursor-default",
+      "disabled:opacity-100",
+    );
+
+    await user.type(textbox, "Hello");
+    const sendButton = screen.getByRole("button", { name: /send message/i });
+    expect(sendButton).toBeEnabled();
+
+    await user.click(sendButton);
+    expect(onSend).toHaveBeenCalledWith("Hello");
   });
 
   it("attaches an image through the picker and sends it without text", async () => {
@@ -419,5 +481,89 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByRole("textbox")).toHaveValue(
       "/workspace/project/src/readme.md ",
     );
+  });
+
+  it("sends a provider override when the mini composer switches agents", async () => {
+    const user = userEvent.setup();
+    const onSend = renderGlobalComposer();
+    const textbox = screen.getByRole("textbox");
+
+    await user.click(textbox);
+    await user.type(textbox, "Use Claude");
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Code" }));
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Use Claude", {
+      providerId: "claude-acp",
+    });
+  });
+
+  it("shows the model name in the mini composer picker trigger", async () => {
+    const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "claude-sonnet-4",
+              name: "Claude Sonnet 4",
+              providerId: "anthropic",
+              providerName: "Anthropic",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    renderGlobalComposer();
+
+    await user.click(screen.getByRole("textbox"));
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("Claude Sonnet 4");
+  });
+
+  it("sends the selected model provider from the shared model picker", async () => {
+    const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "gpt-5",
+              name: "GPT 5",
+              providerId: "openai",
+              providerName: "OpenAI",
+              recommended: true,
+            },
+            {
+              id: "claude-sonnet-4",
+              name: "Claude Sonnet 4",
+              displayName: "Claude Sonnet 4",
+              providerId: "anthropic",
+              providerName: "Anthropic",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    const onSend = renderGlobalComposer();
+    const textbox = screen.getByRole("textbox");
+
+    await user.click(textbox);
+    await user.type(textbox, "Use Sonnet");
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Use Sonnet", {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
   });
 });

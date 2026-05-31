@@ -14,17 +14,20 @@ import {
   IconPlus,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
+import { useAgentModelPickerState } from "@/features/chat/hooks/useAgentModelPickerState";
 import { useMentionHandlers } from "@/features/chat/hooks/useMentionHandlers";
 import { getImageFilesFromClipboardItems } from "@/features/chat/lib/clipboardAttachments";
 import { buildSkillSendPayload } from "@/features/chat/lib/skillSendPayload";
 import { ChatInputAttachments } from "@/features/chat/ui/ChatInputAttachments";
 import { ChatInputSelectionChips } from "@/features/chat/ui/ChatInputSelectionChips";
 import { MentionAutocomplete } from "@/features/chat/ui/MentionAutocomplete";
+import { AgentModelPicker } from "@/features/chat/ui/AgentModelPicker";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
@@ -34,14 +37,11 @@ import type {
   ModelOption,
 } from "@/features/chat/types";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { useProviderModels } from "@/features/providers/hooks/useProviderModels";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
-import {
-  formatProviderLabel,
-  getProviderIcon,
-} from "@/shared/ui/icons/ProviderIcons";
+import { Button } from "@/shared/ui/button";
+import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import {
   Popover,
   PopoverAnchor,
@@ -73,19 +73,9 @@ interface ModelSelection {
   modelName: string;
 }
 
-interface ModelGroup {
-  providerId: string;
-  providerName: string;
-  models: ModelSelection[];
-}
-
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 200;
-
-function compareLabels(left: string, right: string) {
-  return left.localeCompare(right, undefined, { sensitivity: "base" });
-}
 
 function getModelName(model: ModelOption) {
   return model.displayName ?? model.name ?? model.id;
@@ -106,57 +96,6 @@ function modelOptionToSelection(
     modelId: model.id,
     modelName: getModelName(model),
   };
-}
-
-function buildModelGroups(
-  models: ModelOption[],
-  fallbackProviderId: string,
-): ModelGroup[] {
-  const recommendedByProviderAndModel = new Map<string, boolean>();
-  const groups = new Map<string, ModelGroup>();
-
-  for (const model of models) {
-    const selection = modelOptionToSelection(model, fallbackProviderId);
-    recommendedByProviderAndModel.set(
-      `${selection.providerId}:${selection.modelId}`,
-      model.recommended ?? false,
-    );
-
-    const group = groups.get(selection.providerId);
-    if (group) {
-      group.models.push(selection);
-    } else {
-      groups.set(selection.providerId, {
-        providerId: selection.providerId,
-        providerName: selection.providerName,
-        models: [selection],
-      });
-    }
-  }
-
-  return [...groups.values()]
-    .map((group) => ({
-      ...group,
-      models: group.models.sort((left, right) => {
-        const leftRecommended =
-          recommendedByProviderAndModel.get(
-            `${left.providerId}:${left.modelId}`,
-          ) ?? false;
-        const rightRecommended =
-          recommendedByProviderAndModel.get(
-            `${right.providerId}:${right.modelId}`,
-          ) ?? false;
-
-        if (leftRecommended !== rightRecommended) {
-          return leftRecommended ? -1 : 1;
-        }
-
-        return compareLabels(left.modelName, right.modelName);
-      }),
-    }))
-    .sort((left, right) =>
-      compareLabels(left.providerName, right.providerName),
-    );
 }
 
 function findMatchingModel(
@@ -191,17 +130,14 @@ export function GlobalComposerPill({
   suggestedPersonaId = null,
 }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
-  const selectedProvider = useAgentStore((state) => state.selectedProvider);
+  const { providers, providersLoading, selectedProvider, setSelectedProvider } =
+    useProviderSelection();
   const projects = useProjectStore((state) => state.projects);
-  const {
-    getModelsForAgent,
-    refreshAllModelProviders,
-    modelCacheRefreshProviderIds,
-  } = useProviderModels();
   const [text, setText] = useState("");
   const [focused, setFocused] = useState(false);
   const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [projectPickerOpen, setProjectPickerOpen] = useState(false);
+  const [providerOverride, setProviderOverride] = useState<string | null>(null);
   const [modelOverride, setModelOverride] = useState<ModelSelection | null>(
     null,
   );
@@ -261,12 +197,16 @@ export function GlobalComposerPill({
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
     [personas, selectedPersonaId],
   );
-  const hasDraftContent =
+  const hasSendableContent =
     text.trim().length > 0 ||
     attachments.length > 0 ||
-    selectedSkills.length > 0 ||
+    selectedSkills.length > 0;
+  const hasDraftContent =
+    hasSendableContent ||
+    providerOverride !== null ||
     modelOverride !== null ||
     selectedProjectId !== null;
+  const canSend = hasSendableContent && !attachmentWorkPending;
 
   useEffect(() => {
     if (routePersonaIdRef.current !== suggestedPersonaId) {
@@ -314,17 +254,39 @@ export function GlobalComposerPill({
   }, []);
 
   const placeholder = t("globalPill.placeholder");
+  const selectedProviderForPicker = providerOverride ?? selectedProvider;
+  const {
+    selectedAgentId,
+    pickerAgents,
+    availableModels,
+    modelsLoading,
+    modelStatusMessage,
+    handleProviderChange,
+    handleModelChange,
+    handlePickerOpen,
+  } = useAgentModelPickerState({
+    providers,
+    selectedProvider: selectedProviderForPicker,
+    onProviderSelected: (providerId) => {
+      setProviderOverride(providerId);
+      setModelOverride(null);
+      setSelectedProvider(providerId);
+    },
+    onModelSelected: (model) => {
+      const selection = modelOptionToSelection(
+        model,
+        selectedProviderForPicker,
+      );
+      setProviderOverride(selection.providerId);
+      setModelOverride(selection);
+      setSelectedProvider(selection.providerId);
+    },
+  });
 
-  const selectedAgentId =
-    resolveAgentProviderCatalogIdStrict(selectedProvider) ?? "goose";
   const concreteSelectedProviderId =
-    resolveAgentProviderCatalogIdStrict(selectedProvider) == null
-      ? selectedProvider
+    resolveAgentProviderCatalogIdStrict(selectedProviderForPicker) == null
+      ? selectedProviderForPicker
       : null;
-  const availableModels = useMemo(
-    () => getModelsForAgent(selectedAgentId),
-    [getModelsForAgent, selectedAgentId],
-  );
   const defaultModelSelection = useMemo(() => {
     const storedPreference = getStoredModelPreference(selectedAgentId);
     if (storedPreference) {
@@ -341,7 +303,7 @@ export function GlobalComposerPill({
         const providerId =
           matchingModel?.providerId ??
           storedPreference.providerId ??
-          selectedProvider;
+          selectedProviderForPicker;
         return {
           providerId,
           providerName:
@@ -366,7 +328,7 @@ export function GlobalComposerPill({
         gooseDefaultSelection.providerId,
       );
       return matchingDefault
-        ? modelOptionToSelection(matchingDefault, selectedProvider)
+        ? modelOptionToSelection(matchingDefault, selectedProviderForPicker)
         : gooseDefaultSelection;
     }
 
@@ -378,18 +340,14 @@ export function GlobalComposerPill({
         )
       : availableModels;
 
-    return getPreferredModel(compatibleModels, selectedProvider);
+    return getPreferredModel(compatibleModels, selectedProviderForPicker);
   }, [
     availableModels,
     concreteSelectedProviderId,
     gooseDefaultSelection,
     selectedAgentId,
-    selectedProvider,
+    selectedProviderForPicker,
   ]);
-  const modelGroups = useMemo(
-    () => buildModelGroups(availableModels, selectedProvider),
-    [availableModels, selectedProvider],
-  );
   const selectedProject = useMemo(
     () => projects.find((project) => project.id === selectedProjectId) ?? null,
     [projects, selectedProjectId],
@@ -434,6 +392,9 @@ export function GlobalComposerPill({
       if (attachments.length > 0) {
         options.attachments = attachments;
       }
+      if (providerOverride) {
+        options.providerId = providerOverride;
+      }
       if (modelOverride) {
         options.providerId = modelOverride.providerId;
         options.modelId = modelOverride.modelId;
@@ -461,6 +422,7 @@ export function GlobalComposerPill({
       }
       setText("");
       clearAttachments();
+      setProviderOverride(null);
       setModelOverride(null);
       setSelectedProjectId(null);
       setSelectedPersonaId(null);
@@ -474,6 +436,7 @@ export function GlobalComposerPill({
       clearAttachments,
       modelOverride,
       onSend,
+      providerOverride,
       selectedPersonaId,
       selectedProjectId,
       selectedSkills,
@@ -491,21 +454,6 @@ export function GlobalComposerPill({
     resetTextarea: () => {},
     isSendLocked: attachmentWorkPending,
   });
-
-  useEffect(() => {
-    if (!modelPickerOpen) {
-      return;
-    }
-
-    void refreshAllModelProviders(modelCacheRefreshProviderIds).catch(
-      (error) => {
-        console.error(
-          "Failed to refresh provider models from global composer:",
-          error,
-        );
-      },
-    );
-  }, [modelCacheRefreshProviderIds, modelPickerOpen, refreshAllModelProviders]);
 
   useEffect(() => {
     if (selectedAgentId !== "goose") {
@@ -566,7 +514,7 @@ export function GlobalComposerPill({
       : placeholder;
 
   const handleSend = useCallback(() => {
-    if (attachmentWorkPending) {
+    if (!canSend) {
       return;
     }
 
@@ -579,7 +527,7 @@ export function GlobalComposerPill({
     }
 
     submitCompose(text);
-  }, [attachmentWorkPending, dictation, submitCompose, text]);
+  }, [canSend, dictation, submitCompose, text]);
 
   const handlePaste = useCallback(
     (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -615,11 +563,6 @@ export function GlobalComposerPill({
     disabled: false,
     addPathAttachments,
   });
-
-  const modelButtonLabel =
-    effectiveModelSelection?.modelName ??
-    defaultModelSelection?.modelName ??
-    t("toolbar.selectModel");
 
   const projectButtonLabel = selectedProject?.name ?? t("toolbar.noProject");
 
@@ -747,25 +690,28 @@ export function GlobalComposerPill({
               : "max-w-32 opacity-100",
           )}
         >
-          <button
+          <Button
             type="button"
             tabIndex={expanded ? -1 : 0}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-accent"
+            variant="composer-action"
+            size="icon-pill-sm"
             aria-label={t("toolbar.voiceInput")}
             title={t("toolbar.voiceInput")}
           >
-            <IconMicrophone className="size-4 text-foreground" />
-          </button>
-          <button
+            <IconMicrophone aria-hidden="true" />
+          </Button>
+          <Button
             type="button"
             tabIndex={expanded ? -1 : 0}
             onClick={handleSend}
-            disabled={attachmentWorkPending}
-            className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
+            disabled={!canSend}
+            variant="composer-action"
+            size="icon-pill-sm"
+            className={cn(!canSend && "cursor-default disabled:opacity-100")}
             aria-label={t("toolbar.sendMessage")}
           >
-            <IconArrowUp className="size-4 text-foreground" />
-          </button>
+            <IconArrowUp aria-hidden="true" />
+          </Button>
         </div>
       </div>
 
@@ -777,80 +723,36 @@ export function GlobalComposerPill({
         )}
       >
         <div className="flex items-center gap-2">
-          <button
+          <Button
             type="button"
             tabIndex={expanded ? 0 : -1}
             onClick={() => {
               runAttachmentWork(handleAttachFiles);
             }}
-            className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
+            variant="composer-action"
+            size="icon-pill-sm"
             aria-label={t("attachments.chooseFilesDialogTitle")}
           >
-            <IconPlus className="size-4 text-foreground" />
-          </button>
+            <IconPlus aria-hidden="true" />
+          </Button>
 
-          <Popover open={modelPickerOpen} onOpenChange={setModelPickerOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                tabIndex={expanded ? 0 : -1}
-                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-accent"
-                aria-label={t("toolbar.selectModel")}
-              >
-                <span className="max-w-[140px] truncate">
-                  {modelButtonLabel}
-                </span>
-                <IconChevronDown className="size-3 shrink-0 text-muted-foreground" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-[320px] p-2">
-              <div className="max-h-80 space-y-2 overflow-y-auto">
-                {modelGroups.length === 0 ? (
-                  <p className="px-2 py-3 text-center text-[14px] text-muted-foreground">
-                    {t("toolbar.noModelsAvailable")}
-                  </p>
-                ) : null}
-                {modelGroups.map((group) => (
-                  <div key={group.providerId} className="space-y-1">
-                    <div className="flex items-center gap-2 px-2 pt-1 text-[12px] font-medium text-muted-foreground">
-                      <span className="text-muted-foreground">
-                        {getProviderIcon(group.providerId, "size-3.5")}
-                      </span>
-                      <span>{group.providerName}</span>
-                    </div>
-                    <div className="space-y-0.5">
-                      {group.models.map((model) => {
-                        const isSelected =
-                          effectiveModelSelection?.providerId ===
-                            model.providerId &&
-                          effectiveModelSelection.modelId === model.modelId;
-
-                        return (
-                          <button
-                            key={`${model.providerId}:${model.modelId}`}
-                            type="button"
-                            onClick={() => {
-                              setModelOverride(model);
-                              setModelPickerOpen(false);
-                            }}
-                            className={cn(
-                              "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                              isSelected && "bg-accent",
-                            )}
-                          >
-                            <span className="truncate">{model.modelName}</span>
-                            {isSelected ? (
-                              <IconCheck className="ml-2 size-4 shrink-0 text-muted-foreground" />
-                            ) : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+          <AgentModelPicker
+            agents={pickerAgents}
+            selectedAgentId={selectedAgentId}
+            onAgentChange={handleProviderChange}
+            currentModelId={effectiveModelSelection?.modelId ?? null}
+            currentModelProviderId={effectiveModelSelection?.providerId ?? null}
+            currentModelName={effectiveModelSelection?.modelName ?? null}
+            availableModels={availableModels}
+            modelsLoading={modelsLoading}
+            modelStatusMessage={modelStatusMessage}
+            onModelChange={handleModelChange}
+            onOpen={handlePickerOpen}
+            onOpenChange={setModelPickerOpen}
+            loading={providersLoading}
+            isCompact
+            triggerTabIndex={expanded ? 0 : -1}
+          />
 
           <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
             <PopoverTrigger asChild>
@@ -908,15 +810,16 @@ export function GlobalComposerPill({
           </Popover>
 
           <div className="ml-auto flex items-center gap-2">
-            <button
+            <Button
               type="button"
               tabIndex={expanded ? 0 : -1}
               disabled={!dictation.isRecording && !dictation.isEnabled}
               onClick={dictation.toggleRecording}
+              variant="composer-action"
+              size="icon-pill-sm"
               className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full bg-accent transition-colors",
                 dictation.isRecording &&
-                  "bg-destructive/12 text-destructive hover:bg-destructive/16",
+                  "bg-destructive/12 text-destructive hover:bg-destructive/16 hover:text-destructive active:bg-destructive/16 active:text-destructive",
                 dictation.isTranscribing && "animate-pulse",
                 !dictation.isRecording &&
                   !dictation.isEnabled &&
@@ -938,18 +841,20 @@ export function GlobalComposerPill({
                       : t("toolbar.voiceInput")
               }
             >
-              <IconMicrophone className="size-4" />
-            </button>
-            <button
+              <IconMicrophone aria-hidden="true" />
+            </Button>
+            <Button
               type="button"
               tabIndex={expanded ? 0 : -1}
               onClick={handleSend}
-              disabled={attachmentWorkPending}
-              className="flex h-8 w-10 items-center justify-center rounded-full bg-accent"
+              disabled={!canSend}
+              variant="composer-action"
+              size="icon-pill-sm"
+              className={cn(!canSend && "cursor-default disabled:opacity-100")}
               aria-label={t("toolbar.sendMessage")}
             >
-              <IconArrowUp className="size-4 text-foreground" />
-            </button>
+              <IconArrowUp aria-hidden="true" />
+            </Button>
           </div>
         </div>
       </div>
