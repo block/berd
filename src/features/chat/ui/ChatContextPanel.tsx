@@ -43,6 +43,8 @@ interface ChatContextPanelProps {
     workingDirs?: string[];
   } | null;
   sessionWorkingDir?: string | null;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export function ChatContextPanel({
@@ -50,6 +52,8 @@ export function ChatContextPanel({
   isOpen,
   project,
   sessionWorkingDir,
+  terminalOpen = false,
+  onToggleTerminal,
 }: ChatContextPanelProps) {
   const shouldReduceMotion = useReducedMotion();
   const isCompactViewport = useChatContextPanelCompactViewport();
@@ -101,6 +105,8 @@ export function ChatContextPanel({
                 projectColor={project?.color}
                 projectWorkingDirs={project?.workingDirs ?? []}
                 sessionWorkingDir={sessionWorkingDir}
+                terminalOpen={terminalOpen}
+                onToggleTerminal={onToggleTerminal}
               />
             </aside>
           </motion.div>

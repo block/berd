@@ -1,7 +1,8 @@
-import { useEffect, useRef, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
+import { toast } from "sonner";
 import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
@@ -19,7 +20,49 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
+import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
+import { useGitState } from "@/shared/hooks/useGitState";
+import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
+
+interface TerminalWorkspaceState {
+  paths: string[];
+  expandedPath: string | null;
+}
+
+const TERMINAL_WORKSPACE_STORAGE_KEY_PREFIX = "goose:chat-terminal-workspaces";
+
+const DEFAULT_TERMINAL_WORKSPACE_STATE: TerminalWorkspaceState = {
+  paths: [],
+  expandedPath: null,
+};
+
+function validateTerminalWorkspaceState(
+  value: unknown,
+  defaults: TerminalWorkspaceState,
+): TerminalWorkspaceState {
+  if (!value || typeof value !== "object") {
+    return defaults;
+  }
+
+  const parsed = value as Partial<TerminalWorkspaceState>;
+  const paths = Array.isArray(parsed.paths)
+    ? parsed.paths.filter(
+        (path): path is string => typeof path === "string" && path.length > 0,
+      )
+    : defaults.paths;
+  const uniquePaths = Array.from(new Set(paths));
+  const expandedPath =
+    typeof parsed.expandedPath === "string" &&
+    uniquePaths.includes(parsed.expandedPath)
+      ? parsed.expandedPath
+      : null;
+
+  return {
+    paths: uniquePaths,
+    expandedPath,
+  };
+}
 
 interface ChatViewProps {
   sessionId: string;
@@ -40,6 +83,7 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
+  const previousTerminalCwdRef = useRef<string | null>(null);
   const setTopBarActions = useSetTopBarActions();
   const {
     isPinned: isPinnedToHome,
@@ -53,7 +97,18 @@ export function ChatView({
   });
   const effectiveSession = controller.session ?? activeSession ?? null;
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
+  const terminalWorkspacePath = useChatSessionStore((s) =>
+    effectiveSession?.id
+      ? (s.activeWorkspaceBySession[effectiveSession.id]?.path ?? null)
+      : null,
+  );
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
+  const [terminalWorkspaceState, setTerminalWorkspaceState] =
+    usePersistedState<TerminalWorkspaceState>(
+      `${TERMINAL_WORKSPACE_STORAGE_KEY_PREFIX}:${sessionId}`,
+      DEFAULT_TERMINAL_WORKSPACE_STATE,
+      validateTerminalWorkspaceState,
+    );
   const isAgentBuilderSession =
     effectiveSession?.intent === "build-agent" &&
     Boolean(
@@ -78,11 +133,136 @@ export function ChatView({
         "--agent-builder-column-enter-y": "72px",
       } as CSSProperties)
     : undefined;
+  const terminalCwd =
+    terminalWorkspacePath ??
+    effectiveSession?.workingDir ??
+    controller.project?.workingDirs?.[0] ??
+    null;
+  const {
+    data: terminalGitState,
+    isLoading: terminalGitLoading,
+    isFetching: terminalGitFetching,
+  } = useGitState(terminalCwd, Boolean(effectiveSession?.id && terminalCwd));
+  const terminalAvailable = Boolean(terminalCwd && terminalGitState?.isGitRepo);
+  const terminalWorkspacePaths = terminalWorkspaceState.paths;
+  const expandedTerminalPath = terminalWorkspaceState.expandedPath;
+  const activeWorkspaceHasTerminal = terminalCwd
+    ? terminalWorkspacePaths.includes(terminalCwd)
+    : false;
+  const orderedTerminalPaths = terminalCwd
+    ? [
+        ...terminalWorkspacePaths.filter((path) => path === terminalCwd),
+        ...terminalWorkspacePaths.filter((path) => path !== terminalCwd),
+      ]
+    : terminalWorkspacePaths;
+  const terminalVisible = orderedTerminalPaths.length > 0;
+
+  const toggleTerminal = useCallback(() => {
+    if (!terminalCwd) {
+      toast.message(t("terminal.noWorkspace"));
+      return;
+    }
+
+    if ((terminalGitLoading || terminalGitFetching) && !terminalGitState) {
+      toast.message(t("terminal.checkingWorkspace"));
+      return;
+    }
+
+    if (!terminalAvailable) {
+      toast.message(t("terminal.gitOnly"));
+      return;
+    }
+
+    setTerminalWorkspaceState((state) => {
+      const paths = state.paths.includes(terminalCwd)
+        ? state.paths
+        : [...state.paths, terminalCwd];
+      return {
+        paths,
+        expandedPath: state.expandedPath === terminalCwd ? null : terminalCwd,
+      };
+    });
+  }, [
+    terminalAvailable,
+    terminalCwd,
+    terminalGitFetching,
+    terminalGitLoading,
+    terminalGitState,
+    setTerminalWorkspaceState,
+    t,
+  ]);
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
     perfLog(`[perf:chatview] ${sessionId.slice(0, 8)} mounted in ${ms}ms`);
   }, [sessionId]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (
+        event.key.toLowerCase() !== "j" ||
+        event.shiftKey ||
+        event.altKey ||
+        !(event.metaKey || event.ctrlKey)
+      ) {
+        return;
+      }
+
+      event.preventDefault();
+      toggleTerminal();
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [toggleTerminal]);
+
+  useEffect(() => {
+    const previousTerminalCwd = previousTerminalCwdRef.current;
+    previousTerminalCwdRef.current = terminalCwd;
+    if (!previousTerminalCwd || previousTerminalCwd === terminalCwd) {
+      return;
+    }
+
+    setTerminalWorkspaceState((state) =>
+      state.expandedPath === previousTerminalCwd
+        ? { ...state, expandedPath: null }
+        : state,
+    );
+  }, [setTerminalWorkspaceState, terminalCwd]);
+
+  const handleCollapseTerminal = useCallback(
+    (path: string) => {
+      setTerminalWorkspaceState((state) =>
+        state.expandedPath === path ? { ...state, expandedPath: null } : state,
+      );
+    },
+    [setTerminalWorkspaceState],
+  );
+
+  const handleExpandTerminal = useCallback(
+    (path: string) => {
+      setTerminalWorkspaceState((state) => ({
+        ...state,
+        expandedPath: path,
+      }));
+    },
+    [setTerminalWorkspaceState],
+  );
+
+  const handleCloseTerminal = useCallback(
+    (path: string) => {
+      setTerminalWorkspaceState((state) => {
+        const paths = state.paths.filter(
+          (existingPath) => existingPath !== path,
+        );
+        return {
+          paths,
+          expandedPath: state.expandedPath === path ? null : state.expandedPath,
+        };
+      });
+    },
+    [setTerminalWorkspaceState],
+  );
 
   const showIndicator =
     controller.chatState === "thinking" ||
@@ -138,11 +318,8 @@ export function ChatView({
     unpinFromHome,
   ]);
 
-  // The composer lives inside the conversation's scroll container as a sticky
-  // footer, so the conversation scrolls behind the glassy composer and the
-  // browser handles native scroll latching between the composer's text and the
-  // conversation. It stays mounted across loading, empty, and populated states
-  // (passed as `footer`) so it never remounts and loses focus or draft text.
+  // The composer is owned by the timeline so it stays mounted across loading,
+  // empty, and populated states without losing focus or draft text.
   const footerStatus = shouldShowLoadingIndicator ? (
     <AnimatePresence initial={false}>
       <div className="flex h-8 items-center rounded-full bg-surface-composer px-3 shadow-[var(--shadow-chat)] backdrop-blur-md">
@@ -244,6 +421,20 @@ export function ChatView({
       </p>
     </div>
   );
+  const messageTimeline = (
+    <MessageTimeline
+      messages={controller.messages}
+      streamingMessageId={controller.streamingMessageId}
+      scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
+      scrollTargetQuery={controller.scrollTarget?.query ?? null}
+      onScrollTargetHandled={controller.handleScrollTargetHandled}
+      onSendMcpAppMessage={controller.handleSend}
+      showPlaceholder={controller.isLoadingHistory}
+      placeholder={conversationPlaceholder}
+      footer={composerFooter}
+      footerStatus={footerStatus}
+    />
+  );
 
   return (
     <ArtifactPolicyProvider
@@ -259,24 +450,40 @@ export function ChatView({
         <div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col",
+            terminalVisible && "gap-3",
             isAgentBuilderSession && "agent-builder-column-enter",
           )}
           style={agentBuilderChatColumnStyle}
         >
           <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-card">
-            <MessageTimeline
-              messages={controller.messages}
-              streamingMessageId={controller.streamingMessageId}
-              scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
-              scrollTargetQuery={controller.scrollTarget?.query ?? null}
-              onScrollTargetHandled={controller.handleScrollTargetHandled}
-              onSendMcpAppMessage={controller.handleSend}
-              showPlaceholder={controller.isLoadingHistory}
-              placeholder={conversationPlaceholder}
-              footer={composerFooter}
-              footerStatus={footerStatus}
-            />
+            {messageTimeline}
           </div>
+          {terminalVisible ? (
+            <div className="flex shrink-0 flex-col gap-2">
+              {orderedTerminalPaths.map((path) => {
+                const terminalExpanded = expandedTerminalPath === path;
+                return (
+                  <div
+                    key={path}
+                    className={cn(
+                      "shrink-0 overflow-hidden transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
+                      terminalExpanded ? "h-[clamp(220px,34vh,320px)]" : "h-10",
+                    )}
+                  >
+                    <TerminalPanel
+                      sessionKey={`${sessionId}:${path}`}
+                      cwd={path}
+                      collapsed={!terminalExpanded}
+                      onCollapse={() => handleCollapseTerminal(path)}
+                      onExpand={() => handleExpandTerminal(path)}
+                      onClose={() => handleCloseTerminal(path)}
+                      className="h-full rounded-chrome bg-card"
+                    />
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
         </div>
 
         <ChatRightRail
@@ -288,6 +495,8 @@ export function ChatView({
             isAgentBuilderSession ? "agent-builder-column-enter" : undefined
           }
           builderColumnStyle={agentBuilderRailColumnStyle}
+          terminalOpen={activeWorkspaceHasTerminal}
+          onToggleTerminal={toggleTerminal}
         />
       </div>
     </ArtifactPolicyProvider>

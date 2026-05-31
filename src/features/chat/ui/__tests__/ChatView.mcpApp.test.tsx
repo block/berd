@@ -20,6 +20,15 @@ const mocks = vi.hoisted(() => ({
   useChatSessionController: vi.fn(),
   usePinToHomeWidget: vi.fn(),
   isContextPanelOpen: false,
+  activeWorkspaceBySession: {} as Record<
+    string,
+    { path: string; branch: string | null }
+  >,
+  gitState: {
+    data: { isGitRepo: false },
+    isFetching: false,
+    isLoading: false,
+  },
 }));
 
 vi.mock("motion/react", () => ({
@@ -65,10 +74,50 @@ vi.mock("../ChatLoadingSkeleton", () => ({
 }));
 
 vi.mock("../ChatRightRail", () => ({
-  ChatRightRail: (props: unknown) => {
+  ChatRightRail: (props: {
+    onToggleTerminal?: () => void;
+    terminalOpen?: boolean;
+  }) => {
     mocks.chatRightRailSpy(props);
-    return <div data-testid="chat-right-rail" />;
+    return (
+      <div data-testid="chat-right-rail">
+        <button
+          type="button"
+          data-terminal-open={props.terminalOpen ? "true" : "false"}
+          onClick={props.onToggleTerminal}
+        >
+          toggle terminal
+        </button>
+      </div>
+    );
   },
+}));
+
+vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
+  TerminalPanel: (props: {
+    cwd: string;
+    collapsed?: boolean;
+    onClose?: () => void;
+    onCollapse?: () => void;
+    onExpand?: () => void;
+  }) => (
+    <div
+      data-testid="terminal-panel"
+      data-cwd={props.cwd}
+      data-collapsed={String(props.collapsed)}
+    >
+      <span>{props.cwd}</span>
+      <button type="button" onClick={props.onCollapse}>
+        collapse terminal
+      </button>
+      <button type="button" onClick={props.onExpand}>
+        expand terminal
+      </button>
+      <button type="button" onClick={props.onClose}>
+        close terminal
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
@@ -86,9 +135,14 @@ vi.mock("@/features/home/hooks/usePinToHomeWidget", () => ({
 vi.mock("../../stores/chatSessionStore", () => ({
   useChatSessionStore: (selector: (state: unknown) => unknown) =>
     selector({
+      activeWorkspaceBySession: mocks.activeWorkspaceBySession,
       isContextPanelOpen: mocks.isContextPanelOpen,
       setContextPanelOpen: vi.fn(),
     }),
+}));
+
+vi.mock("@/shared/hooks/useGitState", () => ({
+  useGitState: () => mocks.gitState,
 }));
 
 vi.mock("@/features/projects/lib/chatProjectContext", () => ({
@@ -125,6 +179,13 @@ describe("ChatView MCP app messaging", () => {
     mocks.pinToHome.mockClear();
     mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
+    mocks.activeWorkspaceBySession = {};
+    mocks.gitState = {
+      data: { isGitRepo: false },
+      isFetching: false,
+      isLoading: false,
+    };
+    window.localStorage.clear();
     mockMatchMedia(false);
     mocks.usePinToHomeWidget.mockReturnValue({
       isPinned: false,
@@ -208,8 +269,7 @@ describe("ChatView MCP app messaging", () => {
 
     render(<ChatView sessionId="session-1" />);
 
-    // The composer lives inside the timeline as a sticky footer, so the
-    // timeline always renders and the composer never remounts between states.
+    // The composer lives inside the timeline, so it stays mounted between states.
     expect(mocks.messageTimelineSpy).toHaveBeenCalled();
     expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
     expect(mocks.chatInputSpy).toHaveBeenCalled();
@@ -361,5 +421,156 @@ describe("ChatView MCP app messaging", () => {
       placeholder?: string;
     };
     expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
+  });
+
+  it("persists terminal workspaces for the chat session", async () => {
+    const user = userEvent.setup();
+    mocks.gitState = {
+      data: { isGitRepo: true },
+      isFetching: false,
+      isLoading: false,
+    };
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      workingDir: "/Users/test/repo",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    const { unmount } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo",
+    );
+
+    unmount();
+    const { unmount: unmountRestored } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+
+    await user.click(screen.getByRole("button", { name: "close terminal" }));
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+
+    unmountRestored();
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+  });
+
+  it("does not start a new terminal when the active workspace changes", async () => {
+    const user = userEvent.setup();
+    mocks.gitState = {
+      data: { isGitRepo: true },
+      isFetching: false,
+      isLoading: false,
+    };
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      workingDir: "/Users/test/repo-a",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    const { rerender } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-a",
+    );
+
+    mocks.activeWorkspaceBySession = {
+      "session-1": { path: "/Users/test/repo-b", branch: "repo-b" },
+    };
+    rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const panelsAfterSwitch = screen.getAllByTestId("terminal-panel");
+    expect(panelsAfterSwitch).toHaveLength(1);
+    expect(panelsAfterSwitch[0]).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-a",
+    );
+    expect(panelsAfterSwitch[0]).toHaveAttribute("data-collapsed", "true");
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    const panelsAfterOpeningSecond = screen.getAllByTestId("terminal-panel");
+    expect(panelsAfterOpeningSecond).toHaveLength(2);
+    expect(panelsAfterOpeningSecond[0]).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-b",
+    );
+    expect(panelsAfterOpeningSecond[0]).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+    expect(panelsAfterOpeningSecond[1]).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-a",
+    );
+    expect(panelsAfterOpeningSecond[1]).toHaveAttribute(
+      "data-collapsed",
+      "true",
+    );
+  });
+
+  it("expands only one terminal workspace at a time", async () => {
+    const user = userEvent.setup();
+    mocks.gitState = {
+      data: { isGitRepo: true },
+      isFetching: false,
+      isLoading: false,
+    };
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      workingDir: "/Users/test/repo-a",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    const { rerender } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    mocks.activeWorkspaceBySession = {
+      "session-1": { path: "/Users/test/repo-b", branch: "repo-b" },
+    };
+    rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    await user.click(
+      screen.getAllByRole("button", { name: "expand terminal" })[1],
+    );
+
+    const panels = screen.getAllByTestId("terminal-panel");
+    expect(panels[0]).toHaveAttribute("data-cwd", "/Users/test/repo-b");
+    expect(panels[0]).toHaveAttribute("data-collapsed", "true");
+    expect(panels[1]).toHaveAttribute("data-cwd", "/Users/test/repo-a");
+    expect(panels[1]).toHaveAttribute("data-collapsed", "false");
   });
 });

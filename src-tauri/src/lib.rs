@@ -117,6 +117,7 @@ pub fn run() {
             }
             app.manage(distro_state);
             app.manage(commands::automations::AutomationStreamState::default());
+            app.manage(commands::terminal::TerminalState::default());
             let layout_app_data_dir = app.path().app_data_dir()?;
             let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
                 layout_app_data_dir,
@@ -241,6 +242,10 @@ pub fn run() {
             commands::system::inspect_attachment_paths,
             commands::system::list_files_for_mentions,
             commands::system::read_image_attachment,
+            commands::terminal::start_terminal,
+            commands::terminal::write_terminal,
+            commands::terminal::resize_terminal,
+            commands::terminal::stop_terminal,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
@@ -248,6 +253,7 @@ pub fn run() {
             if matches!(event, RunEvent::Exit) {
                 app.state::<commands::automations::AutomationStreamState>()
                     .abort_all();
+                app.state::<commands::terminal::TerminalState>().stop_all();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
         });

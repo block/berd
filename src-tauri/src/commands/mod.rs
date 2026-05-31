@@ -19,3 +19,4 @@ pub mod openai_realtime;
 pub mod path_resolver;
 pub mod project_icons;
 pub mod system;
+pub mod terminal;

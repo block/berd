@@ -1,9 +1,36 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { MessageTimeline } from "../MessageTimeline";
 import type { Message } from "@/shared/types/messages";
+
+const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+
+class ResizeObserverMock {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallbacks.push(callback);
+  }
+
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+
+function triggerResizeObservers() {
+  for (const callback of resizeObserverCallbacks) {
+    callback([], {} as ResizeObserver);
+  }
+}
+
+beforeEach(() => {
+  resizeObserverCallbacks.length = 0;
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverMock,
+  });
+});
 
 vi.mock("../MessageBubble", () => ({
   MessageBubble: ({
@@ -367,7 +394,108 @@ describe("MessageTimeline", () => {
     });
   });
 
-  it("keeps MCP app auto-scroll above the sticky footer", async () => {
+  it("keeps manual scroll position stable when the viewport gets shorter", () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(<MessageTimeline messages={messages} />);
+    const scroller = getTimelineScroller();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 260,
+      scrollHeight: 1200,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 260,
+      scrollHeight: 1200,
+      clientHeight: 300,
+    });
+    triggerResizeObservers();
+
+    expect(scroller.scrollTop).toBe(260);
+  });
+
+  it("does not snap manual near-bottom scrolling to latest when footer controls collapse", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <MessageTimeline
+        messages={messages}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+    const scroller = getTimelineScroller();
+    const scrollTo = attachScrollTo(scroller);
+
+    fireEvent.wheel(scroller, { deltaY: -40 });
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    fireEvent.wheel(scroller, { deltaY: 80 });
+    setScrollMetrics(scroller, {
+      scrollTop: 730,
+      scrollHeight: 1000,
+      clientHeight: 200,
+    });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Jump to latest" }),
+      ).not.toBeInTheDocument(),
+    );
+    triggerResizeObservers();
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(730);
+  });
+
+  it("keeps users pinned to latest when the viewport gets shorter", () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(<MessageTimeline messages={messages} />);
+    const scroller = getTimelineScroller();
+    const scrollTo = attachScrollTo(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    triggerResizeObservers();
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 1000,
+      behavior: "auto",
+    });
+  });
+
+  it("keeps MCP app auto-scroll above the floating footer", async () => {
     const messages = [
       message("user-1", "user", "Question"),
       message("assistant-1", "assistant", "First token"),
@@ -401,7 +529,7 @@ describe("MessageTimeline", () => {
     );
   });
 
-  it("keeps the sticky footer outside the live message log", () => {
+  it("keeps the floating footer outside the live message log", () => {
     renderWithProviders(
       <MessageTimeline
         messages={[message("user-1", "user", "Question")]}

@@ -5,6 +5,7 @@ import {
   IconGitBranch,
   IconRefresh,
   IconReplace,
+  IconTerminal2,
 } from "@tabler/icons-react";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { Button } from "@/shared/ui/button";
@@ -48,6 +49,8 @@ interface WorkspaceWidgetProps {
   isChangingArtifactFolder?: boolean;
   isOpen: boolean;
   onToggleOpen: () => void;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export function WorkspaceWidget({
@@ -73,6 +76,8 @@ export function WorkspaceWidget({
   isChangingArtifactFolder = false,
   isOpen,
   onToggleOpen,
+  terminalOpen = false,
+  onToggleTerminal,
 }: WorkspaceWidgetProps) {
   const { t } = useTranslation("chat");
   const primaryWorkspaceRoot =
@@ -89,22 +94,40 @@ export function WorkspaceWidget({
       isOpen={isOpen}
       onToggleOpen={onToggleOpen}
       action={
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={onRefresh}
-          disabled={!primaryWorkspaceRoot || isFetching}
-          className="rounded-md"
-          aria-label={t("contextPanel.actions.refreshGitStatus")}
-          title={t("contextPanel.actions.refreshGitStatus")}
-        >
-          {isFetching ? (
-            <Spinner className="size-3" />
-          ) : (
-            <IconRefresh className="size-3" />
-          )}
-        </Button>
+        <div className="flex items-center gap-1">
+          {gitState?.isGitRepo && onToggleTerminal ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={onToggleTerminal}
+              className="rounded-md"
+              aria-pressed={terminalOpen}
+              aria-label={
+                terminalOpen ? t("terminal.toggle") : t("terminal.open")
+              }
+              title={terminalOpen ? t("terminal.toggle") : t("terminal.open")}
+            >
+              <IconTerminal2 className="size-3" />
+            </Button>
+          ) : null}
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            onClick={onRefresh}
+            disabled={!primaryWorkspaceRoot || isFetching}
+            className="rounded-md"
+            aria-label={t("contextPanel.actions.refreshGitStatus")}
+            title={t("contextPanel.actions.refreshGitStatus")}
+          >
+            {isFetching ? (
+              <Spinner className="size-3" />
+            ) : (
+              <IconRefresh className="size-3" />
+            )}
+          </Button>
+        </div>
       }
     >
       <div className="space-y-2.5">

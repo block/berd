@@ -23,6 +23,8 @@ interface ChatRightRailProps {
   builderColumnStyle?: CSSProperties;
   sessionWorkingDir?: string | null;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 export function ChatRightRail({
@@ -32,6 +34,8 @@ export function ChatRightRail({
   builderColumnStyle,
   sessionWorkingDir,
   onDraftPromoted,
+  terminalOpen = false,
+  onToggleTerminal,
 }: ChatRightRailProps) {
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const patchSession = useChatSessionStore((s) => s.patchSession);
@@ -125,6 +129,8 @@ export function ChatRightRail({
       isOpen={isContextPanelOpen}
       project={project}
       sessionWorkingDir={sessionWorkingDir}
+      terminalOpen={terminalOpen}
+      onToggleTerminal={onToggleTerminal}
     />
   );
 }

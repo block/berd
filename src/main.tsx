@@ -7,6 +7,7 @@ import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import "@xterm/xterm/css/xterm.css";
 import "@/shared/styles/globals.css";
 
 // One-time cleanup of legacy onboarding state from previous builds. Safe to

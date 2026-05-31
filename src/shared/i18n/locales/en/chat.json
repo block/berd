@@ -18,6 +18,29 @@
     "openPanel": "Open context panel",
     "ringAria": "Context: {{percent}}% used"
   },
+  "terminal": {
+    "checkingWorkspace": "Checking workspace...",
+    "close": "Close terminal",
+    "collapse": "Collapse terminal",
+    "expand": "Expand terminal",
+    "exitedWithSignal": "Exited by {{signal}}",
+    "gitOnly": "Terminal is available in git workspaces.",
+    "noWorkspace": "Assign a project or folder to open a terminal.",
+    "open": "Open terminal",
+    "restart": "Restart terminal",
+    "startFailed": "Could not start terminal.",
+    "status": {
+      "error": "Error",
+      "exited": "Exited",
+      "running": "Running",
+      "starting": "Starting"
+    },
+    "stop": "Stop terminal",
+    "stopAndClose": "Stop and close terminal",
+    "stopped": "Terminal stopped",
+    "toggle": "Toggle terminal",
+    "title": "Terminal"
+  },
   "errors": {
     "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
     "voiceInputFailedTitle": "Voice dictation failed",

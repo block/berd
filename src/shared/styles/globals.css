@@ -4,6 +4,22 @@
 
 @source "../../../node_modules/streamdown/dist";
 
+.goose-terminal .xterm {
+  height: 100%;
+  padding: 0;
+}
+
+.goose-terminal .xterm,
+.goose-terminal .xterm-viewport,
+.goose-terminal .xterm-screen {
+  background-color: var(--card) !important;
+}
+
+.goose-terminal .xterm-viewport {
+  scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
+    transparent;
+}
+
 /* Dark variant fires for either selector during the migration:
    - [data-theme="dark"] is the Alex direction (set via JS on <html>)
    - .dark is the legacy shadcn class still toggled by existing theme code

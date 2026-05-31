@@ -32,6 +32,8 @@ interface ContextPanelProps {
   projectColor?: string;
   projectWorkingDirs?: string[];
   sessionWorkingDir?: string | null;
+  terminalOpen?: boolean;
+  onToggleTerminal?: () => void;
 }
 
 type ContextPanelTab = "details" | "files";
@@ -71,6 +73,8 @@ export function ContextPanel({
   projectColor,
   projectWorkingDirs = [],
   sessionWorkingDir,
+  terminalOpen = false,
+  onToggleTerminal,
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
@@ -305,6 +309,8 @@ export function ContextPanel({
             isChangingArtifactFolder={isChangingArtifactFolder}
             isOpen={sectionVisibility.workspace}
             onToggleOpen={() => toggleSection("workspace")}
+            terminalOpen={terminalOpen}
+            onToggleTerminal={onToggleTerminal}
           />
           {shouldShowChanges && (
             <ChangesWidget

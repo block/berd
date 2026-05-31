@@ -19,6 +19,7 @@ import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { getTextContent, type Message } from "@/shared/types/messages";
 
 const AUTO_SCROLL_THRESHOLD_PX = 180;
+const PINNED_BOTTOM_THRESHOLD_PX = 8;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
 
 interface MessageTimelineProps {
@@ -32,14 +33,13 @@ interface MessageTimelineProps {
   onSendMcpAppMessage?: McpAppMessageHandler;
   className?: string;
   tailPaddingPx?: number;
-  /** Pinned to the bottom inside the scroll container so it scrolls natively
-      with the conversation behind it (the floating chat composer). */
+  /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
   footer?: ReactNode;
   /** Status or activity surface shown in the footer control row above the
       composer, next to Jump to latest when both are visible. */
   footerStatus?: ReactNode;
   /** Shown in place of the message list (empty state or loading skeleton)
-      while keeping the scroll container and sticky footer mounted, so the
+      while keeping the scroll container and floating footer mounted, so the
       composer never remounts between empty, loading, and populated states. */
   placeholder?: ReactNode;
   /** Force the placeholder even when messages exist, e.g. while history is
@@ -99,12 +99,12 @@ export function MessageTimeline({
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
   const containerRef = useRef<HTMLDivElement>(null);
-  // The composer is a sticky footer inside the scroll container. Wheels and
-  // touches that land on it scroll the composer's own text, not the
-  // conversation, so the scroll handlers below ignore anything inside this ref.
+  // The composer floats above the transcript. Its measured height becomes
+  // transcript padding, so the last message can scroll fully above it.
   const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
+  const isPinnedToBottomRef = useRef(true);
   const userDetachedRef = useRef(false);
   const userScrollIntentRef = useRef(false);
   const lastScrollTopRef = useRef(0);
@@ -113,6 +113,11 @@ export function MessageTimeline({
   const lastMcpAppSignatureRef = useRef<string | null>(null);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [userDetached, setUserDetached] = useState(false);
+  const [footerHeightPx, setFooterHeightPx] = useState(0);
+  const hasFooter = footer != null;
+  const messageListBottomPaddingPx = hasFooter
+    ? Math.max(footerHeightPx, 112) + 32
+    : (tailPaddingPx ?? 16);
   const visibleMessages = messages.filter(
     (m) =>
       m.metadata?.userVisible !== false &&
@@ -276,22 +281,86 @@ export function MessageTimeline({
     scrollToBottomIfNearBottom();
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
 
-  // The composer reserves bottom padding so messages stay reachable above it.
-  // When the composer resizes, that padding (and thus scrollHeight) changes; a
-  // user pinned to the bottom would otherwise drift. Re-pin them in BOTH
-  // directions. This runs as a layout effect so it fires synchronously after the
-  // padding mutation and before paint — reading scrollHeight here forces a fresh
-  // measurement, so on shrink we pin to the new (shorter) bottom in the same
-  // frame instead of leaving the view parked past the end until the next scroll.
   useLayoutEffect(() => {
-    if (tailPaddingPx == null) {
+    if (!hasFooter) {
+      setFooterHeightPx(0);
+      return;
+    }
+
+    const footerElement = footerRef.current;
+    if (!footerElement) {
+      return;
+    }
+
+    const updateFooterHeight = () => {
+      setFooterHeightPx(
+        Math.ceil(footerElement.getBoundingClientRect().height),
+      );
+    };
+
+    updateFooterHeight();
+
+    if (typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const resizeObserver = new ResizeObserver(updateFooterHeight);
+    resizeObserver.observe(footerElement);
+    return () => resizeObserver.disconnect();
+  }, [hasFooter]);
+
+  // When the floating footer changes height, it changes transcript padding.
+  // Only users who are already following latest should be re-pinned.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the padding value is the resize signal for this effect.
+  useLayoutEffect(() => {
+    if (!hasFooter && tailPaddingPx == null) {
       return;
     }
     if (userDetachedRef.current) {
       return;
     }
+    if (
+      !isPinnedToBottomRef.current &&
+      stickyScrollUntilRef.current <= performance.now()
+    ) {
+      return;
+    }
     scrollToBottom("auto");
-  }, [tailPaddingPx, scrollToBottom]);
+  }, [hasFooter, messageListBottomPaddingPx, scrollToBottom, tailPaddingPx]);
+
+  useLayoutEffect(() => {
+    const container = containerRef.current;
+    if (!container || typeof ResizeObserver === "undefined") {
+      return;
+    }
+
+    const syncScrollState = () => {
+      lastScrollTopRef.current = container.scrollTop;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
+      isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
+      isPinnedToBottomRef.current =
+        distanceFromBottom <= PINNED_BOTTOM_THRESHOLD_PX;
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      const wasPinnedToLatest =
+        !userDetachedRef.current &&
+        (isPinnedToBottomRef.current ||
+          stickyScrollUntilRef.current > performance.now());
+
+      if (wasPinnedToLatest) {
+        scrollToBottom("auto");
+        syncScrollState();
+        return;
+      }
+
+      syncScrollState();
+    });
+
+    resizeObserver.observe(container);
+    return () => resizeObserver.disconnect();
+  }, [scrollToBottom]);
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
@@ -391,6 +460,8 @@ export function MessageTimeline({
     const { scrollTop, scrollHeight, clientHeight } = container;
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
+    isPinnedToBottomRef.current =
+      distanceFromBottom <= PINNED_BOTTOM_THRESHOLD_PX;
 
     const scrollingDown = scrollTop > lastScrollTopRef.current;
 
@@ -436,6 +507,7 @@ export function MessageTimeline({
   const handleJumpToLatest = () => {
     setDetachedFromLatest(false);
     isNearBottomRef.current = true;
+    isPinnedToBottomRef.current = true;
     scrollToBottom("smooth");
   };
 
@@ -480,7 +552,7 @@ export function MessageTimeline({
   const messageList = (
     <div
       className="mx-auto w-full max-w-[var(--chat-transcript-container-max-width)] flex-1 px-[var(--chat-transcript-inline-padding)] pt-4"
-      style={{ paddingBottom: footer ? 16 : (tailPaddingPx ?? 16) }}
+      style={{ paddingBottom: messageListBottomPaddingPx }}
     >
       {visibleMessages.map((message, index) => {
         const prev = index > 0 ? visibleMessages[index - 1] : null;
@@ -550,7 +622,7 @@ export function MessageTimeline({
     : messageList;
 
   return (
-    <div className={cn("relative min-h-0 flex-1", className)}>
+    <div className={cn("relative min-h-0 flex-1 overflow-hidden", className)}>
       <div
         ref={containerRef}
         onScroll={handleScroll}
@@ -560,11 +632,6 @@ export function MessageTimeline({
         data-testid="message-timeline-scroll"
         className="scrollbar-none h-full overflow-y-auto"
       >
-        {/* A min-height column so the sticky footer sits at the bottom even when
-            the conversation is short, and floats over the messages once they
-            overflow. The footer (composer) shares this scroll container, so the
-            browser handles native scroll latching: a swipe parks the composer's
-            text at its edge, the next swipe scrolls the conversation behind it. */}
         <div className="flex min-h-full flex-col">
           <div
             className="flex min-h-0 flex-1 flex-col"
@@ -574,18 +641,18 @@ export function MessageTimeline({
           >
             {content}
           </div>
-          {footer ? (
-            <div
-              ref={footerRef}
-              data-testid="message-timeline-footer"
-              className="pointer-events-none sticky bottom-4 z-10 flex flex-col"
-            >
-              {footerControlRow}
-              {footer}
-            </div>
-          ) : null}
         </div>
       </div>
+      {footer ? (
+        <div
+          ref={footerRef}
+          data-testid="message-timeline-footer"
+          className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex flex-col"
+        >
+          {footerControlRow}
+          {footer}
+        </div>
+      ) : null}
       {!footer && jumpToLatestButton ? (
         <div
           className="absolute left-1/2 -translate-x-1/2"
