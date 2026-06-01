@@ -407,6 +407,9 @@
     "disconnect": "Disconnect",
     "models": {
       "description": "AI models power your agents. Goose requires one to work, but some agents bring their own.",
+      "details": {
+        "configuredUrl": "Configured URL"
+      },
       "notSet": "Not set",
       "setup": {
         "connected": {

@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState, type ComponentType } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CURATED_PROVIDER_CATALOG } from "@/features/providers/curatedProviders";
 import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
@@ -12,7 +13,9 @@ const Row = ModelProviderRow as unknown as ComponentType<
 >;
 
 function modelProvider(id: string, status: "connected" | "not_configured") {
-  const provider = getModelProviders().find((entry) => entry.id === id);
+  const provider =
+    getModelProviders().find((entry) => entry.id === id) ??
+    CURATED_PROVIDER_CATALOG.find((entry) => entry.id === id);
   if (!provider) {
     throw new Error(`missing provider fixture: ${id}`);
   }
@@ -194,6 +197,35 @@ describe("ModelProviderRow", () => {
     await user.click(screen.getByRole("button", { name: /anthropic/i }));
 
     expect(screen.getByText(/loading models/i)).toBeInTheDocument();
+  });
+
+  it("shows the enforced Databricks AI Gateway URL when expanded", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ModelProviderRow
+        provider={modelProvider("databricks_v2", "connected")}
+        onGetConfig={onGetConfig}
+        onSaveFields={onSaveFields}
+        onRemoveConfig={onRemoveConfig}
+        onCompleteNativeSetup={onCompleteNativeSetup}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /databricks ai gateway/i }),
+    );
+
+    expect(screen.getByText("Configured URL")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "https://block-lakehouse-production.cloud.databricks.com",
+      ),
+    ).toBeInTheDocument();
+    expect(onGetConfig).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("button", { name: /disconnect/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("shows a non-blocking model warning without replacing the connected state", async () => {

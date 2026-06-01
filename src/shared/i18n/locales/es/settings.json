@@ -407,6 +407,9 @@
     "disconnect": "Desconectar",
     "models": {
       "description": "Necesitas al menos un proveedor de modelos para usar el agente Goose. Algunos agentes pueden traer sus propias conexiones de modelo.",
+      "details": {
+        "configuredUrl": "URL configurada"
+      },
       "notSet": "No configurado",
       "setup": {
         "connected": {

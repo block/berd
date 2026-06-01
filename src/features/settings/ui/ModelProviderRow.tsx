@@ -42,6 +42,12 @@ import {
 } from "./ModelProviderPanels";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
 
+const INTERNAL_DATABRICKS_PROVIDER_ID = "databricks_v2";
+// Mirrors the DATABRICKS_HOST value injected into goose serve by the Tauri backend.
+// Keep in sync with src-tauri/src/services/acp/goose_serve.rs.
+const INTERNAL_DATABRICKS_HOST =
+  "https://block-lakehouse-production.cloud.databricks.com";
+
 interface ProviderFieldSaveInput {
   key: string;
   value: string;
@@ -60,6 +66,19 @@ interface ModelProviderRowProps {
   saving?: boolean;
   modelSyncing?: boolean;
   modelWarning?: string | null;
+}
+
+function InternalDatabricksDetails({ label }: { label: string }) {
+  return (
+    <div className="rounded-md border border-border bg-card px-3 py-2.5">
+      <div className="space-y-1 rounded bg-background px-2.5 py-2">
+        <p className="text-sm">{label}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {INTERNAL_DATABRICKS_HOST}
+        </p>
+      </div>
+    </div>
+  );
 }
 
 export function ModelProviderRow({
@@ -92,6 +111,7 @@ export function ModelProviderRow({
   const fields = provider.fields ?? [];
   const hasFields = fields.length > 0;
   const supportsNativeConnect = !!provider.nativeConnectQuery;
+  const isInternalDatabricks = provider.id === INTERNAL_DATABRICKS_PROVIDER_ID;
   const isConnected =
     provider.status === "connected" || provider.status === "built_in";
   const fieldValueMap = useMemo(
@@ -378,7 +398,14 @@ export function ModelProviderRow({
               </Button>
             </div>
           ) : (
-            renderSetupMessage(setupMessage)
+            <>
+              {isInternalDatabricks ? (
+                <InternalDatabricksDetails
+                  label={t("providers.models.details.configuredUrl")}
+                />
+              ) : null}
+              {renderSetupMessage(setupMessage)}
+            </>
           )}
           {authenticating ? (
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
