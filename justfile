@@ -20,8 +20,8 @@ goose-sync:
 # Install dependencies and build workspace packages.
 setup:
     pnpm install
-    cd sdk && pnpm build
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
+    ./scripts/regenerate-sdk-schema.sh
     lefthook install --force
 
 # ── Build & Check ────────────────────────────────────────────
@@ -198,9 +198,10 @@ dev-debug: dev
 dev-frontend:
     pnpm dev
 
-# Resolve a Goose ref/tag/sha and update goose-backend.lock.json.
+# Resolve a Goose ref/tag/sha, update goose-backend.lock.json, and refresh the SDK schema.
 bump-goose ref="main":
     ./scripts/update-goose-backend-lock.sh "{{ ref }}"
+    ./scripts/regenerate-sdk-schema.sh
 
 # ── Utilities ────────────────────────────────────────────────
 
