@@ -18,6 +18,8 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   instance: WidgetInstance;
   currentMaxZ: number;
   mutations: WidgetMutationHandlers;
+  canvasGestureActive?: boolean;
+  widgetResizePreviewActive?: boolean;
   shouldIgnoreActivation?: () => boolean;
   gestureHandlers?: Partial<WidgetFrameGestureHandlers>;
   onVisualLiftReset?: (id: string) => void;
@@ -42,6 +44,8 @@ export function WidgetFrame({
   instance,
   currentMaxZ,
   mutations,
+  canvasGestureActive = false,
+  widgetResizePreviewActive = false,
   shouldIgnoreActivation = () => false,
   gestureHandlers = {},
   onVisualLiftReset = () => {},
@@ -145,6 +149,8 @@ export function WidgetFrame({
       >
         <Component
           instance={instance}
+          canvasGestureActive={canvasGestureActive}
+          widgetResizePreviewActive={widgetResizePreviewActive}
           onUpdateState={handleUpdateState}
           shouldIgnoreActivation={shouldIgnoreActivation}
           onOpenAgent={onOpenAgent}

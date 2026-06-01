@@ -87,14 +87,17 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
     category: "project",
     labelKey: "widgets.projectArtifactPin.label",
     descriptionKey: "widgets.projectArtifactPin.description",
-    defaultSize: { width: 220, height: 220 },
+    // Square hit target; label + resize handle overlay the cube bottom (see widget).
+    defaultSize: { width: 200, height: 200 },
     sizeBounds: {
-      minWidth: 160,
-      maxWidth: 480,
-      minHeight: 160,
-      maxHeight: 480,
+      minWidth: 140,
+      maxWidth: 1000,
+      minHeight: 140,
+      maxHeight: 1000,
       lockAspectRatio: true,
     },
+    resizeHandleClassName:
+      "absolute right-[6%] bottom-[13%] z-30 hidden size-6 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
     Component: ProjectArtifactWidget,
   },
   {

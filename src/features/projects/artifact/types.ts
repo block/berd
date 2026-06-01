@@ -53,6 +53,9 @@ export interface ProjectArtifactRendererProps {
   className?: string;
   variant?: "preview" | "tile";
   motionImpulse?: ProjectArtifactMotionImpulse;
+  /** Pauses continuous rendering while the home canvas drags/resizes the widget. */
+  gestureFreezeActive?: boolean;
+  onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 export type ProjectArtifactPinState = { projectId: string };

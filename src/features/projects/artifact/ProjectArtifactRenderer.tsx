@@ -1,5 +1,6 @@
 import {
   Suspense,
+  useCallback,
   type ComponentRef,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
@@ -81,7 +82,10 @@ const CUBE_POINTER_CLICK_PX = 10;
 const CUBE_POINTER_CLICK_MS = 500;
 const CLICK_VISUAL_DURATION = 1.1;
 const VISUAL_READY_FRAME_DELAY = 2;
-const TILE_VISUAL_READY_FRAME_DELAY = 8;
+const TILE_VISUAL_READY_FRAME_DELAY = 3;
+
+/** Persists across Home navigations so tile cubes skip the first-load fade on return. */
+let projectArtifactTileHasRevealed = false;
 
 const MATERIAL_ANIM = {
   roughness: { min: 0.02, max: 0.075, speed: 2.2 },
@@ -130,6 +134,36 @@ const EFFECTS = {
   vignetteAmountPreview: 0.06,
   vignetteAmountTile: 0.1,
 };
+
+const CANVAS_CAMERA = {
+  preview: {
+    position: [10.8, 12.6, 10.8] as const,
+    fov: 35,
+  },
+  // Slightly closer than preview so the cube reads large in widgets, with headroom so
+  // glass/refraction and idle motion are not clipped by the canvas bounds.
+  tile: {
+    position: [7.1, 8.25, 7.1] as const,
+    fov: 36,
+  },
+} as const;
+
+function getCanvasCamera(
+  variant: NonNullable<ProjectArtifactRendererProps["variant"]>,
+) {
+  const config =
+    variant === "tile" ? CANVAS_CAMERA.tile : CANVAS_CAMERA.preview;
+  return {
+    position: [config.position[0], config.position[1], config.position[2]] as [
+      number,
+      number,
+      number,
+    ],
+    fov: config.fov,
+    near: 1,
+    far: 100,
+  };
+}
 
 const NUM_PLANES = 6;
 const PLANE_SIZE = 4.2;
@@ -530,6 +564,63 @@ function TransparentSceneRender() {
   useFrame(({ gl, scene, camera }) => {
     gl.render(scene, camera);
   }, 1);
+
+  return null;
+}
+
+/** Keeps tile/preview canvases rendering after container resizes (home widget scaling). */
+function CanvasRenderSync({
+  layoutEpoch = 0,
+  onContextRestored,
+  onNeedsRecovery,
+}: {
+  layoutEpoch?: number;
+  onContextRestored?: () => void;
+  onNeedsRecovery?: () => void;
+}) {
+  const gl = useThree((state) => state.gl);
+  const invalidate = useThree((state) => state.invalidate);
+  const size = useThree((state) => state.size);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-invalidate when widget layout or canvas size changes
+  useEffect(() => {
+    invalidate();
+  }, [invalidate, layoutEpoch, size.height, size.width]);
+
+  useEffect(() => {
+    if (size.width > 0 && size.height > 0) {
+      return;
+    }
+
+    const parent = gl.domElement.parentElement;
+    if (!parent || parent.clientWidth <= 0 || parent.clientHeight <= 0) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      onNeedsRecovery?.();
+    }, 120);
+
+    return () => window.clearTimeout(timeout);
+  }, [gl, onNeedsRecovery, size.height, size.width]);
+
+  useEffect(() => {
+    const canvas = gl.domElement;
+    const handleContextLost = (event: Event) => {
+      event.preventDefault();
+    };
+    const handleContextRestored = () => {
+      invalidate();
+      onContextRestored?.();
+    };
+
+    canvas.addEventListener("webglcontextlost", handleContextLost);
+    canvas.addEventListener("webglcontextrestored", handleContextRestored);
+    return () => {
+      canvas.removeEventListener("webglcontextlost", handleContextLost);
+      canvas.removeEventListener("webglcontextrestored", handleContextRestored);
+    };
+  }, [gl, invalidate, onContextRestored]);
 
   return null;
 }
@@ -1170,14 +1261,17 @@ function PrototypeCube({
       previousHoverSpin.current.y = 0;
     }
 
+    const tileMotionScale = variant === "tile" ? 0.55 : 1;
     const bobY =
       (Math.sin(time * 0.6 * SCENE_ANIM.floatingBobSpeed) * 0.08 +
         Math.sin(time * 0.23 * SCENE_ANIM.floatingBobSpeed) * 0.04) *
-      SCENE_ANIM.floatingBobAmplitude;
+      SCENE_ANIM.floatingBobAmplitude *
+      tileMotionScale;
     const bobX =
       Math.sin(time * 0.4 * SCENE_ANIM.floatingBobSpeed + 1) *
       0.03 *
-      SCENE_ANIM.floatingBobAmplitude;
+      SCENE_ANIM.floatingBobAmplitude *
+      tileMotionScale;
 
     if (shellRef.current) {
       shellRef.current.scale.set(
@@ -1361,7 +1455,7 @@ function PrototypeCube({
 
       const camera = frameState.camera;
       const matrix = camera.matrixWorld.elements;
-      const leanAmount = 2.1;
+      const leanAmount = variant === "tile" ? 1.1 : 2.1;
       const leanX = hoverLean.current.x * leanAmount;
       const leanY = hoverLean.current.y * leanAmount;
       const targetX = bobX + matrix[0] * leanX + matrix[4] * leanY;
@@ -1582,22 +1676,46 @@ export function ProjectArtifactRenderer({
   environmentUrl,
   imageUrls,
   className,
+  gestureFreezeActive = false,
   motionImpulse,
+  onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactRendererProps) {
   const initialImageIndex = initialImageIndexForState(state, imageUrls.length);
   const runtimeRef = useRef<ArtifactRuntimeState>(
     makeRuntime(initialImageIndex),
   );
+  const containerRef = useRef<HTMLDivElement>(null);
   const interactive = variant === "preview";
   const hasTransparentBackground = usesTransparentBackground(variant);
   const canvasBackground = useMemo(
     () => getSceneBackgroundColor(state.accentColor, variant),
     [state.accentColor, variant],
   );
+  const [contextRecoveryKey, setContextRecoveryKey] = useState(0);
+  const [layoutEpoch, setLayoutEpoch] = useState(0);
+  const lastContextRecoveryAtRef = useRef(0);
+  const requestSoftRecovery = useCallback(() => {
+    const now = Date.now();
+    if (now - lastContextRecoveryAtRef.current < 250) {
+      return;
+    }
+    lastContextRecoveryAtRef.current = now;
+    setLayoutEpoch((epoch) => epoch + 1);
+  }, []);
+
+  const requestHardRecovery = useCallback(() => {
+    const now = Date.now();
+    if (now - lastContextRecoveryAtRef.current < 250) {
+      return;
+    }
+    lastContextRecoveryAtRef.current = now;
+    setContextRecoveryKey((key) => key + 1);
+    setLayoutEpoch((epoch) => epoch + 1);
+  }, []);
   const canvasKey = `${variant}-${
     hasTransparentBackground ? "transparent" : "opaque"
-  }`;
+  }-${contextRecoveryKey}`;
   const [isVisualReady, setIsVisualReady] = useState(false);
 
   useEffect(() => {
@@ -1610,6 +1728,48 @@ export function ProjectArtifactRenderer({
   }, [initialImageIndex]);
 
   useEffect(() => {
+    if (variant !== "tile" || gestureFreezeActive) {
+      return;
+    }
+    const frame = requestAnimationFrame(() => {
+      requestSoftRecovery();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [gestureFreezeActive, requestSoftRecovery, variant]);
+
+  useEffect(() => {
+    if (variant !== "tile") {
+      return;
+    }
+
+    const root = containerRef.current;
+    if (!root) {
+      return;
+    }
+
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (root.clientWidth > 0 && root.clientHeight > 0) {
+          setLayoutEpoch((epoch) => epoch + 1);
+        }
+      });
+    });
+    observer.observe(root);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [variant]);
+
+  useEffect(() => {
+    if (variant === "tile" && projectArtifactTileHasRevealed) {
+      setIsVisualReady(true);
+      return;
+    }
+
     setIsVisualReady(false);
     const frameIds: number[] = [];
     let frame = 0;
@@ -1621,6 +1781,9 @@ export function ProjectArtifactRenderer({
       frame += 1;
       if (frame >= frameDelay) {
         setIsVisualReady(true);
+        if (variant === "tile") {
+          projectArtifactTileHasRevealed = true;
+        }
         return;
       }
       frameIds.push(requestAnimationFrame(tick));
@@ -1631,6 +1794,10 @@ export function ProjectArtifactRenderer({
       frameIds.forEach(cancelAnimationFrame);
     };
   }, [variant]);
+
+  const handleWebGLContextRestored = useCallback(() => {
+    requestHardRecovery();
+  }, [requestHardRecovery]);
 
   const updateCursorPosition = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!interactive) return;
@@ -1661,10 +1828,11 @@ export function ProjectArtifactRenderer({
 
   return (
     <div
+      ref={containerRef}
       className={cn(
         "relative isolate h-full w-full",
         variant === "tile"
-          ? "pointer-events-none overflow-visible bg-transparent"
+          ? "pointer-events-none overflow-visible bg-transparent [transform:translateZ(0)]"
           : "overflow-hidden rounded-[28px] bg-transparent cursor-grab active:cursor-grabbing",
         className,
       )}
@@ -1682,33 +1850,38 @@ export function ProjectArtifactRenderer({
       ) : null}
       <div
         className={cn(
-          "absolute inset-0 z-10 ease-out",
-          variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
+          "absolute inset-0 z-10",
+          variant === "tile" ? "overflow-visible" : "rounded-[28px]",
           variant === "tile"
-            ? "transition-opacity duration-500"
-            : "transition-[filter,opacity] duration-300",
-          isVisualReady
-            ? variant === "tile"
+            ? projectArtifactTileHasRevealed
               ? "opacity-100"
-              : "opacity-100 blur-0"
-            : variant === "tile"
-              ? "opacity-0"
-              : "opacity-0 blur-md",
+              : cn(
+                  "transition-opacity duration-200",
+                  isVisualReady ? "opacity-100" : "opacity-0",
+                )
+            : cn(
+                "ease-out transition-[filter,opacity] duration-300",
+                isVisualReady ? "opacity-100 blur-0" : "opacity-0 blur-md",
+              ),
         )}
       >
         <Canvas
           key={canvasKey}
-          camera={{ position: [10.8, 12.6, 10.8], fov: 35, near: 1, far: 100 }}
+          camera={getCanvasCamera(variant)}
           className={cn(
-            "relative h-full w-full",
-            variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
+            "relative h-full w-full [transform:translateZ(0)]",
+            variant === "tile" ? "overflow-visible" : "rounded-[28px]",
           )}
           dpr={[1, variant === "tile" ? 1.25 : 1.5]}
-          resize={{ offsetSize: true }}
+          frameloop={
+            variant === "tile" && gestureFreezeActive ? "demand" : "always"
+          }
+          resize={{ offsetSize: true, debounce: 0 }}
           gl={{
             alpha: hasTransparentBackground,
             antialias: true,
             premultipliedAlpha: true,
+            preserveDrawingBuffer: variant === "tile",
             powerPreference: "high-performance",
             stencil: false,
           }}
@@ -1727,8 +1900,14 @@ export function ProjectArtifactRenderer({
               hasTransparentBackground ? 0 : 1,
             );
             scene.environmentIntensity = EFFECTS.envIntensity;
+            onGlCanvasReady?.(gl.domElement);
           }}
         >
+          <CanvasRenderSync
+            layoutEpoch={layoutEpoch}
+            onContextRestored={handleWebGLContextRestored}
+            onNeedsRecovery={requestSoftRecovery}
+          />
           <Suspense fallback={null}>
             <ArtifactScene
               environmentUrl={environmentUrl}

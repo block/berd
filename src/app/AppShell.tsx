@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
+import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
 import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -425,6 +426,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [fetchProjects]);
 
   useEffect(() => {
+    void prefetchProjectArtifactRenderer();
+  }, []);
+
+  useEffect(() => {
     const isViewingChat = activeView === "chat" && Boolean(activeSessionId);
     setChatActiveSessionViewing(isViewingChat);
 
@@ -437,6 +442,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     if (activeView !== "settings" && activeView !== "design-system") {
       lastNonSecondaryViewRef.current = activeView;
     }
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView === "home") {
+      return;
+    }
+    void prefetchProjectArtifactRenderer();
   }, [activeView]);
 
   const activeSession = activeSessionId

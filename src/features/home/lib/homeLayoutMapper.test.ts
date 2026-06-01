@@ -168,10 +168,10 @@ describe("homeLayoutMapper", () => {
     expect(item).toMatchObject({
       kind: "project",
       targetId: "project-1",
-      centerX: 130,
-      centerY: 140,
-      width: 220,
-      height: 220,
+      centerX: 120,
+      centerY: 130,
+      width: 200,
+      height: 200,
       zIndex: 4,
     });
 

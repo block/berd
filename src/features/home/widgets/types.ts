@@ -60,6 +60,10 @@ export interface WidgetRenderProps {
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
   onRemoveWidget?: () => void;
+  /** True while this widget is being dragged or resized on the home canvas. */
+  canvasGestureActive?: boolean;
+  /** True while live resize is previewing new bounds (content is CSS-scaled). */
+  widgetResizePreviewActive?: boolean;
 }
 
 export interface WidgetCatalogEntry {
@@ -69,6 +73,8 @@ export interface WidgetCatalogEntry {
   descriptionKey?: string;
   defaultSize: WidgetSize;
   sizeBounds: WidgetSizeBounds;
+  /** Optional Tailwind classes for the canvas resize handle (defaults to corner). */
+  resizeHandleClassName?: string;
   /** Renderable component for this widget type. Entries without a Component
    *  are catalog stubs — they appear in data but are not rendered on the canvas
    *  until the component is supplied (Task C fills in the pin types). */

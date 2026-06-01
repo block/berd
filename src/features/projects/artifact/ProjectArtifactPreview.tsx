@@ -27,6 +27,8 @@ interface ProjectArtifactPreviewProps {
   className?: string;
   variant?: ProjectArtifactRendererProps["variant"];
   motionImpulse?: ProjectArtifactRendererProps["motionImpulse"];
+  gestureFreezeActive?: boolean;
+  onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 
 function canUseWebGlRenderer(): boolean {
@@ -122,6 +124,8 @@ export function ProjectArtifactPreview({
   input,
   className,
   motionImpulse,
+  gestureFreezeActive,
+  onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactPreviewProps) {
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
@@ -154,7 +158,7 @@ export function ProjectArtifactPreview({
       data-testid="project-artifact-preview"
       className={cn(
         "h-full w-full",
-        variant === "tile" ? "rounded-card-chat" : "rounded-[28px]",
+        variant === "tile" ? "overflow-visible" : "rounded-[28px]",
       )}
     >
       <RendererErrorBoundary
@@ -180,7 +184,9 @@ export function ProjectArtifactPreview({
             className={className}
             environmentUrl={assetQuery.data.environmentUrl}
             imageUrls={assetQuery.data.imageUrls}
+            gestureFreezeActive={gestureFreezeActive}
             motionImpulse={motionImpulse}
+            onGlCanvasReady={onGlCanvasReady}
             state={state}
             variant={variant}
           />

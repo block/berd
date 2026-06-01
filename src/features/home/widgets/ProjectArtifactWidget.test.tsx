@@ -101,10 +101,12 @@ describe("ProjectArtifactWidget", () => {
     expect(preview).toHaveTextContent("Alpha Project");
     expect(preview.parentElement).toHaveClass(
       "pointer-events-auto",
-      "top-[47%]",
-      "left-[49%]",
-      "h-[320px]",
-      "w-[320px]",
+      "aspect-square",
+      "w-[96%]",
+      "max-h-full",
+      "max-w-full",
+      "min-h-0",
+      "min-w-0",
     );
     expect(label).toHaveTextContent("Alpha Project");
     expect(label).toHaveAttribute("aria-hidden", "true");
@@ -173,12 +175,12 @@ describe("ProjectArtifactWidget", () => {
       name: "Start chat in Alpha Project",
     });
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
-      width: 220,
-      height: 220,
+      width: 200,
+      height: 200,
       left: 0,
       top: 0,
-      right: 220,
-      bottom: 220,
+      right: 200,
+      bottom: 200,
       x: 0,
       y: 0,
       toJSON: () => ({}),
@@ -200,12 +202,12 @@ describe("ProjectArtifactWidget", () => {
       name: "Start chat in Alpha Project",
     });
     vi.spyOn(button, "getBoundingClientRect").mockReturnValue({
-      width: 220,
-      height: 220,
+      width: 200,
+      height: 200,
       left: 0,
       top: 0,
-      right: 220,
-      bottom: 220,
+      right: 200,
+      bottom: 200,
       x: 0,
       y: 0,
       toJSON: () => ({}),

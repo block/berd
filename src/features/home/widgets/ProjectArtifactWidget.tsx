@@ -1,4 +1,10 @@
-import { useMemo, useRef, useState, type PointerEvent } from "react";
+import {
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { ProjectArtifactPreview } from "@/features/projects/artifact/ProjectArtifactPreview";
@@ -10,6 +16,7 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { cn } from "@/shared/lib/cn";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
+import { useWidgetGestureFreeze } from "./useWidgetGestureFreeze";
 import type { WidgetRenderProps } from "./types";
 
 function getProjectId(
@@ -38,6 +45,8 @@ function getPointerVelocityBoost(
 
 export function ProjectArtifactWidget({
   instance,
+  canvasGestureActive = false,
+  widgetResizePreviewActive = false,
   shouldIgnoreActivation,
   onStartProjectChat,
 }: WidgetRenderProps) {
@@ -89,6 +98,24 @@ export function ProjectArtifactWidget({
   } | null>(null);
   const [motionImpulse, setMotionImpulse] =
     useState<ProjectArtifactMotionImpulse>();
+  const glCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const captureGestureSnapshot = useCallback(() => {
+    const canvas = glCanvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    try {
+      return canvas.toDataURL("image/png");
+    } catch {
+      return null;
+    }
+  }, []);
+  const shouldFreezeVisual = canvasGestureActive && !widgetResizePreviewActive;
+  const gestureSnapshot = useWidgetGestureFreeze(
+    shouldFreezeVisual,
+    captureGestureSnapshot,
+  );
+
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (project) onStartProjectChat?.(project.id);
   });
@@ -157,15 +184,32 @@ export function ProjectArtifactWidget({
           : t("widgets.projectArtifactPin.unavailableTitle")
       }
       className={cn(
-        "group relative h-full w-full overflow-visible rounded-card-chat bg-transparent text-left text-foreground transition-opacity duration-150 cursor-pointer",
+        "group relative isolate flex h-full w-full flex-col items-center overflow-visible rounded-card-chat bg-transparent text-left text-foreground transition-opacity duration-150 cursor-pointer [transform:translateZ(0)]",
         project ? "hover:opacity-95" : "cursor-not-allowed opacity-70",
       )}
     >
-      <div className="pointer-events-none absolute inset-0 overflow-visible">
-        <div className="pointer-events-auto absolute top-[47%] left-[49%] h-[320px] w-[320px] -translate-x-1/2 -translate-y-1/2">
+      <div className="pointer-events-none relative flex min-h-0 w-full flex-1 items-center justify-center overflow-visible">
+        {gestureSnapshot ? (
+          <img
+            alt=""
+            aria-hidden="true"
+            src={gestureSnapshot}
+            className="pointer-events-none absolute inset-0 z-20 m-auto aspect-square w-[96%] max-h-full max-w-full object-contain"
+          />
+        ) : null}
+        <div
+          className={cn(
+            "pointer-events-auto aspect-square w-[96%] max-h-full max-w-full min-h-0 min-w-0",
+            gestureSnapshot && "invisible",
+          )}
+        >
           <ProjectArtifactPreview
             input={input}
+            gestureFreezeActive={shouldFreezeVisual}
             motionImpulse={motionImpulse}
+            onGlCanvasReady={(canvas) => {
+              glCanvasRef.current = canvas;
+            }}
             variant="tile"
           />
         </div>
@@ -173,7 +217,7 @@ export function ProjectArtifactWidget({
       <span
         aria-hidden="true"
         data-testid="project-artifact-hover-label"
-        className="pointer-events-none absolute bottom-3 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 truncate rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+        className="pointer-events-none absolute bottom-[13%] left-1/2 z-30 max-w-[calc(100%-1.25rem)] -translate-x-1/2 truncate rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
       >
         {label}
       </span>

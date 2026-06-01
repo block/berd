@@ -1,10 +1,12 @@
-import { memo } from "react";
+import { memo, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
+import { cn } from "@/shared/lib/cn";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
+import { useWidgetGestureFreeze } from "./useWidgetGestureFreeze";
 import type { WidgetRenderProps } from "./types";
 
 function getAgentId(state: Record<string, unknown> | undefined): string | null {
@@ -13,6 +15,7 @@ function getAgentId(state: Record<string, unknown> | undefined): string | null {
 
 export const AgentPinWidget = memo(function AgentPinWidget({
   instance,
+  canvasGestureActive = false,
   shouldIgnoreActivation,
   onOpenAgent,
 }: WidgetRenderProps) {
@@ -31,6 +34,41 @@ export const AgentPinWidget = memo(function AgentPinWidget({
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () =>
     onOpenAgent?.(personaId),
   );
+  const avatarHostRef = useRef<HTMLDivElement | null>(null);
+  const captureGestureSnapshot = useCallback(() => {
+    const host = avatarHostRef.current;
+    if (!host) {
+      return null;
+    }
+
+    const image = host.querySelector("img");
+    if (image instanceof HTMLImageElement) {
+      return image.currentSrc || image.src || null;
+    }
+
+    const video = host.querySelector("video");
+    if (video instanceof HTMLVideoElement && video.videoWidth > 0) {
+      try {
+        const canvas = document.createElement("canvas");
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          return null;
+        }
+        context.drawImage(video, 0, 0);
+        return canvas.toDataURL("image/png");
+      } catch {
+        return null;
+      }
+    }
+
+    return null;
+  }, []);
+  const gestureSnapshot = useWidgetGestureFreeze(
+    canvasGestureActive,
+    captureGestureSnapshot,
+  );
 
   return (
     <div className="group pointer-events-none relative flex h-full w-full items-center justify-center text-center text-foreground">
@@ -40,21 +78,34 @@ export const AgentPinWidget = memo(function AgentPinWidget({
         aria-label={t("widgets.agentPin.openAria", { name: label })}
         className="pointer-events-auto relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-full bg-transparent transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
-        {avatarMedia ? (
-          <AvatarMedia
-            media={avatarMedia}
-            alt=""
-            loadingStrategy="eager"
-            className="pointer-events-none h-full w-full object-contain"
-          />
-        ) : (
+        {gestureSnapshot ? (
           <img
-            aria-hidden="true"
             alt=""
-            src={fallbackIconSrc}
-            className="pointer-events-none h-full w-full object-contain"
+            aria-hidden="true"
+            src={gestureSnapshot}
+            className="pointer-events-none absolute inset-0 z-10 h-full w-full object-contain"
           />
-        )}
+        ) : null}
+        <div
+          ref={avatarHostRef}
+          className={cn("h-full w-full", gestureSnapshot && "invisible")}
+        >
+          {avatarMedia ? (
+            <AvatarMedia
+              media={avatarMedia}
+              alt=""
+              loadingStrategy="eager"
+              className="pointer-events-none h-full w-full object-contain"
+            />
+          ) : (
+            <img
+              aria-hidden="true"
+              alt=""
+              src={fallbackIconSrc}
+              className="pointer-events-none h-full w-full object-contain"
+            />
+          )}
+        </div>
       </button>
       <span
         aria-hidden="true"

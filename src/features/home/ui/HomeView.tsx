@@ -1,6 +1,7 @@
 import { Crosshair, LayoutGrid } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { Button } from "@/shared/ui/button";
@@ -63,6 +64,10 @@ export function HomeView({
   const restoreTitle = t("widgets.canvasControls.restoreTitle");
   const cleanUpControlTitle = cleanUpSnapshot ? restoreTitle : cleanUpTitle;
   const hasCleanableWidgets = recenterTarget !== null;
+
+  useEffect(() => {
+    void prefetchProjectArtifactRenderer();
+  }, []);
 
   useEffect(() => {
     if (!layoutMotionActive) {

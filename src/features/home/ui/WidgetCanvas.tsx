@@ -154,6 +154,29 @@ function renderedWidgetContentStyle({
   };
 }
 
+/** Scale committed widget content visually during live resize without resizing WebGL canvases. */
+function renderedWidgetContentStyleForResizePreview({
+  committedSize,
+  previewSize,
+  zoom,
+}: {
+  committedSize: { width: number; height: number };
+  previewSize: { width: number; height: number };
+  zoom: number;
+}): React.CSSProperties {
+  const scaleX = (previewSize.width / committedSize.width) * zoom;
+  const scaleY = (previewSize.height / committedSize.height) * zoom;
+
+  return {
+    position: "relative",
+    width: committedSize.width,
+    height: committedSize.height,
+    transformOrigin: "top left",
+    transform:
+      scaleX === 1 && scaleY === 1 ? undefined : `scale(${scaleX}, ${scaleY})`,
+  };
+}
+
 function starterStickyPlacementsNearAnchor(
   widgets: WidgetInstance[],
   anchor: { x: number; y: number },
@@ -294,9 +317,7 @@ export function WidgetCanvas({
     saveCamera,
     onViewportGestureStart: closePicker,
     onWidgetDragStart: (instance) => {
-      if (instance.z < currentMaxZ) {
-        handleVisualLift(instance.id, currentMaxZ + 1);
-      }
+      handleVisualLift(instance.id, currentMaxZ + 1);
     },
     onWidgetDragEnd: ({ id, position, offset }) => {
       dragSuppression.suppressClickAfterDrag(offset);
@@ -306,9 +327,7 @@ export function WidgetCanvas({
       });
     },
     onWidgetResizeStart: (instance) => {
-      if (instance.z < currentMaxZ) {
-        handleVisualLift(instance.id, currentMaxZ + 1);
-      }
+      handleVisualLift(instance.id, currentMaxZ + 1);
     },
     onWidgetResizeEnd: ({ id, bounds, offset }) => {
       dragSuppression.suppressClickAfterDrag(offset);
@@ -402,13 +421,24 @@ export function WidgetCanvas({
             y: instance.y,
           };
           const resizePreview = resizePreviews[instance.id];
+          const committedSize = widgetSizeForInstance(instance);
+          const previewSize = resizePreview
+            ? {
+                width: resizePreview.width,
+                height: resizePreview.height,
+              }
+            : committedSize;
+          const isResizePreview = resizePreview != null;
           const renderWorldPosition = resizePreview ?? position;
           const renderPosition = renderedWidgetPosition(
             renderWorldPosition,
             viewport,
             devicePixelRatio,
           );
-          const size = resizePreview ?? widgetSizeForInstance(instance);
+          const size = previewSize;
+          const canvasGestureActive = Boolean(
+            resizePreviews[instance.id] ?? dragPositions[instance.id],
+          );
           const defaultSize = catalogEntry.defaultSize;
           const widgetScale = Math.min(
             size.width / defaultSize.width,
@@ -441,13 +471,23 @@ export function WidgetCanvas({
               )}
             >
               <div
-                style={renderedWidgetContentStyle({
-                  size,
-                  zoom: viewport.zoom,
-                })}
+                style={
+                  isResizePreview
+                    ? renderedWidgetContentStyleForResizePreview({
+                        committedSize,
+                        previewSize,
+                        zoom: viewport.zoom,
+                      })
+                    : renderedWidgetContentStyle({
+                        size: previewSize,
+                        zoom: viewport.zoom,
+                      })
+                }
               >
                 <WidgetFrame
                   instance={instance}
+                  canvasGestureActive={canvasGestureActive}
+                  widgetResizePreviewActive={isResizePreview}
                   currentMaxZ={currentMaxZ}
                   mutations={mutations}
                   shouldIgnoreActivation={
@@ -481,7 +521,10 @@ export function WidgetCanvas({
                     event.preventDefault();
                     event.stopPropagation();
                   }}
-                  className="absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  className={
+                    catalogEntry.resizeHandleClassName ??
+                    "absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                  }
                 >
                   <span
                     className="size-4 rounded-full border border-border bg-background shadow-mini"
