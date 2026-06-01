@@ -22,6 +22,8 @@ import { getTextContent, type Message } from "@/shared/types/messages";
 const AUTO_SCROLL_THRESHOLD_PX = 180;
 const PINNED_BOTTOM_THRESHOLD_PX = 8;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
+const JUMP_TO_LATEST_SCROLL_MS = 180;
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 interface MessageTimelineProps {
   messages: Message[];
@@ -83,6 +85,10 @@ function formatDateSeparator(
   });
 }
 
+function easeOutCubic(progress: number): number {
+  return 1 - (1 - progress) ** 3;
+}
+
 export function MessageTimeline({
   messages,
   streamingMessageId,
@@ -114,6 +120,7 @@ export function MessageTimeline({
   const lastScrollTopRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
   const autoScrollTimersRef = useRef<number[]>([]);
+  const jumpToLatestAnimationFrameRef = useRef<number | null>(null);
   const lastMcpAppSignatureRef = useRef<string | null>(null);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [userDetached, setUserDetached] = useState(false);
@@ -152,22 +159,99 @@ export function MessageTimeline({
     return textMatch?.id ?? null;
   }, [scrollTargetMessageId, scrollTargetQuery, visibleMessages]);
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  const getBottomScrollTop = useCallback((container: HTMLDivElement) => {
+    return Math.max(0, container.scrollHeight - container.clientHeight);
+  }, []);
+
+  const setTimelineScrollTop = useCallback(
+    (container: HTMLDivElement, scrollTop: number) => {
+      container.scrollTop = scrollTop;
+      lastScrollTopRef.current = container.scrollTop;
+    },
+    [],
+  );
+
+  const scrollToBottom = useCallback(
+    (behavior: ScrollBehavior = "smooth") => {
+      const container = containerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const bottomScrollTop = getBottomScrollTop(container);
+
+      if (typeof container.scrollTo === "function") {
+        container.scrollTo({
+          top: bottomScrollTop,
+          behavior,
+        });
+        return;
+      }
+
+      container.scrollTop = bottomScrollTop;
+    },
+    [getBottomScrollTop],
+  );
+
+  const cancelJumpToLatestAnimation = useCallback(() => {
+    if (jumpToLatestAnimationFrameRef.current == null) {
+      return;
+    }
+
+    cancelAnimationFrame(jumpToLatestAnimationFrameRef.current);
+    jumpToLatestAnimationFrameRef.current = null;
+  }, []);
+
+  const scrollToBottomWithControlledSmooth = useCallback(() => {
     const container = containerRef.current;
     if (!container) {
       return;
     }
 
-    if (typeof container.scrollTo === "function") {
-      container.scrollTo({
-        top: container.scrollHeight,
-        behavior,
-      });
+    cancelJumpToLatestAnimation();
+
+    const startScrollTop = container.scrollTop;
+    const initialBottomScrollTop = getBottomScrollTop(container);
+    if (Math.abs(initialBottomScrollTop - startScrollTop) <= 1) {
+      setTimelineScrollTop(container, initialBottomScrollTop);
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
-  }, []);
+    if (window.matchMedia(REDUCED_MOTION_QUERY).matches) {
+      setTimelineScrollTop(container, initialBottomScrollTop);
+      return;
+    }
+
+    let startTime: number | null = null;
+    const animate = (now: number) => {
+      const nextContainer = containerRef.current;
+      if (!nextContainer) {
+        jumpToLatestAnimationFrameRef.current = null;
+        return;
+      }
+
+      startTime ??= now;
+      const progress = Math.min(
+        1,
+        (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
+      );
+      const bottomScrollTop = getBottomScrollTop(nextContainer);
+      const nextScrollTop =
+        startScrollTop +
+        (bottomScrollTop - startScrollTop) * easeOutCubic(progress);
+      setTimelineScrollTop(nextContainer, nextScrollTop);
+
+      if (progress < 1) {
+        jumpToLatestAnimationFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
+
+      setTimelineScrollTop(nextContainer, bottomScrollTop);
+      jumpToLatestAnimationFrameRef.current = null;
+    };
+
+    jumpToLatestAnimationFrameRef.current = requestAnimationFrame(animate);
+  }, [cancelJumpToLatestAnimation, getBottomScrollTop, setTimelineScrollTop]);
 
   const setDetachedFromLatest = useCallback((detached: boolean) => {
     userDetachedRef.current = detached;
@@ -422,12 +506,13 @@ export function MessageTimeline({
 
   useEffect(
     () => () => {
+      cancelJumpToLatestAnimation();
       for (const timer of autoScrollTimersRef.current) {
         window.clearTimeout(timer);
       }
       autoScrollTimersRef.current = [];
     },
-    [],
+    [cancelJumpToLatestAnimation],
   );
 
   useEffect(() => {
@@ -513,7 +598,7 @@ export function MessageTimeline({
     setDetachedFromLatest(false);
     isNearBottomRef.current = true;
     isPinnedToBottomRef.current = true;
-    scrollToBottom("smooth");
+    scrollToBottomWithControlledSmooth();
   };
 
   const hasFooterStatus = footerStatus != null;

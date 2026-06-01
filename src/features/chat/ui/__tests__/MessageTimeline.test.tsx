@@ -1,6 +1,6 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { MessageTimeline } from "../MessageTimeline";
 import type { Message } from "@/shared/types/messages";
@@ -30,6 +30,10 @@ beforeEach(() => {
     writable: true,
     value: ResizeObserverMock,
   });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 vi.mock("../MessageBubble", () => ({
@@ -191,6 +195,26 @@ function attachScrollBy(element: HTMLElement) {
   return scrollBy;
 }
 
+function mockRequestAnimationFrame() {
+  const callbacks: FrameRequestCallback[] = [];
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    callbacks.push(callback);
+    return callbacks.length;
+  });
+
+  return {
+    run(now: number) {
+      const callback = callbacks.shift();
+      expect(callback).toBeDefined();
+      callback?.(now);
+    },
+    finish(start = 1000) {
+      this.run(start);
+      this.run(start + 180);
+    },
+  };
+}
+
 function getTimelineScroller() {
   return screen.getByTestId("message-timeline-scroll");
 }
@@ -221,7 +245,7 @@ describe("MessageTimeline", () => {
 
     await waitFor(() =>
       expect(scrollTo).toHaveBeenCalledWith({
-        top: 1000,
+        top: 500,
         behavior: "smooth",
       }),
     );
@@ -229,6 +253,7 @@ describe("MessageTimeline", () => {
 
   it("lets the user detach from auto-scroll during generation", async () => {
     const user = userEvent.setup();
+    const animationFrame = mockRequestAnimationFrame();
     const messages = [
       message("user-1", "user", "Question"),
       message("assistant-1", "assistant", "First token"),
@@ -263,10 +288,51 @@ describe("MessageTimeline", () => {
 
     await user.click(screen.getByRole("button", { name: "Jump to latest" }));
 
-    expect(scrollTo).toHaveBeenCalledWith({
-      top: 1000,
-      behavior: "smooth",
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    animationFrame.finish();
+
+    expect(scroller.scrollTop).toBe(500);
+  });
+
+  it("uses controlled smooth scrolling for long jumps", async () => {
+    const user = userEvent.setup();
+    const animationFrame = mockRequestAnimationFrame();
+    const bottomScrollTop = 4500;
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(<MessageTimeline messages={messages} />);
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 5000,
+      clientHeight: 500,
     });
+    const scrollTo = attachScrollTo(scroller);
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    await user.click(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    );
+
+    expect(scroller.scrollTop).toBe(100);
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    animationFrame.run(1000);
+    expect(scroller.scrollTop).toBe(100);
+
+    animationFrame.run(1090);
+    expect(scroller.scrollTop).toBeGreaterThan(100);
+    expect(scroller.scrollTop).toBeLessThan(bottomScrollTop);
+
+    animationFrame.run(1180);
+
+    expect(scroller.scrollTop).toBe(bottomScrollTop);
+    expect(scrollTo).not.toHaveBeenCalled();
   });
 
   it("detaches immediately when the user wheels upward near the bottom", async () => {
@@ -389,7 +455,7 @@ describe("MessageTimeline", () => {
       ).not.toBeInTheDocument(),
     );
     expect(scrollTo).toHaveBeenCalledWith({
-      top: 1000,
+      top: 500,
       behavior: "auto",
     });
   });
@@ -490,7 +556,7 @@ describe("MessageTimeline", () => {
     triggerResizeObservers();
 
     expect(scrollTo).toHaveBeenCalledWith({
-      top: 1000,
+      top: 700,
       behavior: "auto",
     });
   });
