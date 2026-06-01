@@ -8,7 +8,7 @@ fn push_existing_path(paths: &mut Vec<PathBuf>, path: &str) {
     }));
 }
 
-fn build_extended_path_from_path(path: Option<&str>) -> String {
+pub fn build_extended_path_from_path(path: Option<&str>) -> String {
     let mut paths: Vec<PathBuf> = Vec::new();
 
     if let Some(path) = path {

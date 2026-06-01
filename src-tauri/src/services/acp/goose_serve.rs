@@ -1,12 +1,14 @@
 use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 
+use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::services::distro_bundle::DistroBundleState;
+use crate::services::path_env;
 use crate::services::shell_env;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -107,20 +109,18 @@ impl GooseServeProcess {
 
         // When launched from Finder/Dock/Spotlight, the app inherits a minimal
         // launchd environment. Restore the user's login shell environment so
-        // goosed has access to PATH, LANG, and other needed variables.
+        // goosed has access to PATH, LANG, and other needed variables. The
+        // login shell often misses node-version-manager shims (nvm sources
+        // from .zshrc, not .zprofile), so override PATH with the extended
+        // path used by every other subprocess spawn site in this app, with
+        // the distro `bin_dir` (if any) prepended in front of it.
         let shell_env = shell_env::capture_shell_env().await;
-        for (key, value) in &shell_env {
-            command.env(key, value);
-        }
+        let mut prepend_dirs: Vec<PathBuf> = Vec::new();
 
         if let Some(distro_state) = app_handle.try_state::<DistroBundleState>() {
             if let Some(bundle) = distro_state.bundle() {
                 if let Some(bin_dir) = &bundle.bin_dir {
-                    prepend_path_env(
-                        &mut command,
-                        bin_dir,
-                        shell_env.get("PATH").map(String::as_str),
-                    );
+                    prepend_dirs.push(bin_dir.clone());
                 }
                 if let Some(config_path) = &bundle.config_path {
                     append_additional_config_env(&mut command, config_path);
@@ -128,6 +128,8 @@ impl GooseServeProcess {
                 command.env("GOOSE_DISTRO_DIR", &bundle.root_dir);
             }
         }
+
+        apply_shell_env_with_extended_path(&mut command, &shell_env, &prepend_dirs);
         set_databricks_host_env(&mut command);
 
         command
@@ -495,19 +497,36 @@ fn default_serve_working_dir() -> PathBuf {
     dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
-fn prepend_path_env(
+/// Copy the captured shell environment onto `command`, overriding `PATH`
+/// with `path_env::build_extended_path_from_path` so node-version-manager
+/// shims are visible to the goosed sidecar. Any `prepend_dirs` are placed
+/// at the front of the resulting PATH. All PATH manipulation for the
+/// goosed command flows through this sink, so callers must not read
+/// `shell_env["PATH"]` separately or set PATH on `command` directly —
+/// doing so would bypass the extended-path logic.
+fn apply_shell_env_with_extended_path(
     command: &mut Command,
-    extra_dir: &std::path::Path,
-    existing_path: Option<&str>,
+    shell_env: &HashMap<String, String>,
+    prepend_dirs: &[PathBuf],
 ) {
-    let mut paths = vec![extra_dir.to_path_buf()];
-    if let Some(existing) = existing_path {
-        paths.extend(std::env::split_paths(existing));
-    } else if let Some(existing) = std::env::var_os("PATH") {
-        paths.extend(std::env::split_paths(&existing));
+    let extended_path =
+        path_env::build_extended_path_from_path(shell_env.get("PATH").map(String::as_str));
+
+    for (key, value) in shell_env {
+        if key == "PATH" {
+            continue;
+        }
+        command.env(key, value);
     }
 
-    set_path_list_env(command, "PATH", paths, Some(extra_dir.as_os_str()));
+    let mut paths: Vec<PathBuf> = prepend_dirs.to_vec();
+    paths.extend(std::env::split_paths(&extended_path));
+    set_path_list_env(
+        command,
+        "PATH",
+        paths,
+        prepend_dirs.first().map(|p| p.as_os_str()),
+    );
 }
 
 fn append_additional_config_env(command: &mut Command, config_path: &std::path::Path) {
@@ -565,62 +584,67 @@ fn reserve_free_port() -> Result<u16, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{prepend_path_env, redact_log_line};
-    use std::path::Path;
+    use super::{apply_shell_env_with_extended_path, redact_log_line};
+    use std::collections::HashMap;
+    use std::ffi::OsString;
+    use std::path::{Path, PathBuf};
     use tokio::process::Command;
 
+    fn env_value(command: &Command, key: &str) -> Option<OsString> {
+        command.as_std().get_envs().find_map(|(k, v)| {
+            if k == key {
+                v.map(|value| value.to_os_string())
+            } else {
+                None
+            }
+        })
+    }
+
+    // Verifies the two pieces of behavior that are unique to
+    // `apply_shell_env_with_extended_path` — extended-path coverage itself is
+    // exercised by `path_env::tests`.
     #[test]
-    fn distro_path_prepend_preserves_captured_shell_path() {
+    fn apply_shell_env_routes_path_through_extended_path_and_forwards_other_vars() {
         let mut command = Command::new("goose");
-        let shell_path = "/shell/bin:/tool/bin".to_string();
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin".to_string());
+        shell_env.insert("LANG".to_string(), "en_US.UTF-8".to_string());
 
-        prepend_path_env(&mut command, Path::new("/distro/bin"), Some(&shell_path));
+        apply_shell_env_with_extended_path(&mut command, &shell_env, &[]);
 
-        let path = command
-            .as_std()
-            .get_envs()
-            .find_map(|(key, value)| {
-                if key == "PATH" {
-                    value.map(|value| value.to_os_string())
-                } else {
-                    None
-                }
-            })
-            .expect("PATH should be set");
+        // PATH was routed through `build_extended_path_from_path`: the shell
+        // PATH entry survives and at least one tool-manager shim was appended.
+        let path = env_value(&command, "PATH").expect("PATH should be set");
         let paths: Vec<_> = std::env::split_paths(&path).collect();
+        assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+        assert!(paths.iter().any(|p| p.ends_with(".asdf/shims")));
 
+        // Non-PATH variables are forwarded verbatim.
+        assert_eq!(
+            env_value(&command, "LANG"),
+            Some(OsString::from("en_US.UTF-8"))
+        );
+    }
+
+    #[test]
+    fn apply_shell_env_prepends_extra_dirs_in_front_of_extended_path() {
+        let mut command = Command::new("goose");
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin".to_string());
+
+        apply_shell_env_with_extended_path(
+            &mut command,
+            &shell_env,
+            &[PathBuf::from("/distro/bin")],
+        );
+
+        let path = env_value(&command, "PATH").expect("PATH should be set");
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
         assert_eq!(
             paths.first().map(|p| p.as_path()),
             Some(Path::new("/distro/bin"))
         );
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
-        assert!(paths.iter().any(|p| p == Path::new("/tool/bin")));
-    }
-
-    #[test]
-    fn distro_path_prepend_falls_back_to_process_path() {
-        let mut command = Command::new("goose");
-
-        prepend_path_env(&mut command, Path::new("/distro/bin"), None);
-
-        let path = command
-            .as_std()
-            .get_envs()
-            .find_map(|(key, value)| {
-                if key == "PATH" {
-                    value.map(|value| value.to_os_string())
-                } else {
-                    None
-                }
-            })
-            .expect("PATH should be set");
-        let paths: Vec<_> = std::env::split_paths(&path).collect();
-
-        assert_eq!(
-            paths.first().map(|p| p.as_path()),
-            Some(Path::new("/distro/bin"))
-        );
-        assert!(paths.len() > 1);
     }
 
     #[test]
