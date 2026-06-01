@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { cn } from "@/shared/lib/cn";
 import type { WidgetRenderProps } from "./types";
 
 // Hour ticks at every 30° (12 marks). Minute ticks at every 6°, skipping the
@@ -9,6 +10,73 @@ const HOUR_TICK_ANGLES = Array.from({ length: 12 }, (_, i) => i * 30);
 const MINUTE_TICK_ANGLES = Array.from({ length: 60 }, (_, i) => i * 6).filter(
   (angle) => angle % 30 !== 0,
 );
+
+const CENTER_HUB_SIZE =
+  "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)";
+const SECOND_HAND_DOT_SIZE =
+  "clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)";
+
+/** Hand reach/tail as % of widget height from center; second reach clears minute ticks (~5.5% from rim). */
+const CLOCK_HAND_LENGTH = {
+  hour: { reach: 26, tail: 6 },
+  minute: { reach: 40, tail: 8 },
+  second: { reach: 42, tail: 10 },
+} as const;
+
+type ClockHandProps = {
+  angle: number;
+  lengthPercent: number;
+  tailPercent: number;
+  colorClass: string;
+  zIndex: number;
+  dotAtTip?: boolean;
+};
+
+/** 1px hand centered on the face, extending past the hub on both sides. */
+function ClockHand({
+  angle,
+  lengthPercent,
+  tailPercent,
+  colorClass,
+  zIndex,
+  dotAtTip = false,
+}: ClockHandProps) {
+  return (
+    <div
+      className="absolute inset-0"
+      style={{ transform: `rotate(${angle}deg)`, zIndex }}
+    >
+      <span
+        className={cn(
+          "absolute left-1/2 top-1/2 w-px -translate-x-1/2",
+          colorClass,
+        )}
+        style={{
+          height: `${lengthPercent}%`,
+          transform: "translateX(-50%) translateY(-100%)",
+          transformOrigin: "bottom center",
+        }}
+      />
+      <span
+        className={cn("absolute left-1/2 top-1/2 w-px -translate-x-1/2", colorClass)}
+        style={{
+          height: `${tailPercent}%`,
+          transformOrigin: "top center",
+        }}
+      />
+      {dotAtTip ? (
+        <span
+          className="absolute left-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-clock-hand"
+          style={{
+            top: `${50 - lengthPercent}%`,
+            width: SECOND_HAND_DOT_SIZE,
+            height: SECOND_HAND_DOT_SIZE,
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function ClockWidget(_props: WidgetRenderProps) {
@@ -21,6 +89,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
     return () => clearInterval(interval);
   }, []);
 
+  const secondAngle = time.getSeconds() * 6;
   const minuteAngle = time.getMinutes() * 6 + time.getSeconds() * 0.1;
   const hourAngle = ((time.getHours() % 12) + time.getMinutes() / 60) * 30;
 
@@ -45,7 +114,7 @@ export function ClockWidget(_props: WidgetRenderProps) {
             className="absolute inset-0"
             style={{ transform: `rotate(${angle}deg)` }}
           >
-            <span className="absolute left-1/2 top-[2%] h-[8%] w-[2px] -translate-x-1/2 rounded-full bg-clock-mark" />
+            <span className="absolute left-1/2 top-[2%] h-[8%] w-px -translate-x-1/2 bg-clock-mark" />
           </div>
         ))}
 
@@ -55,43 +124,40 @@ export function ClockWidget(_props: WidgetRenderProps) {
             className="absolute inset-0"
             style={{ transform: `rotate(${angle}deg)` }}
           >
-            <span className="absolute left-1/2 top-[3%] h-[2.5%] w-[1px] -translate-x-1/2 rounded-full bg-clock-mark/40" />
+            <span className="absolute left-1/2 top-[3%] h-[2.5%] w-px -translate-x-1/2 bg-clock-mark/40" />
           </div>
         ))}
 
-        {/* Hour hand — mark token (white in light, dark in dark), stubby. */}
-        <div
-          className="absolute inset-0 z-10"
-          style={{ transform: `rotate(${hourAngle}deg)` }}
-        >
-          <span className="absolute left-1/2 top-[26%] h-[26%] w-[3px] -translate-x-1/2 rounded-full bg-clock-mark" />
-        </div>
+        <ClockHand
+          angle={hourAngle}
+          lengthPercent={CLOCK_HAND_LENGTH.hour.reach}
+          tailPercent={CLOCK_HAND_LENGTH.hour.tail}
+          colorClass="bg-clock-mark"
+          zIndex={10}
+        />
 
-        {/* Minute hand — red with circular dot at tip (Swiss railway accent). */}
-        <div
-          className="absolute inset-0 z-20"
-          style={{ transform: `rotate(${minuteAngle}deg)` }}
-        >
-          <span className="absolute left-1/2 top-[10%] h-[42%] w-[3px] -translate-x-1/2 rounded-full bg-clock-hand" />
-          <span
-            className="absolute left-1/2 top-[10%] -translate-x-1/2 -translate-y-1/2 rounded-full bg-clock-hand"
-            style={{
-              width:
-                "clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
-              height:
-                "clamp(0.5rem, calc(0.625rem * var(--widget-scale, 1)), 1rem)",
-            }}
-          />
-        </div>
+        <ClockHand
+          angle={minuteAngle}
+          lengthPercent={CLOCK_HAND_LENGTH.minute.reach}
+          tailPercent={CLOCK_HAND_LENGTH.minute.tail}
+          colorClass="bg-clock-minute-hand"
+          zIndex={20}
+        />
 
-        {/* Center hub */}
+        <ClockHand
+          angle={secondAngle}
+          lengthPercent={CLOCK_HAND_LENGTH.second.reach}
+          tailPercent={CLOCK_HAND_LENGTH.second.tail}
+          colorClass="bg-clock-hand"
+          zIndex={25}
+          dotAtTip
+        />
+
         <div
           className="absolute left-1/2 top-1/2 z-30 -translate-x-1/2 -translate-y-1/2 rounded-full bg-clock-mark"
           style={{
-            width:
-              "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)",
-            height:
-              "clamp(0.375rem, calc(0.5rem * var(--widget-scale, 1)), 0.875rem)",
+            width: CENTER_HUB_SIZE,
+            height: CENTER_HUB_SIZE,
           }}
         />
       </div>
