@@ -24,7 +24,6 @@ import {
 } from "@react-three/drei";
 import * as THREE from "three";
 import { cn } from "@/shared/lib/cn";
-import { perfLog } from "@/shared/lib/perfLog";
 import { PROJECT_ARTIFACT_CUBE_MODEL_URL } from "./assets";
 import type {
   ProjectArtifactContentMode,
@@ -353,12 +352,6 @@ function initialImageIndexForState(
   return wrapIndex(state.seed, imageCount);
 }
 
-function projectArtifactPerfId(
-  state: Pick<ProjectArtifactState, "name" | "seed">,
-) {
-  return `${state.name || "untitled"}#${state.seed}`;
-}
-
 function triggerNextImage(cycle: ImageCycle, textureCount: number) {
   if (cycle.isFading) return;
   cycle.nextIndex = wrapIndex(cycle.currentIndex + 1, textureCount);
@@ -548,23 +541,9 @@ function SceneBackground({
   return null;
 }
 
-function SceneEnvironment({
-  environmentUrl,
-  perfId,
-  startTime,
-}: {
-  environmentUrl: string;
-  perfId: string;
-  startTime: number;
-}) {
+function SceneEnvironment({ environmentUrl }: { environmentUrl: string }) {
   const ambientRef = useRef<THREE.AmbientLight>(null);
   const scene = useThree((state) => state.scene);
-
-  useEffect(() => {
-    perfLog(
-      `[perf:cube] ${perfId} environment ready in ${(performance.now() - startTime).toFixed(1)}ms`,
-    );
-  }, [perfId, startTime]);
 
   useFrame(() => {
     scene.environmentIntensity = EFFECTS.envIntensity;
@@ -1116,10 +1095,8 @@ function PrototypeCube({
   glassTintRef,
   mode,
   motionImpulse,
-  perfId,
   runtimeRef,
   shellRef,
-  startTime,
   textures,
   variant,
 }: {
@@ -1127,10 +1104,8 @@ function PrototypeCube({
   glassTintRef: MutableRefObject<THREE.Color>;
   mode: ProjectArtifactContentMode;
   motionImpulse: ProjectArtifactRendererProps["motionImpulse"];
-  perfId: string;
   runtimeRef: ArtifactRuntimeRef;
   shellRef: MutableRefObject<THREE.Mesh | null>;
-  startTime: number;
   textures: TextureList;
   variant: NonNullable<ProjectArtifactRendererProps["variant"]>;
 }) {
@@ -1141,11 +1116,6 @@ function PrototypeCube({
     PROJECT_ARTIFACT_CUBE_MODEL_URL,
   ) as unknown as CubeGltf;
   const geometry = nodes.Cube?.geometry ?? null;
-  useEffect(() => {
-    perfLog(
-      `[perf:cube] ${perfId} gltf ready in ${(performance.now() - startTime).toFixed(1)}ms (variant=${variant})`,
-    );
-  }, [perfId, startTime, variant]);
   const clickTime = useRef(0);
   const pointerDownPos = useRef<{ x: number; y: number } | null>(null);
   const pointerDownTime = useRef(0);
@@ -1653,18 +1623,14 @@ function ArtifactScene({
   environmentUrl,
   imageUrls,
   motionImpulse,
-  perfId,
   runtimeRef,
-  startTime,
   state,
   variant,
 }: {
   environmentUrl: string;
   imageUrls: string[];
   motionImpulse: ProjectArtifactRendererProps["motionImpulse"];
-  perfId: string;
   runtimeRef: ArtifactRuntimeRef;
-  startTime: number;
   state: ProjectArtifactState;
   variant: NonNullable<ProjectArtifactRendererProps["variant"]>;
 }) {
@@ -1679,32 +1645,20 @@ function ArtifactScene({
   );
   const hasTransparentBackground = usesTransparentBackground(variant);
 
-  useEffect(() => {
-    perfLog(
-      `[perf:cube] ${perfId} textures ready in ${(performance.now() - startTime).toFixed(1)}ms (variant=${variant}, images=${textures.length})`,
-    );
-  }, [perfId, startTime, textures.length, variant]);
-
   return (
     <>
       <SceneBackground
         color={backgroundColor}
         transparent={hasTransparentBackground}
       />
-      <SceneEnvironment
-        environmentUrl={environmentUrl}
-        perfId={perfId}
-        startTime={startTime}
-      />
+      <SceneEnvironment environmentUrl={environmentUrl} />
       <PrototypeCube
         cameraAnglesRef={cameraAnglesRef}
         glassTintRef={glassTintRef}
         mode={state.contentMode}
         motionImpulse={motionImpulse}
-        perfId={perfId}
         runtimeRef={runtimeRef}
         shellRef={shellRef}
-        startTime={startTime}
         textures={textures}
         variant={variant}
       />
@@ -1729,8 +1683,6 @@ export function ProjectArtifactRenderer({
   onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactRendererProps) {
-  const rendererStartTimeRef = useRef(performance.now());
-  const perfId = useMemo(() => projectArtifactPerfId(state), [state]);
   const initialImageIndex = initialImageIndexForState(
     state,
     imageUrls.length,
@@ -1771,18 +1723,6 @@ export function ProjectArtifactRenderer({
     hasTransparentBackground ? "transparent" : "opaque"
   }-${contextRecoveryKey}`;
   const [isVisualReady, setIsVisualReady] = useState(false);
-
-  useEffect(() => {
-    const startTime = rendererStartTimeRef.current;
-    perfLog(
-      `[perf:cube] ${perfId} renderer mount variant=${variant} images=${imageUrls.length}`,
-    );
-    return () => {
-      perfLog(
-        `[perf:cube] ${perfId} renderer unmount after ${(performance.now() - startTime).toFixed(1)}ms (variant=${variant})`,
-      );
-    };
-  }, [imageUrls.length, perfId, variant]);
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -1833,9 +1773,6 @@ export function ProjectArtifactRenderer({
   useEffect(() => {
     if (variant === "tile" && projectArtifactTileHasRevealed) {
       setIsVisualReady(true);
-      perfLog(
-        `[perf:cube] ${perfId} visual ready reused in ${(performance.now() - rendererStartTimeRef.current).toFixed(1)}ms (variant=${variant})`,
-      );
       return;
     }
 
@@ -1850,9 +1787,6 @@ export function ProjectArtifactRenderer({
       frame += 1;
       if (frame >= frameDelay) {
         setIsVisualReady(true);
-        perfLog(
-          `[perf:cube] ${perfId} visual ready in ${(performance.now() - rendererStartTimeRef.current).toFixed(1)}ms (variant=${variant}, frames=${frame})`,
-        );
         if (variant === "tile") {
           projectArtifactTileHasRevealed = true;
         }
@@ -1865,7 +1799,7 @@ export function ProjectArtifactRenderer({
     return () => {
       frameIds.forEach(cancelAnimationFrame);
     };
-  }, [perfId, variant]);
+  }, [variant]);
 
   const handleWebGLContextRestored = useCallback(() => {
     requestHardRecovery();
@@ -1963,9 +1897,6 @@ export function ProjectArtifactRenderer({
               : canvasBackground,
           }}
           onCreated={({ gl, scene }) => {
-            perfLog(
-              `[perf:cube] ${perfId} canvas created in ${(performance.now() - rendererStartTimeRef.current).toFixed(1)}ms (variant=${variant}, dpr=${window.devicePixelRatio || 1})`,
-            );
             gl.domElement.style.background = hasTransparentBackground
               ? "transparent"
               : canvasBackground;
@@ -1988,9 +1919,7 @@ export function ProjectArtifactRenderer({
               environmentUrl={environmentUrl}
               imageUrls={imageUrls}
               motionImpulse={motionImpulse}
-              perfId={perfId}
               runtimeRef={runtimeRef}
-              startTime={rendererStartTimeRef.current}
               state={state}
               variant={variant}
             />

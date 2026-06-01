@@ -4,14 +4,12 @@ import {
   Suspense,
   useEffect,
   useMemo,
-  useRef,
   type ErrorInfo,
   type ReactNode,
 } from "react";
 import { selectProjectPreviewArtifacts } from "@/shared/api/artifacts";
 import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { cn } from "@/shared/lib/cn";
-import { perfLog } from "@/shared/lib/perfLog";
 import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
 import { prefetchProjectArtifactRenderer } from "./prefetchProjectArtifactRenderer";
 import type {
@@ -143,10 +141,7 @@ export function ProjectArtifactPreview({
   onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactPreviewProps) {
-  const mountedAtRef = useRef(performance.now());
-  const assetsLogKeyRef = useRef<string | null>(null);
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
-  const perfId = input.projectId ?? `seed:${state.seed}`;
   const canUseRenderer = canUseWebGlRenderer();
   const assetQuery = useArtifacts({
     enabled: canUseRenderer,
@@ -162,30 +157,10 @@ export function ProjectArtifactPreview({
   }, [assetQuery.data?.imageUrls, state.seed, variant]);
 
   useEffect(() => {
-    perfLog(`[perf:cube] ${perfId} preview mount variant=${variant}`);
-  }, [perfId, variant]);
-
-  useEffect(() => {
     if (assetQuery.error) {
       console.warn("Failed to load project artifact assets.", assetQuery.error);
     }
   }, [assetQuery.error]);
-
-  useEffect(() => {
-    if (!assetQuery.data) {
-      return;
-    }
-
-    const logKey = `${perfId}:${variant}:${assetQuery.data.catalogVersion}`;
-    if (assetsLogKeyRef.current === logKey) {
-      return;
-    }
-
-    assetsLogKeyRef.current = logKey;
-    perfLog(
-      `[perf:cube] ${perfId} preview assets ready in ${(performance.now() - mountedAtRef.current).toFixed(1)}ms (variant=${variant}, images=${imageUrls.length}/${assetQuery.data.imageUrls.length})`,
-    );
-  }, [assetQuery.data, imageUrls.length, perfId, variant]);
 
   if (!canUseRenderer || !assetQuery.data) {
     return (
