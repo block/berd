@@ -19,6 +19,7 @@ dependencies = [
  "log",
  "mime_guess",
  "objc2-app-kit",
+ "objc2-foundation",
  "portable-pty",
  "reqwest",
  "serde",

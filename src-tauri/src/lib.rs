@@ -2,6 +2,10 @@ mod commands;
 mod services;
 mod types;
 
+#[cfg(target_os = "macos")]
+use objc2_app_kit::NSApplication;
+#[cfg(target_os = "macos")]
+use objc2_foundation::{MainThreadMarker, NSString};
 use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState};
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
@@ -164,6 +168,8 @@ pub fn run() {
                 let view_menu = SubmenuBuilder::new(app, "View").fullscreen().build()?;
                 let window_menu = SubmenuBuilder::new(app, "Window")
                     .minimize()
+                    .maximize_with_text("Zoom")
+                    .separator()
                     .close_window()
                     .build()?;
                 let menu = MenuBuilder::new(app)
@@ -173,6 +179,23 @@ pub fn run() {
                     .item(&window_menu)
                     .build()?;
                 app.set_menu(menu)?;
+
+                // Register the Window submenu as macOS's windowsMenu so that
+                // the system injects standard window management items (Fill,
+                // Center, Move & Resize, Full Screen Tile, Bring All to Front,
+                // etc.) automatically.
+                //
+                if let Some(mtm) = MainThreadMarker::new() {
+                    let ns_app = NSApplication::sharedApplication(mtm);
+                    if let Some(main_menu) = ns_app.mainMenu() {
+                        let window_title = NSString::from_str("Window");
+                        if let Some(window_item) = main_menu.itemWithTitle(&window_title) {
+                            if let Some(window_ns_menu) = window_item.submenu() {
+                                ns_app.setWindowsMenu(Some(&window_ns_menu));
+                            }
+                        }
+                    }
+                }
             }
 
             Ok(())
