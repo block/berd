@@ -271,6 +271,9 @@
   --surface-glass-strong-fg: #242424;
   --message-user-bg: var(--color-gray-75);
 
+  /* Default project cube fold lines on filled color swatches (sidebar, picker). */
+  --project-glyph-fold-stroke: rgba(255, 255, 255, 0.92);
+
   /* Global hover composer pill — translucent glass over the canvas/dot-grid.
      Separate from --surface-composer (which is the chat-area composer fill).
      Deprecated: PR #6 migrates the GlobalComposerPill consumer to
@@ -620,6 +623,8 @@
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: var(--color-gray-900);
   --message-user-bg: var(--color-gray-700);
+
+  --project-glyph-fold-stroke: rgba(0, 0, 0, 0.85);
 
   /* Global hover composer pill — dark variants. Inner ring softens; outer
      outline flips to white-alpha so it doesn't disappear over dark canvas. */

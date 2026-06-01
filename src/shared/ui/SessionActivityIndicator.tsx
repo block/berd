@@ -27,7 +27,10 @@ export function ActiveChatGooseIndicator({
       src={shouldReduceMotion ? startupLoadingPoster : startupLoadingChatGif}
       alt=""
       aria-hidden
-      className={cn("pointer-events-none object-contain", className)}
+      className={cn(
+        "pointer-events-none object-contain dark:invert",
+        className,
+      )}
       style={{ width: size, height: size }}
       decoding="async"
     />

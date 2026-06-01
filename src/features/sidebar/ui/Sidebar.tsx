@@ -4,7 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
-  type ComponentType,
+  type ComponentProps,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -68,6 +68,10 @@ import {
   DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
+
+type SidebarNavItemIcon = NonNullable<
+  ComponentProps<typeof SidebarNavItem>["icon"]
+>;
 
 interface SidebarProps {
   collapsed: boolean;
@@ -398,7 +402,7 @@ export function Sidebar({
   const mainNavItems: readonly {
     id: AppView;
     label: string;
-    icon: ComponentType<{ className?: string }>;
+    icon: SidebarNavItemIcon;
   }[] = [
     { id: "agents", label: t("navigation.agents"), icon: SidebarNavAgentsIcon },
     { id: "skills", label: t("navigation.skills"), icon: SidebarNavSkillsIcon },
@@ -416,7 +420,7 @@ export function Sidebar({
   const devNavItems: readonly {
     id: AppView;
     label: string;
-    icon: ComponentType<{ className?: string }>;
+    icon: SidebarNavItemIcon;
   }[] = isDesignSystemExplorerEnabled()
     ? [
         {

@@ -25,7 +25,7 @@ export function StartupLoadingView() {
           src={startupLoadingPoster}
           alt=""
           aria-hidden
-          className="pointer-events-none object-contain"
+          className="pointer-events-none object-contain dark:invert"
           style={startupLoadingLogoStyle}
           decoding="sync"
           fetchPriority="high"
@@ -35,7 +35,7 @@ export function StartupLoadingView() {
           src={startupLoadingGif}
           alt=""
           aria-hidden
-          className="pointer-events-none object-contain"
+          className="pointer-events-none object-contain dark:invert"
           style={startupLoadingLogoStyle}
           decoding="async"
           fetchPriority="high"

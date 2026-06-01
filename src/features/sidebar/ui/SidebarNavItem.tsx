@@ -1,4 +1,4 @@
-import type { ComponentType } from "react";
+import type { ElementType } from "react";
 import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_NAV_ICON_CLASS } from "./sidebarNavIcons";
 import {
@@ -8,7 +8,7 @@ import {
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 interface SidebarNavItemProps {
-  icon?: ComponentType<{ className?: string }>;
+  icon?: ElementType<{ className?: string }>;
   label: string;
   collapsed: boolean;
   labelTransition: string;

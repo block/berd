@@ -344,15 +344,13 @@ function getCvaMaps(sourceFile) {
 }
 
 function displayNameFromFile(fileName, exportEntries) {
-  const fileBaseName = fileName.replace(/\.tsx$/, "");
-  const matchingFileExport = exportEntries.find(
-    (entry) => entry.kind === "value" && entry.name === fileBaseName,
-  );
-
-  if (matchingFileExport) {
-    return matchingFileExport.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
-  }
-
+  const baseName = fileName.replace(/\.tsx$/, "");
+  const expectedExportName = baseName.includes("-")
+    ? baseName
+        .split("-")
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join("")
+    : baseName;
   const preferredExport = exportEntries.find(
     (entry) =>
       entry.kind === "value" &&
@@ -360,13 +358,22 @@ function displayNameFromFile(fileName, exportEntries) {
       !entry.name.endsWith("Props") &&
       !entry.name.endsWith("Context"),
   );
+  const fileMatchedExport = exportEntries.find(
+    (entry) => entry.kind === "value" && entry.name === expectedExportName,
+  );
+
+  if (
+    fileMatchedExport &&
+    !preferredExport?.name.endsWith(expectedExportName)
+  ) {
+    return fileMatchedExport.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  }
 
   if (preferredExport) {
     return preferredExport.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
   }
 
-  return fileName
-    .replace(/\.tsx$/, "")
+  return baseName
     .split("-")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");

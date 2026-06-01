@@ -7,8 +7,8 @@ import { pillCssColor } from "../lib/pillTones";
 const VIEW_BOX = "0 0 13 15";
 /** Slightly larger than nav icons (16px) so the cube reads clearly in project rows. */
 export const PROJECT_GLYPH_ICON_CLASS = "size-[18px] shrink-0";
-/** Fold lines on the filled cube (white edge highlights). */
-const CUBE_FOLD_STROKE = "rgba(255, 255, 255, 0.92)";
+/** Fold lines on the filled cube; theme token (white in light, black in dark). */
+const CUBE_FOLD_STROKE = "var(--project-glyph-fold-stroke)";
 const CUBE_FOLD_STROKE_WIDTH = 0.75;
 
 function resolveProjectColor(color?: string | null) {
