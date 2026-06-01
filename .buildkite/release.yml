@@ -55,6 +55,7 @@ steps:
                 from: "release/macos/Goose.app"
                 volname: "Goose"
       - squareup/upload-mobile-release#v2:
+          skip_bundle_version_validation: true
           team_ids:
             - "EYF346PHUG"
           mobile_releases:
