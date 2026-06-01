@@ -707,7 +707,7 @@ export function GlobalComposerPill({
             disabled={!canSend}
             variant="composer-action"
             size="icon-pill-sm"
-            className={cn(!canSend && "cursor-default disabled:opacity-100")}
+            className={cn(!canSend && "disabled:opacity-100")}
             aria-label={t("toolbar.sendMessage")}
           >
             <IconArrowUp aria-hidden="true" />
@@ -850,7 +850,7 @@ export function GlobalComposerPill({
               disabled={!canSend}
               variant="composer-action"
               size="icon-pill-sm"
-              className={cn(!canSend && "cursor-default disabled:opacity-100")}
+              className={cn(!canSend && "disabled:opacity-100")}
               aria-label={t("toolbar.sendMessage")}
             >
               <IconArrowUp aria-hidden="true" />

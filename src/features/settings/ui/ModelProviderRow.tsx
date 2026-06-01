@@ -459,7 +459,7 @@ export function ModelProviderRow({
         onClick={handleToggle}
         aria-expanded={expanded}
         disabled={authenticating}
-        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
+        className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:hover:bg-transparent"
       >
         {icon ? (
           <div className="flex size-6 flex-shrink-0 items-center justify-center">

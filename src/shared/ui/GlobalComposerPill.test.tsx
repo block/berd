@@ -285,20 +285,14 @@ describe("GlobalComposerPill", () => {
       name: /send message/i,
     });
     expect(collapsedSendButton).toBeDisabled();
-    expect(collapsedSendButton).toHaveClass(
-      "cursor-default",
-      "disabled:opacity-100",
-    );
+    expect(collapsedSendButton).toHaveClass("disabled:opacity-100");
 
     await user.click(textbox);
     const expandedDisabledSendButton = screen.getByRole("button", {
       name: /send message/i,
     });
     expect(expandedDisabledSendButton).toBeDisabled();
-    expect(expandedDisabledSendButton).toHaveClass(
-      "cursor-default",
-      "disabled:opacity-100",
-    );
+    expect(expandedDisabledSendButton).toHaveClass("disabled:opacity-100");
 
     await user.type(textbox, "Hello");
     const sendButton = screen.getByRole("button", { name: /send message/i });

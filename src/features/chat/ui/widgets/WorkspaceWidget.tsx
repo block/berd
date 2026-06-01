@@ -191,7 +191,7 @@ export function WorkspaceWidget({
               "flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2",
               "text-sm text-foreground transition-colors",
               "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              "disabled:cursor-default disabled:opacity-70 disabled:hover:bg-transparent",
+              "disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-transparent",
             )}
             aria-label={t("contextPanel.artifacts.changeFolder")}
           >

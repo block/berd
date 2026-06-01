@@ -37,7 +37,9 @@ function ChangedFileRow({
         "relative flex w-full select-none items-center gap-2 px-4 py-1.5 text-left",
         "before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 before:content-['']",
         "transition-colors duration-100",
-        isDeleted ? "cursor-default opacity-60" : "hover:bg-muted/80",
+        isDeleted
+          ? "cursor-not-allowed opacity-60"
+          : "cursor-pointer hover:bg-muted/80",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >

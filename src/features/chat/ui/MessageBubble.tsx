@@ -62,9 +62,7 @@ function MessageAttachmentRow({
       disabled={!canOpen}
       className={cn(
         "flex max-w-full items-center gap-2 rounded-full border border-border bg-muted/40 px-3 py-1.5 text-xs text-foreground",
-        canOpen
-          ? "cursor-pointer hover:bg-muted/70"
-          : "cursor-default opacity-80",
+        canOpen ? "hover:bg-muted/70" : "opacity-80",
       )}
       aria-label={
         canOpen

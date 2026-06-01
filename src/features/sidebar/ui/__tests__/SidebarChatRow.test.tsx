@@ -132,10 +132,10 @@ describe("SidebarChatRow", () => {
     );
 
     const row = container.querySelector("[draggable]");
-    expect(row).toHaveClass("cursor-default");
+    expect(row).not.toHaveClass("cursor-default");
     expect(row).not.toHaveClass("active:cursor-grabbing");
     expect(screen.getByTitle("Double-click to rename")).toHaveClass(
-      "cursor-default",
+      "cursor-pointer",
     );
   });
 

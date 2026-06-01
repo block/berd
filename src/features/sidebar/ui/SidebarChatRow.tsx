@@ -211,7 +211,7 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex cursor-default items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
           "bg-sidebar-accent",
@@ -241,7 +241,7 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 cursor-default justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light",
+          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light",
           nested ? "pl-9" : "pl-3",
           rowButtonStateClass,
         )}
