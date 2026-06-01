@@ -43,7 +43,7 @@ describe("TopBar", () => {
     renderTopBar({ onGoHome: vi.fn() });
 
     const button = screen.getByRole("button", { name: /goose home/i });
-    const icon = button.querySelector("svg");
+    const icon = button.querySelector('[role="img"]');
 
     expect(icon).toHaveClass("size-5");
   });

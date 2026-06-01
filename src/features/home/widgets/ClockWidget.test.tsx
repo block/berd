@@ -1,6 +1,12 @@
 import { act, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClockWidget } from "./ClockWidget";
+import type { WidgetRenderProps } from "./types";
+
+const clockWidgetProps: WidgetRenderProps = {
+  instance: { id: "clock-test", type: "clock", x: 0, y: 0, z: 0 },
+  onUpdateState: vi.fn(),
+};
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -26,19 +32,21 @@ describe("ClockWidget", () => {
   });
 
   it("exposes an accessible timer label and themed hands", () => {
-    const { container } = render(<ClockWidget />);
+    const { container } = render(<ClockWidget {...clockWidgetProps} />);
 
     expect(
       screen.getByRole("timer", {
         name: /current time: sunday, june 1 at 2:30 pm/i,
       }),
     ).toBeInTheDocument();
-    expect(container.querySelector(".bg-clock-minute-hand")).toBeInTheDocument();
+    expect(
+      container.querySelector(".bg-clock-minute-hand"),
+    ).toBeInTheDocument();
     expect(container.querySelector(".bg-clock-hand")).toBeInTheDocument();
   });
 
   it("advances the second hand every second", async () => {
-    const { container } = render(<ClockWidget />);
+    const { container } = render(<ClockWidget {...clockWidgetProps} />);
 
     expect(container.innerHTML).toContain("rotate(270deg)");
 

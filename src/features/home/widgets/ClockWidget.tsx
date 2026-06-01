@@ -58,7 +58,10 @@ function ClockHand({
         }}
       />
       <span
-        className={cn("absolute left-1/2 top-1/2 w-px -translate-x-1/2", colorClass)}
+        className={cn(
+          "absolute left-1/2 top-1/2 w-px -translate-x-1/2",
+          colorClass,
+        )}
         style={{
           height: `${tailPercent}%`,
           transformOrigin: "top center",
