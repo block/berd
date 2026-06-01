@@ -76,6 +76,9 @@ import {
   startAgentBuilderSession,
 } from "../agentBuilderSession";
 import { resetAgentBuilderSourceLifecycleForTests } from "../agentBuilderSourceLifecycle";
+import { setStoredModelPreference } from "@/features/chat/lib/modelPreferences";
+import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { DEFAULT_MODEL_ID } from "@/features/migration/lib/constants";
 
 const draftSource = {
   type: "agent",
@@ -131,6 +134,8 @@ describe("agentBuilderSession", () => {
     closeSession.mockClear();
     navigateChat.mockClear();
     resetAgentBuilderSourceLifecycleForTests();
+    window.localStorage.clear();
+    useAgentStore.getState().setProviders([], false);
   });
 
   it("starts a new draft builder session", async () => {
@@ -159,6 +164,95 @@ describe("agentBuilderSession", () => {
       targetAgentSlug: "draft-sess-1",
     });
     expect(navigateChat).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("seeds the draft with the stored Goose provider and model preference", async () => {
+    window.localStorage.setItem("goose:defaultProvider", "goose");
+    setStoredModelPreference("goose", {
+      modelId: "goose-gpt-5-5",
+      modelName: "GPT-5.5",
+      providerId: "goose",
+    });
+    mocks.createPersonaSource.mockResolvedValue(draftSource);
+
+    await startAgentBuilderSession({}, deps);
+
+    expect(mocks.createPersonaSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          draft: true,
+          builderSessionId: "sess-1",
+          provider: "goose",
+          model: "goose-gpt-5-5",
+        }),
+      }),
+    );
+  });
+
+  it("falls back to the goose model preference when the stored provider has none", async () => {
+    window.localStorage.setItem("goose:defaultProvider", "databricks_v2");
+    setStoredModelPreference("goose", {
+      modelId: "goose-claude-sonnet-4-6",
+      modelName: "Claude Sonnet 4.6",
+      providerId: "goose",
+    });
+    mocks.createPersonaSource.mockResolvedValue(draftSource);
+
+    await startAgentBuilderSession({}, deps);
+
+    expect(mocks.createPersonaSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          provider: "databricks_v2",
+          model: "goose-claude-sonnet-4-6",
+        }),
+      }),
+    );
+  });
+
+  it("replaces a stored provider that is no longer in the discovered catalog", async () => {
+    window.localStorage.setItem("goose:defaultProvider", "removed-provider");
+    useAgentStore.getState().setProviders(
+      [
+        { id: "openai", label: "OpenAI" },
+        { id: "goose", label: "Goose" },
+      ],
+      false,
+    );
+    setStoredModelPreference("openai", {
+      modelId: "gpt-5",
+      modelName: "GPT-5",
+      providerId: "openai",
+    });
+    mocks.createPersonaSource.mockResolvedValue(draftSource);
+
+    await startAgentBuilderSession({}, deps);
+
+    expect(mocks.createPersonaSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          provider: "openai",
+          model: "gpt-5",
+        }),
+      }),
+    );
+  });
+
+  it("falls back to the default model id when no model preference is stored", async () => {
+    mocks.createPersonaSource.mockResolvedValue(draftSource);
+
+    await startAgentBuilderSession({}, deps);
+
+    expect(mocks.createPersonaSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          draft: true,
+          builderSessionId: "sess-1",
+          provider: "goose",
+          model: DEFAULT_MODEL_ID,
+        }),
+      }),
+    );
   });
 
   it("starts an existing agent builder session by slug", async () => {

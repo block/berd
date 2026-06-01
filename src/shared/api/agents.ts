@@ -21,7 +21,7 @@ const PORTABLE_SPROUT_FRONTMATTER_KEYS = new Set([
   "avatar",
 ]);
 
-type AgentSourceProperties = {
+export type AgentSourceProperties = {
   [key: string]: unknown;
   provider?: string | null;
   model?: string | null;

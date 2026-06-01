@@ -62,21 +62,6 @@
     "startChat": "Start chat",
     "moreActions": "More actions"
   },
-  "config": {
-    "ariaLabel": "Agent configuration",
-    "createAgent": "Create Agent",
-    "fromPersona": "(from agent: {{value}})",
-    "model": "Model",
-    "modelPlaceholder": "e.g. claude-sonnet-4-20250514",
-    "name": "Name",
-    "namePlaceholder": "My Agent",
-    "persona": "Agent",
-    "provider": "Provider",
-    "systemPromptOverrideCollapsed": "System Prompt Override [+]",
-    "systemPromptOverrideExpanded": "System Prompt Override [-]",
-    "systemPromptPlaceholder": "Override the agent system prompt...",
-    "updateAgent": "Update Agent"
-  },
   "editor": {
     "create": "Create",
     "created": "Agent created.",

@@ -6,6 +6,7 @@ import {
   readAgentSourceFile,
   updatePersonaSource,
   type AgentSourceEntry,
+  type AgentSourceProperties,
   type CreatePersonaSourceRequest,
   type PersonaSourcePatch,
 } from "@/shared/api/agents";
@@ -28,16 +29,33 @@ export async function listAgentBuilderSources(): Promise<AgentSourceEntry[]> {
   return mergeLocalDraftSources(sources);
 }
 
+export interface DraftAgentDefaults {
+  provider?: string;
+  model?: string;
+}
+
 export async function createDraftAgentSource(
   sessionId: string,
+  defaults?: DraftAgentDefaults,
 ): Promise<{ path: string; slug: string }> {
+  const properties: AgentSourceProperties = {
+    draft: true,
+    builderSessionId: sessionId,
+  };
+  if (defaults?.provider) {
+    properties.provider = defaults.provider;
+  }
+  if (defaults?.model) {
+    properties.model = defaults.model;
+  }
+
   const request: CreatePersonaSourceRequest = {
     type: "agent",
     name: placeholderAgentName(sessionId),
     description: PLACEHOLDER_AGENT_DESCRIPTION,
     content: PLACEHOLDER_AGENT_BODY,
     target: { scope: "global" },
-    properties: { draft: true, builderSessionId: sessionId },
+    properties,
   };
   const created = await createPersonaSource(request);
   localDraftSourcesByPath.set(created.path, created);

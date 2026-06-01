@@ -62,21 +62,6 @@
     "startChat": "Iniciar chat",
     "moreActions": "Más acciones"
   },
-  "config": {
-    "ariaLabel": "Configuración del agente",
-    "createAgent": "Crear agente",
-    "fromPersona": "(desde el agente: {{value}})",
-    "model": "Modelo",
-    "modelPlaceholder": "p. ej. claude-sonnet-4-20250514",
-    "name": "Nombre",
-    "namePlaceholder": "Mi agente",
-    "persona": "Agente",
-    "provider": "Proveedor",
-    "systemPromptOverrideCollapsed": "Sobrescribir prompt del sistema [+]",
-    "systemPromptOverrideExpanded": "Sobrescribir prompt del sistema [-]",
-    "systemPromptPlaceholder": "Sobrescribe el prompt del sistema del agente...",
-    "updateAgent": "Actualizar agente"
-  },
   "editor": {
     "create": "Crear",
     "created": "Agente creado.",

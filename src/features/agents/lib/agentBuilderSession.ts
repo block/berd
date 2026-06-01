@@ -2,6 +2,15 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { removeAgentBuilderSkillDraft } from "@/features/chat/lib/agentBuilderSkill";
 import {
+  getStoredProvider,
+  useAgentStore,
+} from "@/features/agents/stores/agentStore";
+import {
+  getStoredModelPreference,
+  getStoredModelPreferenceForProvider,
+} from "@/features/chat/lib/modelPreferences";
+import { DEFAULT_MODEL_ID } from "@/features/migration/lib/constants";
+import {
   createDraftAgentSource,
   deleteIfFreshPlaceholderDraft,
   discardAgentBuilderSource,
@@ -83,7 +92,12 @@ export async function startAgentBuilderSession(
 export async function preSeedDraftAgent(
   sessionId: string,
 ): Promise<{ path: string; slug: string }> {
-  return createDraftAgentSource(sessionId);
+  const provider = getStoredProvider(useAgentStore.getState().providers);
+  const model =
+    getStoredModelPreferenceForProvider(provider)?.modelId ??
+    getStoredModelPreference("goose")?.modelId ??
+    DEFAULT_MODEL_ID;
+  return createDraftAgentSource(sessionId, { provider, model });
 }
 
 export async function recoverDraftAgent(
