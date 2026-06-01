@@ -496,6 +496,11 @@
   --chat-user-message-max-width: 640px;
   --chat-composer-max-width: 768px;
 
+  /* App top bar chrome — deep charcoal controls beside the breadcrumb trail. */
+  --app-top-bar-control-fg: #242424;
+  --app-top-bar-control-fg-disabled: rgba(36, 36, 36, 0.35);
+  --app-top-bar-control-hover-opacity: 0.7;
+
   /* Motion */
   --ease-spring: cubic-bezier(0.33, 1, 0.68, 1);
   --duration-fast: 0.15s;
@@ -539,6 +544,13 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+
+  --app-top-bar-control-fg: var(--foreground);
+  --app-top-bar-control-fg-disabled: color-mix(
+    in srgb,
+    var(--app-top-bar-control-fg) 35%,
+    transparent
+  );
 
   /* Goose canvas + composer extensions — inverted. */
   --canvas-base: #1a1a1a;
@@ -790,6 +802,10 @@
   --color-surface-glass-strong: var(--surface-glass-strong);
   --color-surface-glass-strong-hover: var(--surface-glass-strong-hover);
   --color-surface-glass-strong-fg: var(--surface-glass-strong-fg);
+  --color-app-top-bar-control-fg: var(--app-top-bar-control-fg);
+  --color-app-top-bar-control-fg-disabled: var(
+    --app-top-bar-control-fg-disabled
+  );
   --color-message-user-bg: var(--message-user-bg);
 
   /* Composer chip tones */
@@ -938,7 +954,10 @@
   --text-body-alex: 14px;
   --text-input-alex: 16px;
   --text-title-alex: 24px;
-  --text-app-top-bar-title-compact: 20px;
+  --text-app-top-bar-title: 20px;
+  --text-app-top-bar-title-leading: 18px;
+  --text-app-top-bar-icon: 18px;
+  --text-app-top-bar-title-compact: var(--text-app-top-bar-title);
 
   --breakpoint-desktop: 1440px;
 

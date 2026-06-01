@@ -73,6 +73,7 @@ const statePrefixes = [
 ];
 
 const semanticTokenPrefixes = [
+  "app-top-bar-",
   "canvas-",
   "chart-",
   "chip-",

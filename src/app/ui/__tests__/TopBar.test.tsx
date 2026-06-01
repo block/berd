@@ -47,6 +47,14 @@ describe("TopBar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("omits search when onSearchClick is not provided", () => {
+    renderTopBar();
+
+    expect(
+      screen.queryByRole("button", { name: /search/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps only the current breadcrumb at narrow widths", () => {
     setWindowWidth(900);
 
@@ -69,6 +77,7 @@ describe("TopBar", () => {
     renderTopBar({
       contextPanelLabel: "Details",
       onGoHome: vi.fn(),
+      onSearchClick: vi.fn(),
       showContextPanelToggle: true,
     });
 

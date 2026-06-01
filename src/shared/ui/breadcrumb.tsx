@@ -26,7 +26,7 @@ const breadcrumbListVariants: Record<BreadcrumbListVariant, string> = {
   default:
     "text-muted-foreground flex flex-wrap items-center gap-1.5 text-sm break-words sm:gap-2.5",
   "top-bar":
-    "flex flex-nowrap items-center gap-0 break-normal whitespace-nowrap font-sans text-[24px] font-light leading-[0.96] tracking-normal text-foreground",
+    "flex flex-nowrap items-center gap-0 break-normal whitespace-nowrap font-sans text-[length:var(--text-app-top-bar-title)] font-normal leading-[length:var(--text-app-top-bar-title-leading)] tracking-normal text-foreground",
 };
 
 const breadcrumbTopBarToneClassNames: Record<BreadcrumbTopBarTone, string> = {
@@ -35,7 +35,10 @@ const breadcrumbTopBarToneClassNames: Record<BreadcrumbTopBarTone, string> = {
 };
 
 const breadcrumbTopBarToneTransitionClassName =
-  "motion-safe:transition-colors motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]";
+  "motion-safe:transition-[color,opacity] motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]";
+
+const breadcrumbTopBarInteractiveClassName =
+  "hover:opacity-[var(--app-top-bar-control-hover-opacity)]";
 
 const breadcrumbTopBarEnterClassName =
   "motion-safe:animate-in motion-safe:fade-in-0 motion-reduce:animate-none";
@@ -90,7 +93,7 @@ function BreadcrumbLink({
         variant === "top-bar"
           ? cn(
               breadcrumbTopBarToneClassNames[tone],
-              "hover:text-accent-foreground",
+              breadcrumbTopBarInteractiveClassName,
             )
           : "hover:text-foreground",
         className,
@@ -121,7 +124,6 @@ function BreadcrumbPage({
       className={cn(
         (variant === "top-bar-root" || variant === "top-bar-current") &&
           cn(
-            "font-light",
             breadcrumbTopBarToneTransitionClassName,
             breadcrumbTopBarToneClassNames[topBarTone],
           ),

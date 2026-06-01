@@ -58,6 +58,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `success`, `warning`, `info` | Non-destructive status colors, modeled after shadcn's destructive pattern. | `text-success bg-success/10` |
 | `popover-inverse` | Dark popover on light UI for specific inverse menus. | `bg-popover-inverse text-popover-inverse-foreground` |
 | `clock-face`, `clock-mark`, `clock-hand`, `sticky-note-*`, `dark-*`, `dot-*`, `status-*`, `chart-*` | Product visuals, charts, activity states, onboarding sticky notes, and canvas details. `clock-face` and `clock-mark` flip between themes; `clock-hand` stays red in both. Sticky note tokens include note surfaces and muted text. | `bg-clock-face`, `bg-clock-mark`, `bg-clock-hand`, `bg-sticky-note-warm`, `text-status-added` |
+| `app-top-bar-control-fg`, `app-top-bar-control-fg-disabled`, `app-top-bar-control-hover-opacity` | Deep charcoal top bar controls beside the breadcrumb trail; disabled back/forward use 35% opacity of the control foreground; clickable controls fade to 70% opacity on hover. Light theme pins `#242424`; dark theme follows `foreground`. | `text-app-top-bar-control-fg`, `text-app-top-bar-control-fg-disabled`, `hover:opacity-[var(--app-top-bar-control-hover-opacity)]` |
 
 ## Deleted Or Replaced Names
 

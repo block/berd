@@ -456,6 +456,10 @@ const spacingTokens: RuntimeToken[] = [
     description: "Top bar control footprint.",
   },
   {
+    name: "--spacing-app-top-bar-button-gap",
+    description: "Gap between adjacent top bar icon controls.",
+  },
+  {
     name: "--spacing-app-panel-gutter-top",
     description: "Top gutter between app chrome and panels.",
   },
@@ -484,6 +488,24 @@ const spacingTokens: RuntimeToken[] = [
   {
     name: "--spacing-button-sm",
     description: "Small button height.",
+  },
+];
+
+const appChromeColorTokens: RuntimeToken[] = [
+  {
+    name: "--app-top-bar-control-fg",
+    description:
+      "Deep charcoal (#242424) for controls beside the breadcrumb trail in light theme; follows foreground in dark theme.",
+  },
+  {
+    name: "--app-top-bar-control-fg-disabled",
+    description:
+      "35% opacity of --app-top-bar-control-fg for inactive back/forward controls.",
+  },
+  {
+    name: "--app-top-bar-control-hover-opacity",
+    description:
+      "70% opacity hover affordance for clickable top bar icons and breadcrumb links.",
   },
 ];
 
@@ -523,6 +545,12 @@ const typographyTokens = [
   "--font-display",
   "--font-mono",
   "--text-xxs",
+  "--text-app-top-bar-title",
+  "--text-app-top-bar-title-leading",
+  "--text-app-top-bar-icon",
+  "--app-top-bar-control-fg",
+  "--app-top-bar-control-fg-disabled",
+  "--app-top-bar-control-hover-opacity",
   "--heading-card-font-size",
   "--heading-card-line-height",
   "--body-reading-size",
@@ -686,6 +714,7 @@ const buttonTextSizeBySize = {
   icon: "text-sm",
   "icon-xs": "text-xs",
   "icon-sm": "text-sm",
+  "icon-top-bar": "text-sm",
   "icon-pill-sm": "text-sm",
   "icon-lg": "text-sm",
 } satisfies Record<ButtonSize, string>;
@@ -923,6 +952,33 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       textIcon: "--accent-foreground",
     },
   ],
+  "top-bar-icon": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "transparent",
+      textIcon: "--app-top-bar-control-fg",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "transparent",
+      textIcon:
+        "--app-top-bar-control-fg @ --app-top-bar-control-hover-opacity",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "transparent",
+      textIcon: "--app-top-bar-control-fg",
+    },
+    {
+      anatomy: "Button",
+      state: "Disabled",
+      background: "transparent",
+      textIcon: "--app-top-bar-control-fg-disabled",
+    },
+  ],
   "composer-action": [
     {
       anatomy: "Button",
@@ -1027,18 +1083,20 @@ function getButtonTokenDetails({
       ? buttonIconGhostColorRows
       : buttonVariantColorRows[variant];
   const defaultRow = colorRows.find((row) => row.state === "Default");
+  const disabledRows = colorRows.some((row) => row.state === "Disabled")
+    ? []
+    : [
+        {
+          anatomy: "Button",
+          state: "Disabled",
+          background: withDisabledOpacity(defaultRow?.background),
+          textIcon: withDisabledOpacity(defaultRow?.textIcon),
+          border: withDisabledOpacity(defaultRow?.border),
+        } satisfies TokenColorRow,
+      ];
 
   return {
-    colorRows: [
-      ...colorRows,
-      {
-        anatomy: "Button",
-        state: "Disabled",
-        background: withDisabledOpacity(defaultRow?.background),
-        textIcon: withDisabledOpacity(defaultRow?.textIcon),
-        border: withDisabledOpacity(defaultRow?.border),
-      },
-    ],
+    colorRows: [...colorRows, ...disabledRows],
     textRows: [
       {
         anatomy: "Button label",
@@ -1622,6 +1680,25 @@ function getBreadcrumbTokenDetails({
     return {
       colorRows: [
         {
+          anatomy: "Toolbar icon",
+          state: "Default",
+          background: "transparent",
+          textIcon: "--app-top-bar-control-fg",
+        },
+        {
+          anatomy: "Toolbar icon",
+          state: "Hover",
+          background: "transparent",
+          textIcon:
+            "--app-top-bar-control-fg @ --app-top-bar-control-hover-opacity",
+        },
+        {
+          anatomy: "History nav icon",
+          state: "Disabled",
+          background: "transparent",
+          textIcon: "--app-top-bar-control-fg-disabled",
+        },
+        {
           anatomy: showCurrent ? "Root link" : "Root page",
           state: "Default",
           background: "transparent",
@@ -1633,7 +1710,13 @@ function getBreadcrumbTokenDetails({
                 anatomy: "Root link",
                 state: "Hover",
                 background: "transparent",
-                textIcon: "--accent-foreground",
+                textIcon: "--foreground @ --app-top-bar-control-hover-opacity",
+              } satisfies TokenColorRow,
+              {
+                anatomy: "Section link",
+                state: "Hover",
+                background: "transparent",
+                textIcon: "--foreground @ --app-top-bar-control-hover-opacity",
               } satisfies TokenColorRow,
               {
                 anatomy: "Separator",
@@ -1675,8 +1758,8 @@ function getBreadcrumbTokenDetails({
       textRows: [
         {
           anatomy: "Top bar trail",
-          size: "text-[24px]",
-          weight: "font-light",
+          size: "text-[length:var(--text-app-top-bar-title)] (20px)",
+          weight: "font-normal",
         },
       ],
     };
@@ -4820,6 +4903,7 @@ function getColorTokenScope(selector: string) {
 function isColorTokenName(token: string) {
   if (
     token.startsWith("--color-") ||
+    token.startsWith("--app-top-bar-control-fg") ||
     token.startsWith("--surface-") ||
     token.startsWith("--canvas-") ||
     token.startsWith("--chip-") ||
@@ -4905,6 +4989,12 @@ function SpacingPage() {
         description="Spacing tokens currently cover app chrome and control dimensions."
       >
         <TokenGrid tokens={spacingTokens} kind="spacing" />
+      </Surface>
+      <Surface
+        title="App chrome controls"
+        description="Top bar controls use deep charcoal in light theme; inactive history controls use the disabled foreground token."
+      >
+        <TokenGrid tokens={appChromeColorTokens} kind="color" />
       </Surface>
     </>
   );

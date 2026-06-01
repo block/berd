@@ -37,6 +37,8 @@ const buttonVariants = cva(
           "bg-transparent font-normal text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground active:bg-transparent active:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground aria-expanded:bg-transparent aria-expanded:text-foreground",
         toolbar:
           "justify-start bg-transparent font-normal text-foreground shadow-none hover:bg-accent hover:text-accent-foreground active:bg-accent active:text-accent-foreground data-[state=open]:bg-accent data-[state=open]:text-accent-foreground aria-expanded:bg-accent aria-expanded:text-accent-foreground",
+        "top-bar-icon":
+          "bg-transparent text-app-top-bar-control-fg shadow-none transition-[color,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-transparent hover:text-app-top-bar-control-fg hover:opacity-[var(--app-top-bar-control-hover-opacity)] active:bg-transparent active:text-app-top-bar-control-fg active:opacity-[var(--app-top-bar-control-hover-opacity)] focus-visible:bg-transparent data-[state=open]:bg-transparent data-[state=open]:text-app-top-bar-control-fg aria-expanded:bg-transparent aria-expanded:text-app-top-bar-control-fg disabled:!opacity-100 disabled:text-app-top-bar-control-fg-disabled disabled:hover:opacity-100 disabled:hover:text-app-top-bar-control-fg-disabled disabled:active:text-app-top-bar-control-fg-disabled disabled:focus-visible:text-app-top-bar-control-fg-disabled",
         "composer-action":
           "bg-accent text-foreground shadow-none hover:bg-muted hover:text-foreground active:bg-secondary/40 active:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-secondary dark:active:bg-secondary dark:data-[state=open]:bg-secondary dark:aria-expanded:bg-secondary",
         "page-header":
@@ -56,6 +58,8 @@ const buttonVariants = cva(
           "h-7 w-7 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3",
         "icon-sm":
           "h-8 w-8 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-3.5",
+        "icon-top-bar":
+          "size-[var(--spacing-app-top-bar-control)] [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-[length:var(--text-app-top-bar-icon)]",
         "icon-pill-sm":
           "h-8 w-10 [&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-4",
         "icon-lg":
@@ -135,6 +139,7 @@ const buttonIconSizeClasses = {
   icon: "size-4",
   "icon-xs": "size-3",
   "icon-sm": "size-3.5",
+  "icon-top-bar": "size-[length:var(--text-app-top-bar-icon)]",
   "icon-pill-sm": "size-4",
   "icon-lg": "size-5",
 } satisfies Record<

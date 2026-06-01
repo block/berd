@@ -125,11 +125,6 @@ export function TopBar({
   const ContextPanelIcon = contextPanelOpen
     ? IconLayoutSidebarRightFilled
     : IconLayoutSidebarRight;
-  const toolbarButtonClassName = cn(
-    "size-[var(--spacing-app-top-bar-control)]",
-    "text-muted-foreground hover:text-foreground active:text-foreground focus-visible:text-foreground",
-  );
-  const toolbarIconClassName = "size-[18px]";
   const leadingSpaceClassName =
     chromeInsets.leading === "trafficLights"
       ? "w-[var(--spacing-app-top-bar-leading)]"
@@ -151,12 +146,8 @@ export function TopBar({
         {onGoHome ? (
           <Button
             type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={cn(
-              "size-[var(--spacing-app-top-bar-control)]",
-              "text-foreground hover:text-foreground",
-            )}
+            variant="top-bar-icon"
+            size="icon-top-bar"
             onClick={onGoHome}
             aria-label={t("navigation.gooseHome")}
             title={t("navigation.gooseHome")}
@@ -166,56 +157,50 @@ export function TopBar({
         ) : null}
         <Button
           type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={toolbarButtonClassName}
+          variant="top-bar-icon"
+          size="icon-top-bar"
           onClick={onToggleSidebar}
           aria-label={sidebarLabel}
           title={sidebarLabel}
         >
-          <SidebarIcon aria-hidden="true" className={toolbarIconClassName} />
+          <SidebarIcon aria-hidden="true" />
         </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={toolbarButtonClassName}
-          onClick={onGoBack}
-          disabled={!canGoBack}
-          aria-label={t("actions.back")}
-          title={t("actions.back")}
-        >
-          <IconArrowLeft aria-hidden="true" className={toolbarIconClassName} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={toolbarButtonClassName}
-          onClick={onGoForward}
-          disabled={!canGoForward}
-          aria-label={t("actions.forward")}
-          title={t("actions.forward")}
-        >
-          <IconArrowRight aria-hidden="true" className={toolbarIconClassName} />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={toolbarButtonClassName}
-          onClick={onSearchClick}
-          aria-label={t("actions.search")}
-          title={t("actions.search")}
-        >
-          {/* IconSearch's SVG centerpoint sits ~1px above the other Tabler
-              icons in this row; the per-icon nudge realigns just this one
-              rather than shifting the whole shared icon class. */}
-          <IconSearch
-            aria-hidden="true"
-            className={cn(toolbarIconClassName, "translate-y-px")}
-          />
-        </Button>
+        {onSearchClick ? (
+          <Button
+            type="button"
+            variant="top-bar-icon"
+            size="icon-top-bar"
+            onClick={onSearchClick}
+            aria-label={t("actions.search")}
+            title={t("actions.search")}
+          >
+            <IconSearch aria-hidden="true" />
+          </Button>
+        ) : null}
+        <div className="flex items-center gap-0.5">
+          <Button
+            type="button"
+            variant="top-bar-icon"
+            size="icon-top-bar"
+            onClick={onGoBack}
+            disabled={!canGoBack}
+            aria-label={t("actions.back")}
+            title={t("actions.back")}
+          >
+            <IconArrowLeft aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            variant="top-bar-icon"
+            size="icon-top-bar"
+            onClick={onGoForward}
+            disabled={!canGoForward}
+            aria-label={t("actions.forward")}
+            title={t("actions.forward")}
+          >
+            <IconArrowRight aria-hidden="true" />
+          </Button>
+        </div>
       </div>
       <div
         className="flex min-w-0 flex-1 items-center self-stretch overflow-x-clip overflow-y-visible"
@@ -239,32 +224,24 @@ export function TopBar({
       <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
         <Button
           type="button"
-          variant="ghost"
-          size="icon-sm"
-          className={toolbarButtonClassName}
+          variant="top-bar-icon"
+          size="icon-top-bar"
           onClick={onFeedbackClick}
           aria-label={t("feedback:title")}
           title={t("feedback:title")}
         >
-          <IconMessageReport
-            aria-hidden="true"
-            className={toolbarIconClassName}
-          />
+          <IconMessageReport aria-hidden="true" />
         </Button>
         {showContextPanelToggle && (
           <Button
             type="button"
-            variant="ghost"
-            size="icon-sm"
-            className={toolbarButtonClassName}
+            variant="top-bar-icon"
+            size="icon-top-bar"
             onClick={onToggleContextPanel}
             aria-label={contextPanelLabel}
             title={contextPanelLabel}
           >
-            <ContextPanelIcon
-              aria-hidden="true"
-              className={toolbarIconClassName}
-            />
+            <ContextPanelIcon aria-hidden="true" />
           </Button>
         )}
       </div>
