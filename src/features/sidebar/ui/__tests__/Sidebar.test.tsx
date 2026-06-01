@@ -408,10 +408,12 @@ describe("Sidebar", () => {
     expect(settingsIndex).toBe(sessionHistoryIndex + 1);
   });
 
-  it("renders the dev-only design system button after settings", () => {
+  it("moves the dev-only design system entry into settings navigation", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
     designSystemExplorer.isEnabled.mockReturnValue(true);
 
-    renderSidebar();
+    const { unmount } = renderSidebar();
 
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
@@ -429,13 +431,27 @@ describe("Sidebar", () => {
         "Automations",
         "Session history",
         "Settings",
-        "Design system (dev only)",
       ]),
     );
+    expect(labels).not.toContain("Design system");
+    expect(labels).not.toContain("Design system (dev only)");
 
-    const settingsIndex = labels.indexOf("Settings");
-    const designSystemIndex = labels.indexOf("Design system (dev only)");
-    expect(designSystemIndex).toBe(settingsIndex + 1);
+    unmount();
+
+    renderSidebar({
+      activeView: "settings",
+      onNavigate,
+    });
+
+    const settingsNavigation = screen.getByRole("navigation", {
+      name: /settings navigation/i,
+    });
+    const designSystemButton = within(settingsNavigation).getByRole("button", {
+      name: "Design system (dev only)",
+    });
+
+    await user.click(designSystemButton);
+    expect(onNavigate).toHaveBeenCalledWith("design-system");
   });
 
   it("still renders the nav when collapsed so the AppShell can animate it out", () => {
@@ -608,5 +624,13 @@ describe("Sidebar", () => {
 
     await user.click(screen.getByRole("button", { name: /general/i }));
     expect(onSettingsSectionChange).toHaveBeenCalledWith("general");
+  });
+
+  it("defaults the design system inspector toggle off", () => {
+    renderSidebar({ activeView: "design-system" });
+
+    expect(
+      screen.getByRole("switch", { name: "Show inspector" }),
+    ).toHaveAttribute("aria-checked", "false");
   });
 });

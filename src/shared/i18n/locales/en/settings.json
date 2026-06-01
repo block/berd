@@ -220,6 +220,7 @@
     "archive": "Archive",
     "compaction": "Compaction",
     "connections": "Connections",
+    "designSystem": "Design system (dev only)",
     "doctor": "Doctor",
     "extensions": "Extensions",
     "general": "General",

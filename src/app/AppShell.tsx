@@ -115,7 +115,7 @@ type MaybePromise<T> = T | Promise<T>;
 
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
-  "goose:design-system-inspector-visible";
+  "goose:design-system-inspector-visible:v2";
 
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
@@ -248,7 +248,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [designSystemInspectorVisible, setDesignSystemInspectorVisible] =
     usePersistedState(
       DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY,
-      true,
+      false,
       validateBooleanPreference,
     );
   const initialActiveView = getInitialAppView(initialSettingsSection);
@@ -1261,6 +1261,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     }
   }, [activeView, expandSidebar, sidebarCollapsed]);
 
+  const returnToSettingsFromDesignSystem = useCallback(() => {
+    openSettings(activeSettingsSection);
+  }, [activeSettingsSection, openSettings]);
+
   const selectDesignSystemSection = useCallback(
     (section: DesignSystemSection) => {
       setActiveDesignSystemSection(section);
@@ -1738,13 +1742,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
         return showDesignSystemSection && designSystemSectionLabel
           ? [
+              parent("settings", "Settings", returnToSettingsFromDesignSystem),
               parent("design-system", "Design System", () => {
                 setActiveDesignSystemSection(DEFAULT_DESIGN_SYSTEM_SECTION);
                 openDesignSystem();
               }),
               current("design-system-section", designSystemSectionLabel),
             ]
-          : [current("design-system", "Design System")];
+          : [
+              parent("settings", "Settings", returnToSettingsFromDesignSystem),
+              current("design-system", "Design System"),
+            ];
       }
       case "settings": {
         const settingsSection = SETTINGS_SECTIONS.find(
@@ -1788,6 +1796,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     openDesignSystem,
     openSettings,
     projects,
+    returnToSettingsFromDesignSystem,
     skillsBreadcrumbLabel,
     skillsSkillId,
     t,
@@ -1921,7 +1930,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           onSettingsClick: () => handleNavigate("settings"),
           onSettingsBack: leaveSecondarySurface,
           onSettingsSectionChange: selectSettingsSection,
-          onDesignSystemBack: leaveSecondarySurface,
+          onDesignSystemBack: returnToSettingsFromDesignSystem,
           onDesignSystemSectionChange: selectDesignSystemSection,
           designSystemInspectorVisible,
           onDesignSystemInspectorVisibleChange: setDesignSystemInspectorVisible,

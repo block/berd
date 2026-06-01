@@ -268,7 +268,7 @@ export function Sidebar({
   onSettingsSectionChange,
   onDesignSystemBack,
   onDesignSystemSectionChange,
-  designSystemInspectorVisible = true,
+  designSystemInspectorVisible = false,
   onDesignSystemInspectorVisibleChange,
   onNewChatInProject,
   onNewChat,
@@ -417,19 +417,7 @@ export function Sidebar({
       icon: SidebarNavChatsIcon,
     },
   ];
-  const devNavItems: readonly {
-    id: AppView;
-    label: string;
-    icon: SidebarNavItemIcon;
-  }[] = isDesignSystemExplorerEnabled()
-    ? [
-        {
-          id: "design-system" as const,
-          label: "Design system (dev only)",
-          icon: IconPalette,
-        },
-      ]
-    : [];
+  const showDesignSystemSettingsItem = isDesignSystemExplorerEnabled();
 
   const projectSessions = useMemo(
     () =>
@@ -607,22 +595,6 @@ export function Sidebar({
                     isActive={activeView === "settings"}
                     onClick={() => onSettingsClick?.()}
                   />
-
-                  {devNavItems.map((item) => {
-                    const isActive = activeView === item.id;
-                    return (
-                      <SidebarNavItem
-                        key={item.id}
-                        icon={item.icon}
-                        label={item.label}
-                        collapsed={collapsed}
-                        labelTransition={labelTransition}
-                        labelVisible={labelVisible}
-                        isActive={isActive}
-                        onClick={() => onNavigate?.(item.id)}
-                      />
-                    );
-                  })}
                 </div>
 
                 {!collapsed && <SidebarPinnedSection />}
@@ -699,18 +671,31 @@ export function Sidebar({
               >
                 <div className="space-y-0.5">
                   {isSettingsSurface ? (
-                    SETTINGS_SECTIONS.map((item) => (
-                      <SidebarNavItem
-                        key={item.id}
-                        icon={item.icon}
-                        label={t(`settings:${item.labelKey}`)}
-                        collapsed={collapsed}
-                        labelTransition={labelTransition}
-                        labelVisible={labelVisible}
-                        isActive={activeSettingsSection === item.id}
-                        onClick={() => onSettingsSectionChange?.(item.id)}
-                      />
-                    ))
+                    <>
+                      {SETTINGS_SECTIONS.map((item) => (
+                        <SidebarNavItem
+                          key={item.id}
+                          icon={item.icon}
+                          label={t(`settings:${item.labelKey}`)}
+                          collapsed={collapsed}
+                          labelTransition={labelTransition}
+                          labelVisible={labelVisible}
+                          isActive={activeSettingsSection === item.id}
+                          onClick={() => onSettingsSectionChange?.(item.id)}
+                        />
+                      ))}
+                      {showDesignSystemSettingsItem && (
+                        <SidebarNavItem
+                          icon={IconPalette}
+                          label={t("settings:nav.designSystem")}
+                          collapsed={collapsed}
+                          labelTransition={labelTransition}
+                          labelVisible={labelVisible}
+                          isActive={false}
+                          onClick={() => onNavigate?.("design-system")}
+                        />
+                      )}
+                    </>
                   ) : (
                     <>
                       <SidebarInspectorToggleNavItem
