@@ -9,8 +9,10 @@ import {
 } from "@tabler/icons-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
+import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
   getOrCreateTerminalSession,
   type TerminalSession,
@@ -47,30 +49,71 @@ function readToken(
   return styles.getPropertyValue(name).trim() || fallback;
 }
 
-function resolveTerminalTheme(): ITheme {
+function resolveCssColor(value: string, property: "backgroundColor" | "color") {
+  if (typeof document === "undefined") {
+    return value;
+  }
+
+  const probe = document.createElement("span");
+  probe.style.position = "absolute";
+  probe.style.inset = "0 auto auto -9999px";
+  probe.style.pointerEvents = "none";
+  probe.style.visibility = "hidden";
+  probe.style[property] = value;
+
+  const parent = document.body ?? document.documentElement;
+  parent.appendChild(probe);
+  const resolved = window.getComputedStyle(probe)[property].trim();
+  probe.remove();
+
+  return resolved || value;
+}
+
+function readColorToken(
+  styles: CSSStyleDeclaration,
+  name: string,
+  fallback: string,
+  property: "backgroundColor" | "color" = "color",
+): string {
+  return resolveCssColor(readToken(styles, name, fallback), property);
+}
+
+function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
   if (typeof window === "undefined") {
     return {};
   }
 
+  const defaultForeground = resolvedTheme === "dark" ? "#ffffff" : "#242424";
+  const defaultBackground = resolvedTheme === "dark" ? "#232323" : "#ffffff";
   const styles = window.getComputedStyle(document.documentElement);
-  const foreground = readToken(styles, "--foreground", "var(--foreground)");
-  const background = readToken(styles, "--card", "var(--card)");
-  const mutedForeground = readToken(
+  const foreground = readColorToken(styles, "--foreground", defaultForeground);
+  const background = readColorToken(
+    styles,
+    "--card",
+    defaultBackground,
+    "backgroundColor",
+  );
+  const mutedForeground = readColorToken(
     styles,
     "--muted-foreground",
     "var(--muted-foreground)",
   );
-  const red = readToken(styles, "--destructive", "var(--destructive)");
-  const green = readToken(styles, "--success", "var(--success)");
-  const yellow = readToken(styles, "--warning", "var(--warning)");
-  const blue = readToken(styles, "--info", "var(--info)");
+  const red = readColorToken(styles, "--destructive", "var(--destructive)");
+  const green = readColorToken(styles, "--success", "var(--success)");
+  const yellow = readColorToken(styles, "--warning", "var(--warning)");
+  const blue = readColorToken(styles, "--info", "var(--info)");
 
   return {
     background,
     foreground,
     cursor: foreground,
     cursorAccent: background,
-    selectionBackground: readToken(styles, "--accent", "var(--accent)"),
+    selectionBackground: readColorToken(
+      styles,
+      "--accent",
+      "var(--accent)",
+      "backgroundColor",
+    ),
     black: mutedForeground,
     brightBlack: foreground,
     red,
@@ -92,15 +135,22 @@ function resolveTerminalTheme(): ITheme {
 
 function terminalFontFamily(): string {
   if (typeof window === "undefined") {
-    return "ui-monospace, SFMono-Regular, monospace";
+    return '"NerdFontsSymbols Nerd Font", ui-monospace, SFMono-Regular, monospace';
   }
 
   const styles = window.getComputedStyle(document.documentElement);
-  return readToken(
+  const monoFontFamily = readToken(
     styles,
     "--font-mono",
     "ui-monospace, SFMono-Regular, monospace",
   );
+  const symbolFontFamily = readToken(
+    styles,
+    "--font-terminal-symbols",
+    '"NerdFontsSymbols Nerd Font"',
+  );
+
+  return `${monoFontFamily}, ${symbolFontFamily}`;
 }
 
 export function TerminalPanel({
@@ -113,6 +163,7 @@ export function TerminalPanel({
   onClose,
 }: TerminalPanelProps) {
   const { t } = useTranslation("chat");
+  const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const displayPath = useMemo(() => shortenPath(cwd), [cwd]);
   const labels = useMemo<TerminalSessionLabels>(
@@ -125,19 +176,20 @@ export function TerminalPanel({
   );
   const [session, setSession] = useState<TerminalSession | null>(null);
   const [status, setStatus] = useState<TerminalStatus>("starting");
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
 
   useEffect(() => {
     const nextSession = getOrCreateTerminalSession({
       key: sessionKey,
       cwd,
       labels,
-      theme: resolveTerminalTheme(),
+      theme: resolveTerminalTheme(resolvedTheme),
       fontFamily: terminalFontFamily(),
     });
     nextSession.updateLabels(labels);
     setSession(nextSession);
     setStatus(nextSession.status);
-  }, [cwd, labels, sessionKey]);
+  }, [cwd, labels, resolvedTheme, sessionKey]);
 
   useEffect(() => {
     if (!session) {
@@ -167,6 +219,7 @@ export function TerminalPanel({
 
   const handleStop = useCallback(() => {
     session?.stop({ writeStopped: true });
+    setStopConfirmOpen(false);
     onClose();
   }, [onClose, session]);
 
@@ -242,21 +295,59 @@ export function TerminalPanel({
             </TooltipTrigger>
             <TooltipContent>{t("terminal.restart")}</TooltipContent>
           </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={handleStop}
-                aria-label={t("terminal.stopAndClose")}
-                className="pointer-events-auto rounded-md"
-              >
-                <IconX className="size-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("terminal.stopAndClose")}</TooltipContent>
-          </Tooltip>
+          <Popover open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={t("terminal.stopAndClose")}
+                    className="pointer-events-auto rounded-md"
+                  >
+                    <IconX className="size-3" />
+                  </Button>
+                </PopoverTrigger>
+              </TooltipTrigger>
+              <TooltipContent>{t("terminal.stopAndClose")}</TooltipContent>
+            </Tooltip>
+            <PopoverContent
+              side="top"
+              align="end"
+              sideOffset={8}
+              className="w-64 rounded-overlay p-3 text-left"
+            >
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-foreground">
+                    {t("terminal.confirmStopTitle")}
+                  </p>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    {t("terminal.confirmStopDescription")}
+                  </p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="xs"
+                    onClick={() => setStopConfirmOpen(false)}
+                  >
+                    {t("common:actions.cancel")}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="xs"
+                    onClick={handleStop}
+                  >
+                    {t("terminal.stop")}
+                  </Button>
+                </div>
+              </div>
+            </PopoverContent>
+          </Popover>
           <span
             className="flex size-6 items-center justify-center rounded-md text-muted-foreground"
             aria-hidden="true"

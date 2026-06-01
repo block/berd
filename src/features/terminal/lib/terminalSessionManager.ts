@@ -47,6 +47,11 @@ export class TerminalSession {
   private startupToken: symbol | null = null;
   private inputSubscription: IDisposable | null = null;
   private resizeObserver: ResizeObserver | null = null;
+  private lastBackendCols: number | null = null;
+  private lastBackendRows: number | null = null;
+  private pendingBackendCols: number | null = null;
+  private pendingBackendRows: number | null = null;
+  private fontReadyToken = 0;
   private animationFrame = 0;
   private attachedContainer: HTMLDivElement | null = null;
   private disposed = false;
@@ -88,6 +93,12 @@ export class TerminalSession {
     this.labels = labels;
   }
 
+  updateAppearance(theme: ITheme, fontFamily: string): void {
+    this.terminal.options.theme = theme;
+    this.terminal.options.fontFamily = fontFamily;
+    this.refreshAfterFontsReady();
+  }
+
   subscribe(listener: TerminalSessionListener): () => void {
     this.listeners.add(listener);
     return () => {
@@ -108,6 +119,7 @@ export class TerminalSession {
       this.terminal.open(container);
     }
     this.terminal.focus();
+    this.refreshAfterFontsReady();
     this.scheduleFitAndResize();
 
     this.resizeObserver?.disconnect();
@@ -190,6 +202,10 @@ export class TerminalSession {
 
     const cols = Math.max(this.terminal.cols || DEFAULT_COLS, MIN_COLS);
     const rows = Math.max(this.terminal.rows || DEFAULT_ROWS, MIN_ROWS);
+    this.lastBackendCols = cols;
+    this.lastBackendRows = rows;
+    this.pendingBackendCols = null;
+    this.pendingBackendRows = null;
 
     void startTerminal({
       cwd: this.cwd,
@@ -237,6 +253,10 @@ export class TerminalSession {
         break;
       case "exited":
         this.terminalId = null;
+        this.lastBackendCols = null;
+        this.lastBackendRows = null;
+        this.pendingBackendCols = null;
+        this.pendingBackendRows = null;
         this.setStatus("exited");
         if (event.data.signal) {
           this.terminal.writeln("");
@@ -281,15 +301,66 @@ export class TerminalSession {
       return;
     }
 
-    if (this.terminalId) {
-      void resizeTerminal(
-        this.terminalId,
-        this.terminal.cols,
-        this.terminal.rows,
-      ).catch((error) => {
-        console.warn("Failed to resize terminal", error);
-      });
+    const cols = this.terminal.cols;
+    const rows = this.terminal.rows;
+    const matchesBackend =
+      cols === this.lastBackendCols && rows === this.lastBackendRows;
+    const matchesPending =
+      cols === this.pendingBackendCols && rows === this.pendingBackendRows;
+
+    if (this.terminalId && !matchesBackend && !matchesPending) {
+      const terminalId = this.terminalId;
+      this.pendingBackendCols = cols;
+      this.pendingBackendRows = rows;
+
+      void resizeTerminal(terminalId, cols, rows)
+        .then(() => {
+          if (
+            this.disposed ||
+            this.terminalId !== terminalId ||
+            this.pendingBackendCols !== cols ||
+            this.pendingBackendRows !== rows
+          ) {
+            return;
+          }
+
+          this.lastBackendCols = cols;
+          this.lastBackendRows = rows;
+          this.pendingBackendCols = null;
+          this.pendingBackendRows = null;
+          if (this.terminal.cols !== cols || this.terminal.rows !== rows) {
+            this.scheduleFitAndResize();
+          }
+        })
+        .catch((error) => {
+          if (
+            this.terminalId === terminalId &&
+            this.pendingBackendCols === cols &&
+            this.pendingBackendRows === rows
+          ) {
+            this.pendingBackendCols = null;
+            this.pendingBackendRows = null;
+          }
+
+          console.warn("Failed to resize terminal", error);
+        });
     }
+  }
+
+  private refreshAfterFontsReady(): void {
+    if (typeof document === "undefined" || !document.fonts) {
+      return;
+    }
+
+    this.fontReadyToken += 1;
+    const fontReadyToken = this.fontReadyToken;
+    void document.fonts.ready.then(() => {
+      if (this.disposed || this.fontReadyToken !== fontReadyToken) {
+        return;
+      }
+
+      this.terminal.refresh(0, Math.max(this.terminal.rows - 1, 0));
+    });
   }
 
   private setStatus(status: TerminalStatus): void {
@@ -306,6 +377,7 @@ export function getOrCreateTerminalSession(
   const existing = sessions.get(options.key);
   if (existing && existing.cwd === options.cwd) {
     existing.updateLabels(options.labels);
+    existing.updateAppearance(options.theme, options.fontFamily);
     return existing;
   }
 

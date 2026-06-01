@@ -16,6 +16,10 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t }),
 }));
 
+vi.mock("@/shared/theme/ThemeProvider", () => ({
+  useTheme: () => ({ resolvedTheme: "light" }),
+}));
+
 vi.mock("../../lib/terminalSessionManager", () => ({
   getOrCreateTerminalSession: vi.fn(() => ({
     attach: mocks.attach,
@@ -100,6 +104,22 @@ describe("TerminalPanel", () => {
     await user.click(
       screen.getByRole("button", { name: "terminal.stopAndClose" }),
     );
+    expect(screen.getByText("terminal.confirmStopTitle")).toBeInTheDocument();
+    expect(mocks.stop).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "common:actions.cancel" }),
+    );
+    expect(
+      screen.queryByText("terminal.confirmStopTitle"),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "terminal.stopAndClose" }),
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
+
     expect(mocks.stop).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onCollapse).not.toHaveBeenCalled();
