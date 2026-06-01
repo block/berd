@@ -208,11 +208,17 @@ export function usePersonaSource(
           ? pendingPatchRef.current
           : mergePatches(inFlightPatchRef.current, pendingPatchRef.current),
       );
-      dataRef.current = nextData;
+      const prevData = dataRef.current;
+      const nextDisplayData = prevData
+        ? preserveLocalContentEdgeWhitespace(prevData, nextData)
+        : nextData;
+      dataRef.current = nextDisplayData;
       if (!mountedRef.current || saveIdentityRef.current !== identity) {
         return;
       }
-      setData(nextData);
+      if (!prevData || !sameSourceView(prevData, nextDisplayData)) {
+        setData(nextDisplayData);
+      }
       setError(null);
     } catch {
       setError("load");
@@ -262,9 +268,15 @@ export function usePersonaSource(
         }
         inFlightPatchRef.current = null;
         baseSourceRef.current = updated;
+        const prevData = dataRef.current;
         const nextData = mergeOptimistic(updated, pendingPatchRef.current);
-        dataRef.current = nextData;
-        setData(nextData);
+        const nextDisplayData = prevData
+          ? preserveLocalContentEdgeWhitespace(prevData, nextData)
+          : nextData;
+        dataRef.current = nextDisplayData;
+        if (!prevData || !sameSourceView(prevData, nextDisplayData)) {
+          setData(nextDisplayData);
+        }
         setError(null);
         if (pendingPatchRef.current) {
           setSaveStatus("unsaved");
@@ -593,6 +605,23 @@ function sameSourceView(
     left.content === right.content &&
     sameProperties(left.properties, right.properties)
   );
+}
+
+function preserveLocalContentEdgeWhitespace(
+  previous: AgentSourceEntry,
+  next: AgentSourceEntry,
+): AgentSourceEntry {
+  if (
+    previous.name !== next.name ||
+    previous.description !== next.description ||
+    !sameProperties(previous.properties, next.properties) ||
+    previous.content === next.content ||
+    previous.content.trim() !== next.content.trim()
+  ) {
+    return next;
+  }
+
+  return { ...next, content: previous.content };
 }
 
 function sameProperties(

@@ -199,6 +199,23 @@ describe("usePersonaSource", () => {
     expect(result.current.saveStatus).toBe("unsaved");
   });
 
+  it("keeps local trailing spaces when a save response trims markdown body whitespace", async () => {
+    listMock.mockResolvedValue([sourceV1]);
+    updateMock.mockResolvedValue({ ...sourceV1, content: "-" });
+    const { result } = renderHook(() => usePersonaSource(path));
+    await flushPromises();
+
+    act(() => result.current.update({ content: "- " }));
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    expect(updateMock).toHaveBeenCalledWith(path, { content: "- " });
+    expect(result.current.data?.content).toBe("- ");
+    expect(result.current.saveStatus).toBe("saved");
+  });
+
   it("gives a new source a short grace period before showing missing", async () => {
     listMock.mockResolvedValue([]);
 
