@@ -136,6 +136,55 @@ describe("ProjectArtifactPreview", () => {
     expect(queryClient.getQueryData(ARTIFACTS_QUERY_KEY)).toEqual(rawArtifacts);
   });
 
+  it("limits tile renderer images while preserving the deterministic first image", async () => {
+    mockedGetArtifacts.mockResolvedValue({
+      catalogVersion: "20260521T121530123Z",
+      assets: [
+        {
+          kind: "environment",
+          path: "/tmp/assets/hdri/studio_soft.exr",
+          mimeType: "image/x-exr",
+          byteSize: 4,
+          sha256: "a".repeat(64),
+        },
+        ...Array.from({ length: 8 }, (_, index) => ({
+          kind: "projectImage" as const,
+          path: `/tmp/assets/project-images/memory-${String(index + 1).padStart(2, "0")}.webp`,
+          mimeType: "image/webp",
+          byteSize: 4,
+          sha256: String(index).repeat(64).slice(0, 64),
+        })),
+      ],
+    });
+
+    renderWithQueryClient(
+      <ProjectArtifactPreview
+        input={{
+          name: "Launch plan",
+          artifact: {
+            seed: 2,
+            color: "sage",
+            mood: "active",
+            moodIntensity: 0.5,
+            contentMode: "planes",
+          },
+        }}
+        variant="tile"
+      />,
+    );
+
+    expect(
+      await screen.findByTestId("project-artifact-renderer"),
+    ).toHaveAttribute(
+      "data-image-urls",
+      [
+        "asset:///tmp/assets/project-images/memory-03.webp",
+        "asset:///tmp/assets/project-images/memory-04.webp",
+        "asset:///tmp/assets/project-images/memory-05.webp",
+      ].join(","),
+    );
+  });
+
   it("keeps the fallback visible when asset loading fails", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mockedGetArtifacts.mockRejectedValue(new Error("offline"));

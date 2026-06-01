@@ -240,6 +240,11 @@ export function CreateProjectDialog({
   const titleText = isEditing
     ? t("dialog.editTitle")
     : t("dialog.newTitleShort");
+  const shouldUseSavedPreviewArtifact =
+    editingProject !== undefined && name.trim() === editingProject.name;
+  const previewArtifact = shouldUseSavedPreviewArtifact
+    ? (editingProject?.artifact ?? null)
+    : null;
   const selectedPanelColor =
     pillCssColor(color) ??
     (/^#[0-9a-f]{3,8}$/i.test(color) ? color : null) ??
@@ -279,7 +284,7 @@ export function CreateProjectDialog({
                 prompt,
                 color,
                 workingDirs,
-                artifact: editingProject?.artifact ?? null,
+                artifact: previewArtifact,
               }}
               className="h-full w-full"
             />

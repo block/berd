@@ -47,6 +47,15 @@ function normalizedText(value: string | null | undefined): string {
   return value?.trim() ?? "";
 }
 
+function seedForProjectIdentity(input: ProjectArtifactInput): number {
+  const name = normalizedText(input.name) || "Untitled project";
+  return hashText(
+    [input.projectId, name]
+      .filter((part) => part !== undefined && part !== null)
+      .join("::"),
+  );
+}
+
 function normalizedArtifactColor(color: string | null | undefined) {
   const normalized = normalizedText(color) || DEFAULT_PROJECT_COLOR;
   if (isPillTone(normalized) || /^#[0-9a-f]{3,8}$/i.test(normalized)) {
@@ -162,17 +171,7 @@ function deriveBaseProjectArtifactState(
   input: ProjectArtifactInput,
 ): ProjectArtifactState {
   const name = normalizedText(input.name) || "Untitled project";
-  const seed = hashText(
-    [
-      input.projectId,
-      name,
-      input.prompt,
-      input.workingDirs?.join("|"),
-      input.sessionCount,
-    ]
-      .filter((part) => part !== undefined && part !== null)
-      .join("::"),
-  );
+  const seed = seedForProjectIdentity(input);
   const { accentColor, accentCssColor } = colorForProject(input.color);
   const sessionCount = input.sessionCount ?? 0;
   const promptLength = normalizedText(input.prompt).length;

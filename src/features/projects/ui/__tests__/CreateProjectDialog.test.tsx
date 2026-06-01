@@ -72,8 +72,17 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 }));
 
 vi.mock("../../artifact/ProjectArtifactPreview", () => ({
-  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
-    <div data-testid="project-artifact-preview">{input.name}</div>
+  ProjectArtifactPreview: ({
+    input,
+  }: {
+    input: { artifact?: { seed: number } | null; name: string };
+  }) => (
+    <div
+      data-testid="project-artifact-preview"
+      data-artifact-seed={input.artifact?.seed ?? ""}
+    >
+      {input.name}
+    </div>
   ),
 }));
 
@@ -94,6 +103,7 @@ function makeEditingProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     useWorktrees: false,
     order: 0,
     archivedAt: null,
+    artifact: null,
     ...overrides,
   };
 }
@@ -340,6 +350,36 @@ describe("CreateProjectDialog", () => {
   });
 
   describe("edit mode", () => {
+    it("uses saved artifact metadata until the draft project name changes", async () => {
+      const user = userEvent.setup();
+      const editingProject = makeEditingProject({
+        artifact: {
+          seed: 1234,
+          color: "pink",
+          mood: "serene",
+          moodIntensity: 0.5,
+          contentMode: "cubeStatic",
+        },
+      });
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={editingProject}
+        />,
+      );
+
+      const preview = screen.getByTestId("project-artifact-preview");
+      expect(preview).toHaveAttribute("data-artifact-seed", "1234");
+
+      const nameInput = screen.getByPlaceholderText("Project Alpha");
+      await user.clear(nameInput);
+      await user.type(nameInput, "Renamed Project");
+
+      expect(preview).toHaveAttribute("data-artifact-seed", "");
+    });
+
     it("preserves description metadata while saving prompt changes", async () => {
       const user = userEvent.setup();
       const editingProject = makeEditingProject({

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
+import {
+  createProjectArtifactMetadata,
+  deriveProjectArtifactState,
+} from "./deriveProjectArtifactState";
 
 describe("deriveProjectArtifactState", () => {
-  it("keeps artifact identity stable when only the project color changes", () => {
+  it("keeps artifact seed stable when non-identity inputs change", () => {
     const baseInput = {
       projectId: "project-1",
       name: "Launch Site",
@@ -15,15 +18,65 @@ describe("deriveProjectArtifactState", () => {
       ...baseInput,
       color: "blue",
     });
-    const peach = deriveProjectArtifactState({
+    const changedPresentation = deriveProjectArtifactState({
       ...baseInput,
+      prompt:
+        "Coordinate release readiness with a much longer brief and rollout notes.",
+      workingDirs: ["/tmp/launch-site", "/tmp/launch-site/packages/app"],
+      sessionCount: 12,
       color: "peach",
     });
 
-    expect(peach.seed).toBe(blue.seed);
-    expect(peach.mood).toBe(blue.mood);
-    expect(peach.contentMode).toBe(blue.contentMode);
-    expect(peach.accentColor).not.toBe(blue.accentColor);
+    expect(changedPresentation.seed).toBe(blue.seed);
+    expect(changedPresentation.accentColor).not.toBe(blue.accentColor);
+  });
+
+  it("changes artifact seed when project name changes", () => {
+    const baseInput = {
+      projectId: "project-1",
+      name: "Launch Site",
+      prompt: "Coordinate release readiness.",
+      workingDirs: ["/tmp/launch-site"],
+      sessionCount: 2,
+      color: "blue",
+    };
+
+    expect(
+      deriveProjectArtifactState({
+        ...baseInput,
+        prompt: "Coordinate release readiness with extra scope.",
+      }).seed,
+    ).toBe(deriveProjectArtifactState(baseInput).seed);
+    expect(
+      deriveProjectArtifactState({
+        ...baseInput,
+        name: "Launch Platform",
+      }).seed,
+    ).not.toBe(deriveProjectArtifactState(baseInput).seed);
+  });
+
+  it("creates metadata from project id and normalized name only", () => {
+    const baseInput = {
+      projectId: "project-1",
+      name: "  Launch Site  ",
+      prompt: "Coordinate release readiness.",
+      color: "blue",
+      workingDirs: ["/tmp/launch-site"],
+      sessionCount: 2,
+    };
+
+    const metadata = createProjectArtifactMetadata(baseInput);
+    const changedMetadata = createProjectArtifactMetadata({
+      ...baseInput,
+      name: "Launch Site",
+      prompt: "Different prompt.",
+      workingDirs: ["/tmp/other"],
+      sessionCount: 20,
+      color: "peach",
+    });
+
+    expect(changedMetadata.seed).toBe(metadata.seed);
+    expect(changedMetadata.color).toBe("peach");
   });
 
   it("uses saved artifact metadata for visual identity", () => {

@@ -24,6 +24,19 @@ export interface ProjectInfo {
   artifact?: ProjectArtifactMetadata | null;
 }
 
+function createArtifactMetadata(
+  projectId: string,
+  project: Pick<ProjectInfo, "name" | "prompt" | "color" | "workingDirs">,
+): ProjectArtifactMetadata {
+  return createProjectArtifactMetadata({
+    projectId,
+    name: project.name,
+    prompt: project.prompt,
+    color: project.color,
+    workingDirs: project.workingDirs,
+  });
+}
+
 // Shape returned by _goose/sources/*. Narrowed to project-type sources here.
 interface SourceEntry {
   type: "project";
@@ -154,8 +167,7 @@ export async function createProject(
   const client = await getClient();
   const existing = await listAllProjects();
   const id = uniqueProjectSlug(name, new Set(existing.map((p) => p.id)));
-  const artifact = createProjectArtifactMetadata({
-    projectId: null,
+  const artifact = createArtifactMetadata(id, {
     name,
     prompt,
     color,
@@ -186,12 +198,7 @@ export async function createProject(
 function shouldCreateArtifactForUpdate(
   updates: Partial<Omit<ProjectInfo, "id" | "path">>,
 ) {
-  return (
-    updates.name !== undefined ||
-    updates.prompt !== undefined ||
-    updates.color !== undefined ||
-    updates.workingDirs !== undefined
-  );
+  return updates.name !== undefined || updates.color !== undefined;
 }
 
 function artifactForUpdate(
@@ -204,17 +211,15 @@ function artifactForUpdate(
   }
 
   if (existing.artifact) {
+    if (updates.name !== undefined && updates.name !== existing.name) {
+      return createArtifactMetadata(existing.id, merged);
+    }
+
     return {
       ...existing.artifact,
       color:
         updates.color !== undefined
-          ? createProjectArtifactMetadata({
-              projectId: existing.id,
-              name: merged.name,
-              prompt: merged.prompt,
-              color: merged.color,
-              workingDirs: merged.workingDirs,
-            }).color
+          ? createArtifactMetadata(existing.id, merged).color
           : existing.artifact.color,
     };
   }
@@ -223,13 +228,7 @@ function artifactForUpdate(
     return null;
   }
 
-  return createProjectArtifactMetadata({
-    projectId: existing.id,
-    name: merged.name,
-    prompt: merged.prompt,
-    color: merged.color,
-    workingDirs: merged.workingDirs,
-  });
+  return createArtifactMetadata(existing.id, merged);
 }
 
 export async function updateProject(

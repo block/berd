@@ -4,23 +4,27 @@ import {
   Suspense,
   useEffect,
   useMemo,
+  useRef,
   type ErrorInfo,
   type ReactNode,
 } from "react";
 import { selectProjectPreviewArtifacts } from "@/shared/api/artifacts";
 import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { cn } from "@/shared/lib/cn";
+import { perfLog } from "@/shared/lib/perfLog";
 import { deriveProjectArtifactState } from "./deriveProjectArtifactState";
+import { prefetchProjectArtifactRenderer } from "./prefetchProjectArtifactRenderer";
 import type {
   ProjectArtifactInput,
   ProjectArtifactRendererProps,
 } from "./types";
 
 const LazyProjectArtifactRenderer = lazy(() =>
-  import("./ProjectArtifactRenderer").then((module) => ({
+  prefetchProjectArtifactRenderer().then((module) => ({
     default: module.ProjectArtifactRenderer,
   })),
 );
+const TILE_PROJECT_IMAGE_LIMIT = 3;
 
 interface ProjectArtifactPreviewProps {
   input: ProjectArtifactInput;
@@ -33,6 +37,17 @@ interface ProjectArtifactPreviewProps {
 
 function canUseWebGlRenderer(): boolean {
   return typeof window !== "undefined";
+}
+
+function selectTileProjectImageUrls(imageUrls: string[], seed: number) {
+  if (imageUrls.length <= TILE_PROJECT_IMAGE_LIMIT) {
+    return imageUrls;
+  }
+
+  const start = Math.abs(seed) % imageUrls.length;
+  return Array.from({ length: TILE_PROJECT_IMAGE_LIMIT }, (_, offset) => {
+    return imageUrls[(start + offset) % imageUrls.length];
+  });
 }
 
 function ProjectArtifactFallback({
@@ -128,7 +143,10 @@ export function ProjectArtifactPreview({
   onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactPreviewProps) {
+  const mountedAtRef = useRef(performance.now());
+  const assetsLogKeyRef = useRef<string | null>(null);
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
+  const perfId = input.projectId ?? `seed:${state.seed}`;
   const canUseRenderer = canUseWebGlRenderer();
   const assetQuery = useArtifacts({
     enabled: canUseRenderer,
@@ -136,12 +154,38 @@ export function ProjectArtifactPreview({
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 2000),
   });
+  const imageUrls = useMemo(() => {
+    const availableImageUrls = assetQuery.data?.imageUrls ?? [];
+    return variant === "tile"
+      ? selectTileProjectImageUrls(availableImageUrls, state.seed)
+      : availableImageUrls;
+  }, [assetQuery.data?.imageUrls, state.seed, variant]);
+
+  useEffect(() => {
+    perfLog(`[perf:cube] ${perfId} preview mount variant=${variant}`);
+  }, [perfId, variant]);
 
   useEffect(() => {
     if (assetQuery.error) {
       console.warn("Failed to load project artifact assets.", assetQuery.error);
     }
   }, [assetQuery.error]);
+
+  useEffect(() => {
+    if (!assetQuery.data) {
+      return;
+    }
+
+    const logKey = `${perfId}:${variant}:${assetQuery.data.catalogVersion}`;
+    if (assetsLogKeyRef.current === logKey) {
+      return;
+    }
+
+    assetsLogKeyRef.current = logKey;
+    perfLog(
+      `[perf:cube] ${perfId} preview assets ready in ${(performance.now() - mountedAtRef.current).toFixed(1)}ms (variant=${variant}, images=${imageUrls.length}/${assetQuery.data.imageUrls.length})`,
+    );
+  }, [assetQuery.data, imageUrls.length, perfId, variant]);
 
   if (!canUseRenderer || !assetQuery.data) {
     return (
@@ -183,7 +227,7 @@ export function ProjectArtifactPreview({
           <LazyProjectArtifactRenderer
             className={className}
             environmentUrl={assetQuery.data.environmentUrl}
-            imageUrls={assetQuery.data.imageUrls}
+            imageUrls={imageUrls}
             gestureFreezeActive={gestureFreezeActive}
             motionImpulse={motionImpulse}
             onGlCanvasReady={onGlCanvasReady}
