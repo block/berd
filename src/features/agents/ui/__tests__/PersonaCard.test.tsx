@@ -78,7 +78,7 @@ describe("PersonaCard", () => {
     const viewButton = screen.getByRole("button", {
       name: /^view goose default$/i,
     });
-    expect(viewButton).toHaveClass("bg-surface-glass-strong");
+    expect(viewButton).toHaveClass("bg-surface-agent-tile-action-bg");
     expect(viewButton.parentElement).toHaveClass(
       "opacity-0",
       "focus-within:opacity-100",

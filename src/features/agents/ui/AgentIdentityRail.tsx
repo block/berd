@@ -35,12 +35,12 @@ export function AgentIdentityRail({
       {avatar ? <div data-agent-layout-slot="avatar">{avatar}</div> : null}
 
       <div className="space-y-4">
-        <div className="space-y-3">
-          <h1 className="break-words text-[28px] font-normal leading-8 text-surface-agent-profile-fg">
+        <div className="space-y-2">
+          <h1 className="break-words text-base font-normal leading-5 text-surface-agent-profile-fg">
             {title}
           </h1>
           {description ? (
-            <div className="text-sm leading-relaxed text-surface-agent-profile-fg-muted">
+            <div className="text-sm font-normal leading-relaxed text-surface-agent-profile-fg-muted">
               {description}
             </div>
           ) : null}

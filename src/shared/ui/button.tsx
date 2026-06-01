@@ -4,6 +4,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { IconArrowLeft } from "@tabler/icons-react";
 
 import { cn } from "@/shared/lib/cn";
+import { APP_CHROME_NAV_TEXT_IMPORTANT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 import { Spinner } from "@/shared/ui/spinner";
 
@@ -28,6 +29,8 @@ const buttonVariants = cva(
           "bg-surface-composer text-foreground shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-composer-hover hover:text-foreground active:bg-surface-composer data-[state=open]:bg-surface-composer aria-expanded:bg-surface-composer",
         "glass-strong":
           "bg-surface-glass-strong text-surface-glass-strong-fg shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-glass-strong-hover hover:text-surface-glass-strong-fg active:bg-surface-glass-strong data-[state=open]:bg-surface-glass-strong aria-expanded:bg-surface-glass-strong",
+        "agent-tile-action":
+          "bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg shadow-[var(--shadow-chat)] backdrop-blur-md hover:bg-surface-agent-tile-action-bg-hover hover:text-surface-agent-tile-action-fg-hover active:bg-surface-agent-tile-action-bg-hover active:text-surface-agent-tile-action-fg-hover data-[state=open]:bg-surface-agent-tile-action-bg-hover data-[state=open]:text-surface-agent-tile-action-fg-hover aria-expanded:bg-surface-agent-tile-action-bg-hover aria-expanded:text-surface-agent-tile-action-fg-hover",
         ghost: "hover:bg-accent hover:text-accent-foreground",
         "ghost-light":
           "font-normal hover:bg-accent hover:text-accent-foreground",
@@ -70,8 +73,11 @@ const buttonVariants = cva(
       {
         variant: "page-header",
         size: "xs",
-        className:
-          "!h-[30px] !gap-[5px] !px-3 !text-[14px] !leading-[15px] [&_svg]:!size-3.5",
+        className: cn(
+          "!h-[30px] !gap-[5px] !px-3",
+          APP_CHROME_NAV_TEXT_IMPORTANT_CLASS,
+          "[&_svg]:!size-3.5",
+        ),
       },
       {
         variant: "toolbar",

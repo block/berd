@@ -176,6 +176,18 @@ describe("Button", () => {
     );
   });
 
+  it("renders the agent tile action variant with agent tile tokens", () => {
+    render(<Button variant="agent-tile-action">View</Button>);
+
+    const button = screen.getByRole("button", { name: "View" });
+    expect(button).toHaveClass(
+      "bg-surface-agent-tile-action-bg",
+      "text-surface-agent-tile-action-fg",
+      "hover:bg-surface-agent-tile-action-bg-hover",
+      "hover:text-surface-agent-tile-action-fg-hover",
+    );
+  });
+
   it("disables and marks the button busy while loading", () => {
     render(
       <Button

@@ -878,6 +878,29 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       border: "none; contained by --shadow-chat",
     },
   ],
+  "agent-tile-action": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--surface-agent-tile-action-bg",
+      textIcon: "--surface-agent-tile-action-fg",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--surface-agent-tile-action-bg-hover",
+      textIcon: "--surface-agent-tile-action-fg-hover",
+      border: "none; contained by --shadow-chat",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "--surface-agent-tile-action-bg-hover",
+      textIcon: "--surface-agent-tile-action-fg-hover",
+      border: "none; contained by --shadow-chat",
+    },
+  ],
   ghost: [
     {
       anatomy: "Button",

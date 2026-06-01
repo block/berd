@@ -269,6 +269,10 @@
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: #242424;
+  --surface-agent-tile-action-bg: var(--surface-glass-strong);
+  --surface-agent-tile-action-fg: var(--surface-glass-strong-fg);
+  --surface-agent-tile-action-bg-hover: var(--foreground);
+  --surface-agent-tile-action-fg-hover: var(--background);
   --message-user-bg: var(--color-gray-75);
 
   /* Default project cube fold lines on filled color swatches (sidebar, picker). */
@@ -623,6 +627,10 @@
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: var(--color-gray-900);
+  --surface-agent-tile-action-bg: var(--background);
+  --surface-agent-tile-action-fg: var(--foreground);
+  --surface-agent-tile-action-bg-hover: var(--foreground);
+  --surface-agent-tile-action-fg-hover: var(--background);
   --message-user-bg: var(--color-gray-700);
 
   --project-glyph-fold-stroke: rgba(0, 0, 0, 0.85);
@@ -822,6 +830,14 @@
   --color-surface-glass-strong: var(--surface-glass-strong);
   --color-surface-glass-strong-hover: var(--surface-glass-strong-hover);
   --color-surface-glass-strong-fg: var(--surface-glass-strong-fg);
+  --color-surface-agent-tile-action-bg: var(--surface-agent-tile-action-bg);
+  --color-surface-agent-tile-action-fg: var(--surface-agent-tile-action-fg);
+  --color-surface-agent-tile-action-bg-hover: var(
+    --surface-agent-tile-action-bg-hover
+  );
+  --color-surface-agent-tile-action-fg-hover: var(
+    --surface-agent-tile-action-fg-hover
+  );
   --color-app-top-bar-control-fg: var(--app-top-bar-control-fg);
   --color-app-top-bar-control-fg-disabled: var(
     --app-top-bar-control-fg-disabled

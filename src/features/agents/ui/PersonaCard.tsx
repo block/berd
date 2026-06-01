@@ -77,7 +77,7 @@ export const PersonaCard = memo(function PersonaCard({
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant="glass"
+          variant="agent-tile-action"
           size="icon-xs"
           aria-label={t("card.options")}
           onClick={(e) => e.stopPropagation()}
@@ -150,7 +150,7 @@ export const PersonaCard = memo(function PersonaCard({
         {onSelect ? (
           <Button
             type="button"
-            variant="glass-strong"
+            variant="agent-tile-action"
             size="sm"
             onClick={() => onSelect(persona)}
             aria-label={t("card.viewAria", { name: persona.displayName })}
@@ -162,7 +162,7 @@ export const PersonaCard = memo(function PersonaCard({
         {onStartChat ? (
           <Button
             type="button"
-            variant="glass-strong"
+            variant="agent-tile-action"
             size="sm"
             onClick={() => onStartChat(persona)}
             aria-label={t("card.chatAria", { name: persona.displayName })}
@@ -214,15 +214,15 @@ export const PersonaCard = memo(function PersonaCard({
         {hoverActionsOverlay}
       </div>
 
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-1">
         <div className="flex min-w-0 items-center justify-between gap-2">
-          <span className="min-w-0 truncate text-lg font-medium text-foreground">
+          <span className="min-w-0 truncate text-base font-normal leading-5 text-foreground">
             {persona.displayName}
           </span>
           {optionsMenu}
         </div>
 
-        <p className="line-clamp-3 max-w-[28ch] text-xs font-light leading-3 text-muted-foreground">
+        <p className="line-clamp-3 max-w-[28ch] text-xs font-normal leading-4 text-muted-foreground">
           {persona.systemPrompt}
         </p>
       </div>

@@ -1,5 +1,15 @@
-/** Primary sidebar navigation labels (nav items, chat rows, footer actions). */
-export const SIDEBAR_NAV_TEXT_CLASS = "text-sm font-normal";
+/**
+ * Primary chrome nav labels — sidebar nav items, chat rows, footer actions,
+ * and top-bar page-header actions (Import, New Agent, etc.).
+ */
+export const APP_CHROME_NAV_TEXT_CLASS = "text-sm font-normal leading-normal";
+
+/** Overrides size-xs `text-xs` on page-header buttons in the top bar. */
+export const APP_CHROME_NAV_TEXT_IMPORTANT_CLASS =
+  "!text-sm !font-normal !leading-normal";
+
+/** @deprecated Use APP_CHROME_NAV_TEXT_CLASS */
+export const SIDEBAR_NAV_TEXT_CLASS = APP_CHROME_NAV_TEXT_CLASS;
 
 /** Menu row hover/active background — ease-in-out for fluid feedback. */
 export const SIDEBAR_MENU_HOVER_TRANSITION_CLASS =
