@@ -26,14 +26,13 @@ and will be automatically installed for your platform.
 ### Building
 
 ```bash
-# Regenerate schema JSON from the pinned upstream Goose backend AND rebuild TypeScript
-../scripts/regenerate-sdk-schema.sh
-
-# Regenerate layer-2 codegen (types.gen.ts / zod.gen.ts / client.gen.ts) from
-# the checked-in schema JSON, then compile with tsc
+# Build everything (schema + TypeScript)
 npm run build
 
-# Compile with tsc only (no layer-2 codegen, no schema regen)
+# Build just the schema (requires Rust)
+npm run build:schema
+
+# Build just the TypeScript
 npm run build:ts
 
 # Build native binary for current platform
@@ -58,23 +57,18 @@ npm link @aaif/goose-sdk
 
 ### Schema Generation
 
-The TypeScript types are generated from Rust schemas defined in `crates/goose`
-in the upstream Goose backend pinned by `goose-backend.lock.json`. The pipeline:
+The TypeScript types are generated from Rust schemas defined in `crates/goose`.
+The build process:
 
-1. `scripts/ensure-local-goose.sh` syncs the managed Goose checkout to the pinned commit
-2. `cargo build -p goose --bin generate-acp-schema` builds the generator
-3. The generator produces `sdk/schema/acp-schema.json` and `sdk/schema/acp-meta.json`
-4. `@hey-api/openapi-ts` generates TypeScript types and Zod validators
-5. A typed client is emitted to `src/generated/client.gen.ts`
+1. Builds the `generate-acp-schema` Rust binary
+2. Runs it to generate `acp-schema.json` and `acp-meta.json`
+3. Uses `@hey-api/openapi-ts` to generate TypeScript types and Zod validators
+4. Generates a typed client in `src/generated/client.gen.ts`
 
-To regenerate everything from the pinned backend:
+To regenerate schemas after changing Rust types:
 
 ```bash
-# From the repo root
-./scripts/regenerate-sdk-schema.sh
-
-# Or, when bumping the backend pin in the same step:
-just bump-goose <ref-or-sha>
+npm run build:schema
 ```
 
 ## Native Binary Packages

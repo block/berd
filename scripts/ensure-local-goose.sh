@@ -99,23 +99,35 @@ fail_or_skip() {
   exit 0
 }
 
-# Resolve the managed checkout / cargo target / stamp paths via the shared
-# helper so regenerate-sdk-schema.sh can land its build in the same target
-# dir without a parallel copy of this logic.
+default_goose_dev_root() {
+  if [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+    printf '%s/goose-internal-dev\n' "$XDG_CACHE_HOME"
+    return
+  fi
+  case "$(uname -s)" in
+    Darwin) printf '%s/Library/Caches/goose-internal-dev\n' "$HOME" ;;
+    *) printf '%s/.cache/goose-internal-dev\n' "$HOME" ;;
+  esac
+}
+
+goose_dev_root="${GOOSE_DEV_ROOT:-$(default_goose_dev_root)}"
+goose_repo="${GOOSE_DEV_REPO:-${goose_dev_root}/goose}"
+stamp_file="${GOOSE_DEV_STAMP_FILE:-${goose_dev_root}/stamp.env}"
+
+# Pin a dedicated target directory for the goose backend build. We must NOT
+# share a target-dir with this repo's src-tauri crate: that crate's binary is
+# named `Goose` and upstream's is named `goose`, which collide on macOS APFS
+# (case-insensitive by default), so whichever cargo build runs last clobbers
+# the other. The original symptom: `just dev` builds the goose backend, then
+# Tauri builds `Goose` over it, and at runtime `GOOSE_BIN` points at the
+# Tauri app -- which proceeds to relaunch itself recursively, opening new
+# windows forever.
 #
-# Pinning a dedicated cargo target dir matters here: we must NOT share with
-# this repo's src-tauri crate. That crate's binary is named `Goose` and
-# upstream's is named `goose`, which collide on macOS APFS (case-insensitive
-# by default), so whichever cargo build runs last clobbers the other. The
-# original symptom: `just dev` builds the goose backend, then Tauri builds
-# `Goose` over it, and at runtime `GOOSE_BIN` points at the Tauri app --
-# which proceeds to relaunch itself recursively, opening new windows
-# forever. A dedicated target dir under the dev cache root preserves the
-# shared-cache benefit across goose-internal worktrees (they still all hit
-# the same location) without ever sharing with src-tauri or any other
-# workspace that honours `$HOME/.cargo/config.toml`'s `[build] target-dir`.
-# shellcheck source=lib/goose-dev-paths.sh
-source "$script_dir/lib/goose-dev-paths.sh"
+# A dedicated target dir under the dev cache root preserves the shared-cache
+# benefit across goose-internal worktrees (they still all hit the same
+# location) without ever sharing with src-tauri or any other workspace that
+# honours `$HOME/.cargo/config.toml`'s `[build] target-dir`.
+goose_cargo_target_dir="${GOOSE_DEV_CARGO_TARGET_DIR:-${goose_dev_root}/cargo-target}"
 export CARGO_TARGET_DIR="$goose_cargo_target_dir"
 
 # bin_path is computed after the checkout exists, via `cargo metadata`, so it
@@ -144,7 +156,7 @@ resolve_bin_path() {
 write_stamp() {
   local ref_name="$1"
   local commit_sha="$2"
-  mkdir -p "$(dirname "$goose_stamp_file")"
+  mkdir -p "$(dirname "$stamp_file")"
   {
     printf 'STAMP_REPO=%q\n' "$goose_repo"
     printf 'STAMP_LOCK_FILE=%q\n' "$lock_file"
@@ -153,13 +165,13 @@ write_stamp() {
     printf 'STAMP_PACKAGE=%q\n' "$goose_package"
     printf 'STAMP_BIN_NAME=%q\n' "$goose_bin"
     printf 'STAMP_BIN=%q\n' "$bin_path"
-  } >"$goose_stamp_file"
+  } >"$stamp_file"
 }
 
 stamp_matches_current_build() {
-  [[ -f "$goose_stamp_file" ]] || return 1
+  [[ -f "$stamp_file" ]] || return 1
   # shellcheck disable=SC1090
-  source "$goose_stamp_file"
+  source "$stamp_file"
   [[ "${STAMP_REPO:-}" == "$goose_repo" ]] || return 1
   [[ "${STAMP_REF:-${STAMP_BRANCH:-}}" == "$pinned_ref" ]] || return 1
   [[ "${STAMP_COMMIT:-}" == "$pinned_commit" ]] || return 1

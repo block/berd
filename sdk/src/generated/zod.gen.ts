@@ -3,323 +3,11 @@
 import { z } from 'zod';
 
 /**
- * Persist a new extension to the user's global goose config.
- */
-export const zAddConfigExtensionRequestUnstable = z.object({
-    enabled: z.boolean().optional().default(false),
-    extensionConfig: z.unknown().optional().default(null),
-    name: z.string()
-});
-
-/**
  * Add an extension to an active session.
  */
 export const zAddExtensionRequestUnstable = z.object({
-    config: z.unknown().optional().default(null),
-    sessionId: z.string()
-});
-
-/**
- * Archive a session (soft delete).
- */
-export const zArchiveSessionRequestUnstable = z.object({
-    sessionId: z.string()
-});
-
-export const zCustomProviderConfigDto = z.object({
-    apiKeyEnv: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    apiKeySet: z.boolean(),
-    apiUrl: z.string(),
-    basePath: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    catalogProviderId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    displayName: z.string(),
-    engine: z.string(),
-    headers: z.record(z.string()).optional().default({}),
-    models: z.array(z.string()).optional().default([]),
-    preservesThinking: z.boolean(),
-    providerId: z.string(),
-    requiresAuth: z.boolean(),
-    supportsStreaming: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * Create a custom provider backed by Goose's declarative provider store.
- */
-export const zCustomProviderCreateRequestUnstable = z.object({
-    apiKey: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    apiUrl: z.string(),
-    basePath: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    catalogProviderId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    displayName: z.string(),
-    engine: z.string(),
-    headers: z.record(z.string()).optional().default({}),
-    models: z.array(z.string()).optional().default([]),
-    preservesThinking: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional(),
-    requiresAuth: z.boolean(),
-    supportsStreaming: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * Delete a custom provider from Goose's declarative provider store.
- */
-export const zCustomProviderDeleteRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-/**
- * Read a declarative provider config. Custom configs are editable; bundled configs are read-only.
- */
-export const zCustomProviderReadRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-/**
- * Update a custom provider backed by Goose's declarative provider store.
- */
-export const zCustomProviderUpdateRequestUnstable = z.object({
-    apiKey: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    apiUrl: z.string(),
-    basePath: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    catalogProviderId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    displayName: z.string(),
-    engine: z.string(),
-    headers: z.record(z.string()).optional().default({}),
-    models: z.array(z.string()).optional().default([]),
-    preservesThinking: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional(),
-    providerId: z.string(),
-    requiresAuth: z.boolean(),
-    supportsStreaming: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * Read Goose default provider and model configuration.
- */
-export const zDefaultsReadRequestUnstable = z.record(z.unknown());
-
-export const zDefaultsReadResponseUnstable = z.object({
-    modelId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    providerId: z.union([
-        z.string(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * Save Goose default provider and model configuration.
- */
-export const zDefaultsSaveRequestUnstable = z.object({
-    modelId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    providerId: z.string()
-});
-
-/**
- * Delete a session.
- */
-export const zDeleteSessionRequest = z.object({
-    sessionId: z.string()
-});
-
-/**
- * Get the configuration status of all dictation providers.
- */
-export const zDictationConfigRequestUnstable = z.record(z.unknown());
-
-export const zDictationDownloadProgress = z.object({
-    bytesDownloaded: z.number().int().gte(0),
-    error: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    progressPercent: z.number(),
-    status: z.string(),
-    totalBytes: z.number().int().gte(0)
-});
-
-export const zDictationLocalModelStatus = z.object({
-    description: z.string(),
-    downloadInProgress: z.boolean(),
-    downloaded: z.boolean(),
-    id: z.string(),
-    label: z.string(),
-    sizeMb: z.number().int().gte(0)
-});
-
-/**
- * Cancel an in-flight download.
- */
-export const zDictationModelCancelRequestUnstable = z.object({
-    modelId: z.string()
-});
-
-/**
- * Delete a downloaded local Whisper model from disk.
- */
-export const zDictationModelDeleteRequestUnstable = z.object({
-    modelId: z.string()
-});
-
-/**
- * Poll the progress of an in-flight download.
- */
-export const zDictationModelDownloadProgressRequestUnstable = z.object({
-    modelId: z.string()
-});
-
-export const zDictationModelDownloadProgressResponseUnstable = z.object({
-    progress: z.union([
-        zDictationDownloadProgress,
-        z.null()
-    ]).optional()
-});
-
-/**
- * Kick off a background download of a local Whisper model.
- */
-export const zDictationModelDownloadRequestUnstable = z.object({
-    modelId: z.string()
-});
-
-export const zDictationModelOption = z.object({
-    description: z.string(),
-    id: z.string(),
-    label: z.string()
-});
-
-/**
- * Persist the user's model selection for a given provider.
- */
-export const zDictationModelSelectRequestUnstable = z.object({
-    modelId: z.string(),
-    provider: z.string()
-});
-
-/**
- * List available local Whisper models with their download status.
- */
-export const zDictationModelsListRequestUnstable = z.record(z.unknown());
-
-export const zDictationModelsListResponseUnstable = z.object({
-    models: z.array(zDictationLocalModelStatus)
-});
-
-/**
- * Per-provider configuration status.
- */
-export const zDictationProviderStatusEntry = z.object({
-    availableModels: z.array(zDictationModelOption).optional().default([]),
-    configKey: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    configured: z.boolean(),
-    defaultModel: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    description: z.string(),
-    host: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    modelConfigKey: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    selectedModel: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    settingsPath: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    usesProviderConfig: z.boolean()
-});
-
-/**
- * Dictation config response — map of provider name to status.
- */
-export const zDictationConfigResponseUnstable = z.object({
-    providers: z.record(zDictationProviderStatusEntry)
-});
-
-/**
- * Remove a dictation provider secret value.
- */
-export const zDictationSecretDeleteRequestUnstable = z.object({
-    provider: z.string()
-});
-
-/**
- * Set a dictation provider secret value.
- */
-export const zDictationSecretSaveRequestUnstable = z.object({
-    provider: z.string(),
-    value: z.string()
-});
-
-/**
- * Transcribe audio via a dictation provider.
- */
-export const zDictationTranscribeRequestUnstable = z.object({
-    audio: z.string(),
-    mimeType: z.string(),
-    provider: z.string()
-});
-
-/**
- * Transcription result.
- */
-export const zDictationTranscribeResponseUnstable = z.object({
-    text: z.string()
+    sessionId: z.string(),
+    config: z.unknown().optional().default(null)
 });
 
 /**
@@ -328,43 +16,11 @@ export const zDictationTranscribeResponseUnstable = z.object({
 export const zEmptyResponse = z.record(z.unknown());
 
 /**
- * Export a session as a JSON string.
+ * Remove an extension from an active session.
  */
-export const zExportSessionRequestUnstable = z.object({
-    sessionId: z.string()
-});
-
-/**
- * Export session response — raw JSON of the goose session with `conversation`.
- */
-export const zExportSessionResponseUnstable = z.object({
-    data: z.string()
-});
-
-export const zExportSourceResponseUnstable = z.object({
-    filename: z.string(),
-    json: z.string()
-});
-
-/**
- * List configured extensions and any warnings.
- */
-export const zGetExtensionsRequestUnstable = z.record(z.unknown());
-
-/**
- * List configured extensions and any warnings.
- */
-export const zGetExtensionsResponseUnstable = z.object({
-    extensions: z.array(z.unknown()),
-    warnings: z.array(z.string())
-});
-
-export const zGetSessionExtensionsRequestUnstable = z.object({
-    sessionId: z.string()
-});
-
-export const zGetSessionExtensionsResponseUnstable = z.object({
-    extensions: z.array(z.unknown())
+export const zRemoveExtensionRequestUnstable = z.object({
+    sessionId: z.string(),
+    name: z.string()
 });
 
 /**
@@ -385,434 +41,28 @@ export const zGetToolsResponseUnstable = z.object({
  * Call a tool from an extension.
  */
 export const zGooseToolCallRequestUnstable = z.object({
-    arguments: z.unknown().optional().default(null),
+    sessionId: z.string(),
     name: z.string(),
-    sessionId: z.string()
+    arguments: z.unknown().optional().default(null)
 });
 
 /**
  * Tool call response.
  */
 export const zGooseToolCallResponseUnstable = z.object({
-    _meta: z.unknown().optional(),
     content: z.array(z.unknown()).optional().default([]),
+    structuredContent: z.unknown().optional(),
     isError: z.boolean(),
-    structuredContent: z.unknown().optional()
-});
-
-/**
- * Import a session from a JSON string.
- */
-export const zImportSessionRequestUnstable = z.object({
-    data: z.string()
-});
-
-/**
- * Import session response — metadata about the newly created session.
- */
-export const zImportSessionResponseUnstable = z.object({
-    messageCount: z.number().int().gte(0),
-    sessionId: z.string(),
-    title: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    updatedAt: z.union([
-        z.string(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * List providers with setup metadata and the current model inventory snapshot.
- */
-export const zListProvidersRequestUnstable = z.object({
-    providerIds: z.array(z.string()).optional().default([])
-});
-
-/**
- * Import selected onboarding candidates.
- */
-export const zOnboardingImportApplyRequestUnstable = z.object({
-    candidateIds: z.array(z.string()).optional().default([]),
-    enableImportedExtensions: z.boolean().optional().default(false)
-});
-
-export const zOnboardingImportCounts = z.object({
-    extensions: z.number().int().gte(0),
-    preferences: z.number().int().gte(0),
-    projects: z.number().int().gte(0),
-    providers: z.number().int().gte(0),
-    sessions: z.number().int().gte(0),
-    skills: z.number().int().gte(0)
-});
-
-export const zOnboardingImportApplyResponseUnstable = z.object({
-    imported: zOnboardingImportCounts,
-    providerDefaults: z.union([
-        zDefaultsReadResponseUnstable,
-        z.null()
-    ]).optional(),
-    skipped: zOnboardingImportCounts,
-    warnings: z.array(z.string()).optional().default([])
-});
-
-/**
- * Sources that onboarding knows how to discover and import.
- */
-export const zOnboardingImportSourceKind = z.enum(['goose_config', 'claude_desktop']);
-
-export const zOnboardingImportCandidate = z.object({
-    counts: zOnboardingImportCounts,
-    displayName: z.string(),
-    id: z.string(),
-    path: z.string(),
-    sourceKind: zOnboardingImportSourceKind,
-    warnings: z.array(z.string()).optional().default([])
-});
-
-/**
- * Scan for existing Goose and compatible app data that onboarding can import.
- */
-export const zOnboardingImportScanRequestUnstable = z.object({
-    sources: z.array(zOnboardingImportSourceKind).optional().default([])
-});
-
-export const zOnboardingImportScanResponseUnstable = z.object({
-    candidates: z.array(zOnboardingImportCandidate)
-});
-
-export const zPreferenceKey = z.enum([
-    'autoCompactThreshold',
-    'voiceAutoSubmitPhrases',
-    'voiceDictationProvider',
-    'voiceDictationPreferredMic'
-]);
-
-export const zPreferenceValue = z.object({
-    key: zPreferenceKey,
-    value: z.unknown().optional().default(null)
-});
-
-/**
- * Read allowlisted user preferences. Empty `keys` means all supported preferences.
- */
-export const zPreferencesReadRequestUnstable = z.object({
-    keys: z.array(zPreferenceKey).optional().default([])
-});
-
-export const zPreferencesReadResponseUnstable = z.object({
-    values: z.array(zPreferenceValue)
-});
-
-/**
- * Remove allowlisted user preferences.
- */
-export const zPreferencesRemoveRequestUnstable = z.object({
-    keys: z.array(zPreferenceKey).optional().default([])
-});
-
-/**
- * Save allowlisted user preferences.
- */
-export const zPreferencesSaveRequestUnstable = z.object({
-    values: z.array(zPreferenceValue).optional().default([])
-});
-
-/**
- * List custom-provider catalog entries. Omit `format` to list all formats.
- */
-export const zProviderCatalogListRequestUnstable = z.object({
-    format: z.union([
-        z.string(),
-        z.null()
-    ]).optional()
-});
-
-/**
- * Return the editable template for one catalog provider.
- */
-export const zProviderCatalogTemplateRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-/**
- * Run a provider-owned native authentication flow and start an inventory refresh when supported.
- */
-export const zProviderConfigAuthenticateRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-/**
- * Delete provider configuration fields and start an inventory refresh when supported.
- */
-export const zProviderConfigDeleteRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-export const zProviderConfigFieldUpdate = z.object({
-    key: z.string(),
-    value: z.string()
-});
-
-export const zProviderConfigFieldValueDto = z.object({
-    isSecret: z.boolean(),
-    isSet: z.boolean(),
-    key: z.string(),
-    required: z.boolean(),
-    value: z.union([
-        z.string(),
-        z.null()
-    ]).optional().default(null)
-});
-
-export const zProviderConfigKey = z.object({
-    default: z.union([
-        z.string(),
-        z.null()
-    ]).optional().default(null),
-    deviceCodeFlow: z.boolean().optional().default(false),
-    name: z.string(),
-    oauthFlow: z.boolean().optional().default(false),
-    primary: z.boolean().optional().default(false),
-    required: z.boolean(),
-    secret: z.boolean()
-});
-
-/**
- * Read saved configuration field values for one provider.
- */
-export const zProviderConfigReadRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-export const zProviderConfigReadResponseUnstable = z.object({
-    fields: z.array(zProviderConfigFieldValueDto)
-});
-
-/**
- * Save provider configuration fields and start an inventory refresh when supported.
- */
-export const zProviderConfigSaveRequestUnstable = z.object({
-    fields: z.array(zProviderConfigFieldUpdate),
-    providerId: z.string()
-});
-
-export const zProviderConfigStatusDto = z.object({
-    isConfigured: z.boolean(),
-    providerId: z.string()
-});
-
-export const zCustomProviderReadResponseUnstable = z.object({
-    editable: z.boolean(),
-    provider: zCustomProviderConfigDto,
-    status: zProviderConfigStatusDto
-});
-
-/**
- * Return provider configured statuses. Empty provider_ids means all providers.
- */
-export const zProviderConfigStatusRequestUnstable = z.object({
-    providerIds: z.array(z.string()).optional().default([])
-});
-
-export const zProviderConfigStatusResponseUnstable = z.object({
-    statuses: z.array(zProviderConfigStatusDto)
-});
-
-/**
- * A single model in provider inventory.
- */
-export const zProviderInventoryModelDto = z.object({
-    contextLimit: z.union([
-        z.number().int().gte(0),
-        z.null()
-    ]).optional(),
-    family: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    id: z.string(),
-    name: z.string(),
-    reasoning: z.union([
-        z.boolean(),
-        z.null()
-    ]).optional(),
-    recommended: z.boolean().optional().default(false)
-});
-
-/**
- * List provider setup catalog entries
- */
-export const zProviderSetupCatalogListRequestUnstable = z.record(z.unknown());
-
-export const zProviderSetupCategoryDto = z.enum(['agent', 'model']);
-
-/**
- * Provider inventory entry.
- */
-export const zProviderInventoryEntryDto = z.object({
-    category: zProviderSetupCategoryDto,
-    configKeys: z.array(zProviderConfigKey),
-    configured: z.boolean(),
-    defaultModel: z.string(),
-    description: z.string(),
-    lastRefreshAttemptAt: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    lastRefreshError: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    lastUpdatedAt: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    modelSelectionHint: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    models: z.array(zProviderInventoryModelDto),
-    providerId: z.string(),
-    providerName: z.string(),
-    providerType: z.string(),
-    refreshing: z.boolean(),
-    setupSteps: z.array(z.string()),
-    stale: z.boolean(),
-    supportsRefresh: z.boolean()
-});
-
-/**
- * Provider list response.
- */
-export const zListProvidersResponseUnstable = z.object({
-    entries: z.array(zProviderInventoryEntryDto)
-});
-
-export const zProviderSetupFieldDto = z.object({
-    defaultValue: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    key: z.string(),
-    label: z.string(),
-    placeholder: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    required: z.boolean(),
-    secret: z.boolean()
-});
-
-export const zProviderSetupGroupDto = z.enum(['default', 'additional']);
-
-export const zProviderSetupMethodDto = z.enum([
-    'none',
-    'single_api_key',
-    'config_fields',
-    'host_with_oauth_fallback',
-    'oauth_browser',
-    'oauth_device_code',
-    'cloud_credentials',
-    'local',
-    'cli_auth'
-]);
-
-export const zProviderSetupCatalogEntryDto = z.object({
-    aliases: z.array(z.string()).optional().default([]),
-    binaryName: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    category: zProviderSetupCategoryDto,
-    description: z.string(),
-    docUrl: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    fields: z.array(zProviderSetupFieldDto).optional().default([]),
-    group: zProviderSetupGroupDto,
-    name: z.string(),
-    nativeConnectQuery: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    providerId: z.string(),
-    setupMethod: zProviderSetupMethodDto,
-    showOnlyWhenInstalled: z.boolean(),
-    supportsAuth: z.boolean(),
-    supportsAuthStatus: z.boolean(),
-    supportsInstall: z.boolean()
-});
-
-export const zProviderSetupCatalogListResponseUnstable = z.object({
-    providers: z.array(zProviderSetupCatalogEntryDto)
-});
-
-/**
- * List the raw model identifiers returned by a provider's live supported-models API.
- */
-export const zProviderSupportedModelsListRequestUnstable = z.object({
-    providerId: z.string()
-});
-
-export const zProviderSupportedModelsListResponseUnstable = z.object({
-    models: z.array(z.string()),
-    providerId: z.string()
-});
-
-export const zProviderTemplateCapabilitiesDto = z.object({
-    attachment: z.boolean(),
-    reasoning: z.boolean(),
-    temperature: z.boolean(),
-    toolCall: z.boolean()
-});
-
-export const zProviderTemplateCatalogEntryDto = z.object({
-    apiUrl: z.string(),
-    docUrl: z.string(),
-    envVar: z.string(),
-    format: z.string(),
-    modelCount: z.number().int().gte(0),
-    name: z.string(),
-    providerId: z.string()
-});
-
-export const zProviderCatalogListResponseUnstable = z.object({
-    providers: z.array(zProviderTemplateCatalogEntryDto)
-});
-
-export const zProviderTemplateModelDto = z.object({
-    capabilities: zProviderTemplateCapabilitiesDto,
-    contextLimit: z.number().int().gte(0),
-    deprecated: z.boolean(),
-    id: z.string(),
-    name: z.string()
-});
-
-export const zProviderTemplateDto = z.object({
-    apiUrl: z.string(),
-    docUrl: z.string(),
-    envVar: z.string(),
-    format: z.string(),
-    models: z.array(zProviderTemplateModelDto),
-    name: z.string(),
-    providerId: z.string(),
-    supportsStreaming: z.boolean()
-});
-
-export const zProviderCatalogTemplateResponseUnstable = z.object({
-    template: zProviderTemplateDto
+    _meta: z.unknown().optional()
 });
 
 /**
  * Read a resource from an extension.
  */
 export const zReadResourceRequestUnstable = z.object({
-    extensionName: z.string(),
     sessionId: z.string(),
-    uri: z.string()
+    uri: z.string(),
+    extensionName: z.string()
 });
 
 /**
@@ -823,75 +73,11 @@ export const zReadResourceResponseUnstable = z.object({
 });
 
 /**
- * Trigger a background refresh of provider inventories.
+ * Update the working directory for a session.
  */
-export const zRefreshProviderInventoryRequestUnstable = z.object({
-    providerIds: z.array(z.string()).optional().default([])
-});
-
-export const zRefreshProviderInventorySkipReasonDto = z.enum([
-    'unknown_provider',
-    'not_configured',
-    'does_not_support_refresh',
-    'already_refreshing'
-]);
-
-export const zRefreshProviderInventorySkipDto = z.object({
-    providerId: z.string(),
-    reason: zRefreshProviderInventorySkipReasonDto
-});
-
-/**
- * Refresh acknowledgement.
- */
-export const zRefreshProviderInventoryResponseUnstable = z.object({
-    skipped: z.array(zRefreshProviderInventorySkipDto).optional().default([]),
-    started: z.array(z.string())
-});
-
-export const zCustomProviderCreateResponseUnstable = z.object({
-    providerId: z.string(),
-    refresh: zRefreshProviderInventoryResponseUnstable,
-    status: zProviderConfigStatusDto
-});
-
-export const zCustomProviderDeleteResponseUnstable = z.object({
-    providerId: z.string(),
-    refresh: zRefreshProviderInventoryResponseUnstable
-});
-
-export const zCustomProviderUpdateResponseUnstable = z.object({
-    providerId: z.string(),
-    refresh: zRefreshProviderInventoryResponseUnstable,
-    status: zProviderConfigStatusDto
-});
-
-export const zProviderConfigChangeResponseUnstable = z.object({
-    refresh: zRefreshProviderInventoryResponseUnstable,
-    status: zProviderConfigStatusDto
-});
-
-/**
- * Remove a persisted extension from the user's global goose config.
- */
-export const zRemoveConfigExtensionRequestUnstable = z.object({
-    configKey: z.string()
-});
-
-/**
- * Remove an extension from an active session.
- */
-export const zRemoveExtensionRequestUnstable = z.object({
-    name: z.string(),
-    sessionId: z.string()
-});
-
-/**
- * Rename a session.
- */
-export const zRenameSessionRequestUnstable = z.object({
+export const zUpdateWorkingDirRequestUnstable = z.object({
     sessionId: z.string(),
-    title: z.string()
+    workingDir: z.string()
 });
 
 /**
@@ -910,14 +96,714 @@ export const zSessionSystemPromptMode = z.union([
  * previous value for that mode/key; sending empty text clears it.
  */
 export const zSetSessionSystemPromptRequestUnstable = z.object({
+    sessionId: z.string(),
+    mode: zSessionSystemPromptMode.optional().default('append'),
     key: z.union([
         z.string(),
         z.null()
     ]).optional(),
-    mode: zSessionSystemPromptMode.optional().default('append'),
-    sessionId: z.string(),
     text: z.string()
 });
+
+/**
+ * Delete a session.
+ */
+export const zDeleteSessionRequest = z.object({
+    sessionId: z.string()
+});
+
+/**
+ * List configured extensions and any warnings.
+ */
+export const zGetExtensionsRequestUnstable = z.record(z.unknown());
+
+/**
+ * List configured extensions and any warnings.
+ */
+export const zGetExtensionsResponseUnstable = z.object({
+    extensions: z.array(z.unknown()),
+    warnings: z.array(z.string())
+});
+
+/**
+ * Persist a new extension to the user's global goose config.
+ */
+export const zAddConfigExtensionRequestUnstable = z.object({
+    name: z.string(),
+    extensionConfig: z.unknown().optional().default(null),
+    enabled: z.boolean().optional().default(false)
+});
+
+/**
+ * Remove a persisted extension from the user's global goose config.
+ */
+export const zRemoveConfigExtensionRequestUnstable = z.object({
+    configKey: z.string()
+});
+
+/**
+ * Toggle the `enabled` flag for a persisted extension in the user's global goose config.
+ */
+export const zToggleConfigExtensionRequestUnstable = z.object({
+    configKey: z.string(),
+    enabled: z.boolean()
+});
+
+export const zGetSessionExtensionsRequestUnstable = z.object({
+    sessionId: z.string()
+});
+
+export const zGetSessionExtensionsResponseUnstable = z.object({
+    extensions: z.array(z.unknown())
+});
+
+/**
+ * List providers with setup metadata and the current model inventory snapshot.
+ */
+export const zListProvidersRequestUnstable = z.object({
+    providerIds: z.array(z.string()).optional().default([])
+});
+
+export const zProviderSetupCategoryDto = z.enum(['agent', 'model']);
+
+export const zProviderConfigKey = z.object({
+    name: z.string(),
+    required: z.boolean(),
+    secret: z.boolean(),
+    default: z.union([
+        z.string(),
+        z.null()
+    ]).optional().default(null),
+    oauthFlow: z.boolean().optional().default(false),
+    deviceCodeFlow: z.boolean().optional().default(false),
+    primary: z.boolean().optional().default(false)
+});
+
+/**
+ * A single model in provider inventory.
+ */
+export const zProviderInventoryModelDto = z.object({
+    id: z.string(),
+    name: z.string(),
+    family: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    contextLimit: z.union([
+        z.number().int().gte(0),
+        z.null()
+    ]).optional(),
+    reasoning: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional(),
+    recommended: z.boolean().optional().default(false)
+});
+
+/**
+ * Provider inventory entry.
+ */
+export const zProviderInventoryEntryDto = z.object({
+    providerId: z.string(),
+    providerName: z.string(),
+    description: z.string(),
+    defaultModel: z.string(),
+    configured: z.boolean(),
+    providerType: z.string(),
+    category: zProviderSetupCategoryDto,
+    configKeys: z.array(zProviderConfigKey),
+    setupSteps: z.array(z.string()),
+    supportsRefresh: z.boolean(),
+    refreshing: z.boolean(),
+    models: z.array(zProviderInventoryModelDto),
+    lastUpdatedAt: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    lastRefreshAttemptAt: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    lastRefreshError: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    stale: z.boolean(),
+    modelSelectionHint: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Provider list response.
+ */
+export const zListProvidersResponseUnstable = z.object({
+    entries: z.array(zProviderInventoryEntryDto)
+});
+
+/**
+ * List the raw model identifiers returned by a provider's live supported-models API.
+ */
+export const zProviderSupportedModelsListRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zProviderSupportedModelsListResponseUnstable = z.object({
+    providerId: z.string(),
+    models: z.array(z.string())
+});
+
+/**
+ * List custom-provider catalog entries. Omit `format` to list all formats.
+ */
+export const zProviderCatalogListRequestUnstable = z.object({
+    format: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zProviderTemplateCatalogEntryDto = z.object({
+    providerId: z.string(),
+    name: z.string(),
+    format: z.string(),
+    apiUrl: z.string(),
+    modelCount: z.number().int().gte(0),
+    docUrl: z.string(),
+    envVar: z.string()
+});
+
+export const zProviderCatalogListResponseUnstable = z.object({
+    providers: z.array(zProviderTemplateCatalogEntryDto)
+});
+
+/**
+ * List provider setup catalog entries
+ */
+export const zProviderSetupCatalogListRequestUnstable = z.record(z.unknown());
+
+export const zProviderSetupMethodDto = z.enum([
+    'none',
+    'single_api_key',
+    'config_fields',
+    'host_with_oauth_fallback',
+    'oauth_browser',
+    'oauth_device_code',
+    'cloud_credentials',
+    'local',
+    'cli_auth'
+]);
+
+export const zProviderSetupFieldDto = z.object({
+    key: z.string(),
+    label: z.string(),
+    secret: z.boolean(),
+    required: z.boolean(),
+    placeholder: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    defaultValue: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zProviderSetupGroupDto = z.enum(['default', 'additional']);
+
+export const zProviderSetupCatalogEntryDto = z.object({
+    providerId: z.string(),
+    name: z.string(),
+    category: zProviderSetupCategoryDto,
+    description: z.string(),
+    setupMethod: zProviderSetupMethodDto,
+    nativeConnectQuery: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    fields: z.array(zProviderSetupFieldDto).optional().default([]),
+    binaryName: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    docUrl: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    group: zProviderSetupGroupDto,
+    showOnlyWhenInstalled: z.boolean(),
+    aliases: z.array(z.string()).optional().default([]),
+    supportsInstall: z.boolean(),
+    supportsAuth: z.boolean(),
+    supportsAuthStatus: z.boolean()
+});
+
+export const zProviderSetupCatalogListResponseUnstable = z.object({
+    providers: z.array(zProviderSetupCatalogEntryDto)
+});
+
+/**
+ * Return the editable template for one catalog provider.
+ */
+export const zProviderCatalogTemplateRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zProviderTemplateCapabilitiesDto = z.object({
+    toolCall: z.boolean(),
+    reasoning: z.boolean(),
+    attachment: z.boolean(),
+    temperature: z.boolean()
+});
+
+export const zProviderTemplateModelDto = z.object({
+    id: z.string(),
+    name: z.string(),
+    contextLimit: z.number().int().gte(0),
+    capabilities: zProviderTemplateCapabilitiesDto,
+    deprecated: z.boolean()
+});
+
+export const zProviderTemplateDto = z.object({
+    providerId: z.string(),
+    name: z.string(),
+    format: z.string(),
+    apiUrl: z.string(),
+    models: z.array(zProviderTemplateModelDto),
+    supportsStreaming: z.boolean(),
+    envVar: z.string(),
+    docUrl: z.string()
+});
+
+export const zProviderCatalogTemplateResponseUnstable = z.object({
+    template: zProviderTemplateDto
+});
+
+/**
+ * Create a custom provider backed by Goose's declarative provider store.
+ */
+export const zCustomProviderCreateRequestUnstable = z.object({
+    engine: z.string(),
+    displayName: z.string(),
+    apiUrl: z.string(),
+    apiKey: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    models: z.array(z.string()).optional().default([]),
+    supportsStreaming: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional(),
+    headers: z.record(z.string()).optional().default({}),
+    requiresAuth: z.boolean(),
+    catalogProviderId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    basePath: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    preservesThinking: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional()
+});
+
+export const zProviderConfigStatusDto = z.object({
+    providerId: z.string(),
+    isConfigured: z.boolean()
+});
+
+export const zRefreshProviderInventorySkipReasonDto = z.enum([
+    'unknown_provider',
+    'not_configured',
+    'does_not_support_refresh',
+    'already_refreshing'
+]);
+
+export const zRefreshProviderInventorySkipDto = z.object({
+    providerId: z.string(),
+    reason: zRefreshProviderInventorySkipReasonDto
+});
+
+/**
+ * Refresh acknowledgement.
+ */
+export const zRefreshProviderInventoryResponseUnstable = z.object({
+    started: z.array(z.string()),
+    skipped: z.array(zRefreshProviderInventorySkipDto).optional().default([])
+});
+
+export const zCustomProviderCreateResponseUnstable = z.object({
+    providerId: z.string(),
+    status: zProviderConfigStatusDto,
+    refresh: zRefreshProviderInventoryResponseUnstable
+});
+
+/**
+ * Read a declarative provider config. Custom configs are editable; bundled configs are read-only.
+ */
+export const zCustomProviderReadRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zCustomProviderConfigDto = z.object({
+    providerId: z.string(),
+    engine: z.string(),
+    displayName: z.string(),
+    apiUrl: z.string(),
+    models: z.array(z.string()).optional().default([]),
+    supportsStreaming: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional(),
+    headers: z.record(z.string()).optional().default({}),
+    requiresAuth: z.boolean(),
+    catalogProviderId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    basePath: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    apiKeyEnv: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    apiKeySet: z.boolean(),
+    preservesThinking: z.boolean()
+});
+
+export const zCustomProviderReadResponseUnstable = z.object({
+    provider: zCustomProviderConfigDto,
+    editable: z.boolean(),
+    status: zProviderConfigStatusDto
+});
+
+/**
+ * Update a custom provider backed by Goose's declarative provider store.
+ */
+export const zCustomProviderUpdateRequestUnstable = z.object({
+    providerId: z.string(),
+    engine: z.string(),
+    displayName: z.string(),
+    apiUrl: z.string(),
+    apiKey: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    models: z.array(z.string()).optional().default([]),
+    supportsStreaming: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional(),
+    headers: z.record(z.string()).optional().default({}),
+    requiresAuth: z.boolean(),
+    catalogProviderId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    basePath: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    preservesThinking: z.union([
+        z.boolean(),
+        z.null()
+    ]).optional()
+});
+
+export const zCustomProviderUpdateResponseUnstable = z.object({
+    providerId: z.string(),
+    status: zProviderConfigStatusDto,
+    refresh: zRefreshProviderInventoryResponseUnstable
+});
+
+/**
+ * Delete a custom provider from Goose's declarative provider store.
+ */
+export const zCustomProviderDeleteRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zCustomProviderDeleteResponseUnstable = z.object({
+    providerId: z.string(),
+    refresh: zRefreshProviderInventoryResponseUnstable
+});
+
+/**
+ * Trigger a background refresh of provider inventories.
+ */
+export const zRefreshProviderInventoryRequestUnstable = z.object({
+    providerIds: z.array(z.string()).optional().default([])
+});
+
+/**
+ * Read saved configuration field values for one provider.
+ */
+export const zProviderConfigReadRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zProviderConfigFieldValueDto = z.object({
+    key: z.string(),
+    value: z.union([
+        z.string(),
+        z.null()
+    ]).optional().default(null),
+    isSet: z.boolean(),
+    isSecret: z.boolean(),
+    required: z.boolean()
+});
+
+export const zProviderConfigReadResponseUnstable = z.object({
+    fields: z.array(zProviderConfigFieldValueDto)
+});
+
+/**
+ * Return provider configured statuses. Empty provider_ids means all providers.
+ */
+export const zProviderConfigStatusRequestUnstable = z.object({
+    providerIds: z.array(z.string()).optional().default([])
+});
+
+export const zProviderConfigStatusResponseUnstable = z.object({
+    statuses: z.array(zProviderConfigStatusDto)
+});
+
+export const zProviderConfigFieldUpdate = z.object({
+    key: z.string(),
+    value: z.string()
+});
+
+/**
+ * Save provider configuration fields and start an inventory refresh when supported.
+ */
+export const zProviderConfigSaveRequestUnstable = z.object({
+    providerId: z.string(),
+    fields: z.array(zProviderConfigFieldUpdate)
+});
+
+export const zProviderConfigChangeResponseUnstable = z.object({
+    status: zProviderConfigStatusDto,
+    refresh: zRefreshProviderInventoryResponseUnstable
+});
+
+/**
+ * Delete provider configuration fields and start an inventory refresh when supported.
+ */
+export const zProviderConfigDeleteRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+/**
+ * Run a provider-owned native authentication flow and start an inventory refresh when supported.
+ */
+export const zProviderConfigAuthenticateRequestUnstable = z.object({
+    providerId: z.string()
+});
+
+export const zPreferenceKey = z.enum([
+    'autoCompactThreshold',
+    'voiceAutoSubmitPhrases',
+    'voiceDictationProvider',
+    'voiceDictationPreferredMic'
+]);
+
+/**
+ * Read allowlisted user preferences. Empty `keys` means all supported preferences.
+ */
+export const zPreferencesReadRequestUnstable = z.object({
+    keys: z.array(zPreferenceKey).optional().default([])
+});
+
+export const zPreferenceValue = z.object({
+    key: zPreferenceKey,
+    value: z.unknown().optional().default(null)
+});
+
+export const zPreferencesReadResponseUnstable = z.object({
+    values: z.array(zPreferenceValue)
+});
+
+/**
+ * Save allowlisted user preferences.
+ */
+export const zPreferencesSaveRequestUnstable = z.object({
+    values: z.array(zPreferenceValue).optional().default([])
+});
+
+/**
+ * Remove allowlisted user preferences.
+ */
+export const zPreferencesRemoveRequestUnstable = z.object({
+    keys: z.array(zPreferenceKey).optional().default([])
+});
+
+/**
+ * Read Goose default provider and model configuration.
+ */
+export const zDefaultsReadRequestUnstable = z.record(z.unknown());
+
+export const zDefaultsReadResponseUnstable = z.object({
+    providerId: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    modelId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Save Goose default provider and model configuration.
+ */
+export const zDefaultsSaveRequestUnstable = z.object({
+    providerId: z.string(),
+    modelId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Sources that onboarding knows how to discover and import.
+ */
+export const zOnboardingImportSourceKind = z.enum(['goose_config', 'claude_desktop']);
+
+/**
+ * Scan for existing Goose and compatible app data that onboarding can import.
+ */
+export const zOnboardingImportScanRequestUnstable = z.object({
+    sources: z.array(zOnboardingImportSourceKind).optional().default([])
+});
+
+export const zOnboardingImportCounts = z.object({
+    providers: z.number().int().gte(0),
+    extensions: z.number().int().gte(0),
+    sessions: z.number().int().gte(0),
+    skills: z.number().int().gte(0),
+    projects: z.number().int().gte(0),
+    preferences: z.number().int().gte(0)
+});
+
+export const zOnboardingImportCandidate = z.object({
+    id: z.string(),
+    sourceKind: zOnboardingImportSourceKind,
+    displayName: z.string(),
+    path: z.string(),
+    counts: zOnboardingImportCounts,
+    warnings: z.array(z.string()).optional().default([])
+});
+
+export const zOnboardingImportScanResponseUnstable = z.object({
+    candidates: z.array(zOnboardingImportCandidate)
+});
+
+/**
+ * Import selected onboarding candidates.
+ */
+export const zOnboardingImportApplyRequestUnstable = z.object({
+    candidateIds: z.array(z.string()).optional().default([]),
+    enableImportedExtensions: z.boolean().optional().default(false)
+});
+
+export const zOnboardingImportApplyResponseUnstable = z.object({
+    imported: zOnboardingImportCounts,
+    skipped: zOnboardingImportCounts,
+    warnings: z.array(z.string()).optional().default([]),
+    providerDefaults: z.union([
+        zDefaultsReadResponseUnstable,
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Export a session as a JSON string.
+ */
+export const zExportSessionRequestUnstable = z.object({
+    sessionId: z.string()
+});
+
+/**
+ * Export session response — raw JSON of the goose session with `conversation`.
+ */
+export const zExportSessionResponseUnstable = z.object({
+    data: z.string()
+});
+
+/**
+ * Import a session from a JSON string.
+ */
+export const zImportSessionRequestUnstable = z.object({
+    data: z.string()
+});
+
+/**
+ * Import session response — metadata about the newly created session.
+ */
+export const zImportSessionResponseUnstable = z.object({
+    sessionId: z.string(),
+    title: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    updatedAt: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    messageCount: z.number().int().gte(0)
+});
+
+/**
+ * Update the project association for a session.
+ */
+export const zUpdateSessionProjectRequestUnstable = z.object({
+    sessionId: z.string(),
+    projectId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Rename a session.
+ */
+export const zRenameSessionRequestUnstable = z.object({
+    sessionId: z.string(),
+    title: z.string()
+});
+
+/**
+ * Archive a session (soft delete).
+ */
+export const zArchiveSessionRequestUnstable = z.object({
+    sessionId: z.string()
+});
+
+/**
+ * Unarchive a previously archived session.
+ */
+export const zUnarchiveSessionRequestUnstable = z.object({
+    sessionId: z.string()
+});
+
+/**
+ * The type of source entity.
+ */
+export const zSourceType = z.enum([
+    'skill',
+    'builtinSkill',
+    'recipe',
+    'subrecipe',
+    'agent',
+    'project'
+]);
 
 /**
  * Target scope for creating or importing sources.
@@ -937,53 +823,36 @@ export const zSourceScope = z.union([
 ]);
 
 /**
- * Import a source from a JSON export payload produced by `_goose/unstable/sources/export`.
- * The imported source is written into the explicit target scope; on name
- * collisions a `-imported` suffix is appended.
- */
-export const zImportSourcesRequestUnstable = z.object({
-    data: z.string(),
-    target: zSourceScope
-});
-
-/**
- * The type of source entity.
- */
-export const zSourceType = z.enum([
-    'skill',
-    'builtinSkill',
-    'recipe',
-    'subrecipe',
-    'agent',
-    'project'
-]);
-
-/**
  * Create a new source in an explicit target scope (global or project-scoped).
  */
 export const zCreateSourceRequestUnstable = z.object({
-    content: z.string(),
-    description: z.string(),
+    type: zSourceType,
     name: z.string(),
-    properties: z.record(z.unknown()).optional(),
+    description: z.string(),
+    content: z.string(),
     target: zSourceScope,
-    type: zSourceType
+    properties: z.record(z.unknown()).optional()
 });
 
 /**
- * Delete a source and its on-disk directory by absolute path.
+ * A source discovered by Goose. Filesystem sources use an on-disk path;
+ * built-in sources use a stable synthetic path. Sources may be either
+ * `global` (shared across all projects) or project-specific.
  */
-export const zDeleteSourceRequestUnstable = z.object({
+export const zSourceEntry = z.object({
+    type: zSourceType,
+    name: z.string(),
+    description: z.string(),
+    content: z.string(),
     path: z.string(),
-    type: zSourceType
+    global: z.boolean(),
+    writable: z.boolean().optional().default(false),
+    supportingFiles: z.array(z.string()).optional(),
+    properties: z.record(z.unknown()).optional()
 });
 
-/**
- * Export a source at an absolute path as a portable JSON payload.
- */
-export const zExportSourceRequestUnstable = z.object({
-    path: z.string(),
-    type: zSourceType
+export const zCreateSourceResponseUnstable = z.object({
+    source: zSourceEntry
 });
 
 /**
@@ -995,40 +864,15 @@ export const zExportSourceRequestUnstable = z.object({
  * skills.
  */
 export const zListSourcesRequestUnstable = z.object({
-    includeProjectSources: z.boolean().optional().default(false),
+    type: z.union([
+        zSourceType,
+        z.null()
+    ]).optional(),
     projectDir: z.union([
         z.string(),
         z.null()
     ]).optional(),
-    type: z.union([
-        zSourceType,
-        z.null()
-    ]).optional()
-});
-
-/**
- * A source discovered by Goose. Filesystem sources use an on-disk path;
- * built-in sources use a stable synthetic path. Sources may be either
- * `global` (shared across all projects) or project-specific.
- */
-export const zSourceEntry = z.object({
-    content: z.string(),
-    description: z.string(),
-    global: z.boolean(),
-    name: z.string(),
-    path: z.string(),
-    properties: z.record(z.unknown()).optional(),
-    supportingFiles: z.array(z.string()).optional(),
-    type: zSourceType,
-    writable: z.boolean().optional().default(false)
-});
-
-export const zCreateSourceResponseUnstable = z.object({
-    source: zSourceEntry
-});
-
-export const zImportSourcesResponseUnstable = z.object({
-    sources: z.array(zSourceEntry)
+    includeProjectSources: z.boolean().optional().default(false)
 });
 
 export const zListSourcesResponseUnstable = z.object({
@@ -1036,109 +880,212 @@ export const zListSourcesResponseUnstable = z.object({
 });
 
 /**
- * Toggle the `enabled` flag for a persisted extension in the user's global goose config.
- */
-export const zToggleConfigExtensionRequestUnstable = z.object({
-    configKey: z.string(),
-    enabled: z.boolean()
-});
-
-/**
- * Unarchive a previously archived session.
- */
-export const zUnarchiveSessionRequestUnstable = z.object({
-    sessionId: z.string()
-});
-
-/**
- * Update the project association for a session.
- */
-export const zUpdateSessionProjectRequestUnstable = z.object({
-    projectId: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    sessionId: z.string()
-});
-
-/**
  * Update an existing source's name, description, and content by absolute path.
  */
 export const zUpdateSourceRequestUnstable = z.object({
-    content: z.string(),
-    description: z.string(),
-    name: z.string(),
+    type: zSourceType,
     path: z.string(),
+    name: z.string(),
+    description: z.string(),
+    content: z.string(),
     properties: z.union([
         z.record(z.unknown()),
         z.null()
-    ]).optional(),
-    type: zSourceType
+    ]).optional()
 });
 
 export const zUpdateSourceResponseUnstable = z.object({
     source: zSourceEntry
 });
 
-export const zExtResponse = z.union([
-    z.object({
-        id: z.string(),
-        result: z.union([
-            z.union([
-                zEmptyResponse,
-                zGetToolsResponseUnstable,
-                zGooseToolCallResponseUnstable,
-                zReadResourceResponseUnstable,
-                zGetExtensionsResponseUnstable,
-                zGetSessionExtensionsResponseUnstable,
-                zListProvidersResponseUnstable,
-                zProviderSupportedModelsListResponseUnstable,
-                zProviderCatalogListResponseUnstable,
-                zProviderSetupCatalogListResponseUnstable,
-                zProviderCatalogTemplateResponseUnstable,
-                zCustomProviderCreateResponseUnstable,
-                zCustomProviderReadResponseUnstable,
-                zCustomProviderUpdateResponseUnstable,
-                zCustomProviderDeleteResponseUnstable,
-                zRefreshProviderInventoryResponseUnstable,
-                zProviderConfigReadResponseUnstable,
-                zProviderConfigStatusResponseUnstable,
-                zProviderConfigChangeResponseUnstable,
-                zPreferencesReadResponseUnstable,
-                zDefaultsReadResponseUnstable,
-                zOnboardingImportScanResponseUnstable,
-                zOnboardingImportApplyResponseUnstable,
-                zExportSessionResponseUnstable,
-                zImportSessionResponseUnstable,
-                zCreateSourceResponseUnstable,
-                zListSourcesResponseUnstable,
-                zUpdateSourceResponseUnstable,
-                zExportSourceResponseUnstable,
-                zImportSourcesResponseUnstable,
-                zDictationTranscribeResponseUnstable,
-                zDictationConfigResponseUnstable,
-                zDictationModelsListResponseUnstable,
-                zDictationModelDownloadProgressResponseUnstable
-            ]),
-            z.unknown()
-        ]).optional()
-    }),
-    z.object({
-        error: z.object({
-            code: z.number().int(),
-            data: z.unknown().optional(),
-            message: z.string()
-        }),
-        id: z.string()
-    })
-]);
+/**
+ * Delete a source and its on-disk directory by absolute path.
+ */
+export const zDeleteSourceRequestUnstable = z.object({
+    type: zSourceType,
+    path: z.string()
+});
 
 /**
- * Update the working directory for a session.
+ * Export a source at an absolute path as a portable JSON payload.
  */
-export const zUpdateWorkingDirRequestUnstable = z.object({
-    sessionId: z.string(),
-    workingDir: z.string()
+export const zExportSourceRequestUnstable = z.object({
+    type: zSourceType,
+    path: z.string()
+});
+
+export const zExportSourceResponseUnstable = z.object({
+    json: z.string(),
+    filename: z.string()
+});
+
+/**
+ * Import a source from a JSON export payload produced by `_goose/unstable/sources/export`.
+ * The imported source is written into the explicit target scope; on name
+ * collisions a `-imported` suffix is appended.
+ */
+export const zImportSourcesRequestUnstable = z.object({
+    data: z.string(),
+    target: zSourceScope
+});
+
+export const zImportSourcesResponseUnstable = z.object({
+    sources: z.array(zSourceEntry)
+});
+
+/**
+ * Transcribe audio via a dictation provider.
+ */
+export const zDictationTranscribeRequestUnstable = z.object({
+    audio: z.string(),
+    mimeType: z.string(),
+    provider: z.string()
+});
+
+/**
+ * Transcription result.
+ */
+export const zDictationTranscribeResponseUnstable = z.object({
+    text: z.string()
+});
+
+/**
+ * Get the configuration status of all dictation providers.
+ */
+export const zDictationConfigRequestUnstable = z.record(z.unknown());
+
+export const zDictationModelOption = z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string()
+});
+
+/**
+ * Per-provider configuration status.
+ */
+export const zDictationProviderStatusEntry = z.object({
+    configured: z.boolean(),
+    host: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    description: z.string(),
+    usesProviderConfig: z.boolean(),
+    settingsPath: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    configKey: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    modelConfigKey: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    defaultModel: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    selectedModel: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    availableModels: z.array(zDictationModelOption).optional().default([])
+});
+
+/**
+ * Dictation config response — map of provider name to status.
+ */
+export const zDictationConfigResponseUnstable = z.object({
+    providers: z.record(zDictationProviderStatusEntry)
+});
+
+/**
+ * Set a dictation provider secret value.
+ */
+export const zDictationSecretSaveRequestUnstable = z.object({
+    provider: z.string(),
+    value: z.string()
+});
+
+/**
+ * Remove a dictation provider secret value.
+ */
+export const zDictationSecretDeleteRequestUnstable = z.object({
+    provider: z.string()
+});
+
+/**
+ * List available local Whisper models with their download status.
+ */
+export const zDictationModelsListRequestUnstable = z.record(z.unknown());
+
+export const zDictationLocalModelStatus = z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string(),
+    sizeMb: z.number().int().gte(0),
+    downloaded: z.boolean(),
+    downloadInProgress: z.boolean()
+});
+
+export const zDictationModelsListResponseUnstable = z.object({
+    models: z.array(zDictationLocalModelStatus)
+});
+
+/**
+ * Kick off a background download of a local Whisper model.
+ */
+export const zDictationModelDownloadRequestUnstable = z.object({
+    modelId: z.string()
+});
+
+/**
+ * Poll the progress of an in-flight download.
+ */
+export const zDictationModelDownloadProgressRequestUnstable = z.object({
+    modelId: z.string()
+});
+
+export const zDictationDownloadProgress = z.object({
+    bytesDownloaded: z.number().int().gte(0),
+    totalBytes: z.number().int().gte(0),
+    progressPercent: z.number(),
+    status: z.string(),
+    error: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zDictationModelDownloadProgressResponseUnstable = z.object({
+    progress: z.union([
+        zDictationDownloadProgress,
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Cancel an in-flight download.
+ */
+export const zDictationModelCancelRequestUnstable = z.object({
+    modelId: z.string()
+});
+
+/**
+ * Delete a downloaded local Whisper model from disk.
+ */
+export const zDictationModelDeleteRequestUnstable = z.object({
+    modelId: z.string()
+});
+
+/**
+ * Persist the user's model selection for a given provider.
+ */
+export const zDictationModelSelectRequestUnstable = z.object({
+    provider: z.string(),
+    modelId: z.string()
 });
 
 export const zExtRequest = z.object({
@@ -1210,3 +1157,56 @@ export const zExtRequest = z.object({
         ])
     ]).optional()
 });
+
+export const zExtResponse = z.union([
+    z.object({
+        id: z.string(),
+        result: z.union([
+            z.union([
+                zEmptyResponse,
+                zGetToolsResponseUnstable,
+                zGooseToolCallResponseUnstable,
+                zReadResourceResponseUnstable,
+                zGetExtensionsResponseUnstable,
+                zGetSessionExtensionsResponseUnstable,
+                zListProvidersResponseUnstable,
+                zProviderSupportedModelsListResponseUnstable,
+                zProviderCatalogListResponseUnstable,
+                zProviderSetupCatalogListResponseUnstable,
+                zProviderCatalogTemplateResponseUnstable,
+                zCustomProviderCreateResponseUnstable,
+                zCustomProviderReadResponseUnstable,
+                zCustomProviderUpdateResponseUnstable,
+                zCustomProviderDeleteResponseUnstable,
+                zRefreshProviderInventoryResponseUnstable,
+                zProviderConfigReadResponseUnstable,
+                zProviderConfigStatusResponseUnstable,
+                zProviderConfigChangeResponseUnstable,
+                zPreferencesReadResponseUnstable,
+                zDefaultsReadResponseUnstable,
+                zOnboardingImportScanResponseUnstable,
+                zOnboardingImportApplyResponseUnstable,
+                zExportSessionResponseUnstable,
+                zImportSessionResponseUnstable,
+                zCreateSourceResponseUnstable,
+                zListSourcesResponseUnstable,
+                zUpdateSourceResponseUnstable,
+                zExportSourceResponseUnstable,
+                zImportSourcesResponseUnstable,
+                zDictationTranscribeResponseUnstable,
+                zDictationConfigResponseUnstable,
+                zDictationModelsListResponseUnstable,
+                zDictationModelDownloadProgressResponseUnstable
+            ]),
+            z.unknown()
+        ]).optional()
+    }),
+    z.object({
+        error: z.object({
+            code: z.number().int(),
+            message: z.string(),
+            data: z.unknown().optional()
+        }),
+        id: z.string()
+    })
+]);
