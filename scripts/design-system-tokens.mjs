@@ -115,6 +115,25 @@ const allowedBridgeTargets = new Map([
   ["placeholder-composer", "text-placeholder-composer"],
 ]);
 
+const requiredGlobalTokens = [
+  [
+    "text-app-top-bar-title",
+    "Top bar breadcrumbs use this token for their title size.",
+  ],
+  [
+    "text-app-top-bar-title-leading",
+    "Top bar breadcrumbs use this token for their compact line height.",
+  ],
+  [
+    "text-app-top-bar-icon",
+    "Top bar icon buttons use this token to size glyphs inside the chrome control.",
+  ],
+  [
+    "text-app-top-bar-title-compact",
+    "Responsive top bar breadcrumbs use this token at compact widths.",
+  ],
+];
+
 function listSourceFiles(directory) {
   return fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const entryPath = path.join(directory, entry.name);
@@ -240,6 +259,21 @@ function findBridgeFindings(sourceText) {
   return findings;
 }
 
+function findRequiredGlobalTokenFindings(sourceText) {
+  return requiredGlobalTokens
+    .filter(([token]) => {
+      const tokenPattern = new RegExp(`--${token}\\s*:`);
+      return !tokenPattern.test(sourceText);
+    })
+    .map(([token, hint]) => ({
+      source: path.relative(repoRoot, globalsPath),
+      line: 1,
+      label: "missing required global token",
+      value: `--${token}`,
+      hint,
+    }));
+}
+
 function runTokenCheck() {
   const findings = [];
   const sourceFiles = listSourceFiles(srcRoot);
@@ -255,6 +289,7 @@ function runTokenCheck() {
   }
 
   const globalsText = fs.readFileSync(globalsPath, "utf8");
+  findings.push(...findRequiredGlobalTokenFindings(globalsText));
   findings.push(...findBridgeFindings(globalsText));
 
   if (findings.length > 0) {

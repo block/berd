@@ -39,6 +39,15 @@ describe("TopBar", () => {
     expect(onGoHome).toHaveBeenCalledOnce();
   });
 
+  it("keeps the goose home logo at its top-bar brand size", () => {
+    renderTopBar({ onGoHome: vi.fn() });
+
+    const button = screen.getByRole("button", { name: /goose home/i });
+    const icon = button.querySelector("svg");
+
+    expect(icon).toHaveClass("size-5");
+  });
+
   it("omits the goose home logo when onGoHome is not provided", () => {
     renderTopBar();
 

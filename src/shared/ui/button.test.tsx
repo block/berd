@@ -68,6 +68,26 @@ describe("Button", () => {
     expect(screen.getByTestId("icon")).toHaveClass("size-3.5");
   });
 
+  it("applies top-bar icon sizing through the shared icon button logic", () => {
+    render(
+      <Button variant="top-bar-icon" size="icon-top-bar" aria-label="Search">
+        <IconArrowDown data-testid="icon" />
+      </Button>,
+    );
+
+    const button = screen.getByRole("button", { name: "Search" });
+
+    expect(button.className).toContain(
+      "size-[var(--spacing-app-top-bar-control)]",
+    );
+    expect(button.className).toContain(
+      "[&_svg:not([class*='size-']):not([class*='h-']):not([class*='w-'])]:size-[length:var(--text-app-top-bar-icon)]",
+    );
+    expect(screen.getByTestId("icon")).toHaveClass(
+      "size-[length:var(--text-app-top-bar-icon)]",
+    );
+  });
+
   it("applies pill icon button sizing from the size variant", () => {
     render(
       <Button size="icon-pill-sm" aria-label="Send">

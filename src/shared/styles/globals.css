@@ -958,7 +958,10 @@
   --text-body-alex: 14px;
   --text-input-alex: 16px;
   --text-title-alex: 24px;
-  --text-app-top-bar-title-compact: 20px;
+  --text-app-top-bar-title: 20px;
+  --text-app-top-bar-title-leading: 18px;
+  --text-app-top-bar-icon: 18px;
+  --text-app-top-bar-title-compact: var(--text-app-top-bar-title);
 
   --breakpoint-desktop: 1440px;
 
