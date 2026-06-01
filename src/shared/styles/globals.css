@@ -410,6 +410,8 @@
     0 16px 32px rgba(0, 0, 0, 0.03);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
+  /* Floating panel hover (sidebar, global composer pill). */
+  --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.05);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
   --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
@@ -723,6 +725,7 @@
     0 2px 6px rgba(0, 0, 0, 0.24);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
+  --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
   --shadow-agent-profile-avatar: 0 18px 32px rgba(0, 0, 0, 0.42);
@@ -922,6 +925,7 @@
   --shadow-popover: var(--shadow-popover);
   --shadow-popover-inverse: var(--shadow-popover-inverse);
   --shadow-modal: var(--shadow-modal);
+  --shadow-sidebar-panel-elevated: var(--shadow-sidebar-panel-elevated);
   --shadow-kbd: var(--shadow-kbd);
   --shadow-date-field-focus: var(--shadow-date-field-focus);
   --shadow-agent-profile-avatar: var(--shadow-agent-profile-avatar);

@@ -40,6 +40,7 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
+import { SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS } from "@/shared/ui/sidebar-tokens";
 import { Button } from "@/shared/ui/button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import {
@@ -76,6 +77,14 @@ interface ModelSelection {
 const MODEL_ALIAS_IDS = new Set(["current", "default"]);
 
 const TEXTAREA_MAX_HEIGHT_PX = 200;
+const COMPOSER_ACTION_STRIP_CLASS = "h-[40px]";
+
+const COMPOSER_LAYOUT_TRANSITION_CLASS =
+  "transition-[height,min-height,padding] duration-300 ease-in-out motion-reduce:transition-none";
+const COMPOSER_TEXT_SLIDE_TRANSITION_CLASS =
+  "transition-[min-height,padding] duration-300 ease-in-out motion-reduce:transition-none";
+const COMPOSER_TOOLBAR_SLIDE_TRANSITION_CLASS =
+  "transition-[transform,opacity] duration-300 ease-in-out motion-reduce:transition-none";
 
 function getModelName(model: ModelOption) {
   return model.displayName ?? model.name ?? model.id;
@@ -581,11 +590,10 @@ export function GlobalComposerPill({
           setFocused(false);
         }
       }}
-      className="fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-surface-composer-glass px-4 py-3 ring-1 ring-inset ring-[var(--ring-composer-glass-inner)] outline outline-1 outline-[var(--outline-composer-glass-outer)]"
-      style={{
-        backdropFilter: "blur(24px) saturate(180%) brightness(1.05)",
-        WebkitBackdropFilter: "blur(24px) saturate(180%) brightness(1.05)",
-      }}
+      className={cn(
+        "group relative fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-shadow duration-300 ease-out",
+        SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
+      )}
     >
       {isAttachmentDragOver ? (
         <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center rounded-composer border border-dashed border-border/80 bg-card/60">
@@ -613,116 +621,113 @@ export function GlobalComposerPill({
         </div>
       ) : null}
 
-      <div className="flex items-center gap-3 px-2">
-        <Popover open={mentionOpen}>
-          <PopoverAnchor asChild>
-            <textarea
-              ref={textareaRef}
-              value={text}
-              rows={1}
-              onChange={(event) => {
-                const value = event.target.value;
-                setText(value);
-                const cursor = event.target.selectionStart ?? value.length;
-                detectMention(value, cursor);
-              }}
-              onKeyDown={(event) => {
-                if (mentionOpen) {
-                  if (event.key === "Escape") {
-                    event.preventDefault();
-                    closeMention();
-                    return;
-                  }
-                  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-                    event.preventDefault();
-                    navigateMention(event.key === "ArrowDown" ? "down" : "up");
-                    return;
-                  }
-                  if (event.key === "Enter" || event.key === "Tab") {
-                    const item = confirmMention();
-                    if (item) {
-                      event.preventDefault();
-                      handleMentionConfirm(item);
-                      return;
-                    }
-                  }
-                }
-                if (
-                  event.key === "Enter" &&
-                  !event.shiftKey &&
-                  !event.nativeEvent.isComposing &&
-                  event.nativeEvent.keyCode !== 229
-                ) {
-                  event.preventDefault();
-                  handleSend();
-                }
-              }}
-              onPaste={handlePaste}
-              placeholder={effectivePlaceholder}
-              className="focus-override min-h-10 max-h-[200px] flex-1 resize-none appearance-none overflow-y-auto scrollbar-none border-0 bg-transparent py-2.5 text-[16px] leading-[20px] text-foreground outline-none placeholder:text-foreground focus:outline-none focus:ring-0"
-            />
-          </PopoverAnchor>
-          <MentionAutocomplete
-            isOpen={mentionOpen}
-            filteredPersonas={filteredPersonas}
-            filteredSkills={filteredSkills}
-            filteredFiles={filteredFiles}
-            selectedIndex={mentionSelectedIndex}
-            onClose={closeMention}
-            onSelectPersona={(persona) =>
-              handleMentionConfirm({ type: "persona", persona })
-            }
-            onSelectSkill={(skill) =>
-              handleMentionConfirm({ type: "skill", skill })
-            }
-            onSelectFile={(file) =>
-              handleMentionConfirm({ type: "file", file })
-            }
-          />
-        </Popover>
-
+      <div
+        className={cn(
+          "relative w-full px-2",
+          COMPOSER_LAYOUT_TRANSITION_CLASS,
+          expanded ? "pb-[40px]" : "h-[40px]",
+        )}
+      >
         <div
-          aria-hidden={expanded}
           className={cn(
-            "flex shrink-0 items-center gap-2 overflow-hidden transition-[max-width,opacity,margin-left] duration-150 ease-out",
-            expanded
-              ? "pointer-events-none -ml-3 max-w-0 opacity-0"
-              : "max-w-32 opacity-100",
+            "relative z-[1] min-w-0",
+            COMPOSER_TEXT_SLIDE_TRANSITION_CLASS,
+            !expanded && "flex h-full items-center",
           )}
         >
-          <Button
-            type="button"
-            tabIndex={expanded ? -1 : 0}
-            variant="composer-action"
-            size="icon-pill-sm"
-            aria-label={t("toolbar.voiceInput")}
-            title={t("toolbar.voiceInput")}
-          >
-            <IconMicrophone aria-hidden="true" />
-          </Button>
-          <Button
-            type="button"
-            tabIndex={expanded ? -1 : 0}
-            onClick={handleSend}
-            disabled={!canSend}
-            variant="composer-action"
-            size="icon-pill-sm"
-            className={cn(!canSend && "disabled:opacity-100")}
-            aria-label={t("toolbar.sendMessage")}
-          >
-            <IconArrowUp aria-hidden="true" />
-          </Button>
+          <Popover open={mentionOpen}>
+            <PopoverAnchor asChild>
+              <textarea
+                ref={textareaRef}
+                value={text}
+                rows={1}
+                onChange={(event) => {
+                  const value = event.target.value;
+                  setText(value);
+                  const cursor = event.target.selectionStart ?? value.length;
+                  detectMention(value, cursor);
+                }}
+                onKeyDown={(event) => {
+                  if (mentionOpen) {
+                    if (event.key === "Escape") {
+                      event.preventDefault();
+                      closeMention();
+                      return;
+                    }
+                    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                      event.preventDefault();
+                      navigateMention(
+                        event.key === "ArrowDown" ? "down" : "up",
+                      );
+                      return;
+                    }
+                    if (event.key === "Enter" || event.key === "Tab") {
+                      const item = confirmMention();
+                      if (item) {
+                        event.preventDefault();
+                        handleMentionConfirm(item);
+                        return;
+                      }
+                    }
+                  }
+                  if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    !event.nativeEvent.isComposing &&
+                    event.nativeEvent.keyCode !== 229
+                  ) {
+                    event.preventDefault();
+                    handleSend();
+                  }
+                }}
+                onPaste={handlePaste}
+                onFocus={() => setFocused(true)}
+                placeholder={effectivePlaceholder}
+                className={cn(
+                  "focus-override max-h-[200px] w-full resize-none appearance-none overflow-y-auto scrollbar-none border-0 bg-transparent text-[16px] leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-opacity placeholder:duration-300 placeholder:ease-in-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
+                  expanded
+                    ? "min-h-10 py-2.5 pr-2"
+                    : "h-8 min-h-0 py-0 pr-[5.75rem]",
+                )}
+              />
+            </PopoverAnchor>
+            <MentionAutocomplete
+              isOpen={mentionOpen}
+              filteredPersonas={filteredPersonas}
+              filteredSkills={filteredSkills}
+              filteredFiles={filteredFiles}
+              selectedIndex={mentionSelectedIndex}
+              onClose={closeMention}
+              onSelectPersona={(persona) =>
+                handleMentionConfirm({ type: "persona", persona })
+              }
+              onSelectSkill={(skill) =>
+                handleMentionConfirm({ type: "skill", skill })
+              }
+              onSelectFile={(file) =>
+                handleMentionConfirm({ type: "file", file })
+              }
+            />
+          </Popover>
         </div>
       </div>
 
       <div
-        aria-hidden={!expanded}
         className={cn(
-          "overflow-hidden transition-[max-height,opacity,padding-top] duration-200 ease-out",
-          expanded ? "max-h-20 pt-2 opacity-100" : "max-h-0 pt-0 opacity-0",
+          "pointer-events-none absolute bottom-2 left-6 right-[1.125rem] z-20 flex items-center overflow-hidden pr-[5.75rem]",
+          COMPOSER_ACTION_STRIP_CLASS,
         )}
       >
-        <div className="flex items-center gap-2">
+        <div
+          aria-hidden={!expanded}
+          className={cn(
+            "flex items-center gap-2",
+            COMPOSER_TOOLBAR_SLIDE_TRANSITION_CLASS,
+            expanded
+              ? "pointer-events-auto relative h-full min-w-0 flex-1 translate-y-0 opacity-100"
+              : "pointer-events-none absolute bottom-0 left-0 translate-y-4 opacity-0",
+          )}
+        >
           <Button
             type="button"
             tabIndex={expanded ? 0 : -1}
@@ -808,54 +813,52 @@ export function GlobalComposerPill({
               </div>
             </PopoverContent>
           </Popover>
+        </div>
 
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              type="button"
-              tabIndex={expanded ? 0 : -1}
-              disabled={!dictation.isRecording && !dictation.isEnabled}
-              onClick={dictation.toggleRecording}
-              variant="composer-action"
-              size="icon-pill-sm"
-              className={cn(
-                dictation.isRecording &&
-                  "bg-destructive/12 text-destructive hover:bg-destructive/16 hover:text-destructive active:bg-destructive/16 active:text-destructive",
-                dictation.isTranscribing && "animate-pulse",
-                !dictation.isRecording &&
-                  !dictation.isEnabled &&
-                  "opacity-50 hover:bg-accent",
-              )}
-              aria-label={
-                dictation.isRecording
+        <div className="pointer-events-auto absolute inset-y-0 right-0 z-10 flex items-center gap-2">
+          <Button
+            type="button"
+            disabled={!dictation.isRecording && !dictation.isEnabled}
+            onClick={dictation.toggleRecording}
+            variant="composer-action"
+            size="icon-pill-sm"
+            className={cn(
+              dictation.isRecording &&
+                "bg-destructive/12 text-destructive hover:bg-destructive/16 hover:text-destructive active:bg-destructive/16 active:text-destructive",
+              dictation.isTranscribing && "animate-pulse",
+              !dictation.isRecording &&
+                !dictation.isEnabled &&
+                "opacity-50 hover:bg-accent",
+            )}
+            aria-label={
+              dictation.isRecording
+                ? t("toolbar.voiceInputRecording")
+                : t("toolbar.voiceInput")
+            }
+            aria-pressed={dictation.isRecording}
+            title={
+              !dictation.isEnabled
+                ? t("toolbar.voiceInputDisabled")
+                : dictation.isRecording
                   ? t("toolbar.voiceInputRecording")
-                  : t("toolbar.voiceInput")
-              }
-              aria-pressed={dictation.isRecording}
-              title={
-                !dictation.isEnabled
-                  ? t("toolbar.voiceInputDisabled")
-                  : dictation.isRecording
-                    ? t("toolbar.voiceInputRecording")
-                    : dictation.isTranscribing
-                      ? t("toolbar.voiceInputTranscribing")
-                      : t("toolbar.voiceInput")
-              }
-            >
-              <IconMicrophone aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              tabIndex={expanded ? 0 : -1}
-              onClick={handleSend}
-              disabled={!canSend}
-              variant="composer-action"
-              size="icon-pill-sm"
-              className={cn(!canSend && "disabled:opacity-100")}
-              aria-label={t("toolbar.sendMessage")}
-            >
-              <IconArrowUp aria-hidden="true" />
-            </Button>
-          </div>
+                  : dictation.isTranscribing
+                    ? t("toolbar.voiceInputTranscribing")
+                    : t("toolbar.voiceInput")
+            }
+          >
+            <IconMicrophone aria-hidden="true" />
+          </Button>
+          <Button
+            type="button"
+            onClick={handleSend}
+            disabled={!canSend}
+            variant="composer-action"
+            size="icon-pill-sm"
+            className={cn(!canSend && "disabled:opacity-100")}
+            aria-label={t("toolbar.sendMessage")}
+          >
+            <IconArrowUp aria-hidden="true" />
+          </Button>
         </div>
       </div>
     </div>
