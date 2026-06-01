@@ -242,6 +242,41 @@
   --canvas-project-tint: #d6dde7; /* slight cool tilt for project chats */
   --surface-composer: rgba(255, 255, 255, 0.2);
   --surface-composer-hover: rgba(255, 255, 255, 0.45);
+  /* Floating chat composer — muted gray tint; keep translucent for backdrop blur. */
+  --surface-chat-composer: color-mix(in srgb, var(--muted) 72%, transparent);
+  --surface-chat-composer-hover: color-mix(
+    in srgb,
+    var(--muted) 80%,
+    transparent
+  );
+  --surface-composer-action: var(--color-gray-300);
+  --surface-composer-action-hover: var(--color-gray-400);
+  --surface-composer-action-active: var(--color-gray-400);
+  --surface-chat-responding-pill-bg: var(--foreground);
+  --surface-chat-responding-pill-fg: var(--background);
+  --filter-chat-responding-goose: invert(1);
+  --chat-context-panel-bg: color-mix(
+    in srgb,
+    var(--color-gray-900) 60%,
+    transparent
+  );
+  --chat-context-panel-fg: var(--color-gray-50);
+  --chat-context-panel-muted-fg: color-mix(
+    in srgb,
+    var(--color-gray-50) 62%,
+    transparent
+  );
+  --chat-context-panel-border: color-mix(
+    in srgb,
+    var(--color-gray-50) 16%,
+    transparent
+  );
+  --chat-context-panel-accent: color-mix(
+    in srgb,
+    var(--color-gray-50) 10%,
+    transparent
+  );
+  --chat-context-panel-accent-fg: var(--color-gray-50);
   --surface-editor-panel-neutral: color-mix(
     in srgb,
     var(--color-gray-300) 52%,
@@ -425,6 +460,8 @@
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
   /* Floating panel hover (sidebar, global composer pill). */
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.05);
+  /* Chat composer: soft drop straight down. */
+  --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.09);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
   --shadow-date-field-focus: 0 0 0 3px rgba(26, 26, 26, 0.15);
   --shadow-agent-profile-avatar: 0 18px 28px rgba(36, 36, 36, 0.1);
@@ -503,13 +540,19 @@
 
   /* Chat layout */
   --chat-transcript-max-width: 768px;
-  --chat-transcript-inline-padding: 16px;
+  --chat-transcript-inline-padding: 46px;
   --chat-transcript-container-max-width: calc(
     var(--chat-transcript-max-width) +
     (var(--chat-transcript-inline-padding) * 2)
   );
   --chat-user-message-max-width: 640px;
   --chat-composer-max-width: 768px;
+  /* Space below the white chat column (composer overlaps this gap). */
+  --chat-surface-bottom-gap: 24px;
+  /* How far the composer overlaps the bottom of the white chat column. */
+  --chat-composer-surface-overlap: 28px;
+  /* Distance from the viewport bottom edge to the chat composer. */
+  --chat-composer-bottom-inset: 42px;
 
   /* App top bar chrome — deep charcoal controls beside the breadcrumb trail. */
   --app-top-bar-control-fg: #242424;
@@ -577,6 +620,36 @@
   --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);
+  --surface-chat-composer: color-mix(in srgb, var(--muted) 66%, transparent);
+  --surface-chat-composer-hover: color-mix(
+    in srgb,
+    var(--muted) 70%,
+    transparent
+  );
+  --surface-composer-action: var(--color-gray-700);
+  --surface-composer-action-hover: var(--color-gray-600);
+  --surface-composer-action-active: var(--color-gray-600);
+  --surface-chat-responding-pill-bg: var(--background);
+  --surface-chat-responding-pill-fg: var(--foreground);
+  --filter-chat-responding-goose: none;
+  --chat-context-panel-bg: color-mix(
+    in srgb,
+    var(--color-gray-50) 60%,
+    transparent
+  );
+  --chat-context-panel-fg: var(--color-gray-900);
+  --chat-context-panel-muted-fg: var(--color-gray-600);
+  --chat-context-panel-border: color-mix(
+    in srgb,
+    var(--color-gray-900) 18%,
+    transparent
+  );
+  --chat-context-panel-accent: color-mix(
+    in srgb,
+    var(--color-gray-900) 8%,
+    transparent
+  );
+  --chat-context-panel-accent-fg: var(--color-gray-900);
   --surface-editor-panel-neutral: var(--color-gray-800);
   --surface-editor-panel: color-mix(
     in oklab,
@@ -751,6 +824,7 @@
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
+  --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.28);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
   --shadow-agent-profile-avatar: 0 18px 32px rgba(0, 0, 0, 0.42);
@@ -800,6 +874,17 @@
   --color-canvas-project-tint: var(--canvas-project-tint);
   --color-surface-composer: var(--surface-composer);
   --color-surface-composer-hover: var(--surface-composer-hover);
+  --color-surface-chat-composer: var(--surface-chat-composer);
+  --color-surface-chat-composer-hover: var(--surface-chat-composer-hover);
+  --color-surface-composer-action: var(--surface-composer-action);
+  --color-surface-composer-action-hover: var(--surface-composer-action-hover);
+  --color-surface-composer-action-active: var(--surface-composer-action-active);
+  --color-surface-chat-responding-pill-bg: var(
+    --surface-chat-responding-pill-bg
+  );
+  --color-surface-chat-responding-pill-fg: var(
+    --surface-chat-responding-pill-fg
+  );
   --color-surface-composer-glass: var(--surface-composer-glass);
   --color-surface-editor-panel: var(--surface-editor-panel);
   --color-surface-agent-profile-bg: var(--surface-agent-profile-bg);
@@ -1360,6 +1445,16 @@ body,
 }
 
 @layer components {
+  /* Chat context panel — scoped palette for glass aside over the transcript. */
+  .chat-context-panel-surface {
+    --background: var(--chat-context-panel-bg);
+    --foreground: var(--chat-context-panel-fg);
+    --muted-foreground: var(--chat-context-panel-muted-fg);
+    --border: var(--chat-context-panel-border);
+    --accent: var(--chat-context-panel-accent);
+    --accent-foreground: var(--chat-context-panel-accent-fg);
+  }
+
   *:not(body):not(.focus-override) {
     outline: none !important;
   }

@@ -9,6 +9,7 @@ import {
   type SyntheticEvent,
   type WheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { IconArrowDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
@@ -45,6 +46,8 @@ interface MessageTimelineProps {
   /** Force the placeholder even when messages exist, e.g. while history is
       still loading. */
   showPlaceholder?: boolean;
+  /** When set, the footer is portaled here (e.g. viewport-bottom dock in ChatView). */
+  composerDockEl?: HTMLElement | null;
 }
 
 function isSameDay(a: number, b: number): boolean {
@@ -95,6 +98,7 @@ export function MessageTimeline({
   footerStatus,
   placeholder,
   showPlaceholder,
+  composerDockEl,
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
@@ -281,6 +285,7 @@ export function MessageTimeline({
     scrollToBottomIfNearBottom();
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: composerDockEl changes which footer node is observed.
   useLayoutEffect(() => {
     if (!hasFooter) {
       setFooterHeightPx(0);
@@ -307,7 +312,7 @@ export function MessageTimeline({
     const resizeObserver = new ResizeObserver(updateFooterHeight);
     resizeObserver.observe(footerElement);
     return () => resizeObserver.disconnect();
-  }, [hasFooter]);
+  }, [composerDockEl, hasFooter]);
 
   // When the floating footer changes height, it changes transcript padding.
   // Only users who are already following latest should be re-pinned.
@@ -517,7 +522,7 @@ export function MessageTimeline({
     hasFooterStatus ? (
       <Button
         type="button"
-        variant="glass"
+        variant="jump-to-latest"
         size="icon-sm"
         onClick={handleJumpToLatest}
         aria-label={jumpToLatestLabel}
@@ -528,7 +533,7 @@ export function MessageTimeline({
     ) : (
       <Button
         type="button"
-        variant="glass"
+        variant="jump-to-latest"
         size="sm"
         onClick={handleJumpToLatest}
         leftIcon={<IconArrowDown />}
@@ -643,16 +648,30 @@ export function MessageTimeline({
           </div>
         </div>
       </div>
-      {footer ? (
-        <div
-          ref={footerRef}
-          data-testid="message-timeline-footer"
-          className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex flex-col"
-        >
-          {footerControlRow}
-          {footer}
-        </div>
-      ) : null}
+      {footer
+        ? (() => {
+            const footerShell = (
+              <div
+                ref={footerRef}
+                data-testid="message-timeline-footer"
+                className="pointer-events-none flex flex-col"
+              >
+                {footerControlRow}
+                {footer}
+              </div>
+            );
+
+            if (composerDockEl) {
+              return createPortal(footerShell, composerDockEl);
+            }
+
+            return (
+              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex flex-col">
+                {footerShell}
+              </div>
+            );
+          })()
+        : null}
       {!footer && jumpToLatestButton ? (
         <div
           className="absolute left-1/2 -translate-x-1/2"

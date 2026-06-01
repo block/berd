@@ -533,7 +533,7 @@ export const MessageBubble = memo(function MessageBubble({
             "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
             "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
             isCopyConfirmed && "opacity-100 pointer-events-auto",
-            isUser ? "right-0" : "left-0",
+            isUser ? "right-0" : "-left-3",
           )}
         >
           <MessageBubbleActions

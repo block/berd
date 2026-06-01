@@ -165,6 +165,17 @@ describe("Button", () => {
     expect(icon).toHaveClass("size-3");
   });
 
+  it("renders the composer action variant with composer action tokens", () => {
+    render(<Button variant="composer-action">Branch</Button>);
+
+    const button = screen.getByRole("button", { name: "Branch" });
+    expect(button).toHaveClass(
+      "bg-surface-composer-action",
+      "hover:bg-surface-composer-action-hover",
+      "active:bg-surface-composer-action-active",
+    );
+  });
+
   it("renders the strong glass variant with strong glass tokens", () => {
     render(<Button variant="glass-strong">View</Button>);
 

@@ -1,16 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import {
-  Mic,
-  ArrowUp,
-  Square,
-  File,
-  FolderOpen,
-  Settings2,
-  Plus,
-} from "lucide-react";
+import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { IconLibraryPlusFilled } from "@tabler/icons-react";
+import {
+  IconLibraryPlusFilled,
+  IconPlayerStopFilled,
+} from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { ChatInputSelector } from "./ChatInputSelector";
 import { ContextRing } from "./ContextRing";
@@ -487,7 +482,7 @@ export function ChatInputToolbar({
               aria-label={t("toolbar.stopGeneration")}
               title={t("toolbar.stopGeneration")}
             >
-              <Square aria-hidden="true" />
+              <IconPlayerStopFilled className="size-3.5" aria-hidden="true" />
             </Button>
           ) : !sendButtonTooltip ? (
             <Button

@@ -121,7 +121,7 @@ export function AgentModelPicker({
       <PopoverTrigger asChild>
         <Button
           type="button"
-          variant="toolbar"
+          variant="composer-action"
           size="sm"
           aria-label={t("toolbar.chooseAgentModel")}
           tabIndex={triggerTabIndex}

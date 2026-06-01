@@ -54,7 +54,7 @@ function ChangedFileRow({
             {dir}
           </span>
         )}
-        <span className="shrink-0 whitespace-nowrap text-sm font-light text-foreground">
+        <span className="shrink-0 whitespace-nowrap text-sm font-normal text-foreground">
           {name}
         </span>
       </div>

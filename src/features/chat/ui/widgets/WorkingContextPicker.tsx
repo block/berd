@@ -227,11 +227,11 @@ export function WorkingContextPicker({
         <PopoverContent
           align="start"
           sideOffset={6}
-          className="max-h-80 w-[var(--radix-popover-trigger-width)] min-w-56 overflow-y-auto p-1.5 font-light"
+          className="max-h-80 w-[var(--radix-popover-trigger-width)] min-w-56 overflow-y-auto p-1.5 font-normal"
         >
           {hasWorktrees ? (
             <div>
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-light text-sidebar-foreground/55">
+              <p className="px-2 pb-1.5 pt-1 text-xxs font-normal text-sidebar-foreground/55">
                 {t("contextPanel.picker.worktrees")}
               </p>
               {worktrees.map((wt) => (
@@ -265,7 +265,7 @@ export function WorkingContextPicker({
             <div
               className={hasWorktrees ? "mt-1 border-t border-border pt-1" : ""}
             >
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-light text-sidebar-foreground/55">
+              <p className="px-2 pb-1.5 pt-1 text-xxs font-normal text-sidebar-foreground/55">
                 {t("contextPanel.picker.allBranches")}
               </p>
               {localBranches.map((branch) => {

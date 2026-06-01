@@ -48,6 +48,10 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `canvas-base`, `canvas-project-tint` | Goose's dot-grid app canvas and project tinting are product-specific. | `bg-canvas-base` |
 | `sidebar` | Frosted app chrome/sidebar/context-panel shell treatment. | `bg-sidebar` |
 | `surface-composer`, `surface-composer-glass`, `surface-composer-hover` | Composer-specific translucent surfaces and their hover counterpart. | `bg-surface-composer` |
+| `surface-chat-composer`, `surface-chat-composer-hover` | Floating chat composer shell over the transcript; muted translucent gray. | `bg-surface-chat-composer` |
+| `surface-composer-action`, `surface-composer-action-hover`, `surface-composer-action-active` | Chat composer toolbar control fills (agent/model pickers, branch selector). | `bg-surface-composer-action`, `hover:bg-surface-composer-action-hover` |
+| `surface-chat-responding-pill-bg`, `surface-chat-responding-pill-fg` | “Responding” status pill beside the composer; inverts with theme. | `bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg` |
+| `chat-context-panel-*` | Scoped palette for the glass chat context panel aside (background, foreground, accent). Applied via `.chat-context-panel-surface`. | `bg-background text-foreground` (scoped) |
 | `surface-glass-strong`, `surface-glass-strong-hover`, `surface-glass-strong-fg` | Stronger glass controls that sit over artwork or other visually busy media where ordinary foreground-on-glass can lose contrast. | `bg-surface-glass-strong text-surface-glass-strong-fg` |
 | `surface-agent-tile-action-*` | Agent tile View/Chat/⋯ controls: glass white + charcoal text in light theme, inverted surface in dark theme; hover/active/open invert foreground/background in both themes. | `bg-surface-agent-tile-action-bg text-surface-agent-tile-action-fg`, `hover:bg-surface-agent-tile-action-bg-hover` |
 | `surface-editor-panel` | Large slide-out editor panels use a translucent glass surface over the canvas. | `bg-surface-editor-panel` |

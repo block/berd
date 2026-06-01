@@ -61,7 +61,7 @@ export function ChatInputSelector({
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
-          variant={triggerVariant === "toolbar" ? "toolbar" : "outline"}
+          variant={triggerVariant === "toolbar" ? "composer-action" : "outline"}
           size={buttonSize}
           aria-label={ariaLabel}
           title={triggerTitle}

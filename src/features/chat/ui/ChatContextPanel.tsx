@@ -76,10 +76,10 @@ export function ChatContextPanel({
           <motion.div
             key="context-panel"
             className={cn(
-              "flex",
+              "flex self-start",
               isCompactViewport
                 ? "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]"
-                : "h-full",
+                : "max-h-full",
             )}
             style={
               isCompactViewport
@@ -95,8 +95,9 @@ export function ChatContextPanel({
           >
             <aside
               className={cn(
-                "flex min-w-0 flex-1 overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md",
-                isCompactViewport ? "max-h-full shadow-popover" : "h-full",
+                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-chrome bg-background text-foreground backdrop-blur-md",
+                "h-auto max-h-full overflow-y-auto",
+                isCompactViewport && "shadow-popover",
               )}
             >
               <ContextPanel

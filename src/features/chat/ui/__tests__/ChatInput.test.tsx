@@ -313,7 +313,7 @@ describe("ChatInput", () => {
       '[data-project-color-swatch="project-1"]',
     );
     expect(swatch).toBeInTheDocument();
-    expect(swatch).toHaveClass("size-3", "rounded-[3px]");
+    expect(swatch).toHaveClass("size-3.5", "rounded-[3px]");
     expect(swatch).not.toHaveClass("ring-1");
     expect(swatch).toHaveAttribute(
       "style",

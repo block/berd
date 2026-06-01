@@ -45,7 +45,7 @@ export function LoadingGoose({
   return (
     <motion.div
       className={cn(
-        "mb-3 flex min-h-4 items-center px-1 text-xs text-muted-foreground",
+        "mb-3 flex min-h-4 items-center px-1 text-xs font-normal text-current",
         className,
       )}
       role="status"

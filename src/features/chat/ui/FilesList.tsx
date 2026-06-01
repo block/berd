@@ -251,7 +251,7 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
   return (
     <div className="min-w-0 px-1 pb-1 pt-1">
       <FileTree
-        className="border-0 bg-transparent font-light"
+        className="border-0 bg-transparent font-normal"
         contentClassName="p-1"
         expanded={expandedPaths}
         onExpandedChange={handleExpandedChange}

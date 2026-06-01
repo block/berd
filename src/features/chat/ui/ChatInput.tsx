@@ -598,7 +598,7 @@ export function ChatInput({
                   disabled={disabled}
                   rows={1}
                   className={cn(
-                    "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm leading-relaxed text-foreground placeholder:font-light placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
+                    "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
                     // Backstop for the JS auto-resize cap (textareaMaxHeightPx).
                     surface === "bare" ? "max-h-[184px]" : "max-h-[200px]",
                     // The composer text scrolls with the cursor, but never shows

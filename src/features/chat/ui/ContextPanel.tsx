@@ -271,9 +271,9 @@ export function ContextPanel({
     <Tabs
       value={activeTab}
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
-      className="flex h-full min-h-0 max-h-full min-w-0 flex-1 flex-col gap-0"
+      className="flex w-full min-w-0 flex-col gap-0"
     >
-      <div className="shrink-0 border-b border-border/80 px-4 pb-2 pt-2.5">
+      <div className="shrink-0 px-5 pb-2 pt-2.5">
         <TabsList variant="weight">
           <TabsTrigger value="details" variant="weight">
             {t("contextPanel.tabs.details")}
@@ -283,9 +283,13 @@ export function ContextPanel({
           </TabsTrigger>
         </TabsList>
       </div>
+      <div className="mx-5 shrink-0 border-b border-border/80" aria-hidden />
 
-      <TabsContent value="details" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="pb-3">
+      <TabsContent
+        value="details"
+        className="w-full min-h-0 flex-1 overflow-y-auto"
+      >
+        <div className="w-full pb-3">
           <WorkspaceWidget
             projectName={projectName}
             projectColor={projectColor}
@@ -334,7 +338,7 @@ export function ContextPanel({
         </div>
       </TabsContent>
 
-      <TabsContent value="files" className="min-h-0 flex-1 overflow-y-auto">
+      <TabsContent value="files" className="w-full overflow-y-auto">
         <FilesList projectWorkingDirs={fileBrowserRoots} />
       </TabsContent>
     </Tabs>

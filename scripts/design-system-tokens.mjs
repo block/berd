@@ -101,7 +101,7 @@ const allowedBridgePatterns = [
   /^canvas-(?:base|project-tint)$/,
   /^app-top-bar-control-fg(?:-disabled)?$/,
   /^sidebar-section-action-(?:bg|fg)(?:-hover)?$/,
-  /^surface-(?:composer(?:-glass|-hover)?|editor-panel|glass-strong(?:-(?:hover|fg))?|agent-tile-action-(?:bg|fg)(?:-hover)?)$/,
+  /^surface-(?:composer(?:-(?:glass|hover|action(?:-(?:hover|active))?)?)?|chat-(?:composer(?:-hover)?|responding-pill-(?:bg|fg))|editor-panel|glass-strong(?:-(?:hover|fg))?|agent-tile-action-(?:bg|fg)(?:-hover)?)$/,
   /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
   /^message-user-bg$/,
   /^chip-(?:file|chat|project|agent|skill|automation)-(?:bg|fg)$/,

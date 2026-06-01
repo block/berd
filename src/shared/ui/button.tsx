@@ -43,7 +43,9 @@ const buttonVariants = cva(
         "top-bar-icon":
           "bg-transparent text-app-top-bar-control-fg shadow-none transition-[color,opacity] duration-200 ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-transparent hover:text-app-top-bar-control-fg hover:opacity-[var(--app-top-bar-control-hover-opacity)] active:bg-transparent active:text-app-top-bar-control-fg active:opacity-[var(--app-top-bar-control-hover-opacity)] focus-visible:bg-transparent data-[state=open]:bg-transparent data-[state=open]:text-app-top-bar-control-fg aria-expanded:bg-transparent aria-expanded:text-app-top-bar-control-fg disabled:!opacity-100 disabled:text-app-top-bar-control-fg-disabled disabled:hover:opacity-100 disabled:hover:text-app-top-bar-control-fg-disabled disabled:active:text-app-top-bar-control-fg-disabled disabled:focus-visible:text-app-top-bar-control-fg-disabled",
         "composer-action":
-          "bg-accent text-foreground shadow-none hover:bg-muted hover:text-foreground active:bg-secondary/40 active:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-secondary dark:active:bg-secondary dark:data-[state=open]:bg-secondary dark:aria-expanded:bg-secondary",
+          "bg-surface-composer-action text-foreground shadow-none hover:bg-surface-composer-action-hover hover:text-foreground active:bg-surface-composer-action-active active:text-foreground data-[state=open]:bg-surface-composer-action-hover data-[state=open]:text-foreground aria-expanded:bg-surface-composer-action-hover aria-expanded:text-foreground",
+        "jump-to-latest":
+          "bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] hover:opacity-90",
         "page-header":
           "bg-background text-muted-foreground shadow-none hover:bg-background hover:text-foreground focus-visible:text-foreground active:text-foreground",
         back: "justify-start text-muted-foreground hover:text-foreground",

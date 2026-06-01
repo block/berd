@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
@@ -24,6 +30,16 @@ import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
+import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+
+const CHAT_COMPOSER_SHELL_CLASS =
+  "rounded-composer bg-surface-chat-composer shadow-[var(--shadow-chat-composer)] [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
+const CHAT_RESPONDING_PILL_CLASS =
+  "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]";
+const CHAT_RESPONDING_GOOSE_CLASS =
+  "[filter:var(--filter-chat-responding-goose)]";
+const CHAT_COMPOSER_DOCK_BOTTOM_CLASS =
+  "bottom-[calc(var(--chat-composer-bottom-inset)-var(--spacing-app-panel-gutter-bottom)-var(--chat-composer-surface-overlap))]";
 
 interface TerminalWorkspaceState {
   paths: string[];
@@ -83,6 +99,9 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
+  const [composerDockEl, setComposerDockEl] = useState<HTMLDivElement | null>(
+    null,
+  );
   const previousTerminalCwdRef = useRef<string | null>(null);
   const setTopBarActions = useSetTopBarActions();
   const {
@@ -322,7 +341,16 @@ export function ChatView({
   // empty, and populated states without losing focus or draft text.
   const footerStatus = shouldShowLoadingIndicator ? (
     <AnimatePresence initial={false}>
-      <div className="flex h-8 items-center rounded-full bg-surface-composer px-3 shadow-[var(--shadow-chat)] backdrop-blur-md">
+      <div
+        className={cn(
+          "flex h-8 items-center gap-2 px-3",
+          CHAT_RESPONDING_PILL_CLASS,
+        )}
+      >
+        <ActiveChatGooseIndicator
+          size={14}
+          className={CHAT_RESPONDING_GOOSE_CLASS}
+        />
         <LoadingGoose
           key="loading-indicator"
           chatState={loadingChatState}
@@ -333,7 +361,12 @@ export function ChatView({
   ) : null;
   const composerFooter = (
     <div className="px-4">
-      <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
+      <div
+        className={cn(
+          "pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)]",
+          CHAT_COMPOSER_SHELL_CLASS,
+        )}
+      >
         <ChatInput
           surface="bare"
           placeholder={
@@ -414,7 +447,7 @@ export function ChatView({
     <ChatLoadingSkeleton />
   ) : (
     <div className="flex w-full flex-1 items-center justify-center px-6">
-      <p className="text-3xl font-light text-foreground">
+      <p className="text-3xl font-normal text-foreground">
         {isAgentBuilderSession
           ? agentBuilderEmptyPrompt
           : t("emptyState.startAConversation")}
@@ -433,6 +466,7 @@ export function ChatView({
       placeholder={conversationPlaceholder}
       footer={composerFooter}
       footerStatus={footerStatus}
+      composerDockEl={composerDockEl}
     />
   );
 
@@ -455,7 +489,14 @@ export function ChatView({
           )}
           style={agentBuilderChatColumnStyle}
         >
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-card">
+          <div
+            ref={setComposerDockEl}
+            className={cn(
+              "pointer-events-none absolute inset-x-0 z-30 flex flex-col",
+              CHAT_COMPOSER_DOCK_BOTTOM_CLASS,
+            )}
+          />
+          <div className="relative mb-[var(--chat-surface-bottom-gap)] flex min-h-0 flex-1 flex-col overflow-hidden rounded-chrome bg-card">
             {messageTimeline}
           </div>
           {terminalVisible ? (

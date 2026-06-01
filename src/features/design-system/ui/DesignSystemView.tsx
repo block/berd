@@ -1028,26 +1028,40 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
     {
       anatomy: "Button",
       state: "Default",
-      background: "--accent",
+      background: "--surface-composer-action",
       textIcon: "--foreground",
     },
     {
       anatomy: "Button",
       state: "Hover",
-      background: "--muted; dark: --secondary",
+      background: "--surface-composer-action-hover",
       textIcon: "--foreground",
     },
     {
       anatomy: "Button",
       state: "Active",
-      background: "--secondary / 40%; dark: --secondary",
+      background: "--surface-composer-action-active",
       textIcon: "--foreground",
     },
     {
       anatomy: "Button",
       state: "Open",
-      background: "--muted; dark: --secondary",
+      background: "--surface-composer-action-hover",
       textIcon: "--foreground",
+    },
+  ],
+  "jump-to-latest": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "--surface-chat-responding-pill-bg",
+      textIcon: "--surface-chat-responding-pill-fg",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "--surface-chat-responding-pill-bg / 90%",
+      textIcon: "--surface-chat-responding-pill-fg",
     },
   ],
   back: [

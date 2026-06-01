@@ -37,7 +37,7 @@ describe("ChatContextPanel", () => {
     mockMatchMedia(false);
   });
 
-  it("uses full-height layout without overlay shadow in inline mode", () => {
+  it("hugs content height without overlay shadow in inline mode", () => {
     const { container } = render(
       <ChatContextPanel activeSessionId="session-1" isOpen />,
     );
@@ -45,11 +45,15 @@ describe("ChatContextPanel", () => {
     const frame = container.querySelector("aside")?.parentElement;
     const panel = container.querySelector("aside");
 
-    expect(frame).toHaveClass("h-full");
+    expect(frame).toHaveClass("self-start");
+    expect(frame).toHaveClass("max-h-full");
+    expect(frame).not.toHaveClass("h-full");
     expect(frame).not.toHaveClass(
       "max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
     );
-    expect(panel).toHaveClass("h-full");
+    expect(panel).toHaveClass("h-auto");
+    expect(panel).toHaveClass("max-h-full");
+    expect(panel).not.toHaveClass("h-full");
     expect(panel).not.toHaveClass("shadow-popover");
   });
 
