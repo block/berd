@@ -82,6 +82,19 @@ Run these as passes, then consolidate findings before presenting them. A finding
 - Are design system components, tokens, and utilities used instead of custom styling?
 - Are raw HTML controls avoided when the repo has shared primitives for the same job?
 - Are theme tokens used for colors that must work across themes?
+- For design-system changes, check the local guidance in `DESIGN.md`, `docs/color-token-mapping.md`, `src/shared/ui/AGENTS.md`, and `src/features/design-system/AGENTS.md` before judging the implementation.
+- Check every changed visual surface in both light and dark mode. Missing dark-mode support is a review issue, not visual polish.
+- Flag raw light/dark colors in component code, such as `text-black`, `bg-white`, `border-gray-*`, hex colors, or inline color styles, unless there is an approved design-system exception.
+- Do not accept component-local `dark:` class patches for new color behavior when a semantic token can own the theme switch. New reusable color behavior must use semantic tokens with both `:root` and `.dark` values.
+- When a PR adds a new token, require the token to have the right theme mapping, Tailwind bridge if needed, design-system manifest/docs coverage, and state coverage for default, hover, active/open, disabled, and focus-visible states.
+- If a component creates a new visual pattern with repeated light/dark behavior, flag it as a design-system issue unless it is implemented as a shared variant or tokenized component pattern.
+- Treat missing dark-mode support, raw light/dark colors, and new tokens without dark-mode mapping as [Must Fix] design-system findings unless the PR includes an explicit approved exception.
+- New token names must describe product meaning, anatomy, property, and state, not the literal color or implementation. Use names shaped like `--<scope>-<role>-<property>` or `--<scope>-<role>-<property>-<state>`, such as `--app-top-bar-control-fg-disabled`; reject names like `--black-icon`, `--gray-hover`, `--light-button`, or broad aliases that duplicate shadcn tokens.
+- Use shadcn token names first for shared anatomy (`background`, `foreground`, `card`, `popover`, `muted`, `accent`, `primary`, `destructive`, `border`, `input`, `ring`). Goose extension tokens are allowed only for narrow product-specific surfaces or identities that do not map honestly to shadcn.
+- Shared component APIs must carry reusable visual behavior. Add or extend a `variant` when the component needs a reusable visual treatment, intent, or product-surface role. Add or extend `size` when only spatial scale changes. Add a named prop when the component owns a semantic behavior or state, such as `loading`, `selected`, `invalid`, `open`, `feedbackState`, or `leftIcon`.
+- Do not add boolean props that only toggle arbitrary class bundles. If a prop would mean "make it black", "add the special hover", or "use this one-off layout", require a semantic variant, size, token, or small composed wrapper instead.
+- `className` in feature code may handle local layout and positioning. It must not be the primary home for repeated color, typography, radius, shadow, icon sizing, hover, active, selected, disabled, or focus behavior. Flag repeated `className` styling as a design-system issue.
+- If a PR adds or changes a shared component variant, prop, token, or state, require the design-system explorer/manifest/token docs to stay in sync and expect `pnpm design-system:generate`, `pnpm design-system:tokens`, `pnpm design-system:manifest-check`, and relevant checks/tests to pass.
 - Are utility classes static and compatible with the project's build tooling?
 - Does the layout work across the breakpoints this feature supports?
 - Are visual changes consistent with the existing product surface?
