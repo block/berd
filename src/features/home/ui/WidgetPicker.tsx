@@ -35,10 +35,25 @@ import {
 } from "../widgets/skillQueryKey";
 import type { WidgetCategory, WidgetInstance } from "../widgets/types";
 
+/**
+ * Width of the picker's stage-two card and the popover's offset from its
+ * anchor. Exported so the canvas can decide which side to open on using the
+ * same source-of-truth values (see `WidgetCanvas`), keeping the two stages on
+ * the same side of the click near the right screen edge.
+ */
+export const WIDGET_PICKER_WIDTH = 280;
+export const WIDGET_PICKER_SIDE_OFFSET = 10;
+
 interface WidgetPickerProps {
   open: boolean;
   x: number;
   y: number;
+  /**
+   * Which side of the anchor to open on. Decided up front by the canvas based
+   * on room for the widest stage, so both picker stages stay on the same side
+   * of the click instead of flipping across it near the right screen edge.
+   */
+  side?: "left" | "right";
   instances: WidgetInstance[];
   onClose: () => void;
   onSelect: (type: string, state?: Record<string, unknown>) => void;
@@ -332,6 +347,7 @@ export function WidgetPicker({
   open,
   x,
   y,
+  side = "right",
   instances,
   onClose,
   onSelect,
@@ -515,18 +531,21 @@ export function WidgetPicker({
       </PopoverAnchor>
       <PopoverContent
         align="start"
-        side="right"
-        sideOffset={10}
+        side={side}
+        sideOffset={WIDGET_PICKER_SIDE_OFFSET}
         onPointerDownCapture={(event) => event.stopPropagation()}
         onDoubleClickCapture={(event) => event.stopPropagation()}
         onWheelCapture={(event) => event.stopPropagation()}
         onOpenAutoFocus={(event) => event.preventDefault()}
         // Transparent shell: stage 1 is just floating pills, stage 2 supplies
         // its own white card. The popover surface itself contributes no chrome.
-        style={{ boxShadow: "none" }}
+        style={{
+          boxShadow: "none",
+          ...(activePanel ? { width: WIDGET_PICKER_WIDTH } : {}),
+        }}
         className={cn(
           "border-0 bg-transparent p-0 shadow-none outline-none",
-          activePanel ? "w-[280px]" : "w-auto",
+          !activePanel && "w-auto",
         )}
       >
         {activePanel ? (
@@ -585,7 +604,7 @@ function PanelStageOne({
   getSectionLabel,
 }: PanelStageOneProps) {
   return (
-    <div className="flex flex-col items-start gap-3">
+    <div className="flex flex-col items-start gap-1.5">
       <div className="flex items-center gap-2 text-foreground">
         <span aria-hidden="true" className="text-base leading-none">
           {/* i18n-check-ignore: emoji glyph, not translatable copy */}📌
@@ -598,14 +617,17 @@ function PanelStageOne({
           type="button"
           onClick={() => onSelectCategory(category)}
           className={cn(
-            "rounded-pill bg-popover-inverse px-4 py-2 text-sm text-popover-inverse-foreground",
+            "inline-flex h-[30px] items-center rounded-pill bg-popover-inverse px-3 text-sm text-popover-inverse-foreground",
             "transition-[transform,background-color,opacity] duration-200 ease-out",
             "hover:scale-[1.03] hover:bg-popover-inverse/85",
             "active:scale-[0.97] active:duration-75",
             "disabled:opacity-50",
           )}
         >
-          {getSectionLabel(category)}
+          {/* Optically nudge the label up 2px within the pill. */}
+          <span className="-translate-y-[2px]">
+            {getSectionLabel(category)}
+          </span>
         </button>
       ))}
     </div>

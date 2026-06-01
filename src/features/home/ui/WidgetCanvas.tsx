@@ -18,7 +18,11 @@ import type {
   WidgetNavigationHandlers,
 } from "../widgets/types";
 import { WidgetFrame } from "./WidgetFrame";
-import { WidgetPicker } from "./WidgetPicker";
+import {
+  WIDGET_PICKER_SIDE_OFFSET,
+  WIDGET_PICKER_WIDTH,
+  WidgetPicker,
+} from "./WidgetPicker";
 import { useHomeCanvasViewport } from "./useHomeCanvasViewport";
 import { useWidgetDragSuppression } from "./useWidgetDragSuppression";
 
@@ -45,7 +49,15 @@ interface PickerState {
   y: number;
   worldX: number;
   worldY: number;
+  side: "left" | "right";
 }
+
+// We decide which side to open the picker on up front using its widest stage,
+// so the narrow stage-one pills and the wide stage-two card stay on the same
+// side of the click instead of the card flipping across the cursor near the
+// right edge of the screen. Width/offset come from the picker itself so the two
+// stay in sync.
+const PICKER_VIEWPORT_EDGE_PADDING = 16;
 
 const DEFAULT_CAMERA: LayoutCamera = {
   centerX: 0,
@@ -274,6 +286,7 @@ export function WidgetCanvas({
     y: 0,
     worldX: 0,
     worldY: 0,
+    side: "right",
   });
   const devicePixelRatio = useDevicePixelRatio();
 
@@ -366,12 +379,24 @@ export function WidgetCanvas({
         y: event.clientY,
       });
 
+      // Open leftward when the wide stage-two card wouldn't fit to the right of
+      // the cursor, so the menu hugs the click instead of jumping across it.
+      const roomOnRight = window.innerWidth - event.clientX;
+      const side: "left" | "right" =
+        roomOnRight <
+        WIDGET_PICKER_WIDTH +
+          WIDGET_PICKER_SIDE_OFFSET +
+          PICKER_VIEWPORT_EDGE_PADDING
+          ? "left"
+          : "right";
+
       setPicker({
         open: true,
         x: screenPoint.x,
         y: screenPoint.y,
         worldX: worldPoint.x,
         worldY: worldPoint.y,
+        side,
       });
     },
     [canvasRef, worldPointForClientPoint],
@@ -546,6 +571,7 @@ export function WidgetCanvas({
         open={picker.open}
         x={picker.x}
         y={picker.y}
+        side={picker.side}
         instances={instances}
         onClose={closePicker}
         onSelect={(type, state) => {
