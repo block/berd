@@ -128,9 +128,10 @@ describe("AppShell startup diagnostics", () => {
     expect(
       screen.getByRole("status", { name: "Starting Goose" }),
     ).toBeInTheDocument();
-    expect(container.querySelector("video")).toBeInTheDocument();
-    expect(container.querySelector('source[type="video/mp4"]')).toBeTruthy();
-    expect(container.querySelector('source[type="video/webm"]')).toBeTruthy();
+    expect(
+      container.querySelector('img[src*="startup-loading"]'),
+    ).toBeInTheDocument();
+    expect(container.querySelector("video")).toBeNull();
     expect(screen.queryByTestId("app-shell-content")).not.toBeInTheDocument();
   });
 

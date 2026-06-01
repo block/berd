@@ -1,37 +1,45 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "motion/react";
 
-import gooseStartupLoadingMp4 from "@/app/assets/goose-startup-loading.mp4";
-import gooseStartupLoadingWebm from "@/app/assets/goose-startup-loading.webm";
-import { Spinner } from "@/shared/ui/spinner";
+import startupLoadingGif from "@/app/assets/startup-loading.gif";
+import startupLoadingPoster from "@/app/assets/startup-loading-poster.png";
+import { STARTUP_LOADING_LOGO_SIZE_PX } from "@/app/lib/startupLoading";
+
+const startupLoadingLogoStyle = {
+  width: STARTUP_LOADING_LOGO_SIZE_PX,
+  height: STARTUP_LOADING_LOGO_SIZE_PX,
+} as const;
 
 export function StartupLoadingView() {
   const { t } = useTranslation("common");
   const shouldReduceMotion = useReducedMotion();
-  const [videoFailed, setVideoFailed] = useState(false);
 
   return (
     <div
-      className="flex h-screen w-screen items-center justify-center bg-background text-foreground"
+      className="flex h-screen w-screen items-center justify-center bg-dot-grid text-foreground"
       role="status"
       aria-label={t("startup.loadingLabel")}
     >
-      {shouldReduceMotion || videoFailed ? (
-        <Spinner decorative className="size-5 text-primary" />
+      {shouldReduceMotion ? (
+        <img
+          src={startupLoadingPoster}
+          alt=""
+          aria-hidden
+          className="pointer-events-none object-contain"
+          style={startupLoadingLogoStyle}
+          decoding="sync"
+          fetchPriority="high"
+        />
       ) : (
-        <video
-          className="size-16 text-primary"
-          autoPlay
-          loop
-          muted
-          playsInline
-          preload="auto"
-          onError={() => setVideoFailed(true)}
-        >
-          <source src={gooseStartupLoadingMp4} type="video/mp4" />
-          <source src={gooseStartupLoadingWebm} type="video/webm" />
-        </video>
+        <img
+          src={startupLoadingGif}
+          alt=""
+          aria-hidden
+          className="pointer-events-none object-contain"
+          style={startupLoadingLogoStyle}
+          decoding="async"
+          fetchPriority="high"
+        />
       )}
     </div>
   );

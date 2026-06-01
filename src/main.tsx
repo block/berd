@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
 
+import { preloadStartupLoadingMedia } from "@/app/lib/preloadStartupLoadingMedia";
 import { App } from "@/app/App";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
@@ -17,6 +18,8 @@ try {
 } catch {
   // localStorage may be unavailable in some environments; ignore.
 }
+
+preloadStartupLoadingMedia();
 
 const queryClient = new QueryClient({
   defaultOptions: {

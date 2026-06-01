@@ -97,6 +97,7 @@ import type {
   AutomationNavigationRoute,
 } from "./types/appNavigation";
 import type { TopBarBreadcrumb } from "./ui/TopBar";
+import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
 import { StartupLoadingView } from "./ui/StartupLoadingView";
 export type { AppView } from "./types/appNavigation";
 
@@ -342,6 +343,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     openEditProjectDialog,
   } = useProjectDialog({ onProjectCreated: refreshProjectsAfterDialogSave });
   const startup = useAppStartup();
+  const [startupLoadingMinElapsed, setStartupLoadingMinElapsed] = useState(
+    () => startup.ready,
+  );
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(
+      () => setStartupLoadingMinElapsed(true),
+      STARTUP_LOADING_MIN_DISPLAY_MS,
+    );
+
+    return () => window.clearTimeout(timeoutId);
+  }, []);
   const startupReady = startup.ready && !startup.error;
   const migrationGate = useMigrationGate(startupReady);
   const migrationSettled =
@@ -1855,7 +1868,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     };
   }, [showGlobalComposer]);
 
-  if (forceStartupLoading || !startup.ready) {
+  if (forceStartupLoading || !startup.ready || !startupLoadingMinElapsed) {
     return <StartupLoadingView />;
   }
 
