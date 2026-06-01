@@ -1,9 +1,16 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconEdit, IconMessage } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit } from "@tabler/icons-react";
+import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import {
+  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+  SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
+  SIDEBAR_SECTION_ACTION_PILL_CLASS,
+  SIDEBAR_SECTION_HEADER_ROW_CLASS,
+} from "@/shared/ui/sidebar-tokens";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarChatRow } from "./SidebarChatRow";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
@@ -111,15 +118,24 @@ export function SidebarRecentsSection({
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
     <div
-      className="mt-4 border-t border-sidebar-border/80"
       onDragOver={handleRecentsDragOver}
       onDragLeave={handleRecentsDragLeave}
       onDrop={handleRecentsDrop}
     >
       <div
         className={cn(
-          "relative group/chats-header flex items-center transition-all duration-300",
-          collapsed ? "px-0 pt-0 pb-1 justify-center" : "pl-3 pr-0 pt-3 pb-1.5",
+          SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+          SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
+          "border-t border-sidebar-border/80",
+        )}
+        aria-hidden
+      />
+      <div
+        className={cn(
+          "relative group/chats-header flex items-center",
+          collapsed
+            ? "px-0 pt-0 pb-1 justify-center"
+            : SIDEBAR_SECTION_HEADER_ROW_CLASS,
         )}
       >
         {!collapsed && (
@@ -128,44 +144,43 @@ export function SidebarRecentsSection({
             onClick={onToggleOpen}
             aria-expanded={isOpen}
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-sidebar-foreground",
-              "-ml-3",
+              "flex min-w-0 flex-1 items-center gap-0.5 rounded-md py-1 text-left transition-colors hover:text-sidebar-foreground",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"
                 : "opacity-0 w-0 overflow-hidden",
             )}
           >
-            <IconChevronDown
-              className={cn(
-                "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
-                !isOpen && "-rotate-90",
-              )}
-            />
             <span className={cn("truncate", sectionHeaderTextClass)}>
               {t("sections.recents")}
             </span>
+            <IconChevronDown
+              className={cn(
+                "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150",
+                "group-hover/chats-header:opacity-100",
+                !isOpen && "-rotate-90",
+              )}
+            />
           </button>
         )}
         {!collapsed && onNewChat && !showEmptyState && (
           <Button
             type="button"
             variant="ghost"
-            size="icon-xs"
+            size="xs"
             onClick={onNewChat}
-            aria-label={t("actions.newChat")}
-            title={t("actions.newChat")}
+            title={t("empty.startChat")}
             className={cn(
-              "mr-1 size-6 flex-shrink-0 rounded-md text-sidebar-foreground/40 hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
+              SIDEBAR_SECTION_ACTION_PILL_CLASS,
               "opacity-0 pointer-events-none group-hover/chats-header:opacity-100 group-hover/chats-header:pointer-events-auto group-focus-within/chats-header:opacity-100 group-focus-within/chats-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto",
             )}
           >
-            <IconEdit className="size-4" />
+            {t("empty.startChat")}
           </Button>
         )}
 
         {recentsDragOver && (
-          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
+          <div className="absolute bottom-0 left-3.5 right-3.5 h-px bg-sidebar-foreground" />
         )}
       </div>
 
@@ -216,12 +231,14 @@ export function SidebarRecentsSection({
                   : "text-sidebar-foreground hover:text-sidebar-foreground",
               )}
             >
-              <IconMessage className="size-4" />
-              <SessionActivityIndicator
-                isRunning={session.isRunning}
-                hasUnread={session.hasUnread}
-                variant="overlay"
-              />
+              <SidebarChatMenuIcon />
+              {session.isRunning ? (
+                <SessionActivityIndicator isRunning variant="overlay" />
+              ) : session.hasUnread ? (
+                <span className="absolute -right-0.5 -top-0.5">
+                  <SessionActivityIndicator hasUnread variant="overlay" />
+                </span>
+              ) : null}
             </Button>
           ))}
         </div>

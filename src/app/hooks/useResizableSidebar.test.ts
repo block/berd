@@ -61,7 +61,7 @@ describe("useResizableSidebar", () => {
 
     expect(result.current.isCollapsed).toBe(false);
     expect(result.current.sidebarCollapsed).toBe(false);
-    expect(result.current.sidebarWidth).toBeGreaterThan(0);
+    expect(result.current.sidebarWidth).toBe(200);
     expect(result.current.sidebarOuterWidth).toBeGreaterThan(
       result.current.sidebarWidth,
     );

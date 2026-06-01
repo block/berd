@@ -307,7 +307,7 @@ const componentPageDescriptions: Partial<Record<string, string>> = {
   Sheet:
     "Side-panel modal surfaces for secondary workflows and mobile-friendly overlays.",
   Sidebar:
-    "Application sidebar primitives for grouped navigation, rail behavior, and nested menus.",
+    "Application sidebar primitives for grouped navigation, rail behavior, and nested menus. Nav labels use regular weight via --sidebar-nav-font-weight and SIDEBAR_NAV_TEXT_CLASS.",
   Skeleton:
     "Loading placeholders that preserve layout while async content resolves.",
   Slider:
@@ -507,6 +507,22 @@ const appChromeColorTokens: RuntimeToken[] = [
     description:
       "70% opacity hover affordance for clickable top bar icons and breadcrumb links.",
   },
+  {
+    name: "--sidebar-section-action-bg",
+    description: "Sidebar section header action pill background.",
+  },
+  {
+    name: "--sidebar-section-action-fg",
+    description: "Sidebar section header action pill label color.",
+  },
+  {
+    name: "--sidebar-section-action-bg-hover",
+    description: "Sidebar section header action pill hover background.",
+  },
+  {
+    name: "--sidebar-section-action-fg-hover",
+    description: "Sidebar section header action pill hover label color.",
+  },
 ];
 
 const elevationTokens: RuntimeToken[] = [
@@ -517,6 +533,11 @@ const elevationTokens: RuntimeToken[] = [
   { name: "--shadow-elevated", description: "Elevated panel shadow." },
   { name: "--shadow-popover", description: "Popover shadow." },
   { name: "--shadow-modal", description: "Modal shadow." },
+  {
+    name: "--shadow-sidebar-panel-elevated",
+    description:
+      "Sidebar panel hover shadow (modal blur, +30px right, +42px down, 5% opacity light).",
+  },
   { name: "--shadow-kbd", description: "Keyboard key shadow." },
   {
     name: "--shadow-date-field-focus",
@@ -544,6 +565,7 @@ const typographyTokens = [
   "--font-sans",
   "--font-display",
   "--font-mono",
+  "--sidebar-nav-font-weight",
   "--text-xxs",
   "--text-app-top-bar-title",
   "--text-app-top-bar-title-leading",
@@ -2108,6 +2130,11 @@ function ComponentTokenDetails({
 
 const typographyInventory = [
   { className: "text-xs", count: "250", role: "Small metadata and labels" },
+  {
+    className: "SIDEBAR_NAV_TEXT_CLASS",
+    count: "app sidebar",
+    role: "Sidebar nav labels at regular weight (text-sm font-normal)",
+  },
   { className: "text-sm", count: "276", role: "Default interface body" },
   { className: "text-base", count: "6", role: "Inputs and larger body text" },
   { className: "text-[11px]", count: "33", role: "One-off compact labels" },

@@ -1,6 +1,9 @@
 /** `startup-loading.gif` — keep in sync with `scripts/build-startup-loading-gif.sh` output. */
 export const STARTUP_LOADING_GIF_FRAME_COUNT = 62;
 export const STARTUP_LOADING_GIF_FPS = 24;
+
+/** `startup-loading-chat.gif` uses setpts=1/1.6 in the build script for faster wing flap. */
+export const STARTUP_LOADING_CHAT_GIF_SPEED = 1.6;
 export const STARTUP_LOADING_LOOP_COUNT = 2;
 
 const STARTUP_LOADING_GIF_LOOP_MS = Math.round(

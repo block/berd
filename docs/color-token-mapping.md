@@ -59,6 +59,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `popover-inverse` | Dark popover on light UI for specific inverse menus. | `bg-popover-inverse text-popover-inverse-foreground` |
 | `clock-face`, `clock-mark`, `clock-hand`, `sticky-note-*`, `dark-*`, `dot-*`, `status-*`, `chart-*` | Product visuals, charts, activity states, onboarding sticky notes, and canvas details. `clock-face` and `clock-mark` flip between themes; `clock-hand` stays red in both. Sticky note tokens include note surfaces and muted text. | `bg-clock-face`, `bg-clock-mark`, `bg-clock-hand`, `bg-sticky-note-warm`, `text-status-added` |
 | `app-top-bar-control-fg`, `app-top-bar-control-fg-disabled`, `app-top-bar-control-hover-opacity` | Deep charcoal top bar controls beside the breadcrumb trail; disabled back/forward use 35% opacity of the control foreground; clickable controls fade to 70% opacity on hover. Light theme pins `#242424`; dark theme follows `foreground`. | `text-app-top-bar-control-fg`, `text-app-top-bar-control-fg-disabled`, `hover:opacity-[var(--app-top-bar-control-hover-opacity)]` |
+| `sidebar-section-action-*` | Scoped action-pill colors for Projects / Chats section header controls. The token layer owns default and hover contrast for light and dark themes. | `bg-sidebar-section-action-bg`, `hover:bg-sidebar-section-action-bg-hover`, `text-sidebar-section-action-fg-hover` |
 
 ## Deleted Or Replaced Names
 
@@ -80,6 +81,7 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 | `border-input` old alias | `input` | shadcn input token. |
 | `border-focus`, `ring-focus` | `ring` | shadcn focus token. |
 | `sidebar-nav-bg-hover`, `sidebar-nav-bg-selected`, `sidebar-nav-fg` | `sidebar-accent`, `sidebar-accent-foreground`, `sidebar-foreground` | shadcn already has sidebar state tokens. |
+| `sidebar-nav-font-weight-light` | `--sidebar-nav-font-weight` (400), `font-normal`, `SIDEBAR_NAV_TEXT_CLASS` | Sidebar navigation labels use regular weight, not light. |
 
 ## Button State Mapping
 

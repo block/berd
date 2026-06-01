@@ -11,7 +11,12 @@ import type { ProjectInfo } from "@/features/projects/api/projects";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import {
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_TEXT_CLASS,
+} from "@/shared/ui/sidebar-tokens";
 import { SidebarChatRow } from "./SidebarChatRow";
+import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import { SidebarItemMenu } from "./SidebarItemMenu";
 
@@ -89,6 +94,7 @@ export function SidebarProjectSection({
   const [showExpandedChats, setShowExpandedChats] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const projectHasUnread = projectChats.some((session) => session.hasUnread);
   const {
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
@@ -178,7 +184,8 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+          "relative flex items-center group rounded-md hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+          SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
           menuOpen && "bg-sidebar-accent",
         )}
       >
@@ -188,18 +195,19 @@ export function SidebarProjectSection({
           size="sm"
           onClick={() => toggleProject(project.id)}
           className={cn(
-            "flex-1 min-w-0 justify-start gap-2 rounded-md px-3 py-2 text-sm font-light",
+            "flex-1 min-w-0 justify-start gap-2 rounded-md px-3 py-2",
+            SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+            SIDEBAR_NAV_TEXT_CLASS,
             PROJECT_ROW_TEXT_CLASS,
           )}
         >
-          <span className="relative flex h-4 w-4 flex-shrink-0 items-center justify-center text-sidebar-foreground">
+          <span className="relative flex size-[18px] flex-shrink-0 items-center justify-center text-sidebar-foreground">
             <span className="absolute group-hover:opacity-0">
               <ProjectIcon
                 icon={project.icon}
                 color={project.color}
                 projectId={project.id}
-                className="size-3 rounded-[3px]"
-                imageClassName="size-4 rounded-[4px]"
+                imageClassName="size-[18px] rounded-[4px]"
               />
             </span>
             {isExpanded ? (
@@ -212,6 +220,7 @@ export function SidebarProjectSection({
             {project.name}
           </span>
         </Button>
+        {projectHasUnread && <SidebarUnreadDot />}
         <SidebarItemMenu
           label={project.name}
           onOpenChange={setMenuOpen}

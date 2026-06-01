@@ -271,7 +271,7 @@ Use [Input](/Users/morganm/Development/goose-internal/src/shared/ui/input.tsx), 
 
 Use the shared sidebar and nav item patterns as the baseline.
 
-- **Sidebar items:** `bg-sidebar-nav-bg-hover` for hover/focus, `bg-sidebar-nav-bg-selected` for active/menu-open, stable nav foreground text, compact padding, `rounded-md`.
+- **Sidebar items:** `bg-sidebar-nav-bg-hover` for hover/focus, `bg-sidebar-nav-bg-selected` for active/menu-open, stable nav foreground text, compact padding, `rounded-md`, and regular-weight labels via `--sidebar-nav-font-weight` / `SIDEBAR_NAV_TEXT_CLASS` (`text-sm font-normal`).
 - **Top bar:** compact icon-only actions using `Button` ghost icon variants.
 - **State:** Active state should be visible without relying on color alone.
 - **Behavior:** Collapsed labels may fade and width-collapse, but navigation must remain keyboard and screen-reader legible.

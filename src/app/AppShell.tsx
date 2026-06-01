@@ -226,6 +226,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     resizeHandleWidth,
     sidebarOuterHeight,
     sidebarOuterWidth,
+    sidebarPanelOuterWidth,
     sidebarWidth,
     toggleCollapse: toggleSidebar,
   } = useResizableSidebar();
@@ -1902,7 +1903,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           onSearchClick: () => handleNavigate("search"),
         }}
         sidebar={{
-          collapsed: sidebarCollapsed,
+          collapsed: false,
           width: sidebarWidth,
           isResizing,
           onSettingsClick: () => handleNavigate("settings"),
@@ -1940,6 +1941,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         }}
         sidebarCollapsed={sidebarCollapsed}
         sidebarOuterWidth={sidebarOuterWidth}
+        sidebarPanelOuterWidth={sidebarPanelOuterWidth}
         isResizing={isResizing}
         resizeHandleHeight={resizeHandleHeight}
         resizeHandleWidth={resizeHandleWidth}

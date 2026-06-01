@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import type { ProjectIconCandidate } from "../api/projects";
 import { DEFAULT_PROJECT_ICON, isImageProjectIcon } from "../lib/projectIcons";
-import { ProjectColorSwatch } from "./ProjectColorSwatch";
+import { DefaultProjectGlyphIcon } from "./DefaultProjectGlyphIcon";
 import { ProjectIcon } from "./ProjectIcon";
 
 const ICON_GRID_CELL_REM = 2.25;
@@ -60,7 +60,7 @@ export function ProjectIconPicker({
                 icon: t("dialog.colorBlockIcon"),
               })}
             >
-              <ProjectColorSwatch color={color} className="size-5" />
+              <DefaultProjectGlyphIcon color={color} className="size-5" />
             </button>
             {iconCandidates.map((candidate, index) => (
               <button

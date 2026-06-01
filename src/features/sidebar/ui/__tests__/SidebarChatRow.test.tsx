@@ -90,8 +90,8 @@ describe("SidebarChatRow", () => {
     expect(onRename).not.toHaveBeenCalled();
   });
 
-  it("shows a spinner when the chat is active", () => {
-    render(
+  it("shows the goose loader when the chat is active", () => {
+    const { container } = render(
       <SidebarChatRow
         id="session-1"
         title="Busy Chat"
@@ -101,6 +101,12 @@ describe("SidebarChatRow", () => {
     );
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src*="startup-loading"]'),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-chat-menu-icon"),
+    ).not.toBeInTheDocument();
   });
 
   it("shows an unread dot when the chat has unread output", () => {
@@ -116,14 +122,17 @@ describe("SidebarChatRow", () => {
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
   });
 
-  it("does not reserve activity space by default when idle", () => {
+  it("shows a chat menu icon for idle chats without an activity indicator", () => {
     const { container } = render(
       <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
     );
 
+    expect(screen.getByTestId("sidebar-chat-menu-icon")).toBeInTheDocument();
     expect(
-      container.querySelector(".h-3.w-3.shrink-0.items-center.justify-center"),
-    ).toBeNull();
+      container.querySelector('img[src*="startup-loading"]'),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/chat active/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
   });
 
   it("does not advertise drag with the cursor", () => {
@@ -188,14 +197,12 @@ describe("SidebarChatRow", () => {
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 
-  it("reserves activity space only once activity exists", () => {
-    const { container, rerender } = render(
+  it("shows the trailing unread dot only when the chat has unread output", () => {
+    const { rerender } = render(
       <SidebarChatRow id="session-1" title="Recent Chat" isActive={false} />,
     );
 
-    expect(
-      container.querySelector(".h-3.w-3.shrink-0.items-center.justify-center"),
-    ).toBeNull();
+    expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
 
     rerender(
       <SidebarChatRow
@@ -206,7 +213,8 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/unread messages/i)).toHaveClass("bg-success");
+    expect(screen.getByLabelText(/unread messages/i)).toHaveClass("right-3.5");
   });
 
   it("can mark an idle chat unread from the menu", async () => {

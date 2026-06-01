@@ -1,11 +1,37 @@
+import { useReducedMotion } from "motion/react";
+
+import startupLoadingChatGif from "@/app/assets/startup-loading-chat.gif";
+import startupLoadingPoster from "@/app/assets/startup-loading-poster.png";
 import { cn } from "@/shared/lib/cn";
-import { Spinner } from "@/shared/ui/spinner";
+
+const ACTIVE_CHAT_GOOSE_SIZE_PX = 14;
 
 interface SessionActivityIndicatorProps {
   isRunning?: boolean;
   hasUnread?: boolean;
   variant?: "inline" | "overlay";
   className?: string;
+}
+
+export function ActiveChatGooseIndicator({
+  className,
+  size = ACTIVE_CHAT_GOOSE_SIZE_PX,
+}: {
+  className?: string;
+  size?: number;
+}) {
+  const shouldReduceMotion = useReducedMotion();
+
+  return (
+    <img
+      src={shouldReduceMotion ? startupLoadingPoster : startupLoadingChatGif}
+      alt=""
+      aria-hidden
+      className={cn("pointer-events-none object-contain", className)}
+      style={{ width: size, height: size }}
+      decoding="async"
+    />
+  );
 }
 
 export function SessionActivityIndicator({
@@ -21,11 +47,11 @@ export function SessionActivityIndicator({
           role="status"
           aria-label="Chat active"
           className={cn(
-            "absolute -right-1 -top-1 flex h-3.5 w-3.5 items-center justify-center transition-opacity duration-200 ease-out animate-in fade-in-0",
+            "absolute -right-1 -top-1 flex items-center justify-center transition-opacity duration-200 ease-out animate-in fade-in-0",
             className,
           )}
         >
-          <Spinner decorative className="h-2.5 w-2.5 text-info" />
+          <ActiveChatGooseIndicator size={ACTIVE_CHAT_GOOSE_SIZE_PX} />
         </span>
       );
     }
@@ -35,11 +61,11 @@ export function SessionActivityIndicator({
         role="status"
         aria-label="Chat active"
         className={cn(
-          "inline-flex h-3 w-3 shrink-0 items-center justify-center animate-in fade-in-0 duration-200 ease-out",
+          "inline-flex shrink-0 items-center justify-center animate-in fade-in-0 duration-200 ease-out",
           className,
         )}
       >
-        <Spinner decorative className="h-3 w-3 text-info" />
+        <ActiveChatGooseIndicator size={ACTIVE_CHAT_GOOSE_SIZE_PX} />
       </span>
     );
   }
@@ -54,7 +80,7 @@ export function SessionActivityIndicator({
         role="status"
         aria-label="Unread messages"
         className={cn(
-          "absolute -right-0.5 -top-0.5 h-2 w-2 shrink-0 rounded-full border border-background bg-info/10 transition-opacity duration-200 ease-out animate-in fade-in-0",
+          "absolute -right-0.5 -top-0.5 h-2 w-2 shrink-0 rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0",
           className,
         )}
       />
@@ -66,7 +92,7 @@ export function SessionActivityIndicator({
       role="status"
       aria-label="Unread messages"
       className={cn(
-        "h-1.5 w-1.5 shrink-0 rounded-full bg-info/10 transition-opacity duration-200 ease-out animate-in fade-in-0",
+        "h-2 w-2 shrink-0 rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0",
         className,
       )}
     />

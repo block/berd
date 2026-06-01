@@ -53,6 +53,10 @@
     "projects": "Proyectos",
     "recents": "Chats"
   },
+  "status": {
+    "chatActive": "Chat activo",
+    "unreadMessages": "Mensajes no leídos"
+  },
   "showLess": "Mostrar menos",
   "viewMoreChats": "Ver más chats",
   "olderChatsInHistory": "Ver chats antiguos en Historial de sesiones"

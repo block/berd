@@ -3,10 +3,13 @@ import { describe, expect, it } from "vitest";
 import { SessionActivityIndicator } from "./SessionActivityIndicator";
 
 describe("SessionActivityIndicator", () => {
-  it("renders an inline spinner for running sessions", () => {
-    render(<SessionActivityIndicator isRunning />);
+  it("renders the goose loader for running sessions", () => {
+    const { container } = render(<SessionActivityIndicator isRunning />);
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src*="startup-loading"]'),
+    ).toBeInTheDocument();
   });
 
   it("renders an inline dot for unread sessions", () => {
@@ -15,10 +18,15 @@ describe("SessionActivityIndicator", () => {
     expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
   });
 
-  it("renders an overlay spinner variant for running sessions", () => {
-    render(<SessionActivityIndicator isRunning variant="overlay" />);
+  it("renders an overlay goose loader variant for running sessions", () => {
+    const { container } = render(
+      <SessionActivityIndicator isRunning variant="overlay" />,
+    );
 
     expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src*="startup-loading"]'),
+    ).toBeInTheDocument();
   });
 
   it("renders nothing when the session is idle and read", () => {

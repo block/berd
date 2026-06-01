@@ -18,6 +18,12 @@ import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
+  SIDEBAR_CHAT_ROW_PADDING_CLASS,
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_TEXT_CLASS,
+} from "@/shared/ui/sidebar-tokens";
+import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -26,15 +32,22 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
-import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 
-const INACTIVE_CHAT_ROW_CLASS =
-  "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground";
-const ACTIVE_CHAT_ROW_CLASS =
-  "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground";
-const SELECTED_CHAT_ROW_CLASS =
-  "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground";
+const INACTIVE_CHAT_ROW_CLASS = cn(
+  "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+);
+const ACTIVE_CHAT_ROW_CLASS = cn(
+  "bg-sidebar-accent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+);
+const SELECTED_CHAT_ROW_CLASS = cn(
+  "bg-sidebar-accent text-sidebar-foreground ring-1 ring-inset ring-sidebar-border/80 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+);
 
 interface SidebarChatRowProps {
   id: string;
@@ -111,7 +124,7 @@ export function SidebarChatRow({
     t("common:session.defaultTitle"),
   );
   const [draftTitle, setDraftTitle] = useState(editableTitle);
-  const showActivityIndicator = isRunning || hasUnread;
+  const rowPaddingClass = nested ? "pl-9" : SIDEBAR_CHAT_ROW_PADDING_CLASS;
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
   const rowButtonStateClass = selected
@@ -182,7 +195,10 @@ export function SidebarChatRow({
               cancelRename();
             }
           }}
-          className="flex-1 min-w-0 px-3 text-sm font-normal"
+          className={cn(
+            "flex-1 min-w-0 pr-3 text-sm font-normal",
+            rowPaddingClass,
+          )}
           style={{ height: 32 }}
         />
       </div>
@@ -211,7 +227,8 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md transition-colors duration-200 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+        "relative flex items-center group/chat-row rounded-md hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+        SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
           "bg-sidebar-accent",
@@ -241,32 +258,34 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2 text-sm font-light",
-          nested ? "pl-9" : "pl-3",
+          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2",
+          SIDEBAR_NAV_TEXT_CLASS,
+          rowPaddingClass,
           rowButtonStateClass,
         )}
         aria-pressed={selectionEnabled ? selected : undefined}
       >
-        {showActivityIndicator && !nested && (
-          <span className="flex h-3 w-3 shrink-0 items-center justify-center">
-            <SessionActivityIndicator
-              isRunning={isRunning}
-              hasUnread={hasUnread}
-            />
+        {isRunning ? (
+          <span
+            className="flex size-4 shrink-0 items-center justify-center"
+            role="status"
+            aria-label={t("status.chatActive")}
+          >
+            <ActiveChatGooseIndicator size={16} />
+          </span>
+        ) : (
+          <span
+            className="flex size-4 shrink-0 items-center justify-center"
+            aria-hidden="true"
+          >
+            <SidebarChatMenuIcon />
           </span>
         )}
         <span className="flex-1 min-w-0 truncate text-left">
           {displayTitle}
         </span>
       </Button>
-      {showActivityIndicator && nested && (
-        <SessionActivityIndicator
-          isRunning={isRunning}
-          hasUnread={hasUnread}
-          variant="overlay"
-          className="left-4 right-auto top-1/2 -translate-y-1/2"
-        />
-      )}
+      {!isRunning && hasUnread && <SidebarUnreadDot />}
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>

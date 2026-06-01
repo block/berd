@@ -2297,12 +2297,12 @@ export const designSystemComponentManifest = [
   {
     name: "Session Activity Indicator",
     source: "src/shared/ui/SessionActivityIndicator.tsx",
-    exports: ["SessionActivityIndicator"],
+    exports: ["ActiveChatGooseIndicator", "SessionActivityIndicator"],
     slots: [],
     cva: [],
-    tokenClasses: ["bg-info/10", "border-background", "text-info"],
+    tokenClasses: ["bg-success"],
     stateClasses: [],
-    sourceTokenClasses: ["border-background"],
+    sourceTokenClasses: [],
   },
   {
     name: "Settings Page",

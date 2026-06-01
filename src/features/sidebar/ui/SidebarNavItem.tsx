@@ -1,5 +1,10 @@
 import type { ComponentType } from "react";
 import { cn } from "@/shared/lib/cn";
+import { SIDEBAR_NAV_ICON_CLASS } from "./sidebarNavIcons";
+import {
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_TEXT_CLASS,
+} from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
 interface SidebarNavItemProps {
@@ -26,7 +31,9 @@ export function SidebarNavItem({
   labelTransitionDelay,
 }: SidebarNavItemProps) {
   const className = cn(
-    "flex items-center w-full text-sm font-light transition-colors duration-200 rounded-md outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
+    "flex items-center w-full rounded-md outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
+    SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+    SIDEBAR_NAV_TEXT_CLASS,
     Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",
     isActive
       ? "bg-sidebar-accent text-sidebar-foreground"
@@ -53,7 +60,7 @@ export function SidebarNavItem({
       aria-current={isActive ? "page" : undefined}
       className={className}
     >
-      {Icon ? <Icon className="size-4 flex-shrink-0" /> : null}
+      {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
       <span
         className={cn(
           "whitespace-nowrap",

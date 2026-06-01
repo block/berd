@@ -84,6 +84,7 @@ const semanticTokenPrefixes = [
   "placeholder-composer",
   "popover-inverse",
   "shadow-",
+  "sidebar-section-action-",
   "status-",
   "success",
   "surface-",
@@ -343,6 +344,15 @@ function getCvaMaps(sourceFile) {
 }
 
 function displayNameFromFile(fileName, exportEntries) {
+  const fileBaseName = fileName.replace(/\.tsx$/, "");
+  const matchingFileExport = exportEntries.find(
+    (entry) => entry.kind === "value" && entry.name === fileBaseName,
+  );
+
+  if (matchingFileExport) {
+    return matchingFileExport.name.replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+  }
+
   const preferredExport = exportEntries.find(
     (entry) =>
       entry.kind === "value" &&

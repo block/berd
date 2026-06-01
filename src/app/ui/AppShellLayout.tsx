@@ -1,14 +1,19 @@
-import type {
-  ComponentProps,
-  CSSProperties,
-  MouseEventHandler,
-  ReactNode,
+import {
+  useState,
+  type ComponentProps,
+  type CSSProperties,
+  type MouseEventHandler,
+  type ReactNode,
 } from "react";
 import { Sidebar } from "@/features/sidebar/ui/Sidebar";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import { cn } from "@/shared/lib/cn";
+import {
+  SIDEBAR_COLLAPSE_TRANSITION_EASE,
+  SIDEBAR_COLLAPSE_TRANSITION_MS,
+} from "@/shared/ui/sidebar-tokens";
 import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
 
@@ -37,6 +42,8 @@ interface AppShellLayoutProps {
   sidebarCollapsed: boolean;
   sidebarOuterHeight: number;
   sidebarOuterWidth: number;
+  /** Full slide panel width (content + gutter); stays constant while collapsing. */
+  sidebarPanelOuterWidth: number;
   showDesignSystemInspector: boolean;
   topBar: ComponentProps<typeof TopBar>;
 }
@@ -60,9 +67,23 @@ export function AppShellLayout({
   sidebarCollapsed,
   sidebarOuterHeight,
   sidebarOuterWidth,
+  sidebarPanelOuterWidth,
   showDesignSystemInspector,
   topBar,
 }: AppShellLayoutProps) {
+  const [sidebarHovered, setSidebarHovered] = useState(false);
+  const sidebarElevated = sidebarHovered || isResizing;
+  const sidebarSlideTransition = isResizing
+    ? "none"
+    : `transform ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
+  const sidebarHandleFadeTransition = isResizing
+    ? "none"
+    : `opacity ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
+
+  const sidebarSlotMaxHeight = contentUnderTopBar
+    ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
+    : "calc(100% - var(--spacing-app-panel-gutter-bottom)";
+
   const shellStyle = {
     "--project-tint": projectTint ?? "transparent",
   } as CSSProperties;
@@ -79,38 +100,54 @@ export function AppShellLayout({
         }
       />
 
-      <div className="goose-zoom-scope relative flex flex-1 min-h-0 overflow-hidden">
+      <div className="goose-zoom-scope relative flex min-h-0 flex-1">
+        {/* Reserves horizontal space instantly; no width animation (slide only). */}
         <div
           className={cn(
-            contentUnderSidebar
-              ? "relative z-20 flex-shrink-0 overflow-visible select-none"
-              : "relative z-20 flex-shrink-0 overflow-visible",
+            "flex-shrink-0",
             contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
           )}
           style={{
             height: sidebarOuterHeight,
-            maxHeight: contentUnderTopBar
-              ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
-              : "calc(100% - var(--spacing-app-panel-gutter-bottom))",
+            maxHeight: sidebarSlotMaxHeight,
             width: sidebarOuterWidth,
-            opacity: sidebarCollapsed ? 0 : 1,
-            transition: isResizing
-              ? "none"
-              : "height 220ms ease-out, width 220ms ease-out, opacity 180ms ease-out",
+          }}
+          aria-hidden={sidebarCollapsed || undefined}
+        />
+
+        <div
+          className={cn(
+            "absolute left-0 select-none",
+            contentUnderSidebar
+              ? "z-20 overflow-visible"
+              : "z-20 overflow-x-hidden overflow-y-visible",
+            contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
+            sidebarElevated && "z-30",
+          )}
+          style={{
+            height: sidebarOuterHeight,
+            maxHeight: sidebarSlotMaxHeight,
+            width: sidebarPanelOuterWidth,
+            transform: sidebarCollapsed ? "translateX(-100%)" : "translateX(0)",
+            transition: sidebarSlideTransition,
             pointerEvents: sidebarCollapsed ? "none" : undefined,
           }}
           aria-hidden={sidebarCollapsed || undefined}
+          inert={sidebarCollapsed ? true : undefined}
+          onMouseEnter={() => setSidebarHovered(true)}
+          onMouseLeave={() => setSidebarHovered(false)}
         >
-          <div className="h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
-            <Sidebar {...sidebar} />
+          <div className="relative h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
+            <Sidebar {...sidebar} elevatedShadow={sidebarElevated} />
           </div>
           <div
             onMouseDown={onResizeStart}
             onDoubleClick={onResizeDoubleClick}
-            className="group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+            className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
             style={{
               width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
               opacity: sidebarCollapsed ? 0 : 1,
+              transition: sidebarHandleFadeTransition,
             }}
             aria-hidden={sidebarCollapsed || undefined}
           >
@@ -123,6 +160,7 @@ export function AppShellLayout({
             style={{
               height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
               opacity: sidebarCollapsed ? 0 : 1,
+              transition: sidebarHandleFadeTransition,
             }}
             aria-hidden={sidebarCollapsed || undefined}
           >
@@ -136,6 +174,7 @@ export function AppShellLayout({
               height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
               width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
               opacity: sidebarCollapsed ? 0 : 1,
+              transition: sidebarHandleFadeTransition,
             }}
             aria-hidden={sidebarCollapsed || undefined}
           >
@@ -153,14 +192,10 @@ export function AppShellLayout({
           )}
           style={{
             height: sidebarOuterHeight,
-            maxHeight: contentUnderTopBar
-              ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
-              : "calc(100% - var(--spacing-app-panel-gutter-bottom))",
+            maxHeight: sidebarSlotMaxHeight,
             width: 0,
             opacity: sidebarCollapsed ? 0 : 1,
-            transition: isResizing
-              ? "none"
-              : "height 220ms ease-out, width 220ms ease-out, opacity 180ms ease-out",
+            transition: sidebarHandleFadeTransition,
             pointerEvents: sidebarCollapsed ? "none" : undefined,
           }}
           aria-hidden={sidebarCollapsed || undefined}
@@ -170,7 +205,7 @@ export function AppShellLayout({
           className={
             contentUnderSidebar
               ? "absolute inset-0 z-0 min-h-0 min-w-0"
-              : "min-h-0 min-w-0 flex-1"
+              : "min-h-0 min-w-0 flex-1 overflow-hidden"
           }
         >
           {children}

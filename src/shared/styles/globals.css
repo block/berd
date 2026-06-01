@@ -224,6 +224,7 @@
 
   /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
   --sidebar: rgba(255, 255, 255, 0.8);
+  --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -231,6 +232,10 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  --sidebar-section-action-bg: var(--muted);
+  --sidebar-section-action-fg: var(--foreground);
+  --sidebar-section-action-bg-hover: var(--foreground);
+  --sidebar-section-action-fg-hover: var(--background);
 
   /* Goose canvas + composer extensions. */
   --canvas-base: #f5f5f5;
@@ -539,6 +544,7 @@
   --ring: var(--color-gray-400);
 
   --sidebar: rgba(0, 0, 0, 0.8);
+  --sidebar-nav-font-weight: 400;
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -546,6 +552,10 @@
   --sidebar-accent-foreground: var(--foreground);
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
+  --sidebar-section-action-bg: var(--muted);
+  --sidebar-section-action-fg: var(--foreground);
+  --sidebar-section-action-bg-hover: var(--foreground);
+  --sidebar-section-action-fg-hover: var(--background);
 
   --app-top-bar-control-fg: var(--foreground);
   --app-top-bar-control-fg-disabled: color-mix(
@@ -877,6 +887,14 @@
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-section-action-bg: var(--sidebar-section-action-bg);
+  --color-sidebar-section-action-fg: var(--sidebar-section-action-fg);
+  --color-sidebar-section-action-bg-hover: var(
+    --sidebar-section-action-bg-hover
+  );
+  --color-sidebar-section-action-fg-hover: var(
+    --sidebar-section-action-fg-hover
+  );
 
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

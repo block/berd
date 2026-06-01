@@ -90,7 +90,7 @@ export function SidebarProjectList({
               icon={project.icon}
               color={project.color}
               projectId={project.id}
-              className="size-3 rounded-[3px]"
+              className="size-[18px]"
               imageClassName="size-4 rounded-[4px]"
             />
           </Button>

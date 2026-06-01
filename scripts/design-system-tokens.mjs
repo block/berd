@@ -44,6 +44,10 @@ const deletedTokenFamilies = [
   ["sidebar-nav-bg-hover", "bg-sidebar-accent or --sidebar-accent"],
   ["sidebar-nav-bg-selected", "bg-sidebar-accent or --sidebar-accent"],
   ["sidebar-nav-fg", "text-sidebar-foreground or --sidebar-foreground"],
+  [
+    "sidebar-nav-font-weight-light",
+    "font-normal or --sidebar-nav-font-weight (400)",
+  ],
   ["surface-chrome", "bg-sidebar or --sidebar"],
   ["surface-tile", "bg-accent or --accent"],
   ["surface-button", "bg-accent or --accent"],
@@ -96,6 +100,7 @@ const allowedBridgeNames = new Set([
 const allowedBridgePatterns = [
   /^canvas-(?:base|project-tint)$/,
   /^app-top-bar-control-fg(?:-disabled)?$/,
+  /^sidebar-section-action-(?:bg|fg)(?:-hover)?$/,
   /^surface-(?:composer(?:-glass|-hover)?|editor-panel|glass-strong(?:-(?:hover|fg))?)$/,
   /^surface-agent-profile-(?:bg|fg(?:-(?:80|muted|subtle|faint|placeholder))?|border|dot|control-bg(?:-hover)?|action-(?:fg|bg-hover))$/,
   /^message-user-bg$/,

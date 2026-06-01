@@ -4,6 +4,7 @@ import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import type { SessionSearchDisplayResult } from "@/features/sessions/lib/buildSessionSearchResults";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { SIDEBAR_MENU_HOVER_TRANSITION_CLASS } from "@/shared/ui/sidebar-tokens";
 
 interface SidebarSearchResultsProps {
   results: SessionSearchDisplayResult[];
@@ -24,7 +25,7 @@ export function SidebarSearchResults({
 
   if (results.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-sidebar-border/80 px-3 py-6 text-center text-xs font-light text-muted-foreground">
+      <div className="rounded-md border border-dashed border-sidebar-border/80 px-3 py-6 text-center text-xs font-normal text-muted-foreground">
         <p className="text-sidebar-foreground/80">
           {t("sessions:history.emptyNoMatches")}
         </p>
@@ -55,7 +56,8 @@ export function SidebarSearchResults({
             variant="ghost"
             onClick={() => onSelectResult?.(session.id, result.messageId)}
             className={cn(
-              "h-auto w-full items-start justify-start rounded-md border border-transparent px-3 py-2 text-left font-light hover:bg-sidebar-accent",
+              "h-auto w-full items-start justify-start rounded-md border border-transparent px-3 py-2 text-left font-normal hover:bg-sidebar-accent",
+              SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
               activeSessionId === session.id &&
                 "border-sidebar-border/80 bg-sidebar-accent",
             )}

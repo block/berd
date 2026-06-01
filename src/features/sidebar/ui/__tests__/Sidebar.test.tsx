@@ -219,11 +219,11 @@ describe("Sidebar", () => {
       screen.getByRole("button", { name: "Start a chat" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Project One")).toBeInTheDocument();
-    const swatch = container.querySelector(
+    const projectIcon = container.querySelector(
       '[data-project-color-swatch="project-1"]',
     );
-    expect(swatch).toBeInTheDocument();
-    expect(swatch).toHaveAttribute(
+    expect(projectIcon).toBeInTheDocument();
+    expect(projectIcon).toHaveAttribute(
       "style",
       expect.stringContaining("--color-pill-sage"),
     );
@@ -390,7 +390,25 @@ describe("Sidebar", () => {
     expect(onNavigate).toHaveBeenCalledWith("automations");
   });
 
-  it("renders the dev-only design system button after session history", () => {
+  it("renders settings after session history in main navigation", () => {
+    renderSidebar();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const labels = within(mainNavigation)
+      .getAllByRole("button")
+      .map((button) => button.getAttribute("aria-label"))
+      .filter((label): label is string => Boolean(label));
+
+    const sessionHistoryIndex = labels.indexOf("Session history");
+    const settingsIndex = labels.indexOf("Settings");
+
+    expect(sessionHistoryIndex).toBeGreaterThanOrEqual(0);
+    expect(settingsIndex).toBe(sessionHistoryIndex + 1);
+  });
+
+  it("renders the dev-only design system button after settings", () => {
     designSystemExplorer.isEnabled.mockReturnValue(true);
 
     renderSidebar();
@@ -410,17 +428,21 @@ describe("Sidebar", () => {
         "Skills",
         "Automations",
         "Session history",
+        "Settings",
         "Design system (dev only)",
       ]),
     );
+
+    const settingsIndex = labels.indexOf("Settings");
+    const designSystemIndex = labels.indexOf("Design system (dev only)");
+    expect(designSystemIndex).toBe(settingsIndex + 1);
   });
 
   it("still renders the nav when collapsed so the AppShell can animate it out", () => {
     renderSidebar({ collapsed: true });
 
-    // The visibility/clipping lives on the AppShell wrapper (width + opacity
-    // transition). Sidebar itself stays mounted so its content can fade with
-    // the wrapper rather than vanishing instantly.
+    // Visibility/clipping lives on the AppShell wrapper (width + slide
+    // transition). Sidebar stays mounted so the panel can animate off-screen.
     expect(
       screen.getByRole("navigation", { name: /main navigation/i }),
     ).toBeInTheDocument();

@@ -10,8 +10,8 @@ const SIDEBAR_OUTER_GUTTER_WIDTH = 12;
 const SIDEBAR_RESIZE_HANDLE_WIDTH = 12;
 const SIDEBAR_RESIZE_HANDLE_HEIGHT = 12;
 const SIDEBAR_LAYOUT_STORAGE_KEY = "goose:sidebar:layout";
-const SIDEBAR_DEFAULT_WIDTH = 256;
-const SIDEBAR_MIN_WIDTH = 220;
+const SIDEBAR_DEFAULT_WIDTH = 200;
+const SIDEBAR_MIN_WIDTH = 200;
 const SIDEBAR_MAX_WIDTH = 420;
 const SIDEBAR_DEFAULT_HEIGHT_RATIO = 2 / 3;
 const SIDEBAR_MIN_HEIGHT = 320;
@@ -202,10 +202,9 @@ export function useResizableSidebar() {
     [setSidebarLayout],
   );
 
-  const sidebarOuterWidth = sidebarCollapsed
-    ? 0
-    : sidebarWidth + SIDEBAR_OUTER_GUTTER_WIDTH;
-  const sidebarOuterHeight = sidebarCollapsed ? 0 : sidebarHeight;
+  const sidebarPanelOuterWidth = sidebarWidth + SIDEBAR_OUTER_GUTTER_WIDTH;
+  const sidebarOuterWidth = sidebarCollapsed ? 0 : sidebarPanelOuterWidth;
+  const sidebarOuterHeight = sidebarHeight;
 
   const expandSidebar = useCallback(async () => {
     const expandedFitWidth = getExpandedSidebarFitWidth(
@@ -394,6 +393,7 @@ export function useResizableSidebar() {
     sidebarHeight,
     sidebarOuterHeight,
     sidebarOuterWidth,
+    sidebarPanelOuterWidth,
     sidebarWidth,
     toggleCollapse: toggleSidebar,
     toggleSidebar,

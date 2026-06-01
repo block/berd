@@ -1,16 +1,22 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { IconArrowLeft, IconPalette } from "@tabler/icons-react";
 import {
-  IconBolt,
-  IconHistory,
-  IconHome,
-  IconArrowLeft,
-  IconPalette,
-  IconRobotFace,
-  IconSettings,
-} from "@tabler/icons-react";
-import { SkillIcon } from "@/features/skills/ui/SkillIcon";
+  SidebarNavAgentsIcon,
+  SidebarNavAutomationsIcon,
+  SidebarNavChatsIcon,
+  SidebarNavHomeIcon,
+  SidebarNavSettingsIcon,
+  SidebarNavSkillsIcon,
+} from "./sidebarNavIcons";
 import { cn } from "@/shared/lib/cn";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -42,6 +48,12 @@ import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { SidebarPinnedSection } from "./SidebarPinnedSection";
 import { SidebarProjectsSection } from "./SidebarProjectsSection";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
+import {
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS,
+  SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
+} from "@/shared/ui/sidebar-tokens";
 import { SidebarNavItem } from "./SidebarNavItem";
 import {
   DEFAULT_SETTINGS_SECTION,
@@ -61,6 +73,8 @@ interface SidebarProps {
   collapsed: boolean;
   width: number;
   isResizing?: boolean;
+  /** Drop shadow on the panel when hovering the sidebar (or actively resizing). */
+  elevatedShadow?: boolean;
   onSettingsClick?: () => void;
   onSettingsBack?: () => void;
   onSettingsSectionChange?: (section: SectionId) => void;
@@ -132,7 +146,9 @@ function SidebarInspectorToggleNavItem({
   return (
     <div
       className={cn(
-        "flex w-full items-center rounded-md text-sm font-light text-sidebar-foreground transition-colors duration-200 hover:bg-sidebar-accent hover:text-sidebar-foreground",
+        "flex w-full items-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+        SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+        SIDEBAR_NAV_TEXT_CLASS,
         collapsed
           ? "justify-center px-3 py-2"
           : "justify-between gap-2.5 px-3 py-1.5",
@@ -242,6 +258,7 @@ export function Sidebar({
   collapsed,
   width,
   isResizing = false,
+  elevatedShadow = false,
   onSettingsClick,
   onSettingsBack,
   onSettingsSectionChange,
@@ -270,8 +287,6 @@ export function Sidebar({
   projects,
 }: SidebarProps) {
   const { t } = useTranslation(["sidebar", "common", "settings"]);
-  const [expanded, setExpanded] = useState(!collapsed);
-  const prevCollapsed = useRef(collapsed);
   const navRef = useRef<HTMLElement>(null);
   const [expandedProjects, setExpandedProjects] = useState<
     Record<string, boolean>
@@ -375,46 +390,42 @@ export function Sidebar({
     });
   }, [activeSessionId, activeSessionIds]);
 
-  useEffect(() => {
-    if (collapsed) {
-      setExpanded(false);
-    } else if (prevCollapsed.current && !collapsed) {
-      const timer = setTimeout(() => setExpanded(true), 60);
-      return () => clearTimeout(timer);
-    } else {
-      setExpanded(true);
-    }
-    prevCollapsed.current = collapsed;
-  }, [collapsed]);
-
-  const labelTransition = "transition-[opacity,width] duration-300 ease-out";
-  const labelVisible = expanded && !collapsed;
+  const labelVisible = !collapsed;
+  const labelTransition = "";
   const isSettingsSurface = activeView === "settings";
   const isDesignSystemSurface = activeView === "design-system";
   const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
-  const navItems: readonly {
+  const mainNavItems: readonly {
     id: AppView;
     label: string;
-    icon: typeof IconRobotFace;
+    icon: ComponentType<{ className?: string }>;
   }[] = [
-    { id: "agents", label: t("navigation.agents"), icon: IconRobotFace },
-    { id: "skills", label: t("navigation.skills"), icon: SkillIcon },
-    { id: "automations", label: t("navigation.automations"), icon: IconBolt },
+    { id: "agents", label: t("navigation.agents"), icon: SidebarNavAgentsIcon },
+    { id: "skills", label: t("navigation.skills"), icon: SidebarNavSkillsIcon },
+    {
+      id: "automations",
+      label: t("navigation.automations"),
+      icon: SidebarNavAutomationsIcon,
+    },
     {
       id: "session-history",
       label: t("navigation.sessionHistory"),
-      icon: IconHistory,
+      icon: SidebarNavChatsIcon,
     },
-    ...(isDesignSystemExplorerEnabled()
-      ? [
-          {
-            id: "design-system" as const,
-            label: "Design system (dev only)",
-            icon: IconPalette,
-          },
-        ]
-      : []),
   ];
+  const devNavItems: readonly {
+    id: AppView;
+    label: string;
+    icon: ComponentType<{ className?: string }>;
+  }[] = isDesignSystemExplorerEnabled()
+    ? [
+        {
+          id: "design-system" as const,
+          label: "Design system (dev only)",
+          icon: IconPalette,
+        },
+      ]
+    : [];
 
   const projectSessions = useMemo(
     () =>
@@ -523,256 +534,215 @@ export function Sidebar({
       )}
       style={{ width }}
     >
-      <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
-        {/* The goose home affordance now lives in the TopBar (left of the
-            panel toggle) so it survives when the panel is collapsed. This
-            spacer + the nav's own py-1 give the same ~6px top inset as the
-            settings row's py-1.5 at the bottom, keeping the panel symmetric. */}
-        <div className="flex-shrink-0 pt-0.5" aria-hidden="true" />
+      <div
+        className={cn(
+          "h-full rounded-chrome transition-shadow duration-300 ease-out",
+          elevatedShadow && SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
+        )}
+      >
+        <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
+          {/* The goose home affordance now lives in the TopBar (left of the
+            panel toggle) so it survives when the panel is collapsed. */}
+          <div className="flex-shrink-0 pt-0.5" aria-hidden="true" />
 
-        <div className="relative flex-1 min-h-0 overflow-hidden">
-          <div
-            className={cn(
-              "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-              isSecondarySurface
-                ? "pointer-events-none -translate-x-full opacity-0"
-                : "translate-x-0 opacity-100",
-            )}
-            inert={isSecondarySurface ? true : undefined}
-            aria-hidden={isSecondarySurface}
-          >
-            <nav
-              ref={navRef}
-              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
-              style={{
-                maskImage: BOTTOM_MASK,
-                WebkitMaskImage: BOTTOM_MASK,
-              }}
-              aria-label={t("navigation.main")}
-            >
-              <div className="relative z-10 space-y-0.5">
-                <SidebarNavItem
-                  testId="nav-home"
-                  icon={IconHome}
-                  label={t("navigation.home")}
-                  collapsed={collapsed}
-                  labelTransition={labelTransition}
-                  labelVisible={labelVisible}
-                  isActive={activeView === "home"}
-                  onClick={() => onNavigate?.("home")}
-                />
-
-                {navItems.map((item, index) => {
-                  const isActive = activeView === item.id;
-                  return (
-                    <SidebarNavItem
-                      key={item.id}
-                      icon={item.icon}
-                      label={item.label}
-                      collapsed={collapsed}
-                      labelTransition={labelTransition}
-                      labelVisible={labelVisible}
-                      isActive={isActive}
-                      onClick={() => onNavigate?.(item.id)}
-                      labelTransitionDelay={
-                        labelVisible ? `${index * 30 + 60}ms` : "0ms"
-                      }
-                    />
-                  );
-                })}
-              </div>
-
-              {!collapsed && <SidebarPinnedSection />}
-
-              {!collapsed && (
-                <SidebarProjectsSection
-                  projects={projects}
-                  projectSessions={projectSessions}
-                  hasVisibleChats={activeSessions.length > 0}
-                  expandedProjects={expandedProjects}
-                  toggleProject={toggleProject}
-                  collapsed={collapsed}
-                  labelTransition={labelTransition}
-                  labelVisible={labelVisible}
-                  activeSessionId={activeSessionId}
-                  onNavigate={onNavigate}
-                  onSelectSession={onSelectSession}
-                  onNewChatInProject={onNewChatInProject}
-                  onNewChat={onNewChat}
-                  onCreateProject={onCreateProject}
-                  onEditProject={onEditProject}
-                  onArchiveProject={onArchiveProject}
-                  onArchiveChat={onArchiveChat}
-                  onRenameChat={onRenameChat}
-                  onMarkChatRead={onMarkChatRead}
-                  onMarkChatUnread={onMarkChatUnread}
-                  onMoveToProject={onMoveToProject}
-                  selectedSessionIds={selectedSessionIds}
-                  selectionEnabled={selectedCount > 0}
-                  selectionActionsDisabled={isApplyingSelectionAction}
-                  onSelectionClear={clearSelection}
-                  onSelectionChange={toggleSessionSelection}
-                  onArchiveSelected={requestArchiveSelected}
-                  onPinSelectedToHome={handlePinSelectedToHome}
-                  isPinningSelectedToHome={isPinningBatch}
-                  onMarkSelectedRead={() =>
-                    void applySelectionAction(onMarkChatRead)
-                  }
-                  onMarkSelectedUnread={() =>
-                    void applySelectionAction(onMarkChatUnread)
-                  }
-                  onReorderProject={onReorderProject}
-                  hasMoreSessions={hasMoreSessions}
-                  projectsSectionOpen={sectionVisibility.projects}
-                  recentsSectionOpen={sectionVisibility.recents}
-                  onToggleProjectsSection={() => toggleSection("projects")}
-                  onToggleRecentsSection={() => toggleSection("recents")}
-                />
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            <div
+              className={cn(
+                "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+                isSecondarySurface
+                  ? "pointer-events-none -translate-x-full opacity-0"
+                  : "translate-x-0 opacity-100",
               )}
-            </nav>
-
-            <div className="flex-shrink-0 px-1.5 py-1.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size={collapsed ? "icon-sm" : "default"}
-                onClick={onSettingsClick}
-                className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
-                  collapsed
-                    ? "justify-center p-3"
-                    : "justify-start gap-2.5 px-3 py-2.5",
-                )}
-                title={t("settings:title")}
-                aria-label={t("settings:title")}
-              >
-                <IconSettings className="size-4 flex-shrink-0" />
-                {!collapsed && (
-                  <span
-                    className={cn(
-                      "whitespace-nowrap text-sm font-light",
-                      labelTransition,
-                      labelVisible
-                        ? "opacity-100 w-auto"
-                        : "opacity-0 w-0 overflow-hidden",
-                    )}
-                  >
-                    {t("settings:title")}
-                  </span>
-                )}
-              </Button>
-            </div>
-          </div>
-
-          <div
-            className={cn(
-              "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
-              isSecondarySurface
-                ? "translate-x-0 opacity-100"
-                : "pointer-events-none translate-x-full opacity-0",
-            )}
-            inert={!isSecondarySurface ? true : undefined}
-            aria-hidden={!isSecondarySurface}
-          >
-            <nav
-              className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
-              style={{
-                maskImage: BOTTOM_MASK,
-                WebkitMaskImage: BOTTOM_MASK,
-              }}
-              aria-label={
-                isSettingsSurface
-                  ? t("settings:navigationLabel")
-                  : "Design system navigation"
-              }
+              inert={isSecondarySurface ? true : undefined}
+              aria-hidden={isSecondarySurface}
             >
-              <div className="space-y-0.5">
-                {isSettingsSurface ? (
-                  SETTINGS_SECTIONS.map((item, index) => (
-                    <SidebarNavItem
-                      key={item.id}
-                      icon={item.icon}
-                      label={t(`settings:${item.labelKey}`)}
-                      collapsed={collapsed}
-                      labelTransition={labelTransition}
-                      labelVisible={labelVisible}
-                      isActive={activeSettingsSection === item.id}
-                      onClick={() => onSettingsSectionChange?.(item.id)}
-                      labelTransitionDelay={
-                        labelVisible ? `${index * 30 + 60}ms` : "0ms"
-                      }
-                    />
-                  ))
-                ) : (
-                  <>
-                    <SidebarInspectorToggleNavItem
-                      checked={designSystemInspectorVisible}
-                      collapsed={collapsed}
-                      label={t("designSystem.inspector")}
-                      labelTransition={labelTransition}
-                      labelVisible={labelVisible}
-                      onCheckedChange={onDesignSystemInspectorVisibleChange}
-                      switchLabel={t("designSystem.showInspector")}
-                      labelTransitionDelay={labelVisible ? "60ms" : "0ms"}
-                    />
-                    {DESIGN_SYSTEM_CORE_SECTIONS.map((item, index) => (
+              <nav
+                ref={navRef}
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none"
+                style={{
+                  maskImage: BOTTOM_MASK,
+                  WebkitMaskImage: BOTTOM_MASK,
+                }}
+                aria-label={t("navigation.main")}
+              >
+                <div className="relative z-10 space-y-0.5">
+                  <SidebarNavItem
+                    testId="nav-home"
+                    icon={SidebarNavHomeIcon}
+                    label={t("navigation.home")}
+                    collapsed={collapsed}
+                    labelTransition={labelTransition}
+                    labelVisible={labelVisible}
+                    isActive={activeView === "home"}
+                    onClick={() => onNavigate?.("home")}
+                  />
+
+                  {mainNavItems.map((item) => {
+                    const isActive = activeView === item.id;
+                    return (
                       <SidebarNavItem
                         key={item.id}
+                        icon={item.icon}
                         label={item.label}
                         collapsed={collapsed}
                         labelTransition={labelTransition}
                         labelVisible={labelVisible}
-                        isActive={activeDesignSystemSection === item.id}
-                        onClick={() => onDesignSystemSectionChange?.(item.id)}
-                        labelTransitionDelay={
-                          labelVisible ? `${index * 30 + 90}ms` : "0ms"
-                        }
+                        isActive={isActive}
+                        onClick={() => onNavigate?.(item.id)}
                       />
-                    ))}
-                    {!collapsed && (
-                      <div
-                        className={cn(
-                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-sidebar-foreground/25",
-                          labelTransition,
-                          labelVisible
-                            ? "opacity-100"
-                            : "opacity-0 overflow-hidden",
-                        )}
-                      >
-                        {t("sections.components")}
-                      </div>
-                    )}
-                    {DESIGN_SYSTEM_COMPONENT_SECTIONS.map((item, index) => (
+                    );
+                  })}
+
+                  <SidebarNavItem
+                    testId="nav-settings"
+                    icon={SidebarNavSettingsIcon}
+                    label={t("settings:title")}
+                    collapsed={collapsed}
+                    labelTransition={labelTransition}
+                    labelVisible={labelVisible}
+                    isActive={activeView === "settings"}
+                    onClick={() => onSettingsClick?.()}
+                  />
+
+                  {devNavItems.map((item) => {
+                    const isActive = activeView === item.id;
+                    return (
                       <SidebarNavItem
                         key={item.id}
+                        icon={item.icon}
                         label={item.label}
                         collapsed={collapsed}
                         labelTransition={labelTransition}
                         labelVisible={labelVisible}
-                        isActive={activeDesignSystemSection === item.id}
-                        onClick={() => onDesignSystemSectionChange?.(item.id)}
-                        labelTransitionDelay={
-                          labelVisible
-                            ? `${(DESIGN_SYSTEM_CORE_SECTIONS.length + index) * 30 + 60}ms`
-                            : "0ms"
-                        }
+                        isActive={isActive}
+                        onClick={() => onNavigate?.(item.id)}
                       />
-                    ))}
-                    {!collapsed && (
-                      <div
-                        className={cn(
-                          "px-3 pb-1 pt-4 text-[10px] font-light normal-case tracking-normal text-sidebar-foreground/25",
-                          labelTransition,
-                          labelVisible
-                            ? "opacity-100"
-                            : "opacity-0 overflow-hidden",
-                        )}
-                      >
-                        {t("sections.notUsed")}
-                      </div>
-                    )}
-                    {DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.map(
-                      (item, index) => (
+                    );
+                  })}
+                </div>
+
+                {!collapsed && <SidebarPinnedSection />}
+
+                {!collapsed && (
+                  <SidebarProjectsSection
+                    projects={projects}
+                    projectSessions={projectSessions}
+                    hasVisibleChats={activeSessions.length > 0}
+                    expandedProjects={expandedProjects}
+                    toggleProject={toggleProject}
+                    collapsed={collapsed}
+                    labelTransition={labelTransition}
+                    labelVisible={labelVisible}
+                    activeSessionId={activeSessionId}
+                    onNavigate={onNavigate}
+                    onSelectSession={onSelectSession}
+                    onNewChatInProject={onNewChatInProject}
+                    onNewChat={onNewChat}
+                    onCreateProject={onCreateProject}
+                    onEditProject={onEditProject}
+                    onArchiveProject={onArchiveProject}
+                    onArchiveChat={onArchiveChat}
+                    onRenameChat={onRenameChat}
+                    onMarkChatRead={onMarkChatRead}
+                    onMarkChatUnread={onMarkChatUnread}
+                    onMoveToProject={onMoveToProject}
+                    selectedSessionIds={selectedSessionIds}
+                    selectionEnabled={selectedCount > 0}
+                    selectionActionsDisabled={isApplyingSelectionAction}
+                    onSelectionClear={clearSelection}
+                    onSelectionChange={toggleSessionSelection}
+                    onArchiveSelected={requestArchiveSelected}
+                    onPinSelectedToHome={handlePinSelectedToHome}
+                    isPinningSelectedToHome={isPinningBatch}
+                    onMarkSelectedRead={() =>
+                      void applySelectionAction(onMarkChatRead)
+                    }
+                    onMarkSelectedUnread={() =>
+                      void applySelectionAction(onMarkChatUnread)
+                    }
+                    onReorderProject={onReorderProject}
+                    hasMoreSessions={hasMoreSessions}
+                    projectsSectionOpen={sectionVisibility.projects}
+                    recentsSectionOpen={sectionVisibility.recents}
+                    onToggleProjectsSection={() => toggleSection("projects")}
+                    onToggleRecentsSection={() => toggleSection("recents")}
+                  />
+                )}
+              </nav>
+            </div>
+
+            <div
+              className={cn(
+                "absolute inset-0 flex flex-col transition-[transform,opacity] duration-200 ease-out motion-reduce:transition-none",
+                isSecondarySurface
+                  ? "translate-x-0 opacity-100"
+                  : "pointer-events-none translate-x-full opacity-0",
+              )}
+              inert={!isSecondarySurface ? true : undefined}
+              aria-hidden={!isSecondarySurface}
+            >
+              <nav
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
+                style={{
+                  maskImage: BOTTOM_MASK,
+                  WebkitMaskImage: BOTTOM_MASK,
+                }}
+                aria-label={
+                  isSettingsSurface
+                    ? t("settings:navigationLabel")
+                    : "Design system navigation"
+                }
+              >
+                <div className="space-y-0.5">
+                  {isSettingsSurface ? (
+                    SETTINGS_SECTIONS.map((item) => (
+                      <SidebarNavItem
+                        key={item.id}
+                        icon={item.icon}
+                        label={t(`settings:${item.labelKey}`)}
+                        collapsed={collapsed}
+                        labelTransition={labelTransition}
+                        labelVisible={labelVisible}
+                        isActive={activeSettingsSection === item.id}
+                        onClick={() => onSettingsSectionChange?.(item.id)}
+                      />
+                    ))
+                  ) : (
+                    <>
+                      <SidebarInspectorToggleNavItem
+                        checked={designSystemInspectorVisible}
+                        collapsed={collapsed}
+                        label={t("designSystem.inspector")}
+                        labelTransition={labelTransition}
+                        labelVisible={labelVisible}
+                        onCheckedChange={onDesignSystemInspectorVisibleChange}
+                        switchLabel={t("designSystem.showInspector")}
+                      />
+                      {DESIGN_SYSTEM_CORE_SECTIONS.map((item) => (
+                        <SidebarNavItem
+                          key={item.id}
+                          label={item.label}
+                          collapsed={collapsed}
+                          labelTransition={labelTransition}
+                          labelVisible={labelVisible}
+                          isActive={activeDesignSystemSection === item.id}
+                          onClick={() => onDesignSystemSectionChange?.(item.id)}
+                        />
+                      ))}
+                      {!collapsed && (
+                        <div
+                          className={cn(
+                            "px-3 pb-1 pt-4 text-sidebar-foreground/25",
+                            SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS,
+                            labelVisible
+                              ? "opacity-100"
+                              : "opacity-0 overflow-hidden",
+                          )}
+                        >
+                          {t("sections.components")}
+                        </div>
+                      )}
+                      {DESIGN_SYSTEM_COMPONENT_SECTIONS.map((item, index) => (
                         <SidebarNavItem
                           key={item.id}
                           label={item.label}
@@ -783,48 +753,74 @@ export function Sidebar({
                           onClick={() => onDesignSystemSectionChange?.(item.id)}
                           labelTransitionDelay={
                             labelVisible
-                              ? `${(DESIGN_SYSTEM_CORE_SECTIONS.length + DESIGN_SYSTEM_COMPONENT_SECTIONS.length + index) * 30 + 60}ms`
+                              ? `${(DESIGN_SYSTEM_CORE_SECTIONS.length + index) * 30 + 60}ms`
                               : "0ms"
                           }
                         />
-                      ),
-                    )}
-                  </>
-                )}
+                      ))}
+                      {!collapsed && (
+                        <div
+                          className={cn(
+                            "px-3 pb-1 pt-4 text-sidebar-foreground/25",
+                            SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS,
+                            labelVisible
+                              ? "opacity-100"
+                              : "opacity-0 overflow-hidden",
+                          )}
+                        >
+                          {t("sections.notUsed")}
+                        </div>
+                      )}
+                      {DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS.map((item) => (
+                        <SidebarNavItem
+                          key={item.id}
+                          label={item.label}
+                          collapsed={collapsed}
+                          labelTransition={labelTransition}
+                          labelVisible={labelVisible}
+                          isActive={activeDesignSystemSection === item.id}
+                          onClick={() => onDesignSystemSectionChange?.(item.id)}
+                        />
+                      ))}
+                    </>
+                  )}
+                </div>
+              </nav>
+              <div className={cn("flex-shrink-0", "px-1.5 py-1.5")}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size={collapsed ? "icon-sm" : "default"}
+                  onClick={
+                    isSettingsSurface ? onSettingsBack : onDesignSystemBack
+                  }
+                  className={cn(
+                    "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
+                    SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+                    collapsed
+                      ? "justify-center p-3"
+                      : "justify-start gap-2.5 px-3 py-2.5",
+                  )}
+                  title={t("actions.backToMainNavigation")}
+                  aria-label={t("actions.backToMainNavigation")}
+                >
+                  <IconArrowLeft className="size-4 flex-shrink-0" />
+                  {!collapsed && (
+                    <span
+                      className={cn(
+                        "whitespace-nowrap",
+                        SIDEBAR_NAV_TEXT_CLASS,
+                        labelTransition,
+                        labelVisible
+                          ? "opacity-100 w-auto"
+                          : "opacity-0 w-0 overflow-hidden",
+                      )}
+                    >
+                      {t("actions.backToMainNavigation")}
+                    </span>
+                  )}
+                </Button>
               </div>
-            </nav>
-            <div className={cn("flex-shrink-0", "px-1.5 py-1.5")}>
-              <Button
-                type="button"
-                variant="ghost"
-                size={collapsed ? "icon-sm" : "default"}
-                onClick={
-                  isSettingsSurface ? onSettingsBack : onDesignSystemBack
-                }
-                className={cn(
-                  "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
-                  collapsed
-                    ? "justify-center p-3"
-                    : "justify-start gap-2.5 px-3 py-2.5",
-                )}
-                title={t("actions.backToMainNavigation")}
-                aria-label={t("actions.backToMainNavigation")}
-              >
-                <IconArrowLeft className="size-4 flex-shrink-0" />
-                {!collapsed && (
-                  <span
-                    className={cn(
-                      "whitespace-nowrap text-sm font-light",
-                      labelTransition,
-                      labelVisible
-                        ? "opacity-100 w-auto"
-                        : "opacity-0 w-0 overflow-hidden",
-                    )}
-                  >
-                    {t("actions.backToMainNavigation")}
-                  </span>
-                )}
-              </Button>
             </div>
           </div>
         </div>

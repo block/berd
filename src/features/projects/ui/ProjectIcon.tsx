@@ -28,7 +28,7 @@ import {
   isImageProjectIcon,
   normalizeProjectIcon,
 } from "../lib/projectIcons";
-import { ProjectColorSwatch } from "./ProjectColorSwatch";
+import { DefaultProjectGlyphIcon } from "./DefaultProjectGlyphIcon";
 
 type TablerIconComponent = ComponentType<{
   className?: string;
@@ -93,9 +93,9 @@ export function ProjectIcon({
     );
   }
 
-  if (normalizedIcon === DEFAULT_PROJECT_ICON && color) {
+  if (normalizedIcon === DEFAULT_PROJECT_ICON) {
     return (
-      <ProjectColorSwatch
+      <DefaultProjectGlyphIcon
         color={color}
         projectId={projectId}
         className={className}

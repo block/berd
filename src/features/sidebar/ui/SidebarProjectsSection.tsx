@@ -4,7 +4,13 @@ import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
+import {
+  SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+  SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+  SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
+  SIDEBAR_SECTION_ACTION_PILL_CLASS,
+  SIDEBAR_SECTION_HEADER_ROW_CLASS,
+} from "@/shared/ui/sidebar-tokens";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
@@ -109,7 +115,7 @@ export function SidebarProjectsSection({
     <SidebarChatDragProvider>
       <div
         className={cn(
-          "relative z-10 mt-4 border-t border-border/80",
+          "relative z-10",
           labelTransition,
           labelVisible
             ? "opacity-100 max-h-[2000px]"
@@ -120,8 +126,18 @@ export function SidebarProjectsSection({
       >
         <div
           className={cn(
-            "group/projects-header flex items-center transition-all duration-300",
-            collapsed ? "px-0 pt-0 pb-1 justify-center" : "px-3 pt-3 pb-1.5",
+            SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+            SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
+            "border-t border-border/80",
+          )}
+          aria-hidden
+        />
+        <div
+          className={cn(
+            "group/projects-header flex items-center",
+            collapsed
+              ? "px-0 pt-0 pb-1 justify-center"
+              : SIDEBAR_SECTION_HEADER_ROW_CLASS,
           )}
         >
           {!collapsed && (
@@ -130,23 +146,23 @@ export function SidebarProjectsSection({
               onClick={onToggleProjectsSection}
               aria-expanded={projectsSectionOpen}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
-                "-ml-3",
+                "flex min-w-0 flex-1 items-center gap-0.5 rounded-md py-1 text-left transition-colors hover:text-foreground",
                 labelTransition,
                 labelVisible
                   ? "opacity-100 w-auto"
                   : "opacity-0 w-0 overflow-hidden",
               )}
             >
-              <IconChevronDown
-                className={cn(
-                  "size-3 shrink-0 text-muted-foreground transition-transform duration-150",
-                  !projectsSectionOpen && "-rotate-90",
-                )}
-              />
               <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
                 {t("sections.projects")}
               </span>
+              <IconChevronDown
+                className={cn(
+                  "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150",
+                  "group-hover/projects-header:opacity-100",
+                  !projectsSectionOpen && "-rotate-90",
+                )}
+              />
             </button>
           )}
           {!collapsed && !showProjectsEmptyState && (
@@ -157,8 +173,8 @@ export function SidebarProjectsSection({
               onClick={onCreateProject}
               title={t("actions.newProject")}
               className={cn(
-                "mr-1 h-6 flex-shrink-0 rounded-full bg-muted px-2 text-[11px] text-foreground opacity-0 transition-opacity duration-150 ease-out hover:bg-muted/80 hover:text-foreground",
-                "pointer-events-none group-hover/projects-header:pointer-events-auto group-hover/projects-header:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100",
+                SIDEBAR_SECTION_ACTION_PILL_CLASS,
+                "opacity-0 pointer-events-none group-hover/projects-header:opacity-100 group-hover/projects-header:pointer-events-auto group-focus-within/projects-header:opacity-100 group-focus-within/projects-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto",
               )}
             >
               {t("actions.newProject")}
