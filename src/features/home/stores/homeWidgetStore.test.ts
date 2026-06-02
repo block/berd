@@ -109,6 +109,36 @@ function clockLayoutItem(id: string, centerX: number): Layout["items"][number] {
   };
 }
 
+function stickyNoteLayoutItem({
+  height = 196,
+  id,
+  noteId,
+  width = 224,
+  x,
+  y,
+  zIndex,
+}: {
+  height?: number;
+  id: string;
+  noteId: string;
+  width?: number;
+  x: number;
+  y: number;
+  zIndex: number;
+}): Layout["items"][number] {
+  return {
+    id,
+    kind: "stickyNote",
+    targetId: noteId,
+    centerX: x + width / 2,
+    centerY: y + height / 2,
+    width,
+    height,
+    zIndex,
+    titleOverride: null,
+  };
+}
+
 function clockWidget(overrides: Partial<WidgetInstance> = {}): WidgetInstance {
   return { id: "w1", type: "clock", x: 0, y: 0, z: 1, ...overrides };
 }
@@ -321,6 +351,114 @@ describe("homeWidgetStore", () => {
       },
       { type: "stickyNote", state: { noteId: "onboarding:shape-home" } },
     ]);
+  });
+
+  it("snaps untouched legacy onboarding sticky positions without moving customized notes", async () => {
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        itemRevision: 11,
+        items: [
+          stickyNoteLayoutItem({
+            id: "sticky-welcome",
+            noteId: "onboarding:welcome",
+            x: -360,
+            y: -250,
+            zIndex: 1,
+          }),
+          stickyNoteLayoutItem({
+            id: "sticky-project",
+            noteId: "onboarding:start-project",
+            x: -96,
+            y: -216,
+            zIndex: 2,
+          }),
+          stickyNoteLayoutItem({
+            id: "sticky-build-agent",
+            noteId: "onboarding:build-agent",
+            x: 168,
+            y: -250,
+            zIndex: 3,
+          }),
+          stickyNoteLayoutItem({
+            id: "sticky-workflows",
+            noteId: "onboarding:reuse-workflows",
+            x: -360,
+            y: -14,
+            zIndex: 4,
+          }),
+          stickyNoteLayoutItem({
+            id: "sticky-automations",
+            noteId: "onboarding:manage-automations",
+            x: -96,
+            y: -14,
+            zIndex: 5,
+          }),
+          stickyNoteLayoutItem({
+            id: "sticky-home",
+            noteId: "onboarding:shape-home",
+            x: 168,
+            y: -14,
+            zIndex: 6,
+          }),
+        ],
+      }),
+    );
+    vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
+      ok: true,
+      layout: layout({
+        itemRevision: 12,
+        items: request.items.map((item) => ({
+          ...item,
+          titleOverride: item.titleOverride ?? null,
+        })),
+      }),
+    }));
+
+    await useHomeWidgetStore.getState().initialize();
+
+    expect(saveLayoutItems).toHaveBeenCalledWith(
+      expect.objectContaining({
+        layoutId: HOME_LAYOUT_ID,
+        expectedRevision: 11,
+        replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
+      }),
+    );
+    expect(vi.mocked(saveLayoutItems).mock.calls[0][0].items).toMatchObject([
+      {
+        targetId: "onboarding:welcome",
+        centerX: -248,
+        centerY: -142,
+      },
+      {
+        targetId: "onboarding:start-project",
+        centerX: 16,
+        centerY: -118,
+      },
+      {
+        targetId: "onboarding:build-agent",
+        centerX: 280,
+        centerY: -142,
+      },
+      {
+        targetId: "onboarding:reuse-workflows",
+        centerX: -248,
+        centerY: 98,
+      },
+      {
+        targetId: "onboarding:manage-automations",
+        centerX: 16,
+        centerY: 98,
+      },
+      {
+        targetId: "onboarding:shape-home",
+        centerX: 280,
+        centerY: 98,
+      },
+    ]);
+    expect(useHomeWidgetStore.getState()).toMatchObject({
+      loadStatus: "ready",
+      itemRevision: 12,
+    });
   });
 
   it("upgrades old two-note onboarding layouts with the new primitive notes", async () => {

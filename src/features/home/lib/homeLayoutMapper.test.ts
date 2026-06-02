@@ -252,6 +252,16 @@ describe("homeLayoutMapper", () => {
       "clock",
     ]);
     expect(widgets.map((widget) => widget.z)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(
+      widgets.slice(0, 6).map((widget) => ({ x: widget.x, y: widget.y })),
+    ).toEqual([
+      { x: -360, y: -240 },
+      { x: -96, y: -240 },
+      { x: 168, y: -240 },
+      { x: -360, y: 0 },
+      { x: -96, y: 0 },
+      { x: 168, y: 0 },
+    ]);
     expect(items.map((item) => item.kind)).toEqual([
       "stickyNote",
       "stickyNote",

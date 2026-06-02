@@ -30,6 +30,22 @@ const ONBOARDING_STICKY_INTRODUCED_VERSION: Record<string, number> = {
   "onboarding:shape-home": 3,
   "onboarding:manage-automations": 4,
 };
+const LEGACY_DEFAULT_STICKY_NOTE_POSITIONS_BY_ID: Record<
+  string,
+  { x: number; y: number; width: number; height: number }
+> = {
+  "onboarding:welcome": { x: -360, y: -250, width: 224, height: 196 },
+  "onboarding:start-project": { x: -96, y: -250, width: 224, height: 196 },
+  "onboarding:build-agent": { x: 168, y: -250, width: 224, height: 196 },
+  "onboarding:reuse-workflows": { x: -360, y: -14, width: 224, height: 196 },
+  "onboarding:manage-automations": {
+    x: -96,
+    y: -14,
+    width: 224,
+    height: 196,
+  },
+  "onboarding:shape-home": { x: 168, y: -14, width: 224, height: 196 },
+};
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type SaveStatus = "idle" | "saving";
@@ -257,6 +273,69 @@ function withMissingDefaultStickyNotes(
   return [...instances, ...stickyNotes];
 }
 
+function defaultStickyNotePositionsById(): Map<
+  string,
+  { x: number; y: number; width: number; height: number }
+> {
+  return new Map(
+    createDefaultStickyNoteWidgets().flatMap((instance) => {
+      const noteId = defaultStickyNoteId(instance);
+      if (!noteId || !instance.width || !instance.height) {
+        return [];
+      }
+      return [
+        [
+          noteId,
+          {
+            x: instance.x,
+            y: instance.y,
+            width: instance.width,
+            height: instance.height,
+          },
+        ],
+      ];
+    }),
+  );
+}
+
+function withSnappedDefaultStickyNotePositions(
+  instances: WidgetInstance[],
+): WidgetInstance[] {
+  const currentPositionsById = defaultStickyNotePositionsById();
+  let changed = false;
+
+  const nextInstances = instances.map((instance) => {
+    const noteId = defaultStickyNoteId(instance);
+    if (!noteId) {
+      return instance;
+    }
+
+    const legacyPosition = LEGACY_DEFAULT_STICKY_NOTE_POSITIONS_BY_ID[noteId];
+    const currentPosition = currentPositionsById.get(noteId);
+    if (!legacyPosition || !currentPosition) {
+      return instance;
+    }
+
+    const matchesLegacyPosition =
+      instance.x === legacyPosition.x &&
+      instance.y === legacyPosition.y &&
+      instance.width === legacyPosition.width &&
+      instance.height === legacyPosition.height;
+    if (!matchesLegacyPosition) {
+      return instance;
+    }
+
+    changed = true;
+    return {
+      ...instance,
+      x: currentPosition.x,
+      y: currentPosition.y,
+    };
+  });
+
+  return changed ? nextInstances : instances;
+}
+
 function mergeAddedWidgetsAfterConflict(
   current: HomeWidgetState,
   attemptedInstances: WidgetInstance[],
@@ -366,12 +445,15 @@ export function createHomeWidgetRuntime({
         if (instances.length > 0) {
           const instancesWithMissingNotes =
             withMissingDefaultStickyNotes(instances);
-          if (instancesWithMissingNotes.length > instances.length) {
+          const preparedInstances = withSnappedDefaultStickyNotePositions(
+            instancesWithMissingNotes,
+          );
+          if (preparedInstances !== instances) {
             const result = await saveLayoutItems({
               layoutId: HOME_LAYOUT_ID,
               expectedRevision: layout.itemRevision,
               replaceKinds: HOME_LAYOUT_REPLACE_KINDS,
-              items: homeWidgetsToLayoutItems(instancesWithMissingNotes),
+              items: homeWidgetsToLayoutItems(preparedInstances),
             });
             if (generation !== runtime.generation) {
               return;
