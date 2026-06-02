@@ -238,7 +238,8 @@
     "card": {
       "checkPrompt": "Busca si hay una nueva versión disponible.",
       "description": "Mantén Goose actualizado con las últimas funciones y correcciones.",
-      "title": "Actualizaciones de software"
+      "title": "Actualizaciones de software",
+      "currentVersion": "Versión {{version}}"
     },
     "description": "Goose comprueba actualizaciones firmadas de la app en segundo plano y espera a que reinicies.",
     "details": {

@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   type UpdateStatus,
@@ -45,6 +46,25 @@ export function UpdatesSettings() {
     checkForUpdate,
     relaunch,
   } = useUpdaterContext();
+  const [currentVersion, setCurrentVersion] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadVersion() {
+      if (!window.__TAURI_INTERNALS__) return;
+      try {
+        const { getVersion } = await import("@tauri-apps/api/app");
+        const version = await getVersion();
+        if (!cancelled) setCurrentVersion(version);
+      } catch {
+        // non-critical — leave version hidden
+      }
+    }
+    void loadVersion();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const isBusy =
     status === "checking" ||
     status === "downloading" ||
@@ -60,7 +80,18 @@ export function UpdatesSettings() {
     <SettingsPage contentClassName="space-y-6">
       <section className="overflow-hidden rounded-lg bg-background px-6 py-5">
         <div className="space-y-1">
-          <h4 className="text-sm text-foreground">{t("updates.card.title")}</h4>
+          <div className="flex items-baseline justify-between gap-2">
+            <h4 className="text-sm text-foreground">
+              {t("updates.card.title")}
+            </h4>
+            {currentVersion ? (
+              <span className="text-xs text-muted-foreground">
+                {t("updates.card.currentVersion", {
+                  version: currentVersion,
+                })}
+              </span>
+            ) : null}
+          </div>
           <p className="text-xs leading-4 text-muted-foreground">
             {t("updates.card.description")}
           </p>

@@ -1,9 +1,15 @@
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UpdateStatus } from "@/features/updates/hooks/useUpdater";
 import { renderWithProviders } from "@/test/render";
 import { UpdatesSettings } from "../UpdatesSettings";
+
+const mockGetVersion = vi.hoisted(() => vi.fn());
+
+vi.mock("@tauri-apps/api/app", () => ({
+  getVersion: mockGetVersion,
+}));
 
 type MockUpdaterState = {
   status: UpdateStatus;
@@ -42,6 +48,11 @@ function setUpdaterState(overrides: Partial<MockUpdaterState> = {}) {
 describe("UpdatesSettings", () => {
   beforeEach(() => {
     setUpdaterState();
+    mockGetVersion.mockResolvedValue("1.2.3");
+    // Simulate Tauri environment
+    (
+      window as unknown as { __TAURI_INTERNALS__: boolean }
+    ).__TAURI_INTERNALS__ = true;
   });
 
   it("renders the idle state and starts a manual check", async () => {
@@ -63,6 +74,24 @@ describe("UpdatesSettings", () => {
     await user.click(screen.getByRole("button", { name: "Check for Updates" }));
 
     expect(state.checkForUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("displays the current version number", async () => {
+    renderWithProviders(<UpdatesSettings />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Version 1.2.3")).toBeInTheDocument();
+    });
+  });
+
+  it("hides version when not in Tauri environment", () => {
+    (
+      window as unknown as { __TAURI_INTERNALS__: undefined }
+    ).__TAURI_INTERNALS__ = undefined;
+
+    renderWithProviders(<UpdatesSettings />);
+
+    expect(screen.queryByText(/Version \d/)).not.toBeInTheDocument();
   });
 
   it("disables the action while checking", () => {
