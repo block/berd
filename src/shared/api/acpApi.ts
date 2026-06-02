@@ -92,25 +92,29 @@ export async function importSession(json: string): Promise<AcpSessionInfo> {
   return result as unknown as AcpSessionInfo;
 }
 
-export async function forkSession(sessionId: string): Promise<AcpSessionInfo> {
+export async function forkSession(
+  sessionId: string,
+  workingDir: string,
+): Promise<AcpSessionInfo> {
   const client = await getClient();
   const response = await client.unstable_forkSession({
     sessionId,
-    cwd: "~",
+    cwd: workingDir,
+    mcpServers: [],
   });
   return {
     sessionId: response.sessionId,
-    title: (response._meta?.title as string) ?? null,
+    title: null,
     updatedAt: null,
     createdAt: (response._meta?.createdAt as string) ?? null,
     archivedAt: (response._meta?.archivedAt as string) ?? null,
     userSetName: response._meta?.userSetName === true,
     messageCount: (response._meta?.messageCount as number) ?? 0,
-    workingDir: null,
+    workingDir,
     projectId: (response._meta?.projectId as string) ?? null,
     providerId: (response._meta?.providerId as string) ?? null,
     modelId: (response._meta?.modelId as string) ?? null,
-    personaId: (response._meta?.personaId as string) ?? null,
+    personaId: null,
   };
 }
 

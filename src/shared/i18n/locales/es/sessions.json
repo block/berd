@@ -9,6 +9,11 @@
     "today": "Hoy",
     "yesterday": "Ayer"
   },
+  "duplicate": {
+    "failed": "No se pudo duplicar la sesión",
+    "missingWorkingDir": "Esta sesión no tiene un directorio de trabajo y no se puede duplicar.",
+    "title": "Copia de {{title}}"
+  },
   "history": {
     "archivedSubtitle": "Sesiones que has archivado",
     "archivedTitle": "Sesiones archivadas",

@@ -265,11 +265,25 @@ export async function acpImportSession(json: string): Promise<AcpSessionInfo> {
   return directAcp.importSession(json);
 }
 
-/** Duplicate (fork) a session via the goose binary. Returns new session metadata. */
+/** Duplicate a session via ACP's fork method. Returns new session metadata. */
 export async function acpDuplicateSession(
   sessionId: string,
+  workingDir: string,
+  duplicateTitle?: string,
 ): Promise<AcpSessionInfo> {
-  return directAcp.forkSession(sessionId);
+  const session = await directAcp.forkSession(sessionId, workingDir);
+  const normalizedTitle = duplicateTitle?.trim();
+  if (!normalizedTitle) {
+    return session;
+  }
+
+  try {
+    await directAcp.renameSession(session.sessionId, normalizedTitle);
+  } catch (error) {
+    console.error("Failed to rename duplicated session:", error);
+  }
+
+  return session;
 }
 
 /** Cancel an in-progress ACP session so the backend stops streaming. */

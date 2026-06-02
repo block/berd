@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
   listSessions: vi.fn(),
+  unstableForkSession: vi.fn(),
 }));
 
 vi.mock("../acpConnection", () => ({
@@ -14,6 +15,7 @@ describe("listSessionsPage", () => {
     vi.clearAllMocks();
     mocks.getClient.mockResolvedValue({
       listSessions: mocks.listSessions,
+      unstable_forkSession: mocks.unstableForkSession,
     });
   });
 
@@ -122,5 +124,51 @@ describe("listSessionsPage", () => {
     const { listSessionsPage } = await import("../acpApi");
 
     await expect(listSessionsPage()).rejects.toThrow(error);
+  });
+});
+
+describe("forkSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getClient.mockResolvedValue({
+      listSessions: mocks.listSessions,
+      unstable_forkSession: mocks.unstableForkSession,
+    });
+  });
+
+  it("passes the selected working dir and empty MCP server list", async () => {
+    mocks.unstableForkSession.mockResolvedValueOnce({
+      sessionId: "session-2",
+      _meta: {
+        createdAt: "2026-05-01T00:00:00.000Z",
+        userSetName: true,
+        messageCount: 7,
+        projectId: "project-1",
+        providerId: "goose",
+        modelId: "gpt-4.1",
+      },
+    });
+
+    const { forkSession } = await import("../acpApi");
+
+    await expect(forkSession("session-1", "/tmp/project")).resolves.toEqual({
+      sessionId: "session-2",
+      title: null,
+      updatedAt: null,
+      createdAt: "2026-05-01T00:00:00.000Z",
+      archivedAt: null,
+      userSetName: true,
+      messageCount: 7,
+      workingDir: "/tmp/project",
+      projectId: "project-1",
+      providerId: "goose",
+      modelId: "gpt-4.1",
+      personaId: null,
+    });
+    expect(mocks.unstableForkSession).toHaveBeenCalledWith({
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      mcpServers: [],
+    });
   });
 });

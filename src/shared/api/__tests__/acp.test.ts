@@ -6,6 +6,8 @@ const mockSetProvider = vi.fn();
 const mockSetModel = vi.fn();
 const mockPrompt = vi.fn();
 const mockAppendSessionSystemPrompt = vi.fn();
+const mockForkSession = vi.fn();
+const mockRenameSession = vi.fn();
 
 vi.mock("../acpApi", () => ({
   listProviders: vi.fn(),
@@ -19,7 +21,8 @@ vi.mock("../acpApi", () => ({
   newSession: (...args: unknown[]) => mockNewSession(...args),
   exportSession: vi.fn(),
   importSession: vi.fn(),
-  forkSession: vi.fn(),
+  forkSession: (...args: unknown[]) => mockForkSession(...args),
+  renameSession: (...args: unknown[]) => mockRenameSession(...args),
   cancelSession: vi.fn(),
 }));
 
@@ -225,6 +228,70 @@ describe("acpCreateSession", () => {
     expect(mockSetProvider).toHaveBeenCalledWith("acp-session-1", "openai");
     expect(mockSetModel).toHaveBeenCalledWith("acp-session-1", "gpt-4.1");
     expect(sessionRegistry.isSessionPrepared("acp-session-1")).toBe(true);
+  });
+});
+
+describe("acpDuplicateSession", () => {
+  const forkedSession = {
+    sessionId: "session-2",
+    title: "Fork",
+    userSetName: false,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("delegates the session id and working dir to direct ACP", async () => {
+    mockForkSession.mockResolvedValueOnce(forkedSession);
+
+    const { acpDuplicateSession } = await import("../acp");
+
+    await expect(
+      acpDuplicateSession("session-1", "/tmp/project"),
+    ).resolves.toEqual(forkedSession);
+    expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project");
+    expect(mockRenameSession).not.toHaveBeenCalled();
+  });
+
+  it("renames duplicated sessions when a duplicate title is provided", async () => {
+    mockForkSession.mockResolvedValueOnce(forkedSession);
+
+    const { acpDuplicateSession } = await import("../acp");
+
+    await expect(
+      acpDuplicateSession("session-1", "/tmp/project", "Copy of Chat One"),
+    ).resolves.toEqual(forkedSession);
+    expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project");
+    expect(mockRenameSession).toHaveBeenCalledWith(
+      "session-2",
+      "Copy of Chat One",
+    );
+  });
+
+  it("keeps the duplicated session when the cosmetic rename fails", async () => {
+    const error = new Error("rename failed");
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    mockForkSession.mockResolvedValueOnce(forkedSession);
+    mockRenameSession.mockRejectedValueOnce(error);
+
+    const { acpDuplicateSession } = await import("../acp");
+
+    await expect(
+      acpDuplicateSession("session-1", "/tmp/project", "Copy of Chat One"),
+    ).resolves.toEqual(forkedSession);
+    expect(mockRenameSession).toHaveBeenCalledWith(
+      "session-2",
+      "Copy of Chat One",
+    );
+    expect(consoleError).toHaveBeenCalledWith(
+      "Failed to rename duplicated session:",
+      error,
+    );
+    consoleError.mockRestore();
   });
 });
 

@@ -102,6 +102,7 @@ export function SessionHistoryView({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const duplicatingSessionIdsRef = useRef<Set<string>>(new Set());
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
@@ -497,17 +498,49 @@ export function SessionHistoryView({
 
   const handleDuplicate = useCallback(
     async (sessionId: string) => {
+      if (duplicatingSessionIdsRef.current.has(sessionId)) {
+        return;
+      }
+
+      const session = activeSessions.find(
+        (candidate) => candidate.id === sessionId,
+      );
+      const workingDir = session?.workingDir?.trim();
+      if (!session) {
+        toast.error(t("duplicate.failed"));
+        return;
+      }
+      if (!workingDir) {
+        toast.error(t("duplicate.missingWorkingDir"));
+        return;
+      }
+      const baseTitle = getDisplayTitle(session).trim() || defaultSessionTitle;
+      const duplicateTitle = t("duplicate.title", { title: baseTitle });
+      duplicatingSessionIdsRef.current.add(sessionId);
+
       try {
-        await acpDuplicateSession(sessionId);
+        await acpDuplicateSession(sessionId, workingDir, duplicateTitle);
         await loadSessions();
       } catch (error) {
         console.error("Duplicate failed:", error);
         if (isSessionNotFoundError(error)) {
           removeSession(sessionId);
+          return;
         }
+        toast.error(t("duplicate.failed"));
+      } finally {
+        duplicatingSessionIdsRef.current.delete(sessionId);
       }
     },
-    [isSessionNotFoundError, loadSessions, removeSession],
+    [
+      activeSessions,
+      defaultSessionTitle,
+      getDisplayTitle,
+      isSessionNotFoundError,
+      loadSessions,
+      removeSession,
+      t,
+    ],
   );
 
   const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();

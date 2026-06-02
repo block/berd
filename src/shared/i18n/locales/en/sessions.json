@@ -9,6 +9,11 @@
     "today": "Today",
     "yesterday": "Yesterday"
   },
+  "duplicate": {
+    "failed": "Failed to duplicate session",
+    "missingWorkingDir": "This session has no working directory and can't be duplicated.",
+    "title": "Copy of {{title}}"
+  },
   "history": {
     "archivedSubtitle": "Sessions you've archived",
     "archivedTitle": "Archived sessions",
