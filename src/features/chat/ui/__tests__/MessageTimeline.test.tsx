@@ -629,9 +629,17 @@ describe("MessageTimeline", () => {
     );
 
     const scroller = screen.getByTestId("message-timeline-scroll");
+    const surface = screen.getByTestId("message-timeline-surface");
     const footerFrame = screen.getByTestId("message-timeline-footer");
 
-    expect(scroller).toHaveClass("flex-1", "rounded-chrome", "bg-card");
+    expect(surface).toHaveClass(
+      "absolute",
+      "bottom-[calc(var(--chat-surface-bottom-gap)*2)]",
+      "rounded-chrome",
+      "bg-card",
+    );
+    expect(scroller).toHaveClass("flex-1");
+    expect(scroller).not.toHaveClass("bg-card");
     expect(footerFrame).toHaveClass(
       "relative",
       "mt-[calc(-1*var(--chat-composer-surface-overlap))]",

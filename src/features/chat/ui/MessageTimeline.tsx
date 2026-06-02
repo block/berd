@@ -834,6 +834,13 @@ export function MessageTimeline({
         className,
       )}
     >
+      {hasFooter ? (
+        <div
+          aria-hidden="true"
+          data-testid="message-timeline-surface"
+          className="pointer-events-none absolute inset-x-0 top-0 bottom-[calc(var(--chat-surface-bottom-gap)*2)] rounded-chrome bg-card"
+        />
+      ) : null}
       <div
         ref={containerRef}
         onScroll={handleScroll}
@@ -841,7 +848,10 @@ export function MessageTimeline({
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
         data-testid="message-timeline-scroll"
-        className="scrollbar-none min-h-0 flex-1 overflow-y-auto rounded-chrome bg-card"
+        className={cn(
+          "scrollbar-none relative z-0 min-h-0 flex-1 overflow-y-auto",
+          !hasFooter && "rounded-chrome bg-card",
+        )}
       >
         <div className="flex min-h-full flex-col">
           <div
