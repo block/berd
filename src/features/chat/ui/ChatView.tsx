@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type CSSProperties } from "react";
-import { AnimatePresence } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
 import { toast } from "sonner";
@@ -7,6 +7,7 @@ import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
+import { ConversationEmptyAvatar } from "./ConversationEmptyAvatar";
 import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
 import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
@@ -435,7 +436,23 @@ export function ChatView({
   const conversationPlaceholder = controller.isLoadingHistory ? (
     <ChatLoadingSkeleton />
   ) : (
-    <div className="flex w-full flex-1 items-center justify-center px-6">
+    <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
+      <AnimatePresence initial={false}>
+        {!isAgentBuilderSession && controller.selectedPersona ? (
+          <motion.div
+            key="conversation-empty-avatar"
+            className="overflow-hidden"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25, ease: "easeInOut" }}
+          >
+            <div className="pb-4">
+              <ConversationEmptyAvatar persona={controller.selectedPersona} />
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
       <p className="text-3xl font-normal text-foreground">
         {isAgentBuilderSession
           ? agentBuilderEmptyPrompt

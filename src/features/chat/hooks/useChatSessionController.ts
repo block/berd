@@ -1324,6 +1324,7 @@ export function useChatSessionController({
     projectMetadataPending,
     personas,
     selectedPersonaId,
+    selectedPersona,
     handlePersonaChange,
     handleCreatePersona,
     pickerAgents,

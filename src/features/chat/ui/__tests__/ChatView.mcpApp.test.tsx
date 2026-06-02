@@ -33,6 +33,14 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: new Proxy(
+    {},
+    {
+      get: () => (props: { children?: ReactNode }) => (
+        <div>{props.children}</div>
+      ),
+    },
+  ),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -71,6 +79,15 @@ vi.mock("../LoadingGoose", () => ({
 
 vi.mock("../ChatLoadingSkeleton", () => ({
   ChatLoadingSkeleton: () => <div data-testid="chat-loading-skeleton" />,
+}));
+
+vi.mock("../ConversationEmptyAvatar", () => ({
+  ConversationEmptyAvatar: (props: { persona: { id: string } }) => (
+    <div
+      data-testid="conversation-empty-avatar"
+      data-persona-id={props.persona.id}
+    />
+  ),
 }));
 
 vi.mock("../ChatRightRail", () => ({
@@ -280,6 +297,72 @@ describe("ChatView MCP app messaging", () => {
     };
     expect(timelineProps.footer).toBeTruthy();
     expect(timelineProps.showPlaceholder).toBe(false);
+  });
+
+  it("renders the selected persona's avatar above the empty-state text for a fresh chat", () => {
+    const persona = {
+      id: "gloopy",
+      displayName: "Gloopy",
+      avatar: "app-avatar:gloopy-1",
+      systemPrompt: "",
+    };
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+      selectedPersona: persona,
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    const avatar = screen.getByTestId("conversation-empty-avatar");
+    expect(avatar).toHaveAttribute("data-persona-id", "gloopy");
+    expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
+  });
+
+  it("does not render the persona avatar once messages exist", () => {
+    const persona = {
+      id: "gloopy",
+      displayName: "Gloopy",
+      avatar: "app-avatar:gloopy-1",
+      systemPrompt: "",
+    };
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      selectedPersona: persona,
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    expect(screen.queryByTestId("conversation-empty-avatar")).toBeNull();
+  });
+
+  it("does not render the persona avatar in an empty agent-builder session", () => {
+    const persona = {
+      id: "gloopy",
+      displayName: "Gloopy",
+      avatar: "app-avatar:gloopy-1",
+      systemPrompt: "",
+    };
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentPath: "/Users/test/.agents/agents/draft.md",
+      targetAgentSlug: "draft",
+    } satisfies ChatSession;
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+      selectedPersona: persona,
+    });
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    expect(screen.queryByTestId("conversation-empty-avatar")).toBeNull();
+    expect(screen.getByText("emptyState.buildAgentPrompt")).toBeTruthy();
   });
 
   it("forces the loading skeleton placeholder while history loads", () => {
