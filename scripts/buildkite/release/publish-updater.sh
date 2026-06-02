@@ -34,7 +34,7 @@ echo "+++ :buildkite: Downloading signed artifacts from build step"
 # build-macos uploads release/macos/* via the apple-codesign plugin's built-in
 # upload. We only need the .app.zip (it's the signed + stapled bundle
 # packaged for transport).
-buildkite-agent artifact download "**/release/macos/${APP_BUNDLE_NAME}.app.zip" "$REPO_ROOT/"
+buildkite-agent artifact download "release/macos/${APP_BUNDLE_NAME}.app.zip" "$REPO_ROOT/"
 
 APP_ZIP="$OUT_DIR/${APP_BUNDLE_NAME}.app.zip"
 [[ -f "$APP_ZIP" ]] || { echo "Missing $APP_ZIP" >&2; exit 1; }
