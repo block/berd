@@ -299,6 +299,58 @@ describe("AppShell global navigation", () => {
     );
   });
 
+  it("returns home and focuses the global composer with Cmd+N from chat", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+    mockAcpCreateSession.mockClear();
+
+    await user.keyboard("{Meta>}n{/Meta}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    await waitFor(() => {
+      expect(textbox).toHaveFocus();
+    });
+    expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("drops pending Cmd+N focus when the global composer remains hidden", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <AppShell>
+        <div>Custom shell content</div>
+      </AppShell>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+    expect(
+      screen.queryByPlaceholderText("Start a conversation"),
+    ).not.toBeInTheDocument();
+
+    await user.keyboard("{Meta>}n{/Meta}");
+
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    });
+    rerender(<AppShell />);
+
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    expect(textbox).not.toHaveFocus();
+  });
+
   it("opens a blank chat before ACP session creation finishes", async () => {
     const pendingSession = deferred<{ sessionId: string }>();
     mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);

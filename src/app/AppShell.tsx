@@ -258,6 +258,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
+  const pendingGlobalComposerFocusViewRef = useRef<AppView | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
   const [skillsBreadcrumbLabel, setSkillsBreadcrumbLabel] = useState<
@@ -1708,6 +1709,50 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setFeedbackOpen(true);
   }, []);
 
+  const startupIssue = useMemo(
+    () =>
+      startup.error
+        ? buildStartupDiagnosticIssue(startup.error, startup.probe)
+        : null,
+    [startup.error, startup.probe],
+  );
+  const forceStartupLoading =
+    import.meta.env.DEV &&
+    new URLSearchParams(window.location.search).has("startupLoading");
+  const showGlobalComposer =
+    startup.ready &&
+    !forceStartupLoading &&
+    !startupIssue &&
+    children == null &&
+    activeView !== "chat" &&
+    !(activeView === "automations" && automationsRoute.surface === "builder");
+
+  const requestGlobalComposerFocus = useCallback(() => {
+    if (showGlobalComposer) {
+      setGlobalComposerFocusRequest((request) => request + 1);
+      return;
+    }
+
+    pendingGlobalComposerFocusViewRef.current = "home";
+  }, [showGlobalComposer]);
+
+  useEffect(() => {
+    const pendingView = pendingGlobalComposerFocusViewRef.current;
+    if (!pendingView) {
+      return;
+    }
+
+    // Only bridge the Cmd+N unmount gap. If Home lands without the composer,
+    // drop the request so a later unrelated composer-visible route won't steal focus.
+    if (activeView !== pendingView || !showGlobalComposer) {
+      pendingGlobalComposerFocusViewRef.current = null;
+      return;
+    }
+
+    pendingGlobalComposerFocusViewRef.current = null;
+    setGlobalComposerFocusRequest((request) => request + 1);
+  }, [activeView, showGlobalComposer]);
+
   const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
     switch (activeView) {
       case "chat": {
@@ -1865,6 +1910,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveSession(null);
         clearSettingsSectionUrl();
         setActiveView("home");
+        requestGlobalComposerFocus();
       }
     };
     window.addEventListener("keydown", handler);
@@ -1875,27 +1921,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     handleNavigate,
     leaveSecondarySurface,
     openSettings,
+    requestGlobalComposerFocus,
     setActiveSession,
     toggleSidebar,
   ]);
-
-  const startupIssue = useMemo(
-    () =>
-      startup.error
-        ? buildStartupDiagnosticIssue(startup.error, startup.probe)
-        : null,
-    [startup.error, startup.probe],
-  );
-  const forceStartupLoading =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).has("startupLoading");
-  const showGlobalComposer =
-    startup.ready &&
-    !forceStartupLoading &&
-    !startupIssue &&
-    children == null &&
-    activeView !== "chat" &&
-    !(activeView === "automations" && automationsRoute.surface === "builder");
 
   useEffect(() => {
     if (showGlobalComposer) {
