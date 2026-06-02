@@ -18,6 +18,11 @@
     "openPanel": "Abrir panel de contexto",
     "ringAria": "Contexto: {{percent}}% usado"
   },
+  "selectedText": {
+    "actions": {
+      "copyAsMarkdown": "Copiar como Markdown"
+    }
+  },
   "terminal": {
     "checkingWorkspace": "Comprobando espacio de trabajo...",
     "close": "Cerrar terminal",
