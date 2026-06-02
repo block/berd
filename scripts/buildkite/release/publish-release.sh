@@ -30,7 +30,7 @@ rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR/macos"
 
 echo "+++ :buildkite: Downloading signed artifacts"
-buildkite-agent artifact download "release/macos/*" "$REPO_ROOT/"
+buildkite-agent artifact download "**/release/macos/*" "$REPO_ROOT/"
 
 STAGED="$RELEASE_DIR/macos"
 APP_ZIP_SRC="$STAGED/${APP_BUNDLE_NAME}.app.zip"

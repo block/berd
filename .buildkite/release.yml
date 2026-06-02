@@ -4,16 +4,13 @@ agents:
 env:
   GOOSE2_UPDATER_ENDPOINT: "https://global.block-artifacts.com/artifactory/mdx/goose-internal/latest.json"
 
+  MACOS_ENVIRONMENT_XCODE_VERSION: "26.3.0"
+  MACOS_ENVIRONMENT_RUBY_VERSION: "3.3.9"
 # The macos-environment plugin activates Xcode and sets up RVM/bundler so the
 # upload-mobile-release plugin's pre-command can find `fastlane` if it ever
 # needs to. Goose only builds macOS, but the plugin's signing/upload helpers
 # still rely on the environment it primes.
 common:
-  - macos_env: &macos_env
-      squareup/macos-environment#v2:
-        ruby_version: "3.3.9"
-        xcode_version: "26.3.0"
-
 steps:
   - input: ":mac: Cut a Goose release"
     key: "release-input"
@@ -38,7 +35,6 @@ steps:
     depends_on: "release-input"
     command: ./scripts/buildkite/release/build-macos.sh
     plugins:
-      - *macos_env
       - squareup/apple-codesign#v1:
           identity: "Developer ID Application: Block, Inc. (EYF346PHUG)"
           artifacts:
@@ -54,7 +50,7 @@ steps:
               package:
                 from: "release/macos/Goose.app"
                 volname: "Goose"
-      - squareup/upload-mobile-release#v2:
+      - squareup/upload-mobile-release#v3:
           skip_bundle_version_validation: true
           team_ids:
             - "EYF346PHUG"
@@ -71,9 +67,6 @@ steps:
     depends_on:
       - "build-macos"
     command: ./scripts/buildkite/release/publish-updater.sh
-    plugins:
-      - *macos_env
-
   - label: ":github: Publish GitHub release"
     key: "publish"
     depends_on:
