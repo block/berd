@@ -62,6 +62,10 @@ vi.mock("@/features/projects/api/projects", () => ({
   updateProject: vi.fn(),
 }));
 
+vi.mock("@/features/projects/artifact/prefetchProjectArtifactRenderer", () => ({
+  prefetchProjectArtifactRenderer: vi.fn().mockResolvedValue({}),
+}));
+
 vi.mock("@/features/updates/ui/UpdateButton", () => ({
   UpdateButton: () => null,
 }));

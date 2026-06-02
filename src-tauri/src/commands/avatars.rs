@@ -267,12 +267,94 @@ pub async fn get_cached_avatar_for_ref(
     let Some(catalog) = read_cached_catalog(&paths)? else {
         return Ok(None);
     };
+    cached_avatar_for_id(&paths, &catalog, &avatar_id)
+}
+
+#[tauri::command]
+pub async fn get_cached_avatars_for_refs(
+    app: AppHandle,
+    avatar_refs: Vec<String>,
+) -> Result<HashMap<String, Option<CachedAvatar>>, String> {
+    if avatar_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let mut parsed_refs = Vec::with_capacity(avatar_refs.len());
+    for avatar_ref in avatar_refs {
+        let avatar_id = parse_avatar_ref(&avatar_ref).ok();
+        parsed_refs.push((avatar_ref, avatar_id));
+    }
+
+    let _cache_guard = avatar_cache_lock().lock().await;
+    let paths = avatar_cache_paths(&app)?;
+    let Some(catalog) = read_cached_catalog(&paths)? else {
+        return Ok(parsed_refs
+            .into_iter()
+            .map(|(avatar_ref, _)| (avatar_ref, None))
+            .collect());
+    };
+
+    cached_avatars_for_parsed_refs_with_format(
+        &paths,
+        &catalog,
+        parsed_refs,
+        platform_avatar_format(),
+    )
+}
+
+fn cached_avatar_for_id(
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    avatar_id: &str,
+) -> Result<Option<CachedAvatar>, String> {
+    cached_avatar_for_id_with_format(paths, catalog, avatar_id, platform_avatar_format())
+}
+
+fn cached_avatars_for_parsed_refs_with_format(
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    parsed_refs: Vec<(String, Option<String>)>,
+    format: &str,
+) -> Result<HashMap<String, Option<CachedAvatar>>, String> {
+    let mut cached_by_id = HashMap::new();
+    for avatar_id in parsed_refs
+        .iter()
+        .filter_map(|(_, avatar_id)| avatar_id.as_ref())
+    {
+        if cached_by_id.contains_key(avatar_id) {
+            continue;
+        }
+        cached_by_id.insert(
+            avatar_id.clone(),
+            cached_avatar_for_id_with_format(paths, catalog, avatar_id, format)?,
+        );
+    }
+
+    Ok(parsed_refs
+        .into_iter()
+        .map(|(avatar_ref, avatar_id)| {
+            (
+                avatar_ref,
+                avatar_id
+                    .and_then(|avatar_id| cached_by_id.get(&avatar_id).cloned())
+                    .unwrap_or(None),
+            )
+        })
+        .collect())
+}
+
+fn cached_avatar_for_id_with_format(
+    paths: &AvatarCachePaths,
+    catalog: &AvatarCatalog,
+    avatar_id: &str,
+    format: &str,
+) -> Result<Option<CachedAvatar>, String> {
     let Some(entry) = catalog.assets.iter().find(|entry| entry.id == avatar_id) else {
         return Ok(None);
     };
-    let variant = variant_for_format(entry, platform_avatar_format())?;
-    let target = media_cache_path(&paths, &catalog.catalog_version, &variant.path)?;
-    let Some(asset) = valid_cached_asset(&paths, &catalog, entry, variant, &target)? else {
+    let variant = variant_for_format(entry, format)?;
+    let target = media_cache_path(paths, &catalog.catalog_version, &variant.path)?;
+    let Some(asset) = valid_cached_asset(paths, catalog, entry, variant, &target)? else {
         return Ok(None);
     };
     let catalog_version = catalog.catalog_version.clone();
@@ -1593,6 +1675,14 @@ mod tests {
         let target = write_cached_webm(&paths, &catalog, bytes);
         write_webm_checksum_marker(&paths, &catalog);
 
+        assert_eq!(
+            cached_avatar_for_id_with_format(&paths, &catalog, "gloopy-1", "webm")
+                .unwrap()
+                .unwrap()
+                .asset
+                .id,
+            "gloopy-1"
+        );
         assert!(
             cached_collection_assets(&paths, &catalog, &catalog.collections[0], "webm")
                 .unwrap()
@@ -1605,6 +1695,40 @@ mod tests {
                 .id,
             "gloopy-1"
         );
+    }
+
+    #[test]
+    fn cached_avatar_batch_keeps_invalid_refs_isolated() {
+        let bytes = b"avatar-bytes";
+        let catalog = valid_catalog(bytes);
+        let (_dir, paths) = temp_paths();
+        write_cached_webm(&paths, &catalog, bytes);
+        write_webm_checksum_marker(&paths, &catalog);
+
+        let cached = cached_avatars_for_parsed_refs_with_format(
+            &paths,
+            &catalog,
+            vec![
+                (
+                    "app-avatar:gloopy-1".to_string(),
+                    Some("gloopy-1".to_string()),
+                ),
+                ("app-avatar:../gloopy-1".to_string(), None),
+            ],
+            "webm",
+        )
+        .unwrap();
+
+        assert_eq!(
+            cached
+                .get("app-avatar:gloopy-1")
+                .and_then(|avatar| avatar.as_ref())
+                .unwrap()
+                .asset
+                .id,
+            "gloopy-1"
+        );
+        assert!(cached.get("app-avatar:../gloopy-1").unwrap().is_none());
     }
 
     #[tokio::test]

@@ -8,6 +8,7 @@ import {
   getAvatarLibrarySnapshot,
   getCachedAvatarCollections,
   getCachedAvatarForRef,
+  getCachedAvatarsForRefs,
   listenAvatarCacheWarmed,
   normalizeAvatarLibraryError,
 } from "./avatars";
@@ -155,16 +156,64 @@ describe("avatars api", () => {
     });
   });
 
-  it("resolves saved refs with the cached-only command", async () => {
+  it("resolves saved refs with the batched cached-only command", async () => {
     invokeMock.mockResolvedValueOnce({
+      "app-avatar:gloopy-1": {
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+        asset: cachedCollections[0].assets[0],
+      },
+    });
+    await expect(
+      getCachedAvatarForRef({ avatarRef: "app-avatar:gloopy-1" }),
+    ).resolves.toMatchObject({
       catalogVersion: "v1",
       collectionId: "gloopies",
-      asset: cachedCollections[0].assets[0],
     });
-    await getCachedAvatarForRef({ avatarRef: "app-avatar:gloopy-1" });
 
-    expect(invokeMock).toHaveBeenCalledWith("get_cached_avatar_for_ref", {
-      avatarRef: "app-avatar:gloopy-1",
+    expect(invokeMock).toHaveBeenCalledWith("get_cached_avatars_for_refs", {
+      avatarRefs: ["app-avatar:gloopy-1"],
+    });
+  });
+
+  it("coalesces same-tick cached avatar lookups", async () => {
+    invokeMock.mockResolvedValueOnce({
+      "app-avatar:gloopy-1": {
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+        asset: cachedCollections[0].assets[0],
+      },
+      "app-avatar:gloopy-2": null,
+    });
+
+    const first = getCachedAvatarForRef({ avatarRef: "app-avatar:gloopy-1" });
+    const second = getCachedAvatarForRef({ avatarRef: "app-avatar:gloopy-2" });
+
+    await expect(first).resolves.toMatchObject({
+      catalogVersion: "v1",
+      collectionId: "gloopies",
+    });
+    await expect(second).resolves.toBeNull();
+    expect(invokeMock).toHaveBeenCalledOnce();
+    expect(invokeMock).toHaveBeenCalledWith("get_cached_avatars_for_refs", {
+      avatarRefs: ["app-avatar:gloopy-1", "app-avatar:gloopy-2"],
+    });
+  });
+
+  it("resolves an explicit cached avatar batch", async () => {
+    invokeMock.mockResolvedValueOnce({
+      "app-avatar:gloopy-1": {
+        catalogVersion: "v1",
+        collectionId: "gloopies",
+        asset: cachedCollections[0].assets[0],
+      },
+    });
+
+    await expect(
+      getCachedAvatarsForRefs({ avatarRefs: ["app-avatar:gloopy-1"] }),
+    ).resolves.toHaveProperty("app-avatar:gloopy-1");
+    expect(invokeMock).toHaveBeenCalledWith("get_cached_avatars_for_refs", {
+      avatarRefs: ["app-avatar:gloopy-1"],
     });
   });
 

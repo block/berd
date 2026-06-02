@@ -205,6 +205,7 @@ pub fn run() {
             commands::agents::read_agent_source_file,
             commands::avatars::get_avatar_library_snapshot,
             commands::avatars::get_cached_avatar_for_ref,
+            commands::avatars::get_cached_avatars_for_refs,
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
             commands::connections::list_connections,

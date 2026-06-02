@@ -120,7 +120,9 @@ describe("AgentPinWidget", () => {
       "translate-y-2",
       "backdrop-blur-md",
     );
-    expect(container.querySelector(media)).toBeInTheDocument();
+    await waitFor(() =>
+      expect(container.querySelector(media)).toBeInTheDocument(),
+    );
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
   });
 
