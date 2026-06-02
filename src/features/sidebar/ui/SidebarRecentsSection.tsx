@@ -1,6 +1,7 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconEdit } from "@tabler/icons-react";
+import type { AppView } from "@/app/AppShell";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
@@ -24,6 +25,7 @@ export function SidebarRecentsSection({
   showEmptyState = false,
   activeSessionId,
   onNewChat,
+  onNavigate,
   onSelectSession,
   onArchiveChat,
   onRenameChat,
@@ -51,6 +53,7 @@ export function SidebarRecentsSection({
   showEmptyState?: boolean;
   activeSessionId?: string | null;
   onNewChat?: () => void;
+  onNavigate?: (view: AppView) => void;
   onSelectSession?: (sessionId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
@@ -243,7 +246,7 @@ export function SidebarRecentsSection({
           ))}
         </div>
       ) : showContent && sessions.length > 0 ? (
-        <div className="space-y-0.5">
+        <div className="space-y-0.5 pb-2">
           {sessions.map((session) => {
             const isActive = activeSessionId === session.id;
             return (
@@ -274,6 +277,17 @@ export function SidebarRecentsSection({
               />
             );
           })}
+          {onNavigate && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="xs"
+              onClick={() => onNavigate("session-history")}
+              className="h-auto w-full justify-start rounded-md py-1 px-3 text-[11px] text-muted-foreground hover:text-sidebar-foreground"
+            >
+              {t("viewAllInHistory")}
+            </Button>
+          )}
         </div>
       ) : null}
     </div>

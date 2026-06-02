@@ -1,5 +1,11 @@
 import { useState, type ComponentProps } from "react";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -106,6 +112,7 @@ function SidebarSelectionHarness({
   return (
     <Sidebar
       {...sidebarProps({
+        activeView: "chat",
         activeSessionId,
         onSelectSession: (sessionId) => {
           setActiveSessionId(sessionId);
@@ -114,6 +121,27 @@ function SidebarSelectionHarness({
       })}
     />
   );
+}
+
+function mockElementRect(element: Element, top: number, bottom: number) {
+  return mockRect(element, { top, bottom });
+}
+
+async function waitForAnimationFrame() {
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function attachScrollTo(element: HTMLElement) {
+  const scrollTo = vi.fn((options: ScrollToOptions) => {
+    if (typeof options.top === "number") {
+      element.scrollTop = options.top;
+    }
+  });
+  Object.defineProperty(element, "scrollTo", {
+    configurable: true,
+    value: scrollTo,
+  });
+  return scrollTo;
 }
 
 async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
@@ -213,6 +241,80 @@ describe("Sidebar", () => {
 
     expect(onCreateProject).toHaveBeenCalledOnce();
     expect(onNewChat).toHaveBeenCalledOnce();
+  });
+
+  it("only fades the bottom of the main navigation when more content is below", async () => {
+    renderSidebar();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+
+    Object.defineProperties(mainNavigation, {
+      clientHeight: { configurable: true, value: 100 },
+      scrollHeight: { configurable: true, value: 200 },
+      scrollTop: { configurable: true, writable: true, value: 0 },
+    });
+
+    fireEvent.scroll(mainNavigation);
+    await waitFor(() =>
+      expect(mainNavigation.style.maskImage).toContain("linear-gradient"),
+    );
+
+    mainNavigation.scrollTop = 100;
+    fireEvent.scroll(mainNavigation);
+    await waitFor(() => expect(mainNavigation.style.maskImage).toBe(""));
+  });
+
+  it("scrolls the active main nav item into view after navigating from the recents history link", async () => {
+    const user = userEvent.setup();
+    seedSessions({
+      id: "session-1",
+      title: "Recent Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    let activeView: SidebarProps["activeView"] = "home";
+    let rerenderSidebar: ReturnType<typeof render>["rerender"];
+    const onNavigate = vi.fn(
+      (view: NonNullable<SidebarProps["activeView"]>) => {
+        activeView = view;
+        rerenderSidebar(
+          <Sidebar {...sidebarProps({ activeView, onNavigate })} />,
+        );
+      },
+    );
+    const rendered = renderSidebar({ activeView, onNavigate });
+    rerenderSidebar = rendered.rerender;
+    await waitForAnimationFrame();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const sessionHistoryNavItem = mainNavigation.querySelector<HTMLElement>(
+      '[data-sidebar-nav-id="session-history"]',
+    );
+    if (!sessionHistoryNavItem) {
+      throw new Error("Session history nav item not found");
+    }
+    mainNavigation.scrollTop = 120;
+    mockElementRect(mainNavigation, 0, 100);
+    mockElementRect(sessionHistoryNavItem, -36, -4);
+    const scrollTo = attachScrollTo(mainNavigation);
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "View all in Session History",
+      }),
+    );
+
+    expect(onNavigate).toHaveBeenCalledWith("session-history");
+    expect(sessionHistoryNavItem).toHaveAttribute("aria-current", "page");
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 44, behavior: "smooth" }),
+    );
+    await waitFor(() => expect(mainNavigation.scrollTop).toBe(44));
   });
 
   it("shows the projects empty state when chats exist", () => {
@@ -520,7 +622,7 @@ describe("Sidebar", () => {
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 
-  it("scrolls externally activated chats into view", () => {
+  it("scrolls externally activated chats into view", async () => {
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
       .mockImplementation((callback) => {
@@ -538,7 +640,7 @@ describe("Sidebar", () => {
       messageCount: 3,
     });
 
-    const { rerender } = renderSidebar();
+    const { rerender } = renderSidebar({ activeView: "chat" });
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
     });
@@ -548,9 +650,17 @@ describe("Sidebar", () => {
     mainNavigation.scrollTop = 0;
     const navRectSpy = mockRect(mainNavigation, { top: 0, bottom: 100 });
     const rowRectSpy = mockRect(row as HTMLElement, { top: 80, bottom: 90 });
+    const scrollTo = attachScrollTo(mainNavigation);
 
-    rerender(<Sidebar {...sidebarProps({ activeSessionId: "session-1" })} />);
+    rerender(
+      <Sidebar
+        {...sidebarProps({ activeView: "chat", activeSessionId: "session-1" })}
+      />,
+    );
 
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({ top: 38, behavior: "smooth" }),
+    );
     expect(mainNavigation.scrollTop).toBe(38);
 
     requestAnimationFrameSpy.mockRestore();
@@ -562,12 +672,6 @@ describe("Sidebar", () => {
   it("does not scroll the sidebar when the active chat came from a sidebar click", async () => {
     const user = userEvent.setup();
     const onSelectSession = vi.fn();
-    const requestAnimationFrameSpy = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
 
     seedSessions({
       id: "session-1",
@@ -586,14 +690,15 @@ describe("Sidebar", () => {
     mainNavigation.scrollTop = 0;
     const navRectSpy = mockRect(mainNavigation, { top: 0, bottom: 100 });
     const rowRectSpy = mockRect(row as HTMLElement, { top: 80, bottom: 90 });
+    const scrollTo = attachScrollTo(mainNavigation);
 
     await user.click(screen.getByRole("button", { name: "Recovered Session" }));
+    await waitForAnimationFrame();
 
     expect(onSelectSession).toHaveBeenCalledWith("session-1");
+    expect(scrollTo).not.toHaveBeenCalled();
     expect(mainNavigation.scrollTop).toBe(0);
-    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
 
-    requestAnimationFrameSpy.mockRestore();
     navRectSpy.mockRestore();
     rowRectSpy.mockRestore();
   });

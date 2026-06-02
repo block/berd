@@ -317,6 +317,7 @@ export function SidebarProjectsSection({
             showEmptyState={showChatsEmptyState}
             activeSessionId={activeSessionId}
             onNewChat={onNewChat}
+            onNavigate={onNavigate}
             onSelectSession={onSelectSession}
             onArchiveChat={onArchiveChat}
             onRenameChat={onRenameChat}

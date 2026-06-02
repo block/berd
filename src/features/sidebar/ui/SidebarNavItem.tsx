@@ -16,6 +16,7 @@ interface SidebarNavItemProps {
   isActive: boolean;
   onClick: () => void;
   testId?: string;
+  navId?: string;
   labelTransitionDelay?: string;
 }
 
@@ -28,6 +29,7 @@ export function SidebarNavItem({
   isActive,
   onClick,
   testId,
+  navId,
   labelTransitionDelay,
 }: SidebarNavItemProps) {
   const className = cn(
@@ -54,6 +56,7 @@ export function SidebarNavItem({
       })}
       type="button"
       data-testid={testId}
+      data-sidebar-nav-id={navId}
       onClick={onClick}
       title={collapsed ? label : undefined}
       aria-label={label}

@@ -1,6 +1,9 @@
 import {
+  type CSSProperties,
+  type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -68,6 +71,7 @@ import {
   DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
+import { useSidebarScrollIntoView } from "./useSidebarScrollIntoView";
 
 type SidebarNavItemIcon = NonNullable<
   ComponentProps<typeof SidebarNavItem>["icon"]
@@ -114,6 +118,19 @@ const MAX_RECENTS = 20;
 // scroll-into-view math so a row never lands underneath the fade.
 const BOTTOM_MASK_PX = 48;
 const BOTTOM_MASK = `linear-gradient(to bottom, black calc(100% - ${BOTTOM_MASK_PX}px), transparent 100%)`;
+const BOTTOM_MASK_STYLE: CSSProperties = {
+  maskImage: BOTTOM_MASK,
+  WebkitMaskImage: BOTTOM_MASK,
+};
+const SCROLL_BOTTOM_EPSILON_PX = 1;
+const ACTIVE_SCROLL_TOP_OFFSET_PX = 40;
+const MAIN_NAV_SCROLL_TARGETS: ReadonlySet<AppView> = new Set([
+  "home",
+  "agents",
+  "skills",
+  "automations",
+  "session-history",
+]);
 type SidebarSectionVisibility = {
   projects: boolean;
   recents: boolean;
@@ -258,6 +275,73 @@ function validateSectionVisibility(
   };
 }
 
+function hasScrollableContentBelow(element: HTMLElement) {
+  return (
+    element.scrollHeight - element.scrollTop - element.clientHeight >
+    SCROLL_BOTTOM_EPSILON_PX
+  );
+}
+
+function useBottomMaskState(ref: RefObject<HTMLElement | null>) {
+  const [showBottomMask, setShowBottomMask] = useState(false);
+
+  const updateBottomMask = useCallback(() => {
+    const nextShowBottomMask = ref.current
+      ? hasScrollableContentBelow(ref.current)
+      : false;
+    setShowBottomMask((current) =>
+      current === nextShowBottomMask ? current : nextShowBottomMask,
+    );
+  }, [ref]);
+
+  useLayoutEffect(() => {
+    const scrollContainer = ref.current;
+    if (!scrollContainer) return;
+
+    let raf = 0;
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(updateBottomMask);
+    };
+
+    updateBottomMask();
+    scrollContainer.addEventListener("scroll", updateBottomMask, {
+      passive: true,
+    });
+    window.addEventListener("resize", scheduleUpdate);
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? undefined
+        : new ResizeObserver(scheduleUpdate);
+    resizeObserver?.observe(scrollContainer);
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? undefined
+        : new MutationObserver(scheduleUpdate);
+    mutationObserver?.observe(scrollContainer, {
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      cancelAnimationFrame(raf);
+      scrollContainer.removeEventListener("scroll", updateBottomMask);
+      window.removeEventListener("resize", scheduleUpdate);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [ref, updateBottomMask]);
+
+  return { showBottomMask, updateBottomMask };
+}
+
+function getSidebarSelector(attribute: string, value: string | null) {
+  return value ? `[${attribute}="${CSS.escape(value)}"]` : null;
+}
+
 export function Sidebar({
   collapsed,
   width,
@@ -293,6 +377,10 @@ export function Sidebar({
   const { t } = useTranslation(["sidebar", "common", "settings"]);
   const navRef = useRef<HTMLElement>(null);
   const skipActiveSessionScrollRef = useRef<string | null>(null);
+  const secondaryNavRef = useRef<HTMLElement>(null);
+  const { showBottomMask, updateBottomMask } = useBottomMaskState(navRef);
+  const { showBottomMask: showSecondaryBottomMask } =
+    useBottomMaskState(secondaryNavRef);
   const [expandedProjects, setExpandedProjects] = useState<
     Record<string, boolean>
   >(() => {
@@ -427,6 +515,51 @@ export function Sidebar({
     },
   ];
   const showDesignSystemSettingsItem = isDesignSystemExplorerEnabled();
+  const shouldSkipActiveSessionScroll =
+    activeSessionId !== null &&
+    skipActiveSessionScrollRef.current === activeSessionId;
+  const activeSessionScrollSelector = useMemo(
+    () =>
+      activeView === "chat" &&
+      activeSessionId &&
+      !collapsed &&
+      !shouldSkipActiveSessionScroll
+        ? getSidebarSelector("data-session-id", activeSessionId)
+        : null,
+    [activeSessionId, activeView, collapsed, shouldSkipActiveSessionScroll],
+  );
+  const activeMainNavScrollSelector = useMemo(
+    () =>
+      activeView && MAIN_NAV_SCROLL_TARGETS.has(activeView) && !collapsed
+        ? getSidebarSelector("data-sidebar-nav-id", activeView)
+        : null,
+    [activeView, collapsed],
+  );
+
+  useEffect(() => {
+    if (
+      !activeSessionId ||
+      skipActiveSessionScrollRef.current !== activeSessionId
+    ) {
+      skipActiveSessionScrollRef.current = null;
+    }
+  }, [activeSessionId]);
+
+  useSidebarScrollIntoView({
+    containerRef: navRef,
+    targetSelector: isSecondarySurface ? null : activeSessionScrollSelector,
+    topOffsetPx: ACTIVE_SCROLL_TOP_OFFSET_PX,
+    bottomOffsetPx: BOTTOM_MASK_PX,
+    onAfterScroll: updateBottomMask,
+  });
+
+  useSidebarScrollIntoView({
+    containerRef: navRef,
+    targetSelector: isSecondarySurface ? null : activeMainNavScrollSelector,
+    topOffsetPx: ACTIVE_SCROLL_TOP_OFFSET_PX,
+    bottomOffsetPx: BOTTOM_MASK_PX,
+    onAfterScroll: updateBottomMask,
+  });
 
   const projectSessions = useMemo(
     () =>
@@ -447,50 +580,6 @@ export function Sidebar({
       return { ...prev, [activeProjectId]: true };
     });
   }, [activeProjectId, projectIds]);
-
-  // When the active chat changes (e.g. navigating in from elsewhere), bring its
-  // row into view if it's scrolled out of sight. Keyed on activeSessionId so it
-  // only fires on navigation — manual scrolling within the same chat is left alone.
-  useEffect(() => {
-    if (!activeSessionId) {
-      skipActiveSessionScrollRef.current = null;
-      return;
-    }
-
-    if (skipActiveSessionScrollRef.current === activeSessionId) {
-      skipActiveSessionScrollRef.current = null;
-      return;
-    }
-    skipActiveSessionScrollRef.current = null;
-
-    if (collapsed || isSecondarySurface) return;
-    let raf = 0;
-    // Navigating into a collapsed project takes a couple of renders to expand
-    // and reveal the row, so retry across a few frames until it mounts.
-    let attemptsLeft = 3;
-    const scrollActiveRowIntoView = () => {
-      const nav = navRef.current;
-      const row = nav?.querySelector<HTMLElement>(
-        `[data-session-id="${CSS.escape(activeSessionId)}"]`,
-      );
-      if (!nav || !row) {
-        if (attemptsLeft-- > 0)
-          raf = requestAnimationFrame(scrollActiveRowIntoView);
-        return;
-      }
-      const navRect = nav.getBoundingClientRect();
-      const rowRect = row.getBoundingClientRect();
-      const visibleTop = navRect.top;
-      const visibleBottom = navRect.bottom - BOTTOM_MASK_PX;
-      if (rowRect.top < visibleTop) {
-        nav.scrollTop += rowRect.top - visibleTop;
-      } else if (rowRect.bottom > visibleBottom) {
-        nav.scrollTop += rowRect.bottom - visibleBottom;
-      }
-    };
-    raf = requestAnimationFrame(scrollActiveRowIntoView);
-    return () => cancelAnimationFrame(raf);
-  }, [activeSessionId, collapsed, isSecondarySurface]);
 
   useEffect(() => {
     try {
@@ -571,15 +660,13 @@ export function Sidebar({
               <nav
                 ref={navRef}
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none"
-                style={{
-                  maskImage: BOTTOM_MASK,
-                  WebkitMaskImage: BOTTOM_MASK,
-                }}
+                style={showBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={t("navigation.main")}
               >
                 <div className="relative z-10 space-y-0.5">
                   <SidebarNavItem
                     testId="nav-home"
+                    navId="home"
                     icon={SidebarNavHomeIcon}
                     label={t("navigation.home")}
                     collapsed={collapsed}
@@ -594,6 +681,7 @@ export function Sidebar({
                     return (
                       <SidebarNavItem
                         key={item.id}
+                        navId={item.id}
                         icon={item.icon}
                         label={item.label}
                         collapsed={collapsed}
@@ -607,6 +695,7 @@ export function Sidebar({
 
                   <SidebarNavItem
                     testId="nav-settings"
+                    navId="settings"
                     icon={SidebarNavSettingsIcon}
                     label={t("settings:title")}
                     collapsed={collapsed}
@@ -678,11 +767,9 @@ export function Sidebar({
               aria-hidden={!isSecondarySurface}
             >
               <nav
+                ref={secondaryNavRef}
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
-                style={{
-                  maskImage: BOTTOM_MASK,
-                  WebkitMaskImage: BOTTOM_MASK,
-                }}
+                style={showSecondaryBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={
                   isSettingsSurface
                     ? t("settings:navigationLabel")
