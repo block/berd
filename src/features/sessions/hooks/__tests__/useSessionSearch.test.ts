@@ -210,4 +210,19 @@ describe("useSessionSearch", () => {
     expect(result.current.results).toEqual([]);
     expect(result.current.isSearching).toBe(false);
   });
+
+  it("surfaces ACP error data for backend search failures", async () => {
+    const error = new Error("Internal error") as Error & { data: string };
+    error.name = "RequestError";
+    error.data = "Failed to export session for search: session missing";
+    mockAcpSearchSessions.mockRejectedValueOnce(error);
+
+    const { result } = renderSessionSearch();
+
+    await searchFor(result, "needle");
+
+    expect(result.current.error).toBe(
+      "Failed to export session for search: session missing",
+    );
+  });
 });

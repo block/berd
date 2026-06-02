@@ -8,6 +8,7 @@ import {
 } from "@/features/providers/api/credentials";
 import type { ProviderConfigChangeResponseUnstable as ProviderConfigChangeResponse } from "@aaif/goose-sdk";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import type { ProviderFieldValue } from "@/shared/types/providers";
 
 export interface ProviderFieldSave {
@@ -30,10 +31,6 @@ interface UseCredentialsReturn {
     providerId: string,
     result?: ProviderConfigChangeResponse,
   ) => Promise<void>;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function useCredentials(): UseCredentialsReturn {
@@ -162,7 +159,7 @@ export function useCredentials(): UseCredentialsReturn {
           if (modelRefreshRunIds.current.get(providerId) !== runId) {
             return;
           }
-          setProviderModelWarning(providerId, errorMessage(error));
+          setProviderModelWarning(providerId, formatAcpErrorMessage(error));
         })
         .finally(() => {
           if (modelRefreshRunIds.current.get(providerId) !== runId) {

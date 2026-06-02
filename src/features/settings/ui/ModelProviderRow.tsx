@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import { Spinner } from "@/shared/ui/spinner";
@@ -133,9 +134,7 @@ export function ModelProviderRow({
         setError("");
       } catch (nextError) {
         setError(
-          nextError instanceof Error
-            ? nextError.message
-            : "Couldn't load provider settings",
+          formatAcpErrorMessage(nextError, "Couldn't load provider settings"),
         );
       } finally {
         if (showSkeleton) {
@@ -204,9 +203,7 @@ export function ModelProviderRow({
       await onCompleteNativeSetup(provider.id, result);
     } catch (nextError) {
       setSetupError(
-        nextError instanceof Error
-          ? nextError.message
-          : "Couldn't complete sign-in",
+        formatAcpErrorMessage(nextError, "Couldn't complete sign-in"),
       );
     } finally {
       unlisten();
@@ -264,9 +261,7 @@ export function ModelProviderRow({
       setEditingKey(null);
       setShowSavedState(true);
     } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Couldn't save",
-      );
+      setError(formatAcpErrorMessage(nextError, "Couldn't save"));
     }
   }
 
@@ -319,9 +314,7 @@ export function ModelProviderRow({
       await loadConfig();
       setShowSavedState(false);
     } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Couldn't save",
-      );
+      setError(formatAcpErrorMessage(nextError, "Couldn't save"));
     }
   }
 
@@ -334,9 +327,7 @@ export function ModelProviderRow({
       setError("");
       setShowSavedState(false);
     } catch (nextError) {
-      setError(
-        nextError instanceof Error ? nextError.message : "Couldn't remove",
-      );
+      setError(formatAcpErrorMessage(nextError, "Couldn't remove"));
     }
   }
 

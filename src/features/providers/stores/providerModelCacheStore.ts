@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { providerModelOptionsFromIds } from "../lib/modelRecommendations";
 import type { ModelOption } from "@/features/chat/types";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { getClient } from "@/shared/api/acpConnection";
 
 const MODEL_CACHE_STORAGE_KEY = "goose:providerModelCache:v1";
@@ -38,10 +39,6 @@ interface ProviderModelCacheActions {
 
 export type ProviderModelCacheStore = ProviderModelCacheState &
   ProviderModelCacheActions;
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 function readPersistedModels(): Map<string, CachedProviderModels> {
   if (typeof window === "undefined") {
@@ -188,7 +185,7 @@ export const useProviderModelCacheStore = create<ProviderModelCacheStore>(
               providerId,
               models: existing?.models ?? [],
               fetchedAt: existing?.fetchedAt ?? 0,
-              error: errorMessage(error),
+              error: formatAcpErrorMessage(error),
             });
             persistModels(providers);
             return { providers };

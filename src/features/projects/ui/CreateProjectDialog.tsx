@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { getHomeDir } from "@/shared/api/system";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
@@ -227,7 +228,7 @@ export function CreateProjectDialog({
       onCreated(savedProject);
       onClose();
     } catch (err) {
-      setError(String(err));
+      setError(formatAcpErrorMessage(err));
     } finally {
       setSaving(false);
     }

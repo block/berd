@@ -14,12 +14,15 @@
     "instructions": "Instructions",
     "instructionsPlaceholder": "Markdown instructions the agent will follow...",
     "name": "Name",
+    "nameConflictDescription": "Choose a different name, or edit the existing skill instead.",
+    "nameConflictTitle": "A skill named \"{{name}}\" already exists",
     "namePlaceholder": "my-skill-name",
     "nameValidation": "Use 1–64 lowercase letters, numbers, or hyphens. Names cannot start or end with a hyphen.",
     "pathOnDisk": "Path on disk",
     "newTitle": "New skill",
     "projectHint": "Stored in the project folder",
     "saveLocation": "Save to",
+    "saveErrorTitle": "Couldn't save skill",
     "saving": "Saving..."
   },
   "view": {

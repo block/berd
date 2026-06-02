@@ -92,4 +92,22 @@ describe("providerModelCacheStore", () => {
         .getModelsForProvider("databricks_v2"),
     ).toEqual([]);
   });
+
+  it("stores ACP error data when supported model refresh fails", async () => {
+    const error = new Error("Internal error") as Error & { data: string };
+    error.name = "RequestError";
+    error.data =
+      "Failed to fetch provider supported models: Databricks token expired";
+    mocks.supportedModelsList.mockRejectedValueOnce(error);
+
+    await useProviderModelCacheStore
+      .getState()
+      .refreshProviderModels("databricks_v2");
+
+    expect(
+      useProviderModelCacheStore.getState().getError("databricks_v2"),
+    ).toBe(
+      "Failed to fetch provider supported models: Databricks token expired",
+    );
+  });
 });

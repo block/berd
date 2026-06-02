@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
 import { exportSkill, importSkills, type SkillInfo } from "../api/skills";
 import { downloadExport } from "../lib/skillsHelpers";
@@ -16,8 +17,8 @@ export function useSkillImportExport(onAfterImport: () => Promise<void>) {
       const result = await exportSkill(skill.path);
       downloadExport(result.json, result.filename);
       toast.success(t("view.exportedTo", { filename: result.filename }));
-    } catch {
-      toast.error(t("view.exportError"));
+    } catch (error) {
+      toast.error(formatAcpErrorMessage(error, t("view.exportError")));
     }
   };
 
@@ -26,8 +27,8 @@ export function useSkillImportExport(onAfterImport: () => Promise<void>) {
       await importSkills(fileBytes, fileName);
       await onAfterImport();
       toast.success(t("view.importSuccess"));
-    } catch {
-      toast.error(t("view.importError"));
+    } catch (error) {
+      toast.error(formatAcpErrorMessage(error, t("view.importError")));
     }
   };
 

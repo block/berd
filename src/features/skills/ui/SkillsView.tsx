@@ -10,6 +10,7 @@ import {
 import { toast } from "sonner";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { Button } from "@/shared/ui/button";
 import {
   DropdownMenu,
@@ -138,10 +139,10 @@ export function SkillsView({
       const nextSkills = hydrateProjectNames(result, projects);
       setSkills(nextSkills);
       return nextSkills;
-    } catch {
+    } catch (error) {
       if (loadRequestIdRef.current === requestId) {
         setSkills([]);
-        toast.error(t("view.loadError"));
+        toast.error(formatAcpErrorMessage(error, t("view.loadError")));
       }
       return [];
     } finally {
@@ -236,8 +237,8 @@ export function SkillsView({
         setActiveSkill(null, { replace: true });
       }
       toast.success(t("view.deleteSuccess", { name: deletingSkill.name }));
-    } catch {
-      toast.error(t("view.deleteError"));
+    } catch (error) {
+      toast.error(formatAcpErrorMessage(error, t("view.deleteError")));
     }
     setDeletingSkill(null);
   };

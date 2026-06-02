@@ -114,8 +114,6 @@ describe("useExtensionsSettings", () => {
     expect(mocks.removeExtension).toHaveBeenCalledTimes(1);
     expect(mocks.removeExtension).toHaveBeenCalledWith("github");
     expect(mocks.removeExtension).not.toHaveBeenCalledWith("linear");
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "extensions.errors.saveFailed",
-    );
+    expect(mocks.toastError).toHaveBeenCalledWith("remove failed");
   });
 });

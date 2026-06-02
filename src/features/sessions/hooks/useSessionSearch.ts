@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { acpSearchSessions } from "@/shared/api/acp";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   buildSessionSearchResults,
   mergeSessionSearchResults,
@@ -16,8 +17,7 @@ interface UseSessionSearchOptions {
 }
 
 function searchErrorMessage(error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error);
-  return message || "Search failed";
+  return formatAcpErrorMessage(error, "Search failed");
 }
 
 type ResultApplyMode = "replace" | "merge";

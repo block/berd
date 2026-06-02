@@ -1,3 +1,5 @@
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+
 const JSON_MIME_TYPES = new Set([
   "",
   "application/json",
@@ -75,11 +77,5 @@ export function formatImportSuccessMessage(
 }
 
 export function formatAgentError(error: unknown, fallback: string): string {
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
-  }
-  return fallback;
+  return formatAcpErrorMessage(error, fallback);
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   MAX_PERSONA_IMPORT_BYTES,
+  formatAgentError,
   validatePersonaImportFile,
 } from "./personaImport";
 
@@ -42,5 +43,17 @@ describe("validatePersonaImportFile", () => {
       key: "view.importTooLarge",
       options: { maxSize: "4 MB" },
     });
+  });
+});
+
+describe("formatAgentError", () => {
+  it("surfaces ACP error data before falling back to the generic message", () => {
+    const error = new Error("Invalid params") as Error & { data: string };
+    error.name = "RequestError";
+    error.data = "A source named 'reviewer' already exists";
+
+    expect(formatAgentError(error, "Import failed")).toBe(
+      "A source named 'reviewer' already exists",
+    );
   });
 });

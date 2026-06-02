@@ -368,5 +368,36 @@ describe("SkillEditor", () => {
 
       expect(screen.getByText(/network error/i)).toBeInTheDocument();
     });
+
+    it("shows duplicate source failures as a skill name conflict", async () => {
+      const user = userEvent.setup();
+      const error = new Error("Invalid params") as Error & { data: string };
+      error.name = "RequestError";
+      error.data = "A source named 'my-skill' already exists";
+      vi.mocked(createSkill).mockRejectedValueOnce(error);
+
+      render(<SkillEditor {...defaultProps} />);
+
+      const nameInput = screen.getByPlaceholderText("my-skill-name");
+      await user.type(nameInput, "my-skill");
+      await user.type(
+        screen.getByPlaceholderText("What it does and when to use it..."),
+        "desc",
+      );
+      await user.click(screen.getByRole("button", { name: /create skill/i }));
+
+      expect(nameInput).toHaveAttribute("aria-invalid", "true");
+      expect(
+        screen.getByText('A skill named "my-skill" already exists'),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText(
+          "Choose a different name, or edit the existing skill instead.",
+        ),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByText("A source named 'my-skill' already exists"),
+      ).not.toBeInTheDocument();
+    });
   });
 });

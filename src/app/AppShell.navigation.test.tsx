@@ -396,6 +396,41 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("shows ACP error data when draft session creation fails", async () => {
+    const error = new Error("Internal error") as Error & { data: string };
+    error.name = "RequestError";
+    error.data = "Failed to create session: provider config is missing";
+    mockAcpCreateSession.mockRejectedValueOnce(error);
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      const draftSessionId = useChatSessionStore.getState().activeSessionId;
+      expect(
+        useChatSessionStore.getState().getSession(draftSessionId ?? ""),
+      ).toMatchObject({
+        creationState: "failed",
+        creationError: "Failed to create session: provider config is missing",
+      });
+    });
+
+    const draftSessionId = useChatSessionStore.getState().activeSessionId ?? "";
+    const messages = useChatStore.getState().messagesBySession[draftSessionId];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatchObject({
+      role: "system",
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: "Failed to create session: provider config is missing",
+        },
+      ],
+    });
+  });
+
   it("goes back and forward through Skills detail subroutes", async () => {
     const user = userEvent.setup();
     render(<AppShell />);

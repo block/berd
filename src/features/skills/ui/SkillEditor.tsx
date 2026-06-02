@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Copy, Trash2 } from "lucide-react";
+import { AlertCircle, Copy, Trash2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
@@ -53,6 +54,19 @@ const INSTRUCTIONS_TEXTAREA_CLASS =
 const FIELD_LABEL_CLASS =
   "text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground";
 const SECTION_GAP_CLASS = "group/field space-y-2";
+const ERROR_CALLOUT_CLASS =
+  "flex items-start gap-2 rounded-[12px] border border-destructive/15 bg-destructive/6 px-3 py-2.5 text-[12px] leading-5 shadow-none";
+
+type SkillEditorError =
+  | { kind: "nameConflict"; sourceName: string }
+  | { kind: "save"; message: string };
+
+function getDuplicateSourceName(message: string): string | null {
+  const match = message.match(
+    /^A source named (?:"([^"]+)"|'([^']+)') already exists\.?$/i,
+  );
+  return match?.[1] ?? match?.[2] ?? null;
+}
 
 interface SkillEditorProps {
   isOpen: boolean;
@@ -77,7 +91,7 @@ export function SkillEditor({
   const [instructions, setInstructions] = useState("");
   const [saveLocation, setSaveLocation] = useState(GLOBAL_VALUE);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<SkillEditorError | null>(null);
   const [formHasScrollBelow, setFormHasScrollBelow] = useState(false);
   // null = "no explicit pick yet"; the hero falls through to the deterministic
   // name-hash tone so the editor still has visual identity before the user
@@ -121,10 +135,21 @@ export function SkillEditor({
 
   const nameValid = isValidSkillName(name);
   const canSave = nameValid && description.trim().length > 0 && !saving;
+  const showNameValidationError = name.length > 0 && !nameValid;
+  const nameInputDescribedBy = [
+    showNameValidationError ? "skill-name-validation" : null,
+    error?.kind === "nameConflict" ? "skill-name-conflict" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   const handleNameChange = (raw: string) => {
     setName(formatSkillName(raw));
     setError(null);
+  };
+
+  const clearSaveError = () => {
+    setError((current) => (current?.kind === "nameConflict" ? current : null));
   };
 
   const handleClose = () => {
@@ -182,17 +207,13 @@ export function SkillEditor({
       await onSaved?.(savedSkill);
       onClose();
     } catch (err) {
-      // JSON-RPC errors from goose-serve put the human-readable reason on
-      // `.data` (e.g. "A source named 'X' already exists"). Surface that
-      // directly when present instead of the generic "Invalid params".
-      const data = (err as { data?: unknown })?.data;
-      if (typeof data === "string" && data.trim().length > 0) {
-        setError(data);
-      } else if (data) {
-        setError(`${String(err)} — ${JSON.stringify(data)}`);
-      } else {
-        setError(String(err));
-      }
+      const message = formatAcpErrorMessage(err);
+      const duplicateSourceName = getDuplicateSourceName(message);
+      setError(
+        duplicateSourceName
+          ? { kind: "nameConflict", sourceName: duplicateSourceName }
+          : { kind: "save", message },
+      );
     } finally {
       setSaving(false);
     }
@@ -301,11 +322,40 @@ export function SkillEditor({
                 onChange={(e) => handleNameChange(e.target.value)}
                 placeholder={t("dialog.namePlaceholder")}
                 className={FIELD_INPUT_CLASS}
+                aria-invalid={
+                  showNameValidationError || error?.kind === "nameConflict"
+                }
+                aria-describedby={nameInputDescribedBy || undefined}
               />
-              {name.length > 0 && !nameValid ? (
-                <p className="text-[11px] text-destructive">
+              {showNameValidationError ? (
+                <p
+                  id="skill-name-validation"
+                  className="text-[11px] text-destructive"
+                >
                   {t("dialog.nameValidation")}
                 </p>
+              ) : null}
+              {error?.kind === "nameConflict" ? (
+                <div
+                  id="skill-name-conflict"
+                  role="alert"
+                  className={ERROR_CALLOUT_CLASS}
+                >
+                  <AlertCircle
+                    aria-hidden="true"
+                    className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive"
+                  />
+                  <div className="min-w-0">
+                    <p className="font-medium text-[#242424]">
+                      {t("dialog.nameConflictTitle", {
+                        name: error.sourceName,
+                      })}
+                    </p>
+                    <p className="text-muted-foreground">
+                      {t("dialog.nameConflictDescription")}
+                    </p>
+                  </div>
+                </div>
               ) : null}
             </div>
 
@@ -318,7 +368,7 @@ export function SkillEditor({
                 value={description}
                 onChange={(e) => {
                   setDescription(e.target.value);
-                  setError(null);
+                  clearSaveError();
                 }}
                 placeholder={t("dialog.descriptionPlaceholder")}
                 className={FIELD_INPUT_CLASS}
@@ -337,7 +387,13 @@ export function SkillEditor({
                 <Label className={FIELD_LABEL_CLASS}>
                   {t("dialog.saveLocation")}
                 </Label>
-                <Select value={saveLocation} onValueChange={setSaveLocation}>
+                <Select
+                  value={saveLocation}
+                  onValueChange={(value) => {
+                    setSaveLocation(value);
+                    clearSaveError();
+                  }}
+                >
                   <SelectTrigger className={cn(SELECT_TRIGGER_CLASS, "w-full")}>
                     <SelectValue />
                   </SelectTrigger>
@@ -360,6 +416,23 @@ export function SkillEditor({
               </div>
             ) : null}
 
+            {error?.kind === "save" ? (
+              <div role="alert" className={ERROR_CALLOUT_CLASS}>
+                <AlertCircle
+                  aria-hidden="true"
+                  className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive"
+                />
+                <div className="min-w-0">
+                  <p className="font-medium text-[#242424]">
+                    {t("dialog.saveErrorTitle")}
+                  </p>
+                  <p className="break-words text-muted-foreground">
+                    {error.message}
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
             <div
               className={cn(SECTION_GAP_CLASS, "flex min-h-0 flex-1 flex-col")}
             >
@@ -368,13 +441,14 @@ export function SkillEditor({
               </Label>
               <Textarea
                 value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
+                onChange={(e) => {
+                  setInstructions(e.target.value);
+                  clearSaveError();
+                }}
                 placeholder={t("dialog.instructionsPlaceholder")}
                 className={INSTRUCTIONS_TEXTAREA_CLASS}
               />
             </div>
-
-            {error ? <p className="text-xs text-destructive">{error}</p> : null}
           </div>
 
           {/* Footer: Delete + Duplicate (left, edit mode only) + Save

@@ -84,6 +84,7 @@ import {
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession } from "@/shared/api/acp";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
@@ -771,10 +772,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           }
         })
         .catch((error) => {
-          const message =
-            error instanceof Error
-              ? error.message
-              : "Failed to create session.";
+          const message = formatAcpErrorMessage(
+            error,
+            "Failed to create session.",
+          );
           const chatStore = useChatStore.getState();
           markSessionCreationFailed(session.id, message);
           chatStore.addMessage(
@@ -1367,7 +1368,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         modelId: session.modelId,
       }).catch((error) => {
         console.error("Failed to move session to project:", error);
-        toast.error(t("chat:notifications.moveError"));
+        toast.error(
+          formatAcpErrorMessage(error, t("chat:notifications.moveError")),
+        );
       });
     },
     [selectedProvider, t],
@@ -1377,7 +1380,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     (sessionId: string, nextTitle: string) => {
       void updateSessionTitle(sessionId, nextTitle).catch((error) => {
         console.error("Failed to rename session:", error);
-        toast.error(t("notifications.renameError"));
+        toast.error(
+          formatAcpErrorMessage(error, t("notifications.renameError")),
+        );
       });
     },
     [t],

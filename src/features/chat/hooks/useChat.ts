@@ -30,6 +30,7 @@ import {
 import { sanitizeReplayMessages } from "../lib/replaySanitizer";
 import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
@@ -42,30 +43,6 @@ function createCompactionConfirmationMessage() {
     i18n.t("chat:notifications.compactionComplete"),
     "compaction",
   );
-}
-
-function getErrorMessage(error: unknown): string {
-  // Tauri command rejections typically arrive as plain strings, so handle
-  // that shape first before falling back to standard Error objects.
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (
-    typeof error === "object" &&
-    error !== null &&
-    "message" in error &&
-    typeof error.message === "string" &&
-    error.message.trim()
-  ) {
-    return error.message;
-  }
-
-  return "Unknown error";
 }
 
 async function ensurePreparedForPrompt(
@@ -286,7 +263,7 @@ export function useChat(
         if (err instanceof DOMException && err.name === "AbortError") {
           setChatState(sessionId, "idle");
         } else {
-          const errorMessage = getErrorMessage(err);
+          const errorMessage = formatAcpErrorMessage(err);
           const liveStore = useChatStore.getState();
           const { streamingMessageId } = liveStore.getSessionRuntime(sessionId);
           if (streamingMessageId) {
@@ -406,7 +383,7 @@ export function useChat(
           effectivePersonaInfo?.id,
         );
       } catch (err) {
-        const errorMessage = getErrorMessage(err);
+        const errorMessage = formatAcpErrorMessage(err);
         addMessage(
           sessionId,
           createSystemNotificationMessage(errorMessage, "error"),
@@ -448,7 +425,7 @@ export function useChat(
         clearReplayBuffer(sessionId);
         setSessionLoading(sessionId, false);
 
-        const errorMessage = getErrorMessage(err);
+        const errorMessage = formatAcpErrorMessage(err);
         addMessage(
           sessionId,
           createSystemNotificationMessage(errorMessage, "error"),

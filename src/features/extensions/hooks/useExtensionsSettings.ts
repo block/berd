@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   addExtension,
   listExtensions,
@@ -69,9 +70,11 @@ export function useExtensionsSettings() {
         setModalMode(null);
         setEditingExtension(null);
         await fetchExtensions();
-      } catch {
+      } catch (error) {
         await fetchExtensions();
-        toast.error(t("extensions.errors.saveFailed"));
+        toast.error(
+          formatAcpErrorMessage(error, t("extensions.errors.saveFailed")),
+        );
       }
     },
     [editingExtension, extensions, fetchExtensions, t],
@@ -85,7 +88,9 @@ export function useExtensionsSettings() {
         setEditingExtension(null);
         await fetchExtensions();
       } catch (error) {
-        toast.error(t("extensions.errors.deleteFailed"));
+        toast.error(
+          formatAcpErrorMessage(error, t("extensions.errors.deleteFailed")),
+        );
         throw error;
       }
     },
@@ -97,8 +102,10 @@ export function useExtensionsSettings() {
       try {
         await toggleExtension(configKey, false);
         await fetchExtensions();
-      } catch {
-        toast.error(t("extensions.errors.resetFailed"));
+      } catch (error) {
+        toast.error(
+          formatAcpErrorMessage(error, t("extensions.errors.resetFailed")),
+        );
       }
     },
     [fetchExtensions, t],

@@ -412,4 +412,32 @@ describe("useChat", () => {
       },
     ]);
   });
+
+  it("surfaces ACP error data when send fails with a generic JSON-RPC message", async () => {
+    const error = new Error("Internal error") as Error & { data: string };
+    error.name = "RequestError";
+    error.data =
+      "Error getting agent reply: Failed to fetch completion from provider";
+    mockAcpSendMessage.mockRejectedValue(error);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.sendMessage("Hello");
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    const runtime = useChatStore.getState().getSessionRuntime("session-1");
+    const detail =
+      "Error getting agent reply: Failed to fetch completion from provider";
+
+    expect(messages[1].content).toEqual([
+      {
+        type: "systemNotification",
+        notificationType: "error",
+        text: detail,
+      },
+    ]);
+    expect(runtime.error).toBe(detail);
+  });
 });

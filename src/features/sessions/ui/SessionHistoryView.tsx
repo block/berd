@@ -29,6 +29,7 @@ import {
   acpExportSession,
   acpImportSession,
 } from "@/shared/api/acp";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   saveExportedSessionFile,
   saveExportedSessionFiles,
@@ -380,7 +381,7 @@ export function SessionHistoryView({
   });
 
   const isSessionNotFoundError = useCallback((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
+    const message = formatAcpErrorMessage(error, "");
     return message.includes("not found in sessions or threads");
   }, []);
   const groupedVirtualItems = groupedVirtualizer.getVirtualItems();
@@ -490,7 +491,7 @@ export function SessionHistoryView({
         if (isSessionNotFoundError(error)) {
           removeSession(sessionId);
         }
-        toast.error("Failed to export session");
+        toast.error(formatAcpErrorMessage(error, "Failed to export session"));
       }
     },
     [activeSessions, isSessionNotFoundError, removeSession],
@@ -527,7 +528,7 @@ export function SessionHistoryView({
           removeSession(sessionId);
           return;
         }
-        toast.error(t("duplicate.failed"));
+        toast.error(formatAcpErrorMessage(error, t("duplicate.failed")));
       } finally {
         duplicatingSessionIdsRef.current.delete(sessionId);
       }
@@ -582,7 +583,7 @@ export function SessionHistoryView({
       clearSelection();
     } catch (error) {
       console.error("Bulk export failed:", error);
-      toast.error("Failed to export chats");
+      toast.error(formatAcpErrorMessage(error, "Failed to export chats"));
     }
   }, [activeSessions, clearSelection, selectedSessionIds]);
 

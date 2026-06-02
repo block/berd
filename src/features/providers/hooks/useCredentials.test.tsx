@@ -83,9 +83,12 @@ describe("useCredentials", () => {
   });
 
   it("records refresh failure as a provider warning without rejecting the save", async () => {
-    mocks.refreshProviderModels.mockRejectedValueOnce(
-      new Error("model list failed"),
-    );
+    const refreshError = new Error("Internal error") as Error & {
+      data: string;
+    };
+    refreshError.name = "RequestError";
+    refreshError.data = "model list failed with provider detail";
+    mocks.refreshProviderModels.mockRejectedValueOnce(refreshError);
     const { result } = renderHook(() => useCredentials());
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -102,7 +105,7 @@ describe("useCredentials", () => {
     expect(mocks.saveProviderConfig).toHaveBeenCalled();
     await waitFor(() =>
       expect(result.current.modelWarnings.get("anthropic")).toContain(
-        "model list failed",
+        "model list failed with provider detail",
       ),
     );
   });
