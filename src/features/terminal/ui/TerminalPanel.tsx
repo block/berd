@@ -20,6 +20,8 @@ import {
   type TerminalStatus,
 } from "../lib/terminalSessionManager";
 
+const TERMINAL_EXPAND_RESIZE_FALLBACK_MS = 260;
+
 interface TerminalPanelProps {
   sessionKey: string;
   cwd: string;
@@ -165,6 +167,7 @@ export function TerminalPanel({
   const { t } = useTranslation("chat");
   const { resolvedTheme } = useTheme();
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const previousCollapsedRef = useRef(collapsed);
   const displayPath = useMemo(() => shortenPath(cwd), [cwd]);
   const labels = useMemo<TerminalSessionLabels>(
     () => ({
@@ -233,19 +236,61 @@ export function TerminalPanel({
   }, [collapsed, onCollapse, onExpand]);
 
   useEffect(() => {
-    if (collapsed) {
+    if (!session) {
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      session?.focusAndResize();
-    });
+    const wasCollapsed = previousCollapsedRef.current;
+    previousCollapsedRef.current = collapsed;
 
-    return () => window.cancelAnimationFrame(frame);
+    if (collapsed) {
+      session.deferResize();
+      return;
+    }
+
+    if (!wasCollapsed) {
+      return;
+    }
+
+    // Let the height transition own the opening animation. Resizing xterm at
+    // the beginning changes its measured content height/rows and creates a
+    // visible mid-animation hitch; the transition-end listener below performs
+    // the real fit once the shell has settled.
+    session.deferResize();
+    const fallback = window.setTimeout(() => {
+      session.resumeResize({ focus: true });
+    }, TERMINAL_EXPAND_RESIZE_FALLBACK_MS);
+
+    return () => window.clearTimeout(fallback);
+  }, [collapsed, session]);
+
+  useEffect(() => {
+    const container = containerRef.current?.closest("[data-terminal-panel]");
+    if (!container || !session) {
+      return;
+    }
+
+    const handleShellTransitionEnd = () => {
+      if (!collapsed) {
+        session.resumeResize({ focus: true });
+      }
+    };
+
+    container.addEventListener(
+      "goose-terminal-shell-transition-end",
+      handleShellTransitionEnd,
+    );
+    return () => {
+      container.removeEventListener(
+        "goose-terminal-shell-transition-end",
+        handleShellTransitionEnd,
+      );
+    };
   }, [collapsed, session]);
 
   return (
     <section
+      data-terminal-panel
       className={cn(
         "flex h-full min-h-0 flex-col overflow-hidden bg-card text-foreground",
         className,

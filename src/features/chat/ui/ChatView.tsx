@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useRef, type CSSProperties } from "react";
 import { AnimatePresence } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
@@ -38,8 +32,6 @@ const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]";
 const CHAT_RESPONDING_GOOSE_CLASS =
   "[filter:var(--filter-chat-responding-goose)]";
-const CHAT_COMPOSER_DOCK_BOTTOM_CLASS =
-  "bottom-[calc(var(--chat-composer-bottom-inset)-var(--spacing-app-panel-gutter-bottom)-var(--chat-composer-surface-overlap))]";
 
 interface TerminalWorkspaceState {
   paths: string[];
@@ -99,9 +91,6 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
-  const [composerDockEl, setComposerDockEl] = useState<HTMLDivElement | null>(
-    null,
-  );
   const previousTerminalCwdRef = useRef<string | null>(null);
   const setTopBarActions = useSetTopBarActions();
   const {
@@ -466,7 +455,6 @@ export function ChatView({
       placeholder={conversationPlaceholder}
       footer={composerFooter}
       footerStatus={footerStatus}
-      composerDockEl={composerDockEl}
     />
   );
 
@@ -484,19 +472,11 @@ export function ChatView({
         <div
           className={cn(
             "relative flex min-w-0 flex-1 flex-col",
-            terminalVisible && "gap-3",
             isAgentBuilderSession && "agent-builder-column-enter",
           )}
           style={agentBuilderChatColumnStyle}
         >
-          <div
-            ref={setComposerDockEl}
-            className={cn(
-              "pointer-events-none absolute inset-x-0 z-30 flex flex-col",
-              CHAT_COMPOSER_DOCK_BOTTOM_CLASS,
-            )}
-          />
-          <div className="relative mb-[var(--chat-surface-bottom-gap)] flex min-h-0 flex-1 flex-col overflow-hidden rounded-chrome bg-card">
+          <div className="relative flex min-h-0 flex-1 flex-col overflow-visible">
             {messageTimeline}
           </div>
           {terminalVisible ? (
@@ -506,9 +486,28 @@ export function ChatView({
                 return (
                   <div
                     key={path}
+                    onTransitionEnd={(event) => {
+                      if (
+                        event.target !== event.currentTarget ||
+                        event.propertyName !== "height"
+                      ) {
+                        return;
+                      }
+
+                      const terminalElement = event.currentTarget.querySelector(
+                        "[data-terminal-panel]",
+                      );
+                      terminalElement?.dispatchEvent(
+                        new CustomEvent("goose-terminal-shell-transition-end", {
+                          bubbles: true,
+                        }),
+                      );
+                    }}
                     className={cn(
                       "shrink-0 overflow-hidden transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
-                      terminalExpanded ? "h-[clamp(220px,34vh,320px)]" : "h-10",
+                      terminalExpanded
+                        ? "h-[clamp(220px,34vh,320px)]"
+                        : "h-10 [&_.goose-terminal]:hidden",
                     )}
                   >
                     <TerminalPanel

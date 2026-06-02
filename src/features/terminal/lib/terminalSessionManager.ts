@@ -53,6 +53,7 @@ export class TerminalSession {
   private pendingBackendRows: number | null = null;
   private fontReadyToken = 0;
   private animationFrame = 0;
+  private fitDeferred = false;
   private attachedContainer: HTMLDivElement | null = null;
   private disposed = false;
   private listeners = new Set<TerminalSessionListener>();
@@ -146,8 +147,33 @@ export class TerminalSession {
       return;
     }
 
+    this.fitDeferred = false;
     this.scheduleFitAndResize();
     this.terminal.focus();
+  }
+
+  deferResize(): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.fitDeferred = true;
+    if (this.animationFrame) {
+      window.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = 0;
+    }
+  }
+
+  resumeResize({ focus = false }: { focus?: boolean } = {}): void {
+    if (this.disposed) {
+      return;
+    }
+
+    this.fitDeferred = false;
+    this.scheduleFitAndResize();
+    if (focus) {
+      this.terminal.focus();
+    }
   }
 
   restart(): void {
@@ -274,6 +300,10 @@ export class TerminalSession {
   }
 
   private scheduleFitAndResize(): void {
+    if (this.fitDeferred) {
+      return;
+    }
+
     if (this.animationFrame) {
       window.cancelAnimationFrame(this.animationFrame);
     }

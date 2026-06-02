@@ -9,7 +9,6 @@ import {
   type SyntheticEvent,
   type WheelEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { IconArrowDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
@@ -24,6 +23,9 @@ const PINNED_BOTTOM_THRESHOLD_PX = 8;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
 const JUMP_TO_LATEST_SCROLL_MS = 180;
 const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+// Mirrors --chat-composer-surface-overlap for scroll math; CSS owns the token.
+const FOOTER_DOCK_OVERLAP_PX = 28;
+const FOOTER_DOCK_CLEARANCE_PX = 32;
 
 interface MessageTimelineProps {
   messages: Message[];
@@ -48,8 +50,6 @@ interface MessageTimelineProps {
   /** Force the placeholder even when messages exist, e.g. while history is
       still loading. */
   showPlaceholder?: boolean;
-  /** When set, the footer is portaled here (e.g. viewport-bottom dock in ChatView). */
-  composerDockEl?: HTMLElement | null;
 }
 
 function isSameDay(a: number, b: number): boolean {
@@ -104,13 +104,13 @@ export function MessageTimeline({
   footerStatus,
   placeholder,
   showPlaceholder,
-  composerDockEl,
 }: MessageTimelineProps) {
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
   const containerRef = useRef<HTMLDivElement>(null);
-  // The composer floats above the transcript. Its measured height becomes
-  // transcript padding, so the last message can scroll fully above it.
+  // The composer is docked in flow and visually overlaps the transcript; its
+  // measured height changes the scrollable viewport while overlap padding keeps
+  // the last message above the glass surface.
   const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
@@ -129,7 +129,7 @@ export function MessageTimeline({
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const hasFooter = footer != null;
   const messageListBottomPaddingPx = hasFooter
-    ? Math.max(footerHeightPx, 112) + 32
+    ? FOOTER_DOCK_OVERLAP_PX + FOOTER_DOCK_CLEARANCE_PX
     : (tailPaddingPx ?? 16);
   messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
   const visibleMessages = messages.filter(
@@ -401,7 +401,6 @@ export function MessageTimeline({
     scrollToBottomIfNearBottom();
   }, [messages, scrollToBottomIfNearBottom, streamingMessageId]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: composerDockEl changes which footer node is observed.
   useLayoutEffect(() => {
     if (!hasFooter) {
       setFooterHeightPx(0);
@@ -428,10 +427,11 @@ export function MessageTimeline({
     const resizeObserver = new ResizeObserver(updateFooterHeight);
     resizeObserver.observe(footerElement);
     return () => resizeObserver.disconnect();
-  }, [composerDockEl, hasFooter]);
+  }, [hasFooter]);
 
-  // When the floating footer changes height, it changes transcript padding.
-  // Only users who are already following latest should be re-pinned.
+  // When the docked footer changes height, it changes the timeline's available
+  // scroll height. Only users who are already following latest should be
+  // re-pinned.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the padding value is the resize signal for this effect.
   useLayoutEffect(() => {
     if (!hasFooter && tailPaddingPx == null) {
@@ -453,7 +453,13 @@ export function MessageTimeline({
       return;
     }
     scrollToBottom("auto");
-  }, [hasFooter, messageListBottomPaddingPx, scrollToBottom, tailPaddingPx]);
+  }, [
+    footerHeightPx,
+    hasFooter,
+    messageListBottomPaddingPx,
+    scrollToBottom,
+    tailPaddingPx,
+  ]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -822,7 +828,12 @@ export function MessageTimeline({
     : messageList;
 
   return (
-    <div className={cn("relative min-h-0 flex-1 overflow-hidden", className)}>
+    <div
+      className={cn(
+        "relative flex min-h-0 flex-1 flex-col overflow-visible",
+        className,
+      )}
+    >
       <div
         ref={containerRef}
         onScroll={handleScroll}
@@ -830,7 +841,7 @@ export function MessageTimeline({
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
         data-testid="message-timeline-scroll"
-        className="scrollbar-none h-full overflow-y-auto"
+        className="scrollbar-none min-h-0 flex-1 overflow-y-auto rounded-chrome bg-card"
       >
         <div className="flex min-h-full flex-col">
           <div
@@ -843,30 +854,16 @@ export function MessageTimeline({
           </div>
         </div>
       </div>
-      {footer
-        ? (() => {
-            const footerShell = (
-              <div
-                ref={footerRef}
-                data-testid="message-timeline-footer"
-                className="pointer-events-none flex flex-col"
-              >
-                {footerControlRow}
-                {footer}
-              </div>
-            );
-
-            if (composerDockEl) {
-              return createPortal(footerShell, composerDockEl);
-            }
-
-            return (
-              <div className="pointer-events-none absolute inset-x-0 bottom-4 z-10 flex flex-col">
-                {footerShell}
-              </div>
-            );
-          })()
-        : null}
+      {footer ? (
+        <div
+          ref={footerRef}
+          data-testid="message-timeline-footer"
+          className="pointer-events-none relative z-10 mt-[calc(-1*var(--chat-composer-surface-overlap))] flex shrink-0 flex-col pb-[var(--chat-surface-bottom-gap)]"
+        >
+          {footerControlRow}
+          {footer}
+        </div>
+      ) : null}
       {!footer && jumpToLatestButton ? (
         <div
           className="absolute left-1/2 -translate-x-1/2"

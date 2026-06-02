@@ -292,6 +292,7 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useTranslation(["sidebar", "common", "settings"]);
   const navRef = useRef<HTMLElement>(null);
+  const skipActiveSessionScrollRef = useRef<string | null>(null);
   const [expandedProjects, setExpandedProjects] = useState<
     Record<string, boolean>
   >(() => {
@@ -381,6 +382,14 @@ export function Sidebar({
     setSelectedSessionIds(new Set());
   }, [pinBatchToHome, selectedSessionIds]);
 
+  const selectSessionFromSidebar = useCallback(
+    (sessionId: string) => {
+      skipActiveSessionScrollRef.current = sessionId;
+      onSelectSession?.(sessionId);
+    },
+    [onSelectSession],
+  );
+
   useEffect(() => {
     setSelectedSessionIds((current) => {
       const next = normalizeSelectedSessionIds({
@@ -443,7 +452,18 @@ export function Sidebar({
   // row into view if it's scrolled out of sight. Keyed on activeSessionId so it
   // only fires on navigation — manual scrolling within the same chat is left alone.
   useEffect(() => {
-    if (!activeSessionId || collapsed || isSecondarySurface) return;
+    if (!activeSessionId) {
+      skipActiveSessionScrollRef.current = null;
+      return;
+    }
+
+    if (skipActiveSessionScrollRef.current === activeSessionId) {
+      skipActiveSessionScrollRef.current = null;
+      return;
+    }
+    skipActiveSessionScrollRef.current = null;
+
+    if (collapsed || isSecondarySurface) return;
     let raf = 0;
     // Navigating into a collapsed project takes a couple of renders to expand
     // and reveal the row, so retry across a few frames until it mounts.
@@ -611,7 +631,7 @@ export function Sidebar({
                     labelVisible={labelVisible}
                     activeSessionId={activeSessionId}
                     onNavigate={onNavigate}
-                    onSelectSession={onSelectSession}
+                    onSelectSession={selectSessionFromSidebar}
                     onNewChatInProject={onNewChatInProject}
                     onNewChat={onNewChat}
                     onCreateProject={onCreateProject}

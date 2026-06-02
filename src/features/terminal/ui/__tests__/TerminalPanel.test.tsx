@@ -1,11 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TerminalPanel } from "../TerminalPanel";
 
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(() => vi.fn()),
+  deferResize: vi.fn(),
   focusAndResize: vi.fn(),
+  resumeResize: vi.fn(),
   restart: vi.fn(),
   stop: vi.fn(),
   subscribe: vi.fn(() => vi.fn()),
@@ -23,7 +25,9 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
 vi.mock("../../lib/terminalSessionManager", () => ({
   getOrCreateTerminalSession: vi.fn(() => ({
     attach: mocks.attach,
+    deferResize: mocks.deferResize,
     focusAndResize: mocks.focusAndResize,
+    resumeResize: mocks.resumeResize,
     restart: mocks.restart,
     status: "running",
     stop: mocks.stop,
@@ -35,11 +39,70 @@ vi.mock("../../lib/terminalSessionManager", () => ({
 describe("TerminalPanel", () => {
   beforeEach(() => {
     mocks.attach.mockClear();
+    mocks.deferResize.mockClear();
     mocks.focusAndResize.mockClear();
+    mocks.resumeResize.mockClear();
     mocks.restart.mockClear();
     mocks.stop.mockClear();
     mocks.subscribe.mockClear();
     mocks.t.mockClear();
+  });
+
+  it("does not defer terminal resize when mounted expanded", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(mocks.deferResize).not.toHaveBeenCalled();
+    expect(mocks.resumeResize).not.toHaveBeenCalled();
+  });
+
+  it("resumes terminal resize after expansion even without a transition event", () => {
+    vi.useFakeTimers();
+    try {
+      const { rerender } = render(
+        <TerminalPanel
+          sessionKey="session:/repo"
+          cwd="/Users/test/repo"
+          collapsed
+          onCollapse={vi.fn()}
+          onExpand={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(mocks.deferResize).toHaveBeenCalledTimes(1);
+      expect(mocks.resumeResize).not.toHaveBeenCalled();
+
+      rerender(
+        <TerminalPanel
+          sessionKey="session:/repo"
+          cwd="/Users/test/repo"
+          collapsed={false}
+          onCollapse={vi.fn()}
+          onExpand={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
+
+      expect(mocks.deferResize).toHaveBeenCalledTimes(2);
+      expect(mocks.resumeResize).not.toHaveBeenCalled();
+
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
+
+      expect(mocks.resumeResize).toHaveBeenCalledWith({ focus: true });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("toggles when the header background is clicked", async () => {

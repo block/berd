@@ -1,4 +1,4 @@
-import type { ComponentProps } from "react";
+import { useState, type ComponentProps } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -79,6 +79,41 @@ function sidebarProps(props: Partial<SidebarProps> = {}): SidebarProps {
 
 function renderSidebar(props: Partial<SidebarProps> = {}) {
   return render(<Sidebar {...sidebarProps(props)} />);
+}
+
+function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
+  const height = rect.bottom - rect.top;
+  return vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: rect.top,
+    top: rect.top,
+    bottom: rect.bottom,
+    left: 0,
+    right: 300,
+    width: 300,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+function SidebarSelectionHarness({
+  onSelectSession,
+}: {
+  onSelectSession?: (sessionId: string) => void;
+}) {
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+
+  return (
+    <Sidebar
+      {...sidebarProps({
+        activeSessionId,
+        onSelectSession: (sessionId) => {
+          setActiveSessionId(sessionId);
+          onSelectSession?.(sessionId);
+        },
+      })}
+    />
+  );
 }
 
 async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
@@ -483,6 +518,84 @@ describe("Sidebar", () => {
 
     await user.click(recentsHeader);
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+  });
+
+  it("scrolls externally activated chats into view", () => {
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    const cancelAnimationFrameSpy = vi
+      .spyOn(window, "cancelAnimationFrame")
+      .mockImplementation(() => {});
+
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    const { rerender } = renderSidebar();
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const row = document.querySelector('[data-session-id="session-1"]');
+    expect(row).toBeInstanceOf(HTMLElement);
+
+    mainNavigation.scrollTop = 0;
+    const navRectSpy = mockRect(mainNavigation, { top: 0, bottom: 100 });
+    const rowRectSpy = mockRect(row as HTMLElement, { top: 80, bottom: 90 });
+
+    rerender(<Sidebar {...sidebarProps({ activeSessionId: "session-1" })} />);
+
+    expect(mainNavigation.scrollTop).toBe(38);
+
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+    navRectSpy.mockRestore();
+    rowRectSpy.mockRestore();
+  });
+
+  it("does not scroll the sidebar when the active chat came from a sidebar click", async () => {
+    const user = userEvent.setup();
+    const onSelectSession = vi.fn();
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    render(<SidebarSelectionHarness onSelectSession={onSelectSession} />);
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const row = document.querySelector('[data-session-id="session-1"]');
+    expect(row).toBeInstanceOf(HTMLElement);
+
+    mainNavigation.scrollTop = 0;
+    const navRectSpy = mockRect(mainNavigation, { top: 0, bottom: 100 });
+    const rowRectSpy = mockRect(row as HTMLElement, { top: 80, bottom: 90 });
+
+    await user.click(screen.getByRole("button", { name: "Recovered Session" }));
+
+    expect(onSelectSession).toHaveBeenCalledWith("session-1");
+    expect(mainNavigation.scrollTop).toBe(0);
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+
+    requestAnimationFrameSpy.mockRestore();
+    navRectSpy.mockRestore();
+    rowRectSpy.mockRestore();
   });
 
   it("keeps the active chat in the selection while multi-selection is active", async () => {

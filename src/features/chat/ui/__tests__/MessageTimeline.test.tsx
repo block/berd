@@ -620,6 +620,27 @@ describe("MessageTimeline", () => {
     expect(log).not.toContainElement(screen.getByTestId("composer-footer"));
   });
 
+  it("docks the floating footer in layout flow while overlapping the message surface", () => {
+    renderWithProviders(
+      <MessageTimeline
+        messages={[message("user-1", "user", "Question")]}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const footerFrame = screen.getByTestId("message-timeline-footer");
+
+    expect(scroller).toHaveClass("flex-1", "rounded-chrome", "bg-card");
+    expect(footerFrame).toHaveClass(
+      "relative",
+      "mt-[calc(-1*var(--chat-composer-surface-overlap))]",
+      "shrink-0",
+      "pb-[var(--chat-surface-bottom-gap)]",
+    );
+    expect(footerFrame).not.toHaveClass("absolute", "bottom-4");
+  });
+
   it("keeps Jump hidden or clears it when the transcript has no scrollable overflow", async () => {
     const animationFrame = mockRequestAnimationFrame();
     const messages = [
