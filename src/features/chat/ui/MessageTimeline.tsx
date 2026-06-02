@@ -119,6 +119,8 @@ export function MessageTimeline({
   const userScrollIntentRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
+  const hadRealScrollableOverflowRef = useRef(false);
+  const messageListBottomPaddingPxRef = useRef(0);
   const autoScrollTimersRef = useRef<number[]>([]);
   const jumpToLatestAnimationFrameRef = useRef<number | null>(null);
   const lastMcpAppSignatureRef = useRef<string | null>(null);
@@ -129,6 +131,7 @@ export function MessageTimeline({
   const messageListBottomPaddingPx = hasFooter
     ? Math.max(footerHeightPx, 112) + 32
     : (tailPaddingPx ?? 16);
+  messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
   const visibleMessages = messages.filter(
     (m) =>
       m.metadata?.userVisible !== false &&
@@ -163,6 +166,15 @@ export function MessageTimeline({
     return Math.max(0, container.scrollHeight - container.clientHeight);
   }, []);
 
+  const hasRealScrollableOverflow = useCallback((container: HTMLDivElement) => {
+    return (
+      Math.max(
+        0,
+        container.scrollHeight - messageListBottomPaddingPxRef.current,
+      ) > container.clientHeight
+    );
+  }, []);
+
   const setTimelineScrollTop = useCallback(
     (container: HTMLDivElement, scrollTop: number) => {
       container.scrollTop = scrollTop;
@@ -179,18 +191,22 @@ export function MessageTimeline({
       }
 
       const bottomScrollTop = getBottomScrollTop(container);
+      if (hasRealScrollableOverflow(container)) {
+        hadRealScrollableOverflowRef.current = true;
+      }
 
       if (typeof container.scrollTo === "function") {
         container.scrollTo({
           top: bottomScrollTop,
           behavior,
         });
+        lastScrollTopRef.current = container.scrollTop;
         return;
       }
 
-      container.scrollTop = bottomScrollTop;
+      setTimelineScrollTop(container, bottomScrollTop);
     },
-    [getBottomScrollTop],
+    [getBottomScrollTop, hasRealScrollableOverflow, setTimelineScrollTop],
   );
 
   const cancelJumpToLatestAnimation = useCallback(() => {
@@ -254,9 +270,25 @@ export function MessageTimeline({
   }, [cancelJumpToLatestAnimation, getBottomScrollTop, setTimelineScrollTop]);
 
   const setDetachedFromLatest = useCallback((detached: boolean) => {
+    if (userDetachedRef.current === detached) {
+      return;
+    }
+
     userDetachedRef.current = detached;
     setUserDetached(detached);
   }, []);
+
+  const syncUnscrollableState = useCallback(
+    (scrollTop: number) => {
+      hadRealScrollableOverflowRef.current = false;
+      isNearBottomRef.current = true;
+      isPinnedToBottomRef.current = true;
+      lastScrollTopRef.current = scrollTop;
+      userScrollIntentRef.current = false;
+      setDetachedFromLatest(false);
+    },
+    [setDetachedFromLatest],
+  );
 
   const scrollToBottomIfNearBottom = useCallback(
     (behavior: ScrollBehavior = "smooth") => {
@@ -414,25 +446,56 @@ export function MessageTimeline({
     ) {
       return;
     }
+    if (
+      stickyScrollUntilRef.current <= performance.now() &&
+      !hadRealScrollableOverflowRef.current
+    ) {
+      return;
+    }
     scrollToBottom("auto");
   }, [hasFooter, messageListBottomPaddingPx, scrollToBottom, tailPaddingPx]);
 
   useLayoutEffect(() => {
     const container = containerRef.current;
-    if (!container || typeof ResizeObserver === "undefined") {
+    if (!container) {
       return;
     }
 
     const syncScrollState = () => {
+      if (container.scrollHeight <= container.clientHeight) {
+        syncUnscrollableState(container.scrollTop);
+        return;
+      }
+
       lastScrollTopRef.current = container.scrollTop;
       const distanceFromBottom =
         container.scrollHeight - container.scrollTop - container.clientHeight;
       isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
       isPinnedToBottomRef.current =
         distanceFromBottom <= PINNED_BOTTOM_THRESHOLD_PX;
+      hadRealScrollableOverflowRef.current =
+        hasRealScrollableOverflow(container);
+
+      // A resize can create scrollable overflow that leaves the user away from
+      // the latest message without any scroll/wheel event firing. Reconcile the
+      // detached state from the post-resize position so "Jump to latest"
+      // appears (or hides) to match what the user actually sees.
+      if (userDetachedRef.current) {
+        if (isPinnedToBottomRef.current) {
+          setDetachedFromLatest(false);
+        }
+        return;
+      }
+
+      if (distanceFromBottom >= AUTO_SCROLL_THRESHOLD_PX) {
+        setDetachedFromLatest(true);
+        stickyScrollUntilRef.current = 0;
+      }
     };
 
-    const resizeObserver = new ResizeObserver(() => {
+    let resizeFrame: number | null = null;
+
+    const syncAfterResize = () => {
       const wasPinnedToLatest =
         !userDetachedRef.current &&
         (isPinnedToBottomRef.current ||
@@ -445,11 +508,39 @@ export function MessageTimeline({
       }
 
       syncScrollState();
-    });
+    };
 
-    resizeObserver.observe(container);
-    return () => resizeObserver.disconnect();
-  }, [scrollToBottom]);
+    const scheduleSyncAfterResize = () => {
+      if (resizeFrame != null) {
+        cancelAnimationFrame(resizeFrame);
+      }
+      resizeFrame = requestAnimationFrame(() => {
+        resizeFrame = null;
+        syncAfterResize();
+      });
+    };
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(scheduleSyncAfterResize);
+
+    resizeObserver?.observe(container);
+    // Tauri WebView viewport changes can miss element ResizeObserver delivery.
+    window.addEventListener("resize", scheduleSyncAfterResize);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", scheduleSyncAfterResize);
+      if (resizeFrame != null) {
+        cancelAnimationFrame(resizeFrame);
+      }
+    };
+  }, [
+    hasRealScrollableOverflow,
+    scrollToBottom,
+    setDetachedFromLatest,
+    syncUnscrollableState,
+  ]);
 
   const latestVisibleMessage = visibleMessages.at(-1);
   const latestVisibleMessageId = latestVisibleMessage?.id;
@@ -548,6 +639,15 @@ export function MessageTimeline({
     const container = containerRef.current;
     if (!container) return;
     const { scrollTop, scrollHeight, clientHeight } = container;
+
+    // No scrollable overflow exists, so resize-driven reflows should not
+    // mark the user as detached from the latest message.
+    if (scrollHeight <= clientHeight) {
+      syncUnscrollableState(scrollTop);
+      return;
+    }
+
+    hadRealScrollableOverflowRef.current = hasRealScrollableOverflow(container);
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
     isPinnedToBottomRef.current =
@@ -576,6 +676,16 @@ export function MessageTimeline({
     // A wheel over the composer scrolls its text, not the conversation, so it
     // must not flip the conversation into the detached "jump to latest" state.
     if (footerRef.current?.contains(event.target as Node)) {
+      return;
+    }
+
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+
+    if (container.scrollHeight <= container.clientHeight) {
+      syncUnscrollableState(container.scrollTop);
       return;
     }
 
