@@ -42,10 +42,7 @@ static GOOSE_SERVE: OnceCell<GooseServeProcess> = OnceCell::const_new();
 impl GooseServeProcess {
     /// Return the WebSocket URL for connecting to this server.
     pub fn ws_url(&self) -> String {
-        format!(
-            "ws://{LOCALHOST}:{}/acp?token={}",
-            self.port, self.secret_key
-        )
+        format!("ws://{LOCALHOST}:{}/acp", self.port)
     }
 
     /// Return the HTTP base URL for authenticated Goose server routes.
