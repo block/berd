@@ -243,8 +243,33 @@ fi
 git -C "$goose_repo" checkout --detach "$pinned_commit" >/dev/null 2>&1
 git -C "$goose_repo" reset --hard "$pinned_commit" >/dev/null 2>&1
 
+# Apply security patches from the goose-internal patches/ directory.
+# Patches are applied before building and reverted afterward so the managed
+# checkout stays clean at the pinned commit (avoiding dirty-tree failures on
+# subsequent script invocations).
+patches_dir="$repo_root/patches"
+applied_patches=0
+if [[ -d "$patches_dir" ]]; then
+  for patch_file in "$patches_dir"/*.patch; do
+    [[ -f "$patch_file" ]] || continue
+    if git -C "$goose_repo" apply --check "$patch_file" 2>/dev/null; then
+      log "Applying patch: $(basename "$patch_file")"
+      git -C "$goose_repo" apply "$patch_file"
+      applied_patches=1
+    else
+      log "Patch $(basename "$patch_file") does not apply (may already be upstream), skipping."
+    fi
+  done
+fi
+
 log "Building Goose from $goose_repo at $pinned_commit."
 (cd "$goose_repo" && cargo build -p "$goose_package" --bin "$goose_bin")
+
+# Restore the tree to the exact pinned commit so subsequent runs pass the
+# dirty-checkout guard without requiring GOOSE_DEV_ALLOW_DIRTY=1.
+if [[ "$applied_patches" == "1" ]]; then
+  git -C "$goose_repo" checkout -- . 2>/dev/null || true
+fi
 
 if [[ -n "$(git -C "$goose_repo" status --porcelain -- Cargo.lock)" ]]; then
   git -C "$goose_repo" checkout -- Cargo.lock

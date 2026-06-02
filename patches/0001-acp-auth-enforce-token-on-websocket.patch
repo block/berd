@@ -1,0 +1,112 @@
+diff --git a/crates/goose/src/acp/transport/mod.rs b/crates/goose/src/acp/transport/mod.rs
+index ab0ca41..2cdbdde 100644
+--- a/crates/goose/src/acp/transport/mod.rs
++++ b/crates/goose/src/acp/transport/mod.rs
+@@ -10,7 +10,8 @@ use axum::{
+         ws::{rejection::WebSocketUpgradeRejection, WebSocketUpgrade},
+         State,
+     },
+-    http::{header, HeaderName, Method, Request},
++    http::{header, HeaderName, Method, Request, StatusCode},
++    middleware,
+     response::Response,
+     routing::{delete, get, post},
+     Router,
+@@ -127,8 +128,96 @@ pub fn create_acp_router(server: Arc<AcpServer>) -> Router {
+     create_acp_routes(server).layer(acp_cors_layer())
+ }
+ 
++/// Constant-time token comparison to prevent timing side-channels.
++fn token_matches(candidate: Option<&str>, expected: &str) -> bool {
++    match candidate {
++        None => false,
++        Some(c) => {
++            let c_bytes = c.as_bytes();
++            let e_bytes = expected.as_bytes();
++            if c_bytes.len() != e_bytes.len() {
++                return false;
++            }
++            let mut diff: u8 = 0;
++            for (a, b) in c_bytes.iter().zip(e_bytes.iter()) {
++                diff |= a ^ b;
++            }
++            diff == 0
++        }
++    }
++}
++
++/// Middleware that validates the secret key on ACP routes.
++///
++/// Accepts the token from either:
++/// - `X-Secret-Key` header
++/// - `?token=<value>` query parameter
++async fn check_acp_token(
++    axum::extract::State(expected): axum::extract::State<String>,
++    request: Request<Body>,
++    next: middleware::Next,
++) -> Result<Response, StatusCode> {
++    let header_token = request
++        .headers()
++        .get("X-Secret-Key")
++        .and_then(|v| v.to_str().ok());
++
++    let query_token = request.uri().query().and_then(|query| {
++        url::form_urlencoded::parse(query.as_bytes())
++            .find(|(key, _)| key == "token")
++            .map(|(_, value)| value.into_owned())
++    });
++
++    if token_matches(header_token, &expected)
++        || token_matches(query_token.as_deref(), &expected)
++    {
++        Ok(next.run(request).await)
++    } else {
++        Err(StatusCode::UNAUTHORIZED)
++    }
++}
++
++/// Middleware that validates Origin header on WebSocket upgrade requests.
++///
++/// Rejects cross-origin requests from untrusted origins to prevent
++/// browser-based attacks (malicious webpages, extensions, DNS rebinding).
++async fn validate_origin(
++    request: Request<Body>,
++    next: middleware::Next,
++) -> Result<Response, StatusCode> {
++    let is_upgrade = request
++        .headers()
++        .get(header::UPGRADE)
++        .and_then(|v| v.to_str().ok())
++        .is_some_and(|v| v.eq_ignore_ascii_case("websocket"));
++
++    if is_upgrade {
++        if let Some(origin) = request.headers().get(header::ORIGIN).and_then(|v| v.to_str().ok()) {
++            let allowed = origin == "tauri://localhost"
++                || origin == "https://tauri.localhost"
++                || origin.starts_with("http://localhost:")
++                || origin.starts_with("http://127.0.0.1:")
++                || origin == "http://localhost"
++                || origin == "http://127.0.0.1";
++            if !allowed {
++                return Err(StatusCode::FORBIDDEN);
++            }
++        }
++        // No Origin header is acceptable (non-browser clients)
++    }
++
++    Ok(next.run(request).await)
++}
++
+ pub fn create_router(server: Arc<AcpServer>, secret_key: String) -> Router {
+-    create_acp_routes(server)
++    let authed_routes = create_acp_routes(server)
++        .layer(middleware::from_fn(validate_origin))
++        .layer(middleware::from_fn_with_state(
++            secret_key.clone(),
++            check_acp_token,
++        ));
++
++    authed_routes
+         .route("/health", get(health))
+         .route("/status", get(health))
+         .merge(super::mcp_app_proxy::routes(secret_key))
