@@ -33,6 +33,7 @@ import {
 } from "@/features/chat/stores/chatSessionSelectors";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectSelectedProvider } from "@/features/agents/stores/agentSelectors";
+import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
@@ -1097,9 +1098,30 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           return;
         }
 
-        void createNewTab(DEFAULT_CHAT_TITLE)
+        const agentState = useAgentStore.getState();
+        const persona = agentState.personas.find(
+          (candidate) => candidate.id === agentId,
+        );
+        const matchingProvider = resolvePersonaProvider(
+          persona,
+          agentState.providers,
+        );
+        const providerId = matchingProvider?.id;
+        const modelId = matchingProvider
+          ? (persona?.model ?? undefined)
+          : undefined;
+
+        void createNewTab(DEFAULT_CHAT_TITLE, undefined, {
+          providerId,
+          modelId,
+          modelName: modelId,
+        })
           .then((session) => {
-            patchSession(session.id, { personaId: agentId });
+            patchSession(session.id, {
+              ...(providerId ? { providerId } : {}),
+              ...(modelId ? { modelId, modelName: modelId } : {}),
+              personaId: agentId,
+            });
           })
           .catch((error) => {
             console.error("Failed to start chat with agent:", error);

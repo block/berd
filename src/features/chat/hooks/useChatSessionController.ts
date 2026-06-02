@@ -36,6 +36,7 @@ import { composeBuilderSendOptions } from "./useBuilderSendInterceptor";
 import { moveSessionToProject } from "../stores/chatSessionOperations";
 import { updateSessionProject } from "@/shared/api/acpApi";
 import { preSeedDraftAgent } from "@/features/agents/lib/agentBuilderSession";
+import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { deletePersonaSource } from "@/shared/api/agents";
 import {
   ensureAgentBuilderSkillDraft,
@@ -648,11 +649,7 @@ export function useChatSessionController({
       const persona = personas.find((candidate) => candidate.id === personaId);
 
       if (persona?.provider) {
-        const matchingProvider = providers.find(
-          (provider) =>
-            provider.id === persona.provider ||
-            provider.label.toLowerCase().includes(persona.provider ?? ""),
-        );
+        const matchingProvider = resolvePersonaProvider(persona, providers);
         if (matchingProvider) {
           if (!sessionId) {
             setPendingProviderId(matchingProvider.id);

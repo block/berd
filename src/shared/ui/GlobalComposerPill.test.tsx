@@ -242,6 +242,157 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("applies the suggested persona's provider and model to the send payload", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    expect(screen.getByText("Research Scout")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      providerId: "claude-acp",
+      modelId: "claude-sonnet-4",
+      modelName: "claude-sonnet-4",
+      personaId: "persona-1",
+    });
+  });
+
+  it("does not leak a previous persona's provider/model when switching to a provider-less persona", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+        {
+          id: "persona-2",
+          displayName: "UX Critic",
+          systemPrompt: "Review flows.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill onSend={onSend} suggestedPersonaId="persona-1" />,
+    );
+
+    expect(screen.getByText("Research Scout")).toBeInTheDocument();
+
+    rerender(
+      <GlobalComposerPill onSend={onSend} suggestedPersonaId="persona-2" />,
+    );
+
+    expect(screen.getByText("UX Critic")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      personaId: "persona-2",
+    });
+  });
+
+  it("applies the new persona's provider/model when switching between personas", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+        {
+          id: "persona-2",
+          displayName: "UX Critic",
+          systemPrompt: "Review flows.",
+          provider: "goose",
+          model: "goose-default",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = vi.fn();
+    const { rerender } = render(
+      <GlobalComposerPill onSend={onSend} suggestedPersonaId="persona-1" />,
+    );
+
+    expect(screen.getByText("Research Scout")).toBeInTheDocument();
+
+    rerender(
+      <GlobalComposerPill onSend={onSend} suggestedPersonaId="persona-2" />,
+    );
+
+    expect(screen.getByText("UX Critic")).toBeInTheDocument();
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      providerId: "goose",
+      modelId: "goose-default",
+      modelName: "goose-default",
+      personaId: "persona-2",
+    });
+  });
+
+  it("restores the default provider/model after clearing the suggested persona", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /clear active assistant/i }),
+    );
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello");
+  });
+
   it("does not reselect the suggested persona after the user clears it", async () => {
     const user = userEvent.setup();
     setPersonas();

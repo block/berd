@@ -114,6 +114,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onAutomationsBreadcrumbLabelChange,
     onCreatePersona,
     onExitSearch,
+    onOpenAgent,
   }) => (
     <section>
       <div data-testid="active-view">{activeView}</div>
@@ -149,6 +150,12 @@ vi.mock("./ui/AppShellContent", () => ({
         }}
       >
         Open automation history
+      </button>
+      <button type="button" onClick={() => onOpenAgent?.("persona-resolves")}>
+        Start chat with resolving agent
+      </button>
+      <button type="button" onClick={() => onOpenAgent?.("persona-unresolved")}>
+        Start chat with unresolved agent
       </button>
       {activeView === "agents" ? (
         <button type="button" onClick={onCreatePersona}>
@@ -723,6 +730,76 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("var(--color-pill-blue)");
+  });
+
+  it("forwards a persona's provider and model when the provider resolves", async () => {
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [{ id: "goose", label: "Goose" }],
+      personas: [
+        {
+          id: "persona-resolves",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "goose",
+          model: "goose-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with resolving agent" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "goose",
+        "~/goose artifacts",
+        {
+          modelId: "goose-model",
+          projectId: undefined,
+        },
+      );
+    });
+  });
+
+  it("does not forward a persona's model when its provider does not resolve", async () => {
+    useAgentStore.setState({
+      selectedProvider: "goose",
+      providers: [{ id: "goose", label: "Goose" }],
+      personas: [
+        {
+          id: "persona-unresolved",
+          displayName: "Reviewer",
+          systemPrompt: "Review code.",
+          provider: "totally-unknown-provider",
+          model: "unresolved-model",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Start chat with unresolved agent" }),
+    );
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledWith(
+        "goose",
+        "~/goose artifacts",
+        {
+          modelId: undefined,
+          projectId: undefined,
+        },
+      );
+    });
   });
 
   it("opens search with Cmd+K", async () => {

@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { selectPersonas } from "@/features/agents/stores/agentSelectors";
+import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { useAttachmentDropTarget } from "@/features/chat/hooks/useAttachmentDropTarget";
 import { useChatInputAttachments } from "@/features/chat/hooks/useChatInputAttachments";
 import { useChatInputFilePicker } from "@/features/chat/hooks/useChatInputFilePicker";
@@ -167,6 +168,13 @@ export function GlobalComposerPill({
   const routePersonaIdRef = useRef<string | null>(suggestedPersonaId);
   const personaSelectionSourceRef = useRef<"none" | "route" | "user">("none");
   const userTouchedRoutePersonaRef = useRef(false);
+  // True when the current provider/model overrides were seeded from the
+  // selected persona (rather than chosen by the user). Persona-driven overrides
+  // do not count as draft content, so the route persona can still auto-clear.
+  const personaOverrideActiveRef = useRef(false);
+  // Persona id whose provider/model overrides have been applied, so we only
+  // apply once per persona but still retry if providers load in late.
+  const personaOverrideAppliedForRef = useRef<string | null>(null);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -212,9 +220,9 @@ export function GlobalComposerPill({
     selectedSkills.length > 0;
   const hasDraftContent =
     hasSendableContent ||
-    providerOverride !== null ||
-    modelOverride !== null ||
-    selectedProjectId !== null;
+    selectedProjectId !== null ||
+    ((providerOverride !== null || modelOverride !== null) &&
+      !personaOverrideActiveRef.current);
   const canSend = hasSendableContent && !attachmentWorkPending;
 
   useEffect(() => {
@@ -240,6 +248,74 @@ export function GlobalComposerPill({
       personaSelectionSourceRef.current = "route";
     }
   }, [hasDraftContent, selectedPersonaId, suggestedPersonaId]);
+
+  // Seed the provider/model overrides from the selected persona so the picker
+  // display and the send payload reflect the persona's configured provider and
+  // model — mirroring useChatSessionController.handlePersonaChange. Both entry
+  // points that adopt a persona (the route effect above and handlePersonaChange)
+  // flow through this single effect.
+  useEffect(() => {
+    if (!selectedPersonaId) {
+      if (personaOverrideActiveRef.current) {
+        setProviderOverride(null);
+        setModelOverride(null);
+        personaOverrideActiveRef.current = false;
+      }
+      personaOverrideAppliedForRef.current = null;
+      return;
+    }
+
+    if (personaOverrideAppliedForRef.current === selectedPersonaId) {
+      return;
+    }
+
+    // Drop overrides seeded from a previously selected persona before bailing
+    // out, so a stale provider/model can't ship with the new persona. Gated on
+    // the active ref, so user-chosen overrides and fresh selections are left
+    // untouched.
+    const clearPersonaOverride = () => {
+      if (personaOverrideActiveRef.current) {
+        setProviderOverride(null);
+        setModelOverride(null);
+        personaOverrideActiveRef.current = false;
+      }
+    };
+
+    const persona = personas.find(
+      (candidate) => candidate.id === selectedPersonaId,
+    );
+    if (!persona?.provider) {
+      // Persona has no configured provider: the global default is correct.
+      // Settle the latch so we don't reconsider this persona.
+      clearPersonaOverride();
+      personaOverrideAppliedForRef.current = selectedPersonaId;
+      return;
+    }
+
+    const matchingProvider = resolvePersonaProvider(persona, providers);
+    // Providers may still be loading; clear any stale override and leave the
+    // default selection in place, but do not settle the latch so we retry once
+    // they arrive. Gate the model on a matching provider so the two never
+    // drift apart.
+    if (!matchingProvider) {
+      clearPersonaOverride();
+      return;
+    }
+
+    setProviderOverride(matchingProvider.id);
+    setModelOverride(
+      persona.model
+        ? {
+            providerId: matchingProvider.id,
+            providerName: matchingProvider.label,
+            modelId: persona.model,
+            modelName: persona.model,
+          }
+        : null,
+    );
+    personaOverrideActiveRef.current = true;
+    personaOverrideAppliedForRef.current = selectedPersonaId;
+  }, [personas, providers, selectedPersonaId]);
 
   useEffect(() => {
     if (focusRequest <= lastFocusRequestRef.current) {
@@ -277,6 +353,7 @@ export function GlobalComposerPill({
     providers,
     selectedProvider: selectedProviderForPicker,
     onProviderSelected: (providerId) => {
+      personaOverrideActiveRef.current = false;
       setProviderOverride(providerId);
       setModelOverride(null);
       setSelectedProvider(providerId);
@@ -286,6 +363,7 @@ export function GlobalComposerPill({
         model,
         selectedProviderForPicker,
       );
+      personaOverrideActiveRef.current = false;
       setProviderOverride(selection.providerId);
       setModelOverride(selection);
       setSelectedProvider(selection.providerId);
@@ -437,6 +515,8 @@ export function GlobalComposerPill({
       setSelectedPersonaId(null);
       personaSelectionSourceRef.current = "none";
       userTouchedRoutePersonaRef.current = false;
+      personaOverrideActiveRef.current = false;
+      personaOverrideAppliedForRef.current = null;
       setSelectedSkills([]);
       return true;
     },
