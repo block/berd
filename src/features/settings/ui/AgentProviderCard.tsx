@@ -28,10 +28,7 @@ import {
   getAgentSetupFailureSimulation,
   getSimulatedAgentSetupFailureLines,
 } from "@/features/providers/lib/agentSetupFailureSimulation";
-import type {
-  ProviderDisplayInfo,
-  ProviderSetupStatus,
-} from "@/shared/types/providers";
+import type { ProviderDisplayInfo } from "@/shared/types/providers";
 
 type SetupPhase = "idle" | "checking" | "installing" | "authenticating";
 type InstallStatus = "checking" | "installed" | "missing";
@@ -51,23 +48,17 @@ interface AgentProviderCardProps {
   ) => void;
 }
 
-function deriveInstalled(status: ProviderSetupStatus): boolean {
-  return status === "built_in" || status === "connected";
-}
-
 function initialInstallStatus({
   forceMissingForSimulation,
   hasBinary,
   isBuiltIn,
-  status,
 }: {
   forceMissingForSimulation: boolean;
   hasBinary: boolean;
   isBuiltIn: boolean;
-  status: ProviderSetupStatus;
 }): InstallStatus {
   if (forceMissingForSimulation) return "missing";
-  if (isBuiltIn || !hasBinary || deriveInstalled(status)) return "installed";
+  if (isBuiltIn || !hasBinary) return "installed";
   return "checking";
 }
 
@@ -87,7 +78,6 @@ export function AgentProviderCard({
     forceMissingForSimulation,
     hasBinary,
     isBuiltIn,
-    status: provider.status,
   });
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
@@ -180,9 +170,7 @@ export function AgentProviderCard({
     } else if (isBuiltIn || !hasBinary) {
       applyInstalled();
     } else {
-      setInstallStatus((current) =>
-        current === "installed" ? current : "checking",
-      );
+      setInstallStatus("checking");
       void checkAgentInstalled(provider.id)
         .then((installed) => {
           if (installed) {

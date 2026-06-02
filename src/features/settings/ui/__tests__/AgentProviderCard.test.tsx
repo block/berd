@@ -107,6 +107,30 @@ describe("AgentProviderCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("does not trust connected status when the local agent binary is missing", async () => {
+    checkAgentInstalled.mockResolvedValue(false);
+
+    renderWithProviders(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "connected",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+          binaryName: "claude-agent-acp",
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", { name: "Checking..." }),
+    ).toBeInTheDocument();
+    expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
+    expect(
+      await screen.findByRole("button", { name: /install claude/i }),
+    ).toBeInTheDocument();
+  });
+
   it("verifies install through the local CLI check and reports failure when the binary is still missing", async () => {
     const user = userEvent.setup();
     const onStartTroubleshootingChat = vi.fn();

@@ -3,49 +3,112 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::services::path_env::build_extended_path;
 
+#[derive(Clone, Copy)]
+enum InstallCommand {
+    Shell(&'static str),
+    Platform {
+        unix: &'static str,
+        windows: &'static str,
+    },
+}
+
+impl InstallCommand {
+    fn current(self) -> &'static str {
+        match self {
+            InstallCommand::Shell(command) => command,
+            InstallCommand::Platform { unix, windows } => {
+                if cfg!(target_os = "windows") {
+                    windows
+                } else {
+                    unix
+                }
+            }
+        }
+    }
+}
+
 struct AgentCommandDef {
     id: &'static str,
     binary_name: &'static str,
-    install_command: Option<&'static str>,
+    install_command: Option<InstallCommand>,
+    install_npm_registry_url: Option<&'static str>,
     auth_command: Option<&'static str>,
     auth_status_command: Option<&'static str>,
 }
 
+impl AgentCommandDef {
+    fn current_install_command(&self) -> Option<String> {
+        let mut command = self.install_command?.current().to_string();
+
+        if let Some(registry_url) = self.install_npm_registry_url {
+            command.push_str(" --registry=");
+            command.push_str(registry_url);
+        }
+
+        Some(command)
+    }
+}
+
+const BLOCK_NPM_REGISTRY_URL: &str =
+    "https://global.block-artifacts.com/artifactory/api/npm/square-npm/";
+
+const CLAUDE_INSTALL_COMMAND: &str =
+    "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp";
+const CODEX_INSTALL_COMMAND: &str = "npm install -g @openai/codex @zed-industries/codex-acp";
+const COPILOT_INSTALL_COMMAND: &str = "npm install -g @github/copilot";
+
+const AMP_INSTALL_COMMAND_UNIX: &str =
+    "curl -fsSL https://ampcode.com/install.sh | bash && npm install -g amp-acp";
+
+const AMP_INSTALL_COMMAND_WINDOWS: &str =
+    r#"powershell -c "irm https://ampcode.com/install.ps1 | iex" && npm install -g amp-acp"#;
+
+/// Agent CLI definitions. npm install commands must route through Block's
+/// internal Artifactory proxy, because direct registry.npmjs.org access is
+/// blocked by Cloudflare WARP dependency-confusion protection.
 const AGENT_COMMAND_DEFS: &[AgentCommandDef] = &[
     AgentCommandDef {
         id: "claude-acp",
         binary_name: "claude-agent-acp",
-        install_command: Some(
-            "npm install -g @anthropic-ai/claude-code @agentclientprotocol/claude-agent-acp",
-        ),
+        install_command: Some(InstallCommand::Shell(CLAUDE_INSTALL_COMMAND)),
+        install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
         auth_command: Some("claude auth login"),
         auth_status_command: Some("claude auth status"),
     },
     AgentCommandDef {
         id: "codex-acp",
         binary_name: "codex-acp",
-        install_command: Some("npm install -g @openai/codex @zed-industries/codex-acp"),
+        install_command: Some(InstallCommand::Shell(CODEX_INSTALL_COMMAND)),
+        install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
         auth_command: Some("codex login"),
         auth_status_command: Some("codex login status"),
     },
     AgentCommandDef {
         id: "copilot-acp",
         binary_name: "copilot",
-        install_command: Some("npm install -g @github/copilot"),
+        install_command: Some(InstallCommand::Shell(COPILOT_INSTALL_COMMAND)),
+        install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
         auth_command: Some("copilot login"),
         auth_status_command: None,
     },
     AgentCommandDef {
         id: "amp-acp",
         binary_name: "amp-acp",
-        install_command: Some("npm install -g @sourcegraph/amp@latest amp-acp"),
+        install_command: Some(InstallCommand::Platform {
+            unix: AMP_INSTALL_COMMAND_UNIX,
+            windows: AMP_INSTALL_COMMAND_WINDOWS,
+        }),
+        install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
         auth_command: Some("amp login"),
         auth_status_command: Some("amp usage"),
     },
     AgentCommandDef {
         id: "cursor-agent",
         binary_name: "cursor-agent",
-        install_command: Some("curl -fsSL https://cursor.com/install | bash"),
+        install_command: Some(InstallCommand::Shell(
+            "curl -fsSL https://cursor.com/install | bash",
+        )),
+        install_npm_registry_url: None,
         auth_command: Some("cursor-agent login"),
         auth_status_command: Some("cursor-agent status"),
     },
@@ -53,6 +116,7 @@ const AGENT_COMMAND_DEFS: &[AgentCommandDef] = &[
         id: "pi-acp",
         binary_name: "pi-acp",
         install_command: None,
+        install_npm_registry_url: None,
         auth_command: None,
         auth_status_command: None,
     },
@@ -133,9 +197,9 @@ pub async fn check_agent_auth(provider_id: String) -> Result<bool, String> {
 pub async fn install_agent(app_handle: AppHandle, provider_id: String) -> Result<(), String> {
     let def = get_agent_command_def(&provider_id)?;
     let install_command = def
-        .install_command
+        .current_install_command()
         .ok_or_else(|| format!("Agent provider '{provider_id}' does not support install"))?;
-    run_shell_command(&app_handle, &provider_id, install_command).await
+    run_shell_command(&app_handle, &provider_id, &install_command).await
 }
 
 #[tauri::command]
@@ -239,5 +303,56 @@ async fn run_shell_command(
     } else {
         let code = status.code().unwrap_or(-1);
         Err(format!("Command exited with code {code}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AgentCommandDef, InstallCommand, AMP_INSTALL_COMMAND_UNIX, AMP_INSTALL_COMMAND_WINDOWS,
+        BLOCK_NPM_REGISTRY_URL, CODEX_INSTALL_COMMAND,
+    };
+
+    #[test]
+    fn npm_install_command_uses_block_registry() {
+        let def = AgentCommandDef {
+            id: "codex-acp",
+            binary_name: "codex-acp",
+            install_command: Some(InstallCommand::Shell(CODEX_INSTALL_COMMAND)),
+            install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
+            auth_command: None,
+            auth_status_command: None,
+        };
+        let command = def.current_install_command().unwrap();
+
+        assert_eq!(
+            command,
+            format!(
+                "npm install -g @openai/codex @zed-industries/codex-acp --registry={BLOCK_NPM_REGISTRY_URL}",
+            ),
+        );
+    }
+
+    #[test]
+    fn amp_install_command_uses_official_cli_and_acp_npm_adapter() {
+        let def = AgentCommandDef {
+            id: "amp-acp",
+            binary_name: "amp-acp",
+            install_command: Some(InstallCommand::Shell(AMP_INSTALL_COMMAND_UNIX)),
+            install_npm_registry_url: Some(BLOCK_NPM_REGISTRY_URL),
+            auth_command: None,
+            auth_status_command: None,
+        };
+
+        assert_eq!(
+            def.current_install_command().unwrap(),
+            format!(
+                "curl -fsSL https://ampcode.com/install.sh | bash && npm install -g amp-acp --registry={BLOCK_NPM_REGISTRY_URL}",
+            ),
+        );
+        assert_eq!(
+            AMP_INSTALL_COMMAND_WINDOWS,
+            r#"powershell -c "irm https://ampcode.com/install.ps1 | iex" && npm install -g amp-acp"#,
+        );
     }
 }

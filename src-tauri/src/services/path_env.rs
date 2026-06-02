@@ -20,6 +20,7 @@ pub fn build_extended_path_from_path(path: Option<&str>) -> String {
     }
 
     if let Some(home) = dirs::home_dir() {
+        paths.push(home.join(".amp/bin"));
         paths.push(home.join(".local/bin"));
         paths.push(home.join(".npm-global/bin"));
         // Finder-launched apps often miss shell-initialized tool-manager shims.
@@ -111,6 +112,7 @@ mod tests {
             1
         );
         assert!(paths.iter().any(|p| p.ends_with(".local/share/mise/shims")));
+        assert!(paths.iter().any(|p| p.ends_with(".amp/bin")));
         assert!(paths.iter().any(|p| p.ends_with(".volta/bin")));
         assert!(paths.iter().any(|p| p.ends_with(".asdf/shims")));
     }
