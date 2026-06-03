@@ -182,7 +182,7 @@ export function AutomationDraftRail({
   return (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-md bg-card p-5 lg:w-[337px]",
+        "flex min-h-0 w-full flex-col rounded-md bg-card p-5",
         className,
       )}
       aria-label={t("builder.previewAriaLabel")}

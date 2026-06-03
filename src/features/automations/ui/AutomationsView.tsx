@@ -1,15 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
-import {
-  IconAlertTriangle,
-  IconCopy,
-  IconPlus,
-  IconRefresh,
-  IconSparkles,
-  IconTrash,
-} from "@tabler/icons-react";
-import { PinIcon } from "lucide-react";
+import { IconAlertTriangle, IconPlus, IconRefresh } from "@tabler/icons-react";
+import { PlayIcon } from "lucide-react";
+import { toast } from "sonner";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import {
   type AutomationTile,
@@ -17,6 +11,7 @@ import {
   deleteAutomationTile,
   getAutomationTile,
   getAutomationTiles,
+  refreshAutomationTile,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import {
@@ -48,6 +43,13 @@ const AUTOMATIONS_REFETCH_INTERVAL_MS = 15_000;
 // the detail-page error pill. Local validation errors still surface normally.
 const isTransientRefreshError = (msg: string | null | undefined): boolean =>
   !!msg && /being refreshed|try again later/i.test(msg);
+
+const isActiveAutomationRunStatus = (
+  status: string | number | undefined,
+): boolean => {
+  const normalized = String(status ?? "").toLowerCase();
+  return normalized.includes("running") || normalized.includes("pending");
+};
 
 function errorMessage(error: unknown, fallback: string): string {
   if (error instanceof Error && error.message.trim()) {
@@ -310,6 +312,35 @@ export function AutomationsWorkbench({
     },
   });
 
+  const refreshMutation = useMutation({
+    mutationFn: refreshAutomationTile,
+    onSuccess: async (response, automationId) => {
+      if (response.success === false) {
+        toast.error(t("run.error"), {
+          description: response.errorMsg ?? t("run.errorDescription"),
+        });
+        return;
+      }
+
+      toast.success(t("run.started"), {
+        description:
+          detailTile && detailTile.id === automationId
+            ? automationTitle(detailTile, t("fallbacks.untitledAutomation"))
+            : undefined,
+      });
+      await invalidateAutomationQueries();
+      window.setTimeout(() => {
+        void automationsQuery.refetch();
+        void detailQuery.refetch();
+      }, 250);
+    },
+    onError: (error) => {
+      toast.error(t("run.error"), {
+        description: errorMessage(error, t("run.errorDescription")),
+      });
+    },
+  });
+
   const duplicateMutation = useMutation({
     mutationFn: (tile: AutomationTile) => {
       const request = buildDuplicateAutomationRequest(
@@ -360,7 +391,9 @@ export function AutomationsWorkbench({
   const { refetch: refetchAutomations } = automationsQuery;
   const { refetch: refetchDetail } = detailQuery;
   const { mutate: duplicateMutate } = duplicateMutation;
+  const { mutate: refreshMutate } = refreshMutation;
   const isUpdating = updateMutation.isPending;
+  const isRefreshing = refreshMutation.isPending;
   const isDuplicating = duplicateMutation.isPending;
   const isDeleting = deleteMutation.isPending;
   const setTopBarActions = useSetTopBarActions();
@@ -370,6 +403,11 @@ export function AutomationsWorkbench({
     pinToHome,
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "automation", id: detailTile?.id });
+  const pinLabel = isPinnedToHome
+    ? t("common:actions.unpinFromHome")
+    : isPinningToHome
+      ? t("common:actions.pinningToHome")
+      : t("common:actions.pinToHome");
 
   useEffect(() => {
     if (currentRoute.surface === "builder") {
@@ -378,11 +416,9 @@ export function AutomationsWorkbench({
     }
 
     if (detailAutomationId && detailTile) {
-      const pinLabel = isPinnedToHome
-        ? t("common:actions.unpinFromHome")
-        : isPinningToHome
-          ? t("common:actions.pinningToHome")
-          : t("common:actions.pinToHome");
+      const isRunActive = isActiveAutomationRunStatus(
+        detailTile.latestRunStatus,
+      );
 
       setTopBarActions(
         <>
@@ -390,15 +426,18 @@ export function AutomationsWorkbench({
             type="button"
             variant="page-header"
             size="xs"
-            onClick={() =>
-              isPinnedToHome ? unpinFromHome() : void pinToHome()
-            }
-            disabled={isPinningToHome || !detailTile.id}
-            aria-label={pinLabel}
-            title={pinLabel}
-            leftIcon={<PinIcon aria-hidden="true" />}
+            onClick={() => {
+              if (!detailTile.id) return;
+              refreshMutate(detailTile.id);
+            }}
+            disabled={!detailTile.id || isRefreshing || isRunActive}
+            aria-label={t("actions.runNow")}
+            title={t("actions.runNow")}
+            leftIcon={<PlayIcon aria-hidden="true" />}
           >
-            {pinLabel}
+            {isRefreshing || isRunActive
+              ? t("actions.running")
+              : t("actions.runNow")}
           </Button>
           <Button
             type="button"
@@ -413,54 +452,6 @@ export function AutomationsWorkbench({
             leftIcon={<IconRefresh aria-hidden="true" />}
           >
             {t("actions.refreshShort")}
-          </Button>
-          <Button
-            type="button"
-            variant="page-header"
-            size="xs"
-            onClick={() => {
-              if (!detailTile.id) return;
-              setNavigationRoute({
-                surface: "builder",
-                automationId: detailTile.id,
-              });
-            }}
-            disabled={!detailTile.id}
-            aria-label={t("actions.editWithChat")}
-            title={t("actions.editWithChat")}
-            leftIcon={<IconSparkles aria-hidden="true" />}
-          >
-            {t("actions.editWithChat")}
-          </Button>
-          <Button
-            type="button"
-            variant="page-header"
-            size="xs"
-            onClick={() => duplicateMutate(detailTile)}
-            disabled={
-              isUpdating || isDuplicating || !canDuplicateAutomation(detailTile)
-            }
-            aria-label={t("actions.duplicate")}
-            title={t("actions.duplicate")}
-            leftIcon={<IconCopy aria-hidden="true" />}
-          >
-            {isDuplicating ? t("actions.duplicating") : t("actions.duplicate")}
-          </Button>
-          <Button
-            type="button"
-            variant="page-header"
-            size="xs"
-            onClick={() => {
-              if (!detailTileId) return;
-              setMutationError(null);
-              setDeleteAutomationId(detailTileId);
-            }}
-            disabled={isDeleting}
-            aria-label={t("actions.delete")}
-            title={t("actions.delete")}
-            leftIcon={<IconTrash aria-hidden="true" />}
-          >
-            {t("actions.delete")}
           </Button>
         </>,
       );
@@ -498,21 +489,13 @@ export function AutomationsWorkbench({
     currentRoute.surface,
     detailAutomationId,
     detailTile,
-    detailTileId,
-    duplicateMutate,
-    isUpdating,
-    isDuplicating,
-    isDeleting,
-    isPinnedToHome,
-    isPinningToHome,
+    isRefreshing,
     openBuilder,
-    pinToHome,
     refetchAutomations,
     refetchDetail,
-    setNavigationRoute,
+    refreshMutate,
     setTopBarActions,
     t,
-    unpinFromHome,
   ]);
 
   if (currentRoute.surface === "builder") {
@@ -568,6 +551,32 @@ export function AutomationsWorkbench({
                   isTransientRefreshError(mutationError) ? null : mutationError
                 }
                 isSaving={updateMutation.isPending}
+                actions={{
+                  pinLabel,
+                  isPinning: isPinningToHome,
+                  onTogglePin: () =>
+                    isPinnedToHome ? unpinFromHome() : void pinToHome(),
+                  onEditWithChat: () => {
+                    if (!detailTile.id) return;
+                    setNavigationRoute({
+                      surface: "builder",
+                      automationId: detailTile.id,
+                    });
+                  },
+                  onDuplicate: () => duplicateMutate(detailTile),
+                  onDelete: () => {
+                    if (!detailTileId) return;
+                    setMutationError(null);
+                    setDeleteAutomationId(detailTileId);
+                  },
+                  canEditWithChat: Boolean(detailTile.id),
+                  canDuplicate:
+                    !isUpdating &&
+                    !isDuplicating &&
+                    canDuplicateAutomation(detailTile),
+                  isDuplicating,
+                  isDeleting,
+                }}
                 onActiveTabChange={(tab) => {
                   if (!detailAutomationId) return;
                   setNavigationRoute({

@@ -219,6 +219,7 @@ pub fn run() {
             commands::automations::stop_automation_builder_stream,
             commands::automations::update_automation_tile,
             commands::automations::delete_automation_tile,
+            commands::automations::refresh_automation_tile,
             commands::automations::generate_automation_schedule,
             commands::automations::get_automation_session_messages,
             commands::acp::get_goose_serve_url,

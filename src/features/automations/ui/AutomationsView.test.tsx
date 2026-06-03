@@ -9,6 +9,7 @@ import {
   getAutomationTile,
   getAutomationTileResults,
   getAutomationTiles,
+  refreshAutomationTile,
   updateAutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
 import {
@@ -40,6 +41,7 @@ vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   createAutomationTile: vi.fn(),
   updateAutomationTile: vi.fn(),
   deleteAutomationTile: vi.fn(),
+  refreshAutomationTile: vi.fn(),
 }));
 
 vi.mock("@/features/automations/ui/AutomationBuilderView", () => ({
@@ -150,6 +152,10 @@ describe("AutomationsView", () => {
       tileId: "automation-copy",
     });
     vi.mocked(deleteAutomationTile).mockResolvedValue({ success: true });
+    vi.mocked(refreshAutomationTile).mockResolvedValue({
+      success: true,
+      refreshSessionId: "session-refresh",
+    });
     vi.mocked(getAutomationSessionMessages).mockResolvedValue({
       sessionName: "Daily revenue digest run",
       status: "idle",
@@ -265,9 +271,32 @@ describe("AutomationsView", () => {
     ).not.toBeInTheDocument();
     expect(
       within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
-        name: "Pin to home",
+        name: "Run now",
       }),
     ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Refresh automations",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).queryByRole(
+        "button",
+        {
+          name: "Pin to home",
+        },
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Pin to home" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Edit with chat" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Duplicate" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
   });
 
   it("reports controlled navigation from overview to detail", async () => {
@@ -471,6 +500,51 @@ describe("AutomationsView", () => {
     expect(screen.queryByText("Status")).not.toBeInTheDocument();
   });
 
+  it("starts an automation ad hoc from the detail actions", async () => {
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+    await user.click(
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Run now",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(refreshAutomationTile).toHaveBeenCalledWith(
+        "automation-1",
+        expect.anything(),
+      ),
+    );
+  });
+
+  it("disables the ad hoc run action while the automation is already running", async () => {
+    vi.mocked(getAutomationTile).mockResolvedValue({
+      tileInfo: {
+        id: "automation-1",
+        title: "Daily revenue digest",
+        schedule: "0 9 * * *",
+        type: "TILE_TYPE_SUMMARY",
+        latestRunStatus: "TILE_RUN_STATUS_RUNNING",
+      },
+    });
+    const user = userEvent.setup();
+    renderAutomationsView();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Daily revenue digest" }),
+    );
+
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Run now",
+      }),
+    ).toBeDisabled();
+  });
+
   it("formats recent run activity with relative day labels", async () => {
     const now = new Date();
     const yesterday = new Date(now);
@@ -655,7 +729,7 @@ describe("AutomationsView", () => {
     expect(screen.getByText(formatDateTime(older))).toBeInTheDocument();
   });
 
-  it("exposes detail actions in the top bar", async () => {
+  it("keeps only run controls in the detail top bar", async () => {
     const user = userEvent.setup();
     renderAutomationsView();
 
@@ -665,10 +739,22 @@ describe("AutomationsView", () => {
     await screen.findByText(/Pull revenue\s+Send a summary/);
 
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "More actions" })).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Refresh automations" }),
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Run now",
+      }),
     ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).getByRole("button", {
+        name: "Refresh automations",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId("topbar-actions-outlet")).queryByRole(
+        "button",
+        { name: "Duplicate" },
+      ),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Duplicate" }),
     ).toBeInTheDocument();
@@ -691,7 +777,6 @@ describe("AutomationsView", () => {
     expect(await screen.findByText("Run output")).toBeInTheDocument();
     expect(screen.getAllByText("Run completed.").length).toBeGreaterThan(0);
     expect(getAutomationTileResults).toHaveBeenCalledWith("automation-1");
-    expect(screen.queryByText("Run now")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Fetched 3 Slack messages from #revenue."),
     ).not.toBeInTheDocument();

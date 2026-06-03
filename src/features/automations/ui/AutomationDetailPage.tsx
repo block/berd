@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { IconPencil } from "@tabler/icons-react";
+import { IconCopy, IconPencil, IconTrash } from "@tabler/icons-react";
+import { PinIcon } from "lucide-react";
 import type {
   AutomationTile,
   UpdateAutomationTileRequest,
@@ -44,6 +45,11 @@ const WEEKDAY_OPTIONS = [
 ] as const;
 
 const FIELD_CLASS = FORM_FIELD_CLASS;
+const ACTION_BUTTON_CLASS =
+  "size-9 rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-surface-agent-profile-fg";
+const PRIMARY_ACTION_BUTTON_CLASS =
+  "size-9 rounded-full !bg-surface-agent-profile-fg !text-surface-agent-profile-control-bg hover:!bg-surface-agent-profile-action-bg-hover";
+const ACTION_ICON_CLASS = "size-3.5";
 
 function formatTimeLabel(hhmm: string): string {
   const [hRaw, mRaw] = hhmm.split(":");
@@ -68,6 +74,7 @@ export function AutomationDetailPage({
   selectedRunKey,
   mutationError,
   isSaving,
+  actions,
   onActiveTabChange,
   onSelectRun,
   onSave,
@@ -77,6 +84,18 @@ export function AutomationDetailPage({
   selectedRunKey: string | null;
   mutationError: string | null;
   isSaving: boolean;
+  actions?: {
+    pinLabel: string;
+    isPinning: boolean;
+    onTogglePin: () => void;
+    onEditWithChat: () => void;
+    onDuplicate: () => void;
+    onDelete: () => void;
+    canEditWithChat: boolean;
+    canDuplicate: boolean;
+    isDuplicating: boolean;
+    isDeleting: boolean;
+  };
   onActiveTabChange: (tab: "details" | "history") => void;
   onSelectRun: (runKey: string | null) => void;
   onSave: (request: UpdateAutomationTileRequest) => void;
@@ -522,6 +541,67 @@ export function AutomationDetailPage({
                     </SelectContent>
                   </Select>
                 </label>
+
+                {actions ? (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t("actions.editWithChat")}
+                      title={t("actions.editWithChat")}
+                      onClick={actions.onEditWithChat}
+                      disabled={!actions.canEditWithChat}
+                      className={PRIMARY_ACTION_BUTTON_CLASS}
+                    >
+                      <IconPencil className={ACTION_ICON_CLASS} />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={actions.pinLabel}
+                      title={actions.pinLabel}
+                      onClick={actions.onTogglePin}
+                      disabled={actions.isPinning || !tile.id}
+                      className={ACTION_BUTTON_CLASS}
+                    >
+                      <PinIcon className={ACTION_ICON_CLASS} />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={
+                        actions.isDuplicating
+                          ? t("actions.duplicating")
+                          : t("actions.duplicate")
+                      }
+                      title={
+                        actions.isDuplicating
+                          ? t("actions.duplicating")
+                          : t("actions.duplicate")
+                      }
+                      onClick={actions.onDuplicate}
+                      disabled={actions.isDuplicating || !actions.canDuplicate}
+                      className={ACTION_BUTTON_CLASS}
+                    >
+                      <IconCopy className={ACTION_ICON_CLASS} />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      aria-label={t("actions.delete")}
+                      title={t("actions.delete")}
+                      onClick={actions.onDelete}
+                      disabled={actions.isDeleting}
+                      className={ACTION_BUTTON_CLASS}
+                    >
+                      <IconTrash className={ACTION_ICON_CLASS} />
+                    </Button>
+                  </div>
+                ) : null}
               </section>
             </aside>
 

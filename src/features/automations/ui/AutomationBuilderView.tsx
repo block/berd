@@ -1,11 +1,18 @@
 import { IconSparkles } from "@tabler/icons-react";
-import { useEffect, useMemo } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { ChatInput } from "@/features/chat/ui/ChatInput";
 import { LoadingGoose } from "@/features/chat/ui/LoadingGoose";
 import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
 import { useAutomationBuilderSession } from "@/features/automations/hooks/useAutomationBuilderSession";
 import { AutomationDraftRail } from "@/features/automations/ui/AutomationDraftRail";
+import { usePersistedState } from "@/shared/hooks/usePersistedState";
 
 export interface AutomationBuilderLeaveAction {
   hasUnsavedChanges: boolean;
@@ -20,6 +27,23 @@ interface AutomationBuilderViewProps {
   onLeaveActionChange?: (action: AutomationBuilderLeaveAction | null) => void;
 }
 
+const DRAFT_RAIL_LAYOUT_STORAGE_KEY = "goose:automation-builder:draft-rail";
+const DRAFT_RAIL_DEFAULT_WIDTH = 337;
+const DRAFT_RAIL_MIN_WIDTH = 280;
+const DRAFT_RAIL_MAX_WIDTH = 560;
+const DRAFT_RAIL_RESIZE_HANDLE_WIDTH = 12;
+
+function clampDraftRailWidth(width: number) {
+  return Math.min(DRAFT_RAIL_MAX_WIDTH, Math.max(DRAFT_RAIL_MIN_WIDTH, width));
+}
+
+function validateDraftRailWidthPreference(value: unknown, defaults: number) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return defaults;
+  }
+  return clampDraftRailWidth(value);
+}
+
 export function AutomationBuilderView({
   automationId,
   onAutomationCreated,
@@ -28,6 +52,11 @@ export function AutomationBuilderView({
 }: AutomationBuilderViewProps) {
   const { t } = useTranslation("automations");
   const isEditing = Boolean(automationId);
+  const [draftRailWidth, setDraftRailWidth] = usePersistedState(
+    DRAFT_RAIL_LAYOUT_STORAGE_KEY,
+    DRAFT_RAIL_DEFAULT_WIDTH,
+    validateDraftRailWidthPreference,
+  );
   const builder = useAutomationBuilderSession({
     automationId,
     onAutomationCreated,
@@ -46,6 +75,36 @@ export function AutomationBuilderView({
     onLeaveActionChange?.(leaveAction);
     return () => onLeaveActionChange?.(null);
   }, [leaveAction, onLeaveActionChange]);
+  const handleDraftRailResizeStart = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = draftRailWidth;
+
+      const onMouseMove = (moveEvent: MouseEvent) => {
+        const deltaX = moveEvent.clientX - startX;
+        setDraftRailWidth(clampDraftRailWidth(startWidth - deltaX));
+      };
+
+      const cleanup = () => {
+        document.removeEventListener("mousemove", onMouseMove);
+        document.removeEventListener("mouseup", cleanup);
+        window.removeEventListener("blur", cleanup);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+      };
+
+      document.body.style.cursor = "col-resize";
+      document.body.style.userSelect = "none";
+      document.addEventListener("mousemove", onMouseMove);
+      document.addEventListener("mouseup", cleanup);
+      window.addEventListener("blur", cleanup);
+    },
+    [draftRailWidth, setDraftRailWidth],
+  );
+  const handleDraftRailResizeDoubleClick = useCallback(() => {
+    setDraftRailWidth(DRAFT_RAIL_DEFAULT_WIDTH);
+  }, [setDraftRailWidth]);
   const composerFooter = (
     <>
       {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}
@@ -99,16 +158,36 @@ export function AutomationBuilderView({
         </section>
       </div>
 
-      <AutomationDraftRail
-        draftState={builder.draftState}
-        error={builder.error}
-        isSubmitting={builder.isSubmitting}
-        isEditing={isEditing}
-        sessionId={builder.sessionId}
-        status={builder.status}
-        onApprove={builder.approveDraft}
-        onDraftOverride={builder.setDraftOverride}
-      />
+      <div
+        className="relative flex min-h-0 w-full shrink-0 lg:w-[var(--automation-draft-rail-width)]"
+        style={
+          {
+            "--automation-draft-rail-width": `${draftRailWidth}px`,
+          } as CSSProperties
+        }
+      >
+        <div
+          data-testid="automation-draft-rail-resize-handle"
+          onMouseDown={handleDraftRailResizeStart}
+          onDoubleClick={handleDraftRailResizeDoubleClick}
+          className="group absolute bottom-0 left-0 top-0 z-10 flex -translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+          style={{ width: DRAFT_RAIL_RESIZE_HANDLE_WIDTH * 2 }}
+          aria-hidden
+        >
+          <div className="h-full w-px bg-transparent transition-colors group-hover:bg-border group-active:bg-border" />
+        </div>
+        <AutomationDraftRail
+          className="w-full"
+          draftState={builder.draftState}
+          error={builder.error}
+          isSubmitting={builder.isSubmitting}
+          isEditing={isEditing}
+          sessionId={builder.sessionId}
+          status={builder.status}
+          onApprove={builder.approveDraft}
+          onDraftOverride={builder.setDraftOverride}
+        />
+      </div>
     </div>
   );
 }

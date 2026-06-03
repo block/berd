@@ -30,6 +30,7 @@ const GET_TILE_RESULTS_ENDPOINT: &str = "v3/get-tile-results";
 const GET_USER_TILES_ENDPOINT: &str = "v3/get-user-tiles";
 const KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 const PUSH_MESSAGES_ENDPOINT: &str = "v3/push-messages";
+const REFRESH_TILE_ENDPOINT: &str = "v3/refresh-tile";
 const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
 
 #[derive(Default)]
@@ -215,6 +216,16 @@ pub async fn delete_automation_tile(
     let id = trim_required_string(&id, "automation id")?;
     ensure_generic_automation_tile(state.inner(), &id).await?;
     kgoose::post_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
+}
+
+#[tauri::command]
+pub async fn refresh_automation_tile(
+    state: State<'_, DistroBundleState>,
+    id: String,
+) -> Result<Value, String> {
+    let id = trim_required_string(&id, "automation id")?;
+    ensure_generic_automation_tile(state.inner(), &id).await?;
+    kgoose::post_json(state.inner(), REFRESH_TILE_ENDPOINT, json!({ "id": id })).await
 }
 
 #[tauri::command]

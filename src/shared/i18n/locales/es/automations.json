@@ -12,6 +12,8 @@
     "more": "Mas acciones",
     "refresh": "Actualizar automatizaciones",
     "refreshShort": "Actualizar",
+    "runNow": "Ejecutar ahora",
+    "running": "Ejecutando...",
     "save": "Guardar",
     "saveChanges": "Guardar cambios",
     "saving": "Guardando..."
@@ -159,6 +161,11 @@
     "sessionUnavailable": "Esta ejecucion no tiene id de sesion de chat.",
     "unavailableBody": "kgoose no devolvio un id de automatizacion.",
     "unavailableTitle": "Historial no disponible"
+  },
+  "run": {
+    "error": "No se pudo iniciar la automatizacion",
+    "errorDescription": "No se pudo iniciar la automatizacion. Intentalo de nuevo.",
+    "started": "Automatizacion iniciada"
   },
   "list": {
     "ariaLabel": "Lista de automatizaciones",

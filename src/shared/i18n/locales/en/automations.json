@@ -12,6 +12,8 @@
     "more": "More actions",
     "refresh": "Refresh automations",
     "refreshShort": "Refresh",
+    "runNow": "Run now",
+    "running": "Running...",
     "save": "Save",
     "saveChanges": "Save changes",
     "saving": "Saving..."
@@ -159,6 +161,11 @@
     "sessionUnavailable": "This run does not have a chat session id.",
     "unavailableBody": "kgoose did not return an automation id.",
     "unavailableTitle": "History unavailable"
+  },
+  "run": {
+    "error": "Failed to start automation",
+    "errorDescription": "The automation could not be started. Please try again.",
+    "started": "Automation started"
   },
   "list": {
     "ariaLabel": "Automation list",

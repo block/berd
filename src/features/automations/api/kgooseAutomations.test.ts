@@ -4,6 +4,7 @@ import {
   getAutomationSessionMessages,
   isBuilderBotAutomationTile,
   isGenericAutomationTile,
+  refreshAutomationTile,
 } from "./kgooseAutomations";
 
 const mockInvoke = vi.hoisted(() => vi.fn());
@@ -80,6 +81,21 @@ describe("kgoose automations api helpers", () => {
     });
     expect(mockInvoke).toHaveBeenCalledWith("get_automation_session_messages", {
       sessionId: "session-1",
+    });
+  });
+
+  it("refreshes an automation tile by id", async () => {
+    mockInvoke.mockResolvedValue({
+      success: true,
+      refresh_session_id: "session-1",
+    });
+
+    await expect(refreshAutomationTile("automation-1")).resolves.toEqual({
+      success: true,
+      refreshSessionId: "session-1",
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("refresh_automation_tile", {
+      id: "automation-1",
     });
   });
 });

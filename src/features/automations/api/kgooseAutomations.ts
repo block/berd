@@ -74,6 +74,12 @@ export interface DeleteAutomationTileResponse {
   errorMsg?: string;
 }
 
+export interface RefreshAutomationTileResponse {
+  success?: boolean;
+  errorMsg?: string;
+  refreshSessionId?: string;
+}
+
 export interface GenerateAutomationScheduleResponse {
   cronExpression?: string;
   success?: boolean;
@@ -184,6 +190,15 @@ function asDeleteAutomationTileResponse(
     : {};
 }
 
+function asRefreshAutomationTileResponse(
+  value: unknown,
+): RefreshAutomationTileResponse {
+  const normalized = normalizeKgooseJson(value);
+  return isRecord(normalized)
+    ? (normalized as RefreshAutomationTileResponse)
+    : {};
+}
+
 function asGenerateAutomationScheduleResponse(
   value: unknown,
 ): GenerateAutomationScheduleResponse {
@@ -253,6 +268,13 @@ export async function deleteAutomationTile(
 ): Promise<DeleteAutomationTileResponse> {
   const response = await invoke<unknown>("delete_automation_tile", { id });
   return asDeleteAutomationTileResponse(response);
+}
+
+export async function refreshAutomationTile(
+  id: string,
+): Promise<RefreshAutomationTileResponse> {
+  const response = await invoke<unknown>("refresh_automation_tile", { id });
+  return asRefreshAutomationTileResponse(response);
 }
 
 export async function generateAutomationSchedule(
