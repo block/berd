@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { AgentBuilderLeaveDraftDialogProps } from "../ui/AgentBuilderLeaveDraftDialog";
@@ -37,6 +39,7 @@ export function useAgentBuilderCoordinator({
   navigateChat,
   navigateAgents,
 }: UseAgentBuilderCoordinatorOptions) {
+  const { t } = useTranslation("agents");
   const [leaveDraftPromptOpen, setLeaveDraftPromptOpen] = useState(false);
   const pendingNavigationRef = useRef<PendingNavigation | null>(null);
   const pendingSessionIdRef = useRef<string | null>(null);
@@ -117,7 +120,7 @@ export function useAgentBuilderCoordinator({
   );
 
   const start = useCallback(
-    (args?: { slug?: string }) => {
+    (args?: { path?: string; slug?: string }) => {
       const startBuilderSession = () => {
         clearPendingNavigation();
         void startAgentBuilderSession(args, {
@@ -126,6 +129,7 @@ export function useAgentBuilderCoordinator({
           navigateChat,
         }).catch((error) => {
           console.error("Failed to start agent builder session:", error);
+          toast.error(t("builderRail.openFailed"));
         });
       };
 
@@ -162,6 +166,7 @@ export function useAgentBuilderCoordinator({
       createNewTab,
       guardNavigation,
       navigateChat,
+      t,
     ],
   );
 

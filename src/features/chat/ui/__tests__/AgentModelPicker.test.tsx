@@ -77,6 +77,43 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("Claude Opus 4.6");
   });
 
+  it("shows an explicit Goose model before the loaded default model", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="goose-claude-opus-4-8"
+        currentModelProviderId="goose"
+        currentModelName="goose-claude-opus-4-8"
+        availableModels={[
+          {
+            id: "gpt-5.5",
+            name: "GPT 5.5",
+            providerId: "openai",
+            recommended: true,
+          },
+        ]}
+        onModelChange={vi.fn()}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("Claude Opus 4.8");
+    expect(trigger).not.toHaveTextContent("GPT 5.5");
+
+    await user.click(trigger);
+
+    const explicitModel = screen.getByRole("button", {
+      name: /Claude Opus 4\.8/,
+    });
+    expect(explicitModel).toHaveClass("bg-accent");
+  });
+
   it("uses a stored human model name before models resolve", () => {
     render(
       <AgentModelPicker

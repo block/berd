@@ -660,7 +660,6 @@ export function ChatInput({
               </PopoverAnchor>
 
               <ChatInputToolbar
-                personaPicker={{ selectedPersonaId }}
                 agentModelPicker={{
                   enabled: scopedControls.agentModelPicker,
                   providers,

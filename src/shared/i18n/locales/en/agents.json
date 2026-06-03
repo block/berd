@@ -15,6 +15,7 @@
     "draftMissingBody": "The source file for this draft can't be found.",
     "invalidFrontmatterTitle": "Invalid frontmatter",
     "invalidFrontmatterBody": "Fix in chat, or open the source file in an editor.",
+    "openFailed": "Couldn't open the agent editor.",
     "instructionsLabel": "Agent instructions",
     "instructionsPlaceholder": "Describe the agent's goal and instructions",
     "selectedAvatar": "Selected avatar",

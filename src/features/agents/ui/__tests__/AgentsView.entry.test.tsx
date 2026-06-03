@@ -94,7 +94,7 @@ describe("AgentsView entry points", () => {
     expect(onStartChatWithAgent).toHaveBeenCalledWith(persona.id);
   });
 
-  it("clicking detail edit calls onStartAgentBuilderSession with the source slug", () => {
+  it("clicking detail edit calls onStartAgentBuilderSession with the source path and slug", () => {
     const onStartAgentBuilderSession = vi.fn();
     useAgentStore.setState({ personas: [persona] });
 
@@ -110,6 +110,7 @@ describe("AgentsView entry points", () => {
     );
 
     expect(onStartAgentBuilderSession).toHaveBeenCalledWith({
+      path: "/Users/x/.agents/agents/code-reviewer.md",
       slug: "code-reviewer",
     });
   });

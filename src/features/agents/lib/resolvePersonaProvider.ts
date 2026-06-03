@@ -1,5 +1,8 @@
 import type { AcpProvider } from "@/shared/api/acp";
 import type { Persona } from "@/shared/types/agents";
+import { normalizeProviderKey } from "@/features/providers/providerCatalog";
+
+const IMPLICIT_GOOSE_PROVIDER: AcpProvider = { id: "goose", label: "Goose" };
 
 /**
  * Resolve a persona's configured provider against the available providers.
@@ -16,14 +19,26 @@ export function resolvePersonaProvider(
   persona: Pick<Persona, "provider"> | null | undefined,
   providers: AcpProvider[],
 ): AcpProvider | undefined {
-  const personaProvider = persona?.provider?.toLowerCase();
+  const personaProvider = persona?.provider?.trim();
   if (!personaProvider) {
     return undefined;
   }
 
-  return providers.find(
+  const normalizedPersonaProvider = normalizeProviderKey(personaProvider);
+  const matchingProvider = providers.find(
     (provider) =>
-      provider.id === persona?.provider ||
-      provider.label.toLowerCase().includes(personaProvider),
+      provider.id === personaProvider ||
+      normalizeProviderKey(provider.id) === normalizedPersonaProvider ||
+      normalizeProviderKey(provider.label).includes(normalizedPersonaProvider),
   );
+
+  if (matchingProvider) {
+    return matchingProvider;
+  }
+
+  if (normalizedPersonaProvider === "goose") {
+    return IMPLICIT_GOOSE_PROVIDER;
+  }
+
+  return undefined;
 }

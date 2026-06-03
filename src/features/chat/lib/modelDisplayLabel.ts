@@ -1,4 +1,5 @@
 import type { ModelOption } from "../types";
+import { normalizedGooseModelDisplayName } from "@/features/providers/lib/modelRecommendations";
 
 interface ModelDisplayLabelOptions {
   currentModelId?: string | null;
@@ -26,6 +27,15 @@ function getDefaultAvailableModelLabel(availableModels: ModelOption[] = []) {
     availableModels[0];
 
   return model ? getModelDisplayName(model) : null;
+}
+
+function getExplicitModelIdLabel(modelId?: string | null) {
+  const selectedModelId = normalizeLabel(modelId);
+  if (!selectedModelId?.startsWith("goose-")) {
+    return null;
+  }
+
+  return normalizedGooseModelDisplayName(selectedModelId);
 }
 
 function findSelectedAvailableModel({
@@ -83,7 +93,7 @@ export function resolveDisplayModelLabel({
     return modelName;
   }
 
-  return null;
+  return getExplicitModelIdLabel(selectedModelId);
 }
 
 export function resolvePickerTriggerLabel({

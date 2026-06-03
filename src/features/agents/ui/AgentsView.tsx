@@ -68,7 +68,10 @@ interface AgentsViewProps {
     options?: AppNavigationUpdateOptions,
   ) => void;
   onBreadcrumbLabelChange?: (label: string | null) => void;
-  onStartAgentBuilderSession?: (args?: { slug?: string }) => void;
+  onStartAgentBuilderSession?: (args?: {
+    path?: string;
+    slug?: string;
+  }) => void;
   onStartChatWithAgent?: (personaId: string) => void;
 }
 
@@ -163,7 +166,10 @@ export function AgentsView({
 
   const handleEditPersona = useCallback(
     (persona: Persona) => {
-      onStartAgentBuilderSession?.({ slug: sourcePathToSlug(persona.id) });
+      onStartAgentBuilderSession?.({
+        path: persona.id,
+        slug: sourcePathToSlug(persona.id),
+      });
     },
     [onStartAgentBuilderSession],
   );

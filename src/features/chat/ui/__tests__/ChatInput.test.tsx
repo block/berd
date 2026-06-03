@@ -178,6 +178,35 @@ describe("ChatInput", () => {
     ).toHaveTextContent("GPT-4o");
   });
 
+  it("shows the current model name when a persona is selected", () => {
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        personas={TEST_PERSONAS}
+        selectedPersonaId="reviewer"
+        onPersonaChange={vi.fn()}
+        selectedProvider="goose"
+        currentModelProviderId="goose"
+        currentModelId="goose-claude-opus-4-8"
+        currentModel="Claude Opus 4.8"
+        availableModels={[
+          {
+            id: "goose-claude-opus-4-8",
+            name: "Claude Opus 4.8",
+            providerId: "goose",
+          },
+        ]}
+        providers={[{ id: "goose", label: "Goose" }]}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("Claude Opus 4.8");
+    expect(trigger).not.toHaveTextContent("Goose");
+  });
+
   it("shows an available model name when no current model is selected", () => {
     render(
       <ChatInput
@@ -712,7 +741,6 @@ describe("ChatInput", () => {
   it("keeps the mic toggle enabled while recording even if voice input becomes unavailable", () => {
     render(
       <ChatInputToolbar
-        personaPicker={{ selectedPersonaId: null }}
         agentModelPicker={{
           providers: [],
           selectedProvider: "goose",

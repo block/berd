@@ -288,6 +288,32 @@ describe("agentBuilderSession", () => {
     );
   });
 
+  it("starts an existing agent builder session by source path", async () => {
+    mocks.listPersonaSources.mockResolvedValue([
+      {
+        ...draftSource,
+        path: "/Users/x/.agents/agents/code-reviewer.md",
+        name: "Code reviewer",
+        properties: {},
+      },
+    ]);
+
+    const id = await startAgentBuilderSession(
+      { path: "/Users/x/.agents/agents/code-reviewer.md" },
+      deps,
+    );
+
+    expect(id).toBe("sess-1");
+    expect(mocks.createPersonaSource).not.toHaveBeenCalled();
+    expect(mocks.patchSession).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
+        targetAgentSlug: "code-reviewer",
+      }),
+    );
+  });
+
   it("reuses an existing in-memory builder session by slug", async () => {
     chatState.sessions = [
       {
@@ -299,6 +325,26 @@ describe("agentBuilderSession", () => {
     ];
 
     const id = await startAgentBuilderSession({ slug: "code-reviewer" }, deps);
+
+    expect(id).toBe("sess-old");
+    expect(createNewTab).not.toHaveBeenCalled();
+    expect(navigateChat).toHaveBeenCalledWith("sess-old");
+  });
+
+  it("reuses an existing in-memory builder session by source path", async () => {
+    chatState.sessions = [
+      {
+        id: "sess-old",
+        intent: "build-agent",
+        targetAgentPath: "/Users/x/.agents/agents/code-reviewer.md",
+        targetAgentSlug: "stale-slug",
+      },
+    ];
+
+    const id = await startAgentBuilderSession(
+      { path: "/Users/x/.agents/agents/code-reviewer.md" },
+      deps,
+    );
 
     expect(id).toBe("sess-old");
     expect(createNewTab).not.toHaveBeenCalled();

@@ -15,6 +15,7 @@
     "draftMissingBody": "No se encuentra el archivo de este borrador.",
     "invalidFrontmatterTitle": "Frontmatter inválido",
     "invalidFrontmatterBody": "Corrígelo desde el chat o abre el archivo en un editor.",
+    "openFailed": "No se pudo abrir el editor de agente.",
     "instructionsLabel": "Instrucciones del agente",
     "instructionsPlaceholder": "Describe el objetivo e instrucciones del agente",
     "selectedAvatar": "Avatar seleccionado",

@@ -656,10 +656,80 @@ export function useChatSessionController({
       if (persona?.provider) {
         const matchingProvider = resolvePersonaProvider(persona, providers);
         if (matchingProvider) {
+          const personaModelSelection: PreferredModelSelection | undefined =
+            persona.model
+              ? {
+                  id: persona.model,
+                  name: persona.model,
+                  providerId: matchingProvider.id,
+                  source: "explicit",
+                }
+              : undefined;
+
           if (!sessionId) {
             setPendingProviderId(matchingProvider.id);
-            setPendingModelSelection(undefined);
+            setPendingModelSelection(personaModelSelection);
             setGlobalSelectedProvider(matchingProvider.id);
+          } else if (personaModelSelection) {
+            const sessionStore = useChatSessionStore.getState();
+            const previousProviderId = session?.providerId;
+            const previousModelId = session?.modelId;
+            const previousModelName = session?.modelName;
+            const requestId = createModelSelectionRequestId();
+
+            sessionStore.clearModelSelectionIntent(sessionId);
+            sessionStore.beginModelSelectionIntent(sessionId, {
+              requestId,
+              kind: "model",
+              providerId: matchingProvider.id,
+              modelId: personaModelSelection.id,
+              modelName: personaModelSelection.name,
+              previousProviderId,
+              previousModelId,
+              previousModelName,
+            });
+            sessionStore.patchSession(sessionId, {
+              providerId: matchingProvider.id,
+              modelId: personaModelSelection.id,
+              modelName: personaModelSelection.name,
+            });
+            setGlobalSelectedProvider(matchingProvider.id);
+
+            void applySessionModelSelection(
+              matchingProvider.id,
+              personaModelSelection,
+              requestId,
+            )
+              .then(() => {
+                useChatSessionStore
+                  .getState()
+                  .clearModelSelectionIntent(sessionId, requestId);
+              })
+              .catch((error) => {
+                const liveStore = useChatSessionStore.getState();
+                const intentStillMatches =
+                  liveStore.getModelSelectionIntent(sessionId)?.requestId ===
+                  requestId;
+                if (!intentStillMatches) {
+                  return;
+                }
+                liveStore.clearModelSelectionIntent(sessionId, requestId);
+                console.error("Failed to apply persona model:", error);
+                rollbackToPreviousModel({
+                  sessionId,
+                  failedModelName: personaModelSelection.name,
+                  previous: {
+                    providerId: previousProviderId,
+                    modelId: previousModelId,
+                    modelName: previousModelName,
+                  },
+                  applySessionModelSelection,
+                  prepareSelectedProvider,
+                  setGlobalSelectedProvider,
+                  restoreErrorMessage:
+                    "Failed to restore previous model after persona model failure:",
+                });
+              });
           } else {
             handleProviderChange(matchingProvider.id);
           }
@@ -682,8 +752,13 @@ export function useChatSessionController({
     },
     [
       handleProviderChange,
+      applySessionModelSelection,
       personas,
+      prepareSelectedProvider,
       providers,
+      session?.modelId,
+      session?.modelName,
+      session?.providerId,
       sessionId,
       selectedPersonaId,
       setGlobalSelectedProvider,

@@ -1091,6 +1091,152 @@ describe("useChatSessionController", () => {
     expect(result.current.currentModelName).toBe("Claude Sonnet 4");
   });
 
+  it("applies a selected persona's resolved provider and model to an existing chat", async () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "goose-claude-opus-4-8",
+        providerId: "goose",
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
+    });
+    expect(result.current.currentModelProviderId).toBe("goose");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+      modelName: "goose-claude-opus-4-8",
+    });
+    await waitFor(() => {
+      expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+        "session-1",
+        "goose",
+        "/tmp/project",
+      );
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "session-1",
+        "goose-claude-opus-4-8",
+      );
+    });
+  });
+
+  it("replaces a user-selected model highlight when selecting a persona with a configured model", async () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "gpt-5.4",
+        name: "GPT-5.4",
+        providerId: "openai",
+      },
+      {
+        id: "goose-claude-opus-4-8",
+        name: "goose-claude-opus-4-8",
+        providerId: "goose",
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("gpt-5.4");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("gpt-5.4");
+    });
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
+    });
+    expect(result.current.currentModelProviderId).toBe("goose");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+    });
+  });
+
+  it("does not apply a persona model when the persona provider cannot resolve", () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "missing-provider",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    expect(result.current.currentModelId).toBe("gpt-4o");
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+      providerId: "openai",
+      modelId: "gpt-4o",
+      modelName: "GPT-4o",
+    });
+    expect(mockAcpSetModel).not.toHaveBeenCalled();
+  });
+
   it("falls back to the configured goose default model when no explicit model is stored", async () => {
     useAgentStore.setState({ selectedProvider: "goose" });
     mockGooseDefaultsRead.mockResolvedValue({

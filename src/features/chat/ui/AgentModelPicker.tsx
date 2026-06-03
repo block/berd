@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
@@ -71,12 +71,48 @@ export function AgentModelPicker({
     currentModelProviderId,
     availableModels,
   });
+  const displayedModels = useMemo(() => {
+    if (!currentModelId || !displayModelLabel) {
+      return availableModels;
+    }
+
+    const hasCurrentModel = availableModels.some(
+      (model) =>
+        model.id === currentModelId &&
+        (!currentModelProviderId ||
+          !model.providerId ||
+          model.providerId === currentModelProviderId),
+    );
+    if (hasCurrentModel) {
+      return availableModels;
+    }
+
+    return [
+      {
+        id: currentModelId,
+        name: displayModelLabel,
+        displayName: displayModelLabel,
+        providerId: currentModelProviderId ?? undefined,
+        providerName: currentModelProviderId
+          ? formatProviderLabel(currentModelProviderId)
+          : undefined,
+        recommended: true,
+        featured: false,
+      },
+      ...availableModels,
+    ];
+  }, [
+    availableModels,
+    currentModelId,
+    currentModelProviderId,
+    displayModelLabel,
+  ]);
   const triggerLabel = showSelectedModelInTrigger
     ? resolvePickerTriggerLabel({
         currentModelId,
         currentModelName,
         currentModelProviderId,
-        availableModels,
+        availableModels: displayedModels,
         selectedAgentLabel,
       })
     : selectedAgentLabel;
@@ -291,10 +327,10 @@ export function AgentModelPicker({
                   </div>
                 )}
               </div>
-            ) : availableModels.length > 0 ? (
+            ) : displayedModels.length > 0 ? (
               modelView === "recommended" ? (
                 <RecommendedModelList
-                  models={availableModels}
+                  models={displayedModels}
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}
@@ -304,7 +340,7 @@ export function AgentModelPicker({
                 />
               ) : (
                 <AllModelsList
-                  models={availableModels}
+                  models={displayedModels}
                   currentModelId={currentModelId}
                   currentModelProviderId={currentModelProviderId}
                   selectedAgentId={selectedAgentId}

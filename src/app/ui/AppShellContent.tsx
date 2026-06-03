@@ -61,7 +61,7 @@ interface AppShellContentProps {
   onCreatePersona: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
-  onStartAgentBuilderSession: (args?: { slug?: string }) => void;
+  onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
     initialWorkingDir?: string | null;

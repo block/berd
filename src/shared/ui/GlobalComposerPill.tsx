@@ -164,7 +164,11 @@ export function GlobalComposerPill({
   const personaOverrideActiveRef = useRef(false);
   // Persona id whose provider/model overrides have been applied, so we only
   // apply once per persona but still retry if providers load in late.
-  const personaOverrideAppliedForRef = useRef<string | null>(null);
+  const personaOverrideAppliedForRef = useRef<{
+    personaId: string;
+    identity: string;
+  } | null>(null);
+  const personaOverrideUserOverrideForRef = useRef<string | null>(null);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -252,10 +256,7 @@ export function GlobalComposerPill({
         personaOverrideActiveRef.current = false;
       }
       personaOverrideAppliedForRef.current = null;
-      return;
-    }
-
-    if (personaOverrideAppliedForRef.current === selectedPersonaId) {
+      personaOverrideUserOverrideForRef.current = null;
       return;
     }
 
@@ -274,11 +275,32 @@ export function GlobalComposerPill({
     const persona = personas.find(
       (candidate) => candidate.id === selectedPersonaId,
     );
+    const personaOverrideIdentity = [
+      selectedPersonaId,
+      persona?.provider ?? "",
+      persona?.model ?? "",
+    ].join("\u0000");
+    const appliedOverride = personaOverrideAppliedForRef.current;
+
+    if (personaOverrideUserOverrideForRef.current === selectedPersonaId) {
+      return;
+    }
+
+    if (
+      appliedOverride?.personaId === selectedPersonaId &&
+      appliedOverride.identity === personaOverrideIdentity
+    ) {
+      return;
+    }
+
     if (!persona?.provider) {
       // Persona has no configured provider: the global default is correct.
       // Settle the latch so we don't reconsider this persona.
       clearPersonaOverride();
-      personaOverrideAppliedForRef.current = selectedPersonaId;
+      personaOverrideAppliedForRef.current = {
+        personaId: selectedPersonaId,
+        identity: personaOverrideIdentity,
+      };
       return;
     }
 
@@ -304,7 +326,10 @@ export function GlobalComposerPill({
         : null,
     );
     personaOverrideActiveRef.current = true;
-    personaOverrideAppliedForRef.current = selectedPersonaId;
+    personaOverrideAppliedForRef.current = {
+      personaId: selectedPersonaId,
+      identity: personaOverrideIdentity,
+    };
   }, [personas, providers, selectedPersonaId]);
 
   useEffect(() => {
@@ -326,6 +351,7 @@ export function GlobalComposerPill({
     setSelectedPersonaId(personaId);
     personaSelectionSourceRef.current = personaId ? "user" : "none";
     userTouchedRoutePersonaRef.current = true;
+    personaOverrideUserOverrideForRef.current = null;
   }, []);
 
   const placeholder = t("globalPill.placeholder");
@@ -343,6 +369,7 @@ export function GlobalComposerPill({
     providers,
     selectedProvider: selectedProviderForPicker,
     onProviderSelected: (providerId) => {
+      personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
       setProviderOverride(providerId);
       setModelOverride(null);
@@ -353,6 +380,7 @@ export function GlobalComposerPill({
         model,
         selectedProviderForPicker,
       );
+      personaOverrideUserOverrideForRef.current = selectedPersonaId;
       personaOverrideActiveRef.current = false;
       setProviderOverride(selection.providerId);
       setModelOverride(selection);
@@ -507,6 +535,7 @@ export function GlobalComposerPill({
       userTouchedRoutePersonaRef.current = false;
       personaOverrideActiveRef.current = false;
       personaOverrideAppliedForRef.current = null;
+      personaOverrideUserOverrideForRef.current = null;
       setSelectedSkills([]);
       return true;
     },

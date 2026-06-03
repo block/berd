@@ -38,6 +38,7 @@ export {
 } from "./agentBuilderIdentity";
 
 interface StartAgentBuilderSessionArgs {
+  path?: string;
   slug?: string;
 }
 
@@ -72,11 +73,11 @@ export function setAgentBuilderSessionLocalEdits(
 }
 
 export async function startAgentBuilderSession(
-  { slug }: StartAgentBuilderSessionArgs = {},
+  { path, slug }: StartAgentBuilderSessionArgs = {},
   deps: StartAgentBuilderSessionDeps,
 ): Promise<string> {
-  if (slug) {
-    const existing = findLiveBuilderSessionBySlug(slug);
+  if (path || slug) {
+    const existing = findLiveBuilderSession({ path, slug });
     if (existing) {
       await deps.navigateChat(existing.id);
       return existing.id;
@@ -87,9 +88,10 @@ export async function startAgentBuilderSession(
   const sessionId = session.id;
 
   try {
-    const target = slug
-      ? await resolveExistingAgentTarget(slug)
-      : await preSeedDraftAgent(sessionId);
+    const target =
+      path || slug
+        ? await resolveExistingAgentTarget({ path, slug })
+        : await preSeedDraftAgent(sessionId);
 
     useChatSessionStore.getState().patchSession(sessionId, {
       intent: "build-agent",
@@ -321,28 +323,43 @@ async function findCurrentBuilderSource(
   }
 }
 
-function findLiveBuilderSessionBySlug(slug: string) {
+function findLiveBuilderSession({
+  path,
+  slug,
+}: {
+  path?: string;
+  slug?: string;
+}) {
   return useChatSessionStore
     .getState()
     .sessions.find(
       (session) =>
         !session.archivedAt &&
         session.intent === "build-agent" &&
-        session.targetAgentSlug === slug,
+        ((path && session.targetAgentPath === path) ||
+          (slug && session.targetAgentSlug === slug)),
     );
 }
 
 async function resolveExistingAgentTarget(
-  slug: string,
+  target: Pick<StartAgentBuilderSessionArgs, "path" | "slug">,
 ): Promise<{ path: string; slug: string }> {
+  const { path, slug } = target;
   const source = (await listAgentBuilderSources()).find(
-    (source) => fileStem(source.path) === slug,
+    (source) =>
+      (path && source.path === path) ||
+      (slug && fileStem(source.path) === slug),
   );
   if (!source) {
-    throw new Error(`No persona source matches slug: ${slug}`);
+    throw new Error(
+      `No persona source matches ${path ? `path: ${path}` : `slug: ${slug}`}`,
+    );
   }
 
-  return { path: source.path, slug };
+  return {
+    path: source.path,
+    slug: fileStem(source.path) || slug || source.name,
+  };
 }
 
 function sourceTarget(source: AgentSourceEntry): {

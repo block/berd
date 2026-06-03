@@ -1,4 +1,5 @@
 import {
+  act,
   createEvent,
   fireEvent,
   render,
@@ -271,6 +272,141 @@ describe("GlobalComposerPill", () => {
       providerId: "claude-acp",
       modelId: "claude-sonnet-4",
       modelName: "claude-sonnet-4",
+      personaId: "persona-1",
+    });
+  });
+
+  it("refreshes the suggested persona provider/model when the same persona changes", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "claude-acp",
+          model: "claude-sonnet-4",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    act(() => {
+      useAgentStore.setState({
+        personas: [
+          {
+            id: "persona-1",
+            displayName: "Research Scout",
+            systemPrompt: "Gather context.",
+            provider: "goose",
+            model: "goose-claude-opus-4-8",
+            isBuiltin: false,
+            writable: true,
+          },
+        ],
+      });
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+      modelName: "goose-claude-opus-4-8",
+      personaId: "persona-1",
+    });
+  });
+
+  it("uses a suggested persona's implicit Goose model instead of the stored default model", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem(
+      "goose:preferredModelsByAgent",
+      JSON.stringify({
+        goose: {
+          modelId: "gpt-5.5",
+          modelName: "GPT 5.5",
+          providerId: "openai",
+        },
+      }),
+    );
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "gpt-5.5",
+              name: "GPT 5.5",
+              providerId: "openai",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    useAgentStore.setState({
+      providers: [
+        { id: "openai", label: "OpenAI" },
+        { id: "anthropic", label: "Anthropic" },
+      ],
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Everyday Otter",
+          systemPrompt: "Be brief.",
+          provider: "Goose",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /choose agent and model/i }),
+      ).toHaveTextContent("Claude Opus 4.8");
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
+      providerId: "goose",
+      modelId: "goose-claude-opus-4-8",
+      modelName: "goose-claude-opus-4-8",
+      personaId: "persona-1",
+    });
+  });
+
+  it("does not apply a persona model when the persona provider cannot resolve", async () => {
+    const user = userEvent.setup();
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "missing-provider",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const onSend = renderGlobalComposer(vi.fn(), {
+      suggestedPersonaId: "persona-1",
+    });
+
+    await user.type(screen.getByRole("textbox"), "Hello");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Hello", {
       personaId: "persona-1",
     });
   });

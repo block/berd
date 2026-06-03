@@ -26,7 +26,6 @@ import type {
   AgentPickerOption,
   ChatInputAgentModelPicker,
   ChatInputContextUsage,
-  ChatInputPersonaPicker,
   ChatInputProjectPicker,
 } from "../types";
 
@@ -48,7 +47,6 @@ interface ChatInputToolbarComposerActions {
 }
 
 interface ChatInputToolbarProps {
-  personaPicker: Pick<ChatInputPersonaPicker, "selectedPersonaId">;
   agentModelPicker: ChatInputAgentModelPicker & { enabled?: boolean };
   projectPicker: ChatInputProjectPicker;
   contextUsage: ChatInputContextUsage;
@@ -57,7 +55,6 @@ interface ChatInputToolbarProps {
 }
 
 export function ChatInputToolbar({
-  personaPicker,
   agentModelPicker,
   projectPicker,
   contextUsage,
@@ -68,7 +65,6 @@ export function ChatInputToolbar({
   const { formatNumber } = useLocaleFormatting();
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
   const [isContextPopoverOpen, setIsContextPopoverOpen] = useState(false);
-  const { selectedPersonaId = null } = personaPicker;
   const {
     providers = [],
     providersLoading,
@@ -250,7 +246,6 @@ export function ChatInputToolbar({
               onOpen={onPickerOpen}
               loading={providersLoading}
               isCompact={isCompact}
-              showSelectedModelInTrigger={selectedPersonaId === null}
             />
           )}
 
