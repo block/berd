@@ -298,8 +298,9 @@ describe("AgentBuilderRail", () => {
         },
       },
     });
-    vi.mocked(promoteDraft).mockResolvedValue({
+    const promotedSource = {
       ...baseSource,
+      path: "/Users/x/.agents/agents/snark.md",
       name: "Snark",
       content: "Be snarky.",
       properties: {
@@ -307,7 +308,8 @@ describe("AgentBuilderRail", () => {
         provider: "openai",
         model: "gpt-5",
       },
-    });
+    };
+    vi.mocked(promoteDraft).mockResolvedValue(promotedSource);
     const onDraftPromoted = vi.fn();
 
     renderWithProviders(
@@ -324,7 +326,7 @@ describe("AgentBuilderRail", () => {
     await waitFor(() => {
       expect(saveNow).toHaveBeenCalled();
       expect(promoteDraft).toHaveBeenCalledWith("s1");
-      expect(onDraftPromoted).toHaveBeenCalled();
+      expect(onDraftPromoted).toHaveBeenCalledWith(promotedSource);
     });
   });
 

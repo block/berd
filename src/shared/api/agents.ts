@@ -610,17 +610,34 @@ export async function promotePersonaSource(
 ): Promise<AgentSourceEntry> {
   const existing = await readExistingPersonaSource(path);
   const name = patch.name ?? existing.name;
+  const promotedProperties = {
+    ...(existing.properties ?? {}),
+    ...(patch.properties ?? {}),
+  };
+  delete promotedProperties.draft;
+  delete promotedProperties.builderSessionId;
+
   const client = await getClient();
-  const response = await client.goose.GooseUnstableSourcesUpdate({
+  const response = await client.goose.GooseUnstableSourcesCreate({
     type: AGENT_SOURCE_TYPE,
-    path,
     name,
     description: patch.description ?? existing.description,
     content: patch.content ?? existing.content,
-    properties: patch.properties ?? existing.properties,
+    target: { scope: "global" },
+    properties: promotedProperties,
   });
-
   const promoted = requireAgentSource(response.source);
+
+  if (promoted.path !== path) {
+    try {
+      await client.goose.GooseUnstableSourcesDelete({
+        type: AGENT_SOURCE_TYPE,
+        path,
+      });
+    } catch (error) {
+      console.warn("Failed to delete promoted agent draft:", error);
+    }
+  }
 
   return promoted;
 }

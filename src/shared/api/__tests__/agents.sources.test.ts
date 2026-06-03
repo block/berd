@@ -40,6 +40,7 @@ describe("persona source helpers", () => {
     mockGooseSourcesList.mockReset();
     mockGooseSourcesUpdate.mockReset();
     mockGooseSourcesDelete.mockReset();
+    vi.restoreAllMocks();
   });
 
   it("createPersonaSource returns the entry the backend assigns", async () => {
@@ -134,56 +135,126 @@ describe("persona source helpers", () => {
     });
   });
 
-  it("promotePersonaSource updates the draft in place and removes draft metadata", async () => {
+  it("promotePersonaSource creates a final source and deletes the original draft", async () => {
+    const promotionPatch = {
+      name: "Snark",
+      description: "Sharper reviews.",
+      content: "Be snarky.",
+      properties: {
+        draft: true,
+        builderSessionId: "abc",
+        provider: "openai",
+      },
+    };
     const promoted = {
       ...draftEntry,
-      name: "Snark",
-      properties: {},
+      path: "/Users/x/.agents/agents/snark.md",
+      name: promotionPatch.name,
+      description: promotionPatch.description,
+      content: promotionPatch.content,
+      properties: { provider: "openai", model: "gpt-5" },
     };
-    mockGooseSourcesList
-      .mockResolvedValueOnce({ sources: [draftEntry] })
-      .mockResolvedValueOnce({ sources: [promoted] });
-    mockGooseSourcesUpdate.mockResolvedValueOnce({ source: promoted });
-
-    const out = await promotePersonaSource(draftEntry.path, {
-      name: "Snark",
-      properties: {},
+    mockGooseSourcesList.mockResolvedValueOnce({
+      sources: [
+        {
+          ...draftEntry,
+          properties: {
+            draft: true,
+            builderSessionId: "abc",
+            model: "gpt-5",
+          },
+        },
+      ],
     });
+    mockGooseSourcesCreate.mockResolvedValueOnce({ source: promoted });
+    mockGooseSourcesDelete.mockResolvedValueOnce(undefined);
 
-    expect(out.path).toBe(draftEntry.path);
-    expect(mockGooseSourcesUpdate).toHaveBeenCalledWith({
+    const out = await promotePersonaSource(draftEntry.path, promotionPatch);
+
+    expect(out).toEqual(promoted);
+    expect(out.path).toBe("/Users/x/.agents/agents/snark.md");
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
+      name: promotionPatch.name,
+      description: promotionPatch.description,
+      content: promotionPatch.content,
+      target: { scope: "global" },
+      properties: { provider: "openai", model: "gpt-5" },
+    });
+    expect(mockGooseSourcesDelete).toHaveBeenCalledWith({
       type: "agent",
       path: draftEntry.path,
+    });
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
+  });
+
+  it("promotePersonaSource does not delete the draft when final source creation fails", async () => {
+    mockGooseSourcesList.mockResolvedValueOnce({ sources: [draftEntry] });
+    mockGooseSourcesCreate.mockRejectedValueOnce(new Error("create failed"));
+
+    await expect(
+      promotePersonaSource(draftEntry.path, {
+        name: "Snark",
+        properties: {},
+      }),
+    ).rejects.toThrow("create failed");
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "agent",
       name: "Snark",
       description: "Draft",
       content: "Draft in progress.",
+      target: { scope: "global" },
       properties: {},
     });
-    expect(mockGooseSourcesCreate).not.toHaveBeenCalled();
+    expect(mockGooseSourcesUpdate).not.toHaveBeenCalled();
     expect(mockGooseSourcesDelete).not.toHaveBeenCalled();
   });
 
-  it("promotePersonaSource does not delete another draft with the same name", async () => {
-    const liveDraft = {
+  it("promotePersonaSource returns the promoted source when draft cleanup fails", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const promoted = {
       ...draftEntry,
-      path: "/Users/x/.agents/agents/other-live-draft.md",
+      path: "/Users/x/.agents/agents/snark.md",
       name: "Snark",
-      properties: { draft: true, builderSessionId: "other" },
+      properties: {},
     };
+    mockGooseSourcesList.mockResolvedValueOnce({ sources: [draftEntry] });
+    mockGooseSourcesCreate.mockResolvedValueOnce({ source: promoted });
+    mockGooseSourcesDelete.mockRejectedValueOnce(new Error("delete failed"));
+
+    await expect(
+      promotePersonaSource(draftEntry.path, {
+        name: "Snark",
+        properties: {},
+      }),
+    ).resolves.toEqual(promoted);
+
+    expect(mockGooseSourcesDelete).toHaveBeenCalledWith({
+      type: "agent",
+      path: draftEntry.path,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "Failed to delete promoted agent draft:",
+      expect.any(Error),
+    );
+  });
+
+  it("promotePersonaSource does not delete when create returns the original path", async () => {
     const promoted = {
       ...draftEntry,
       name: "Snark",
       properties: {},
     };
-    mockGooseSourcesList
-      .mockResolvedValueOnce({ sources: [draftEntry] })
-      .mockResolvedValueOnce({ sources: [liveDraft, promoted] });
-    mockGooseSourcesUpdate.mockResolvedValueOnce({ source: promoted });
+    mockGooseSourcesList.mockResolvedValueOnce({ sources: [draftEntry] });
+    mockGooseSourcesCreate.mockResolvedValueOnce({ source: promoted });
 
-    await promotePersonaSource(draftEntry.path, {
-      name: "Snark",
-      properties: {},
-    });
+    await expect(
+      promotePersonaSource(draftEntry.path, {
+        name: "Snark",
+        properties: {},
+      }),
+    ).resolves.toEqual(promoted);
 
     expect(mockGooseSourcesDelete).not.toHaveBeenCalled();
   });

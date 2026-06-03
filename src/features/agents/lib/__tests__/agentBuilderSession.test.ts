@@ -399,7 +399,11 @@ describe("agentBuilderSession", () => {
       draftSource.path,
       expect.objectContaining({
         name: "Code reviewer",
-        properties: { provider: "openai" },
+        properties: {
+          draft: true,
+          builderSessionId: "sess-1",
+          provider: "openai",
+        },
       }),
     );
     expect(chatState.sessions[0]).toMatchObject({

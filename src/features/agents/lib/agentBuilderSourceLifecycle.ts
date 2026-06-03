@@ -111,15 +111,11 @@ export async function promoteAgentBuilderDraftSource(
     return source;
   }
 
-  const properties = { ...(source.properties ?? {}) };
-  delete properties.draft;
-  delete properties.builderSessionId;
-
   return promotePersonaSource(source.path, {
     name: source.name,
     description: source.description,
     content: source.content,
-    properties,
+    properties: source.properties,
   }).finally(() => {
     localDraftSourcesByPath.delete(source.path);
   });
