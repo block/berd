@@ -414,6 +414,78 @@ describe("WidgetCanvas", () => {
     expect(widgetContent.style.height).toBe("240px");
   });
 
+  it("lays out non-aspect resize previews at preview dimensions so text is not stretched", async () => {
+    const user = userEvent.setup();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({ instances: [chatWidget()] });
+    const canvas = container.firstElementChild as Element;
+    const resizeHandle = screen.getByRole("button", {
+      name: /resize pin a chat/i,
+    });
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: resizeHandle,
+        coords: { clientX: 208, clientY: 110 },
+      },
+      {
+        target: canvas,
+        coords: { clientX: 328, clientY: 150 },
+      },
+    ]);
+
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    const widgetContent = widgetNode.firstElementChild as HTMLElement;
+
+    expect(widgetNode.style.width).toBe("308px");
+    expect(widgetNode.style.height).toBe("120px");
+    expect(widgetContent.style.width).toBe("308px");
+    expect(widgetContent.style.height).toBe("120px");
+    expect(widgetContent.style.transform).toBe("");
+    expect(screen.getByText("New chat")).toHaveClass(
+      "break-words",
+      "line-clamp-2",
+    );
+  });
+
+  it("does not transform non-aspect resize previews when width and height scale evenly", async () => {
+    const user = userEvent.setup();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({ instances: [chatWidget()] });
+    const canvas = container.firstElementChild as Element;
+    const resizeHandle = screen.getByRole("button", {
+      name: /resize pin a chat/i,
+    });
+
+    await user.pointer([
+      {
+        keys: "[MouseLeft>]",
+        target: resizeHandle,
+        coords: { clientX: 208, clientY: 110 },
+      },
+      {
+        target: canvas,
+        coords: { clientX: 302, clientY: 150 },
+      },
+    ]);
+
+    const widgetNode = container.querySelector(
+      HOME_WIDGET_NODE_SELECTOR,
+    ) as HTMLElement;
+    const widgetContent = widgetNode.firstElementChild as HTMLElement;
+
+    expect(widgetNode.style.width).toBe("282px");
+    expect(widgetNode.style.height).toBe("120px");
+    expect(widgetContent.style.width).toBe("282px");
+    expect(widgetContent.style.height).toBe("120px");
+    expect(widgetContent.style.transform).toBe("");
+  });
+
   it("adds a short position transition during recenter motion", () => {
     const { container, rerender } = renderCanvas({
       instances: [widget()],

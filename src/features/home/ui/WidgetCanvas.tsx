@@ -166,26 +166,39 @@ function renderedWidgetContentStyle({
   };
 }
 
-/** Scale committed widget content visually during live resize without resizing WebGL canvases. */
+/**
+ * Aspect-locked widgets can use a transform-only preview without changing
+ * layout. Freely resizable widgets need real dimensions so text is not scaled
+ * a second time after widget CSS variables have already updated.
+ */
 function renderedWidgetContentStyleForResizePreview({
   committedSize,
   previewSize,
+  preserveLayout,
   zoom,
 }: {
   committedSize: { width: number; height: number };
   previewSize: { width: number; height: number };
+  preserveLayout: boolean;
   zoom: number;
 }): React.CSSProperties {
+  if (!preserveLayout) {
+    return renderedWidgetContentStyle({ size: previewSize, zoom });
+  }
+
   const scaleX = (previewSize.width / committedSize.width) * zoom;
   const scaleY = (previewSize.height / committedSize.height) * zoom;
+
+  if (Math.abs(scaleX - scaleY) > 0.001) {
+    return renderedWidgetContentStyle({ size: previewSize, zoom });
+  }
 
   return {
     position: "relative",
     width: committedSize.width,
     height: committedSize.height,
     transformOrigin: "top left",
-    transform:
-      scaleX === 1 && scaleY === 1 ? undefined : `scale(${scaleX}, ${scaleY})`,
+    transform: scaleX === 1 ? undefined : `scale(${scaleX})`,
   };
 }
 
@@ -464,6 +477,13 @@ export function WidgetCanvas({
           const canvasGestureActive = Boolean(
             resizePreviews[instance.id] ?? dragPositions[instance.id],
           );
+          const renderInstance = isResizePreview
+            ? {
+                ...instance,
+                width: previewSize.width,
+                height: previewSize.height,
+              }
+            : instance;
           const defaultSize = catalogEntry.defaultSize;
           const widgetScale = Math.min(
             size.width / defaultSize.width,
@@ -501,6 +521,9 @@ export function WidgetCanvas({
                     ? renderedWidgetContentStyleForResizePreview({
                         committedSize,
                         previewSize,
+                        preserveLayout: Boolean(
+                          catalogEntry.sizeBounds.lockAspectRatio,
+                        ),
                         zoom: viewport.zoom,
                       })
                     : renderedWidgetContentStyle({
@@ -510,7 +533,7 @@ export function WidgetCanvas({
                 }
               >
                 <WidgetFrame
-                  instance={instance}
+                  instance={renderInstance}
                   canvasGestureActive={canvasGestureActive}
                   widgetResizePreviewActive={isResizePreview}
                   currentMaxZ={currentMaxZ}
