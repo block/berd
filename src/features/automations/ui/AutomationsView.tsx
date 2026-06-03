@@ -25,6 +25,7 @@ import {
   canDuplicateAutomation,
 } from "@/features/automations/lib/automationFormatting";
 import { AutomationBuilderView } from "@/features/automations/ui/AutomationBuilderView";
+import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { AutomationDetailPage } from "@/features/automations/ui/AutomationDetailPage";
 import { AutomationHistoryFeed } from "@/features/automations/ui/AutomationHistoryFeed";
 import { AutomationsOverview } from "@/features/automations/ui/AutomationsOverview";
@@ -67,12 +68,16 @@ interface AutomationsWorkbenchProps {
     options?: AppNavigationUpdateOptions,
   ) => void;
   onBreadcrumbLabelChange?: (label: string | null) => void;
+  onBuilderLeaveActionChange?: (
+    action: AutomationBuilderLeaveAction | null,
+  ) => void;
 }
 
 export function AutomationsWorkbench({
   route,
   onRouteChange,
   onBreadcrumbLabelChange,
+  onBuilderLeaveActionChange,
 }: AutomationsWorkbenchProps = {}) {
   const { t } = useTranslation(["automations", "common"]);
   const queryClient = useQueryClient();
@@ -531,6 +536,7 @@ export function AutomationsWorkbench({
             void refetchDetail();
           });
         }}
+        onLeaveActionChange={onBuilderLeaveActionChange}
       />
     );
   }

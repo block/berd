@@ -9,10 +9,13 @@ const mocks = vi.hoisted(() => ({
   approveAutomationDraft: vi.fn(),
   cancelAutomationBuilderMessage: vi.fn(),
   createAutomationTileFromDraft: vi.fn(),
+  getAutomationTile: vi.fn(),
   listenToAutomationBuilderStream: vi.fn(),
   pushAutomationBuilderUserMessage: vi.fn(),
+  reviseAutomationDraft: vi.fn(),
   startAutomationBuilderStream: vi.fn(),
   stopAutomationBuilderStream: vi.fn(),
+  updateAutomationTile: vi.fn(),
   streamHandler: undefined as
     | ((event: AutomationBuilderStreamEvent) => void)
     | undefined,
@@ -36,10 +39,16 @@ vi.mock("@/features/automations/api/automationBuilder", async () => {
         },
       ),
     pushAutomationBuilderUserMessage: mocks.pushAutomationBuilderUserMessage,
+    reviseAutomationDraft: mocks.reviseAutomationDraft,
     startAutomationBuilderStream: mocks.startAutomationBuilderStream,
     stopAutomationBuilderStream: mocks.stopAutomationBuilderStream,
   };
 });
+
+vi.mock("@/features/automations/api/kgooseAutomations", () => ({
+  getAutomationTile: mocks.getAutomationTile,
+  updateAutomationTile: mocks.updateAutomationTile,
+}));
 
 vi.stubGlobal("crypto", {
   randomUUID: () => "00000000-0000-4000-8000-000000000000",
@@ -66,6 +75,10 @@ describe("useAutomationBuilderSession", () => {
     mocks.pushAutomationBuilderUserMessage.mockResolvedValue({
       sessionId: "session-1",
     });
+    mocks.reviseAutomationDraft.mockReset();
+    mocks.reviseAutomationDraft.mockResolvedValue({
+      sessionId: "session-1",
+    });
     mocks.acknowledgeAutomationTileDraft.mockReset();
     mocks.acknowledgeAutomationTileDraft.mockResolvedValue({
       sessionId: "session-1",
@@ -83,10 +96,23 @@ describe("useAutomationBuilderSession", () => {
       success: true,
       tileId: "automation-1",
     });
+    mocks.getAutomationTile.mockReset();
+    mocks.getAutomationTile.mockResolvedValue({
+      tileInfo: {
+        id: "automation-1",
+        title: "Daily sales",
+        schedule: "0 9 * * *",
+        instructions: ["Send a sales digest."],
+        humanReadableInstructions: ["Send a sales digest."],
+        timeZone: "America/New_York",
+      },
+    });
     mocks.startAutomationBuilderStream.mockReset();
     mocks.startAutomationBuilderStream.mockResolvedValue(undefined);
     mocks.stopAutomationBuilderStream.mockReset();
     mocks.stopAutomationBuilderStream.mockResolvedValue(undefined);
+    mocks.updateAutomationTile.mockReset();
+    mocks.updateAutomationTile.mockResolvedValue({ success: true });
   });
 
   afterEach(() => {
@@ -569,6 +595,152 @@ describe("useAutomationBuilderSession", () => {
     });
 
     expect(result.current.draftState.draft?.title).toBe("Second draft");
+  });
+
+  it("sends draft revision feedback as the pending tool response", async () => {
+    const { result } = renderHook(() => useAutomationBuilderSession());
+
+    await act(async () => {
+      await result.current.sendMessage("create a daily sales automation");
+    });
+    emitStreamEvent({
+      streamId: "automation-builder-00000000-0000-4000-8000-000000000000",
+      sessionId: "session-1",
+      event: "messages",
+      data: {
+        get_messages_response: {
+          status: "CHAT_SESSION_STATUS_NEED_CLIENT_INPUT",
+          messages: [
+            {
+              id: "assistant-1",
+              role: "ROLE_ASSISTANT",
+              content: [
+                {
+                  type: "MESSAGE_TYPE_TOOL_REQUEST",
+                  toolRequest: {
+                    id: "tool-1",
+                    value: {
+                      name: "tile__render_tile",
+                      arguments: JSON.stringify({
+                        render_type: "automation",
+                        tile_type: "summary",
+                        title: "Daily sales",
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    await act(async () => {
+      const accepted = await result.current.sendMessage(
+        "Actually make it 1 PM and include failures.",
+      );
+      expect(accepted).toBe(true);
+    });
+
+    expect(mocks.reviseAutomationDraft).toHaveBeenCalledWith(
+      "session-1",
+      "tool-1",
+      "Actually make it 1 PM and include failures.",
+    );
+    expect(mocks.pushAutomationBuilderUserMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.startAutomationBuilderStream).toHaveBeenCalledTimes(2);
+    expect(result.current.messages.map(getMessageText)).toContain(
+      "Actually make it 1 PM and include failures.",
+    );
+  });
+
+  it("acknowledges a saved edit draft so the session can keep iterating", async () => {
+    const onAutomationUpdated = vi.fn();
+    const { result } = renderHook(() =>
+      useAutomationBuilderSession({
+        automationId: "automation-1",
+        onAutomationUpdated,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.sendMessage("change the automation time");
+    });
+    emitStreamEvent({
+      streamId: "automation-builder-00000000-0000-4000-8000-000000000000",
+      sessionId: "session-1",
+      event: "messages",
+      data: {
+        get_messages_response: {
+          status: "CHAT_SESSION_STATUS_NEED_CLIENT_INPUT",
+          messages: [
+            {
+              id: "assistant-1",
+              role: "ROLE_ASSISTANT",
+              content: [
+                {
+                  type: "MESSAGE_TYPE_TOOL_REQUEST",
+                  toolRequest: {
+                    id: "edit-tool",
+                    value: {
+                      name: "tile__render_tile",
+                      arguments: JSON.stringify({
+                        render_type: "automation",
+                        tile_type: "summary",
+                        title: "Daily sales at noon",
+                        schedule: "0 12 * * *",
+                        instructions: ["Send a sales digest at noon."],
+                      }),
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    });
+
+    await act(async () => {
+      await result.current.approveDraft();
+    });
+
+    expect(mocks.updateAutomationTile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "automation-1",
+        title: "Daily sales at noon",
+        schedule: "0 12 * * *",
+      }),
+    );
+    expect(mocks.acknowledgeAutomationTileDraft).toHaveBeenCalledWith(
+      "session-1",
+      "edit-tool",
+    );
+    expect(mocks.startAutomationBuilderStream).toHaveBeenCalledTimes(2);
+    expect(onAutomationUpdated).toHaveBeenCalledWith("automation-1");
+  });
+
+  it("does not acknowledge the seed edit draft without a real tool request", async () => {
+    const { result } = renderHook(() =>
+      useAutomationBuilderSession({ automationId: "automation-1" }),
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await result.current.approveDraft();
+    });
+
+    expect(mocks.updateAutomationTile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "automation-1",
+        title: "Daily sales",
+      }),
+    );
+    expect(mocks.acknowledgeAutomationTileDraft).not.toHaveBeenCalled();
+    expect(mocks.startAutomationBuilderStream).not.toHaveBeenCalled();
   });
 });
 

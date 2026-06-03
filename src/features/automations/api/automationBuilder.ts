@@ -22,6 +22,8 @@ export const USER_RESPONSE_CONFIRM_AUTOMATION =
   "User accepted the automation, so it MUST be saved using tile__create_automation.";
 export const USER_RESPONSE_CONFIRM_TILE =
   "User accepted the tile, so it MUST be saved using tile__persist_tile.";
+export const USER_RESPONSE_REVISE_AUTOMATION_PREFIX =
+  "User did not accept the automation draft yet. Do not save or persist the tile. Revise the proposed automation using this feedback, then call tile__render_tile again with render_type='automation' and tile_type='summary':";
 const SUMMARY_TILE_TYPE = 4;
 const DATABRICKS_MODEL_PROVIDER = 1;
 const AUTOMATION_BUILDER_MODEL = {
@@ -450,6 +452,18 @@ export function buildTileApprovalAcknowledgementRequest(
   );
 }
 
+export function buildAutomationRevisionRequest(
+  sessionId: string,
+  toolRequestId: string,
+  text: string,
+) {
+  return buildToolResponseRequest(
+    sessionId,
+    toolRequestId,
+    `${USER_RESPONSE_REVISE_AUTOMATION_PREFIX} ${text.trim()}`,
+  );
+}
+
 export async function pushAutomationBuilderUserMessage(
   text: string,
   sessionId?: string,
@@ -497,6 +511,19 @@ export async function acknowledgeAutomationTileDraft(
 ): Promise<PushAutomationBuilderResponse> {
   const response = await invoke<unknown>("push_automation_builder_messages", {
     request: buildTileApprovalAcknowledgementRequest(sessionId, toolRequestId),
+  });
+  return asRecord(
+    normalizeKgooseJson(response),
+  ) as PushAutomationBuilderResponse;
+}
+
+export async function reviseAutomationDraft(
+  sessionId: string,
+  toolRequestId: string,
+  text: string,
+): Promise<PushAutomationBuilderResponse> {
+  const response = await invoke<unknown>("push_automation_builder_messages", {
+    request: buildAutomationRevisionRequest(sessionId, toolRequestId, text),
   });
   return asRecord(
     normalizeKgooseJson(response),

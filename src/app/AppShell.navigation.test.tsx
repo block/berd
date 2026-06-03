@@ -16,6 +16,7 @@ const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
+const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -113,6 +114,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onSkillsBreadcrumbLabelChange,
     onAgentsBreadcrumbLabelChange,
     onAutomationsBreadcrumbLabelChange,
+    onAutomationBuilderLeaveActionChange,
     onCreatePersona,
     onExitSearch,
     onOpenAgent,
@@ -152,6 +154,36 @@ vi.mock("./ui/AppShellContent", () => ({
       >
         Open automation history
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          onAutomationsBreadcrumbLabelChange?.("Add automation");
+          onNavigateAutomations({
+            surface: "builder",
+            automationId: "automation-1",
+          });
+        }}
+      >
+        Open automation builder
+      </button>
+      {activeView === "automations" &&
+      activeAutomationsRoute.surface === "builder" ? (
+        <button
+          type="button"
+          onClick={() =>
+            onAutomationBuilderLeaveActionChange?.({
+              hasUnsavedChanges: true,
+              save: async () => {
+                mockAutomationBuilderSave();
+                return true;
+              },
+              discard: () => {},
+            })
+          }
+        >
+          Mark automation edits unsaved
+        </button>
+      ) : null}
       <button type="button" onClick={() => onOpenAgent?.("persona-resolves")}>
         Start chat with resolving agent
       </button>
@@ -196,6 +228,7 @@ describe("AppShell global navigation", () => {
     mockReadAgentSourceFile.mockRejectedValue(new Error("not found"));
     mockDeletePersonaSource.mockReset();
     mockDeletePersonaSource.mockResolvedValue(undefined);
+    mockAutomationBuilderSave.mockReset();
     useChatStore.setState({
       messagesBySession: {},
       sessionStateById: {},
@@ -794,6 +827,104 @@ describe("AppShell global navigation", () => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
     });
     expect(mockDeletePersonaSource).not.toHaveBeenCalled();
+  });
+
+  it("prompts before leaving unsaved automation builder changes", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+
+    expect(
+      await screen.findByText("Unsaved automation changes"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+
+    await user.click(screen.getByRole("button", { name: "Keep editing" }));
+
+    expect(
+      screen.queryByText("Unsaved automation changes"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+  });
+
+  it("discarding unsaved automation builder changes continues navigation", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+  });
+
+  it("saving unsaved automation builder changes continues navigation", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Save changes" }),
+    );
+
+    expect(mockAutomationBuilderSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+  });
+
+  it("prompts before leaving unsaved automation builder changes with keyboard navigation", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.keyboard("{Meta>}n{/Meta}");
+
+    expect(
+      await screen.findByText("Unsaved automation changes"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
   });
 
   it("keeps Settings section navigation in the global stack", async () => {

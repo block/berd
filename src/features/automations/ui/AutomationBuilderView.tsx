@@ -1,4 +1,5 @@
 import { IconSparkles } from "@tabler/icons-react";
+import { useEffect, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatInput } from "@/features/chat/ui/ChatInput";
 import { LoadingGoose } from "@/features/chat/ui/LoadingGoose";
@@ -6,16 +7,24 @@ import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
 import { useAutomationBuilderSession } from "@/features/automations/hooks/useAutomationBuilderSession";
 import { AutomationDraftRail } from "@/features/automations/ui/AutomationDraftRail";
 
+export interface AutomationBuilderLeaveAction {
+  hasUnsavedChanges: boolean;
+  save: () => Promise<boolean>;
+  discard: () => void;
+}
+
 interface AutomationBuilderViewProps {
   automationId?: string;
   onAutomationCreated?: (automationId?: string) => void;
   onAutomationUpdated?: (automationId?: string) => void;
+  onLeaveActionChange?: (action: AutomationBuilderLeaveAction | null) => void;
 }
 
 export function AutomationBuilderView({
   automationId,
   onAutomationCreated,
   onAutomationUpdated,
+  onLeaveActionChange,
 }: AutomationBuilderViewProps) {
   const { t } = useTranslation("automations");
   const isEditing = Boolean(automationId);
@@ -24,6 +33,19 @@ export function AutomationBuilderView({
     onAutomationCreated,
     onAutomationUpdated,
   });
+  const leaveAction = useMemo(
+    () => ({
+      hasUnsavedChanges: builder.hasUnsavedDraftChanges,
+      save: builder.approveDraft,
+      discard: () => {},
+    }),
+    [builder.approveDraft, builder.hasUnsavedDraftChanges],
+  );
+
+  useEffect(() => {
+    onLeaveActionChange?.(leaveAction);
+    return () => onLeaveActionChange?.(null);
+  }, [leaveAction, onLeaveActionChange]);
   const composerFooter = (
     <>
       {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}

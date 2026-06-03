@@ -9,6 +9,7 @@ import {
   findAutomationDraftState,
   listenToAutomationBuilderStream,
   pushAutomationBuilderUserMessage,
+  reviseAutomationDraft,
   startAutomationBuilderStream,
   stopAutomationBuilderStream,
   type AutomationBuilderStatus,
@@ -238,6 +239,7 @@ export function useAutomationBuilderSession({
     draftOverrideState.toolRequestId === activeDraftToolRequestId
       ? draftOverrideState.overrides
       : {};
+  const hasActiveDraftOverrides = Object.keys(activeDraftOverrides).length > 0;
 
   const setDraftOverride = useCallback(
     (overrides: Partial<AutomationDraft>) => {
@@ -262,6 +264,10 @@ export function useAutomationBuilderSession({
       },
     };
   }, [effectiveDraftState, activeDraftOverrides]);
+  const hasUnsavedDraftChanges =
+    Boolean(mergedDraftState.draft) &&
+    !mergedDraftState.created &&
+    (Boolean(messageDraftState.draft) || hasActiveDraftOverrides || !isEditing);
 
   useEffect(() => {
     setDraftOverrideState((current) =>
@@ -498,6 +504,22 @@ export function useAutomationBuilderSession({
 
       let pushed = false;
       try {
+        const revisionToolRequestId =
+          statusRef.current === "needClientInput"
+            ? messageDraftState.draft?.toolRequestId
+            : undefined;
+        if (sessionIdRef.current && revisionToolRequestId) {
+          const result = await reviseAutomationDraft(
+            sessionIdRef.current,
+            revisionToolRequestId,
+            trimmed,
+          );
+          pushed = true;
+          const nextSessionId = result.sessionId ?? sessionIdRef.current;
+          await markTurnProcessing(nextSessionId);
+          return true;
+        }
+
         const editContext =
           !sessionIdRef.current && seedDraft
             ? {
@@ -540,6 +562,7 @@ export function useAutomationBuilderSession({
       addErrorMessage,
       isSubmitting,
       markTurnProcessing,
+      messageDraftState.draft?.toolRequestId,
       seedDraft,
       setSessionIdValue,
     ],
@@ -585,6 +608,16 @@ export function useAutomationBuilderSession({
           automationId,
         });
         onAutomationUpdated?.(automationId);
+        if (
+          currentSessionId &&
+          messageDraftState.draft?.toolRequestId === draft.toolRequestId
+        ) {
+          await acknowledgeAutomationTileDraft(
+            currentSessionId,
+            draft.toolRequestId,
+          );
+          await markTurnProcessing(currentSessionId);
+        }
         return true;
       }
 
@@ -630,6 +663,7 @@ export function useAutomationBuilderSession({
     isEditing,
     isSubmitting,
     markTurnProcessing,
+    messageDraftState.draft?.toolRequestId,
     mergedDraftState.draft,
     onAutomationUpdated,
     setStatusValue,
@@ -661,6 +695,7 @@ export function useAutomationBuilderSession({
     error,
     draftState: mergedDraftState,
     draftOverrides: activeDraftOverrides,
+    hasUnsavedDraftChanges,
     setDraftOverride,
     sendMessage,
     approveDraft,

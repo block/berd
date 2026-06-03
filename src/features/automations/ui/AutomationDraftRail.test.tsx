@@ -56,4 +56,19 @@ describe("AutomationDraftRail", () => {
     expect(screen.getByLabelText("Cron expression")).toHaveValue("");
     expect(onDraftOverride).toHaveBeenLastCalledWith({ schedule: "" });
   });
+
+  it("copies the session id from the session id row", async () => {
+    const user = userEvent.setup();
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+
+    render(<DraftRailHarness onDraftOverride={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /session id/i }));
+
+    expect(writeText).toHaveBeenCalledWith("session-1");
+  });
 });

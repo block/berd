@@ -1,10 +1,9 @@
 import {
   IconAlertTriangle,
   IconCheck,
-  IconPlayerStop,
   IconSparkles,
 } from "@tabler/icons-react";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   AutomationBuilderStatus,
@@ -103,6 +102,7 @@ export function AutomationDraftRail({
   onDraftOverride,
 }: AutomationDraftRailProps) {
   const { t } = useTranslation("automations");
+  const [copiedSessionId, setCopiedSessionId] = useState(false);
   const draft = draftState.draft;
   const draftToolRequestId = draft?.toolRequestId ?? null;
   const [scheduleState, setScheduleState] = useState(() => ({
@@ -171,6 +171,13 @@ export function AutomationDraftRail({
     const nextSchedule = buildScheduleFromForm(nextForm);
     onDraftOverride({ schedule: nextSchedule });
   }
+
+  const copySessionId = useCallback(async () => {
+    if (!sessionId || !navigator.clipboard?.writeText) return;
+    await navigator.clipboard.writeText(sessionId);
+    setCopiedSessionId(true);
+    window.setTimeout(() => setCopiedSessionId(false), 1_500);
+  }, [sessionId]);
 
   return (
     <aside
@@ -448,11 +455,19 @@ export function AutomationDraftRail({
           <span>{statusText}</span>
         </div>
         {sessionId ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <IconPlayerStop className="size-3.5" aria-hidden="true" />
-            <span className="shrink-0">{t("builder.sessionId")}</span>
+          <button
+            type="button"
+            className="flex min-h-4 w-full min-w-0 items-center gap-2 rounded-sm text-left text-xs text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            title={t("builder.copySessionId")}
+            onClick={() => void copySessionId()}
+          >
+            <span className="shrink-0">
+              {copiedSessionId
+                ? t("builder.sessionIdCopied")
+                : t("builder.sessionId")}
+            </span>
             <span className="truncate">{sessionId}</span>
-          </div>
+          </button>
         ) : null}
       </div>
     </aside>

@@ -4,6 +4,7 @@ import {
   asStreamResponse,
   buildAutomationApprovalRequest,
   buildAutomationBuilderUserMessageRequest,
+  buildAutomationRevisionRequest,
   buildAutomationPreferencePrompt,
   buildCreateAutomationTileRequest,
   buildTileApprovalAcknowledgementRequest,
@@ -127,6 +128,40 @@ describe("automation builder api helpers", () => {
                   {
                     text: {
                       text: "User accepted the tile, so it MUST be saved using tile__persist_tile.",
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("builds revision responses for drafts that are not accepted yet", () => {
+    expect(
+      buildAutomationRevisionRequest(
+        "session-1",
+        "tool-1",
+        "Actually make it 1 PM.",
+      ),
+    ).toMatchObject({
+      sessionId: "session-1",
+      messages: [
+        {
+          messageContents: [
+            {
+              type: "MESSAGE_TYPE_TOOL_RESPONSE",
+              toolResponse: {
+                id: "tool-1",
+                status: "success",
+                results: [
+                  {
+                    text: {
+                      text: expect.stringContaining(
+                        "User did not accept the automation draft yet.",
+                      ),
                     },
                   },
                 ],

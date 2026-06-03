@@ -60,6 +60,8 @@ import {
 } from "./lib/settingsSectionUrl";
 import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuilderCoordinator";
 import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderLeaveDraftDialog";
+import { AutomationBuilderLeaveDialog } from "@/features/automations/ui/AutomationBuilderLeaveDialog";
+import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { AppShellLayout } from "./ui/AppShellLayout";
 import { AppShellContent } from "./ui/AppShellContent";
 import { applyLatestSessionConfig } from "@/features/chat/lib/sessionConfigRequests";
@@ -314,6 +316,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       options?: AppNavigationUpdateOptions,
     ) => void | Promise<void>
   >(() => {});
+  const automationBuilderLeaveActionRef =
+    useRef<AutomationBuilderLeaveAction | null>(null);
+  const pendingAutomationNavigationRef = useRef<(() => void) | null>(null);
+  const [
+    automationBuilderHasUnsavedChanges,
+    setAutomationBuilderHasUnsavedChanges,
+  ] = useState(false);
+  const [automationLeavePromptOpen, setAutomationLeavePromptOpen] =
+    useState(false);
+  const [automationLeaveSaving, setAutomationLeaveSaving] = useState(false);
 
   const messagesBySession = useChatStore(selectMessagesBySession);
   const setChatActiveSession = useChatStore((s) => s.setActiveSession);
@@ -953,6 +965,85 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       navigateAgentBuilderAgentsRef.current(personaId, options),
   });
 
+  const handleAutomationBuilderLeaveActionChange = useCallback(
+    (action: AutomationBuilderLeaveAction | null) => {
+      automationBuilderLeaveActionRef.current = action;
+      setAutomationBuilderHasUnsavedChanges(Boolean(action?.hasUnsavedChanges));
+    },
+    [],
+  );
+
+  const guardAutomationBuilderNavigation = useCallback(
+    (next: () => void) => {
+      const action = automationBuilderLeaveActionRef.current;
+      if (
+        activeView === "automations" &&
+        automationsRoute.surface === "builder" &&
+        automationBuilderHasUnsavedChanges &&
+        action?.hasUnsavedChanges
+      ) {
+        pendingAutomationNavigationRef.current = next;
+        setAutomationLeavePromptOpen(true);
+        return;
+      }
+
+      next();
+    },
+    [activeView, automationBuilderHasUnsavedChanges, automationsRoute.surface],
+  );
+
+  const guardAppNavigation = useCallback(
+    (next: () => void) => {
+      agentBuilder.guardNavigation(() => {
+        guardAutomationBuilderNavigation(next);
+      });
+    },
+    [agentBuilder.guardNavigation, guardAutomationBuilderNavigation],
+  );
+
+  const continuePendingAutomationNavigation = useCallback(() => {
+    const next = pendingAutomationNavigationRef.current;
+    pendingAutomationNavigationRef.current = null;
+    if (next) {
+      next();
+    }
+  }, []);
+
+  const cancelAutomationLeave = useCallback(() => {
+    pendingAutomationNavigationRef.current = null;
+    setAutomationLeavePromptOpen(false);
+  }, []);
+
+  const discardAutomationLeave = useCallback(() => {
+    automationBuilderLeaveActionRef.current?.discard();
+    automationBuilderLeaveActionRef.current = null;
+    setAutomationBuilderHasUnsavedChanges(false);
+    setAutomationLeavePromptOpen(false);
+    continuePendingAutomationNavigation();
+  }, [continuePendingAutomationNavigation]);
+
+  const saveAutomationLeave = useCallback(async () => {
+    const action = automationBuilderLeaveActionRef.current;
+    if (!action) {
+      discardAutomationLeave();
+      return;
+    }
+
+    setAutomationLeaveSaving(true);
+    try {
+      const saved = await action.save();
+      if (saved === false) {
+        return;
+      }
+      automationBuilderLeaveActionRef.current = null;
+      setAutomationBuilderHasUnsavedChanges(false);
+      setAutomationLeavePromptOpen(false);
+      continuePendingAutomationNavigation();
+    } finally {
+      setAutomationLeaveSaving(false);
+    }
+  }, [continuePendingAutomationNavigation, discardAutomationLeave]);
+
   const createNewProjectDraft = useCallback(
     async (
       title = DEFAULT_CHAT_TITLE,
@@ -1058,28 +1149,28 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
       });
     },
-    [createNewProjectDraft, agentBuilder.guardNavigation],
+    [createNewProjectDraft, guardAppNavigation],
   );
 
   const handleStartProjectChat = useCallback(
     (projectId: string) => {
       const project = projects.find((candidate) => candidate.id === projectId);
       if (project) {
-        agentBuilder.guardNavigation(() => {
+        guardAppNavigation(() => {
           void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
         });
       }
     },
-    [createNewProjectDraft, projects, agentBuilder.guardNavigation],
+    [createNewProjectDraft, projects, guardAppNavigation],
   );
 
   const handleStartChatWithSkill = useCallback(
     (skill: SkillInfo, projectId?: string | null) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         const project = projectId
           ? projects.find((candidate) => candidate.id === projectId)
           : undefined;
@@ -1098,17 +1189,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           });
       });
     },
-    [
-      createNewProjectDraft,
-      createNewTab,
-      projects,
-      agentBuilder.guardNavigation,
-    ],
+    [createNewProjectDraft, createNewTab, projects, guardAppNavigation],
   );
 
   const handleStartChatWithAgent = useCallback(
     (agentId: string) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         if (activeView === "agents" && agentsPersonaId === agentId) {
           setGlobalComposerFocusRequest((request) => request + 1);
           return;
@@ -1149,13 +1235,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       agentsPersonaId,
       createNewTab,
       patchSession,
-      agentBuilder.guardNavigation,
+      guardAppNavigation,
     ],
   );
 
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         const project = options?.projectId
           ? projects.find((candidate) => candidate.id === options.projectId)
           : undefined;
@@ -1204,13 +1290,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       createNewTab,
       patchSession,
       projects,
-      agentBuilder.guardNavigation,
+      guardAppNavigation,
     ],
   );
 
   const handleStartProviderTroubleshootingChat = useCallback(
     (request: AgentSetupTroubleshootingRequest) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         void createNewTab(request.title, undefined, { providerId: "goose" })
           .then((session) => {
             useChatStore.getState().enqueueMessage(session.id, {
@@ -1225,19 +1311,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           });
       });
     },
-    [agentBuilder.guardNavigation, createNewTab],
+    [guardAppNavigation, createNewTab],
   );
 
   const handleNewChatInProject = useCallback(
     (projectId: string) => {
       const project = projects.find((p) => p.id === projectId);
       if (project) {
-        agentBuilder.guardNavigation(() => {
+        guardAppNavigation(() => {
           void createNewProjectDraft(DEFAULT_CHAT_TITLE, project);
         });
       }
     },
-    [createNewProjectDraft, projects, agentBuilder.guardNavigation],
+    [createNewProjectDraft, projects, guardAppNavigation],
   );
 
   const handleArchiveProject = useCallback(
@@ -1446,7 +1532,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const activateHomeSession = useCallback(
     (sessionId: string) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         if (homeSessionId === sessionId) {
           setHomeSessionId(null);
         }
@@ -1457,12 +1543,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         useChatStore.getState().markSessionRead(sessionId);
       });
     },
-    [
-      homeSessionId,
-      agentBuilder.guardNavigation,
-      setActiveSession,
-      setChatActiveSession,
-    ],
+    [homeSessionId, guardAppNavigation, setActiveSession, setChatActiveSession],
   );
 
   const selectSessionDirect = useCallback(
@@ -1483,11 +1564,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (id === useChatSessionStore.getState().activeSessionId) {
         return;
       }
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         selectSessionDirect(id);
       });
     },
-    [agentBuilder.guardNavigation, selectSessionDirect],
+    [guardAppNavigation, selectSessionDirect],
   );
 
   const handleSelectSearchResult = useCallback(
@@ -1518,7 +1599,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleOpenAutomationFromSearch = useCallback(
     (automationId: string) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = false;
         setAutomationsRoute({
           surface: "detail",
@@ -1531,12 +1612,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("automations");
       });
     },
-    [agentBuilder.guardNavigation, setActiveSession],
+    [guardAppNavigation, setActiveSession],
   );
 
   const handleNavigate = useCallback(
     (view: AppView) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         if (view === "settings") {
           openSettings();
           return;
@@ -1561,17 +1642,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView(view);
       });
     },
-    [
-      openDesignSystem,
-      openSettings,
-      agentBuilder.guardNavigation,
-      setActiveSession,
-    ],
+    [openDesignSystem, openSettings, guardAppNavigation, setActiveSession],
   );
 
   const navigateSkills = useCallback(
     (skillId: string | null, options?: AppNavigationUpdateOptions) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = Boolean(options?.replace);
         setSkillsSkillId(skillId);
         setActiveSession(null);
@@ -1579,7 +1655,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("skills");
       });
     },
-    [agentBuilder.guardNavigation, setActiveSession],
+    [guardAppNavigation, setActiveSession],
   );
 
   const navigateAgentsDirect = useCallback(
@@ -1596,11 +1672,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const navigateAgents = useCallback(
     (personaId: string | null, options?: AppNavigationUpdateOptions) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         navigateAgentsDirect(personaId, options);
       });
     },
-    [agentBuilder.guardNavigation, navigateAgentsDirect],
+    [guardAppNavigation, navigateAgentsDirect],
   );
 
   const closeAgentBuilder = useCallback(() => {
@@ -1612,7 +1688,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       route: AutomationNavigationRoute,
       options?: AppNavigationUpdateOptions,
     ) => {
-      agentBuilder.guardNavigation(() => {
+      guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = Boolean(options?.replace);
         setAutomationsRoute(route);
         setActiveSession(null);
@@ -1620,7 +1696,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("automations");
       });
     },
-    [agentBuilder.guardNavigation, setActiveSession],
+    [guardAppNavigation, setActiveSession],
   );
 
   const applyNavigationLocation = useCallback(
@@ -1724,7 +1800,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }
     }
 
-    agentBuilder.guardNavigation(() => {
+    guardAppNavigation(() => {
       const history = navigationHistoryRef.current;
       if (history.index <= 0) {
         return;
@@ -1738,13 +1814,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     activeView,
     agentBuilderSettingsReturnTarget,
     applyNavigationLocation,
-    agentBuilder.guardNavigation,
+    guardAppNavigation,
     returnToAgentBuilderSettingsTarget,
     updateNavigationAvailability,
   ]);
 
   const goForward = useCallback(() => {
-    agentBuilder.guardNavigation(() => {
+    guardAppNavigation(() => {
       const history = navigationHistoryRef.current;
       if (history.index >= history.entries.length - 1) {
         return;
@@ -1756,7 +1832,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     });
   }, [
     applyNavigationLocation,
-    agentBuilder.guardNavigation,
+    guardAppNavigation,
     updateNavigationAvailability,
   ]);
 
@@ -1767,12 +1843,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       return;
     }
 
-    agentBuilder.guardNavigation(() => {
+    guardAppNavigation(() => {
       clearSettingsSectionUrl();
       setActiveSession(null);
       setActiveView("home");
     });
-  }, [goBack, agentBuilder.guardNavigation, setActiveSession]);
+  }, [goBack, guardAppNavigation, setActiveSession]);
 
   const toggleContextPanel = useCallback(() => {
     if (!activeSessionId) {
@@ -1956,7 +2032,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           leaveSecondarySurface();
           return;
         }
-        openSettings();
+        handleNavigate("settings");
       }
       // Cmd+B for sidebar toggle
       if (e.key === "b" && e.metaKey) {
@@ -1985,10 +2061,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       // Cmd+N opens new conversation screen
       if (e.key === "n" && e.metaKey) {
         e.preventDefault();
-        setActiveSession(null);
-        clearSettingsSectionUrl();
-        setActiveView("home");
-        requestGlobalComposerFocus();
+        guardAppNavigation(() => {
+          setActiveSession(null);
+          clearSettingsSectionUrl();
+          setActiveView("home");
+          requestGlobalComposerFocus();
+        });
       }
     };
     window.addEventListener("keydown", handler);
@@ -1996,9 +2074,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [
     activeView,
     clearActiveSession,
+    guardAppNavigation,
     handleNavigate,
     leaveSecondarySurface,
-    openSettings,
     requestGlobalComposerFocus,
     setActiveSession,
     toggleSidebar,
@@ -2066,7 +2144,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           onNavigate: handleNavigate,
           onNewChatInProject: handleNewChatInProject,
           onNewChat: () => {
-            agentBuilder.guardNavigation(() => {
+            guardAppNavigation(() => {
               void createNewTab(DEFAULT_CHAT_TITLE).catch((error) => {
                 console.error("Failed to start new chat:", error);
               });
@@ -2133,6 +2211,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
               onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
               onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
+              onAutomationBuilderLeaveActionChange={
+                handleAutomationBuilderLeaveActionChange
+              }
               onCreatePersona={agentBuilder.create}
               onAgentBuilderSaved={agentBuilder.onSaved}
               onAgentBuilderClose={closeAgentBuilder}
@@ -2174,6 +2255,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         )}
       </AppShellLayout>
       <AgentBuilderLeaveDraftDialog {...agentBuilder.leaveDraftDialogProps} />
+      <AutomationBuilderLeaveDialog
+        open={automationLeavePromptOpen}
+        isSaving={automationLeaveSaving}
+        onOpenChange={(open) => {
+          if (!open) {
+            cancelAutomationLeave();
+          }
+        }}
+        onCancel={cancelAutomationLeave}
+        onDiscard={discardAutomationLeave}
+        onSave={() => void saveAutomationLeave()}
+      />
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
     </>
   );

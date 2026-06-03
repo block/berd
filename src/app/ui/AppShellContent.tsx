@@ -2,6 +2,7 @@ import { HomeScreen } from "@/features/home/ui/HomeScreen";
 import { HomeView } from "@/features/home/ui/HomeView";
 import { ChatView } from "@/features/chat/ui/ChatView";
 import { AutomationsWorkbench } from "@/features/automations/ui/AutomationsView";
+import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
 import { SkillsView } from "@/features/skills/ui/SkillsView";
 import { AgentsView } from "@/features/agents/ui/AgentsView";
 import { ProjectsView } from "@/features/projects/ui/ProjectsView";
@@ -51,6 +52,9 @@ interface AppShellContentProps {
   onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
+  onAutomationBuilderLeaveActionChange?: (
+    action: AutomationBuilderLeaveAction | null,
+  ) => void;
   onCreatePersona: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
@@ -100,6 +104,7 @@ export function AppShellContent({
   onSkillsBreadcrumbLabelChange,
   onAgentsBreadcrumbLabelChange,
   onAutomationsBreadcrumbLabelChange,
+  onAutomationBuilderLeaveActionChange,
   onCreatePersona,
   onAgentBuilderSaved,
   onAgentBuilderClose,
@@ -143,6 +148,7 @@ export function AppShellContent({
           route={activeAutomationsRoute}
           onRouteChange={onNavigateAutomations}
           onBreadcrumbLabelChange={onAutomationsBreadcrumbLabelChange}
+          onBuilderLeaveActionChange={onAutomationBuilderLeaveActionChange}
         />
       );
     case "skills":
