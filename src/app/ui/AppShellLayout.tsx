@@ -73,12 +73,12 @@ export function AppShellLayout({
 }: AppShellLayoutProps) {
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const sidebarElevated = sidebarHovered || isResizing;
-  const sidebarSlideTransition = isResizing
-    ? "none"
-    : `transform ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
   const sidebarHandleFadeTransition = isResizing
     ? "none"
     : `opacity ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
+  const sidebarSpacerTransition = isResizing
+    ? "none"
+    : `width ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
 
   const sidebarSlotMaxHeight = contentUnderTopBar
     ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
@@ -101,88 +101,88 @@ export function AppShellLayout({
       />
 
       <div className="goose-zoom-scope relative flex min-h-0 flex-1">
-        {/* Reserves horizontal space instantly; no width animation (slide only). */}
+        {/*
+          This slot owns the sidebar/content gap. The panel is right-aligned
+          inside the slot, so animating the slot width moves the panel and main
+          content from the same edge and keeps their gutter visually constant.
+        */}
         <div
           className={cn(
-            "flex-shrink-0",
+            "relative flex-shrink-0 overflow-visible",
             contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
           )}
           style={{
             height: sidebarOuterHeight,
             maxHeight: sidebarSlotMaxHeight,
             width: sidebarOuterWidth,
+            transition: sidebarSpacerTransition,
           }}
           aria-hidden={sidebarCollapsed || undefined}
-        />
-
-        <div
-          className={cn(
-            // overflow-visible on every view: the sidebar card clips its own
-            // content via `overflow-hidden rounded-md`, so the only things
-            // that extend past this wrapper's right edge are the elevated panel
-            // shadow and the resize rail (translate-x-1/2), both of which are
-            // meant to float over the adjacent content. Clipping x here cropped
-            // them on non-home pages.
-            "absolute left-0 z-20 select-none overflow-visible",
-            contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
-            sidebarElevated && "z-30",
-          )}
-          style={{
-            height: sidebarOuterHeight,
-            maxHeight: sidebarSlotMaxHeight,
-            width: sidebarPanelOuterWidth,
-            transform: sidebarCollapsed ? "translateX(-100%)" : "translateX(0)",
-            transition: sidebarSlideTransition,
-            pointerEvents: sidebarCollapsed ? "none" : undefined,
-          }}
-          aria-hidden={sidebarCollapsed || undefined}
-          inert={sidebarCollapsed ? true : undefined}
-          onMouseEnter={() => setSidebarHovered(true)}
-          onMouseLeave={() => setSidebarHovered(false)}
         >
-          <div className="relative h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
-            <Sidebar {...sidebar} elevatedShadow={sidebarElevated} />
-          </div>
           <div
-            onMouseDown={onResizeStart}
-            onDoubleClick={onResizeDoubleClick}
-            className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+            className={cn(
+              // overflow-visible on every view: the sidebar card clips its own
+              // content via `overflow-hidden rounded-md`, so the only things
+              // that extend past this wrapper's right edge are the elevated panel
+              // shadow and the resize rail (translate-x-1/2), both of which are
+              // meant to float over the adjacent content. Clipping x here cropped
+              // them on non-home pages.
+              "absolute top-0 right-0 bottom-0 z-20 select-none overflow-visible",
+              sidebarElevated && "z-30",
+            )}
             style={{
-              width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
-              opacity: sidebarCollapsed ? 0 : 1,
-              transition: sidebarHandleFadeTransition,
+              width: sidebarPanelOuterWidth,
+              pointerEvents: sidebarCollapsed ? "none" : undefined,
             }}
             aria-hidden={sidebarCollapsed || undefined}
+            inert={sidebarCollapsed ? true : undefined}
+            onMouseEnter={() => setSidebarHovered(true)}
+            onMouseLeave={() => setSidebarHovered(false)}
           >
-            <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
-          </div>
-          <div
-            onMouseDown={onHeightResizeStart}
-            onDoubleClick={onHeightResizeDoubleClick}
-            className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-row-resize items-center justify-center overflow-hidden"
-            style={{
-              height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
-              opacity: sidebarCollapsed ? 0 : 1,
-              transition: sidebarHandleFadeTransition,
-            }}
-            aria-hidden={sidebarCollapsed || undefined}
-          >
-            <div className="h-px w-8 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-          </div>
-          <div
-            onMouseDown={onCornerResizeStart}
-            onDoubleClick={onCornerResizeDoubleClick}
-            className="group absolute right-0 bottom-0 z-20 translate-x-1/2 translate-y-1/2 cursor-nwse-resize overflow-hidden"
-            style={{
-              height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
-              width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
-              opacity: sidebarCollapsed ? 0 : 1,
-              transition: sidebarHandleFadeTransition,
-            }}
-            aria-hidden={sidebarCollapsed || undefined}
-          >
-            <div className="absolute top-1/2 left-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-            <div className="absolute top-1/2 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+            <div className="relative h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
+              <Sidebar {...sidebar} elevatedShadow={sidebarElevated} />
+            </div>
+            <div
+              onMouseDown={onResizeStart}
+              onDoubleClick={onResizeDoubleClick}
+              className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+              style={{
+                width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                opacity: sidebarCollapsed ? 0 : 1,
+                transition: sidebarHandleFadeTransition,
+              }}
+              aria-hidden={sidebarCollapsed || undefined}
+            >
+              <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
+            </div>
+            <div
+              onMouseDown={onHeightResizeStart}
+              onDoubleClick={onHeightResizeDoubleClick}
+              className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-row-resize items-center justify-center overflow-hidden"
+              style={{
+                height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
+                opacity: sidebarCollapsed ? 0 : 1,
+                transition: sidebarHandleFadeTransition,
+              }}
+              aria-hidden={sidebarCollapsed || undefined}
+            >
+              <div className="h-px w-8 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+            </div>
+            <div
+              onMouseDown={onCornerResizeStart}
+              onDoubleClick={onCornerResizeDoubleClick}
+              className="group absolute right-0 bottom-0 z-20 translate-x-1/2 translate-y-1/2 cursor-nwse-resize overflow-hidden"
+              style={{
+                height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
+                width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                opacity: sidebarCollapsed ? 0 : 1,
+                transition: sidebarHandleFadeTransition,
+              }}
+              aria-hidden={sidebarCollapsed || undefined}
+            >
+              <div className="absolute top-1/2 left-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+              <div className="absolute top-1/2 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+            </div>
           </div>
         </div>
 

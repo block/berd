@@ -216,6 +216,32 @@ describe("useResizableSidebar", () => {
     expect(result.current.sidebarWidth).toBe(240);
   });
 
+  it("keeps the collapsed panel width clamped on narrow windows", () => {
+    window.localStorage.setItem(
+      "goose:sidebar:layout",
+      JSON.stringify({
+        width: 420,
+        height: 400,
+        heightCustomized: true,
+      }),
+    );
+    setWindowWidth(800);
+
+    const { result } = renderHook(() => useResizableSidebar());
+    const expandedPanelOuterWidth = result.current.sidebarPanelOuterWidth;
+
+    expect(result.current.sidebarWidth).toBe(240);
+    expect(expandedPanelOuterWidth).toBe(252);
+
+    act(() => {
+      result.current.toggleCollapse();
+    });
+
+    expect(result.current.isCollapsed).toBe(true);
+    expect(result.current.sidebarOuterWidth).toBe(0);
+    expect(result.current.sidebarPanelOuterWidth).toBe(expandedPanelOuterWidth);
+  });
+
   it("restores the preferred sidebar width when space returns", async () => {
     window.localStorage.setItem(
       "goose:sidebar:layout",

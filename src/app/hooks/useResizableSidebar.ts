@@ -191,9 +191,10 @@ export function useResizableSidebar() {
   );
   const [isResizing, setIsResizing] = useState(false);
   const preferredSidebarWidth = sidebarLayout.width;
-  const sidebarWidth = sidebarCollapsed
-    ? preferredSidebarWidth
-    : getResponsiveSidebarWidth(preferredSidebarWidth, viewportWidth);
+  const sidebarWidth = getResponsiveSidebarWidth(
+    preferredSidebarWidth,
+    viewportWidth,
+  );
   const sidebarHeight = sidebarLayout.height;
   const patchSidebarLayout = useCallback(
     (patch: Partial<SidebarLayoutPreference>) => {
