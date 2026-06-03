@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
+  GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+} from "@/features/experiments/experimentPreferences";
+
 const mockLoadSession = vi.fn();
 const mockNewSession = vi.fn();
 const mockSetProvider = vi.fn();
@@ -8,6 +17,24 @@ const mockPrompt = vi.fn();
 const mockAppendSessionSystemPrompt = vi.fn();
 const mockForkSession = vi.fn();
 const mockRenameSession = vi.fn();
+
+const GOOSE_MANAGED_PROVIDER_IDS = ["goose", "databricks_v2"] as const;
+const EXTERNAL_AGENT_PROVIDER_IDS = ["claude-acp", "codex-acp"] as const;
+
+function enableStyleGuidelinesPrompt(prompt?: string) {
+  localStorage.setItem(
+    EXPERIMENT_PREFERENCES_STORAGE_KEY,
+    JSON.stringify({
+      version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+      experiments: {
+        [GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID]: {
+          enabled: true,
+          ...(prompt === undefined ? {} : { config: { prompt } }),
+        },
+      },
+    }),
+  );
+}
 
 vi.mock("../acpApi", () => ({
   listProviders: vi.fn(),
@@ -39,30 +66,36 @@ describe("acpSendMessage", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   });
 
-  it("updates the session system prompt before sending only user-visible prompt content", async () => {
+  it.each(
+    GOOSE_MANAGED_PROVIDER_IDS,
+  )("updates only the client system prompt when style guidelines are disabled for %s", async (providerId) => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");
+    const sessionId = `acp-session-${providerId}`;
 
     sessionRegistry.registerPreparedSession(
-      "acp-session-1",
-      "goose",
+      sessionId,
+      providerId,
       "/tmp/project",
     );
 
-    await acpSendMessage("acp-session-1", "hello", {
+    await acpSendMessage(sessionId, "hello", {
       systemPrompt: "You are Starfriend.",
       assistantPrompt: "Use these skills for this request: goose-help.",
     });
 
-    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledWith(
-      "acp-session-1",
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      1,
+      sessionId,
       "client_system_prompt",
       "You are Starfriend.",
     );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(1);
     expect(mockPrompt).toHaveBeenCalledWith(
-      "acp-session-1",
+      sessionId,
       [
         {
           type: "text",
@@ -75,19 +108,80 @@ describe("acpSendMessage", () => {
     );
   });
 
-  it("hands the persona off in-band on the first prompt for external agents", async () => {
+  it.each(
+    GOOSE_MANAGED_PROVIDER_IDS,
+  )("adds configured style guidelines before sending for %s", async (providerId) => {
+    const configuredPrompt = "Use concise, test-specific style guidance.";
+    enableStyleGuidelinesPrompt(configuredPrompt);
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+    const sessionId = `acp-session-${providerId}`;
+
+    sessionRegistry.registerPreparedSession(
+      sessionId,
+      providerId,
+      "/tmp/project",
+    );
+
+    await acpSendMessage(sessionId, "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      1,
+      sessionId,
+      "goose_internal_style_guidelines",
+      configuredPrompt,
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      2,
+      sessionId,
+      "client_system_prompt",
+      "You are Starfriend.",
+    );
+    expect(mockAppendSessionSystemPrompt).toHaveBeenCalledTimes(2);
+  });
+
+  it("adds the default style guidelines when enabled without config", async () => {
+    enableStyleGuidelinesPrompt();
+
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSendMessage } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-default-style",
+      "goose",
+      "/tmp/project",
+    );
+
+    await acpSendMessage("acp-session-default-style", "hello", {
+      systemPrompt: "You are Starfriend.",
+    });
+
+    expect(mockAppendSessionSystemPrompt).toHaveBeenNthCalledWith(
+      1,
+      "acp-session-default-style",
+      "goose_internal_style_guidelines",
+      DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT,
+    );
+  });
+
+  it.each(
+    EXTERNAL_AGENT_PROVIDER_IDS,
+  )("hands the persona off in-band on the first prompt for %s", async (providerId) => {
     const sessionRegistry = await import("../acpSessionRegistry");
     const { __resetAllPersonaHandoffs } = await import("../acpPersonaHandoff");
     const { acpSendMessage } = await import("../acp");
     __resetAllPersonaHandoffs();
 
     sessionRegistry.registerPreparedSession(
-      "acp-session-claude",
-      "claude-acp",
+      `acp-session-${providerId}`,
+      providerId,
       "/tmp/project",
     );
 
-    await acpSendMessage("acp-session-claude", "hello", {
+    await acpSendMessage(`acp-session-${providerId}`, "hello", {
       systemPrompt: "You are Starfriend.",
     });
 
@@ -98,7 +192,10 @@ describe("acpSendMessage", () => {
     const [, blocks] = mockPrompt.mock.calls[0];
     expect(blocks[0].annotations).toEqual({ audience: ["assistant"] });
     expect(blocks[0].text).toContain("You are Starfriend.");
-    expect(blocks[blocks.length - 1]).toEqual({ type: "text", text: "hello" });
+    expect(blocks[blocks.length - 1]).toEqual({
+      type: "text",
+      text: "hello",
+    });
   });
 
   it("merges the persona handoff with a skill assistant prompt, persona first", async () => {

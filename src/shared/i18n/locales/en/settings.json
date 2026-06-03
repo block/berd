@@ -158,6 +158,13 @@
     },
     "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
+    "gooseStyleGuidelines": {
+      "description": "Adds an extra style-guidance system prompt to Goose-managed providers before each user message.",
+      "promptDescription": "Sent as an additional Goose system prompt when the experiment is enabled.",
+      "promptLabel": "Prompt",
+      "promptPlaceholder": "Enter style guidance for Goose",
+      "title": "Goose style guidelines"
+    },
     "saveError": "Couldn't save the experiment setting. Try again.",
     "title": "Experiments"
   },

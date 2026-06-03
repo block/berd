@@ -158,6 +158,13 @@
     },
     "description": "Activa funciones de Goose en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
+    "gooseStyleGuidelines": {
+      "description": "Agrega un prompt del sistema adicional con guía de estilo a proveedores administrados por Goose antes de cada mensaje del usuario.",
+      "promptDescription": "Se envía como un prompt del sistema adicional de Goose cuando el experimento está activado.",
+      "promptLabel": "Prompt",
+      "promptPlaceholder": "Ingresa la guía de estilo para Goose",
+      "title": "Guía de estilo de Goose"
+    },
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "title": "Experimentos"
   },

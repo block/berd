@@ -4,6 +4,7 @@ import {
   buildPersonaHandoffPreamble,
   claimPersonaHandoff,
   isExternalAgentProvider,
+  isGooseManagedProvider,
   resetPersonaHandoff,
 } from "../acpPersonaHandoff";
 
@@ -14,6 +15,11 @@ beforeEach(() => {
 describe("isExternalAgentProvider", () => {
   it("treats goose as not external", () => {
     expect(isExternalAgentProvider("goose")).toBe(false);
+  });
+
+  it("treats goose model providers as not external", () => {
+    expect(isGooseManagedProvider("databricks_v2")).toBe(true);
+    expect(isExternalAgentProvider("databricks_v2")).toBe(false);
   });
 
   it("treats other agent harnesses as external", () => {
@@ -42,6 +48,12 @@ describe("claimPersonaHandoff", () => {
   it("returns null for the goose provider", () => {
     expect(
       claimPersonaHandoff("s1", "goose", "You are Starfriend."),
+    ).toBeNull();
+  });
+
+  it("returns null for goose model providers", () => {
+    expect(
+      claimPersonaHandoff("s1", "databricks_v2", "You are Starfriend."),
     ).toBeNull();
   });
 

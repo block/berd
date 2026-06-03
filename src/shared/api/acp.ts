@@ -13,8 +13,10 @@ import {
 import { searchSessionsViaExports } from "./sessionSearch";
 import {
   claimPersonaHandoff,
-  isExternalAgentProvider,
+  isGooseManagedProvider,
 } from "./acpPersonaHandoff";
+import { GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { getExperiment } from "@/features/experiments/experimentPreferences";
 import { perfLog } from "@/shared/lib/perfLog";
 
 export interface AcpProvider {
@@ -65,6 +67,14 @@ function resolveProvidersCatalog(providers: AcpProvider[]): AcpProvider[] {
     .filter((provider): provider is AcpProvider => provider !== null);
 }
 
+function getEnabledGooseStyleGuidelinesPrompt(): string | null {
+  const experiment = getExperiment(GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID);
+  if (!experiment?.enabled) return null;
+
+  const prompt = experiment.config.prompt;
+  return typeof prompt === "string" && prompt.trim() ? prompt : null;
+}
+
 /** Send a message to an ACP agent. Response streams via Tauri events. */
 export async function acpSendMessage(
   sessionId: string,
@@ -86,15 +96,24 @@ export async function acpSendMessage(
   // extension. External agent harnesses (Claude Code, Codex, ...) ignore that
   // method and expose no system-prompt channel, so we hand the persona off
   // in-band on the first prompt under that agent instead. See acpPersonaHandoff.
+  const isGooseManaged = !providerId || isGooseManagedProvider(providerId);
   let personaHandoff: string | null = null;
-  if (isExternalAgentProvider(providerId)) {
-    personaHandoff = claimPersonaHandoff(sessionId, providerId, systemPrompt);
-  } else {
+  if (isGooseManaged) {
+    const styleGuidelinesPrompt = getEnabledGooseStyleGuidelinesPrompt();
+    if (styleGuidelinesPrompt) {
+      await directAcp.appendSessionSystemPrompt(
+        sessionId,
+        "goose_internal_style_guidelines",
+        styleGuidelinesPrompt,
+      );
+    }
     await directAcp.appendSessionSystemPrompt(
       sessionId,
       "client_system_prompt",
       systemPrompt?.trim() ? systemPrompt : "",
     );
+  } else {
+    personaHandoff = claimPersonaHandoff(sessionId, providerId, systemPrompt);
   }
 
   // Merge the persona handoff (when present) with any skill/builder assistant

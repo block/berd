@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/shared/ui/select";
 import { Switch } from "@/shared/ui/switch";
+import { Textarea } from "@/shared/ui/textarea";
 
 interface ExperimentConfigControlsProps {
   definition: ExperimentDefinition;
@@ -60,11 +61,16 @@ export function ExperimentConfigControls({
         const description = control.descriptionKey
           ? t(control.descriptionKey)
           : null;
+        const isTextControl = control.type === "text";
 
         return (
           <div
             key={key}
-            className="flex items-center justify-between gap-6 py-3 pl-8 pr-4"
+            className={
+              isTextControl
+                ? "flex flex-col gap-2 py-3 pl-8 pr-4"
+                : "flex items-center justify-between gap-6 py-3 pl-8 pr-4"
+            }
           >
             <div className="min-w-0 flex-1">
               <Label
@@ -79,7 +85,7 @@ export function ExperimentConfigControls({
                 </p>
               ) : null}
             </div>
-            <div className="w-40 flex-shrink-0">
+            <div className={isTextControl ? "w-full" : "w-40 flex-shrink-0"}>
               {control.type === "boolean" ? (
                 <Switch
                   id={controlId}
@@ -119,18 +125,12 @@ export function ExperimentConfigControls({
                 />
               ) : null}
               {control.type === "text" ? (
-                <Input
+                <TextExperimentControl
                   id={controlId}
                   disabled={disabled}
                   value={String(experiment.config[key])}
-                  placeholder={
-                    control.placeholderKey
-                      ? t(control.placeholderKey)
-                      : undefined
-                  }
-                  onChange={(event) =>
-                    handleConfigChange(key, event.currentTarget.value)
-                  }
+                  placeholder={control.placeholderKey}
+                  onCommit={(value) => handleConfigChange(key, value)}
                 />
               ) : null}
             </div>
@@ -138,6 +138,63 @@ export function ExperimentConfigControls({
         );
       })}
     </div>
+  );
+}
+
+function TextExperimentControl({
+  id,
+  disabled,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  id: string;
+  disabled: boolean;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => boolean;
+}) {
+  const { t } = useTranslation("settings");
+  const [draftValue, setDraftValue] = useState(value);
+
+  useEffect(() => {
+    setDraftValue(value);
+  }, [value]);
+
+  const commitDraft = useCallback(
+    (nextValue = draftValue) => {
+      if (nextValue === value) return true;
+
+      const didSave = onCommit(nextValue);
+      if (!didSave) {
+        setDraftValue(value);
+      }
+      return didSave;
+    },
+    [draftValue, onCommit, value],
+  );
+
+  useEffect(() => {
+    if (disabled || draftValue === value) return;
+
+    const timeoutId = window.setTimeout(() => {
+      commitDraft(draftValue);
+    }, 400);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [commitDraft, disabled, draftValue, value]);
+
+  return (
+    <Textarea
+      id={id}
+      className="min-h-32 resize-y"
+      variant="code"
+      disabled={disabled}
+      value={draftValue}
+      placeholder={placeholder ? t(placeholder) : undefined}
+      onBlur={() => commitDraft()}
+      onChange={(event) => setDraftValue(event.currentTarget.value)}
+    />
   );
 }
 

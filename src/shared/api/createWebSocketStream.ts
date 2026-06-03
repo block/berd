@@ -1,5 +1,31 @@
 import type { AnyMessage, Stream } from "@agentclientprotocol/sdk";
 
+function isAcpDebugEnabled(): boolean {
+  if (!import.meta.env.DEV) return false;
+
+  const g = globalThis as {
+    ACP_DEBUG?: unknown;
+    localStorage?: { getItem?: (k: string) => string | null };
+  };
+
+  try {
+    return (
+      g.ACP_DEBUG === true ||
+      g.ACP_DEBUG === "1" ||
+      !!g.localStorage?.getItem?.("ACP_DEBUG")
+    );
+  } catch {
+    return false;
+  }
+}
+
+const acpDebugEnabled = isAcpDebugEnabled();
+
+function acpDebug(label: string, payload: unknown): void {
+  if (!acpDebugEnabled) return;
+  console.debug(`[acp] ${label}`, payload);
+}
+
 export function createWebSocketStream(wsUrl: string): Stream {
   const ws = new WebSocket(wsUrl);
 
@@ -33,6 +59,7 @@ export function createWebSocketStream(wsUrl: string): Stream {
     if (typeof event.data !== "string") return;
     try {
       const msg = JSON.parse(event.data) as AnyMessage;
+      acpDebug("WS → client", msg);
       pushMessage(msg);
     } catch {
       // ignore malformed JSON
@@ -67,6 +94,7 @@ export function createWebSocketStream(wsUrl: string): Stream {
   const writable = new WritableStream<AnyMessage>({
     async write(msg) {
       await openPromise;
+      acpDebug("WS → agent", msg);
       ws.send(JSON.stringify(msg));
     },
     close() {

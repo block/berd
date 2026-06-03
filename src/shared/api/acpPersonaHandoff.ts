@@ -15,6 +15,8 @@
  * re-injects.
  */
 
+import { getCatalogEntry } from "@/features/providers/providerCatalog";
+
 const GOOSE_PROVIDER_ID = "goose";
 
 /**
@@ -45,14 +47,30 @@ function fingerprint(text: string): string {
 }
 
 /**
- * Whether a provider is an external agent harness (anything other than goose).
- * Goose owns prompt assembly and uses the real system-prompt ext method, so it
- * never needs the handoff.
+ * Goose owns prompt assembly for the Goose agent and Goose model providers.
+ * Those sessions use the real system-prompt ext method, so they never need the
+ * in-band persona handoff.
+ */
+export function isGooseManagedProvider(
+  providerId: string | undefined,
+): boolean {
+  if (!providerId) {
+    return false;
+  }
+  if (providerId === GOOSE_PROVIDER_ID) {
+    return true;
+  }
+  return getCatalogEntry(providerId)?.category === "model";
+}
+
+/**
+ * Whether a provider is an external agent harness. External agents do not
+ * implement Goose's system-prompt ext method.
  */
 export function isExternalAgentProvider(
   providerId: string | undefined,
 ): boolean {
-  return Boolean(providerId) && providerId !== GOOSE_PROVIDER_ID;
+  return providerId ? !isGooseManagedProvider(providerId) : false;
 }
 
 /** Frame the persona instructions as a handoff preamble for the agent. */

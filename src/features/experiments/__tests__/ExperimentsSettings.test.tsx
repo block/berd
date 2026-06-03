@@ -116,6 +116,12 @@ describe("ExperimentsSettings", () => {
 
     await user.clear(screen.getByLabelText("Updates"));
     await user.type(screen.getByLabelText("Updates"), "custom");
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments["ui-experiment"].config.label,
+    ).toBeUndefined();
+
+    await user.tab();
 
     expect(
       JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
