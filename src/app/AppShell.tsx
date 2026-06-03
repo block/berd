@@ -41,9 +41,13 @@ import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProv
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
-import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
+import {
+  DEFAULT_CHAT_TITLE,
+  isDefaultChatTitle,
+} from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
+import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { useProjectDialog } from "./hooks/useProjectDialog";
 import { useResizableSidebar } from "./hooks/useResizableSidebar";
 import {
@@ -91,7 +95,11 @@ import {
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { createSystemNotificationMessage } from "@/shared/types/messages";
+import {
+  createSystemNotificationMessage,
+  getTextContent,
+  type Message,
+} from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -122,8 +130,26 @@ type ResolvedSessionModelPreference = Awaited<
 type MaybePromise<T> = T | Promise<T>;
 
 const APP_NAVIGATION_HISTORY_LIMIT = 50;
+const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
   "goose:design-system-inspector-visible:v2";
+
+function fallbackTitleFromReplay(messages: Message[]): string | null {
+  for (const message of messages) {
+    if (message.role !== "user") {
+      continue;
+    }
+
+    try {
+      const text = getTextContent(message).trim();
+      if (text) {
+        return text.replace(/\s+/g, " ").slice(0, 80);
+      }
+    } catch {}
+  }
+
+  return null;
+}
 
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
@@ -389,12 +415,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
+  const hydratingPinnedSessionIdsRef = useRef<Set<string>>(new Set());
   const loadSessionMessages = useCallback(async (sessionId: string) => {
     const sid = sessionId.slice(0, 8);
     const existingMsgs = useChatStore.getState().messagesBySession[sessionId];
     if ((existingMsgs?.length ?? 0) > 0) {
       perfLog(`[perf:load] ${sid} skip — has messages`);
-      return;
+      useChatSessionStore
+        .getState()
+        .patchSession(sessionId, { pinnedLoadState: undefined });
+      return true;
     }
     const t0 = performance.now();
     perfLog(`[perf:load] ${sid} start`);
@@ -432,17 +462,109 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       clearReplayPerf(sessionId);
       if (replayMessages) {
         useChatStore.getState().setMessages(sessionId, replayMessages);
+        const latestSession = useChatSessionStore
+          .getState()
+          .getSession(sessionId);
+        const sessionPatch: Partial<ChatSession> = {
+          messageCount: replayMessages.length,
+        };
+        if (
+          latestSession &&
+          !latestSession.userSetName &&
+          isDefaultChatTitle(latestSession.title)
+        ) {
+          const fallbackTitle = fallbackTitleFromReplay(replayMessages);
+          if (fallbackTitle) {
+            sessionPatch.title = fallbackTitle;
+          }
+        }
+        useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
       }
+      useChatSessionStore
+        .getState()
+        .patchSession(sessionId, { pinnedLoadState: undefined });
       const t2 = performance.now();
       perfLog(
         `[perf:load] ${sid} replay: notifs=${replayStats?.count ?? 0} span=${replayStats?.spanMs.toFixed(1) ?? "0"}ms msgs=${replayMessages?.length ?? 0} flush=${(t2 - tFlush).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`,
       );
+      return true;
     } catch (err) {
       console.error("Failed to load session messages:", err);
       clearReplayBuffer(sessionId);
       useChatStore.getState().setSessionLoading(sessionId, false);
+      return false;
     }
   }, []);
+
+  const hydratePinnedChatSessions = useCallback(
+    async (sessionIds: string[]) => {
+      const uniqueSessionIds = [...new Set(sessionIds)].filter(Boolean);
+      const sessionStore = useChatSessionStore.getState();
+      const sessionsToLoad: string[] = [];
+
+      for (const sessionId of uniqueSessionIds) {
+        if (hydratingPinnedSessionIdsRef.current.has(sessionId)) {
+          continue;
+        }
+
+        const session = sessionStore.getSession(sessionId);
+        if (session?.creationState) {
+          continue;
+        }
+
+        const hasMessages =
+          (useChatStore.getState().messagesBySession[sessionId]?.length ?? 0) >
+          0;
+        if (hasMessages) {
+          continue;
+        }
+
+        sessionsToLoad.push(sessionId);
+      }
+
+      if (sessionsToLoad.length === 0) {
+        return;
+      }
+
+      const pendingSessionIds: string[] = [];
+      for (const sessionId of sessionsToLoad) {
+        useChatSessionStore
+          .getState()
+          .ensurePinnedSessionPlaceholder(sessionId);
+        hydratingPinnedSessionIdsRef.current.add(sessionId);
+        pendingSessionIds.push(sessionId);
+      }
+
+      let nextIndex = 0;
+
+      async function worker(): Promise<void> {
+        while (nextIndex < pendingSessionIds.length) {
+          const sessionId = pendingSessionIds[nextIndex];
+          nextIndex += 1;
+          const ok = await loadSessionMessages(sessionId);
+          if (!ok) {
+            useChatSessionStore.getState().patchSession(sessionId, {
+              pinnedLoadState: "failed",
+            });
+          }
+          hydratingPinnedSessionIdsRef.current.delete(sessionId);
+        }
+      }
+
+      await Promise.all(
+        Array.from(
+          {
+            length: Math.min(
+              PINNED_CHAT_HYDRATION_CONCURRENCY,
+              pendingSessionIds.length,
+            ),
+          },
+          () => worker(),
+        ),
+      );
+    },
+    [loadSessionMessages],
+  );
 
   useEffect(() => {
     fetchProjects();
@@ -791,6 +913,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             modelName: sessionModelPreference.modelName,
             workingDir,
           });
+          useHomeWidgetStore
+            .getState()
+            .replaceChatPinSessionId(session.id, sessionId);
           replaceNavigationSessionId(session.id, sessionId);
           if (shouldRemainActive) {
             setActiveSession(sessionId);
@@ -2233,6 +2358,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onOpenAgent={handleStartChatWithAgent}
               onOpenAutomation={handleOpenAutomationFromSearch}
               onOpenSkill={handleStartChatWithSkill}
+              onHydratePinnedChatSessions={hydratePinnedChatSessions}
               onStartProviderTroubleshootingChat={
                 handleStartProviderTroubleshootingChat
               }

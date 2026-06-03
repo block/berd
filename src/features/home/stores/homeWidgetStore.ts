@@ -184,6 +184,10 @@ interface HomeWidgetStore extends HomeWidgetState {
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   removeWidget: (id: string) => void;
   updateWidgetState: (id: string, state: Record<string, unknown>) => void;
+  replaceChatPinSessionId: (
+    draftSessionId: string,
+    backendSessionId: string,
+  ) => void;
   saveCamera: (camera: LayoutCamera) => void;
 }
 
@@ -415,6 +419,29 @@ function createHomeWidgetStore() {
         applyMutation((instances) =>
           updateWidgetStateMutation(instances, id, state),
         );
+      },
+      replaceChatPinSessionId: (draftSessionId, backendSessionId) => {
+        applyMutation((instances) => {
+          let changed = false;
+          const next = instances.map((instance) => {
+            if (
+              instance.type !== "chatPin" ||
+              instance.state?.sessionId !== draftSessionId
+            ) {
+              return instance;
+            }
+            changed = true;
+            return {
+              ...instance,
+              state: {
+                ...instance.state,
+                sessionId: backendSessionId,
+              },
+            };
+          });
+
+          return changed ? next : null;
+        });
       },
       saveCamera: (camera) => {
         const state = get();

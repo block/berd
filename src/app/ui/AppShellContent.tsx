@@ -81,6 +81,7 @@ interface AppShellContentProps {
   onOpenAgent: (agentId: string) => void;
   onOpenAutomation: (automationId: string) => void;
   onOpenSkill: (skill: SkillInfo) => void;
+  onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
@@ -124,6 +125,7 @@ export function AppShellContent({
   onOpenAgent,
   onOpenAutomation,
   onOpenSkill,
+  onHydratePinnedChatSessions,
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
 }: AppShellContentProps) {
@@ -233,6 +235,7 @@ export function AppShellContent({
           onOpenAutomations={() =>
             onNavigateAutomations({ surface: "overview" })
           }
+          onHydratePinnedChatSessions={onHydratePinnedChatSessions}
         />
       );
   }

@@ -1,5 +1,6 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ComponentProps } from "react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -85,6 +86,10 @@ function TopBarActionsHost() {
 
 function renderHomeView() {
   return render(<HomeView />);
+}
+
+function renderHomeViewWithProps(props: ComponentProps<typeof HomeView>) {
+  return render(<HomeView {...props} />);
 }
 
 function renderHomeViewWithTopBarActions() {
@@ -189,6 +194,43 @@ describe("HomeView", () => {
 
     await screen.findByText("widget canvas");
     expect(getLayout).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not rehydrate chat pins when only widget layout changes", async () => {
+    const onHydratePinnedChatSessions = vi.fn();
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000003",
+            kind: "session",
+            targetId: "session-1",
+            centerX: 1094,
+            centerY: 540,
+            width: 188,
+            height: 80,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithProps({ onHydratePinnedChatSessions });
+
+    await screen.findByText("widget canvas");
+    await waitFor(() =>
+      expect(onHydratePinnedChatSessions).toHaveBeenCalledWith(["session-1"]),
+    );
+
+    act(() => {
+      useHomeWidgetStore
+        .getState()
+        .moveWidget("00000000-0000-0000-0000-000000000003", 1200, 600);
+    });
+    await waitFor(() => expect(saveLayoutItems).toHaveBeenCalledTimes(1));
+
+    expect(onHydratePinnedChatSessions).toHaveBeenCalledTimes(1);
   });
 
   it("exposes a top-bar recenter action for the home camera", async () => {

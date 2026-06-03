@@ -235,4 +235,49 @@ describe("usePinToHomeWidget", () => {
     expect(useHomeWidgetStore.getState().instances).toEqual([]);
     expect(toast.success).toHaveBeenCalledWith("widgets.unpinFromHome.success");
   });
+
+  it("rewrites chat pins from a draft session id to the backend session id", () => {
+    useHomeWidgetStore.setState({
+      instances: [
+        {
+          id: "chat-pin-1",
+          type: "chatPin",
+          x: 0,
+          y: 0,
+          z: 1,
+          state: { sessionId: "draft-session" },
+        },
+        {
+          id: "agent-pin-1",
+          type: "agentPin",
+          x: 100,
+          y: 0,
+          z: 2,
+          state: { agentId: "agent-1" },
+        },
+      ],
+      loadStatus: "ready",
+      itemRevision: 1,
+      cameraRevision: 1,
+      camera: { centerX: 0, centerY: 0, zoomBps: 10_000 },
+      constraints: layout().constraints,
+    });
+
+    act(() => {
+      useHomeWidgetStore
+        .getState()
+        .replaceChatPinSessionId("draft-session", "backend-session");
+    });
+
+    expect(useHomeWidgetStore.getState().instances).toEqual([
+      expect.objectContaining({
+        id: "chat-pin-1",
+        state: { sessionId: "backend-session" },
+      }),
+      expect.objectContaining({
+        id: "agent-pin-1",
+        state: { agentId: "agent-1" },
+      }),
+    ]);
+  });
 });

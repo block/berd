@@ -251,6 +251,44 @@ describe("chatSessionStore", () => {
     });
   });
 
+  describe("ensurePinnedSessionPlaceholder", () => {
+    it("does not mark draft sessions as loading", () => {
+      seedSession({
+        id: "draft-session",
+        creationState: "pending",
+      });
+
+      useChatSessionStore
+        .getState()
+        .ensurePinnedSessionPlaceholder("draft-session");
+
+      const session = useChatSessionStore
+        .getState()
+        .getSession("draft-session");
+      expect(session).toMatchObject({
+        creationState: "pending",
+      });
+      expect(session?.pinnedLoadState).toBeUndefined();
+    });
+
+    it("marks failed pinned sessions as loading for retry", () => {
+      seedSession({
+        id: "failed-pinned-session",
+        pinnedLoadState: "failed",
+      });
+
+      useChatSessionStore
+        .getState()
+        .ensurePinnedSessionPlaceholder("failed-pinned-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("failed-pinned-session"),
+      ).toMatchObject({
+        pinnedLoadState: "loading",
+      });
+    });
+  });
+
   describe("loadSessions", () => {
     it("loads sessions from ACP and maps them correctly", async () => {
       mocks.acpListSessionsPage.mockResolvedValue(

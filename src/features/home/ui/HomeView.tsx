@@ -25,6 +25,7 @@ export interface HomeViewProps {
   onCreateProject?: () => void;
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
+  onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
 }
 
 export function HomeView({
@@ -38,6 +39,7 @@ export function HomeView({
   onCreateProject,
   onOpenSkills,
   onOpenAutomations,
+  onHydratePinnedChatSessions,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
   const setTopBarActions = useSetTopBarActions();
@@ -59,6 +61,20 @@ export function HomeView({
     () => widgetCenterOfGravity(instances),
     [instances],
   );
+  const pinnedChatSessionIdKey = useMemo(() => {
+    const ids = [
+      ...new Set(
+        instances.flatMap((instance) => {
+          const sessionId = instance.state?.sessionId;
+          return instance.type === "chatPin" && typeof sessionId === "string"
+            ? [sessionId]
+            : [];
+        }),
+      ),
+    ].sort();
+
+    return ids.join("\u001f");
+  }, [instances]);
   const recenterTitle = t("widgets.canvasControls.recenterTitle");
   const cleanUpTitle = t("widgets.canvasControls.cleanUpTitle");
   const restoreTitle = t("widgets.canvasControls.restoreTitle");
@@ -68,6 +84,20 @@ export function HomeView({
   useEffect(() => {
     void prefetchProjectArtifactRenderer();
   }, []);
+
+  useEffect(() => {
+    if (loadStatus !== "ready" || !onHydratePinnedChatSessions) {
+      return;
+    }
+
+    const sessionIds = pinnedChatSessionIdKey
+      ? pinnedChatSessionIdKey.split("\u001f")
+      : [];
+
+    if (sessionIds.length > 0) {
+      onHydratePinnedChatSessions(sessionIds);
+    }
+  }, [loadStatus, onHydratePinnedChatSessions, pinnedChatSessionIdKey]);
 
   useEffect(() => {
     if (!layoutMotionActive) {

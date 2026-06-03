@@ -37,6 +37,8 @@
       "kicker": "Chat",
       "emptyTitle": "Sin chat reciente",
       "emptyDescription": "Fija un chat para verlo aquí",
+      "loadingDescription": "Cargando chat fijado...",
+      "unavailableDescription": "Chat fijado no disponible",
       "openAria": "Abrir chat: {{title}}"
     },
     "projectArtifactPin": {

@@ -35,6 +35,7 @@ export interface ChatSession {
   userSetName?: boolean;
   creationState?: "pending" | "failed";
   creationError?: string;
+  pinnedLoadState?: "loading" | "failed";
   clientSessionId?: string;
   intent?: "build-agent" | null;
   targetAgentPath?: string | null;
@@ -107,6 +108,7 @@ interface ChatSessionStoreActions {
     patch?: Partial<ChatSession>,
   ) => void;
   markSessionCreationFailed: (id: string, error: string) => void;
+  ensurePinnedSessionPlaceholder: (id: string) => void;
   loadSessions: () => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   patchSession: (id: string, patch: Partial<ChatSession>) => void;
@@ -390,6 +392,35 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           : session,
       ),
     }));
+  },
+
+  ensurePinnedSessionPlaceholder: (id) => {
+    set((state) => {
+      const existing = state.sessions.find((session) => session.id === id);
+      if (existing) {
+        if (existing.creationState || existing.pinnedLoadState === "loading") {
+          return state;
+        }
+        return {
+          sessions: state.sessions.map((session) =>
+            session.id === id
+              ? { ...session, pinnedLoadState: "loading" as const }
+              : session,
+          ),
+        };
+      }
+
+      const now = new Date().toISOString();
+      const placeholder: ChatSession = {
+        id,
+        title: DEFAULT_CHAT_TITLE,
+        createdAt: now,
+        updatedAt: now,
+        messageCount: 0,
+        pinnedLoadState: "loading",
+      };
+      return { sessions: [placeholder, ...state.sessions] };
+    });
   },
 
   loadSessions: async () => {

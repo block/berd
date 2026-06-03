@@ -37,6 +37,8 @@
       "kicker": "Chat",
       "emptyTitle": "No recent chat",
       "emptyDescription": "Pin a chat to see it here",
+      "loadingDescription": "Loading pinned chat...",
+      "unavailableDescription": "Pinned chat unavailable",
       "openAria": "Open chat: {{title}}"
     },
     "projectArtifactPin": {

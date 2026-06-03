@@ -1,12 +1,8 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconMessageCircle } from "@tabler/icons-react";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import {
-  getVisibleSessions,
-  useChatSessionStore,
-} from "@/features/chat/stores/chatSessionStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
@@ -24,7 +20,7 @@ function getSessionId(
 }
 
 function resolveSession(sessions: ChatSession[], id: string | null) {
-  return sessions.find((session) => session.id === id) ?? sessions[0];
+  return id ? sessions.find((session) => session.id === id) : undefined;
 }
 
 export function ChatPinWidget({
@@ -35,29 +31,32 @@ export function ChatPinWidget({
   const { t } = useTranslation("home");
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const sessions = useChatSessionStore((state) => state.sessions);
-  const messagesBySession = useChatStore((state) => state.messagesBySession);
-  const projects = useProjectStore(selectProjects);
-
-  const visibleSessions = useMemo(
-    () =>
-      getVisibleSessions(sessions, messagesBySession).filter(
-        (s) => !s.archivedAt,
-      ),
-    [messagesBySession, sessions],
+  const sessionId = getSessionId(instance.state);
+  const isLoadingSession = useChatStore((state) =>
+    sessionId ? (state.loadingSessionIds?.has(sessionId) ?? false) : false,
   );
+  const projects = useProjectStore(selectProjects);
+  const session = resolveSession(sessions, sessionId);
+  const isUnavailable = session?.pinnedLoadState === "failed";
+  const isLoading = Boolean(sessionId) && (!session || isLoadingSession);
 
-  const session = resolveSession(visibleSessions, getSessionId(instance.state));
-  const title = session
-    ? session.title.trim() || DEFAULT_CHAT_TITLE
-    : t("widgets.chatPin.emptyTitle");
+  const title =
+    session && !isUnavailable
+      ? session.title.trim() || DEFAULT_CHAT_TITLE
+      : t("widgets.chatPin.emptyTitle");
   const project = session?.projectId
     ? projects.find((candidate) => candidate.id === session.projectId)
     : undefined;
-  const footerLabel = session
-    ? [project?.name, formatRelativeTimeToNow(session.updatedAt)]
-        .filter(Boolean)
-        .join(" · ")
-    : t("widgets.chatPin.emptyDescription");
+  let footerLabel = t("widgets.chatPin.emptyDescription");
+  if (isUnavailable) {
+    footerLabel = t("widgets.chatPin.unavailableDescription");
+  } else if (isLoading) {
+    footerLabel = t("widgets.chatPin.loadingDescription");
+  } else if (session) {
+    footerLabel = [project?.name, formatRelativeTimeToNow(session.updatedAt)]
+      .filter(Boolean)
+      .join(" · ");
+  }
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (session) onSelectSession?.(session.id);
   });
