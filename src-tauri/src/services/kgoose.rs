@@ -24,6 +24,7 @@ const KGOOSE_JSON_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const KGOOSE_UPLOAD_READ_TIMEOUT: Duration = Duration::from_secs(120);
 const KGOOSE_SSE_IDLE_TIMEOUT: Duration = Duration::from_secs(120);
 const KGOOSE_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+const KGOOSE_CONNECTIVITY_PROBE_ENDPOINT: &str = "list-oauth-extensions";
 
 pub(crate) async fn post_json(
     distro_state: &DistroBundleState,
@@ -335,18 +336,23 @@ pub(crate) struct KgooseProbeResult {
     pub message: String,
 }
 
-/// Issues a `HEAD` request against the configured kgoose base URL (no endpoint
-/// path) and classifies the response. Used by the startup-error diagnostic
-/// flow to distinguish a WARP/network failure from a backend bug.
+/// Issues a small read-only request against a configured kgoose endpoint and
+/// classifies the response. Used by the startup-error diagnostic flow to
+/// distinguish a WARP/network failure from a backend bug.
 pub(crate) async fn probe_connectivity(
     distro_state: &DistroBundleState,
 ) -> Result<KgooseProbeResult, String> {
-    let url = build_url("", distro_state.kgoose_config())?;
+    let url = build_url(
+        KGOOSE_CONNECTIVITY_PROBE_ENDPOINT,
+        distro_state.kgoose_config(),
+    )?;
     Ok(probe_url(url).await)
 }
 
 async fn probe_url(url: reqwest::Url) -> KgooseProbeResult {
-    let request = add_playpen_baggage(client().head(url.clone())).timeout(KGOOSE_PROBE_TIMEOUT);
+    let request = add_playpen_baggage(json_post_request(url.clone()))
+        .timeout(KGOOSE_PROBE_TIMEOUT)
+        .json(&serde_json::json!({}));
     match request.send().await {
         Ok(response) => {
             let status = response.status();

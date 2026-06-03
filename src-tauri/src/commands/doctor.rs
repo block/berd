@@ -1,10 +1,22 @@
 //! Tauri command wrappers for the doctor health-check system.
 
-use std::process::Stdio;
+use std::{
+    collections::{BTreeSet, HashMap},
+    env, fs,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
 use serde::{Deserialize, Serialize};
+use tauri::State;
 
-use crate::services::path_env::build_extended_path;
+use crate::services::{
+    distro_bundle::DistroBundleState,
+    goose_config::{self, AdditionalConfigFiles},
+    kgoose::{self, KgooseProbeResult},
+    path_env::{build_extended_path, build_extended_path_from_path},
+    shell_env,
+};
 
 use doctor::CheckStatus;
 pub use doctor::FixType;
@@ -13,8 +25,18 @@ const TOOLS_CATEGORY: &str = "tools";
 const TOOLS_CATEGORY_LABEL: &str = "Tools";
 const AGENTS_CATEGORY: &str = "agents";
 const AGENTS_CATEGORY_LABEL: &str = "Agents";
-const INTERNAL_TOOLS_CATEGORY: &str = "internal-tools";
-const INTERNAL_TOOLS_CATEGORY_LABEL: &str = "Internal Tools";
+const ENVIRONMENT_HEALTH_CATEGORY: &str = "environment-health";
+const ENVIRONMENT_HEALTH_CATEGORY_LABEL: &str = "Environment Health";
+const GOOSE_BIN_ENV: &str = "GOOSE_BIN";
+const APP_CONFIG_PASS_MESSAGE: &str =
+    "Checked config YAML, additional config files, thinking settings, and Goose binary override";
+const CLAUDE_THINKING_CONFIG_KEYS: &[&str] = &[
+    "CLAUDE_THINKING_TYPE",
+    "CLAUDE_THINKING_ENABLED",
+    "CLAUDE_THINKING_BUDGET",
+    "ANTHROPIC_THINKING_BUDGET",
+];
+const GOOSE_THINKING_EFFORT_ENV: &str = "GOOSE_THINKING_EFFORT";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,7 +94,7 @@ struct LocalCommandCheck {
 
 struct LocalCustomCheck {
     meta: LocalCheckMeta,
-    run: fn(&LocalCheckMeta) -> DoctorCheck,
+    run: fn(&LocalCheckMeta, &HashMap<String, String>, Option<&Path>) -> DoctorCheck,
 }
 
 struct LocalDoctorRegistry<'a> {
@@ -85,8 +107,8 @@ const LOCAL_COMMAND_CHECKS: &[LocalCommandCheck] = &[LocalCommandCheck {
     meta: LocalCheckMeta {
         id: "sq-agent-tools",
         label: "Square Agent Tools",
-        category: INTERNAL_TOOLS_CATEGORY,
-        category_label: INTERNAL_TOOLS_CATEGORY_LABEL,
+        category: ENVIRONMENT_HEALTH_CATEGORY,
+        category_label: ENVIRONMENT_HEALTH_CATEGORY_LABEL,
         fix: None,
         fix_url: None,
         debug_output: None,
@@ -99,10 +121,33 @@ const LOCAL_COMMAND_CHECKS: &[LocalCommandCheck] = &[LocalCommandCheck {
     fail_message: "sq agent-tools is not available; internal workflow integrations may be limited",
 }];
 
+const LOCAL_CUSTOM_CHECKS: &[LocalCustomCheck] = &[LocalCustomCheck {
+    meta: LocalCheckMeta {
+        id: "goose-config",
+        label: "Goose Configuration",
+        category: ENVIRONMENT_HEALTH_CATEGORY,
+        category_label: ENVIRONMENT_HEALTH_CATEGORY_LABEL,
+        fix: None,
+        fix_url: None,
+        debug_output: None,
+    },
+    run: run_goose_config_check,
+}];
+
+const KGOOSE_CONNECTIVITY_CHECK: LocalCheckMeta = LocalCheckMeta {
+    id: "internal-service-connectivity",
+    label: "Internal Service Access",
+    category: ENVIRONMENT_HEALTH_CATEGORY,
+    category_label: ENVIRONMENT_HEALTH_CATEGORY_LABEL,
+    fix: None,
+    fix_url: None,
+    debug_output: None,
+};
+
 const LOCAL_DOCTOR_REGISTRY: LocalDoctorRegistry<'static> = LocalDoctorRegistry {
     path_checks: &[],
     command_checks: LOCAL_COMMAND_CHECKS,
-    custom_checks: &[],
+    custom_checks: LOCAL_CUSTOM_CHECKS,
 };
 
 impl From<doctor::DoctorCheck> for DoctorCheck {
@@ -133,14 +178,19 @@ fn upstream_category(check_id: &str) -> (&'static str, &'static str) {
     }
 }
 
-async fn run_local_checks(registry: &LocalDoctorRegistry<'_>) -> Vec<DoctorCheck> {
+async fn run_local_checks(
+    registry: &LocalDoctorRegistry<'_>,
+    distro_config_path: Option<&Path>,
+) -> Vec<DoctorCheck> {
     let check_count =
         registry.path_checks.len() + registry.command_checks.len() + registry.custom_checks.len();
     if check_count == 0 {
         return Vec::new();
     }
 
-    let extended_path = build_extended_path().await;
+    let captured_shell_env = shell_env::capture_shell_env().await;
+    let extended_path =
+        build_extended_path_from_path(captured_shell_env.get("PATH").map(String::as_str));
     let mut results = Vec::with_capacity(check_count);
 
     for check in registry.path_checks {
@@ -150,7 +200,11 @@ async fn run_local_checks(registry: &LocalDoctorRegistry<'_>) -> Vec<DoctorCheck
         results.push(run_local_command_check(check, &extended_path).await);
     }
     for check in registry.custom_checks {
-        results.push((check.run)(&check.meta));
+        results.push((check.run)(
+            &check.meta,
+            &captured_shell_env,
+            distro_config_path,
+        ));
     }
 
     results
@@ -267,6 +321,479 @@ fn build_local_result(
     }
 }
 
+#[derive(Default)]
+struct AppConfigReport {
+    lines: Vec<String>,
+    findings: Vec<String>,
+    has_failure: bool,
+    has_warning: bool,
+}
+
+impl AppConfigReport {
+    fn new() -> Self {
+        Self {
+            lines: vec!["checked:".to_string()],
+            ..Self::default()
+        }
+    }
+
+    fn push(
+        &mut self,
+        label: &str,
+        status: CheckStatus,
+        message: impl Into<String>,
+        path: Option<String>,
+        detail: Option<String>,
+    ) {
+        let message = message.into();
+        self.lines
+            .push(format!("- {label} [{}]: {message}", status_name(&status)));
+        if let Some(path) = path {
+            self.lines.push(format!("  path: {path}"));
+        }
+        if let Some(detail) = detail {
+            self.lines
+                .extend(detail.lines().map(|line| format!("  {line}")));
+        }
+
+        match &status {
+            CheckStatus::Fail => {
+                self.has_failure = true;
+                self.findings.push(message);
+            }
+            CheckStatus::Warn => {
+                self.has_warning = true;
+                self.findings.push(message);
+            }
+            CheckStatus::Pass => {}
+        }
+    }
+
+    fn into_check(self, check: &LocalCheckMeta) -> DoctorCheck {
+        let status = if self.has_failure {
+            CheckStatus::Fail
+        } else if self.has_warning {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Pass
+        };
+        let message = match self.findings.as_slice() {
+            [] => APP_CONFIG_PASS_MESSAGE.to_string(),
+            [finding] => finding.clone(),
+            _ => format!("Found {} Goose config findings", self.findings.len()),
+        };
+
+        build_local_result(check, status, &message, None, Some(self.lines.join("\n")))
+    }
+}
+
+fn run_goose_config_check(
+    check: &LocalCheckMeta,
+    shell_env: &HashMap<String, String>,
+    distro_config_path: Option<&Path>,
+) -> DoctorCheck {
+    let mut report = AppConfigReport::new();
+    let mut config_paths = Vec::new();
+
+    match goose_config::config_path() {
+        Ok(path) => {
+            config_paths.push(path.clone());
+            push_goose_config_file(&mut report, &path);
+        }
+        Err(error) => report.push(
+            "Config YAML",
+            CheckStatus::Fail,
+            error.clone(),
+            None,
+            Some(error),
+        ),
+    }
+
+    let additional_config_files = additional_config_files_from_env(shell_env, distro_config_path);
+    config_paths.extend(additional_config_files.paths.iter().cloned());
+    push_additional_config_files(&mut report, &additional_config_files);
+    push_thinking_settings(&mut report, shell_env, &config_paths);
+    push_goose_bin_override(&mut report, env::var_os(GOOSE_BIN_ENV));
+
+    report.into_check(check)
+}
+
+fn status_name(status: &CheckStatus) -> &'static str {
+    match status {
+        CheckStatus::Pass => "pass",
+        CheckStatus::Warn => "warn",
+        CheckStatus::Fail => "fail",
+    }
+}
+
+fn additional_config_files_from_env(
+    shell_env: &HashMap<String, String>,
+    distro_config_path: Option<&Path>,
+) -> AdditionalConfigFiles {
+    let process_value = env::var_os(goose_config::ADDITIONAL_CONFIG_FILES_ENV);
+    goose_config::additional_config_files_from_values(
+        process_value.as_deref(),
+        shell_env
+            .get(goose_config::ADDITIONAL_CONFIG_FILES_ENV)
+            .map(std::ffi::OsStr::new),
+        distro_config_path,
+    )
+}
+
+fn push_thinking_settings(
+    report: &mut AppConfigReport,
+    shell_env: &HashMap<String, String>,
+    config_paths: &[PathBuf],
+) {
+    let mut sources = BTreeSet::new();
+    collect_thinking_settings_from_env(shell_env, &mut sources);
+    for path in config_paths {
+        collect_thinking_settings_from_yaml(path, &mut sources);
+    }
+
+    if sources.is_empty() {
+        report.push(
+            "Thinking Settings",
+            CheckStatus::Pass,
+            "No risky thinking settings found in Goose config or the sidecar environment",
+            None,
+            None,
+        );
+        return;
+    }
+
+    let detail = sources
+        .iter()
+        .map(|source| format!("- {source}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    report.push(
+        "Thinking Settings",
+        CheckStatus::Warn,
+        "Risky thinking settings are configured; if Claude or Opus models fail or compact immediately, remove these keys and restart Goose Internal",
+        None,
+        Some(format!("found keys with values hidden:\n{detail}")),
+    );
+}
+
+fn collect_thinking_settings_from_env(
+    shell_env: &HashMap<String, String>,
+    sources: &mut BTreeSet<String>,
+) {
+    for key in CLAUDE_THINKING_CONFIG_KEYS {
+        if shell_env.contains_key(*key) {
+            sources.insert(format!("login shell environment: {key}"));
+        } else if env::var_os(key).is_some() {
+            sources.insert(format!("process environment: {key}"));
+        }
+    }
+
+    if shell_env.contains_key(GOOSE_THINKING_EFFORT_ENV) {
+        sources.insert(format!(
+            "login shell environment: {GOOSE_THINKING_EFFORT_ENV}"
+        ));
+    } else if env::var_os(GOOSE_THINKING_EFFORT_ENV).is_some() {
+        sources.insert(format!("process environment: {GOOSE_THINKING_EFFORT_ENV}"));
+    }
+}
+
+fn collect_thinking_settings_from_yaml(path: &Path, sources: &mut BTreeSet<String>) {
+    let Ok(contents) = fs::read_to_string(path) else {
+        return;
+    };
+    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&contents) else {
+        return;
+    };
+    let Some(mapping) = value.as_mapping() else {
+        return;
+    };
+
+    for key in CLAUDE_THINKING_CONFIG_KEYS {
+        if mapping.contains_key(serde_yaml::Value::String((*key).to_string())) {
+            sources.insert(format!("{}: {key}", path.display()));
+        }
+    }
+
+    if mapping.contains_key(serde_yaml::Value::String(
+        GOOSE_THINKING_EFFORT_ENV.to_string(),
+    )) {
+        sources.insert(format!("{}: {GOOSE_THINKING_EFFORT_ENV}", path.display()));
+    }
+}
+
+fn push_goose_config_file(report: &mut AppConfigReport, path: &Path) {
+    match validate_yaml_file(path) {
+        ConfigFileValidation::Valid => report.push(
+            "Config YAML",
+            CheckStatus::Pass,
+            "Goose config YAML is readable",
+            Some(path.display().to_string()),
+            None,
+        ),
+        ConfigFileValidation::Missing => report.push(
+            "Config YAML",
+            CheckStatus::Warn,
+            "Goose config is missing; model setup may need to run before sessions can start",
+            Some(path.display().to_string()),
+            None,
+        ),
+        ConfigFileValidation::Invalid(error) => report.push(
+            "Config YAML",
+            CheckStatus::Fail,
+            "Goose config YAML is invalid; Goose may fail to start",
+            Some(path.display().to_string()),
+            Some(error),
+        ),
+    }
+}
+
+fn push_additional_config_files(
+    report: &mut AppConfigReport,
+    config_files: &AdditionalConfigFiles,
+) {
+    if !config_files.configured {
+        report.push(
+            "Additional Config Files",
+            CheckStatus::Pass,
+            "No additional Goose config files are configured",
+            None,
+            None,
+        );
+        return;
+    }
+
+    if config_files.paths.is_empty() {
+        report.push(
+            "Additional Config Files",
+            CheckStatus::Warn,
+            "GOOSE_ADDITIONAL_CONFIG_FILES is set but does not contain any paths",
+            None,
+            Some(format!(
+                "{} is empty",
+                goose_config::ADDITIONAL_CONFIG_FILES_ENV
+            )),
+        );
+        return;
+    }
+
+    let errors: Vec<String> = config_files
+        .paths
+        .iter()
+        .filter_map(|path| match validate_yaml_file(path) {
+            ConfigFileValidation::Valid => None,
+            ConfigFileValidation::Missing => {
+                Some(format!("{}: file does not exist", path.display()))
+            }
+            ConfigFileValidation::Invalid(error) => Some(format!("{}: {error}", path.display())),
+        })
+        .collect();
+
+    let path = config_files
+        .paths
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(if cfg!(windows) { ";" } else { ":" });
+
+    if errors.is_empty() {
+        report.push(
+            "Additional Config Files",
+            CheckStatus::Pass,
+            format!(
+                "{} additional Goose config file(s) are readable",
+                config_files.paths.len()
+            ),
+            Some(path),
+            None,
+        )
+    } else {
+        report.push(
+            "Additional Config Files",
+            CheckStatus::Fail,
+            "One or more additional Goose config files are missing or invalid",
+            Some(path),
+            Some(errors.join("\n")),
+        )
+    }
+}
+
+enum ConfigFileValidation {
+    Valid,
+    Missing,
+    Invalid(String),
+}
+
+fn validate_yaml_file(path: &Path) -> ConfigFileValidation {
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ConfigFileValidation::Missing;
+        }
+        Err(error) => {
+            return ConfigFileValidation::Invalid(format!("failed to inspect file: {error}"));
+        }
+    };
+
+    if !metadata.is_file() {
+        return ConfigFileValidation::Invalid("path is not a file".to_string());
+    }
+
+    let contents = match fs::read(path) {
+        Ok(contents) => contents,
+        Err(error) => {
+            return ConfigFileValidation::Invalid(format!("failed to read file: {error}"));
+        }
+    };
+
+    match serde_yaml::from_slice::<serde_yaml::Value>(&contents) {
+        Ok(_) => ConfigFileValidation::Valid,
+        Err(error) => ConfigFileValidation::Invalid(format!("failed to parse YAML: {error}")),
+    }
+}
+
+fn push_goose_bin_override(report: &mut AppConfigReport, value: Option<std::ffi::OsString>) {
+    let Some(value) = value else {
+        report.push(
+            "Goose Binary Override",
+            CheckStatus::Pass,
+            "No GOOSE_BIN override is configured; the bundled Goose binary will be used",
+            None,
+            None,
+        );
+        return;
+    };
+
+    let path = PathBuf::from(value);
+    if path.as_os_str().is_empty() {
+        report.push(
+            "Goose Binary Override",
+            CheckStatus::Fail,
+            "GOOSE_BIN is set but empty; Goose Internal cannot resolve a Goose binary override",
+            None,
+            None,
+        );
+        return;
+    }
+
+    match validate_goose_bin_path(&path) {
+        Ok(()) => report.push(
+            "Goose Binary Override",
+            CheckStatus::Pass,
+            "GOOSE_BIN points to an executable file",
+            Some(path.display().to_string()),
+            None,
+        ),
+        Err(error) => report.push(
+            "Goose Binary Override",
+            CheckStatus::Fail,
+            "GOOSE_BIN points to an invalid Goose binary override",
+            Some(path.display().to_string()),
+            Some(error),
+        ),
+    }
+}
+
+fn validate_goose_bin_path(path: &Path) -> Result<(), String> {
+    let metadata =
+        fs::metadata(path).map_err(|error| format!("failed to inspect file: {error}"))?;
+    if !metadata.is_file() {
+        return Err("path is not a file".to_string());
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o111 == 0 {
+            return Err("file is not executable".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+async fn run_kgoose_connectivity_check(distro_state: &DistroBundleState) -> DoctorCheck {
+    match kgoose::probe_connectivity(distro_state).await {
+        Ok(probe) => build_kgoose_connectivity_check(&KGOOSE_CONNECTIVITY_CHECK, probe),
+        Err(error) => build_kgoose_connectivity_error(&KGOOSE_CONNECTIVITY_CHECK, error.as_str()),
+    }
+}
+
+fn build_kgoose_connectivity_check(
+    check: &LocalCheckMeta,
+    probe: KgooseProbeResult,
+) -> DoctorCheck {
+    let status_label = kgoose_probe_status_label(&probe);
+    let (status, message) = if probe.status == Some(407) {
+        (
+            CheckStatus::Fail,
+            format!("Checked kgoose access probe; proxy authentication required ({status_label})"),
+        )
+    } else if probe.likely_warp_failure {
+        (
+            CheckStatus::Fail,
+            format!("Checked kgoose access probe; WARP/access failure suspected ({status_label})"),
+        )
+    } else if probe.status.is_some() {
+        (
+            CheckStatus::Pass,
+            format!("Checked kgoose access probe; {status_label} reachable"),
+        )
+    } else {
+        (
+            CheckStatus::Warn,
+            "Checked kgoose access probe; request failed for an unclassified network reason"
+                .to_string(),
+        )
+    };
+
+    build_local_result(
+        check,
+        status,
+        &message,
+        None,
+        Some(format_kgoose_probe_details(&probe)),
+    )
+}
+
+fn build_kgoose_connectivity_error(check: &LocalCheckMeta, error: &str) -> DoctorCheck {
+    build_local_result(
+        check,
+        CheckStatus::Fail,
+        "Internal service probe could not run",
+        None,
+        Some(format!("error: {error}")),
+    )
+}
+
+fn format_kgoose_probe_details(probe: &KgooseProbeResult) -> String {
+    format!(
+        "checked: kgoose access probe\nkind: {}\nstatus: {}\nlikely_warp_failure: {}\nclassification: {}",
+        probe.kind,
+        kgoose_probe_status_label(probe),
+        probe.likely_warp_failure,
+        classify_kgoose_probe(probe)
+    )
+}
+
+fn kgoose_probe_status_label(probe: &KgooseProbeResult) -> String {
+    probe
+        .status
+        .map(|status| format!("HTTP {status}"))
+        .unwrap_or_else(|| "no HTTP status".to_string())
+}
+
+fn classify_kgoose_probe(probe: &KgooseProbeResult) -> &'static str {
+    if probe.status == Some(407) {
+        "proxy_auth_required"
+    } else if probe.likely_warp_failure {
+        "likely_warp_or_access_failure"
+    } else if probe.status.is_some() {
+        "reachable"
+    } else {
+        "unclassified_request_failure"
+    }
+}
+
 fn find_local_fix<'a>(
     registry: &'a LocalDoctorRegistry<'_>,
     check_id: &str,
@@ -311,17 +838,26 @@ async fn execute_local_fix(command: &'static str) -> Result<(), String> {
     }
 }
 
-async fn run_doctor_impl(registry: &LocalDoctorRegistry<'_>) -> DoctorReport {
+async fn run_doctor_impl(
+    registry: &LocalDoctorRegistry<'_>,
+    distro_state: &DistroBundleState,
+) -> DoctorReport {
     let upstream = doctor::run_checks().await;
     let mut checks: Vec<DoctorCheck> = upstream.checks.into_iter().map(DoctorCheck::from).collect();
-    checks.extend(run_local_checks(registry).await);
+    let distro_config_path = distro_state
+        .bundle()
+        .and_then(|bundle| bundle.config_path.as_deref());
+    checks.extend(run_local_checks(registry, distro_config_path).await);
+    checks.push(run_kgoose_connectivity_check(distro_state).await);
     DoctorReport { checks }
 }
 
 /// Run all health checks and return the report.
 #[tauri::command]
-pub async fn run_doctor() -> DoctorReport {
-    run_doctor_impl(&LOCAL_DOCTOR_REGISTRY).await
+pub async fn run_doctor(
+    distro_state: State<'_, DistroBundleState>,
+) -> Result<DoctorReport, String> {
+    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner()).await)
 }
 
 /// Run a fix command for a doctor check, identified by check ID and fix type.
@@ -365,7 +901,11 @@ mod tests {
         }
     }
 
-    fn custom_fixture_check(check: &LocalCheckMeta) -> DoctorCheck {
+    fn custom_fixture_check(
+        check: &LocalCheckMeta,
+        _shell_env: &HashMap<String, String>,
+        _distro_config_path: Option<&Path>,
+    ) -> DoctorCheck {
         build_local_result(
             check,
             CheckStatus::Warn,
@@ -404,9 +944,89 @@ mod tests {
         assert!(check
             .pass_message_suffix
             .is_some_and(|suffix| suffix.contains("centralized auth")));
-        assert_eq!(check.meta.category, "internal-tools");
-        assert_eq!(check.meta.category_label, "Internal Tools");
+        assert_eq!(check.meta.category, "environment-health");
+        assert_eq!(check.meta.category_label, "Environment Health");
         assert!(check.meta.fix.is_none());
+    }
+
+    #[test]
+    fn app_config_report_collapses_findings_and_keeps_details() {
+        let mut report = AppConfigReport::new();
+        report.push(
+            "Config YAML",
+            CheckStatus::Pass,
+            "Goose config YAML is readable",
+            Some("/tmp/config.yaml".to_string()),
+            None,
+        );
+        report.push(
+            "Goose Binary Override",
+            CheckStatus::Fail,
+            "GOOSE_BIN points to an invalid Goose binary override",
+            Some("/tmp/goose".to_string()),
+            Some("file is not executable".to_string()),
+        );
+
+        let check = report.into_check(&fixture_meta());
+
+        assert_eq!(check.status, CheckStatus::Fail);
+        assert_eq!(
+            check.message,
+            "GOOSE_BIN points to an invalid Goose binary override"
+        );
+        let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output.contains("Config YAML [pass]"));
+        assert!(output.contains("Goose Binary Override [fail]"));
+        assert!(output.contains("path: /tmp/goose"));
+        assert!(output.contains("file is not executable"));
+    }
+
+    #[test]
+    fn thinking_settings_warn_on_key_presence_without_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.yaml");
+        fs::write(
+            &config_path,
+            "CLAUDE_THINKING_TYPE: enabled\nGOOSE_THINKING_EFFORT: high\n",
+        )
+        .unwrap();
+        let shell_env =
+            HashMap::from([("CLAUDE_THINKING_BUDGET".to_string(), "200000".to_string())]);
+        let mut report = AppConfigReport::new();
+
+        push_thinking_settings(&mut report, &shell_env, &[config_path.clone()]);
+        let check = report.into_check(&fixture_meta());
+
+        assert_eq!(check.status, CheckStatus::Warn);
+        let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output.contains("login shell environment: CLAUDE_THINKING_BUDGET"));
+        assert!(output.contains(&format!("{}: CLAUDE_THINKING_TYPE", config_path.display())));
+        assert!(output.contains(&format!("{}: GOOSE_THINKING_EFFORT", config_path.display())));
+        assert!(!output.contains("enabled"));
+        assert!(!output.contains("200000"));
+        assert!(!output.contains("high"));
+    }
+
+    #[test]
+    fn kgoose_connectivity_check_passes_for_reachable_probe() {
+        let check = build_kgoose_connectivity_check(
+            &KGOOSE_CONNECTIVITY_CHECK,
+            KgooseProbeResult {
+                likely_warp_failure: false,
+                status: Some(200),
+                kind: "http_status",
+                message: "kgoose probe returned 200".to_string(),
+            },
+        );
+
+        assert_eq!(check.status, CheckStatus::Pass);
+        assert_eq!(
+            check.message,
+            "Checked kgoose access probe; HTTP 200 reachable"
+        );
+        let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output.contains("classification: reachable"));
+        assert!(!output.contains("kgoose probe returned 200"));
     }
 
     #[tokio::test]
@@ -421,7 +1041,7 @@ mod tests {
             custom_checks: &checks,
         };
 
-        let results = run_local_checks(&registry).await;
+        let results = run_local_checks(&registry, None).await;
 
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].id, "fixture-check");
@@ -452,7 +1072,7 @@ mod tests {
             custom_checks: &[],
         };
 
-        let results = run_local_checks(&registry).await;
+        let results = run_local_checks(&registry, None).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message.trim(), "command-output");
@@ -481,7 +1101,7 @@ mod tests {
             custom_checks: &[],
         };
 
-        let results = run_local_checks(&registry).await;
+        let results = run_local_checks(&registry, None).await;
 
         assert_eq!(results[0].status, CheckStatus::Pass);
         assert_eq!(results[0].message, "path found");

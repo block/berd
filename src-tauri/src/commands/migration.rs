@@ -12,21 +12,19 @@
 //! `localStorage` so it survives a webview cache wipe. The backup file uses a
 //! fresh timestamp on every run, so re-runs are non-destructive.
 //!
-//! Goose config path resolution uses the `etcetera` crate with the same
-//! `AppStrategyArgs` upstream goose uses (`top_level_domain: "Block"`,
-//! `author: "Block"`, `app_name: "goose"`). See
-//! `crates/goose/src/config/paths.rs` in the goose repo.
+//! Goose config path resolution flows through `services::goose_config`, which
+//! matches `crates/goose/src/config/paths.rs` in the goose repo.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::services::goose_config;
+
 const MARKER_FILE_NAME: &str = "migration.json";
-const GOOSE_CONFIG_FILE_NAME: &str = "config.yaml";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -65,19 +63,6 @@ pub struct MarkMigrationCompleteRequest {
     pub disabled_extensions: Vec<DisabledExtension>,
     #[serde(default)]
     pub backup_path: Option<String>,
-}
-
-/// Resolve the upstream goose config file path. Matches
-/// `crates/goose/src/config/paths.rs::Paths::config_dir`.
-fn goose_config_path() -> Result<PathBuf, String> {
-    let strategy = choose_app_strategy(AppStrategyArgs {
-        top_level_domain: "Block".to_string(),
-        author: "Block".to_string(),
-        app_name: "goose".to_string(),
-    })
-    .map_err(|err| format!("Failed to resolve goose config directory: {err}"))?;
-
-    Ok(strategy.config_dir().join(GOOSE_CONFIG_FILE_NAME))
 }
 
 fn marker_path(app_handle: &AppHandle) -> Result<PathBuf, String> {
@@ -144,7 +129,7 @@ fn build_backup_path(source: &Path, now_iso: &str) -> PathBuf {
     let file_name = source
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
-        .unwrap_or_else(|| GOOSE_CONFIG_FILE_NAME.to_string());
+        .unwrap_or_else(|| goose_config::CONFIG_FILE_NAME.to_string());
     let backup_name = format!("{file_name}.backup-{sanitized}");
 
     match source.parent() {
@@ -201,7 +186,7 @@ pub fn migration_status(app_handle: AppHandle) -> Result<MigrationStatus, String
 
 #[tauri::command]
 pub fn backup_goose_config() -> Result<BackupResult, String> {
-    let source = goose_config_path()?;
+    let source = goose_config::config_path()?;
     backup_goose_config_at(&source)
 }
 
@@ -475,31 +460,5 @@ mod tests {
         assert!(!file_name.contains(':'));
         assert!(file_name.starts_with("config.yaml.backup-"));
         assert_eq!(backup.parent(), Some(PathBuf::from("/tmp/goose").as_path()));
-    }
-
-    #[test]
-    fn goose_config_path_resolves_under_dot_config_on_unix() {
-        // This is the contract upstream goose ships today via etcetera's XDG
-        // strategy. If goose ever changes to an Apple/Roaming-style strategy
-        // on macOS, this test will fail loudly and the migration backup
-        // resolver will need to follow it.
-        let path = goose_config_path().expect("config path must resolve");
-
-        #[cfg(unix)]
-        {
-            let home = dirs::home_dir().expect("home dir");
-            let expected = home.join(".config").join("goose").join("config.yaml");
-            assert_eq!(path, expected);
-        }
-
-        #[cfg(windows)]
-        {
-            // On Windows, etcetera's Windows strategy resolves to
-            //   %APPDATA%\Block\goose\config\config.yaml
-            let file_name = path.file_name().unwrap();
-            assert_eq!(file_name, "config.yaml");
-            let parent = path.parent().unwrap();
-            assert!(parent.to_string_lossy().contains("goose"));
-        }
     }
 }

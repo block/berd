@@ -2,6 +2,7 @@ pub mod acp;
 pub mod bundled_agents;
 pub mod bundled_skills;
 pub mod distro_bundle;
+pub(crate) mod goose_config;
 pub(crate) mod kgoose;
 pub mod path_env;
 pub mod shell_env;

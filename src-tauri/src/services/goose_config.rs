@@ -1,0 +1,82 @@
+use std::{
+    env,
+    ffi::{OsStr, OsString},
+    path::{Path, PathBuf},
+};
+
+use etcetera::{choose_app_strategy, AppStrategy, AppStrategyArgs};
+
+pub(crate) const ADDITIONAL_CONFIG_FILES_ENV: &str = "GOOSE_ADDITIONAL_CONFIG_FILES";
+pub(crate) const CONFIG_FILE_NAME: &str = "config.yaml";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AdditionalConfigFiles {
+    pub configured: bool,
+    pub paths: Vec<PathBuf>,
+}
+
+/// Resolve the upstream goose config file path. Matches
+/// `crates/goose/src/config/paths.rs::Paths::config_dir`.
+pub(crate) fn config_path() -> Result<PathBuf, String> {
+    let strategy = choose_app_strategy(AppStrategyArgs {
+        top_level_domain: "Block".to_string(),
+        author: "Block".to_string(),
+        app_name: "goose".to_string(),
+    })
+    .map_err(|err| format!("Failed to resolve goose config directory: {err}"))?;
+
+    Ok(strategy.config_dir().join(CONFIG_FILE_NAME))
+}
+
+pub(crate) fn additional_config_files_from_values(
+    process_value: Option<&OsStr>,
+    shell_value: Option<&OsStr>,
+    distro_config_path: Option<&Path>,
+) -> AdditionalConfigFiles {
+    let mut configured = false;
+    let mut paths = Vec::new();
+
+    if let Some(value) = shell_value.or(process_value) {
+        configured = true;
+        extend_additional_config_paths(&mut paths, value);
+    }
+
+    if let Some(path) = distro_config_path {
+        configured = true;
+        push_unique_path(&mut paths, path.to_path_buf());
+    }
+
+    AdditionalConfigFiles { configured, paths }
+}
+
+pub(crate) fn join_additional_config_files(paths: &[PathBuf]) -> OsString {
+    env::join_paths(paths).unwrap_or_else(|_| {
+        let separator = if cfg!(windows) { ";" } else { ":" };
+        let mut fallback = OsString::new();
+
+        for path in paths {
+            if !fallback.is_empty() {
+                fallback.push(separator);
+            }
+            fallback.push(path.as_os_str());
+        }
+
+        fallback
+    })
+}
+
+fn extend_additional_config_paths(paths: &mut Vec<PathBuf>, value: &OsStr) {
+    if value.is_empty() {
+        return;
+    }
+
+    for path in env::split_paths(value).filter(|path| !path.as_os_str().is_empty()) {
+        push_unique_path(paths, path);
+    }
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.contains(&path) {
+        paths.push(path);
+    }
+}

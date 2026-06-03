@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use crate::services::distro_bundle::DistroBundleState;
+use crate::services::goose_config;
 use crate::services::path_env;
 use crate::services::shell_env;
 
@@ -116,6 +117,7 @@ impl GooseServeProcess {
         // the distro `bin_dir` (if any) prepended in front of it.
         let shell_env = shell_env::capture_shell_env().await;
         let mut prepend_dirs: Vec<PathBuf> = Vec::new();
+        let mut distro_config_path: Option<PathBuf> = None;
 
         if let Some(distro_state) = app_handle.try_state::<DistroBundleState>() {
             if let Some(bundle) = distro_state.bundle() {
@@ -123,13 +125,16 @@ impl GooseServeProcess {
                     prepend_dirs.push(bin_dir.clone());
                 }
                 if let Some(config_path) = &bundle.config_path {
-                    append_additional_config_env(&mut command, config_path);
+                    distro_config_path = Some(config_path.clone());
                 }
                 command.env("GOOSE_DISTRO_DIR", &bundle.root_dir);
             }
         }
 
         apply_shell_env_with_extended_path(&mut command, &shell_env, &prepend_dirs);
+        if let Some(config_path) = distro_config_path.as_deref() {
+            apply_additional_config_files_env(&mut command, &shell_env, config_path);
+        }
         set_databricks_host_env(&mut command);
 
         command
@@ -529,25 +534,24 @@ fn apply_shell_env_with_extended_path(
     );
 }
 
-fn append_additional_config_env(command: &mut Command, config_path: &std::path::Path) {
-    let existing = std::env::var_os("GOOSE_ADDITIONAL_CONFIG_FILES");
-    let mut paths: Vec<PathBuf> = existing
-        .as_ref()
-        .map(std::env::split_paths)
-        .map(Iterator::collect)
-        .unwrap_or_default();
-    paths.push(config_path.to_path_buf());
+fn apply_additional_config_files_env(
+    command: &mut Command,
+    shell_env: &HashMap<String, String>,
+    config_path: &std::path::Path,
+) {
+    let process_value = std::env::var_os(goose_config::ADDITIONAL_CONFIG_FILES_ENV);
+    let config_files = goose_config::additional_config_files_from_values(
+        process_value.as_deref(),
+        shell_env
+            .get(goose_config::ADDITIONAL_CONFIG_FILES_ENV)
+            .map(std::ffi::OsStr::new),
+        Some(config_path),
+    );
 
-    if let Ok(joined) = std::env::join_paths(&paths) {
-        command.env("GOOSE_ADDITIONAL_CONFIG_FILES", joined);
-    } else {
-        let mut fallback = existing.unwrap_or_default();
-        if !fallback.is_empty() {
-            fallback.push(if cfg!(windows) { ";" } else { ":" });
-        }
-        fallback.push(config_path.as_os_str());
-        command.env("GOOSE_ADDITIONAL_CONFIG_FILES", fallback);
-    }
+    command.env(
+        goose_config::ADDITIONAL_CONFIG_FILES_ENV,
+        goose_config::join_additional_config_files(&config_files.paths),
+    );
 }
 
 fn set_databricks_host_env(command: &mut Command) {
