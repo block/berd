@@ -95,6 +95,10 @@ export function SidebarProjectSection({
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
+  // When collapsed, surface unread by swapping the project icon for the dot
+  // (the chats — and their own dots — are hidden). When expanded, the per-chat
+  // dots carry the signal, so the project row shows its normal icon.
+  const showUnreadDot = projectHasUnread && !isExpanded;
   const {
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
@@ -202,14 +206,24 @@ export function SidebarProjectSection({
           )}
         >
           <span className="relative flex size-[18px] flex-shrink-0 items-center justify-center text-sidebar-foreground">
-            <span className="absolute group-hover:opacity-0">
-              <ProjectIcon
-                icon={project.icon}
-                color={project.color}
-                projectId={project.id}
-                imageClassName="size-[18px] rounded-[4px]"
-              />
-            </span>
+            {showUnreadDot ? (
+              <span
+                role="status"
+                aria-label={t("status.unreadMessages")}
+                className="absolute flex items-center justify-center group-hover:opacity-0"
+              >
+                <SidebarUnreadDot />
+              </span>
+            ) : (
+              <span className="absolute group-hover:opacity-0">
+                <ProjectIcon
+                  icon={project.icon}
+                  color={project.color}
+                  projectId={project.id}
+                  imageClassName="size-[18px] rounded-[4px]"
+                />
+              </span>
+            )}
             {isExpanded ? (
               <IconChevronDown className="absolute size-3 opacity-0 group-hover:opacity-100" />
             ) : (
@@ -220,7 +234,6 @@ export function SidebarProjectSection({
             {project.name}
           </span>
         </Button>
-        {projectHasUnread && <SidebarUnreadDot />}
         <SidebarItemMenu
           label={project.name}
           onOpenChange={setMenuOpen}

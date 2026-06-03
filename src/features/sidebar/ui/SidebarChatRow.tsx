@@ -273,6 +273,14 @@ export function SidebarChatRow({
           >
             <ActiveChatGooseIndicator size={16} />
           </span>
+        ) : hasUnread ? (
+          <span
+            className="flex size-4 shrink-0 items-center justify-center"
+            role="status"
+            aria-label={t("status.unreadMessages")}
+          >
+            <SidebarUnreadDot />
+          </span>
         ) : (
           <span
             className="flex size-4 shrink-0 items-center justify-center"
@@ -285,7 +293,6 @@ export function SidebarChatRow({
           {displayTitle}
         </span>
       </Button>
-      {!isRunning && hasUnread && <SidebarUnreadDot />}
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>

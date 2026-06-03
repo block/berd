@@ -197,7 +197,7 @@ describe("SidebarChatRow", () => {
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 
-  it("shows the trailing unread dot only when the chat has unread output", () => {
+  it("shows the unread dot in the icon slot only when the chat has unread output", () => {
     const { rerender } = render(
       <SidebarChatRow id="session-1" title="Recent Chat" isActive={false} />,
     );
@@ -213,8 +213,24 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(screen.getByLabelText(/unread messages/i)).toHaveClass("bg-success");
-    expect(screen.getByLabelText(/unread messages/i)).toHaveClass("right-3.5");
+    const slot = screen.getByLabelText(/unread messages/i);
+    const dot = slot.querySelector("span");
+    expect(dot).toHaveClass("bg-success");
+  });
+
+  it("hides the unread dot while the chat is running", () => {
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Running Chat"
+        isActive={false}
+        isRunning
+        hasUnread
+      />,
+    );
+
+    expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/chat active/i)).toBeInTheDocument();
   });
 
   it("can mark an idle chat unread from the menu", async () => {

@@ -42,9 +42,9 @@ export const SIDEBAR_SECTION_HEADER_ROW_CLASS = `${SIDEBAR_SECTION_HEADER_PADDIN
 /** Standalone chat row left padding; aligns with section divider inset. */
 export const SIDEBAR_CHAT_ROW_PADDING_CLASS = "pl-3.5";
 
-/** Unread dot on the right, aligned with section divider inset. */
+/** Bare unread dot; the parent owns positioning (e.g. a row's icon slot). */
 export const SIDEBAR_UNREAD_DOT_CLASS =
-  "pointer-events-none absolute right-3.5 top-1/2 h-[7px] w-[7px] translate-y-[calc(-50%+1px)] rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0";
+  "pointer-events-none h-[7px] w-[7px] rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0";
 
 /** Projects / Chats header action pill; colors are scoped sidebar tokens. */
 export const SIDEBAR_SECTION_ACTION_PILL_CLASS =
