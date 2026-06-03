@@ -42,5 +42,12 @@ export interface ExperimentDefinition {
   config?: Record<string, ExperimentConfigControl>;
 }
 
-export const EXPERIMENT_DEFINITIONS =
-  [] as const satisfies readonly ExperimentDefinition[];
+export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
+
+export const EXPERIMENT_DEFINITIONS = [
+  {
+    id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
+    titleKey: "experiments.builderbot.title",
+    descriptionKey: "experiments.builderbot.description",
+  },
+] as const satisfies readonly ExperimentDefinition[];

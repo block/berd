@@ -58,7 +58,7 @@ describe("ExperimentsSettings", () => {
   });
 
   it("shows an empty state when no experiments are registered", () => {
-    renderWithProviders(<ExperimentsSettings />);
+    renderWithProviders(<ExperimentsSettings registry={[]} />);
 
     expect(
       screen.getByRole("heading", {
@@ -68,6 +68,21 @@ describe("ExperimentsSettings", () => {
     expect(
       screen.getByText(
         i18n.t("experiments.emptyDescription", { ns: "settings" }),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the registered Builderbot experiment", () => {
+    renderWithProviders(<ExperimentsSettings />);
+
+    expect(
+      screen.getByRole("switch", {
+        name: i18n.t("experiments.builderbot.title", { ns: "settings" }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.builderbot.description", { ns: "settings" }),
       ),
     ).toBeInTheDocument();
   });

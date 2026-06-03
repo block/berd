@@ -152,6 +152,10 @@
     "tools": "Tools"
   },
   "experiments": {
+    "builderbot": {
+      "description": "Show the Builderbot tasks and automations surface.",
+      "title": "Builderbot"
+    },
     "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
     "saveError": "Couldn't save the experiment setting. Try again.",

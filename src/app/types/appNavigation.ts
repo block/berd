@@ -5,6 +5,7 @@ export type AppView =
   | "home"
   | "chat"
   | "automations"
+  | "builderbot"
   | "design-system"
   | "skills"
   | "agents"
@@ -36,6 +37,7 @@ export type AppNavigationLocation =
   | { view: "home" }
   | { view: "chat"; sessionId: string | null }
   | { view: "automations"; route: AutomationNavigationRoute }
+  | { view: "builderbot" }
   | { view: "design-system"; designSystemSection: DesignSystemSection }
   | { view: "skills"; skillId: string | null }
   | { view: "agents"; personaId: string | null }

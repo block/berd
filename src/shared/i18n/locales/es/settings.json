@@ -152,6 +152,10 @@
     "tools": "Herramientas"
   },
   "experiments": {
+    "builderbot": {
+      "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
+      "title": "Builderbot"
+    },
     "description": "Activa funciones de Goose en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",

@@ -11,7 +11,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { IconArrowLeft, IconPalette } from "@tabler/icons-react";
+import { IconArrowLeft, IconPalette, IconServer } from "@tabler/icons-react";
 import {
   SidebarNavAgentsIcon,
   SidebarNavAutomationsIcon,
@@ -72,6 +72,8 @@ import {
   DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSidebarScrollIntoView } from "./useSidebarScrollIntoView";
 
 type SidebarNavItemIcon = NonNullable<
@@ -130,6 +132,7 @@ const MAIN_NAV_SCROLL_TARGETS: ReadonlySet<AppView> = new Set([
   "agents",
   "skills",
   "automations",
+  "builderbot",
   "session-history",
 ]);
 type SidebarSectionVisibility = {
@@ -494,6 +497,8 @@ export function Sidebar({
 
   const labelVisible = !collapsed;
   const labelTransition = "";
+  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
+  const showBuilderbotSurface = Boolean(builderbotExperiment?.enabled);
   const isSettingsSurface = activeView === "settings";
   const isDesignSystemSurface = activeView === "design-system";
   const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
@@ -509,6 +514,15 @@ export function Sidebar({
       label: t("navigation.automations"),
       icon: SidebarNavAutomationsIcon,
     },
+    ...(showBuilderbotSurface
+      ? [
+          {
+            id: "builderbot" as const,
+            label: t("navigation.builderbot"),
+            icon: IconServer,
+          },
+        ]
+      : []),
     {
       id: "session-history",
       label: t("navigation.sessionHistory"),

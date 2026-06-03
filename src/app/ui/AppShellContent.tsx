@@ -3,6 +3,7 @@ import { HomeView } from "@/features/home/ui/HomeView";
 import { ChatView } from "@/features/chat/ui/ChatView";
 import { AutomationsWorkbench } from "@/features/automations/ui/AutomationsView";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
+import { BuilderbotView } from "@/features/builderbot/ui/BuilderbotView";
 import { SkillsView } from "@/features/skills/ui/SkillsView";
 import { AgentsView } from "@/features/agents/ui/AgentsView";
 import { ProjectsView } from "@/features/projects/ui/ProjectsView";
@@ -11,6 +12,8 @@ import { SessionHistoryView } from "@/features/sessions/ui/SessionHistoryView";
 import { SettingsView } from "@/features/settings/ui/SettingsView";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -129,6 +132,30 @@ export function AppShellContent({
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
 }: AppShellContentProps) {
+  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
+  const homeContent = (
+    <HomeView
+      onOpenProject={onStartChatFromProjectId}
+      onOpenAgent={onOpenAgent}
+      onOpenSkill={onOpenSkill}
+      onSelectSession={onSelectSession}
+      onStartProjectChat={onStartProjectChat}
+      onCreatePersona={onCreatePersona}
+      onCreateProject={onCreateProject}
+      onOpenAutomation={(automationId) =>
+        onNavigateAutomations({
+          surface: "detail",
+          automationId,
+          tab: "details",
+          selectedRunKey: null,
+        })
+      }
+      onOpenSkills={() => onNavigateSkills(null)}
+      onOpenAutomations={() => onNavigateAutomations({ surface: "overview" })}
+      onHydratePinnedChatSessions={onHydratePinnedChatSessions}
+    />
+  );
+
   switch (activeView) {
     case "design-system":
       return isDesignSystemExplorerEnabled() ? (
@@ -153,6 +180,8 @@ export function AppShellContent({
           onBuilderLeaveActionChange={onAutomationBuilderLeaveActionChange}
         />
       );
+    case "builderbot":
+      return builderbotExperiment?.enabled ? <BuilderbotView /> : homeContent;
     case "skills":
       return (
         <SkillsView
@@ -214,29 +243,6 @@ export function AppShellContent({
         />
       );
     case "home":
-      return (
-        <HomeView
-          onOpenProject={onStartChatFromProjectId}
-          onOpenAgent={onOpenAgent}
-          onOpenSkill={onOpenSkill}
-          onSelectSession={onSelectSession}
-          onStartProjectChat={onStartProjectChat}
-          onCreatePersona={onCreatePersona}
-          onCreateProject={onCreateProject}
-          onOpenAutomation={(automationId) =>
-            onNavigateAutomations({
-              surface: "detail",
-              automationId,
-              tab: "details",
-              selectedRunKey: null,
-            })
-          }
-          onOpenSkills={() => onNavigateSkills(null)}
-          onOpenAutomations={() =>
-            onNavigateAutomations({ surface: "overview" })
-          }
-          onHydratePinnedChatSessions={onHydratePinnedChatSessions}
-        />
-      );
+      return homeContent;
   }
 }

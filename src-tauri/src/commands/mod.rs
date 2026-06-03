@@ -4,6 +4,7 @@ pub mod agents;
 pub mod artifacts;
 pub mod automations;
 pub mod avatars;
+pub mod builderbot;
 pub mod cache;
 pub mod connections;
 pub mod diagnostics;

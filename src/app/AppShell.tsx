@@ -101,6 +101,8 @@ import {
   type Message,
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -287,6 +289,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     );
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
+  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
+  const isBuilderbotSurfaceEnabled = Boolean(builderbotExperiment?.enabled);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -595,6 +599,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     }
     void prefetchProjectArtifactRenderer();
   }, [activeView]);
+
+  useEffect(() => {
+    if (activeView === "builderbot" && !isBuilderbotSurfaceEnabled) {
+      setActiveView("home");
+    }
+  }, [activeView, isBuilderbotSurfaceEnabled]);
 
   useEffect(() => {
     if (activeView !== "settings") {
@@ -1743,6 +1753,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const handleNavigate = useCallback(
     (view: AppView) => {
       guardAppNavigation(() => {
+        if (view === "builderbot" && !isBuilderbotSurfaceEnabled) {
+          setActiveView("home");
+          return;
+        }
         if (view === "settings") {
           openSettings();
           return;
@@ -1767,7 +1781,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView(view);
       });
     },
-    [openDesignSystem, openSettings, guardAppNavigation, setActiveSession],
+    [
+      openDesignSystem,
+      openSettings,
+      guardAppNavigation,
+      setActiveSession,
+      isBuilderbotSurfaceEnabled,
+    ],
   );
 
   const navigateSkills = useCallback(
@@ -2078,6 +2098,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               current("automation-detail", automationsBreadcrumbLabel),
             ]
           : [current("automations", "Automations")];
+      case "builderbot":
+        return [current("builderbot", "Builderbot")];
       case "design-system": {
         const designSystemSectionLabel = DESIGN_SYSTEM_SECTIONS.find(
           (section) => section.id === activeDesignSystemSection,

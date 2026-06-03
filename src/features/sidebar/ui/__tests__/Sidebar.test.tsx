@@ -9,6 +9,8 @@ import {
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
 import { Sidebar } from "../Sidebar";
 
 const designSystemExplorer = vi.hoisted(() => ({
@@ -525,6 +527,24 @@ describe("Sidebar", () => {
     await user.click(screen.getByRole("button", { name: /automations/i }));
 
     expect(onNavigate).toHaveBeenCalledWith("automations");
+  });
+
+  it("hides Builderbot from main navigation until the experiment is enabled", () => {
+    renderSidebar();
+
+    expect(screen.queryByRole("button", { name: /builderbot/i })).toBeNull();
+  });
+
+  it("renders Builderbot in main navigation when the experiment is enabled", async () => {
+    const user = userEvent.setup();
+    const onNavigate = vi.fn();
+    setExperimentEnabled(BUILDERBOT_SURFACE_EXPERIMENT_ID, true);
+
+    renderSidebar({ onNavigate });
+
+    await user.click(screen.getByRole("button", { name: /builderbot/i }));
+
+    expect(onNavigate).toHaveBeenCalledWith("builderbot");
   });
 
   it("renders settings after session history in main navigation", () => {

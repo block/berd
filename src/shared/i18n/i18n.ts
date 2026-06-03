@@ -30,6 +30,7 @@ const localeResourceLoaders = {
   en: {
     agents: () => import("./locales/en/agents.json"),
     automations: () => import("./locales/en/automations.json"),
+    builderbot: () => import("./locales/en/builderbot.json"),
     common: () => import("./locales/en/common.json"),
     chat: () => import("./locales/en/chat.json"),
     feedback: () => import("./locales/en/feedback.json"),
@@ -44,6 +45,7 @@ const localeResourceLoaders = {
   es: {
     agents: () => import("./locales/es/agents.json"),
     automations: () => import("./locales/es/automations.json"),
+    builderbot: () => import("./locales/es/builderbot.json"),
     common: () => import("./locales/es/common.json"),
     chat: () => import("./locales/es/chat.json"),
     feedback: () => import("./locales/es/feedback.json"),

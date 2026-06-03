@@ -1,0 +1,41 @@
+{
+  "tabs": {
+    "tasks": "Tareas",
+    "automations": "Automatizaciones"
+  },
+  "states": {
+    "errorTitle": "Builderbot no cargó",
+    "errorBody": "Revisa tu conexión e inténtalo de nuevo."
+  },
+  "tasks": {
+    "title": "Tareas",
+    "item": "Tarea de Builderbot",
+    "by": "por {{user}}",
+    "emptyTitle": "No hay tareas",
+    "emptyBody": "Builderbot no devolvió tareas para ti."
+  },
+  "automations": {
+    "title": "Automatizaciones",
+    "emptyTitle": "No hay automatizaciones",
+    "emptyBody": "Builderbot no devolvió automatizaciones programadas o activadas de tu propiedad.",
+    "enabled": "activada",
+    "disabled": "desactivada",
+    "nextRun": "próxima {{time}}",
+    "conditions_one": "{{displayCount}} condición",
+    "conditions_other": "{{displayCount}} condiciones",
+    "kind": {
+      "scheduled": "programada",
+      "routing": "activada"
+    },
+    "action": {
+      "agent": "Agente",
+      "script": "Script",
+      "routine": "Rutina",
+      "task": "Tarea"
+    },
+    "runAs": {
+      "me": "Ejecutar como yo",
+      "builderbot": "Ejecutar como Builderbot"
+    }
+  }
+}

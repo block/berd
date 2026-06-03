@@ -1,0 +1,41 @@
+{
+  "tabs": {
+    "tasks": "Tasks",
+    "automations": "Automations"
+  },
+  "states": {
+    "errorTitle": "Builderbot did not load",
+    "errorBody": "Check your connection and try again."
+  },
+  "tasks": {
+    "title": "Tasks",
+    "item": "Builderbot task",
+    "by": "by {{user}}",
+    "emptyTitle": "No tasks",
+    "emptyBody": "Builderbot returned no tasks for you."
+  },
+  "automations": {
+    "title": "Automations",
+    "emptyTitle": "No automations",
+    "emptyBody": "Builderbot returned no scheduled or triggered automations owned by you.",
+    "enabled": "enabled",
+    "disabled": "disabled",
+    "nextRun": "next {{time}}",
+    "conditions_one": "{{displayCount}} condition",
+    "conditions_other": "{{displayCount}} conditions",
+    "kind": {
+      "scheduled": "scheduled",
+      "routing": "triggered"
+    },
+    "action": {
+      "agent": "Agent",
+      "script": "Script",
+      "routine": "Routine",
+      "task": "Task"
+    },
+    "runAs": {
+      "me": "Run as me",
+      "builderbot": "Run as Builderbot"
+    }
+  }
+}

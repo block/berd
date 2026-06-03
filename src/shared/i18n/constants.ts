@@ -4,6 +4,7 @@ export const DEFAULT_NAMESPACE = "common";
 export const TRANSLATION_NAMESPACES = [
   "agents",
   "automations",
+  "builderbot",
   "common",
   "chat",
   "feedback",
