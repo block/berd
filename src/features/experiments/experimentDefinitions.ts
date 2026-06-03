@@ -1,0 +1,46 @@
+export type ExperimentConfigValue = boolean | number | string;
+
+export type ExperimentConfigControl =
+  | {
+      type: "boolean";
+      labelKey: string;
+      descriptionKey?: string;
+      defaultValue: boolean;
+    }
+  | {
+      type: "select";
+      labelKey: string;
+      descriptionKey?: string;
+      defaultValue: string;
+      options: readonly {
+        labelKey: string;
+        value: string;
+      }[];
+    }
+  | {
+      type: "number";
+      labelKey: string;
+      descriptionKey?: string;
+      defaultValue: number;
+      min?: number;
+      max?: number;
+      step?: number;
+    }
+  | {
+      type: "text";
+      labelKey: string;
+      descriptionKey?: string;
+      defaultValue: string;
+      placeholderKey?: string;
+    };
+
+export interface ExperimentDefinition {
+  id: string;
+  titleKey: string;
+  descriptionKey: string;
+  defaultEnabled?: boolean;
+  config?: Record<string, ExperimentConfigControl>;
+}
+
+export const EXPERIMENT_DEFINITIONS =
+  [] as const satisfies readonly ExperimentDefinition[];

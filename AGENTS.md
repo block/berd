@@ -27,6 +27,16 @@ paths through `convertFileSrc(..., "asset")` before rendering media. Do not
 vendor startup media, fetch catalogs in the renderer, or construct Artifactory
 URLs in UI code.
 
+## Experimental features
+
+Experiments are opt-in, user-local switches for in-progress UI or workflow
+behavior. Use `.agents/skills/experimental-features/SKILL.md` before adding,
+reviewing, graduating, or removing an experiment.
+
+Do not create one-off localStorage keys, distro flags, Tauri commands, or
+capabilities for per-user experiments unless the skill says the use case
+requires it.
+
 ## Common commands
 
 - `just setup` — install pnpm deps, build SDK, build managed local Goose

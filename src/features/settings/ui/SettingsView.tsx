@@ -3,6 +3,7 @@ import { DoctorSettings } from "./DoctorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { GeneralSettings } from "./GeneralSettings";
 import type { SectionId } from "./settingsSections";
+import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import {
   ConnectionsSettings,
   type ConnectionsTab,
@@ -43,6 +44,7 @@ export function SettingsView({
         />
       )}
       {activeSection === "doctor" && <DoctorSettings />}
+      {activeSection === "experiments" && <ExperimentsSettings />}
       {activeSection === "general" && <GeneralSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
       {activeSection === "updates" && <UpdatesSettings />}

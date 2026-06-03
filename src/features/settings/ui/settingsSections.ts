@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import {
   Archive,
+  FlaskConical,
   Link2,
   RefreshCw,
   Settings2,
@@ -15,6 +16,7 @@ export const SETTINGS_SECTIONS = [
   { id: "archive", labelKey: "nav.archive", icon: Archive },
   { id: "updates", labelKey: "nav.updates", icon: RefreshCw },
   { id: "doctor", labelKey: "nav.doctor", icon: Stethoscope },
+  { id: "experiments", labelKey: "nav.experiments", icon: FlaskConical },
 ] as const satisfies readonly {
   id: string;
   labelKey: string;

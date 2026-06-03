@@ -151,6 +151,12 @@
     "title": "Doctor",
     "tools": "Tools"
   },
+  "experiments": {
+    "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
+    "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
+    "saveError": "Couldn't save the experiment setting. Try again.",
+    "title": "Experiments"
+  },
   "general": {
     "agentToolsTips": {
       "description": "Goose will show tips in chat for relevant tools, skills, or workflows.",
@@ -222,6 +228,7 @@
     "connections": "Connections",
     "designSystem": "Design system (dev only)",
     "doctor": "Doctor",
+    "experiments": "Experiments",
     "extensions": "Extensions",
     "general": "General",
     "providers": "AI providers",

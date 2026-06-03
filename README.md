@@ -49,6 +49,12 @@ stage-sidecar`. Staging creates `src-tauri/binaries/goosed-<rust-host-triple>`,
 matching the `"externalBin": ["binaries/goosed"]` entry in
 `src-tauri/tauri.conf.json`.
 
+## Adding an experiment
+
+Experiments are user-local, opt-in preferences for unstable UI or workflow
+behavior. Use `.agents/skills/experimental-features/SKILL.md` for the current
+workflow, registry contract, storage rules, Tauri guardrails, and test coverage.
+
 ## Publishing avatar assets
 
 Avatar media publishes as immutable catalog releases. Source files must be:

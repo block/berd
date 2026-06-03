@@ -151,6 +151,12 @@
     "title": "Diagnóstico",
     "tools": "Herramientas"
   },
+  "experiments": {
+    "description": "Activa funciones de Goose en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
+    "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
+    "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
+    "title": "Experimentos"
+  },
   "general": {
     "agentToolsTips": {
       "description": "Goose mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
@@ -222,6 +228,7 @@
     "connections": "Conexiones",
     "designSystem": "Sistema de diseño (solo dev)",
     "doctor": "Diagnóstico",
+    "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
     "providers": "Proveedores de IA",

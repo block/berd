@@ -121,8 +121,11 @@ Use distro bundles for packaged-app policy and shell-level defaults.
 
 Good fits:
 
-- feature flags for Goose UI behavior
-- allowlists that suggest visible product choices
-- config or helper binaries that should be present when `goose serve` starts
+- packaged build policy or startup defaults
+- Tauri shell or sidecar resources/config
+- `providerAllowlist`, `kgoose`, `featureToggles.costTracking`
+- bundled `config.yaml`, `bin/`, `skills/`, and `agents/`
 
-Avoid using distro bundles as a replacement for normal app state, user settings, or ACP-backed domain data.
+Do not use distro bundles for normal app state, user preferences, dynamic
+runtime switches, ACP-backed data, or per-user experiments. For opt-in
+experiments, use `.agents/skills/experimental-features/SKILL.md`.
