@@ -79,7 +79,7 @@ function SettingsSection({
   return (
     <section className="space-y-3">
       {title ? <h4 className="text-base text-foreground">{title}</h4> : null}
-      <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
+      <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
         {children}
       </div>
     </section>
@@ -332,7 +332,7 @@ export function GeneralSettings() {
                 <button
                   aria-pressed={selected}
                   className={cn(
-                    "flex min-w-0 items-center gap-3 rounded-lg border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    "flex min-w-0 items-center gap-3 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     selected
                       ? "border-primary/30 bg-primary/10 text-foreground"
                       : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
@@ -423,7 +423,7 @@ export function GeneralSettings() {
             </p>
           </div>
 
-          <div className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-xxs font-medium text-success">
+          <div className="inline-flex items-center gap-1 rounded-xs bg-success/10 px-2 py-1 text-xxs font-medium text-success">
             <IconCheck className="size-3.5" />
             <span>{t("compaction.goose.builtIn")}</span>
           </div>

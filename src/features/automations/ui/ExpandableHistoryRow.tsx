@@ -61,7 +61,7 @@ export function ExpandableHistoryRow({
   return (
     <Accordion.Item
       value={value}
-      className="w-full overflow-hidden rounded-card-chat border-b-0 bg-card"
+      className="w-full overflow-hidden rounded-md border-b-0 bg-card"
     >
       <Accordion.Header className="flex">
         <Accordion.Trigger

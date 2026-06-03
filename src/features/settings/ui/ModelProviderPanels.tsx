@@ -42,7 +42,7 @@ export function ModelRefreshMessage({
     return (
       <p
         role="status"
-        className="rounded-md border border-warning bg-warning/20 px-2.5 py-2 text-xs text-warning"
+        className="rounded-sm border border-warning bg-warning/20 px-2.5 py-2 text-xs text-warning"
       >
         {t("providers.modelRefreshWarning", { message: warning })}
       </p>
@@ -94,14 +94,14 @@ export function ConnectedFieldsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 space-y-3 rounded-b-lg border-x border-b px-3 py-3 outline-none"
+      className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
     >
       {fields.map((field) => {
         const isEditing = editingKey === field.key;
         return (
           <div
             key={field.key}
-            className="space-y-2 rounded-md border border-border px-3 py-2.5"
+            className="space-y-2 rounded-sm border border-border px-3 py-2.5"
           >
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
@@ -242,7 +242,7 @@ export function SetupFieldsPanel({
     <div
       ref={panelRef}
       tabIndex={-1}
-      className="focus-override mx-3 space-y-3 rounded-b-lg border-x border-b px-3 py-3 outline-none"
+      className="focus-override mx-3 space-y-3 rounded-b-sm border-x border-b px-3 py-3 outline-none"
     >
       {!isConnected && fieldSetupDescription ? (
         <p className="text-xs text-muted-foreground">{fieldSetupDescription}</p>

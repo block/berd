@@ -62,7 +62,7 @@ export function ArchivedChatsSection() {
       {archivedChats.map((session) => (
         <div
           key={session.id}
-          className="flex items-center justify-between gap-3 rounded-card-sm bg-card px-3 py-2 text-card-foreground"
+          className="flex items-center justify-between gap-3 rounded-sm bg-card px-3 py-2 text-card-foreground"
         >
           <div className="min-w-0">
             <div className="truncate text-sm">

@@ -42,8 +42,9 @@ import {
 } from "@/features/agents/lib/agentBuilderSession";
 import { AvatarLibraryPicker } from "@/features/agents/ui/AvatarLibraryPicker";
 import { ProviderModelFields } from "@/features/agents/ui/PersonaFields/ProviderModelFields";
+import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 
-const FIELD_CLASS = "rounded-card-chat border-transparent bg-card/40";
+const FIELD_CLASS = FORM_FIELD_CLASS;
 const FIELD_LABEL_CLASS = "mb-2 block text-xs text-muted-foreground";
 
 export interface AgentBuilderRailProps {
@@ -249,7 +250,7 @@ export function AgentBuilderRail({
     !blockingError;
 
   const headerNode = (
-    <div className="flex items-center justify-between rounded-pill bg-card/40 px-4 py-3 text-sm text-foreground">
+    <div className="flex items-center justify-between rounded-full bg-card/40 px-4 py-3 text-sm text-foreground">
       <span className="flex min-w-0 items-center gap-2">
         <IconSparkles className="size-4 shrink-0 text-foreground" />
         {headerName ? (
@@ -359,7 +360,7 @@ export function AgentBuilderRail({
   ) => (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-card bg-card p-5 lg:w-[506px]",
+        "flex min-h-0 w-full flex-col rounded-md bg-card p-5 lg:w-[506px]",
         className,
       )}
       aria-label={t("builderRail.ariaLabel")}
@@ -374,7 +375,7 @@ export function AgentBuilderRail({
   );
 
   const pickerHeaderNode = (
-    <div className="flex items-center gap-2 rounded-pill bg-card/40 px-3 py-3 text-sm text-foreground">
+    <div className="flex items-center gap-2 rounded-full bg-card/40 px-3 py-3 text-sm text-foreground">
       <Button
         type="button"
         variant="ghost"
@@ -401,7 +402,7 @@ export function AgentBuilderRail({
   if (error === "parse") {
     return shell(
       headerNode,
-      <section className="rounded-card-chat border border-destructive/40 bg-destructive/10 p-3">
+      <section className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
         <div className="flex items-start gap-2">
           <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
           <div>
@@ -429,7 +430,7 @@ export function AgentBuilderRail({
   if (error === "missing" || !data) {
     return shell(
       headerNode,
-      <section className="rounded-card-chat border border-destructive/40 bg-destructive/10 p-3">
+      <section className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
         <div className="flex items-start gap-2">
           <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
           <div>
@@ -476,7 +477,7 @@ export function AgentBuilderRail({
       <section>
         <button
           type="button"
-          className="group relative flex min-h-48 w-full items-center justify-center overflow-hidden rounded-card-chat bg-card/40 p-5 transition-colors hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="group relative flex min-h-48 w-full items-center justify-center overflow-hidden rounded-md bg-card/40 p-5 transition-colors hover:bg-card/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={
             normalizedAvatar
               ? t("builderRail.changeAvatar")
@@ -551,7 +552,7 @@ export function AgentBuilderRail({
       {error === "load" ? (
         <section
           role="alert"
-          className="rounded-card-chat border border-destructive/40 bg-destructive/10 p-3"
+          className="rounded-md border border-destructive/40 bg-destructive/10 p-3"
         >
           <div className="flex items-start gap-2">
             <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />

@@ -773,7 +773,7 @@ export function MessageTimeline({
             }}
             className={cn(
               index === 0 ? "mt-0" : "mt-4",
-              "rounded-xl transition-[background-color,box-shadow]",
+              "rounded-lg transition-[background-color,box-shadow]",
               pulsingMessageId === message.id &&
                 "bg-accent/25 ring-2 ring-accent/35 ring-inset",
             )}
@@ -838,7 +838,7 @@ export function MessageTimeline({
         <div
           aria-hidden="true"
           data-testid="message-timeline-surface"
-          className="pointer-events-none absolute inset-x-0 top-0 bottom-[calc(var(--chat-surface-bottom-gap)*2)] rounded-chrome bg-card"
+          className="pointer-events-none absolute inset-x-0 top-0 bottom-[calc(var(--chat-surface-bottom-gap)*2)] rounded-md bg-card"
         />
       ) : null}
       <div
@@ -850,7 +850,7 @@ export function MessageTimeline({
         data-testid="message-timeline-scroll"
         className={cn(
           "scrollbar-none relative z-0 min-h-0 flex-1 overflow-y-auto",
-          !hasFooter && "rounded-chrome bg-card",
+          !hasFooter && "rounded-md bg-card",
         )}
       >
         <div className="flex min-h-full flex-col">

@@ -52,17 +52,12 @@ typography:
     lineHeight: "leading-none"
     letterSpacing: "tracking-wide"
 rounded:
-  rounded-full: "999px"
-  rounded-pill: "999px"
-  rounded-input: "999px"
-  rounded-card: "20px"
-  rounded-card-lg: "24px"
-  rounded-card-sm: "14px"
-  rounded-dropdown: "20px"
-  rounded-overlay: "20px"
-  rounded-modal: "16px"
+  rounded-xs: "6px"
+  rounded-sm: "12px"
   rounded-md: "18px"
-  rounded-2xl: "1rem"
+  rounded-lg: "24px"
+  rounded-full: "999px"
+  rounded-composer: "40px"
 spacing:
   h-7: "1.75rem"
   h-8: "2rem"
@@ -92,28 +87,28 @@ components:
   input-default:
     backgroundColor: "transparent"
     textColor: "{colors.text-foreground}"
-    rounded: "{rounded.rounded-input}"
+    rounded: "{rounded.rounded-sm}"
     height: "2.25rem"
     padding: "0 0.75rem"
   chat-composer:
     backgroundColor: "{colors.bg-background}"
     textColor: "{colors.text-foreground}"
-    rounded: "{rounded.rounded-2xl}"
+    rounded: "{rounded.rounded-composer}"
     padding: "1rem"
   card-default:
     backgroundColor: "{colors.bg-card}"
     textColor: "{colors.text-foreground}"
-    rounded: "{rounded.rounded-card}"
+    rounded: "{rounded.rounded-md}"
     padding: "1.5rem"
   nav-item-active:
     backgroundColor: "{colors.bg-sidebar-accent}"
     textColor: "{colors.text-foreground}"
-    rounded: "6px"
+    rounded: "{rounded.rounded-sm}"
     padding: "0.375rem 0.75rem"
   badge-secondary:
     backgroundColor: "{colors.bg-muted}"
     textColor: "{colors.text-foreground}"
-    rounded: "{rounded.rounded-pill}"
+    rounded: "{rounded.rounded-xs}"
     padding: "0.125rem 0.5rem"
 ---
 
@@ -228,13 +223,39 @@ Goose Internal uses semantic shadow tokens plus borders and tonal layering. Most
 
 **The No Glass Rule.** Blur and translucent glass are not default elevation. The top bar may use subtle translucency as window chrome, but product panels should use solid tokenized surfaces.
 
-## 5. Components
+## 5. Shape
+
+Corner radii use a 5-step scale built on Tailwind's standard utility names: `rounded-xs`, `rounded-sm`, `rounded-md`, `rounded-lg`, and `rounded-full`. Each step differs by 6px so adjacent tokens nest concentrically.
+
+| Token | Value | Tailwind class |
+| --- | --- | --- |
+| `--radius-xs` | 6px | `rounded-xs` |
+| `--radius-sm` | 12px | `rounded-sm` |
+| `--radius-md` | 18px | `rounded-md` |
+| `--radius-lg` | 24px | `rounded-lg` |
+| (built-in) | 999px | `rounded-full` |
+
+**The Nesting Rule.** When one rounded surface sits inside another, drop one step on the scale and use 6px (`p-1.5`) of padding between them. The inner corner will be concentric with the outer corner. Cards inside modals nest as `md → sm`; sub-cards inside cards nest as `sm → xs`.
+
+**Composer Exception.** `rounded-composer` (40px) is a deliberate one-off for the chat composer surface. Do not reuse it elsewhere; the composer is the app's signature component and earns its own token.
+
+**Picking a Token.**
+
+- `rounded-full` — buttons, chips, pills, inputs, avatars, any surface that should read as fully soft.
+- `rounded-lg` (24px) — the largest scale container; outer cards or panels that dominate a region.
+- `rounded-md` (18px) — default for cards, modals, dropdowns, popovers, tiles, and most non-pill surfaces.
+- `rounded-sm` (12px) — surfaces nested inside `md` containers, small cards, sidebar nav items.
+- `rounded-xs` (6px) — surfaces nested inside `sm` containers, micro chips, dense controls.
+
+**Authoring rule.** Always use Tailwind's standard radius utility names. Do not invent new class names like `rounded-m` or `rounded-pill`; override values in `@theme inline` instead.
+
+## 6. Components
 
 ### Buttons
 
 Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx) and its variants before adding feature-level styling.
 
-- **Shape:** `rounded-full` for ordinary buttons.
+- **Shape:** `rounded-full` for all buttons — text and icon-only alike. The base `Button` applies this automatically; feature code should not override the radius. Buttons are exempt from the geometric nesting rule — their effective radius is half their height, not a scale step.
 - **Primary:** `bg-primary text-primary-foreground`, mapping through semantic primary surface and readable-on-primary text tokens.
 - **Sizing:** Use the `Button` `size` prop. Current variants map to `h-7`, `h-8`, `h-9`, and `h-10`.
 - **Ghost icon buttons:** No hover fill for `variant="ghost"` plus icon sizes; they shift from muted text to foreground text.
@@ -244,7 +265,7 @@ Use [Button](/Users/morganm/Development/goose-internal/src/shared/ui/button.tsx)
 
 Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), composer chips, or a shared variant.
 
-- **Shape:** `rounded-pill` or `rounded-full`.
+- **Shape:** `rounded-xs` (6px). Badges and status chips deliberately differ from buttons in shape because they differ in semantic purpose — buttons are interactive controls and use `rounded-full` to read as "press me"; badges are static labels conveying state and use `rounded-xs` so they read as "tag" rather than "control." This affordance separation reduces the chance of users attempting to click a static status indicator.
 - **Color:** `bg-muted`, `text-foreground`, `text-muted`, and state tokens when the chip communicates state.
 - **State:** Removable context chips should stay compact and should not compete with the composer text field.
 
@@ -252,7 +273,7 @@ Use [Badge](/Users/morganm/Development/goose-internal/src/shared/ui/badge.tsx), 
 
 Use [Card](/Users/morganm/Development/goose-internal/src/shared/ui/card.tsx) only when a meaningful object boundary exists.
 
-- **Shape:** `rounded-card`, with `rounded-card-sm` and `rounded-card-lg` for system-level variants.
+- **Shape:** `rounded-md` (18px) on the base `Card` primitive, matching the sidenav panel. Use `rounded-lg` (24px) for the largest framing cards and `rounded-sm` (12px) for sub-cards nested inside another card.
 - **Color:** `bg-card text-card-foreground`, mapping through `--card` and `--card-foreground` to semantic card surface and text tokens.
 - **Border:** `border-border`, mapping to `--border`.
 - **Shadow:** `hover:shadow-card` only when the card is interactive.
@@ -294,7 +315,7 @@ Use Radix-backed shared primitives for dialogs, sheets, drawers, dropdowns, popo
 - **Motion:** Use existing open/close animations and durations (`--duration-fast`, `--duration-normal`, `--duration-slow`).
 - **Modal Use:** Dialogs are for blocking decisions, destructive confirmation, or workflows that cannot remain inline.
 
-## 6. Do's and Don'ts
+## 7. Do's and Don'ts
 
 ### Do:
 

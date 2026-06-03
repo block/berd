@@ -184,7 +184,7 @@ export function ProjectArtifactWidget({
           : t("widgets.projectArtifactPin.unavailableTitle")
       }
       className={cn(
-        "group relative isolate flex h-full w-full flex-col items-center overflow-visible rounded-card-chat bg-transparent text-left text-foreground transition-opacity duration-150 cursor-pointer [transform:translateZ(0)]",
+        "group relative isolate flex h-full w-full flex-col items-center overflow-visible rounded-md bg-transparent text-left text-foreground transition-opacity duration-150 cursor-pointer [transform:translateZ(0)]",
         project ? "hover:opacity-95" : "cursor-not-allowed opacity-70",
       )}
     >

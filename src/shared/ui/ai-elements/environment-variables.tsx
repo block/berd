@@ -64,7 +64,7 @@ export const EnvironmentVariables = ({
   return (
     <EnvironmentVariablesContext.Provider value={contextValue}>
       <div
-        className={cn("rounded-lg border bg-background", className)}
+        className={cn("rounded-md border bg-background", className)}
         {...props}
       >
         {children}

@@ -78,7 +78,7 @@ export function UpdatesSettings() {
 
   return (
     <SettingsPage contentClassName="space-y-6">
-      <section className="overflow-hidden rounded-lg bg-background px-6 py-5">
+      <section className="overflow-hidden rounded-md bg-background px-6 py-5">
         <div className="space-y-1">
           <div className="flex items-baseline justify-between gap-2">
             <h4 className="text-sm text-foreground">

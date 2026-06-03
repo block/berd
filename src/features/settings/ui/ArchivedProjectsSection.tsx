@@ -66,14 +66,14 @@ export function ArchivedProjectsSection() {
         {archivedProjects.map((project) => (
           <div
             key={project.id}
-            className="flex items-center justify-between gap-3 rounded-card-sm bg-card px-3 py-2 text-card-foreground"
+            className="flex items-center justify-between gap-3 rounded-sm bg-card px-3 py-2 text-card-foreground"
           >
             <div className="flex min-w-0 items-center gap-2">
               <ProjectIcon
                 icon={project.icon}
                 color={project.color}
                 className="size-4 shrink-0 text-foreground"
-                imageClassName="size-4 shrink-0 rounded-[4px]"
+                imageClassName="size-4 shrink-0 rounded-xs"
               />
               <span className="truncate text-sm">{project.name}</span>
             </div>

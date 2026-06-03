@@ -107,7 +107,7 @@ export function AvatarLibraryPicker({
           key={entry.id}
           type="button"
           className={cn(
-            "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-card-sm bg-popover p-2",
+            "relative flex aspect-square min-h-24 items-center justify-center overflow-hidden rounded-sm bg-popover p-2",
             "border border-border/80 transition-colors hover:border-border",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             !selectable &&
@@ -204,7 +204,7 @@ export function AvatarLibraryPicker({
           key={collection.id}
           type="button"
           className={cn(
-            "flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-popover p-3 text-center",
+            "flex min-w-0 flex-col items-center gap-2 rounded-sm bg-popover p-3 text-center",
             "border border-border/80 transition-colors hover:border-border hover:bg-accent",
             "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
             disabled && "cursor-not-allowed opacity-60",
@@ -215,7 +215,7 @@ export function AvatarLibraryPicker({
             void library.openCollection(collection);
           }}
         >
-          <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center overflow-hidden rounded-card-sm bg-background">
+          <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center overflow-hidden rounded-sm bg-background">
             {cachedCoverMedia ? (
               <AvatarMedia
                 media={cachedCoverMedia}
@@ -260,9 +260,9 @@ export function AvatarLibraryPicker({
   const renderCollectionSkeleton = (index: number) => (
     <div
       key={index}
-      className="flex min-w-0 flex-col items-center gap-2 rounded-card-sm bg-popover p-3 text-center"
+      className="flex min-w-0 flex-col items-center gap-2 rounded-sm bg-popover p-3 text-center"
     >
-      <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-card-sm bg-background">
+      <span className="flex aspect-[4/3] w-full shrink-0 items-center justify-center rounded-sm bg-background">
         <Spinner className="size-4 text-muted-foreground" />
       </span>
       <span className="text-[11px] text-muted-foreground">
@@ -279,7 +279,7 @@ export function AvatarLibraryPicker({
       )}
     >
       {library.error ? (
-        <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between gap-2 rounded-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
           <span>{catalogErrorText}</span>
           <Button
             type="button"
@@ -311,7 +311,7 @@ export function AvatarLibraryPicker({
             </div>
           )}
           {library.failedCollectionIds.has(selectedCollection.id) ? (
-            <div className="flex items-center justify-between gap-2 rounded-card-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="flex items-center justify-between gap-2 rounded-sm bg-popover px-3 py-2 text-[11px] text-muted-foreground">
               <span>{collectionErrorText}</span>
               <Button
                 type="button"

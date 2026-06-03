@@ -1020,26 +1020,17 @@
   --font-serif: serif;
   --font-display: "Cash Sans", system-ui, sans-serif;
 
-  /* Radii — pill-first system */
-  --radius: 20px;
-  --radius-pill: 999px;
-  --radius-button: 999px;
-  --radius-input: 999px;
-  --radius-card: 20px;
-  --radius-card-lg: 24px;
-  --radius-card-sm: 14px;
-  --radius-card-chat: 16px;
-  --radius-chrome: 16px;
-  --radius-composer: 40px;
-  --radius-tile: 20px;
-  --radius-dropdown: 20px;
-  --radius-overlay: 20px;
-  --radius-modal: 16px;
+  /* Radii — 5-step scale: xs/sm/md/lg + rounded-full (999px).
+     Each step differs by 6px, so adjacent tokens nest concentrically
+     with 6px (p-1.5) padding between layers. */
+  --radius-xs: 6px;
+  --radius-sm: 12px;
+  --radius-md: 18px;
+  --radius-lg: 24px;
 
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  /* Composer — deliberate one-off; the chat composer is the app's
+     signature surface and earns its own token. */
+  --radius-composer: 40px;
 
   /* Shadow utilities */
   --shadow-mini: var(--shadow-mini);

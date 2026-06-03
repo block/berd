@@ -84,7 +84,7 @@ export function StickyNoteWidget({
     <section
       aria-label={t("widgets.stickyNote.label")}
       className={cn(
-        "relative flex h-full w-full flex-col overflow-hidden rounded-card px-4 pb-4 pt-5 text-sticky-note-foreground shadow-sticky-note",
+        "relative flex h-full w-full flex-col overflow-hidden rounded-xs px-4 pb-4 pt-5 text-sticky-note-foreground shadow-sticky-note",
         note.tone === "warm"
           ? "bg-sticky-note-warm"
           : note.tone === "cool"

@@ -18,58 +18,58 @@ export function ChatLoadingSkeleton() {
         {/* Date separator skeleton */}
         <div className="flex items-center gap-3">
           <div className="h-px flex-1 bg-border/80" />
-          <Skeleton className="h-3 w-16 rounded-pill" />
+          <Skeleton className="h-3 w-16 rounded-full" />
           <div className="h-px flex-1 bg-border/80" />
         </div>
 
         {/* User message */}
         <div className="flex justify-end">
           <div className="space-y-2 max-w-[var(--chat-user-message-max-width)]">
-            <Skeleton className="h-4 w-64 rounded-card-sm" />
+            <Skeleton className="h-4 w-64 rounded-sm" />
           </div>
         </div>
 
         {/* Assistant message — multi-line */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Skeleton className="size-6 rounded-pill" />
-            <Skeleton className="h-3 w-14 rounded-pill" />
+            <Skeleton className="size-6 rounded-full" />
+            <Skeleton className="h-3 w-14 rounded-full" />
           </div>
           <div className="pl-8 space-y-2">
-            <Skeleton className="h-4 w-full rounded-card-sm" />
-            <Skeleton className="h-4 w-[85%] rounded-card-sm" />
-            <Skeleton className="h-4 w-[60%] rounded-card-sm" />
+            <Skeleton className="h-4 w-full rounded-sm" />
+            <Skeleton className="h-4 w-[85%] rounded-sm" />
+            <Skeleton className="h-4 w-[60%] rounded-sm" />
           </div>
         </div>
 
         {/* User message */}
         <div className="flex justify-end">
           <div className="space-y-2 max-w-[var(--chat-user-message-max-width)]">
-            <Skeleton className="h-4 w-48 rounded-card-sm" />
+            <Skeleton className="h-4 w-48 rounded-sm" />
           </div>
         </div>
 
         {/* Assistant message — shorter */}
         <div className="space-y-2">
           <div className="flex items-center gap-2">
-            <Skeleton className="size-6 rounded-pill" />
-            <Skeleton className="h-3 w-14 rounded-pill" />
+            <Skeleton className="size-6 rounded-full" />
+            <Skeleton className="h-3 w-14 rounded-full" />
           </div>
           <div className="pl-8 space-y-2">
-            <Skeleton className="h-4 w-full rounded-card-sm" />
-            <Skeleton className="h-4 w-[70%] rounded-card-sm" />
+            <Skeleton className="h-4 w-full rounded-sm" />
+            <Skeleton className="h-4 w-[70%] rounded-sm" />
           </div>
         </div>
 
         {/* Tool call block */}
         <div className="pl-8">
-          <Skeleton className="h-10 w-[50%] rounded-card-sm" />
+          <Skeleton className="h-10 w-[50%] rounded-sm" />
         </div>
 
         {/* Assistant continuation */}
         <div className="pl-8 space-y-2">
-          <Skeleton className="h-4 w-full rounded-card-sm" />
-          <Skeleton className="h-4 w-[45%] rounded-card-sm" />
+          <Skeleton className="h-4 w-full rounded-sm" />
+          <Skeleton className="h-4 w-[45%] rounded-sm" />
         </div>
       </div>
     </div>

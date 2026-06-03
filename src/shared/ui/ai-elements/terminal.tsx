@@ -262,7 +262,7 @@ export const Terminal = ({
     <TerminalContext.Provider value={contextValue}>
       <div
         className={cn(
-          "flex flex-col overflow-hidden rounded-lg border bg-popover-inverse text-popover-inverse-foreground",
+          "flex flex-col overflow-hidden rounded-md border bg-popover-inverse text-popover-inverse-foreground",
           className,
         )}
         {...props}

@@ -36,7 +36,7 @@ export function PersonaDetails({
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-5">
       <div className="space-y-4">
-        <section className="rounded-xl border border-border bg-muted/20 p-4">
+        <section className="rounded-md border border-border bg-muted/20 p-4">
           <div className="flex items-start gap-4">
             <AvatarRoot className="h-16 w-16 border border-border bg-background">
               {avatarMedia?.mediaType === "video" ? (
@@ -75,7 +75,7 @@ export function PersonaDetails({
         </section>
 
         <section className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-border bg-background p-4">
+          <div className="rounded-md border border-border bg-background p-4">
             <DetailField
               label={t("editor.provider")}
               contentClassName="font-medium"
@@ -83,7 +83,7 @@ export function PersonaDetails({
               {providerLabel}
             </DetailField>
           </div>
-          <div className="rounded-xl border border-border bg-background p-4">
+          <div className="rounded-md border border-border bg-background p-4">
             <DetailField
               label={t("editor.model")}
               contentClassName="font-medium"
@@ -93,7 +93,7 @@ export function PersonaDetails({
           </div>
         </section>
 
-        <section className="space-y-2 rounded-xl border border-border bg-background p-4">
+        <section className="space-y-2 rounded-md border border-border bg-background p-4">
           <DetailField
             label={t("editor.systemPrompt")}
             meta={
@@ -104,7 +104,7 @@ export function PersonaDetails({
               </span>
             }
           />
-          <div className="rounded-lg border border-border bg-muted/20 px-4 py-3">
+          <div className="rounded-md border border-border bg-muted/20 px-4 py-3">
             <MessageResponse className="min-w-0 text-sm leading-6">
               {systemPrompt}
             </MessageResponse>

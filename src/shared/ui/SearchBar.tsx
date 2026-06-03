@@ -6,7 +6,7 @@ import { Input } from "@/shared/ui/input";
 const searchBarSizes = {
   compact: {
     wrapper:
-      "rounded-md border border-border/80 px-2 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
+      "rounded-sm border border-border/80 px-2 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
     icon: "left-2.5 size-3",
     input:
       "h-auto border-none bg-transparent px-0 pl-5 pr-0 text-[11px] font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
@@ -15,7 +15,7 @@ const searchBarSizes = {
   },
   small: {
     wrapper:
-      "rounded-md border border-border/80 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
+      "rounded-sm border border-border/80 px-2.5 py-1.5 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
     icon: "left-3 size-3.5",
     input:
       "h-auto border-none bg-transparent px-0 pl-6 pr-0 text-xs font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
@@ -26,7 +26,7 @@ const searchBarSizes = {
     wrapper: "",
     icon: "left-3 size-4",
     input:
-      "rounded-lg border-border/80 bg-background pr-3 pl-9 text-sm font-normal hover:border-border/80 focus-visible:border-ring",
+      "rounded-sm border-border/80 bg-background pr-3 pl-9 text-sm font-normal hover:border-border/80 focus-visible:border-ring",
     inputVariant: "default" as const,
     hideIcon: false,
   },

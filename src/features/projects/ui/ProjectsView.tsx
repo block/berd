@@ -190,7 +190,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
               {filtered.map((project) => (
                 <div
                   key={project.id}
-                  className="flex items-start justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                  className="flex items-start justify-between gap-3 rounded-md border border-border px-4 py-3"
                 >
                   <div className="min-w-0 flex-1 flex items-start gap-3">
                     <ProjectIcon
@@ -224,7 +224,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
                 type="button"
                 variant="ghost"
                 onClick={handleNewProject}
-                className="h-auto w-full rounded-lg border border-dashed border-border px-4 py-3 text-muted-foreground hover:border-border hover:bg-accent/50"
+                className="h-auto w-full rounded-md border border-dashed border-border px-4 py-3 text-muted-foreground hover:border-border hover:bg-accent/50"
               >
                 <Plus className="size-4" />
                 <span className="text-sm">{t("view.newProject")}</span>
@@ -234,7 +234,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
 
           {/* Empty state */}
           {!loading && filtered.length === 0 && (
-            <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground rounded-lg border border-dashed border-transparent">
+            <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground rounded-md border border-dashed border-transparent">
               <FolderKanban className="h-10 w-10 opacity-30" />
               <div className="text-center">
                 <p className="text-sm font-medium">

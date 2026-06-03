@@ -63,16 +63,16 @@ interface AgentDetailPageProps {
 const CONTEXT_LABEL_CLASS =
   "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const SECONDARY_ACTION_CLASS =
-  "rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-surface-agent-profile-fg";
+  "bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover hover:text-surface-agent-profile-fg";
 const OVERFLOW_TRIGGER_CLASS =
-  "rounded-full bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
+  "bg-surface-agent-profile-control-bg text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover";
 const ACTION_ICON_CLASS = "size-3";
 const AVATAR_FIELD_INPUT_CLASS =
-  "h-[42px] rounded-full border-0 bg-surface-agent-profile-control-bg px-4 text-[14px] leading-[15px] text-surface-agent-profile-fg shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-surface-agent-profile-fg-placeholder hover:shadow-agent-profile-input-hover focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-agent-profile-input-focus";
+  "h-[42px] rounded-sm border-0 bg-surface-agent-profile-control-bg px-4 text-[14px] leading-[15px] text-surface-agent-profile-fg shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-surface-agent-profile-fg-placeholder hover:shadow-agent-profile-input-hover focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-agent-profile-input-focus";
 const AVATAR_FIELD_LABEL_CLASS =
   "text-xs leading-4 font-medium text-surface-agent-profile-fg-muted";
 const INSTRUCTIONS_PANEL_CLASS =
-  "min-h-[24rem] w-full overflow-y-auto rounded-card-chat bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
+  "min-h-[24rem] w-full overflow-y-auto rounded-md bg-card p-4 text-sm leading-relaxed text-surface-agent-profile-fg lg:min-h-[29rem]";
 
 function formatDate(value: string): string {
   const date = new Date(value);
@@ -364,7 +364,7 @@ export function AgentDetailPage({
       variant="ghost"
       size="sm"
       onClick={handleCloseAvatarSection}
-      className="h-9 rounded-full bg-surface-agent-profile-control-bg px-3 text-sm text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover"
+      className="h-9 bg-surface-agent-profile-control-bg px-3 text-sm text-surface-agent-profile-fg shadow-none hover:bg-surface-agent-profile-control-bg-hover"
     >
       <ArrowLeft className="size-3.5" />
       {t("editor.avatarBackToProfile")}

@@ -80,7 +80,7 @@ export function ProviderModelListEditor({
           {models.map((model) => (
             <span
               key={model}
-              className="inline-flex h-7 max-w-full items-center gap-1 rounded-full border border-border bg-muted px-2 text-xs"
+              className="inline-flex h-7 max-w-full items-center gap-1 rounded-xs border border-border bg-muted px-2 text-xs"
             >
               <span className="truncate">{model}</span>
               <button
@@ -90,7 +90,7 @@ export function ProviderModelListEditor({
                 })}
                 onClick={() => removeModel(model)}
                 disabled={disabled}
-                className="rounded-full text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                className="rounded-sm text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
               >
                 <IconX className="size-3" />
               </button>

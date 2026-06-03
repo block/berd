@@ -92,7 +92,7 @@ export function AgentAvatarSection({
               size="icon-sm"
               aria-label={t("common:actions.save")}
               title={t("common:actions.save")}
-              className="shrink-0 rounded-full"
+              className="shrink-0"
               disabled={!canSaveCustomAvatar}
               onClick={onSaveCustomAvatar}
             >
@@ -105,7 +105,7 @@ export function AgentAvatarSection({
               variant="ghost"
               size="icon-sm"
               aria-label={t("avatar.removeAria")}
-              className="shrink-0 rounded-full"
+              className="shrink-0"
               disabled={clearDisabled}
               onClick={onClearAvatar}
             >

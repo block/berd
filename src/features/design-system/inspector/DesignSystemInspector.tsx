@@ -359,7 +359,7 @@ function InspectorPanel({
   );
 
   return (
-    <aside className="fixed top-16 right-4 bottom-16 z-[120] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-overlay border border-border bg-popover text-foreground shadow-popover">
+    <aside className="fixed top-16 right-4 bottom-16 z-[120] flex w-[380px] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-md border border-border bg-popover text-foreground shadow-popover">
       <header className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">

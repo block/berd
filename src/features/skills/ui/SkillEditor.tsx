@@ -42,15 +42,15 @@ const CLOSE_BUTTON_CLASS =
   "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50";
 const HERO_HEIGHT_CLASS = "h-[200px]";
 const FIELD_INPUT_CLASS =
-  "h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+  "h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
 const SELECT_TRIGGER_CLASS =
-  "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+  "!h-[42px] min-h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
 // Instructions stay monospace because the field holds markdown the agent
 // reads literally. Height comes from the parent section's
 // flex-grow so the textarea owns whatever vertical space the form body has
 // after the other fields, falling back to a 215px floor on short windows.
 const INSTRUCTIONS_TEXTAREA_CLASS =
-  "h-full min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] font-mono text-[13px] leading-relaxed text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
+  "h-full min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] font-mono text-[13px] leading-relaxed text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
 const FIELD_LABEL_CLASS =
   "text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground";
 const SECTION_GAP_CLASS = "group/field space-y-2";
@@ -280,7 +280,7 @@ export function SkillEditor({
               {titleText}
             </SheetTitle>
             {isBuiltIn ? (
-              <span className="rounded-full bg-white/70 px-1.5 py-0.5 text-[11px] text-[#242424]">
+              <span className="rounded-xs bg-white/70 px-1.5 py-0.5 text-[11px] text-[#242424]">
                 {t("dialog.builtIn")}
               </span>
             ) : null}

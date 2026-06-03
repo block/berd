@@ -16,7 +16,7 @@ import {
  * Codifies the column-layout pattern that every create/edit modal in the app
  * consumes: a sticky compact header, a scrollable body that owns the form,
  * and a `border-t`-divided footer pinned to the bottom. All padding and
- * geometry comes from tokens (`rounded-modal`, `--card` via the
+ * geometry comes from tokens (`rounded-md`, `--card` via the
  * dialog default) — feature code only owns the content.
  *
  * Usage:

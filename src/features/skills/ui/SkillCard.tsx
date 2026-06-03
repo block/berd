@@ -76,14 +76,14 @@ export function SkillCard({
       onClick={() => !menuOpen && onSelect(skill)}
       onKeyDown={handleCardKeyDown}
       className={cn(
-        "group relative flex h-full min-h-[12.5rem] w-full cursor-pointer flex-col items-start gap-3 rounded-tile bg-card p-4 text-left",
+        "group relative flex h-full min-h-[12.5rem] w-full cursor-pointer flex-col items-start gap-3 rounded-md bg-card p-4 text-left",
         "transition-shadow duration-200 hover:shadow-card",
         "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
       )}
     >
       <span
         className={cn(
-          "inline-flex max-w-full items-center truncate rounded-pill px-2 py-0.5 text-[13px] leading-[18px] text-skill-pill-fg",
+          "inline-flex max-w-full items-center truncate rounded-xs px-2 py-0.5 text-[13px] leading-[18px] text-skill-pill-fg",
           customColor ? null : skillPillToneClass(tone),
         )}
         style={customColor ? { backgroundColor: customColor } : undefined}

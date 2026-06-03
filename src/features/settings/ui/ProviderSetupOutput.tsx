@@ -51,7 +51,7 @@ export function ProviderSetupOutput({
   return (
     <div className="space-y-2">
       {deviceCode ? (
-        <div className="rounded-md border border-border bg-background px-3 py-2 text-foreground">
+        <div className="rounded-sm border border-border bg-background px-3 py-2 text-foreground">
           <div className="flex items-center justify-between gap-3">
             <div className="min-w-0">
               <p className="text-xs font-medium text-muted-foreground">
@@ -80,7 +80,7 @@ export function ProviderSetupOutput({
 
       <div
         ref={scrollRef}
-        className="max-h-24 overflow-y-auto rounded-md bg-muted px-2.5 py-2 font-mono text-xs leading-relaxed text-muted-foreground"
+        className="max-h-24 overflow-y-auto rounded-sm bg-muted px-2.5 py-2 font-mono text-xs leading-relaxed text-muted-foreground"
       >
         {lines.map((line) => (
           <div key={line.id}>{line.text || "\u00A0"}</div>

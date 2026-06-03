@@ -159,7 +159,7 @@ export function SessionCard({
       <div
         data-session-card
         className={cn(
-          "group relative flex min-h-20 flex-col justify-center rounded-card-chat bg-card p-3 text-left",
+          "group relative flex min-h-20 flex-col justify-center rounded-md bg-card p-3 text-left",
           selected && "ring-1 ring-inset ring-foreground",
           archivedAt && "opacity-60",
         )}
@@ -190,7 +190,7 @@ export function SessionCard({
     <div
       data-session-card
       className={cn(
-        "group relative flex min-h-20 flex-col justify-between gap-1 rounded-card-chat bg-card p-3 text-left transition-shadow",
+        "group relative flex min-h-20 flex-col justify-between gap-1 rounded-md bg-card p-3 text-left transition-shadow",
         "hover:shadow-card",
         selected && "ring-1 ring-inset ring-foreground",
         archivedAt && "opacity-60",
@@ -209,7 +209,7 @@ export function SessionCard({
           }
           onSelect?.(id);
         }}
-        className="absolute inset-0 z-0 rounded-card-chat"
+        className="absolute inset-0 z-0 rounded-md"
         aria-label={t("card.open", { title: displayTitle })}
         aria-pressed={selectionEnabled ? selected : undefined}
       />
@@ -280,7 +280,7 @@ export function SessionCard({
             aria-label={t("card.optionsFor", { title: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-2 top-2 z-10 size-5 rounded-full transition-colors hover:text-foreground",
+              "absolute right-2 top-2 z-10 size-5 rounded-sm transition-colors hover:text-foreground",
               menuOpen
                 ? "visible opacity-100 text-foreground"
                 : "invisible group-hover:visible opacity-0 group-hover:opacity-100 text-foreground/40",

@@ -118,7 +118,7 @@ export function AppShellLayout({
         <div
           className={cn(
             // overflow-visible on every view: the sidebar card clips its own
-            // content via `overflow-hidden rounded-chrome`, so the only things
+            // content via `overflow-hidden rounded-md`, so the only things
             // that extend past this wrapper's right edge are the elevated panel
             // shadow and the resize rail (translate-x-1/2), both of which are
             // meant to float over the adjacent content. Clipping x here cropped

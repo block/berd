@@ -64,7 +64,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
 
   return (
     <>
-      <div className="flex items-center gap-2.5 rounded-lg bg-background px-3.5 py-2.5">
+      <div className="flex items-center gap-2.5 rounded-md bg-background px-3.5 py-2.5">
         <Icon
           className={cn("h-4 w-4 flex-shrink-0", STATUS_COLOR[check.status])}
         />

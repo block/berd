@@ -28,7 +28,7 @@ export function AutomationBuilderView({
     <>
       {builder.isStreaming ? <LoadingGoose chatState="thinking" /> : null}
       <div className="px-4">
-        <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-card-chat bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
+        <div className="pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)] rounded-md bg-surface-composer shadow-[var(--shadow-chat)] backdrop-blur-md">
           <ChatInput
             surface="bare"
             placeholder={isEditing ? t("builder.editPlaceholder") : undefined}
@@ -65,7 +65,7 @@ export function AutomationBuilderView({
     <div className="page-transition flex h-full min-w-0 gap-3 px-3 pb-3 pt-[var(--spacing-app-panel-gutter-top)]">
       <div className="relative flex min-w-0 flex-1 flex-col">
         <section
-          className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-card-chat bg-card"
+          className="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-md bg-card"
           aria-label={t("builder.chatAriaLabel")}
         >
           <MessageTimeline

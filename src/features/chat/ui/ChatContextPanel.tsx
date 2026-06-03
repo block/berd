@@ -95,7 +95,7 @@ export function ChatContextPanel({
           >
             <aside
               className={cn(
-                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-chrome bg-background text-foreground backdrop-blur-md",
+                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground backdrop-blur-md",
                 "h-auto max-h-full overflow-y-auto",
                 isCompactViewport && "shadow-popover",
               )}

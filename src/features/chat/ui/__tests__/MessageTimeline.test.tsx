@@ -635,7 +635,7 @@ describe("MessageTimeline", () => {
     expect(surface).toHaveClass(
       "absolute",
       "bottom-[calc(var(--chat-surface-bottom-gap)*2)]",
-      "rounded-chrome",
+      "rounded-md",
       "bg-card",
     );
     expect(scroller).toHaveClass("flex-1");

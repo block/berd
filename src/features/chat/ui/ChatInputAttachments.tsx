@@ -29,20 +29,20 @@ function DraftImageAttachment({
         <button
           type="button"
           onClick={() => setLightboxOpen(true)}
-          className="block cursor-pointer rounded-card-sm"
+          className="block cursor-pointer rounded-sm"
           aria-label={t("attachments.view", { index: index + 1 })}
           title={attachment.path ?? attachment.name}
         >
           <img
             src={attachment.previewUrl}
             alt={t("attachments.alt", { index: index + 1 })}
-            className="h-16 w-16 rounded-card-sm border border-border/80 object-cover"
+            className="h-16 w-16 rounded-sm border border-border/80 object-cover"
           />
         </button>
         <button
           type="button"
           onClick={() => onRemove(attachment.id)}
-          className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-pill bg-foreground text-background opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="absolute -right-1.5 -top-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-foreground text-background opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           aria-label={t("attachments.remove")}
         >
           <X className="h-2.5 w-2.5" />

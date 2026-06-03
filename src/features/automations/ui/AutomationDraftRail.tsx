@@ -20,6 +20,7 @@ import {
 } from "@/features/automations/lib/automationFormatting";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
+import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 import { Input } from "@/shared/ui/input";
 import { SearchableSelect } from "@/shared/ui/searchable-select";
 import {
@@ -53,7 +54,7 @@ const WEEKDAY_OPTIONS = [
   { value: "6", labelKey: "edit.weekdays.saturday" },
 ] as const;
 
-const FIELD_CLASS = "rounded-card-chat border-transparent bg-card/40";
+const FIELD_CLASS = FORM_FIELD_CLASS;
 
 function formatTimeLabel(hhmm: string): string {
   const [hRaw, mRaw] = hhmm.split(":");
@@ -174,12 +175,12 @@ export function AutomationDraftRail({
   return (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-card bg-card p-5 lg:w-[337px]",
+        "flex min-h-0 w-full flex-col rounded-md bg-card p-5 lg:w-[337px]",
         className,
       )}
       aria-label={t("builder.previewAriaLabel")}
     >
-      <div className="flex flex-col gap-3 rounded-pill bg-card/40 px-4 py-3 text-sm text-foreground">
+      <div className="flex flex-col gap-3 rounded-full bg-card/40 px-4 py-3 text-sm text-foreground">
         <span className="flex min-w-0 items-center gap-2">
           <IconSparkles className="size-4 shrink-0 text-foreground" />
           <span className="truncate text-xs text-muted-foreground">
@@ -197,7 +198,7 @@ export function AutomationDraftRail({
 
       <div className="mt-5 min-h-0 flex-1 overflow-y-auto">
         {draftState.blockedToolRequest && !draft ? (
-          <section className="rounded-card-chat border border-destructive/40 bg-destructive/10 p-3">
+          <section className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
             <div className="flex items-start gap-2">
               <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
               <div>
@@ -211,7 +212,7 @@ export function AutomationDraftRail({
             </div>
           </section>
         ) : !draft ? (
-          <section className="rounded-card-chat bg-card/40 p-4 text-sm text-muted-foreground">
+          <section className="rounded-md bg-card/40 p-4 text-sm text-muted-foreground">
             {t("builder.previewEmptyBody")}
           </section>
         ) : (
@@ -417,7 +418,7 @@ export function AutomationDraftRail({
         )}
 
         {error ? (
-          <div className="mt-4 rounded-card-chat border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         ) : null}

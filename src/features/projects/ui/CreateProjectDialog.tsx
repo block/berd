@@ -256,7 +256,7 @@ export function CreateProjectDialog({
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
         className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.26)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
-        closeButtonClassName="top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50"
+        closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-white/50"
         overlayClassName="bg-transparent"
         style={{
           backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
@@ -276,7 +276,7 @@ export function CreateProjectDialog({
           </div>
 
           {/* Hero stays transparent so the glass panel reveals whatever sits
-              underneath instead of painting a fake backdrop. */}
+ underneath instead of painting a fake backdrop. */}
           <div className="relative h-[400px] shrink-0 overflow-hidden px-8 pb-4">
             <ProjectArtifactPreview
               input={{
@@ -321,7 +321,7 @@ export function CreateProjectDialog({
                   setError(null);
                 }}
                 placeholder={t("dialog.nameInlinePlaceholder")}
-                className="h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]"
+                className="h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]"
               />
             </div>
 
@@ -334,7 +334,7 @@ export function CreateProjectDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={t("dialog.describePlaceholder")}
                 rows={4}
-                className="h-[215px] min-h-[215px] w-full resize-none rounded-[10px] border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:rounded-[28px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:rounded-[28px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
+                className="h-[215px] min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
               />
             </div>
 
@@ -347,7 +347,7 @@ export function CreateProjectDialog({
                   type="button"
                   onClick={handleAddDirectory}
                   className={cn(
-                    "h-[42px] !rounded-[10px] border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                    "h-[42px] rounded-sm border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
                     "flex w-full items-center gap-2.5 text-left",
                   )}
                 >
@@ -379,7 +379,7 @@ export function CreateProjectDialog({
                 >
                   <SelectTrigger
                     className={cn(
-                      "!h-[42px] min-h-[42px] !rounded-[10px] border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[border-radius,box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:!rounded-[20px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:!rounded-[20px] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:!rounded-[20px] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:!rounded-[20px] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                      "!h-[42px] min-h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
                       "w-full",
                     )}
                   >
@@ -410,7 +410,7 @@ export function CreateProjectDialog({
               size="sm"
               onClick={handleClose}
               disabled={saving}
-              className="h-10 rounded-full px-4 text-sm hover:bg-white/50"
+              className="h-10 rounded-sm px-4 text-sm hover:bg-white/50"
             >
               {t("common:actions.cancel")}
             </Button>
@@ -420,7 +420,7 @@ export function CreateProjectDialog({
               variant="default"
               size="sm"
               disabled={!canSave}
-              className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
+              className="h-10 rounded-sm !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
             >
               {saving
                 ? isEditing

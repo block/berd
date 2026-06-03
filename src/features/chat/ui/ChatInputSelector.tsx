@@ -31,12 +31,17 @@ interface ChatInputSelectorProps {
   triggerLabel: string;
   triggerTitle?: string;
   icon?: ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  triggerTabIndex?: number;
   triggerVariant?: "default" | "toolbar";
   triggerSize?: "default" | "sm";
   menuLabel?: string;
   sections: ChatInputSelectorSection[];
   onValueChange: (value: string) => void;
   contentWidth?: "trigger" | "wide";
+  contentSide?: "top" | "right" | "bottom" | "left";
+  contentAlign?: "start" | "center" | "end";
   disabled?: boolean;
 }
 
@@ -46,18 +51,23 @@ export function ChatInputSelector({
   triggerLabel,
   triggerTitle,
   icon,
+  open,
+  onOpenChange,
+  triggerTabIndex,
   triggerVariant = "default",
   triggerSize = "default",
   menuLabel,
   sections,
   onValueChange,
   contentWidth = "trigger",
+  contentSide,
+  contentAlign = "start",
   disabled,
 }: ChatInputSelectorProps) {
   const buttonSize = triggerSize === "sm" ? "xs" : "sm";
 
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={onOpenChange}>
       <DropdownMenuTrigger asChild>
         <Button
           type="button"
@@ -65,6 +75,7 @@ export function ChatInputSelector({
           size={buttonSize}
           aria-label={ariaLabel}
           title={triggerTitle}
+          tabIndex={triggerTabIndex}
           disabled={disabled}
           leftIcon={icon}
           rightIcon={<ChevronDown />}
@@ -78,7 +89,8 @@ export function ChatInputSelector({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent
-        align="start"
+        align={contentAlign}
+        side={contentSide}
         className={cn(contentWidth === "wide" ? "w-72" : "w-56")}
       >
         {menuLabel ? (

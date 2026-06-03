@@ -161,7 +161,7 @@ export const SkillPinWidget = memo(function SkillPinWidget({
       <div className="flex h-full w-full items-center justify-center">
         <div
           aria-hidden="true"
-          className="flex h-full w-full items-center justify-center rounded-card-chat bg-card"
+          className="flex h-full w-full items-center justify-center rounded-md bg-card"
         />
       </div>
     );
@@ -178,8 +178,8 @@ export const SkillPinWidget = memo(function SkillPinWidget({
         className={cn(
           "flex h-full w-full items-center justify-center cursor-grab",
           skill
-            ? cn("rounded-pill text-skill-pill-fg", skillPillToneClass(tone))
-            : "h-full w-full rounded-card-chat bg-card text-muted-foreground",
+            ? cn("rounded-xs text-skill-pill-fg", skillPillToneClass(tone))
+            : "h-full w-full rounded-md bg-card text-muted-foreground",
         )}
         style={
           skill

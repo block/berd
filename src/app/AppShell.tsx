@@ -2014,7 +2014,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           activeDesignSystemSection,
           activeSessionId,
           projects,
-          className: "h-full rounded-xl",
+          className: "h-full rounded-md",
         }}
         sidebarCollapsed={sidebarCollapsed}
         sidebarOuterWidth={sidebarOuterWidth}

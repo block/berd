@@ -87,7 +87,7 @@ export function DeleteProjectConfirmation({
         <button
           type="button"
           onClick={onCancel}
-          className="inline-flex h-[30px] items-center rounded-full bg-popover px-3 text-sm leading-[15px] text-foreground"
+          className="inline-flex h-[30px] items-center rounded-sm bg-popover px-3 text-sm leading-[15px] text-foreground"
         >
           {t("common:actions.cancel")}
         </button>

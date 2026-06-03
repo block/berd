@@ -534,7 +534,7 @@ export function ChatView({
                       onCollapse={() => handleCollapseTerminal(path)}
                       onExpand={() => handleExpandTerminal(path)}
                       onClose={() => handleCloseTerminal(path)}
-                      className="h-full rounded-chrome bg-card"
+                      className="h-full rounded-md bg-card"
                     />
                   </div>
                 );

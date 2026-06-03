@@ -20,6 +20,7 @@ import { AutomationLatestResultCard } from "@/features/automations/ui/Automation
 import { EmptyState } from "@/features/automations/ui/RunOutput";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
+import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 import { Input } from "@/shared/ui/input";
 import { SearchableSelect } from "@/shared/ui/searchable-select";
 import {
@@ -42,7 +43,7 @@ const WEEKDAY_OPTIONS = [
   { value: "6", labelKey: "edit.weekdays.saturday" },
 ] as const;
 
-const FIELD_CLASS = "rounded-card-chat border-transparent bg-card";
+const FIELD_CLASS = FORM_FIELD_CLASS;
 
 function formatTimeLabel(hhmm: string): string {
   const [hRaw, mRaw] = hhmm.split(":");
@@ -360,7 +361,7 @@ export function AutomationDetailPage({
                   >
                     <SelectTrigger
                       id="detail-schedule-preset"
-                      className="w-full rounded-card-chat border-transparent bg-card"
+                      className="w-full rounded-sm border-transparent bg-card"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -405,7 +406,7 @@ export function AutomationDetailPage({
                     >
                       <SelectTrigger
                         id="detail-schedule-day"
-                        className="w-full rounded-card-chat border-transparent bg-card"
+                        className="w-full rounded-sm border-transparent bg-card"
                       >
                         <SelectValue />
                       </SelectTrigger>
@@ -472,7 +473,7 @@ export function AutomationDetailPage({
                       onBlur={() => saveSchedule({ customSchedule })}
                       placeholder={t("edit.fields.schedulePlaceholder")}
                       disabled={isSaving}
-                      className="rounded-card-chat border-transparent bg-card"
+                      className="rounded-sm border-transparent bg-card"
                     />
                   </label>
                 ) : null}
@@ -489,7 +490,7 @@ export function AutomationDetailPage({
                     disabled={isSaving}
                     searchPlaceholder={t("edit.fields.timeZoneSearch")}
                     emptyLabel={t("edit.fields.timeZoneEmpty")}
-                    className="rounded-card-chat border-transparent bg-card"
+                    className="rounded-sm border-transparent bg-card"
                   />
                 </label>
 
@@ -572,7 +573,7 @@ export function AutomationDetailPage({
                     </Button>
                   )}
                 </div>
-                <section className="rounded-card-chat bg-card p-4">
+                <section className="rounded-md bg-card p-4">
                   {isEditingInstructions ? (
                     <Textarea
                       aria-label={t("edit.fields.instructions")}
@@ -583,7 +584,7 @@ export function AutomationDetailPage({
                       disabled={isSavingInstructions}
                       placeholder={t("details.noInstructions")}
                       rows={12}
-                      className="min-h-[360px] resize-y rounded-md text-[14px] leading-relaxed"
+                      className="min-h-[360px] resize-y rounded-sm text-[14px] leading-relaxed"
                     />
                   ) : instructionsText ? (
                     <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">

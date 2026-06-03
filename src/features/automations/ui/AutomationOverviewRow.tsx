@@ -100,7 +100,7 @@ export function AutomationOverviewRow({
     <button
       type="button"
       className={cn(
-        "group grid min-h-[86px] w-full gap-3 rounded-card-chat bg-card px-6 py-5 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
+        "group grid min-h-[86px] w-full gap-3 rounded-md bg-card px-6 py-5 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center",
         selected && "ring-1 ring-inset ring-foreground",
       )}
       onClick={onOpenDetail}

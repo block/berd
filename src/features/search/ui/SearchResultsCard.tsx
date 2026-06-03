@@ -24,10 +24,10 @@ export function SearchResultsCard({
   children,
 }: SearchResultsCardProps) {
   return (
-    <section className="relative h-full min-h-[220px] w-[259px] flex-none animate-fade-in overflow-hidden rounded-card bg-card motion-reduce:animate-none">
+    <section className="relative h-full min-h-[220px] w-[259px] flex-none animate-fade-in overflow-hidden rounded-md bg-card motion-reduce:animate-none">
       <h2
         className={cn(
-          "absolute left-5 top-[21px] inline-flex h-5 items-center rounded-pill px-[6px] pb-[3px] text-[14px]",
+          "absolute left-5 top-[21px] inline-flex h-5 items-center rounded-xs px-[6px] pb-[3px] text-[14px]",
           TONE_CHIP_CLASSES[tone],
         )}
       >

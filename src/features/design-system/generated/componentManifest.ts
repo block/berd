@@ -1290,7 +1290,7 @@ export const designSystemComponentManifest = [
       "data-[vaul-drawer-direction=bottom]:inset-x-0",
       "data-[vaul-drawer-direction=bottom]:max-h-[80vh]",
       "data-[vaul-drawer-direction=bottom]:mt-24",
-      "data-[vaul-drawer-direction=bottom]:rounded-t-lg",
+      "data-[vaul-drawer-direction=bottom]:rounded-t-md",
       "data-[vaul-drawer-direction=left]:border-r",
       "data-[vaul-drawer-direction=left]:inset-y-0",
       "data-[vaul-drawer-direction=left]:left-0",
@@ -1305,7 +1305,7 @@ export const designSystemComponentManifest = [
       "data-[vaul-drawer-direction=top]:inset-x-0",
       "data-[vaul-drawer-direction=top]:max-h-[80vh]",
       "data-[vaul-drawer-direction=top]:mb-24",
-      "data-[vaul-drawer-direction=top]:rounded-b-lg",
+      "data-[vaul-drawer-direction=top]:rounded-b-md",
       "data-[vaul-drawer-direction=top]:top-0",
     ],
     sourceTokenClasses: [
@@ -1481,7 +1481,6 @@ export const designSystemComponentManifest = [
     tokenClasses: [
       "active:bg-destructive/16",
       "active:text-destructive",
-      "bg-accent",
       "bg-card/60",
       "bg-destructive/12",
       "bg-secondary",
@@ -1495,7 +1494,6 @@ export const designSystemComponentManifest = [
       "placeholder:text-foreground/40",
       "text-destructive",
       "text-foreground",
-      "text-muted-foreground",
       "text-secondary-foreground",
     ],
     stateClasses: [
@@ -1511,7 +1509,6 @@ export const designSystemComponentManifest = [
     sourceTokenClasses: [
       "active:bg-destructive/16",
       "active:text-destructive",
-      "bg-accent",
       "bg-card/60",
       "bg-destructive/12",
       "bg-secondary",
@@ -1525,7 +1522,6 @@ export const designSystemComponentManifest = [
       "placeholder:text-foreground/40",
       "text-destructive",
       "text-foreground",
-      "text-muted-foreground",
       "text-secondary-foreground",
     ],
   },

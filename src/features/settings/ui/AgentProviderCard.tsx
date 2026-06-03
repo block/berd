@@ -532,7 +532,7 @@ export function AgentProviderCard({
   return (
     <div
       className={cn(
-        "flex flex-col rounded-lg bg-background p-3 transition-colors",
+        "flex flex-col rounded-md bg-background p-3 transition-colors",
         isActive && "bg-linear-to-b from-primary/10 to-primary/10",
       )}
     >
@@ -557,7 +557,7 @@ export function AgentProviderCard({
 
       {setupError && !isActive && (
         <div className="mt-3 space-y-2 border-t pt-3">
-          <div className="rounded-md bg-destructive/10 px-3 py-2.5">
+          <div className="rounded-sm bg-destructive/10 px-3 py-2.5">
             <div className="flex flex-col gap-2">
               <p className="min-w-0 text-xs font-medium leading-relaxed text-destructive">
                 {setupFailureMessage}

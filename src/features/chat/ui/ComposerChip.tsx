@@ -34,7 +34,7 @@ export function ComposerChip({
   return (
     <span
       className={cn(
-        "group inline-flex h-6 max-w-64 items-center gap-1.5 rounded-full pl-[9px] pr-2 text-xs font-normal transition-colors",
+        "group inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal transition-colors",
         toneClasses[tone],
         className,
       )}

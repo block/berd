@@ -33,7 +33,7 @@ export function SidebarNavItem({
   labelTransitionDelay,
 }: SidebarNavItemProps) {
   const className = cn(
-    "flex items-center w-full rounded-md outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
+    "flex items-center w-full rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
     Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",

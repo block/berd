@@ -542,7 +542,7 @@ export function AutomationsWorkbench({
           detailQuery.isLoading && !detailTile ? (
             <div className="space-y-4">
               <div className="h-7 w-64 rounded-md bg-muted" />
-              <div className="h-40 rounded-lg bg-muted" />
+              <div className="h-40 rounded-md bg-muted" />
             </div>
           ) : detailTile ? (
             <>
@@ -613,9 +613,9 @@ export function AutomationsWorkbench({
             <TabsContent value="overview" className="mt-6">
               {automationsQuery.isLoading ? (
                 <div className="space-y-3">
-                  <div className="h-[86px] rounded-card-chat bg-card" />
-                  <div className="h-[86px] rounded-card-chat bg-card" />
-                  <div className="h-[86px] rounded-card-chat bg-card" />
+                  <div className="h-[86px] rounded-md bg-card" />
+                  <div className="h-[86px] rounded-md bg-card" />
+                  <div className="h-[86px] rounded-md bg-card" />
                 </div>
               ) : automationsQuery.error ? (
                 <EmptyState

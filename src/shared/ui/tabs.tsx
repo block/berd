@@ -10,7 +10,7 @@ const tabsListVariants = cva(
   {
     variants: {
       variant: {
-        default: "h-9 rounded-lg bg-muted p-[3px]",
+        default: "h-9 rounded-md bg-muted p-[3px]",
         buttons: "h-auto gap-1 bg-transparent p-0",
         weight: "h-auto gap-6 bg-transparent p-0",
       },

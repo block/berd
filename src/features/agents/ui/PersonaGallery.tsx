@@ -33,7 +33,7 @@ interface PersonaGalleryProps {
 function SkeletonCard() {
   return (
     <div aria-hidden="true" className="flex w-full flex-col gap-4 p-2">
-      <Skeleton className="aspect-square w-full rounded-card-sm" />
+      <Skeleton className="aspect-square w-full rounded-sm" />
       <div className="space-y-3 px-1">
         <Skeleton className="h-px w-full rounded-none" />
         <Skeleton className="h-5 w-24 rounded-full" />
@@ -163,7 +163,7 @@ export function PersonaGallery({
         onClick={onCreatePersona}
         aria-label={t("gallery.createAria")}
         className={cn(
-          "agents-gallery-card-enter group flex h-full w-full items-center justify-center rounded-card border border-transparent p-4",
+          "agents-gallery-card-enter group flex h-full w-full items-center justify-center rounded-md border border-transparent p-4",
           "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
           "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",

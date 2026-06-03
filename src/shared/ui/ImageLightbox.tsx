@@ -25,7 +25,7 @@ export function ImageLightbox({
         <img
           src={src}
           alt={alt}
-          className="max-h-[85vh] max-w-[90vw] rounded-lg object-contain"
+          className="max-h-[85vh] max-w-[90vw] rounded-md object-contain"
         />
       </DialogContent>
     </Dialog>

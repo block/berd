@@ -14,7 +14,7 @@ export function MessageMetadataChip({ chip }: { chip: MessageChip }) {
   return (
     <span
       className={cn(
-        "inline-flex h-6 max-w-64 items-center gap-1.5 rounded-full pl-[9px] pr-2 text-xs font-normal",
+        "inline-flex h-6 max-w-64 items-center gap-1.5 rounded-xs pl-[9px] pr-2 text-xs font-normal",
         messageChipClasses[chip.type],
       )}
     >

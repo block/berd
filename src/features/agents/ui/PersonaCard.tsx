@@ -83,7 +83,7 @@ export const PersonaCard = memo(function PersonaCard({
           onClick={(e) => e.stopPropagation()}
           onKeyDown={(event) => event.stopPropagation()}
           className={cn(
-            "size-7 shrink-0 rounded-full opacity-0 pointer-events-none",
+            "size-7 shrink-0 opacity-0 pointer-events-none",
             "transition-[opacity,background-color,color,backdrop-filter] duration-200",
             "group-hover:pointer-events-auto group-hover:opacity-100",
             "focus-visible:pointer-events-auto focus-visible:opacity-100",
@@ -154,7 +154,7 @@ export const PersonaCard = memo(function PersonaCard({
             size="sm"
             onClick={() => onSelect(persona)}
             aria-label={t("card.viewAria", { name: persona.displayName })}
-            className="pointer-events-auto rounded-full"
+            className="pointer-events-auto"
           >
             {t("card.view")}
           </Button>
@@ -166,7 +166,7 @@ export const PersonaCard = memo(function PersonaCard({
             size="sm"
             onClick={() => onStartChat(persona)}
             aria-label={t("card.chatAria", { name: persona.displayName })}
-            className="pointer-events-auto rounded-full"
+            className="pointer-events-auto"
           >
             {t("card.chat")}
           </Button>
@@ -178,14 +178,14 @@ export const PersonaCard = memo(function PersonaCard({
     <div
       className={cn(
         "group relative flex w-full flex-col gap-4",
-        "rounded-card bg-transparent p-2",
+        "rounded-md bg-transparent p-2",
         "transition-colors duration-200",
         isActive && "bg-muted/40",
       )}
     >
       <div className="relative">
         <div
-          className="relative aspect-square w-full overflow-hidden rounded-card-sm"
+          className="relative aspect-square w-full overflow-hidden rounded-sm"
           style={{ viewTransitionName: avatarTransitionName }}
         >
           {avatarMedia ? (

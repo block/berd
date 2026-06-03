@@ -2,12 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
-import {
-  IconLibraryPlusFilled,
-  IconPlayerStopFilled,
-} from "@tabler/icons-react";
+import { IconPlayerStopFilled } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
-import { ChatInputSelector } from "./ChatInputSelector";
 import { ContextRing } from "./ContextRing";
 import { Button } from "@/shared/ui/button";
 import {
@@ -25,7 +21,7 @@ import { getCatalogEntryFromEntries } from "@/features/providers/providerCatalog
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { supportsContextCompactionControls } from "../lib/autoCompact";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
-import { ProjectSelectorIcon } from "./ProjectSelectorIcon";
+import { ProjectInputSelector } from "./ProjectInputSelector";
 import type {
   AgentPickerOption,
   ChatInputAgentModelPicker,
@@ -33,9 +29,6 @@ import type {
   ChatInputPersonaPicker,
   ChatInputProjectPicker,
 } from "../types";
-
-const NO_PROJECT_VALUE = "__no_project__";
-const CREATE_PROJECT_VALUE = "__create_project__";
 
 interface ChatInputToolbarComposerActions {
   canSend: boolean;
@@ -155,13 +148,6 @@ export function ChatInputToolbar({
       },
     ];
   }, [catalogEntries, providers, selectedProvider]);
-  const selectedProject = availableProjects.find(
-    (project) => project.id === selectedProjectId,
-  );
-  const projectLabel = selectedProject?.name ?? t("toolbar.noProject");
-  const projectTitle = selectedProject?.workingDirs.length
-    ? selectedProject.workingDirs.join(", ")
-    : undefined;
   const contextProgress =
     contextLimit > 0 ? Math.min(contextTokens / contextLimit, 1) : 0;
   const showContextUsage =
@@ -179,15 +165,6 @@ export function ChatInputToolbar({
       compactDisplay: "short",
       maximumFractionDigits: value < 10_000 ? 1 : 0,
     });
-
-  const handleProjectValueChange = (value: string) => {
-    if (value === CREATE_PROJECT_VALUE) {
-      onCreateProject?.();
-      return;
-    }
-
-    onProjectChange?.(value === NO_PROJECT_VALUE ? null : value);
-  };
 
   const handleCompactContext = () => {
     if (!canCompactContext || isCompactingContext || !onCompactContext) {
@@ -278,64 +255,11 @@ export function ChatInputToolbar({
           )}
 
         {projectPickerEnabled ? (
-          <ChatInputSelector
-            ariaLabel={t("toolbar.selectProject")}
-            value={selectedProjectId ?? NO_PROJECT_VALUE}
-            triggerLabel={projectLabel}
-            triggerTitle={projectTitle}
-            icon={
-              <ProjectSelectorIcon
-                icon={selectedProject?.icon}
-                color={selectedProject?.color}
-                projectId={selectedProject?.id}
-              />
-            }
-            triggerVariant="toolbar"
-            triggerSize="sm"
-            menuLabel={t("toolbar.chooseProject")}
-            contentWidth="wide"
-            sections={[
-              {
-                items: [
-                  {
-                    value: NO_PROJECT_VALUE,
-                    label: t("toolbar.noProject"),
-                    description: t("toolbar.generalChatWithoutProject"),
-                    icon: <ProjectSelectorIcon />,
-                  },
-                  ...availableProjects.map((project) => ({
-                    value: project.id,
-                    label: project.name,
-                    description: project.workingDirs.length
-                      ? project.workingDirs.join(", ")
-                      : undefined,
-                    icon: (
-                      <ProjectSelectorIcon
-                        icon={project.icon}
-                        color={project.color}
-                        projectId={project.id}
-                      />
-                    ),
-                  })),
-                ],
-              },
-              {
-                items: [
-                  ...(onCreateProject
-                    ? [
-                        {
-                          value: CREATE_PROJECT_VALUE,
-                          label: t("toolbar.createProject"),
-                          icon: (
-                            <IconLibraryPlusFilled className="size-4 text-foreground" />
-                          ),
-                        },
-                      ]
-                    : []),
-                ],
-              },
-            ].filter((section) => section.items.length > 0)}
-            onValueChange={handleProjectValueChange}
+          <ProjectInputSelector
+            selectedProjectId={selectedProjectId}
+            availableProjects={availableProjects}
+            onProjectChange={onProjectChange}
+            onCreateProject={onCreateProject}
           />
         ) : null}
       </div>
@@ -361,7 +285,7 @@ export function ChatInputToolbar({
                       variant="ghost"
                       size={isCompact ? "icon-sm" : "sm"}
                       className={cn(
-                        "group rounded-full bg-transparent text-foreground/80 shadow-none hover:bg-transparent hover:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground",
+                        "group rounded-sm bg-transparent text-foreground/80 shadow-none hover:bg-transparent hover:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground",
                         isCompact ? "px-0" : "px-2.5",
                       )}
                       aria-label={t("toolbar.contextUsage")}
@@ -385,7 +309,7 @@ export function ChatInputToolbar({
                 side="top"
                 align="end"
                 sideOffset={8}
-                className="w-60 rounded-2xl p-1 text-left"
+                className="w-60 rounded-md p-1 text-left"
               >
                 <div className="px-2 py-1.5 text-sm font-semibold text-foreground">
                   {t("toolbar.contextWindow")}
@@ -422,7 +346,7 @@ export function ChatInputToolbar({
                         type="button"
                         variant="ghost"
                         size="icon-xs"
-                        className="shrink-0 rounded-full"
+                        className="shrink-0 rounded-sm"
                         onClick={handleOpenAutoCompactSettings}
                         aria-label={t("toolbar.settings")}
                         title={t("toolbar.settings")}

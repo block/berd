@@ -184,7 +184,7 @@ export function ExtensionsSettings({
     if (sectionExtensions.length === 0) return null;
     return (
       <section>
-        <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
+        <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
           {sectionExtensions.map((ext) => (
             <ExtensionItem
               key={ext.config_key}
@@ -262,7 +262,7 @@ export function ExtensionsSettings({
 
       <div className="mt-6">
         {isLoading ? (
-          <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
+          <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <div key={i} className="h-20 animate-pulse px-4 py-4">
                 <div className="h-4 w-2/5 rounded bg-muted/50" />

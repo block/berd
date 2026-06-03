@@ -147,7 +147,7 @@ export function SidebarRecentsSection({
             onClick={onToggleOpen}
             aria-expanded={isOpen}
             className={cn(
-              "flex min-w-0 flex-1 items-center gap-0.5 rounded-md py-1 text-left transition-colors hover:text-sidebar-foreground",
+              "flex min-w-0 flex-1 items-center gap-0.5 rounded-sm py-1 text-left transition-colors hover:text-sidebar-foreground",
               labelTransition,
               labelVisible
                 ? "opacity-100 w-auto"

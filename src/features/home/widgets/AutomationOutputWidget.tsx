@@ -130,7 +130,7 @@ export function AutomationOutputWidget({
       <button
         type="button"
         onClick={handleUnavailableClick}
-        className="flex h-full w-full items-center justify-center bg-card text-muted-foreground rounded-card-chat cursor-pointer"
+        className="flex h-full w-full items-center justify-center bg-card text-muted-foreground rounded-md cursor-pointer"
       >
         <span
           style={{
@@ -161,7 +161,7 @@ export function AutomationOutputWidget({
       type="button"
       onClick={handleClick}
       aria-label={title}
-      className="flex h-full w-full flex-col overflow-hidden rounded-card-chat bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
+      className="flex h-full w-full flex-col overflow-hidden rounded-md bg-card text-left text-foreground transition-colors duration-150 hover:bg-muted cursor-pointer"
       style={{
         padding: "clamp(0.75rem, calc(1rem * var(--widget-scale, 1)), 1.75rem)",
       }}

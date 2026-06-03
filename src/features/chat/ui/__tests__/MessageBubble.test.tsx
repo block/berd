@@ -205,7 +205,7 @@ describe("MessageBubble", () => {
 
     expect(
       container.querySelector(
-        '[data-role="user-message"] .rounded-lg.bg-message-user-bg',
+        '[data-role="user-message"] .rounded-sm.bg-message-user-bg',
       ),
     ).toBeInTheDocument();
   });

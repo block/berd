@@ -237,7 +237,7 @@ export function ConnectionsSettings({
         </div>
 
         <TabsContent value="companyManaged">
-          <div className="overflow-hidden rounded-xl bg-background divide-y divide-border">
+          <div className="overflow-hidden rounded-md bg-background divide-y divide-border">
             {sortedRows.map(({ entry, status }) => (
               <ConnectionRow
                 key={entry.provider}

@@ -56,7 +56,7 @@ export function SidebarSearchResults({
             variant="ghost"
             onClick={() => onSelectResult?.(session.id, result.messageId)}
             className={cn(
-              "h-auto w-full items-start justify-start rounded-md border border-transparent px-3 py-2 text-left font-normal hover:bg-sidebar-accent",
+              "h-auto w-full items-start justify-start rounded-sm border border-transparent px-3 py-2 text-left font-normal hover:bg-sidebar-accent",
               SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
               activeSessionId === session.id &&
                 "border-sidebar-border/80 bg-sidebar-accent",

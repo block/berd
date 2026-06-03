@@ -52,7 +52,7 @@ export function ProjectIconPicker({
               type="button"
               onClick={() => onChooseIcon(DEFAULT_PROJECT_ICON)}
               className={cn(
-                "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted",
+                "flex size-9 items-center justify-center rounded-sm border bg-background transition-colors hover:bg-muted",
                 selectedColorIcon ? "border-foreground" : "border-border/80",
               )}
               title={t("dialog.colorBlockIcon")}
@@ -68,7 +68,7 @@ export function ProjectIconPicker({
                 type="button"
                 onClick={() => onChooseIcon(candidate.icon)}
                 className={cn(
-                  "flex size-9 items-center justify-center rounded-md border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
+                  "flex size-9 items-center justify-center rounded-sm border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
                   icon === candidate.icon
                     ? "border-foreground"
                     : "border-border/80",
@@ -90,7 +90,7 @@ export function ProjectIconPicker({
               type="button"
               onClick={onChooseCustomIcon}
               className={cn(
-                "col-span-3 flex h-9 w-fit min-w-[88px] items-center justify-center gap-1.5 justify-self-start rounded-md border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
+                "col-span-3 flex h-9 w-fit min-w-[88px] items-center justify-center gap-1.5 justify-self-start rounded-sm border bg-background px-3 text-xs text-foreground transition-colors hover:bg-muted",
                 selectedCustomIcon ? "border-foreground" : "border-border/80",
               )}
               title={

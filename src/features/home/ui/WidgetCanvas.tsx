@@ -548,7 +548,7 @@ export function WidgetCanvas({
                   }}
                   className={
                     catalogEntry.resizeHandleClassName ??
-                    "absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                    "absolute -right-3 -bottom-3 z-20 hidden size-7 cursor-nwse-resize items-center justify-center rounded-sm group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   }
                 >
                   <span

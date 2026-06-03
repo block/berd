@@ -6,13 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import {
-  IconArrowUp,
-  IconCheck,
-  IconChevronDown,
-  IconMicrophone,
-  IconPlus,
-} from "@tabler/icons-react";
+import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -29,6 +23,7 @@ import { ChatInputAttachments } from "@/features/chat/ui/ChatInputAttachments";
 import { ChatInputSelectionChips } from "@/features/chat/ui/ChatInputSelectionChips";
 import { MentionAutocomplete } from "@/features/chat/ui/MentionAutocomplete";
 import { AgentModelPicker } from "@/features/chat/ui/AgentModelPicker";
+import { ProjectInputSelector } from "@/features/chat/ui/ProjectInputSelector";
 import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
@@ -44,12 +39,7 @@ import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS } from "@/shared/ui/sidebar-tokens";
 import { Button } from "@/shared/ui/button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/shared/ui/popover";
+import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 
 export interface GlobalComposeOptions {
@@ -653,8 +643,6 @@ export function GlobalComposerPill({
     addPathAttachments,
   });
 
-  const projectButtonLabel = selectedProject?.name ?? t("toolbar.noProject");
-
   return (
     <div
       ref={containerRef}
@@ -839,60 +827,15 @@ export function GlobalComposerPill({
             triggerTabIndex={expanded ? 0 : -1}
           />
 
-          <Popover open={projectPickerOpen} onOpenChange={setProjectPickerOpen}>
-            <PopoverTrigger asChild>
-              <button
-                type="button"
-                tabIndex={expanded ? 0 : -1}
-                className="flex h-8 min-w-0 items-center gap-1 rounded-full px-2 text-[14px] text-foreground hover:bg-accent"
-                aria-label={t("toolbar.selectProject")}
-              >
-                <span className="max-w-[120px] truncate">
-                  {projectButtonLabel}
-                </span>
-                <IconChevronDown className="size-3 shrink-0 text-muted-foreground" />
-              </button>
-            </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="w-[260px] p-2">
-              <div className="space-y-0.5">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedProjectId(null);
-                    setProjectPickerOpen(false);
-                  }}
-                  className={cn(
-                    "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                    selectedProjectId === null && "bg-accent",
-                  )}
-                >
-                  <span>{t("toolbar.noProject")}</span>
-                  {selectedProjectId === null ? (
-                    <IconCheck className="ml-2 size-4 shrink-0 text-muted-foreground" />
-                  ) : null}
-                </button>
-                {projects.map((project) => (
-                  <button
-                    key={project.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedProjectId(project.id);
-                      setProjectPickerOpen(false);
-                    }}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-accent",
-                      selectedProjectId === project.id && "bg-accent",
-                    )}
-                  >
-                    <span className="truncate">{project.name}</span>
-                    {selectedProjectId === project.id ? (
-                      <IconCheck className="ml-2 size-4 shrink-0 text-muted-foreground" />
-                    ) : null}
-                  </button>
-                ))}
-              </div>
-            </PopoverContent>
-          </Popover>
+          <ProjectInputSelector
+            selectedProjectId={selectedProjectId}
+            availableProjects={projects}
+            onProjectChange={setSelectedProjectId}
+            open={projectPickerOpen}
+            onOpenChange={setProjectPickerOpen}
+            triggerTabIndex={expanded ? 0 : -1}
+            contentSide="top"
+          />
         </div>
 
         <div className="pointer-events-auto absolute inset-y-0 right-0 z-10 flex items-center gap-2">

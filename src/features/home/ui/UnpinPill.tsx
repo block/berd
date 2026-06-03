@@ -73,7 +73,7 @@ export function UnpinPill({
           onUnpin();
           onOpenChange(false);
         }}
-        className="rounded-pill bg-popover-inverse px-4 py-2 text-sm text-popover-inverse-foreground transition-opacity hover:opacity-70"
+        className="rounded-full bg-popover-inverse px-4 py-2 text-sm text-popover-inverse-foreground transition-opacity hover:opacity-70"
       >
         {t("widgets.unpin.label")}
       </button>

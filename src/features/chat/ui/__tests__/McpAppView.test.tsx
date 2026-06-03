@@ -236,7 +236,7 @@ describe("McpAppView nested tool calls", () => {
 
     const borderedChrome = borderedRoot.firstElementChild as HTMLElement | null;
     expect(borderedChrome).not.toBeNull();
-    expect(borderedChrome?.className).toContain("rounded-2xl");
+    expect(borderedChrome?.className).toContain("rounded-md");
     expect(borderedChrome?.className).toContain("border");
     expect(borderedChrome?.className).toContain("[&_iframe]:block");
 
@@ -258,7 +258,7 @@ describe("McpAppView nested tool calls", () => {
     const borderlessChrome =
       borderlessRoot.firstElementChild as HTMLElement | null;
     expect(borderlessChrome).not.toBeNull();
-    expect(borderlessChrome?.className).not.toContain("rounded-2xl");
+    expect(borderlessChrome?.className).not.toContain("rounded-md");
     expect(borderlessChrome?.className).not.toContain("border");
     expect(borderlessChrome?.className).not.toContain("shadow-sm");
     expect(borderlessChrome?.className).not.toContain("overflow-hidden");

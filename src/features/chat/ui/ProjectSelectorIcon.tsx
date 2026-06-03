@@ -13,7 +13,7 @@ export function ProjectSelectorIcon({
     return (
       <span
         aria-hidden="true"
-        className="relative top-0.5 inline-block size-2.5 rounded-full bg-muted-foreground/40"
+        className="inline-block size-2.5 rounded-full bg-muted-foreground/40"
       />
     );
   }
@@ -23,8 +23,8 @@ export function ProjectSelectorIcon({
       icon={icon}
       color={color}
       projectId={projectId}
-      className="relative top-0.5 size-3.5 rounded-[3px]"
-      imageClassName="relative top-0.5 size-3.5 rounded-[3px]"
+      className="size-3.5 rounded-[3px]"
+      imageClassName="size-3.5 rounded-[3px]"
     />
   );
 }

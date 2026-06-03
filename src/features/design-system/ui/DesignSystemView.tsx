@@ -417,20 +417,27 @@ type RuntimeToken = {
 
 const shapeTokens: RuntimeToken[] = [
   {
-    name: "--radius",
-    description: "Base radius used by Tailwind radius aliases.",
+    name: "--radius-xs",
+    description:
+      "Sub-cards nested inside sm containers; badges and status chips.",
   },
-  { name: "--radius-pill", description: "Fully rounded controls and pills." },
-  { name: "--radius-button", description: "Button corner shape." },
-  { name: "--radius-input", description: "Input and select corner shape." },
-  { name: "--radius-card", description: "Default card corner shape." },
-  { name: "--radius-card-sm", description: "Compact card corner shape." },
-  { name: "--radius-card-lg", description: "Large card corner shape." },
   {
-    name: "--radius-overlay",
-    description: "Popover and overlay corner shape.",
+    name: "--radius-sm",
+    description: "Sidebar nav items, theme tiles, picker tiles, nested cards.",
   },
-  { name: "--radius-modal", description: "Modal corner shape." },
+  {
+    name: "--radius-md",
+    description:
+      "Base card surface — sidebar panel, settings cards, widgets, chat surface.",
+  },
+  {
+    name: "--radius-lg",
+    description: "Largest framing cards — outer panel containers.",
+  },
+  {
+    name: "--radius-composer",
+    description: "Chat composer one-off — deliberate signature shape.",
+  },
 ];
 
 const spacingTokens: RuntimeToken[] = [
@@ -2210,7 +2217,7 @@ function ThemeControls() {
   const { themeMode, setThemeMode, primaryColor, setPrimaryColor } = useTheme();
 
   return (
-    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-3 py-2">
       <Select
         value={themeMode}
         onValueChange={(value) => {
@@ -2280,7 +2287,7 @@ function Surface({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border bg-background px-4 py-4">
+    <section className="rounded-md border border-border bg-background px-4 py-4">
       <div className="mb-4">
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
         {description ? (
@@ -3139,7 +3146,7 @@ function OverviewPage() {
         ].map(([value, label, detail]) => (
           <div
             key={label}
-            className="rounded-lg border border-border bg-background px-4 py-4"
+            className="rounded-md border border-border bg-background px-4 py-4"
           >
             <p className="text-2xl font-medium tracking-tight text-foreground">
               {value}
@@ -4767,7 +4774,7 @@ function LiveColorTokenTable({
                       {row.dependencies.map((dependency) => (
                         <span
                           key={dependency}
-                          className="rounded-full border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                          className="rounded-xs border border-border bg-background px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
                         >
                           {dependency}
                         </span>

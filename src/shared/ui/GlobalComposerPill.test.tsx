@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import userEvent from "@testing-library/user-event";
@@ -609,7 +610,7 @@ describe("GlobalComposerPill", () => {
 
     await user.click(screen.getByRole("textbox"));
     await user.click(screen.getByRole("button", { name: /select project/i }));
-    await user.click(screen.getByRole("button", { name: "Project One" }));
+    await user.click(screen.getByRole("menuitem", { name: /Project One/i }));
 
     await waitFor(() => {
       expect(mockListFilesForMentions).toHaveBeenCalledWith(
@@ -626,6 +627,25 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByRole("textbox")).toHaveValue(
       "/workspace/project/src/readme.md ",
     );
+  });
+
+  it("uses the shared project selector menu", async () => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByText("Choose a project")).toBeInTheDocument();
+    expect(within(menu).getByText("No project")).toBeInTheDocument();
+    expect(
+      within(menu).getByText("General chat without project context"),
+    ).toBeInTheDocument();
+    expect(within(menu).getByText("/workspace/project")).toBeInTheDocument();
+    expect(
+      document.querySelector('[data-project-color-swatch="project-1"]'),
+    ).toBeInTheDocument();
   });
 
   it("sends a provider override when the mini composer switches agents", async () => {

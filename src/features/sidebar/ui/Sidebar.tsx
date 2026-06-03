@@ -167,7 +167,7 @@ function SidebarInspectorToggleNavItem({
   return (
     <div
       className={cn(
-        "flex w-full items-center rounded-md text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+        "flex w-full items-center rounded-sm text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
         SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
         SIDEBAR_NAV_TEXT_CLASS,
         collapsed
@@ -637,11 +637,11 @@ export function Sidebar({
     >
       <div
         className={cn(
-          "h-full rounded-chrome transition-shadow duration-300 ease-out",
+          "h-full rounded-md transition-shadow duration-300 ease-out",
           elevatedShadow && SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
         )}
       >
-        <div className="flex h-full flex-col overflow-hidden rounded-chrome bg-sidebar backdrop-blur-md">
+        <div className="flex h-full flex-col overflow-hidden rounded-md bg-sidebar backdrop-blur-md">
           {/* The goose home affordance now lives in the TopBar (left of the
             panel toggle) so it survives when the panel is collapsed. */}
           <div className="flex-shrink-0 pt-0.5" aria-hidden="true" />
@@ -891,7 +891,7 @@ export function Sidebar({
                     isSettingsSurface ? onSettingsBack : onDesignSystemBack
                   }
                   className={cn(
-                    "h-10 w-full rounded-md bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
+                    "h-10 w-full rounded-sm bg-transparent text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground active:bg-sidebar-accent",
                     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
                     collapsed
                       ? "justify-center p-3"

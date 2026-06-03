@@ -146,7 +146,7 @@ export function SidebarProjectsSection({
               onClick={onToggleProjectsSection}
               aria-expanded={projectsSectionOpen}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-0.5 rounded-md py-1 text-left transition-colors hover:text-foreground",
+                "flex min-w-0 flex-1 items-center gap-0.5 rounded-sm py-1 text-left transition-colors hover:text-foreground",
                 labelTransition,
                 labelVisible
                   ? "opacity-100 w-auto"
@@ -275,7 +275,7 @@ export function SidebarProjectsSection({
                   onClick={onToggleRecentsSection}
                   aria-expanded={recentsSectionOpen}
                   className={cn(
-                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-md py-1 pl-3 text-left transition-colors hover:text-foreground",
+                    "flex min-w-0 flex-1 items-center gap-1.5 rounded-sm py-1 pl-3 text-left transition-colors hover:text-foreground",
                     "-ml-3",
                     labelTransition,
                     labelVisible

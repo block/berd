@@ -29,7 +29,7 @@ export const skillsGridClass = cn(
 function SkeletonTile() {
   return (
     <div aria-hidden="true" className="flex w-full flex-col gap-3 p-2">
-      <Skeleton className="h-5 w-24 rounded-pill" />
+      <Skeleton className="h-5 w-24 rounded-xs" />
       <Skeleton className="h-4 w-5/6" />
       <Skeleton className="h-4 w-2/3" />
     </div>
@@ -70,7 +70,7 @@ export function SkillsGrid({
         onClick={onCreateSkill}
         aria-label={t("view.newSkill")}
         className={cn(
-          "gallery-card-enter group flex h-full min-h-[12.5rem] w-full items-center justify-center rounded-tile border border-transparent p-4",
+          "gallery-card-enter group flex h-full min-h-[12.5rem] w-full items-center justify-center rounded-md border border-transparent p-4",
           "text-muted-foreground transition-[background-color,backdrop-filter,border-color,color] duration-200",
           "hover:border-card/40 hover:bg-card/40 hover:text-foreground hover:backdrop-blur-sm",
           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",

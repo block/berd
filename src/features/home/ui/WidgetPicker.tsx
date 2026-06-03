@@ -617,7 +617,7 @@ function PanelStageOne({
           type="button"
           onClick={() => onSelectCategory(category)}
           className={cn(
-            "inline-flex h-[30px] items-center rounded-pill bg-popover-inverse px-3 text-sm text-popover-inverse-foreground",
+            "inline-flex h-[30px] items-center rounded-full bg-popover-inverse px-3 text-sm text-popover-inverse-foreground",
             "transition-[transform,background-color,opacity] duration-200 ease-out",
             "hover:scale-[1.03] hover:bg-popover-inverse/85",
             "active:scale-[0.97] active:duration-75",
@@ -686,14 +686,14 @@ function PanelStageTwo({
           type="button"
           aria-label={backLabel}
           onClick={onBack}
-          className="rounded-pill p-1 text-foreground transition-opacity hover:opacity-70"
+          className="rounded-sm p-1 text-foreground transition-opacity hover:opacity-70"
         >
           <ArrowLeft className="size-4" aria-hidden="true" />
         </button>
         <span className="truncate text-sm font-medium">{title}</span>
       </div>
 
-      <div className="rounded-dropdown bg-card p-3">
+      <div className="rounded-md bg-card p-3">
         {activePanel === "clock" ? (
           <div className="space-y-0">
             <WidgetOptionRow
@@ -804,7 +804,7 @@ function PickerRow({ option, isLast, onSelect }: PickerRowProps) {
       >
         <span
           className={cn(
-            "shrink-0 rounded-pill px-2 py-0.5 text-xs text-skill-pill-fg",
+            "shrink-0 rounded-xs px-2 py-0.5 text-xs text-skill-pill-fg",
             skillPillToneClass(
               resolveSkillPillTone(option.leading.name, option.leading.color),
             ),

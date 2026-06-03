@@ -139,7 +139,7 @@ export const TestResults = ({
   return (
     <TestResultsContext.Provider value={contextValue}>
       <div
-        className={cn("rounded-lg border bg-background", className)}
+        className={cn("rounded-md border bg-background", className)}
         {...props}
       >
         {children ??
@@ -254,7 +254,7 @@ export const TestSuite = ({
 
   return (
     <TestSuiteContext.Provider value={contextValue}>
-      <Collapsible className={cn("rounded-lg border", className)} {...props}>
+      <Collapsible className={cn("rounded-md border", className)} {...props}>
         {children}
       </Collapsible>
     </TestSuiteContext.Provider>

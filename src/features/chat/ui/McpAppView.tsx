@@ -377,14 +377,14 @@ export function McpAppView({
     renderError !== null || renderableDocument === null;
   const rootClassName = "my-3 w-full";
   const appChromeClassName = renderableDocument?.prefersBorder
-    ? "w-full overflow-hidden rounded-2xl border border-primary bg-background/40 shadow-sm [&_iframe]:block"
+    ? "w-full overflow-hidden rounded-md border border-primary bg-background/40 shadow-sm [&_iframe]:block"
     : "w-full bg-transparent [&_iframe]:block";
   const appChromeStyle = {
     height: inlineHeight,
     colorScheme: resolvedTheme,
   } as const;
   const loadingClassName = renderableDocument?.prefersBorder
-    ? "rounded-2xl border border-dashed border-border px-4 py-3 text-muted-foreground text-sm"
+    ? "rounded-md border border-dashed border-border px-4 py-3 text-muted-foreground text-sm"
     : "py-1 text-muted-foreground text-sm";
 
   useEffect(() => {

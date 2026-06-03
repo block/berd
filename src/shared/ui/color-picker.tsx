@@ -287,7 +287,7 @@ export function ColorPicker({
             type="button"
             aria-label={label}
             className={cn(
-              "inline-flex h-9 w-12 cursor-pointer items-center justify-center rounded-lg border border-border bg-background p-1",
+              "inline-flex h-9 w-12 cursor-pointer items-center justify-center rounded-md border border-border bg-background p-1",
               className,
             )}
           >
@@ -301,7 +301,7 @@ export function ColorPicker({
       <PopoverContent
         align="start"
         sideOffset={6}
-        className="w-auto rounded-full p-1.5"
+        className="w-auto rounded-sm p-1.5"
       >
         <div className="flex items-center gap-1.5">{swatches}</div>
       </PopoverContent>

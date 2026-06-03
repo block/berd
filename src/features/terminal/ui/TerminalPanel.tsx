@@ -361,7 +361,7 @@ export function TerminalPanel({
               side="top"
               align="end"
               sideOffset={8}
-              className="w-64 rounded-overlay p-3 text-left"
+              className="w-64 rounded-md p-3 text-left"
             >
               <div className="space-y-3">
                 <div className="space-y-1">

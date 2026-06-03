@@ -5,7 +5,7 @@ import { buttonVariants } from "@/shared/ui/button";
 const toastActionButtonClassName = buttonVariants({
   size: "xxs",
   className:
-    "!rounded-full !bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:!ring-2 focus-visible:!ring-ring",
+    "!bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:!ring-2 focus-visible:!ring-ring",
 });
 
 const Toaster = ({ ...props }: ToasterProps) => {
@@ -30,7 +30,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--surface-composer-glass)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius-card-chat)",
+          "--border-radius": "var(--radius-md)",
         } as React.CSSProperties
       }
       toastOptions={{

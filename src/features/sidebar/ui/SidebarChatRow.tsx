@@ -173,7 +173,7 @@ export function SidebarChatRow({
   if (editing) {
     return (
       <div
-        className={cn("flex items-center group rounded-md pr-0.5", className)}
+        className={cn("flex items-center group rounded-sm pr-0.5", className)}
       >
         <Input
           ref={inputRef}
@@ -227,7 +227,7 @@ export function SidebarChatRow({
         setMenuOpen(true);
       }}
       className={cn(
-        "relative flex items-center group/chat-row rounded-md hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+        "relative flex items-center group/chat-row rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
         SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
         (isActive || menuOpen) &&
           (!selectionEnabled || selected) &&
@@ -258,7 +258,7 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 justify-start gap-2 rounded-md pr-8 py-2",
+          "flex-1 min-w-0 justify-start gap-2 rounded-sm pr-8 py-2",
           SIDEBAR_NAV_TEXT_CLASS,
           rowPaddingClass,
           rowButtonStateClass,
@@ -296,7 +296,7 @@ export function SidebarChatRow({
             aria-label={t("menu.optionsFor", { label: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-1 size-5 rounded-full transition-colors hover:text-sidebar-foreground",
+              "absolute right-1 size-5 rounded-sm transition-colors hover:text-sidebar-foreground",
               dragging
                 ? "invisible opacity-0 pointer-events-none"
                 : menuOpen

@@ -487,8 +487,7 @@ export function ChatInput({
 
   // Bare composer matches the conversation panel's chat radius so the two read
   // as one family; the floating Home pill keeps its softer composer radius.
-  const composerRadius =
-    surface === "bare" ? "rounded-card-chat" : "rounded-composer";
+  const composerRadius = surface === "bare" ? "rounded-md" : "rounded-composer";
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -572,7 +571,7 @@ export function ChatInput({
               />
 
               {queuedMessage && (
-                <div className="mb-2 flex items-center gap-2 rounded-card-sm bg-muted px-3 py-1.5">
+                <div className="mb-2 flex items-center gap-2 rounded-sm bg-muted px-3 py-1.5">
                   <span className="flex-1 truncate text-xs text-muted-foreground">
                     {t("queue.label", { text: queuedMessage.text })}
                   </span>

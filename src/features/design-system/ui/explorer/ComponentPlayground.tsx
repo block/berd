@@ -56,7 +56,7 @@ export function ComponentPlayground({
   details?: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border border-border bg-background px-4 py-4">
+    <section className="rounded-md border border-border bg-background px-4 py-4">
       <div className="mb-4">
         <h2 className="text-sm font-medium text-foreground">{title}</h2>
         {description ? (

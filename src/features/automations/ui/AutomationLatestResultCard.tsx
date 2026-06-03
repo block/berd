@@ -46,7 +46,7 @@ export function AutomationLatestResultCard({ tile }: { tile: AutomationTile }) {
   });
 
   return (
-    <section className="space-y-3 rounded-card-chat bg-card p-4">
+    <section className="space-y-3 rounded-md bg-card p-4">
       <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
         <span
           className={cn(
