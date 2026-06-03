@@ -311,23 +311,26 @@ export function useChat(
 
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort();
-    const activeStreamingMessageId = useChatStore
-      .getState()
-      .getSessionRuntime(sessionId).streamingMessageId;
+    const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+    const activeStreamingMessageId = runtime.streamingMessageId;
 
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
-    // Cancel the backend ACP session to stop orphaned streaming events
-    acpCancelSession(sessionId)
+    // Cancel the backend ACP session to stop orphaned streaming/tool events. We
+    // send cancellation even while still "thinking" before ACP has created a
+    // visible assistant message; that is exactly when users need interruption
+    // most for long-running tool calls.
+    const cancellation = acpCancelSession(sessionId)
       .then((wasCancelled) => {
         if (wasCancelled && activeStreamingMessageId) {
           markMessageStopped(sessionId, activeStreamingMessageId);
         }
+        return wasCancelled;
       })
-      .catch(() => {
-        // Best-effort cancellation — ignore errors
-      });
+      .catch(() => false);
+
+    return cancellation;
   }, [
     setChatState,
     setPendingAssistantProvider,

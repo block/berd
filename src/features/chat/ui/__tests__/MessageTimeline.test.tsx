@@ -625,12 +625,14 @@ describe("MessageTimeline", () => {
       <MessageTimeline
         messages={[message("user-1", "user", "Question")]}
         footer={<div data-testid="composer-footer" />}
+        footerStatus={<div data-testid="footer-status">Responding...</div>}
       />,
     );
 
     const scroller = screen.getByTestId("message-timeline-scroll");
     const surface = screen.getByTestId("message-timeline-surface");
     const footerFrame = screen.getByTestId("message-timeline-footer");
+    const footerStatus = screen.getByTestId("footer-status").parentElement;
 
     expect(surface).toHaveClass(
       "absolute",
@@ -647,6 +649,11 @@ describe("MessageTimeline", () => {
       "pb-[var(--chat-surface-bottom-gap)]",
     );
     expect(footerFrame).not.toHaveClass("absolute", "bottom-4");
+    expect(footerStatus?.parentElement).toHaveClass(
+      "absolute",
+      "bottom-full",
+      "pb-2",
+    );
   });
 
   it("keeps Jump hidden or clears it when the transcript has no scrollable overflow", async () => {

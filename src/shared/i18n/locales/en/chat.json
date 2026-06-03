@@ -259,6 +259,7 @@
     "selectModel": "Select model",
     "selectProject": "Select project",
     "sendMessage": "Send message",
+    "sendNow": "Send now",
     "sessionStarting": "Starting session...",
     "sessionStartFailed": "Session failed to start",
     "stopGeneration": "Stop generation",

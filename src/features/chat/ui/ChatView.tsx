@@ -372,6 +372,8 @@ export function ChatView({
           }
           composerActions={{
             onSend: controller.handleSend,
+            onSendNow: controller.sendNow,
+            onSendQueuedNow: controller.sendQueuedNow,
             disabled:
               controller.projectMetadataPending ||
               controller.isCompactingContext,

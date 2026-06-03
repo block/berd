@@ -50,6 +50,8 @@ export type ChatInputSendHandler = (
 export interface ChatInputComposerActions {
   onSend: ChatInputSendHandler;
   onStop?: () => void;
+  onSendNow?: ChatInputSendHandler;
+  onSendQueuedNow?: () => boolean | Promise<boolean>;
   isStreaming?: boolean;
   disabled?: boolean;
   sendDisabled?: boolean;

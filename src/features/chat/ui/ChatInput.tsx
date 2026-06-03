@@ -31,6 +31,7 @@ import { useChatInputFilePicker } from "../hooks/useChatInputFilePicker";
 import { ChatInputAttachments } from "./ChatInputAttachments";
 import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
+import { submitComposerMessage } from "../lib/submitComposerMessage";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
 import { resolveAgentToolsCapabilityTip } from "../lib/agentToolsCapabilities";
@@ -59,6 +60,8 @@ export function ChatInput({
   const {
     onSend,
     onStop,
+    onSendNow,
+    onSendQueuedNow,
     isStreaming = false,
     disabled = false,
     sendDisabled = false,
@@ -177,6 +180,15 @@ export function ChatInput({
   });
 
   const hasQueuedMessage = queuedMessage !== null;
+  const canInterruptAndSendNow = isStreaming && Boolean(onSendNow);
+  const hasComposedMessage =
+    text.trim().length > 0 ||
+    (scopedControls.attachments && attachments.length > 0) ||
+    visibleSelectedSkills.length > 0;
+  const canQueueMessage =
+    hasComposedMessage && !hasQueuedMessage && !disabled && !sendDisabled;
+  const canSendNow =
+    hasComposedMessage && canInterruptAndSendNow && !disabled && !sendDisabled;
 
   const activePersona = useMemo(
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
@@ -190,13 +202,7 @@ export function ChatInput({
   );
   const stickyPersona = activePersona;
 
-  const canSend =
-    (text.trim().length > 0 ||
-      (scopedControls.attachments && attachments.length > 0) ||
-      visibleSelectedSkills.length > 0) &&
-    !hasQueuedMessage &&
-    !disabled &&
-    !sendDisabled;
+  const canSend = canQueueMessage;
 
   const handleSkillMentionAdded = useCallback(
     (skill: (typeof selectedSkills)[number]) => {
@@ -289,67 +295,96 @@ export function ChatInput({
     isSendLocked: hasQueuedMessage || disabled || sendDisabled,
   });
 
-  const handleSend = useCallback(async () => {
-    if (!canSend) {
+  const handleSend = useCallback(
+    async (options?: { sendNow?: boolean }) => {
+      const shouldSendNow = options?.sendNow === true;
+      if (shouldSendNow ? !canSendNow : !canQueueMessage) {
+        return;
+      }
+
+      // Stop without flushing so Send uses the text already in the composer.
+      // This also cancels an in-flight microphone startup.
+      if (
+        scopedControls.voice &&
+        (dictation.isRecording ||
+          dictation.isTranscribing ||
+          dictation.isStarting())
+      ) {
+        dictation.stopRecording();
+      }
+
+      const submittedText = text;
+      const submittedSkills = visibleSelectedSkills;
+      const submittedAttachments = scopedControls.attachments
+        ? attachments
+        : [];
+      const send = shouldSendNow ? onSendNow : undefined;
+      const accepted = send
+        ? await submitComposerMessage({
+            text: submittedText,
+            attachments: submittedAttachments,
+            skills: submittedSkills,
+            selectedPersonaId,
+            onSend: send,
+            resolveSkillSlashCommand,
+            resolveAutoSkill,
+          })
+        : await submitChatInputMessage(
+            submittedText,
+            submittedAttachments,
+            submittedSkills,
+          );
+      if (!accepted) {
+        return;
+      }
+      const textStillMatchesSubmission = textRef.current === submittedText;
+      const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
+        selectedSkillsRef.current,
+        submittedSkills,
+      );
+      const attachmentsStillMatchSubmission = attachmentSnapshotsMatch(
+        attachmentsRef.current,
+        submittedAttachments,
+      );
+      if (textStillMatchesSubmission) {
+        setText("");
+      }
+      if (skillsStillMatchSubmission) {
+        setSelectedSkills([]);
+      }
+      if (attachmentsStillMatchSubmission) {
+        clearAttachments();
+      }
+      if (textareaRef.current) {
+        textareaRef.current.style.height = "auto";
+      }
+    },
+    [
+      attachments,
+      canQueueMessage,
+      canSendNow,
+      clearAttachments,
+      dictation,
+      onSendNow,
+      resolveAutoSkill,
+      resolveSkillSlashCommand,
+      scopedControls.attachments,
+      scopedControls.voice,
+      selectedPersonaId,
+      setSelectedSkills,
+      setText,
+      submitChatInputMessage,
+      text,
+      visibleSelectedSkills,
+    ],
+  );
+
+  const handleSendQueuedNow = useCallback(() => {
+    if (!onSendQueuedNow) {
       return;
     }
-
-    // Stop without flushing so Send uses the text already in the composer.
-    // This also cancels an in-flight microphone startup.
-    if (
-      scopedControls.voice &&
-      (dictation.isRecording ||
-        dictation.isTranscribing ||
-        dictation.isStarting())
-    ) {
-      dictation.stopRecording();
-    }
-
-    const submittedText = text;
-    const submittedSkills = visibleSelectedSkills;
-    const submittedAttachments = scopedControls.attachments ? attachments : [];
-    const accepted = await submitChatInputMessage(
-      submittedText,
-      submittedAttachments,
-      submittedSkills,
-    );
-    if (!accepted) {
-      return;
-    }
-    const textStillMatchesSubmission = textRef.current === submittedText;
-    const skillsStillMatchSubmission = skillDraftSnapshotsMatch(
-      selectedSkillsRef.current,
-      submittedSkills,
-    );
-    const attachmentsStillMatchSubmission = attachmentSnapshotsMatch(
-      attachmentsRef.current,
-      submittedAttachments,
-    );
-    if (textStillMatchesSubmission) {
-      setText("");
-    }
-    if (skillsStillMatchSubmission) {
-      setSelectedSkills([]);
-    }
-    if (attachmentsStillMatchSubmission) {
-      clearAttachments();
-    }
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, [
-    attachments,
-    canSend,
-    clearAttachments,
-    dictation,
-    scopedControls.attachments,
-    scopedControls.voice,
-    setSelectedSkills,
-    setText,
-    submitChatInputMessage,
-    text,
-    visibleSelectedSkills,
-  ]);
+    void onSendQueuedNow();
+  }, [onSendQueuedNow]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
     if (mentionOpen) {
@@ -380,6 +415,10 @@ export function ChatInput({
       event.nativeEvent.keyCode !== 229
     ) {
       event.preventDefault();
+      if ((event.metaKey || event.ctrlKey) && canInterruptAndSendNow) {
+        void handleSend({ sendNow: true });
+        return;
+      }
       void handleSend();
     }
   };
@@ -571,14 +610,25 @@ export function ChatInput({
               />
 
               {queuedMessage && (
-                <div className="mb-2 flex items-center gap-2 rounded-sm bg-muted px-3 py-1.5">
-                  <span className="flex-1 truncate text-xs text-muted-foreground">
+                <div className="mb-2 flex items-center gap-2 rounded-full bg-surface-chat-responding-pill-bg px-3 py-1.5 text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]">
+                  <span className="flex-1 truncate text-xs opacity-75">
                     {t("queue.label", { text: queuedMessage.text })}
                   </span>
+                  {isStreaming && onSendQueuedNow ? (
+                    <button
+                      type="button"
+                      onClick={handleSendQueuedNow}
+                      className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
+                      aria-label={t("toolbar.sendNow")}
+                      title={t("toolbar.sendNow")}
+                    >
+                      {t("toolbar.sendNow")}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={onDismissQueue}
-                    className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                    className="shrink-0 rounded-full p-0.5 text-current opacity-75 hover:opacity-100"
                     aria-label={t("queue.dismiss")}
                   >
                     <X className="size-3.5" />

@@ -624,29 +624,59 @@ describe("ChatInput", () => {
     expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
   });
 
-  it("shows disabled send button (not stop) when queue is full", () => {
+  it("queues on plain enter during streaming even when send-now is available", async () => {
+    const onSend = vi.fn();
+    const onSendNow = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={onSend} onSendNow={onSendNow} isStreaming />);
+
+    await user.type(screen.getByRole("textbox"), "follow up");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
+    expect(onSendNow).not.toHaveBeenCalled();
+  });
+
+  it("sends queued message now from the queue bar", async () => {
+    const onSendQueuedNow = vi.fn();
+    const user = userEvent.setup();
     render(
       <ChatInput
         onSend={vi.fn()}
+        onSendQueuedNow={onSendQueuedNow}
         onStop={vi.fn()}
         isStreaming
         queuedMessage={{ text: "queued msg" }}
       />,
     );
 
-    const sendButton = screen.getByRole("button", { name: /send message/i });
-    expect(sendButton).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /send now/i }));
+
+    expect(onSendQueuedNow).toHaveBeenCalledOnce();
     expect(
       screen.queryByRole("button", { name: /stop generation/i }),
     ).not.toBeInTheDocument();
   });
 
+  it("cmd-enter sends immediately while busy", async () => {
+    const onSendNow = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={vi.fn()} onSendNow={onSendNow} isStreaming />);
+
+    await user.type(screen.getByRole("textbox"), "replacement");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSendNow).toHaveBeenCalledWith("replacement", undefined, undefined);
+  });
+
   it("does not send when queue is full", async () => {
     const onSend = vi.fn();
+    const onSendNow = vi.fn();
     const user = userEvent.setup();
     render(
       <ChatInput
         onSend={onSend}
+        onSendNow={onSendNow}
         isStreaming
         queuedMessage={{ text: "queued msg" }}
       />,
@@ -656,6 +686,7 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).not.toHaveBeenCalled();
+    expect(onSendNow).not.toHaveBeenCalled();
   });
 
   it("does not stop dictation when send is blocked", async () => {

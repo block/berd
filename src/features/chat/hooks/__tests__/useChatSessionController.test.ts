@@ -410,6 +410,32 @@ describe("useChatSessionController", () => {
     expect(queueChatState).toBe("idle");
   });
 
+  it("keeps a queued message when send-now is not accepted", async () => {
+    const dismiss = vi.fn();
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: {
+        text: "make an agent",
+        sendOptions: {
+          chips: [{ label: "agent-builder", type: "skill" }],
+        },
+      },
+      enqueue: vi.fn(),
+      dismiss,
+    }));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "missing-session" }),
+    );
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.sendQueuedNow();
+    });
+
+    expect(accepted).toBe(false);
+    expect(dismiss).not.toHaveBeenCalled();
+  });
+
   it("handleCreatePersona calls the AppShell-provided callback", () => {
     const onCreatePersonaRequested = vi.fn();
     const { result } = renderHook(() =>

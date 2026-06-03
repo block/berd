@@ -28,6 +28,8 @@ type ChatInputHarnessProps = Omit<
 export function ChatInput({
   onSend,
   onStop,
+  onSendNow,
+  onSendQueuedNow,
   isStreaming,
   disabled,
   sendDisabled,
@@ -69,6 +71,8 @@ export function ChatInput({
       composerActions={{
         onSend,
         onStop,
+        onSendNow,
+        onSendQueuedNow,
         isStreaming,
         disabled,
         sendDisabled,

@@ -1021,6 +1021,76 @@ export function useChatSessionController({
     ],
   );
 
+  const sendNow = useCallback(
+    async (
+      text: string,
+      personaId?: string,
+      attachments?: ChatAttachmentDraft[],
+      sendOptions?: ChatSendOptions,
+    ) => {
+      if (!sessionId) {
+        return handleSend(text, personaId, attachments, sendOptions);
+      }
+
+      await stopStreaming();
+
+      let sendResult: boolean | Promise<boolean>;
+      if (
+        session?.intent !== "build-agent" &&
+        isAgentBuilderSkillSendOptions(sendOptions)
+      ) {
+        const builderSession = await ensureCurrentSessionIsAgentBuilder();
+        if (!builderSession) {
+          return false;
+        }
+        sendResult = sendWithAutoCompact(
+          text,
+          undefined,
+          attachments,
+          sendOptions,
+          builderSession,
+        );
+      } else {
+        sendResult = sendWithAutoCompact(
+          text,
+          personaId ? { id: personaId } : undefined,
+          attachments,
+          sendOptions,
+        );
+      }
+
+      const accepted =
+        sendResult instanceof Promise ? await sendResult : sendResult;
+      if (accepted !== false) {
+        queue.dismiss();
+      }
+      return accepted;
+    },
+    [
+      ensureCurrentSessionIsAgentBuilder,
+      handleSend,
+      queue,
+      sendWithAutoCompact,
+      session?.intent,
+      sessionId,
+      stopStreaming,
+    ],
+  );
+
+  const sendQueuedNow = useCallback(async () => {
+    const queuedMessage = queue.queuedMessage;
+    if (!queuedMessage) {
+      return false;
+    }
+
+    return sendNow(
+      queuedMessage.text,
+      queuedMessage.personaId,
+      queuedMessage.attachments,
+      queuedMessage.sendOptions,
+    );
+  }, [queue.queuedMessage, sendNow]);
+
   useEffect(() => {
     if (deferredSend.current && selectedPersona) {
       const { text, attachments, sendOptions, resolve } = deferredSend.current;
@@ -1315,6 +1385,8 @@ export function useChatSessionController({
     isLoadingHistory,
     queue,
     handleSend,
+    sendNow,
+    sendQueuedNow,
     draftValue,
     handleDraftChange,
     selectedSkills,

@@ -745,7 +745,7 @@ export function MessageTimeline({
   ) : null;
   const footerControlRow =
     footer && (footerStatus || jumpToLatestButton) ? (
-      <div className="mb-2 flex justify-center gap-2 px-4">
+      <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center gap-2 px-4 pb-2">
         {footerStatus ? (
           <div className="pointer-events-auto">{footerStatus}</div>
         ) : null}
