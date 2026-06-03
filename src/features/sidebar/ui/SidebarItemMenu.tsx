@@ -48,10 +48,10 @@ export function SidebarItemMenu({
           aria-label={t("menu.optionsFor", { label })}
           onClick={(e) => e.stopPropagation()}
           className={cn(
-            "size-5 rounded-sm transition-colors hover:text-sidebar-foreground",
+            "size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
             open
-              ? "visible opacity-100 text-sidebar-foreground"
-              : "invisible group-hover:visible group-focus-within:visible opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 text-sidebar-foreground/40",
+              ? "visible text-sidebar-foreground opacity-100"
+              : "invisible text-muted-foreground opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
           )}
         >
           <IconDots className="size-3.5" />

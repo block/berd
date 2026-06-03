@@ -11,6 +11,21 @@ export const APP_CHROME_NAV_TEXT_IMPORTANT_CLASS =
 /** @deprecated Use APP_CHROME_NAV_TEXT_CLASS */
 export const SIDEBAR_NAV_TEXT_CLASS = APP_CHROME_NAV_TEXT_CLASS;
 
+/** Shared icon-to-label spacing for sidebar nav items and chat rows. */
+export const SIDEBAR_ROW_ICON_TEXT_GAP_CLASS = "gap-2";
+
+/** Shared row height for sidebar nav items, project rows, and chat rows. */
+export const SIDEBAR_ROW_HEIGHT_CLASS = "h-[30px]";
+
+/** Shared vertical padding for sidebar nav items and chat rows. */
+export const SIDEBAR_ROW_VERTICAL_PADDING_CLASS = "py-1";
+
+/** Shared horizontal padding for top-level sidebar rows. */
+export const SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS = "px-3";
+
+/** Nav row spacing; matches chat row gap and vertical rhythm. */
+export const SIDEBAR_NAV_ROW_SPACING_CLASS = `${SIDEBAR_ROW_HEIGHT_CLASS} ${SIDEBAR_ROW_ICON_TEXT_GAP_CLASS} ${SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS} ${SIDEBAR_ROW_VERTICAL_PADDING_CLASS}`;
+
 /** Menu row hover/active background — ease-in-out for fluid feedback. */
 export const SIDEBAR_MENU_HOVER_TRANSITION_CLASS =
   "transition-[background-color,color] duration-250 ease-in-out";
@@ -21,7 +36,7 @@ export const SIDEBAR_COLLAPSE_TRANSITION_EASE = "cubic-bezier(0.4, 0, 0.2, 1)";
 
 /** Micro section labels in sidebar surfaces (Pinned, design-system groups). */
 export const SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS =
-  "text-[10px] font-normal normal-case tracking-normal";
+  "text-xs font-normal normal-case tracking-normal";
 
 /** Section headers such as Projects and Chats. */
 export const SIDEBAR_GROUP_LABEL_TEXT_CLASS = "text-xs font-normal";
@@ -30,17 +45,18 @@ export const SIDEBAR_GROUP_LABEL_TEXT_CLASS = "text-xs font-normal";
 export const SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS =
   "hover:shadow-sidebar-panel-elevated";
 
-/** Horizontal inset for sidebar section divider lines (14px each side). */
-export const SIDEBAR_SECTION_DIVIDER_INSET_CLASS = "mx-3.5";
+/** Horizontal inset for sidebar section divider lines. */
+export const SIDEBAR_SECTION_DIVIDER_INSET_CLASS = "mx-3";
 
 /** Section header row padding; aligns labels and actions with divider ends. */
-export const SIDEBAR_SECTION_HEADER_PADDING_CLASS = "pl-3.5 pr-3.5";
+export const SIDEBAR_SECTION_HEADER_PADDING_CLASS =
+  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS;
 
-/** Projects / Chats subheading row spacing (4px less space below than prior pb-1.5). */
-export const SIDEBAR_SECTION_HEADER_ROW_CLASS = `${SIDEBAR_SECTION_HEADER_PADDING_CLASS} pt-0.5 pb-0.5`;
+/** Projects / Chats subheading row spacing. */
+export const SIDEBAR_SECTION_HEADER_ROW_CLASS = `${SIDEBAR_SECTION_HEADER_PADDING_CLASS} pt-2 pb-0.5`;
 
 /** Standalone chat row left padding; aligns with section divider inset. */
-export const SIDEBAR_CHAT_ROW_PADDING_CLASS = "pl-3.5";
+export const SIDEBAR_CHAT_ROW_PADDING_CLASS = "pl-3";
 
 /** Bare unread dot; the parent owns positioning (e.g. a row's icon slot). */
 export const SIDEBAR_UNREAD_DOT_CLASS =
@@ -48,7 +64,7 @@ export const SIDEBAR_UNREAD_DOT_CLASS =
 
 /** Projects / Chats header action pill; colors are scoped sidebar tokens. */
 export const SIDEBAR_SECTION_ACTION_PILL_CLASS =
-  "h-5 flex-shrink-0 rounded-full bg-sidebar-section-action-bg px-2 text-[11px] font-normal text-sidebar-section-action-fg transition-[background-color,color] duration-150 ease-out hover:bg-sidebar-section-action-bg-hover hover:text-sidebar-section-action-fg-hover";
+  "h-5 flex-shrink-0 rounded-full bg-sidebar-section-action-bg px-2 text-sm font-normal text-sidebar-section-action-fg transition-[background-color,color] duration-150 ease-out hover:bg-sidebar-section-action-bg-hover hover:text-sidebar-section-action-fg-hover";
 
 /** Vertical offset above sidebar section divider lines (24px). */
 export const SIDEBAR_SECTION_DIVIDER_TOP_CLASS = "mt-6";

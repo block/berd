@@ -25,7 +25,7 @@ export function SidebarSearchResults({
 
   if (results.length === 0) {
     return (
-      <div className="rounded-md border border-dashed border-sidebar-border/80 px-3 py-6 text-center text-xs font-normal text-muted-foreground">
+      <div className="rounded-md border border-dashed border-sidebar-border/80 px-3 py-6 text-center text-sm font-normal text-muted-foreground">
         <p className="text-sidebar-foreground/80">
           {t("sessions:history.emptyNoMatches")}
         </p>
@@ -68,7 +68,7 @@ export function SidebarSearchResults({
               </p>
 
               {(personaName || projectName) && (
-                <div className="flex flex-wrap gap-3 text-[11px] text-muted-foreground">
+                <div className="flex flex-wrap gap-3 text-sm text-muted-foreground">
                   {personaName && (
                     <span className="inline-flex items-center gap-1">
                       <Bot className="size-3" />
@@ -85,13 +85,13 @@ export function SidebarSearchResults({
               )}
 
               {result.snippet && (
-                <p className="line-clamp-2 text-[11px] text-muted-foreground">
+                <p className="line-clamp-2 text-sm text-muted-foreground">
                   {result.snippet}
                 </p>
               )}
 
               {typeof result.matchCount === "number" && (
-                <p className="text-[11px] text-sidebar-foreground/80">
+                <p className="text-sm text-sidebar-foreground/80">
                   {t("sessions:search.messageMatches", {
                     count: result.matchCount,
                     displayCount: result.matchCount,

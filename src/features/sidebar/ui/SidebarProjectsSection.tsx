@@ -1,11 +1,18 @@
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconEdit, IconFolderPlus } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconEdit,
+  IconFolderPlus,
+  IconPlus,
+} from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
   SIDEBAR_GROUP_LABEL_TEXT_CLASS,
+  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
   SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
   SIDEBAR_SECTION_ACTION_PILL_CLASS,
@@ -108,8 +115,7 @@ export function SidebarProjectsSection({
   const showChatsEmptyState = projectSessions.standalone.length === 0;
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const showProjects = collapsed || projectsSectionOpen;
-  const emptyActionClasses =
-    "h-8 w-full justify-start px-3 text-[13px] text-muted-foreground";
+  const emptyActionClasses = `${SIDEBAR_ROW_HEIGHT_CLASS} w-full justify-start gap-2 ${SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS} text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground`;
 
   return (
     <SidebarChatDragProvider>
@@ -156,28 +162,32 @@ export function SidebarProjectsSection({
               <span className={cn("truncate", SECTION_HEADER_TEXT_CLASS)}>
                 {t("sections.projects")}
               </span>
-              <IconChevronDown
-                className={cn(
-                  "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150",
-                  "group-hover/projects-header:opacity-100",
-                  !projectsSectionOpen && "-rotate-90",
-                )}
-              />
+              {!showProjectsEmptyState && (
+                <IconChevronDown
+                  className={cn(
+                    "invisible size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                    "group-hover/projects-header:visible",
+                    !projectsSectionOpen && "-rotate-90",
+                  )}
+                />
+              )}
             </button>
           )}
           {!collapsed && !showProjectsEmptyState && (
             <Button
               type="button"
               variant="ghost"
-              size="xs"
+              size="icon-xs"
               onClick={onCreateProject}
+              aria-label={t("actions.newProject")}
               title={t("actions.newProject")}
               className={cn(
                 SIDEBAR_SECTION_ACTION_PILL_CLASS,
-                "opacity-0 pointer-events-none group-hover/projects-header:opacity-100 group-hover/projects-header:pointer-events-auto group-focus-within/projects-header:opacity-100 group-focus-within/projects-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto",
+                "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
+                "invisible pointer-events-none group-hover/projects-header:visible group-hover/projects-header:pointer-events-auto group-focus-within/projects-header:visible group-focus-within/projects-header:pointer-events-auto focus-visible:visible focus-visible:pointer-events-auto",
               )}
             >
-              {t("actions.newProject")}
+              <IconPlus className="size-4" />
             </Button>
           )}
         </div>
@@ -302,7 +312,7 @@ export function SidebarProjectsSection({
                 size="xs"
                 onClick={onNewChat}
                 className={emptyActionClasses}
-                leftIcon={<IconEdit className="size-3.5" />}
+                leftIcon={<IconEdit className="size-4" />}
               >
                 {t("empty.startChat")}
               </Button>

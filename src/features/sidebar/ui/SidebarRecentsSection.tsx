@@ -1,12 +1,15 @@
 import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronDown, IconEdit } from "@tabler/icons-react";
+import { IconChevronDown, IconEdit, IconPlus } from "@tabler/icons-react";
+import { History } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
+  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
   SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
   SIDEBAR_SECTION_ACTION_PILL_CLASS,
@@ -159,8 +162,8 @@ export function SidebarRecentsSection({
             </span>
             <IconChevronDown
               className={cn(
-                "size-3 shrink-0 text-muted-foreground opacity-0 transition-[opacity,transform] duration-150",
-                "group-hover/chats-header:opacity-100",
+                "invisible size-3 shrink-0 text-muted-foreground transition-transform duration-150",
+                "group-hover/chats-header:visible",
                 !isOpen && "-rotate-90",
               )}
             />
@@ -170,20 +173,22 @@ export function SidebarRecentsSection({
           <Button
             type="button"
             variant="ghost"
-            size="xs"
+            size="icon-xs"
             onClick={onNewChat}
+            aria-label={t("empty.startChat")}
             title={t("empty.startChat")}
             className={cn(
               SIDEBAR_SECTION_ACTION_PILL_CLASS,
-              "opacity-0 pointer-events-none group-hover/chats-header:opacity-100 group-hover/chats-header:pointer-events-auto group-focus-within/chats-header:opacity-100 group-focus-within/chats-header:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto",
+              "size-5 bg-transparent p-0 text-muted-foreground hover:bg-sidebar-section-action-bg hover:text-sidebar-foreground focus-visible:bg-sidebar-section-action-bg focus-visible:text-sidebar-foreground",
+              "invisible pointer-events-none group-hover/chats-header:visible group-hover/chats-header:pointer-events-auto group-focus-within/chats-header:visible group-focus-within/chats-header:pointer-events-auto focus-visible:visible focus-visible:pointer-events-auto",
             )}
           >
-            {t("empty.startChat")}
+            <IconPlus className="size-4" />
           </Button>
         )}
 
         {recentsDragOver && (
-          <div className="absolute bottom-0 left-3.5 right-3.5 h-px bg-sidebar-foreground" />
+          <div className="absolute bottom-0 left-3 right-3 h-px bg-sidebar-foreground" />
         )}
       </div>
 
@@ -208,8 +213,12 @@ export function SidebarRecentsSection({
             variant="quiet"
             size="xs"
             onClick={onNewChat}
-            className="h-8 w-full justify-start px-3 text-[13px] text-muted-foreground"
-            leftIcon={<IconEdit className="size-3.5" />}
+            className={cn(
+              SIDEBAR_ROW_HEIGHT_CLASS,
+              "w-full justify-start gap-2 text-sm text-muted-foreground",
+              SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+            )}
+            leftIcon={<IconEdit className="size-4" />}
           >
             {t("empty.startChat")}
           </Button>
@@ -283,7 +292,12 @@ export function SidebarRecentsSection({
               variant="ghost"
               size="xs"
               onClick={() => onNavigate("session-history")}
-              className="h-auto w-full justify-start rounded-md py-1 px-3 text-[11px] text-muted-foreground hover:text-sidebar-foreground"
+              className={cn(
+                "h-auto w-full justify-start gap-2 rounded-sm py-1 text-sm font-normal text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
+                SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+                "pl-[14px]",
+              )}
+              leftIcon={<History className="size-3.5" strokeWidth={2} />}
             >
               {t("viewAllInHistory")}
             </Button>

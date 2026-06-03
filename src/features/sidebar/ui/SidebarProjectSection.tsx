@@ -13,6 +13,7 @@ import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatRow } from "./SidebarChatRow";
@@ -95,6 +96,7 @@ export function SidebarProjectSection({
   const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
+  const projectHasChats = projectChats.length > 0;
   // When collapsed, surface unread by swapping the project icon for the dot
   // (the chats — and their own dots — are hidden). When expanded, the per-chat
   // dots carry the signal, so the project row shows its normal icon.
@@ -188,7 +190,7 @@ export function SidebarProjectSection({
     >
       <div
         className={cn(
-          "relative flex items-center group rounded-sm hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
+          "relative flex items-center group rounded-sm pr-3 hover:bg-sidebar-accent focus-within:bg-sidebar-accent",
           SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
           menuOpen && "bg-sidebar-accent",
         )}
@@ -197,12 +199,19 @@ export function SidebarProjectSection({
           type="button"
           variant="ghost"
           size="sm"
-          onClick={() => toggleProject(project.id)}
+          onClick={() => {
+            if (projectHasChats) {
+              toggleProject(project.id);
+            }
+          }}
+          aria-expanded={projectHasChats ? isExpanded : undefined}
           className={cn(
-            "flex-1 min-w-0 justify-start gap-2 rounded-sm px-3 py-2",
+            "flex-1 min-w-0 justify-start rounded-sm",
+            SIDEBAR_NAV_ROW_SPACING_CLASS,
             SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
             SIDEBAR_NAV_TEXT_CLASS,
             PROJECT_ROW_TEXT_CLASS,
+            !projectHasChats && "cursor-default",
           )}
         >
           <span className="relative flex size-[18px] flex-shrink-0 items-center justify-center text-sidebar-foreground">
@@ -210,12 +219,20 @@ export function SidebarProjectSection({
               <span
                 role="status"
                 aria-label={t("status.unreadMessages")}
-                className="absolute flex items-center justify-center group-hover:opacity-0"
+                className={cn(
+                  "absolute flex items-center justify-center",
+                  projectHasChats && "group-hover:hidden",
+                )}
               >
                 <SidebarUnreadDot />
               </span>
             ) : (
-              <span className="absolute group-hover:opacity-0">
+              <span
+                className={cn(
+                  "absolute",
+                  projectHasChats && "group-hover:hidden",
+                )}
+              >
                 <ProjectIcon
                   icon={project.icon}
                   color={project.color}
@@ -224,11 +241,13 @@ export function SidebarProjectSection({
                 />
               </span>
             )}
-            {isExpanded ? (
-              <IconChevronDown className="absolute size-3 opacity-0 group-hover:opacity-100" />
-            ) : (
-              <IconChevronRight className="absolute size-3 opacity-0 group-hover:opacity-100" />
-            )}
+            {projectHasChats ? (
+              isExpanded ? (
+                <IconChevronDown className="absolute hidden size-3 text-muted-foreground group-hover:block" />
+              ) : (
+                <IconChevronRight className="absolute hidden size-3 text-muted-foreground group-hover:block" />
+              )
+            ) : null}
           </span>
           <span className="flex-1 min-w-0 truncate text-left">
             {project.name}
@@ -261,10 +280,10 @@ export function SidebarProjectSection({
           }}
           title={t("actions.newChatInProject")}
           className={cn(
-            "mr-1 size-6 flex-shrink-0 rounded-sm text-sidebar-foreground/40 hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
+            "ml-1 size-5 flex-shrink-0 rounded-sm text-muted-foreground hover:text-sidebar-foreground active:text-sidebar-foreground focus-visible:text-sidebar-foreground",
             menuOpen
-              ? "visible opacity-100"
-              : "invisible opacity-0 group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100",
+              ? "visible"
+              : "invisible group-hover:visible group-focus-within:visible",
           )}
         >
           <IconEdit className="size-4" />
@@ -314,7 +333,7 @@ export function SidebarProjectSection({
               variant="ghost"
               size="xs"
               onClick={() => setShowExpandedChats(true)}
-              className="h-auto w-full justify-start gap-1.5 rounded-sm py-1 pl-8 pr-3 text-[11px] text-sidebar-foreground hover:text-sidebar-foreground"
+              className="h-auto w-full justify-start gap-1.5 rounded-sm py-1 pl-8 pr-3 text-sm text-sidebar-foreground hover:text-sidebar-foreground"
             >
               <IconChevronRight className="size-3" />
               {t("viewMoreChats")}
@@ -326,7 +345,7 @@ export function SidebarProjectSection({
               variant="ghost"
               size="xs"
               onClick={() => onNavigate("session-history")}
-              className="h-auto w-full justify-start rounded-sm py-1 pl-8 pr-3 text-[11px] text-muted-foreground hover:text-sidebar-foreground"
+              className="h-auto w-full justify-start rounded-sm py-1 pl-8 pr-3 text-sm text-muted-foreground hover:text-sidebar-foreground"
             >
               {t("olderChatsInHistory")}
             </Button>

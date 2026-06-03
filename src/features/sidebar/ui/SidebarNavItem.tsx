@@ -3,6 +3,7 @@ import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_NAV_ICON_CLASS } from "./sidebarNavIcons";
 import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
@@ -36,7 +37,7 @@ export function SidebarNavItem({
     "flex items-center w-full rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
-    Icon ? "gap-2.5 px-3 py-1.5" : "px-3 py-1.5",
+    SIDEBAR_NAV_ROW_SPACING_CLASS,
     isActive
       ? "bg-sidebar-accent text-sidebar-foreground"
       : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",

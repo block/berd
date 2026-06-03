@@ -39,7 +39,7 @@ export function SidebarPinnedSection({
         </div>
         <ul className="space-y-0.5">
           {items.map((item) => (
-            <li key={item.id} className="px-3 py-1 text-xs text-foreground/80">
+            <li key={item.id} className="px-3 py-1 text-sm text-foreground/80">
               {item.label}
             </li>
           ))}

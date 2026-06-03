@@ -305,7 +305,7 @@ describe("Sidebar", () => {
 
     await user.click(
       screen.getByRole("button", {
-        name: "View all in Session History",
+        name: "Show all",
       }),
     );
 

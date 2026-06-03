@@ -21,6 +21,9 @@ import {
   SIDEBAR_CHAT_ROW_PADDING_CLASS,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_HEIGHT_CLASS,
+  SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import {
@@ -258,7 +261,10 @@ export function SidebarChatRow({
         }}
         title={t("actions.renameHint")}
         className={cn(
-          "flex-1 min-w-0 justify-start gap-2 rounded-sm pr-8 py-2",
+          "flex-1 min-w-0 justify-start rounded-sm pr-8",
+          SIDEBAR_ROW_HEIGHT_CLASS,
+          SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+          SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
           SIDEBAR_NAV_TEXT_CLASS,
           rowPaddingClass,
           rowButtonStateClass,
@@ -303,12 +309,12 @@ export function SidebarChatRow({
             aria-label={t("menu.optionsFor", { label: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-1 size-5 rounded-sm transition-colors hover:text-sidebar-foreground",
+              "absolute right-3 size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
               dragging
-                ? "invisible opacity-0 pointer-events-none"
+                ? "invisible pointer-events-none opacity-0"
                 : menuOpen
-                  ? "visible opacity-100 text-sidebar-foreground"
-                  : "invisible group-hover/chat-row:visible opacity-0 group-hover/chat-row:opacity-100 text-sidebar-foreground/40",
+                  ? "visible text-sidebar-foreground opacity-100"
+                  : "invisible text-muted-foreground opacity-0 group-hover/chat-row:visible group-hover/chat-row:opacity-100 group-focus-within/chat-row:visible group-focus-within/chat-row:opacity-100",
             )}
           >
             <MoreHorizontal className="size-3.5" />
@@ -322,7 +328,7 @@ export function SidebarChatRow({
         >
           {shouldApplyToSelection && (
             <>
-              <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+              <DropdownMenuLabel className="text-sm font-medium text-muted-foreground">
                 {t("bulk.selectedContext", {
                   count: selectionCount,
                   displayCount: selectionCount,

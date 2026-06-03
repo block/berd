@@ -54,6 +54,7 @@ import type { SidebarSessionItem } from "./SidebarProjectSection";
 import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_MICRO_LABEL_TEXT_CLASS,
+  SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_PANEL_ELEVATED_SHADOW_CLASS,
 } from "@/shared/ui/sidebar-tokens";
@@ -172,7 +173,7 @@ function SidebarInspectorToggleNavItem({
         SIDEBAR_NAV_TEXT_CLASS,
         collapsed
           ? "justify-center px-3 py-2"
-          : "justify-between gap-2.5 px-3 py-1.5",
+          : cn("justify-between", SIDEBAR_NAV_ROW_SPACING_CLASS),
       )}
       title={collapsed ? label : undefined}
     >
@@ -644,7 +645,7 @@ export function Sidebar({
         <div className="flex h-full flex-col overflow-hidden rounded-md bg-sidebar backdrop-blur-md">
           {/* The goose home affordance now lives in the TopBar (left of the
             panel toggle) so it survives when the panel is collapsed. */}
-          <div className="flex-shrink-0 pt-0.5" aria-hidden="true" />
+          <div className="flex-shrink-0 pt-1.5" aria-hidden="true" />
 
           <div className="relative flex-1 min-h-0 overflow-hidden">
             <div
@@ -659,7 +660,7 @@ export function Sidebar({
             >
               <nav
                 ref={navRef}
-                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-1 scrollbar-none"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-1 pb-1 scrollbar-none"
                 style={showBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={t("navigation.main")}
               >
@@ -768,7 +769,7 @@ export function Sidebar({
             >
               <nav
                 ref={secondaryNavRef}
-                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-1.5 py-1 pb-12 scrollbar-none"
+                className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-1 pb-12 scrollbar-none"
                 style={showSecondaryBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={
                   isSettingsSurface
@@ -882,7 +883,7 @@ export function Sidebar({
                   )}
                 </div>
               </nav>
-              <div className={cn("flex-shrink-0", "px-1.5 py-1.5")}>
+              <div className={cn("flex-shrink-0", "px-2.5 py-1.5")}>
                 <Button
                   type="button"
                   variant="ghost"
@@ -895,7 +896,10 @@ export function Sidebar({
                     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
                     collapsed
                       ? "justify-center p-3"
-                      : "justify-start gap-2.5 px-3 py-2.5",
+                      : cn(
+                          "h-auto justify-start",
+                          SIDEBAR_NAV_ROW_SPACING_CLASS,
+                        ),
                   )}
                   title={t("actions.backToMainNavigation")}
                   aria-label={t("actions.backToMainNavigation")}
