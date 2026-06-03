@@ -46,6 +46,7 @@ interface AgentProviderCardProps {
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onProviderReady?: (providerId: string) => void;
 }
 
 function initialInstallStatus({
@@ -65,6 +66,7 @@ function initialInstallStatus({
 export function AgentProviderCard({
   provider,
   onStartTroubleshootingChat,
+  onProviderReady,
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
   const isBuiltIn = provider.status === "built_in";
@@ -297,6 +299,7 @@ export function AgentProviderCard({
         await runAuth();
       } else {
         if (!isMountedRef.current) return;
+        onProviderReady?.(provider.id);
         setSetupPhase("idle");
       }
     } catch (err) {
@@ -342,6 +345,7 @@ export function AgentProviderCard({
       }
       setAuthHint(true);
       setAuthStatus("authenticated");
+      onProviderReady?.(provider.id);
       setSetupPhase("idle");
     } catch (err) {
       clearListener();

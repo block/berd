@@ -442,6 +442,10 @@
     "modelRefreshWarning": "Credenciales guardadas. La actualización de modelos necesita atención: {{message}}",
     "saved": "Guardado",
     "saving": "Guardando...",
+    "setupDetour": {
+      "readyDescription": "Proveedor conectado. Vuelve a tu borrador de agente cuando quieras.",
+      "returnToDraft": "Volver al borrador del agente"
+    },
     "setupOutput": {
       "copyDeviceCode": "Copiar código de dispositivo",
       "deviceCode": "Código de dispositivo"

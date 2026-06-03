@@ -48,15 +48,20 @@ interface ProvidersSettingsProps {
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onReturnToAgentDraft?: () => void;
 }
 
 export function ProvidersSettings({
   onStartTroubleshootingChat,
+  onReturnToAgentDraft,
 }: ProvidersSettingsProps) {
   const { t } = useTranslation("settings");
   const distro = useDistroStore((state) => state.manifest);
   const [showAllModels, setShowAllModels] = useState(false);
   const [modelOrder, setModelOrder] = useState<string[] | null>(null);
+  const [setupDetourReadyProviderId, setSetupDetourReadyProviderId] = useState<
+    string | null
+  >(null);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
 
   const {
@@ -139,9 +144,40 @@ export function ProvidersSettings({
     (m) => m.group === "additional",
   );
   const visibleModels = showAllModels ? orderedModels : defaultModels;
+  const showSetupDetourReturn =
+    Boolean(onReturnToAgentDraft) && Boolean(setupDetourReadyProviderId);
+
+  useEffect(() => {
+    if (!onReturnToAgentDraft) {
+      setSetupDetourReadyProviderId(null);
+    }
+  }, [onReturnToAgentDraft]);
+
+  function handleProviderConnected(providerId: string) {
+    if (onReturnToAgentDraft) {
+      setSetupDetourReadyProviderId(providerId);
+    }
+  }
 
   return (
     <SettingsPage>
+      {showSetupDetourReturn ? (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-card-chat bg-foreground px-3 py-2 text-background">
+          <p className="text-xs">
+            {t("providers.setupDetour.readyDescription")}
+          </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={onReturnToAgentDraft}
+            className="shrink-0 border-transparent bg-background text-foreground hover:bg-background/90 hover:text-foreground"
+          >
+            {t("providers.setupDetour.returnToDraft")}
+          </Button>
+        </div>
+      ) : null}
+
       <section>
         <div className="mb-3">
           <h4 className="text-base text-foreground">
@@ -158,6 +194,7 @@ export function ProvidersSettings({
               key={agent.id}
               provider={agent}
               onStartTroubleshootingChat={onStartTroubleshootingChat}
+              onProviderReady={handleProviderConnected}
             />
           ))}
         </div>
@@ -192,6 +229,7 @@ export function ProvidersSettings({
               onSaveFields={(fields) => save(model.id, fields)}
               onRemoveConfig={() => remove(model.id)}
               onCompleteNativeSetup={completeNativeSetup}
+              onProviderConnected={handleProviderConnected}
               saving={savingProviderIds.has(model.id)}
               modelSyncing={syncingProviderIds.has(model.id)}
               modelWarning={modelWarnings.get(model.id)}

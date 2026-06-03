@@ -79,6 +79,7 @@ interface AppShellContentProps {
   onStartProviderTroubleshootingChat: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onReturnToAgentDraft?: () => void;
 }
 
 export function AppShellContent({
@@ -117,6 +118,7 @@ export function AppShellContent({
   onOpenAutomation,
   onOpenSkill,
   onStartProviderTroubleshootingChat,
+  onReturnToAgentDraft,
 }: AppShellContentProps) {
   switch (activeView) {
     case "design-system":
@@ -130,6 +132,7 @@ export function AppShellContent({
           activeConnectionsTab={activeConnectionsTab}
           onConnectionsTabChange={onConnectionsTabChange}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
+          onReturnToAgentDraft={onReturnToAgentDraft}
         />
       );
     case "automations":

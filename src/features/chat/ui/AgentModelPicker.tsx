@@ -247,9 +247,14 @@ export function AgentModelPicker({
                           {isSelected ? (
                             <IconCheck className="size-4 shrink-0 text-muted-foreground" />
                           ) : !isReady ? (
-                            <span className="shrink-0 rounded-xs border border-border bg-background px-1.5 py-0.5 text-xxs font-medium text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-                              {setupLabel}
-                            </span>
+                            <Button
+                              asChild
+                              variant="outline"
+                              size="xxs"
+                              className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                            >
+                              <span>{setupLabel}</span>
+                            </Button>
                           ) : null}
                         </PickerItem>
                       );

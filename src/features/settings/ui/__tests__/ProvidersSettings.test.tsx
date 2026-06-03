@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
@@ -8,6 +9,7 @@ import { ProvidersSettings } from "../ProvidersSettings";
 const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
   checkAgentInstalled: vi.fn(),
+  installAgent: vi.fn(),
 }));
 
 vi.mock("@/features/providers/hooks/useCredentials", () => ({
@@ -18,7 +20,7 @@ vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) =>
     mocks.checkAgentInstalled(...args),
   checkAgentAuth: vi.fn(),
-  installAgent: vi.fn(),
+  installAgent: (...args: unknown[]) => mocks.installAgent(...args),
   authenticateAgent: vi.fn(),
   onAgentSetupOutput: vi.fn(async () => vi.fn()),
 }));
@@ -101,6 +103,7 @@ describe("ProvidersSettings", () => {
     useProviderCatalogStore.getState().setEntries(providerCatalog);
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
     mocks.checkAgentInstalled.mockResolvedValue(true);
+    mocks.installAgent.mockResolvedValue(undefined);
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
       loading: false,
@@ -182,6 +185,35 @@ describe("ProvidersSettings", () => {
     expect(
       screen.queryByRole("button", { name: /add custom provider/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("shows the agent draft return action after setup succeeds during a detour", async () => {
+    const user = userEvent.setup();
+    const onReturnToAgentDraft = vi.fn();
+    let claudeInstallChecks = 0;
+    mocks.checkAgentInstalled.mockImplementation(async (providerId) => {
+      if (providerId !== "claude-acp") {
+        return true;
+      }
+      claudeInstallChecks += 1;
+      return claudeInstallChecks > 1;
+    });
+
+    render(<ProvidersSettings onReturnToAgentDraft={onReturnToAgentDraft} />);
+
+    expect(
+      screen.queryByRole("button", { name: "Return to agent draft" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Install Claude" }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Return to agent draft" }),
+      ).toBeInTheDocument();
+    });
   });
 
   it("hides non-allowlisted model and custom providers for a distro", () => {

@@ -13,7 +13,11 @@ import {
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettings";
-import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import {
+  OPEN_SETTINGS_EVENT,
+  type AgentBuilderProviderSetupReturnTarget,
+  type OpenSettingsEventDetail,
+} from "@/features/settings/lib/settingsEvents";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import { isCompanyManagedExtension } from "@/features/connections/lib/managedExtensions";
 import { classifyExtension } from "@/features/extensions/lib/extensionCategories";
@@ -271,6 +275,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [automationsBreadcrumbLabel, setAutomationsBreadcrumbLabel] = useState<
     string | null
   >(null);
+  const [
+    agentBuilderSettingsReturnTarget,
+    setAgentBuilderSettingsReturnTarget,
+  ] = useState<AgentBuilderProviderSetupReturnTarget | null>(null);
   const [homeSessionId, setHomeSessionId] = useState<string | null>(() =>
     loadStoredHomeSessionId(),
   );
@@ -452,6 +460,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       return;
     }
     void prefetchProjectArtifactRenderer();
+  }, [activeView]);
+
+  useEffect(() => {
+    if (activeView !== "settings") {
+      setAgentBuilderSettingsReturnTarget(null);
+    }
   }, [activeView]);
 
   const activeSession = activeSessionId
@@ -1248,6 +1262,32 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [cleanupChatSession, setActiveSession],
   );
 
+  const returnToAgentBuilderSettingsTarget = useCallback(() => {
+    const target = agentBuilderSettingsReturnTarget;
+    if (!target) {
+      return false;
+    }
+
+    const session = useChatSessionStore.getState().getSession(target.sessionId);
+    setAgentBuilderSettingsReturnTarget(null);
+    if (!session || session.archivedAt) {
+      return false;
+    }
+
+    clearSettingsSectionUrl();
+    setActiveSession(target.sessionId);
+    setActiveView("chat");
+    setChatActiveSession(target.sessionId);
+    useChatStore.getState().markSessionRead(target.sessionId);
+    void loadSessionMessages(target.sessionId);
+    return true;
+  }, [
+    agentBuilderSettingsReturnTarget,
+    loadSessionMessages,
+    setActiveSession,
+    setChatActiveSession,
+  ]);
+
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
       if (activeView !== "settings" && activeView !== "design-system") {
@@ -1264,9 +1304,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const leaveSecondarySurface = useCallback(() => {
+    if (returnToAgentBuilderSettingsTarget()) {
+      return;
+    }
     clearSettingsSectionUrl();
     setActiveView(lastNonSecondaryViewRef.current);
-  }, []);
+  }, [returnToAgentBuilderSettingsTarget]);
 
   const selectSettingsSection = useCallback((section: SectionId) => {
     setActiveSettingsSection(section);
@@ -1298,8 +1341,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   useEffect(() => {
     const handleOpenSettingsEvent = (event: Event) => {
-      const section = (event as CustomEvent<{ section?: string }>).detail
-        ?.section;
+      const detail = (event as CustomEvent<OpenSettingsEventDetail>).detail;
+      const section = detail?.section;
+      setAgentBuilderSettingsReturnTarget(
+        detail?.returnTarget?.type === "agent-builder-provider-setup"
+          ? detail.returnTarget
+          : null,
+      );
       openSettings(resolveSettingsSection(section ?? null));
     };
 
@@ -1654,6 +1702,24 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const goBack = useCallback(() => {
+    if (activeView === "settings" && agentBuilderSettingsReturnTarget) {
+      const history = navigationHistoryRef.current;
+      const previousLocation =
+        history.index > 0 ? history.entries[history.index - 1] : null;
+      if (
+        previousLocation?.view === "chat" &&
+        previousLocation.sessionId ===
+          agentBuilderSettingsReturnTarget.sessionId
+      ) {
+        history.index -= 1;
+        if (returnToAgentBuilderSettingsTarget()) {
+          updateNavigationAvailability();
+          return;
+        }
+        history.index += 1;
+      }
+    }
+
     agentBuilder.guardNavigation(() => {
       const history = navigationHistoryRef.current;
       if (history.index <= 0) {
@@ -1665,8 +1731,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       updateNavigationAvailability();
     });
   }, [
+    activeView,
+    agentBuilderSettingsReturnTarget,
     applyNavigationLocation,
     agentBuilder.guardNavigation,
+    returnToAgentBuilderSettingsTarget,
     updateNavigationAvailability,
   ]);
 
@@ -2080,6 +2149,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onOpenSkill={handleStartChatWithSkill}
               onStartProviderTroubleshootingChat={
                 handleStartProviderTroubleshootingChat
+              }
+              onReturnToAgentDraft={
+                agentBuilderSettingsReturnTarget
+                  ? returnToAgentBuilderSettingsTarget
+                  : undefined
               }
             />
             {showGlobalComposer ? (

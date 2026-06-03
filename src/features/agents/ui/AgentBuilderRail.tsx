@@ -525,6 +525,7 @@ export function AgentBuilderRail({
         model={model}
         onProviderChange={onChangeProvider}
         onModelChange={onChangeModel}
+        builderSessionId={sessionId}
         classes={{
           fieldLabel: FIELD_LABEL_CLASS,
           selectTrigger: FIELD_CLASS,

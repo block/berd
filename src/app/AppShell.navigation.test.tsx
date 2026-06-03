@@ -5,6 +5,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { AppShell } from "./AppShell";
@@ -605,6 +606,58 @@ describe("AppShell global navigation", () => {
       expect(screen.getByText("Save this agent draft?")).toBeInTheDocument();
     });
     expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
+  it("returns from provider setup settings to the dirty agent draft without prompting", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const dirtyDraft = {
+      type: "agent",
+      path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      name: "Reviewer",
+      description: "Draft",
+      content: "Review code carefully.",
+      global: true,
+      writable: true,
+      properties: { draft: true, builderSessionId: "created-session" },
+    };
+    mockListPersonaSources.mockResolvedValue([dirtyDraft]);
+    mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(OPEN_SETTINGS_EVENT, {
+          detail: {
+            section: "providers",
+            returnTarget: {
+              type: "agent-builder-provider-setup",
+              sessionId: "created-session",
+              providerId: "claude-acp",
+            },
+          },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(
+      screen.queryByText("Save this agent draft?"),
+    ).not.toBeInTheDocument();
   });
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {

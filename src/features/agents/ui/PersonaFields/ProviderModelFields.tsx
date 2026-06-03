@@ -8,9 +8,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/shared/ui/select";
+import { Button } from "@/shared/ui/button";
 import type { ProviderType } from "@/shared/types/agents";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { useProviderModels } from "@/features/providers/hooks/useProviderModels";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 
 export interface ProviderModelFieldsClasses {
   sectionGap?: string;
@@ -24,6 +27,7 @@ export interface ProviderModelFieldsProps {
   model: string;
   onProviderChange: (next: ProviderType | "") => void;
   onModelChange: (next: string) => void;
+  builderSessionId?: string;
   isReadOnly?: boolean;
   /** When true, fields render side-by-side; otherwise stacked (rail). */
   gridLayout?: boolean;
@@ -35,6 +39,7 @@ export function ProviderModelFields({
   model,
   onProviderChange,
   onModelChange,
+  builderSessionId,
   isReadOnly = false,
   gridLayout = false,
   classes,
@@ -42,14 +47,25 @@ export function ProviderModelFields({
   const { t } = useTranslation(["agents", "common"]);
   const acpProviders = useAgentStore((s) => s.providers);
   const { getModelsForAgent, getError } = useProviderModels();
+  const { agentReadiness } = useAgentProviderStatus();
 
   const availableModels = provider ? getModelsForAgent(provider) : [];
   const modelStatusMessage = provider ? getError(provider) : null;
+  const selectedProviderReadiness = provider
+    ? (agentReadiness.get(provider) ?? "not_ready")
+    : "ready";
+  const isSelectedProviderReady = selectedProviderReadiness === "ready";
   const hasSavedModelOutsideInventory =
     Boolean(model) && !availableModels.some((entry) => entry.id === model);
   const modelSelectValue = hasSavedModelOutsideInventory
     ? `__saved__:${model}`
     : model || "__none__";
+  const getProviderSetupLabel = (
+    readiness: "ready" | "not_installed" | "not_ready",
+  ) =>
+    readiness === "not_installed"
+      ? t("editor.installProvider")
+      : t("editor.connectProvider");
 
   const containerClass = gridLayout
     ? "grid grid-cols-1 gap-4 sm:grid-cols-2"
@@ -62,6 +78,22 @@ export function ProviderModelFields({
         <Select
           value={provider || "__none__"}
           onValueChange={(v: string) => {
+            if (v !== "__none__") {
+              const readiness = agentReadiness.get(v) ?? "not_ready";
+              if (readiness !== "ready") {
+                requestOpenSettings("providers", {
+                  returnTarget: builderSessionId
+                    ? {
+                        type: "agent-builder-provider-setup",
+                        sessionId: builderSessionId,
+                        providerId: v,
+                      }
+                    : undefined,
+                });
+                return;
+              }
+            }
+
             const nextProvider =
               v === "__none__"
                 ? ("" as ProviderType | "")
@@ -84,11 +116,40 @@ export function ProviderModelFields({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="__none__">{t("common:labels.none")}</SelectItem>
-            {acpProviders.map((providerOption) => (
-              <SelectItem key={providerOption.id} value={providerOption.id}>
-                {providerOption.label}
-              </SelectItem>
-            ))}
+            {acpProviders.map((providerOption) => {
+              const readiness =
+                agentReadiness.get(providerOption.id) ?? "not_ready";
+              const isReady = readiness === "ready";
+
+              return (
+                <SelectItem
+                  key={providerOption.id}
+                  value={providerOption.id}
+                  aria-disabled={!isReady}
+                  className={cn(
+                    "group",
+                    !isReady &&
+                      "cursor-default text-muted-foreground opacity-40 hover:opacity-100 data-[highlighted]:opacity-100",
+                  )}
+                >
+                  <span className="flex min-w-0 flex-1 items-center justify-between gap-2 pr-5">
+                    <span className="min-w-0 truncate">
+                      {providerOption.label}
+                    </span>
+                    {!isReady ? (
+                      <Button
+                        asChild
+                        variant="outline"
+                        size="xxs"
+                        className="pointer-events-none shrink-0 opacity-0 transition-opacity group-hover:opacity-100 group-data-[highlighted]:opacity-100"
+                      >
+                        <span>{getProviderSetupLabel(readiness)}</span>
+                      </Button>
+                    ) : null}
+                  </span>
+                </SelectItem>
+              );
+            })}
           </SelectContent>
         </Select>
       </div>
@@ -108,13 +169,14 @@ export function ProviderModelFields({
             }
             onModelChange(value);
           }}
-          disabled={isReadOnly || !provider}
+          disabled={isReadOnly || !provider || !isSelectedProviderReady}
         >
           <SelectTrigger
             className={cn(
               "w-full",
               classes?.selectTrigger,
-              (isReadOnly || !provider) && "cursor-not-allowed opacity-70",
+              (isReadOnly || !provider || !isSelectedProviderReady) &&
+                "cursor-not-allowed opacity-70",
             )}
           >
             <SelectValue
@@ -139,7 +201,33 @@ export function ProviderModelFields({
             ))}
           </SelectContent>
         </Select>
-        {hasSavedModelOutsideInventory ? (
+        {!isSelectedProviderReady ? (
+          <p
+            className={cn(
+              "text-[11px] text-muted-foreground",
+              classes?.statusMessage,
+            )}
+          >
+            {t("editor.providerNotConnected")}{" "}
+            <button
+              type="button"
+              className="inline underline hover:text-foreground"
+              onClick={() =>
+                requestOpenSettings("providers", {
+                  returnTarget: builderSessionId
+                    ? {
+                        type: "agent-builder-provider-setup",
+                        sessionId: builderSessionId,
+                        providerId: provider,
+                      }
+                    : undefined,
+                })
+              }
+            >
+              {t("editor.openProviderSettings")}
+            </button>
+          </p>
+        ) : hasSavedModelOutsideInventory ? (
           <p
             className={cn(
               "text-[11px] text-muted-foreground",

@@ -64,6 +64,7 @@ interface ModelProviderRowProps {
     providerId: string,
     result?: ProviderConfigChangeResponse,
   ) => Promise<void>;
+  onProviderConnected?: (providerId: string) => void;
   saving?: boolean;
   modelSyncing?: boolean;
   modelWarning?: string | null;
@@ -88,6 +89,7 @@ export function ModelProviderRow({
   onSaveFields,
   onRemoveConfig,
   onCompleteNativeSetup,
+  onProviderConnected,
   saving = false,
   modelSyncing = false,
   modelWarning = null,
@@ -201,6 +203,7 @@ export function ModelProviderRow({
         provider.nativeConnectQuery,
       );
       await onCompleteNativeSetup(provider.id, result);
+      onProviderConnected?.(provider.id);
     } catch (nextError) {
       setSetupError(
         formatAcpErrorMessage(nextError, "Couldn't complete sign-in"),
@@ -312,6 +315,7 @@ export function ModelProviderRow({
         })),
       );
       await loadConfig();
+      onProviderConnected?.(provider.id);
       setShowSavedState(false);
     } catch (nextError) {
       setError(formatAcpErrorMessage(nextError, "Couldn't save"));

@@ -18,6 +18,7 @@ interface SettingsViewProps {
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
+  onReturnToAgentDraft?: () => void;
 }
 
 export function SettingsView({
@@ -25,12 +26,14 @@ export function SettingsView({
   activeConnectionsTab,
   onConnectionsTabChange,
   onStartTroubleshootingChat,
+  onReturnToAgentDraft,
 }: SettingsViewProps) {
   return (
     <PageShell contentWidth="narrow" contentClassName="gap-0">
       {activeSection === "providers" && (
         <ProvidersSettings
           onStartTroubleshootingChat={onStartTroubleshootingChat}
+          onReturnToAgentDraft={onReturnToAgentDraft}
         />
       )}
       {activeSection === "connections" && (

@@ -442,6 +442,10 @@
     "modelRefreshWarning": "Credentials saved. Model refresh needs attention: {{message}}",
     "saved": "Saved",
     "saving": "Saving...",
+    "setupDetour": {
+      "readyDescription": "Provider connected. Return to your agent draft when you're ready.",
+      "returnToDraft": "Return to agent draft"
+    },
     "setupOutput": {
       "copyDeviceCode": "Copy device code",
       "deviceCode": "Device code"
