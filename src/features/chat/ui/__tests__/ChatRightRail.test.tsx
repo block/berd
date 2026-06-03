@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   setPersonas: vi.fn(),
   listPersonas: vi.fn(),
   recoverDraftAgent: vi.fn(),
+  setAgentBuilderSessionLocalEdits: vi.fn(),
 }));
 
 vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
@@ -15,6 +16,8 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
     onDraftPromoted?: (source: unknown) => void;
     onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
     onRecoverMissingDraft?: () => void;
+    onClose?: () => void;
+    onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
   }) => (
     <div data-testid="agent-builder-rail">
       <button
@@ -37,12 +40,23 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
       <button type="button" onClick={props.onRecoverMissingDraft}>
         recover
       </button>
+      <button type="button" onClick={props.onClose}>
+        close
+      </button>
+      <button
+        type="button"
+        onClick={() => props.onLocalEditStateChange?.(true)}
+      >
+        local edits
+      </button>
     </div>
   ),
 }));
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
   recoverDraftAgent: (...args: unknown[]) => mocks.recoverDraftAgent(...args),
+  setAgentBuilderSessionLocalEdits: (...args: unknown[]) =>
+    mocks.setAgentBuilderSessionLocalEdits(...args),
 }));
 
 vi.mock("@/features/agents/stores/agentStore", () => ({
@@ -81,6 +95,7 @@ describe("ChatRightRail", () => {
       path: "/Users/x/.agents/agents/recovered.md",
       slug: "recovered",
     });
+    mocks.setAgentBuilderSessionLocalEdits.mockReset();
   });
 
   it("renders AgentBuilderRail for build-agent sessions", () => {
@@ -222,5 +237,48 @@ describe("ChatRightRail", () => {
         targetAgentSlug: "recovered",
       });
     });
+  });
+
+  it("notifies the parent when the builder close action fires", () => {
+    const onAgentBuilderClose = vi.fn();
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+        onAgentBuilderClose={onAgentBuilderClose}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "close" }));
+
+    expect(onAgentBuilderClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("tracks local edit state for the builder session", () => {
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: "/path",
+            targetAgentSlug: "draft-s1",
+          } as never
+        }
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "local edits" }));
+
+    expect(mocks.setAgentBuilderSessionLocalEdits).toHaveBeenCalledWith(
+      "s1",
+      true,
+    );
   });
 });

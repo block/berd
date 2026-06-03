@@ -1,6 +1,9 @@
 import { useCallback, type CSSProperties } from "react";
 import { AgentBuilderRail } from "@/features/agents/ui/AgentBuilderRail";
-import { recoverDraftAgent } from "@/features/agents/lib/agentBuilderSession";
+import {
+  recoverDraftAgent,
+  setAgentBuilderSessionLocalEdits,
+} from "@/features/agents/lib/agentBuilderSession";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
 import { cn } from "@/shared/lib/cn";
@@ -23,6 +26,7 @@ interface ChatRightRailProps {
   builderColumnStyle?: CSSProperties;
   sessionWorkingDir?: string | null;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
+  onAgentBuilderClose?: () => void;
   terminalOpen?: boolean;
   onToggleTerminal?: () => void;
 }
@@ -34,6 +38,7 @@ export function ChatRightRail({
   builderColumnStyle,
   sessionWorkingDir,
   onDraftPromoted,
+  onAgentBuilderClose,
   terminalOpen = false,
   onToggleTerminal,
 }: ChatRightRailProps) {
@@ -76,6 +81,30 @@ export function ChatRightRail({
     },
     [patchSession, session?.id],
   );
+  const handleBuilderBack = useCallback(
+    (source: AgentSourceEntry) => {
+      if (!session?.id) {
+        return;
+      }
+
+      patchSession(session.id, {
+        intent: null,
+        targetAgentPath: null,
+        targetAgentSlug: null,
+      });
+      void listPersonas()
+        .then((personas) => {
+          useAgentStore.getState().setPersonas(personas);
+        })
+        .catch((error) => {
+          console.error("Failed to refresh agents after leaving edit:", error);
+        })
+        .finally(() => {
+          onDraftPromoted?.(source);
+        });
+    },
+    [onDraftPromoted, patchSession, session?.id],
+  );
   const handleRecoverMissingDraft = useCallback(async () => {
     if (!session?.id) {
       return;
@@ -88,6 +117,16 @@ export function ChatRightRail({
       targetAgentSlug: target.slug,
     });
   }, [patchSession, session?.id, session?.targetAgentPath]);
+  const handleLocalEditStateChange = useCallback(
+    (hasLocalEdits: boolean) => {
+      if (!session?.id) {
+        return;
+      }
+
+      setAgentBuilderSessionLocalEdits(session.id, hasLocalEdits);
+    },
+    [session?.id],
+  );
 
   if (
     session?.intent === "build-agent" &&
@@ -114,6 +153,9 @@ export function ChatRightRail({
           onDraftPromoted={handleDraftPromoted}
           onDraftTargetChanged={handleDraftTargetChanged}
           onRecoverMissingDraft={handleRecoverMissingDraft}
+          onBack={handleBuilderBack}
+          onClose={onAgentBuilderClose}
+          onLocalEditStateChange={handleLocalEditStateChange}
         />
       </div>
     );

@@ -55,6 +55,26 @@ export function usePersonaSource(
   const [saveStatus, setSaveStatus] =
     useState<UsePersonaSourceResult["saveStatus"]>("saved");
 
+  const shouldAutoSave = useCallback(
+    (source: AgentSourceEntry | null = dataRef.current) =>
+      !builderSessionId || source?.properties?.draft === true,
+    [builderSessionId],
+  );
+
+  const scheduleAutoFlush = useCallback(
+    (source: AgentSourceEntry | null = dataRef.current) => {
+      if (!shouldAutoSave(source)) {
+        return;
+      }
+
+      flushTimerRef.current = setTimeout(() => {
+        flushTimerRef.current = null;
+        void flushRef.current?.();
+      }, FLUSH_DEBOUNCE_MS);
+    },
+    [shouldAutoSave],
+  );
+
   const reload = useCallback(async () => {
     if (!path) {
       setData(null);
@@ -173,10 +193,7 @@ export function usePersonaSource(
 
         if (remainingLocalPatch) {
           setSaveStatus("unsaved");
-          flushTimerRef.current = setTimeout(() => {
-            flushTimerRef.current = null;
-            void flushRef.current?.();
-          }, FLUSH_DEBOUNCE_MS);
+          scheduleAutoFlush(found);
         } else {
           setSaveStatus("saved");
         }
@@ -193,10 +210,7 @@ export function usePersonaSource(
         );
         if (!flushTimerRef.current) {
           setSaveStatus("unsaved");
-          flushTimerRef.current = setTimeout(() => {
-            flushTimerRef.current = null;
-            void flushRef.current?.();
-          }, FLUSH_DEBOUNCE_MS);
+          scheduleAutoFlush(found);
         }
       }
       const displaySource = builderSessionId
@@ -227,7 +241,7 @@ export function usePersonaSource(
         setIsLoading(false);
       }
     }
-  }, [builderSessionId, path]);
+  }, [builderSessionId, path, scheduleAutoFlush]);
 
   const flush = useCallback(async (): Promise<boolean> => {
     const identity = saveIdentityRef.current;
@@ -280,10 +294,7 @@ export function usePersonaSource(
         setError(null);
         if (pendingPatchRef.current) {
           setSaveStatus("unsaved");
-          flushTimerRef.current = setTimeout(() => {
-            flushTimerRef.current = null;
-            void flushRef.current?.();
-          }, FLUSH_DEBOUNCE_MS);
+          scheduleAutoFlush(dataRef.current);
         } else {
           setSaveStatus("saved");
         }
@@ -310,7 +321,7 @@ export function usePersonaSource(
 
     inFlightPromiseRef.current = writePromise;
     return writePromise;
-  }, [path]);
+  }, [path, scheduleAutoFlush]);
 
   const update = useCallback(
     (patch: PersonaSourcePatch) => {
@@ -325,12 +336,10 @@ export function usePersonaSource(
       if (flushTimerRef.current) {
         clearTimeout(flushTimerRef.current);
       }
-      flushTimerRef.current = setTimeout(() => {
-        flushTimerRef.current = null;
-        void flush();
-      }, FLUSH_DEBOUNCE_MS);
+      flushTimerRef.current = null;
+      scheduleAutoFlush(dataRef.current);
     },
-    [flush],
+    [scheduleAutoFlush],
   );
 
   const saveNow = useCallback(() => {

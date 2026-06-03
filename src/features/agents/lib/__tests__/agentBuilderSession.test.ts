@@ -11,6 +11,9 @@ const chatState = vi.hoisted(() => ({
   }>,
   hasHydratedSessions: true,
   hasMoreSessions: false,
+  messagesBySession: {} as Record<string, unknown[]>,
+  draftsBySession: {} as Record<string, string>,
+  queuedMessageBySession: {} as Record<string, { text: string }>,
 }));
 
 const mocks = vi.hoisted(() => ({
@@ -54,6 +57,9 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
           { id: "skill-1", name: "code-review" },
         ],
       },
+      messagesBySession: chatState.messagesBySession,
+      draftsBySession: chatState.draftsBySession,
+      queuedMessageBySession: chatState.queuedMessageBySession,
       setSkillDrafts: mocks.setSkillDrafts,
     }),
   },
@@ -69,6 +75,7 @@ vi.mock("@/shared/api/agents", () => ({
 
 import {
   discardDraftAgentSession,
+  hasAgentBuilderSessionUserContent,
   isEmptyDraftAgentSession,
   promoteDraft,
   recoverDraftAgent,
@@ -119,6 +126,9 @@ describe("agentBuilderSession", () => {
     chatState.sessions = [];
     chatState.hasHydratedSessions = true;
     chatState.hasMoreSessions = false;
+    chatState.messagesBySession = {};
+    chatState.draftsBySession = {};
+    chatState.queuedMessageBySession = {};
     mocks.createPersonaSource.mockReset();
     mocks.deletePersonaSource.mockReset();
     mocks.promotePersonaSource.mockReset();
@@ -429,6 +439,68 @@ describe("agentBuilderSession", () => {
     mocks.readAgentSourceFile.mockRejectedValue(new Error("unavailable"));
 
     await expect(isEmptyDraftAgentSession("sess-1")).resolves.toBe(false);
+  });
+
+  it("does not treat seeded provider and model defaults as user content", async () => {
+    addBuilderSession();
+    const seededDraft = {
+      ...draftSource,
+      properties: {
+        draft: true,
+        builderSessionId: "sess-1",
+        provider: "goose",
+        model: "databricks-gpt-5-2-codex",
+      },
+    };
+    mocks.listPersonaSources.mockResolvedValue([seededDraft]);
+    mocks.readAgentSourceFile.mockResolvedValue(seededDraft);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("treats chat composer text as agent builder user content", async () => {
+    addBuilderSession();
+    chatState.draftsBySession = { "sess-1": "build me a reviewer" };
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      true,
+    );
+  });
+
+  it("does not treat a bare agent-builder mention as user content", async () => {
+    addBuilderSession();
+    chatState.draftsBySession = { "sess-1": "@agent-builder" };
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      false,
+    );
+  });
+
+  it("treats sent user messages as agent builder user content", async () => {
+    addBuilderSession();
+    chatState.messagesBySession = {
+      "sess-1": [
+        {
+          id: "m1",
+          role: "user",
+          created: 1,
+          content: [{ type: "text", text: "make a code reviewer" }],
+          metadata: { userVisible: true },
+        },
+      ],
+    };
+    mocks.listPersonaSources.mockResolvedValue([draftSource]);
+    mocks.readAgentSourceFile.mockResolvedValue(draftSource);
+
+    await expect(hasAgentBuilderSessionUserContent("sess-1")).resolves.toBe(
+      true,
+    );
   });
 
   it("recoverDraftAgent rebinds to an existing draft for the session", async () => {

@@ -53,6 +53,7 @@ interface AppShellContentProps {
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
   onCreatePersona: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
+  onAgentBuilderClose?: () => void;
   onStartAgentBuilderSession: (args?: { slug?: string }) => void;
   onArchiveChat: (sessionId: string) => Promise<void>;
   onCreateProject: (options?: {
@@ -101,6 +102,7 @@ export function AppShellContent({
   onAutomationsBreadcrumbLabelChange,
   onCreatePersona,
   onAgentBuilderSaved,
+  onAgentBuilderClose,
   onStartAgentBuilderSession,
   onArchiveChat,
   onCreateProject,
@@ -192,6 +194,7 @@ export function AppShellContent({
           activeSession={activeSession}
           onCreatePersona={onCreatePersona}
           onAgentBuilderSaved={onAgentBuilderSaved}
+          onAgentBuilderClose={onAgentBuilderClose}
           onCreateProject={onCreateProject}
         />
       ) : (

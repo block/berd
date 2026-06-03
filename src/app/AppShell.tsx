@@ -1603,6 +1603,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [agentBuilder.guardNavigation, navigateAgentsDirect],
   );
 
+  const closeAgentBuilder = useCallback(() => {
+    navigateAgents(null);
+  }, [navigateAgents]);
+
   const navigateAutomations = useCallback(
     (
       route: AutomationNavigationRoute,
@@ -2131,6 +2135,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
               onCreatePersona={agentBuilder.create}
               onAgentBuilderSaved={agentBuilder.onSaved}
+              onAgentBuilderClose={closeAgentBuilder}
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
               onCreateProject={openCreateProjectDialog}

@@ -7,7 +7,6 @@ vi.mock("@/features/agents/hooks/usePersonaSource", () => ({
 }));
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
-  discardDraftAgentSession: vi.fn(),
   promoteDraft: vi.fn(),
   fileStem: (path: string) => path.split("/").pop()?.replace(/\.md$/, ""),
   isPlaceholderAgentName: (name: string) =>
@@ -41,10 +40,7 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
 
 import { AgentBuilderRail } from "../AgentBuilderRail";
 import { usePersonaSource } from "@/features/agents/hooks/usePersonaSource";
-import {
-  discardDraftAgentSession,
-  promoteDraft,
-} from "@/features/agents/lib/agentBuilderSession";
+import { promoteDraft } from "@/features/agents/lib/agentBuilderSession";
 import { useAvatarLibrary } from "@/features/agents/hooks/useAvatarLibrary";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 
@@ -77,7 +73,6 @@ function mockHook(overrides: Partial<UsePersonaSourceReturn> = {}) {
 describe("AgentBuilderRail", () => {
   beforeEach(() => {
     vi.mocked(usePersonaSource).mockReset();
-    vi.mocked(discardDraftAgentSession).mockReset();
     vi.mocked(promoteDraft).mockReset();
     vi.mocked(useAvatarLibrary).mockReturnValue({
       catalog: null,
@@ -404,7 +399,45 @@ describe("AgentBuilderRail", () => {
     });
   });
 
-  it("shows a Discard affordance only when the source is a draft", () => {
+  it("shows a back button for existing agent edits", () => {
+    const existingSource = {
+      ...baseSource,
+      name: "Code Reviewer",
+      properties: {},
+    };
+    mockHook({ data: existingSource });
+    const onBack = vi.fn();
+
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="code-reviewer"
+        onBack={onBack}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /back to agent/i }));
+    expect(onBack).toHaveBeenCalledWith(existingSource);
+  });
+
+  it("does not show the back button for new draft agents", () => {
+    mockHook();
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={baseSource.path}
+        targetAgentSlug="draft-1"
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: /back to agent/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a close affordance only when the source is a draft", () => {
     mockHook({
       data: {
         ...baseSource,
@@ -416,22 +449,29 @@ describe("AgentBuilderRail", () => {
         sessionId="s1"
         targetAgentPath={baseSource.path}
         targetAgentSlug="existing"
+        onClose={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("button", { name: /discard/i })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /close agent builder/i }),
+    ).toBeNull();
   });
 
-  it("invokes discardDraftAgentSession when Discard is clicked", () => {
+  it("invokes onClose when the draft close button is clicked", () => {
+    const onClose = vi.fn();
     mockHook();
     renderWithProviders(
       <AgentBuilderRail
         sessionId="s1"
         targetAgentPath={baseSource.path}
         targetAgentSlug="draft-1"
+        onClose={onClose}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /discard/i }));
-    expect(discardDraftAgentSession).toHaveBeenCalledWith("s1");
+    fireEvent.click(
+      screen.getByRole("button", { name: /close agent builder/i }),
+    );
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("renders a Loading state while the source is loading", () => {

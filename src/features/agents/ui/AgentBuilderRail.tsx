@@ -11,7 +11,7 @@ import {
   IconArrowLeft,
   IconPhoto,
   IconSparkles,
-  IconTrash,
+  IconX,
 } from "@tabler/icons-react";
 import { avatarRef, parseAvatarRef } from "@/shared/avatars/catalog";
 import { normalizeAvatarUrl } from "@/shared/lib/avatarUrl";
@@ -34,7 +34,6 @@ import {
   type PersonaSourcePatch,
 } from "@/features/agents/hooks/usePersonaSource";
 import {
-  discardDraftAgentSession,
   fileStem,
   isPlaceholderAgentName,
   PLACEHOLDER_AGENT_BODY,
@@ -56,6 +55,9 @@ export interface AgentBuilderRailProps {
   onDraftPromoted?: (source: AgentSourceEntry) => void;
   onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
   onRecoverMissingDraft?: () => void | Promise<void>;
+  onBack?: (source: AgentSourceEntry) => void;
+  onClose?: () => void;
+  onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
 }
 
 export function AgentBuilderRail({
@@ -65,6 +67,9 @@ export function AgentBuilderRail({
   onDraftPromoted,
   onDraftTargetChanged,
   onRecoverMissingDraft,
+  onBack,
+  onClose,
+  onLocalEditStateChange,
 }: AgentBuilderRailProps) {
   const { t } = useTranslation(["agents", "common"]);
   const handleResolvedPathChange = useCallback(
@@ -208,6 +213,19 @@ export function AgentBuilderRail({
   );
 
   const isDraft = data?.properties?.draft === true;
+  const showBackButton = Boolean(data && !isDraft && onBack);
+  const hasLocalEdits =
+    Boolean(data && !isDraft) &&
+    (saveStatus === "unsaved" || saveStatus === "error");
+
+  useEffect(() => {
+    onLocalEditStateChange?.(hasLocalEdits);
+
+    return () => {
+      onLocalEditStateChange?.(false);
+    };
+  }, [hasLocalEdits, onLocalEditStateChange]);
+
   const requiresNewDraftFields = isDraft;
   const headerName = data
     ? isPlaceholderAgentName(data.name)
@@ -250,8 +268,20 @@ export function AgentBuilderRail({
     !blockingError;
 
   const headerNode = (
-    <div className="flex items-center justify-between rounded-full bg-card/40 px-4 py-3 text-sm text-foreground">
+    <div className="flex items-center justify-between rounded-full bg-card/40 px-3 py-2 text-sm text-foreground">
       <span className="flex min-w-0 items-center gap-2">
+        {showBackButton && data ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="-ml-1 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label={t("builderRail.backToAgent")}
+            onClick={() => onBack?.(data)}
+          >
+            <IconArrowLeft className="size-4" aria-hidden="true" />
+          </Button>
+        ) : null}
         <IconSparkles className="size-4 shrink-0 text-foreground" />
         {headerName ? (
           <h2 className="truncate text-sm font-normal text-foreground">
@@ -261,18 +291,17 @@ export function AgentBuilderRail({
           <span className="truncate">{t("builderRail.eyebrow")}</span>
         )}
       </span>
-      {data && isDraft ? (
+      {data && isDraft && onClose ? (
         <Button
           type="button"
           variant="ghost"
-          size="xs"
-          className="shrink-0 text-muted-foreground hover:text-foreground"
-          onClick={() => {
-            void discardDraftAgentSession(sessionId);
-          }}
+          size="icon-xs"
+          className="-mr-1 shrink-0 text-muted-foreground hover:text-foreground"
+          aria-label={t("builderRail.closeBuilder")}
+          title={t("builderRail.closeBuilder")}
+          onClick={onClose}
         >
-          <IconTrash className="size-3.5" aria-hidden="true" />
-          {t("builderRail.discard")}
+          <IconX className="size-4" aria-hidden="true" />
         </Button>
       ) : null}
     </div>
@@ -348,7 +377,9 @@ export function AgentBuilderRail({
             ? t("builderRail.unsavedChanges")
             : saveStatus === "error"
               ? t("builderRail.saveError")
-              : t("builderRail.savedHelp")}
+              : isDraft
+                ? t("builderRail.savedHelp")
+                : t("builderRail.manualSaveHelp")}
       </p>
     </div>
   ) : null;
@@ -360,14 +391,14 @@ export function AgentBuilderRail({
   ) => (
     <aside
       className={cn(
-        "flex min-h-0 w-full flex-col rounded-md bg-card p-5 lg:w-[506px]",
+        "flex min-h-0 w-full flex-col rounded-md bg-card px-5 pb-5 pt-3 lg:w-[506px]",
         className,
       )}
       aria-label={t("builderRail.ariaLabel")}
       data-testid="agent-builder-rail"
     >
       {header}
-      <div className="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto">
+      <div className="mt-4 min-h-0 flex-1 space-y-4 overflow-y-auto">
         {body}
       </div>
       {footer}

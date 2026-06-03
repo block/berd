@@ -134,6 +134,43 @@ describe("usePersonaSource", () => {
     expect(updateMock).toHaveBeenCalledWith(path, { name: "Snark" });
   });
 
+  it("does not auto-save existing agent builder edits before saveNow", async () => {
+    const existingSource = {
+      ...sourceV1,
+      name: "Code Reviewer",
+      content: "Review code carefully.",
+      properties: {},
+    };
+    listMock.mockResolvedValue([existingSource]);
+    updateMock.mockResolvedValue({
+      ...existingSource,
+      name: "Code Reviewer Deluxe",
+    });
+    const { result } = renderHook(() =>
+      usePersonaSource(path, { builderSessionId: "sess-1" }),
+    );
+    await flushPromises();
+
+    act(() => result.current.update({ name: "Code Reviewer Deluxe" }));
+    expect(result.current.data?.name).toBe("Code Reviewer Deluxe");
+
+    await act(async () => {
+      vi.advanceTimersByTime(450);
+      await Promise.resolve();
+    });
+
+    expect(updateMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith(path, {
+      name: "Code Reviewer Deluxe",
+    });
+  });
+
   it("drops a pending debounced save when the source path changes", async () => {
     const secondPath = "/Users/x/.agents/agents/draft-2.md";
     const sourceB = { ...sourceV1, path: secondPath, name: "Second" };

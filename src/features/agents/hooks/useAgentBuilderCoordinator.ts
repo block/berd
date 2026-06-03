@@ -4,8 +4,8 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { AgentBuilderLeaveDraftDialogProps } from "../ui/AgentBuilderLeaveDraftDialog";
 import {
   discardDraftAgentSession,
+  hasAgentBuilderSessionUserContent,
   isDraftAgentBuilderSession,
-  isEmptyDraftAgentSession,
   reconcileAgentBuilderSessions,
   startAgentBuilderSession,
   type StartAgentBuilderSessionDeps,
@@ -97,14 +97,10 @@ export function useAgentBuilderCoordinator({
       }
 
       void (async () => {
-        const isDraft = await isDraftAgentBuilderSession(session.id);
-        if (!isDraft) {
-          next();
-          return;
-        }
-
-        const isEmptyDraft = await isEmptyDraftAgentSession(session.id);
-        if (isEmptyDraft) {
+        const hasUserContent = await hasAgentBuilderSessionUserContent(
+          session.id,
+        );
+        if (!hasUserContent) {
           next();
           return;
         }
@@ -137,7 +133,10 @@ export function useAgentBuilderCoordinator({
       if (session?.intent === "build-agent") {
         void (async () => {
           const isDraft = await isDraftAgentBuilderSession(session.id);
-          if (isDraft && (await isEmptyDraftAgentSession(session.id))) {
+          if (
+            isDraft &&
+            !(await hasAgentBuilderSessionUserContent(session.id))
+          ) {
             await discardDraftAgentSession(session.id, { closeSession }).catch(
               (error) => {
                 console.error("Failed to discard empty agent draft:", error);

@@ -1,6 +1,7 @@
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { removeAgentBuilderSkillDraft } from "@/features/chat/lib/agentBuilderSkill";
+import { getTextContent } from "@/shared/types/messages";
 import {
   getStoredProvider,
   useAgentStore,
@@ -53,6 +54,21 @@ export interface StartAgentBuilderSessionDeps {
 
 interface CloseSessionDeps {
   closeSession?: (sessionId: string) => MaybePromise<void>;
+}
+
+const localEditSessionIds = new Set<string>();
+const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
+
+export function setAgentBuilderSessionLocalEdits(
+  sessionId: string,
+  hasLocalEdits: boolean,
+): void {
+  if (hasLocalEdits) {
+    localEditSessionIds.add(sessionId);
+    return;
+  }
+
+  localEditSessionIds.delete(sessionId);
 }
 
 export async function startAgentBuilderSession(
@@ -174,6 +190,58 @@ export async function isEmptyDraftAgentSession(
   return isEmptyPlaceholderDraft(freshSource);
 }
 
+export async function hasAgentBuilderSessionUserContent(
+  sessionId: string,
+): Promise<boolean> {
+  if (localEditSessionIds.has(sessionId)) {
+    return true;
+  }
+
+  const chatState = useChatStore.getState();
+  const composerDraft = (chatState.draftsBySession[sessionId] ?? "").trim();
+  if (
+    composerDraft.length > 0 &&
+    !AGENT_BUILDER_MENTION_INVOCATION.test(composerDraft)
+  ) {
+    return true;
+  }
+
+  const queuedMessage = chatState.queuedMessageBySession[sessionId];
+  if (queuedMessage?.text.trim()) {
+    return true;
+  }
+
+  const hasUserMessage = (chatState.messagesBySession[sessionId] ?? []).some(
+    (message) => {
+      if (message.role !== "user" || message.metadata?.userVisible === false) {
+        return false;
+      }
+
+      return (
+        getTextContent(message).trim().length > 0 ||
+        (message.metadata?.attachments?.length ?? 0) > 0
+      );
+    },
+  );
+  if (hasUserMessage) {
+    return true;
+  }
+
+  const source = await findCurrentBuilderSource(sessionId);
+  if (source?.properties?.draft !== true) {
+    return false;
+  }
+
+  let freshSource: AgentSourceEntry;
+  try {
+    freshSource = await readFreshAgentSource(source.path, source);
+  } catch {
+    return !isEmptyPlaceholderDraft(source);
+  }
+
+  return !isEmptyPlaceholderDraft(freshSource);
+}
+
 export async function isDraftAgentBuilderSession(
   sessionId: string,
 ): Promise<boolean> {
@@ -214,6 +282,8 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
 }
 
 export function clearBuilderSessionState(sessionId: string): void {
+  localEditSessionIds.delete(sessionId);
+
   useChatSessionStore.getState().patchSession(sessionId, {
     intent: null,
     targetAgentPath: null,

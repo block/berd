@@ -63,7 +63,12 @@ export function isPlaceholderDraftForSession(
 ): boolean {
   const properties = source.properties ?? {};
   const extraPropertyKeys = Object.keys(properties).filter(
-    (key) => key !== "draft" && key !== "builderSessionId",
+    (key) =>
+      key !== "draft" &&
+      key !== "builderSessionId" &&
+      key !== "provider" &&
+      key !== "model" &&
+      key !== "avatar",
   );
 
   return (

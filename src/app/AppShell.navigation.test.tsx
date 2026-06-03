@@ -183,7 +183,7 @@ describe("AppShell global navigation", () => {
     mockCreatePersonaSource.mockResolvedValue({
       type: "agent",
       path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
-      name: "Untitled agent created-session",
+      name: "Untitled agent created-sess",
       description: "Draft",
       content: "Draft in progress.",
       global: true,
@@ -558,7 +558,7 @@ describe("AppShell global navigation", () => {
     draft.resolve({
       type: "agent",
       path: "/Users/test/.agents/agents/untitled-agent-created-session.md",
-      name: "Untitled agent created-session",
+      name: "Untitled agent created-sess",
       description: "Draft",
       content: "Draft in progress.",
       global: true,
@@ -601,6 +601,78 @@ describe("AppShell global navigation", () => {
     mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Save this agent draft?")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+
+  it("does not prompt when navigating away from an untouched new agent draft", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+    });
+    expect(
+      screen.queryByText("Save this agent draft?"),
+    ).not.toBeInTheDocument();
+    expect(mockDeletePersonaSource).not.toHaveBeenCalled();
+  });
+
+  it("returns to agent builder mode after going back then forward", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+      targetAgentPath:
+        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+    });
+  });
+
+  it("prompts when navigating away after typing in the agent builder chat", async () => {
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
+    await user.click(screen.getByRole("button", { name: "Create agent" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    useChatStore.getState().setDraft("created-session", "make me a reviewer");
+
+    await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
 
     await waitFor(() => {
       expect(screen.getByText("Save this agent draft?")).toBeInTheDocument();

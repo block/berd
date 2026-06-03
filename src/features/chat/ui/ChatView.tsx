@@ -78,6 +78,7 @@ interface ChatViewProps {
   activeSession?: ChatSession | null;
   onCreatePersona?: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
+  onAgentBuilderClose?: () => void;
   onCreateProject?: (options?: {
     onCreated?: (projectId: string) => void;
   }) => void;
@@ -88,6 +89,7 @@ export function ChatView({
   activeSession,
   onCreatePersona,
   onAgentBuilderSaved,
+  onAgentBuilderClose,
   onCreateProject,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
@@ -550,6 +552,7 @@ export function ChatView({
           project={controller.project}
           sessionWorkingDir={effectiveSession?.workingDir}
           onDraftPromoted={onAgentBuilderSaved}
+          onAgentBuilderClose={onAgentBuilderClose}
           builderColumnClassName={
             isAgentBuilderSession ? "agent-builder-column-enter" : undefined
           }

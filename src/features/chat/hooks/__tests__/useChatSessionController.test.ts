@@ -646,6 +646,54 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("clears the bare agent-builder mention after opening builder mode", async () => {
+    useChatStore.getState().setDraft("session-1", "@agent-builder");
+    useChatStore.getState().setSkillDrafts("session-1", [
+      {
+        id: "global:/skills/agent-builder",
+        name: "agent-builder",
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        intent: "build-agent",
+      });
+      expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+        undefined,
+      );
+    });
+  });
+
+  it("keeps agent-builder mention text when it includes instructions", async () => {
+    useChatStore
+      .getState()
+      .setDraft("session-1", "@agent-builder make a reviewer");
+    useChatStore.getState().setSkillDrafts("session-1", [
+      {
+        id: "global:/skills/agent-builder",
+        name: "agent-builder",
+      },
+    ]);
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        intent: "build-agent",
+      });
+    });
+    expect(useChatStore.getState().draftsBySession["session-1"]).toBe(
+      "@agent-builder make a reviewer",
+    );
+  });
+
   it("does not pre-seed repeatedly while typing with agent-builder selected", async () => {
     const pendingDraft = deferred<{ path: string; slug: string }>();
     mockPreSeedDraftAgent.mockReturnValueOnce(pendingDraft.promise);

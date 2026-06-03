@@ -62,6 +62,11 @@ interface UseChatSessionControllerOptions {
 
 const PENDING_HOME_SESSION_ID = "__home_pending__";
 const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
+const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
+
+function isAgentBuilderMentionOnlyDraft(text: string): boolean {
+  return AGENT_BUILDER_MENTION_INVOCATION.test(text.trim());
+}
 
 function movePendingHomeQueuedMessage(sessionId: string) {
   const chatState = useChatStore.getState();
@@ -1189,12 +1194,28 @@ export function useChatSessionController({
       return;
     }
 
-    void ensureCurrentSessionIsAgentBuilder({ requireSelectedSkill: true });
+    void ensureCurrentSessionIsAgentBuilder({
+      requireSelectedSkill: true,
+    }).then((builderSession) => {
+      if (!builderSession) {
+        return;
+      }
+
+      const chatState = useChatStore.getState();
+      if (
+        isAgentBuilderMentionOnlyDraft(
+          chatState.draftsBySession[stateSessionId] ?? "",
+        )
+      ) {
+        chatState.clearDraft(stateSessionId);
+      }
+    });
   }, [
     ensureCurrentSessionIsAgentBuilder,
     hasSelectedAgentBuilderSkill,
     session?.intent,
     sessionId,
+    stateSessionId,
   ]);
 
   const scrollTarget = useChatStore((s) =>
