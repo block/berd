@@ -124,6 +124,7 @@ export function MessageTimeline({
   const autoScrollTimersRef = useRef<number[]>([]);
   const jumpToLatestAnimationFrameRef = useRef<number | null>(null);
   const lastMcpAppSignatureRef = useRef<string | null>(null);
+  const followStreamingMessageIdRef = useRef<string | null>(null);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [userDetached, setUserDetached] = useState(false);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
@@ -394,6 +395,45 @@ export function MessageTimeline({
       alignElementBottom();
     });
   }, []);
+
+  const activeStreamingMessage = streamingMessageId
+    ? (visibleMessages.find((message) => message.id === streamingMessageId) ??
+      null)
+    : null;
+
+  useEffect(() => {
+    if (!activeStreamingMessage || userDetachedRef.current) {
+      return;
+    }
+
+    if (activeStreamingMessage.role !== "assistant") {
+      return;
+    }
+
+    if (followStreamingMessageIdRef.current === activeStreamingMessage.id) {
+      return;
+    }
+
+    const container = containerRef.current;
+    const messageEl = messageRefs.current[activeStreamingMessage.id];
+    if (!container || !messageEl) {
+      return;
+    }
+
+    const messageHeight = messageEl.getBoundingClientRect().height;
+    const viewportHeight = container.clientHeight;
+
+    if (messageHeight <= viewportHeight) {
+      return;
+    }
+
+    const targetScrollTop = Math.max(0, messageEl.offsetTop - 16);
+    isNearBottomRef.current = false;
+    isPinnedToBottomRef.current = false;
+    stickyScrollUntilRef.current = 0;
+    setDetachedFromLatest(true);
+    setTimelineScrollTop(container, targetScrollTop);
+  }, [activeStreamingMessage, setDetachedFromLatest, setTimelineScrollTop]);
 
   // Use scrollTo instead of scrollIntoView to avoid scrolling parent/document-level ancestors.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refs are stable and don't need to be in deps
@@ -711,6 +751,9 @@ export function MessageTimeline({
   };
 
   const handleJumpToLatest = () => {
+    if (streamingMessageId) {
+      followStreamingMessageIdRef.current = streamingMessageId;
+    }
     setDetachedFromLatest(false);
     isNearBottomRef.current = true;
     isPinnedToBottomRef.current = true;
