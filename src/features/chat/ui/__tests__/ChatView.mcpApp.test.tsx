@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
   handleSend: vi.fn(() => true),
+  queueTerminalCommand: vi.fn(),
+  runCommandInTerminalSession: vi.fn(),
   pinToHome: vi.fn(),
   unpinFromHome: vi.fn(),
   t: vi.fn((key: string) => key),
@@ -110,6 +112,11 @@ vi.mock("../ChatRightRail", () => ({
   },
 }));
 
+vi.mock("@/features/terminal/lib/terminalSessionManager", () => ({
+  queueTerminalCommand: mocks.queueTerminalCommand,
+  runCommandInTerminalSession: mocks.runCommandInTerminalSession,
+}));
+
 vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
   TerminalPanel: (props: {
     cwd: string;
@@ -193,6 +200,9 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
     mocks.handleSend.mockClear();
+    mocks.queueTerminalCommand.mockClear();
+    mocks.runCommandInTerminalSession.mockClear();
+    mocks.runCommandInTerminalSession.mockReturnValue(false);
     mocks.pinToHome.mockClear();
     mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
@@ -272,6 +282,9 @@ describe("ChatView MCP app messaging", () => {
     };
 
     expect(timelineProps.onSendMcpAppMessage).toBe(mocks.handleSend);
+    expect(
+      (timelineProps as { onRunShellCommand?: unknown }).onRunShellCommand,
+    ).toBeUndefined();
     const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
       className?: string;
     };
@@ -504,6 +517,85 @@ describe("ChatView MCP app messaging", () => {
       placeholder?: string;
     };
     expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
+  });
+
+  it("passes runnable shell commands through to the terminal runner", () => {
+    mocks.gitState = {
+      data: { isGitRepo: true },
+      isFetching: false,
+      isLoading: false,
+    };
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      workingDir: "/Users/test/repo",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onRunShellCommand?: (command: string) => void;
+    };
+    expect(timelineProps.onRunShellCommand).toBeTypeOf("function");
+
+    act(() => timelineProps.onRunShellCommand?.("pnpm test"));
+
+    expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
+      "session-1:/Users/test/repo",
+      "pnpm test",
+    );
+    expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(
+      "session-1:/Users/test/repo",
+      "pnpm test",
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo",
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+  });
+
+  it("does not double queue runnable shell commands for existing terminal sessions", () => {
+    mocks.gitState = {
+      data: { isGitRepo: true },
+      isFetching: false,
+      isLoading: false,
+    };
+    mocks.runCommandInTerminalSession.mockReturnValue(true);
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      workingDir: "/Users/test/repo",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onRunShellCommand?: (command: string) => void;
+    };
+
+    act(() => timelineProps.onRunShellCommand?.("pnpm test"));
+
+    expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
+      "session-1:/Users/test/repo",
+      "pnpm test",
+    );
+    expect(mocks.queueTerminalCommand).not.toHaveBeenCalled();
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo",
+    );
   });
 
   it("persists terminal workspaces for the chat session", async () => {

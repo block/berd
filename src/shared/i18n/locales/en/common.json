@@ -51,7 +51,8 @@
   },
   "components": {
     "codeBlock": {
-      "copyLabel": "Copy code"
+      "copyLabel": "Copy code",
+      "runInTerminalLabel": "Run in terminal"
     },
     "environmentVariables": {
       "copyLabel": "Copy environment variable",

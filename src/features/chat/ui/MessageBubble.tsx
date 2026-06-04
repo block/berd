@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, FileText, FolderClosed } from "lucide-react";
 import { IconRobot } from "@tabler/icons-react";
@@ -15,6 +15,7 @@ import {
 } from "@/shared/ui/icons/ProviderIcons";
 import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
+import { RunnableCodeBlock } from "@/shared/ui/ai-elements/runnable-code-block";
 import {
   Reasoning,
   ReasoningTrigger,
@@ -25,6 +26,8 @@ import { ToolChainCards, type ToolChainItem } from "./ToolChainCards";
 import { ClickableImage } from "./ClickableImage";
 import { McpAppView } from "./McpAppView";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
+import type { CustomRenderer } from "streamdown";
+import { RUNNABLE_SHELL_LANGUAGES } from "@/shared/lib/runnableShellCommand";
 import type {
   Message,
   MessageAttachment,
@@ -85,6 +88,7 @@ interface MessageBubbleProps {
   onEditMessage?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
+  onRunShellCommand?: (command: string) => void;
 }
 
 interface ContentSection {
@@ -196,6 +200,8 @@ function renderContentBlock(
     contentBlocks: MessageContent[];
     onSendMcpAppMessage?: McpAppMessageHandler;
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
+    onRunShellCommand?: (command: string) => void;
+    runItCodeRenderers?: CustomRenderer[];
   },
   isStreamingMsg?: boolean,
   isUserMessage?: boolean,
@@ -217,7 +223,13 @@ function renderContentBlock(
         );
       }
       return (
-        <MessageResponse key={`text-${index}`} isAnimating={isStreamingMsg}>
+        <MessageResponse
+          key={`text-${index}`}
+          isAnimating={isStreamingMsg}
+          codeRenderers={
+            options.onRunShellCommand ? options.runItCodeRenderers : undefined
+          }
+        >
           {tc.text}
         </MessageResponse>
       );
@@ -317,6 +329,7 @@ export const MessageBubble = memo(function MessageBubble({
   onEditMessage,
   onSendMcpAppMessage,
   onMcpAppAutoScroll,
+  onRunShellCommand,
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { formatDate } = useLocaleFormatting();
@@ -333,6 +346,20 @@ export const MessageBubble = memo(function MessageBubble({
   const { isCopied: isCopyConfirmed, copyToClipboard } = useCopyToClipboard();
   const personaGutterImage = useAvatarImage(persona?.avatar);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const runItCodeRenderers = useMemo<CustomRenderer[]>(
+    () =>
+      onRunShellCommand
+        ? [
+            {
+              language: [...RUNNABLE_SHELL_LANGUAGES],
+              component: (props) => (
+                <RunnableCodeBlock {...props} onRun={onRunShellCommand} />
+              ),
+            },
+          ]
+        : [],
+    [onRunShellCommand],
+  );
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
   if (role === "user" && content.length === 0) return null;
@@ -510,6 +537,8 @@ export const MessageBubble = memo(function MessageBubble({
                     contentBlocks: content,
                     onSendMcpAppMessage,
                     onMcpAppAutoScroll,
+                    onRunShellCommand,
+                    runItCodeRenderers,
                   },
                   isStreaming,
                   isUser,

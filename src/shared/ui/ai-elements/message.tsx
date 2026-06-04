@@ -25,7 +25,7 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, type CustomRenderer } from "streamdown";
 import { useTranslation } from "react-i18next";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -323,7 +323,9 @@ export const MessageBranchPage = ({
   );
 };
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
+  codeRenderers?: CustomRenderer[];
+};
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
@@ -391,7 +393,7 @@ const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
 };
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => {
+  ({ className, codeRenderers, ...props }: MessageResponseProps) => {
     const [modalUrl, setModalUrl] = useState<string | null>(null);
 
     const openModal = useCallback((url: string) => {
@@ -411,7 +413,11 @@ export const MessageResponse = memo(
           )}
           components={streamdownComponents}
           linkSafety={linkSafetyConfig}
-          plugins={streamdownPlugins}
+          plugins={
+            codeRenderers
+              ? { ...streamdownPlugins, renderers: codeRenderers }
+              : streamdownPlugins
+          }
           {...props}
         />
         <LinkSafetyModal
@@ -427,7 +433,8 @@ export const MessageResponse = memo(
   // If modalUrl is ever lifted to a prop, this comparator must be updated.
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
-    nextProps.isAnimating === prevProps.isAnimating,
+    nextProps.isAnimating === prevProps.isAnimating &&
+    nextProps.codeRenderers === prevProps.codeRenderers,
 );
 
 MessageResponse.displayName = "MessageResponse";

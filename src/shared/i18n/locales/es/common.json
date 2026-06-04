@@ -51,7 +51,8 @@
   },
   "components": {
     "codeBlock": {
-      "copyLabel": "Copiar código"
+      "copyLabel": "Copiar código",
+      "runInTerminalLabel": "Ejecutar en terminal"
     },
     "linkSafety": {
       "copied": "¡Copiado!",

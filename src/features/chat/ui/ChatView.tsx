@@ -22,6 +22,10 @@ import {
   type ChatSession,
 } from "../stores/chatSessionStore";
 import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
+import {
+  queueTerminalCommand,
+  runCommandInTerminalSession,
+} from "@/features/terminal/lib/terminalSessionManager";
 import { useGitState } from "@/shared/hooks/useGitState";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
@@ -286,6 +290,50 @@ export function ChatView({
     setContextPanelOpen(effectiveSession.id, false);
   }, [effectiveSession?.id, setContextPanelOpen]);
 
+  const handleRunShellCommand = useCallback(
+    (command: string) => {
+      if (!terminalCwd) {
+        toast.message(t("terminal.noWorkspace"));
+        return;
+      }
+
+      if ((terminalGitLoading || terminalGitFetching) && !terminalGitState) {
+        toast.message(t("terminal.checkingWorkspace"));
+        return;
+      }
+
+      if (!terminalAvailable) {
+        toast.message(t("terminal.gitOnly"));
+        return;
+      }
+
+      const sessionKey = `${sessionId}:${terminalCwd}`;
+      if (!runCommandInTerminalSession(sessionKey, command)) {
+        queueTerminalCommand(sessionKey, command);
+      }
+
+      setTerminalWorkspaceState((state) => {
+        const paths = state.paths.includes(terminalCwd)
+          ? state.paths
+          : [...state.paths, terminalCwd];
+        return {
+          paths,
+          expandedPath: terminalCwd,
+        };
+      });
+    },
+    [
+      sessionId,
+      setTerminalWorkspaceState,
+      terminalAvailable,
+      terminalCwd,
+      terminalGitFetching,
+      terminalGitLoading,
+      terminalGitState,
+      t,
+    ],
+  );
+
   const showIndicator =
     controller.chatState === "thinking" ||
     controller.chatState === "streaming" ||
@@ -511,6 +559,9 @@ export function ChatView({
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
       onScrollTargetHandled={controller.handleScrollTargetHandled}
       onSendMcpAppMessage={isReadOnly ? undefined : controller.handleSend}
+      onRunShellCommand={
+        !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
+      }
       showPlaceholder={controller.isLoadingHistory}
       placeholder={conversationPlaceholder}
       footer={composerFooter}

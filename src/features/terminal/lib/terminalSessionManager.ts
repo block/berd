@@ -1,3 +1,4 @@
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -34,6 +35,27 @@ const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
 
 const sessions = new Map<string, TerminalSession>();
+const queuedCommands = new Map<string, string[]>();
+
+function clearQueuedCommands(sessionKey: string): void {
+  queuedCommands.delete(sessionKey);
+}
+
+function openTerminalLink(event: MouseEvent, uri: string): void {
+  event.preventDefault();
+  void openUrl(uri).catch((error) => {
+    console.warn("Failed to open terminal link", error);
+  });
+}
+
+function formatCommandInput(command: string): string {
+  const trimmedCommand = command.trimEnd();
+  if (!trimmedCommand) {
+    return "";
+  }
+
+  return `${trimmedCommand}\r`;
+}
 
 export class TerminalSession {
   readonly key: string;
@@ -73,7 +95,7 @@ export class TerminalSession {
       theme,
     });
     this.terminal.loadAddon(this.fitAddon);
-    this.terminal.loadAddon(new WebLinksAddon());
+    this.terminal.loadAddon(new WebLinksAddon(openTerminalLink));
     this.inputSubscription = this.terminal.onData((data) => {
       if (!this.terminalId) {
         return;
@@ -176,6 +198,31 @@ export class TerminalSession {
     }
   }
 
+  runCommand(command: string): void {
+    if (this.disposed) {
+      return;
+    }
+
+    const input = formatCommandInput(command);
+    if (!input) {
+      return;
+    }
+
+    if (!this.terminalId || this.statusValue !== "running") {
+      const existing = queuedCommands.get(this.key) ?? [];
+      existing.push(input);
+      queuedCommands.set(this.key, existing);
+      if (this.statusValue === "exited" || this.statusValue === "error") {
+        this.restart();
+      }
+      return;
+    }
+
+    void writeTerminal(this.terminalId, input).catch((error) => {
+      console.warn("Failed to run terminal command", error);
+    });
+  }
+
   restart(): void {
     if (this.disposed) {
       return;
@@ -197,6 +244,7 @@ export class TerminalSession {
 
     this.disposed = true;
     sessions.delete(this.key);
+    clearQueuedCommands(this.key);
     this.startupToken = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -393,12 +441,61 @@ export class TerminalSession {
     });
   }
 
+  private flushQueuedCommands(): void {
+    if (!this.terminalId || this.statusValue !== "running") {
+      return;
+    }
+
+    const commands = queuedCommands.get(this.key);
+    if (!commands?.length) {
+      return;
+    }
+
+    queuedCommands.delete(this.key);
+    const terminalId = this.terminalId;
+    for (const command of commands) {
+      void writeTerminal(terminalId, command).catch((error) => {
+        console.warn("Failed to run queued terminal command", error);
+      });
+    }
+  }
+
   private setStatus(status: TerminalStatus): void {
     this.statusValue = status;
+    if (status === "running") {
+      this.flushQueuedCommands();
+    }
     for (const listener of this.listeners) {
       listener();
     }
   }
+}
+
+export function queueTerminalCommand(
+  sessionKey: string,
+  command: string,
+): void {
+  const input = formatCommandInput(command);
+  if (!input) {
+    return;
+  }
+
+  const existing = queuedCommands.get(sessionKey) ?? [];
+  existing.push(input);
+  queuedCommands.set(sessionKey, existing);
+}
+
+export function runCommandInTerminalSession(
+  sessionKey: string,
+  command: string,
+): boolean {
+  const session = sessions.get(sessionKey);
+  if (!session) {
+    return false;
+  }
+
+  session.runCommand(command);
+  return true;
 }
 
 export function getOrCreateTerminalSession(
