@@ -149,7 +149,30 @@
     "runFixDescription": "Esto ejecutará el siguiente comando:",
     "running": "Ejecutando comprobaciones...",
     "title": "Diagnóstico",
-    "tools": "Herramientas"
+    "tools": "Herramientas",
+    "version": {
+      "bridge": "puente ACP",
+      "updateAvailable": "Actualización disponible → {{version}}",
+      "line": {
+        "full": "Instalado mediante {{source}} · {{version}}",
+        "named": "{{name}} {{version}} mediante {{source}}",
+        "namedSourceOnly": "{{name}} mediante {{source}}",
+        "namedVersionOnly": "{{name}} {{version}}",
+        "sourceOnly": "Instalado mediante {{source}}",
+        "versionOnly": "{{version}}"
+      },
+      "source": {
+        "asdf": "asdf",
+        "brew": "Homebrew",
+        "cargo": "Cargo",
+        "curlPipe": "instalador nativo",
+        "mise": "mise",
+        "npm": "npm",
+        "system": "sistema",
+        "unknown": "un origen desconocido"
+      },
+      "updateLabel": "Actualizar {{name}} a {{version}}"
+    }
   },
   "experiments": {
     "builderbot": {
@@ -243,6 +266,7 @@
     "extensions": "Extensiones",
     "general": "General",
     "providers": "Proveedores de IA",
+    "providersUpdateAvailable": "Actualización disponible",
     "updates": "Actualizaciones"
   },
   "updates": {
@@ -310,6 +334,7 @@
   },
   "providers": {
     "agents": {
+      "applyUpdates": "Actualizar",
       "description": "Goose está integrado en tu espacio de trabajo. Instala otros para ampliar tu configuración.",
       "errors": {
         "genericSetupFailure": "La configuración tuvo un tropiezo.",

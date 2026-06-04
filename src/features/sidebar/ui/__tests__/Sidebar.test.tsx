@@ -17,6 +17,10 @@ const designSystemExplorer = vi.hoisted(() => ({
   isEnabled: vi.fn(() => false),
 }));
 
+vi.mock("@/features/providers/hooks/useAgentUpdatesAvailable", () => ({
+  useAgentUpdatesAvailable: () => false,
+}));
+
 type MockSession = {
   id: string;
   title: string;

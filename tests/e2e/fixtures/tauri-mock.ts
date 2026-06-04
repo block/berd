@@ -601,8 +601,6 @@ export function buildInitScript(options?: {
               return Promise.resolve(
                 providerEntries([args?.providerId]).some((entry) => entry.configured),
               );
-            case "check_agent_auth":
-              return Promise.resolve(false);
             case "install_agent":
               if (AGENT_SETUP_FAILURE?.providerId === args?.providerId) {
                 for (const line of AGENT_SETUP_FAILURE.lines ?? []) {
@@ -615,6 +613,8 @@ export function buildInitScript(options?: {
               }
               return Promise.resolve(null);
             case "authenticate_agent":
+              return Promise.resolve(null);
+            case "update_agent":
               return Promise.resolve(null);
             case "plugin:event|listen": {
               const eventId = nextEventId++;

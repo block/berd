@@ -18,6 +18,7 @@ use crate::services::{
     shell_env,
 };
 
+use doctor::types::{AuthStatus, InstallSource};
 use doctor::CheckStatus;
 pub use doctor::FixType;
 
@@ -38,6 +39,41 @@ const CLAUDE_THINKING_CONFIG_KEYS: &[&str] = &[
 ];
 const GOOSE_THINKING_EFFORT_ENV: &str = "GOOSE_THINKING_EFFORT";
 
+/// Local mirror of the crate's `AgentVersionInfo`, carried so the per-binary
+/// (main CLI vs ACP bridge) version/install-source readout survives the
+/// serialization boundary into the frontend. Field names and serde rename
+/// match the crate exactly so the TS `AgentVersionInfo` deserializes correctly.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentVersionInfo {
+    pub install_source: Option<InstallSource>,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: Option<bool>,
+    pub self_updating: Option<bool>,
+    /// Source-aware update command derived per readout from
+    /// `(install_source, package_id)`. `Some` only when an update is both
+    /// computable and actionable. Paired with `update_fix_type`.
+    pub update_command: Option<String>,
+    /// `FixType::UpdateMain` or `FixType::UpdateBridge`, matching the slot this
+    /// readout occupies. Always paired with `update_command`.
+    pub update_fix_type: Option<FixType>,
+}
+
+impl From<doctor::types::AgentVersionInfo> for AgentVersionInfo {
+    fn from(info: doctor::types::AgentVersionInfo) -> Self {
+        Self {
+            install_source: info.install_source,
+            installed_version: info.installed_version,
+            latest_version: info.latest_version,
+            update_available: info.update_available,
+            self_updating: info.self_updating,
+            update_command: info.update_command,
+            update_fix_type: info.update_fix_type,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DoctorCheck {
@@ -51,6 +87,14 @@ pub struct DoctorCheck {
     pub path: Option<String>,
     pub bridge_path: Option<String>,
     pub raw_output: Option<String>,
+    pub auth_status: Option<AuthStatus>,
+    pub installed_version: Option<String>,
+    pub latest_version: Option<String>,
+    pub update_available: Option<bool>,
+    pub install_source: Option<InstallSource>,
+    pub self_updating: Option<bool>,
+    pub main: Option<AgentVersionInfo>,
+    pub bridge: Option<AgentVersionInfo>,
     pub category: String,
     pub category_label: String,
 }
@@ -217,6 +261,14 @@ impl From<doctor::DoctorCheck> for DoctorCheck {
             path: check.path,
             bridge_path: check.bridge_path,
             raw_output: check.raw_output,
+            auth_status: check.auth_status,
+            installed_version: check.installed_version,
+            latest_version: check.latest_version,
+            update_available: check.update_available,
+            install_source: check.install_source,
+            self_updating: check.self_updating,
+            main: check.main.map(AgentVersionInfo::from),
+            bridge: check.bridge.map(AgentVersionInfo::from),
             category: category.to_string(),
             category_label: category_label.to_string(),
         }
@@ -369,6 +421,16 @@ fn build_local_result(
         path,
         bridge_path: None,
         raw_output: raw_output.or_else(|| check.debug_output.map(String::from)),
+        auth_status: None,
+        installed_version: None,
+        latest_version: None,
+        update_available: None,
+        install_source: None,
+        // Local sq-agent-tools checks are not AI agents, so they carry no
+        // per-binary main/bridge readout and aren't self-updating.
+        self_updating: None,
+        main: None,
+        bridge: None,
         category: check.category.to_string(),
         category_label: check.category_label.to_string(),
     }
@@ -894,8 +956,17 @@ async fn execute_local_fix(command: &'static str) -> Result<(), String> {
 async fn run_doctor_impl(
     registry: &LocalDoctorRegistry<'_>,
     distro_state: &DistroBundleState,
+    check_freshness: bool,
 ) -> DoctorReport {
-    let upstream = doctor::run_checks().await;
+    let upstream = doctor::run_checks_with_options(doctor::RunChecksOptions {
+        npm_registry: Some(crate::commands::agent_setup::BLOCK_NPM_REGISTRY_URL.to_string()),
+        check_freshness,
+        // Freshness, when enabled, runs against the network (and the crate's
+        // 1-hour disk cache); `offline` would suppress the registry lookups we
+        // want here.
+        offline: false,
+    })
+    .await;
     let mut checks: Vec<DoctorCheck> = upstream.checks.into_iter().map(DoctorCheck::from).collect();
     let distro_config_path = distro_state
         .bundle()
@@ -906,21 +977,57 @@ async fn run_doctor_impl(
 }
 
 /// Run all health checks and return the report.
+///
+/// This is the fast, offline status read that paints the settings screen: it
+/// skips the freshness pass (`check_freshness: false`), so no binary
+/// version-probing or registry lookups happen on the synchronous path.
 #[tauri::command]
 pub async fn run_doctor(
     distro_state: State<'_, DistroBundleState>,
 ) -> Result<DoctorReport, String> {
-    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner()).await)
+    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), false).await)
+}
+
+/// Run all health checks *with the freshness pass enabled*.
+///
+/// This is the slower, network-touching variant: it populates
+/// installed/latest version and update-available fields by probing binaries
+/// and the relevant registries. The frontend runs this off the synchronous
+/// path (in the background once Settings opens) and seeds the result into the
+/// shared report cache, so version/update badges fill in progressively without
+/// regressing first-paint latency. The crate's 1-hour disk cache at
+/// `<cache_dir>/doctor/freshness.json` keeps repeated calls cheap.
+#[tauri::command]
+pub async fn run_doctor_fresh(
+    distro_state: State<'_, DistroBundleState>,
+) -> Result<DoctorReport, String> {
+    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), true).await)
 }
 
 /// Run a fix command for a doctor check, identified by check ID and fix type.
+///
+/// `command_override` lets the frontend pass a verbatim shell command (used by
+/// the per-readout Update affordances, whose source-aware commands aren't in
+/// the crate's static lookup table); `None` falls back to the crate's
+/// `lookup_fix_command`. The npm registry override is still applied either way.
 #[tauri::command]
-pub async fn run_doctor_fix(check_id: String, fix_type: FixType) -> Result<(), String> {
-    if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
-        execute_local_fix(fix.command).await
-    } else {
-        doctor::execute_fix(check_id, fix_type).await
+pub async fn run_doctor_fix(
+    check_id: String,
+    fix_type: FixType,
+    command_override: Option<String>,
+) -> Result<(), String> {
+    if command_override.is_none() {
+        if let Some(fix) = find_local_fix(&LOCAL_DOCTOR_REGISTRY, &check_id, &fix_type) {
+            return execute_local_fix(fix.command).await;
+        }
     }
+    doctor::execute_fix_with_options(
+        check_id,
+        fix_type,
+        command_override,
+        Some(crate::commands::agent_setup::BLOCK_NPM_REGISTRY_URL),
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -939,6 +1046,14 @@ mod tests {
             path: None,
             bridge_path: None,
             raw_output: None,
+            auth_status: None,
+            installed_version: None,
+            latest_version: None,
+            update_available: None,
+            install_source: None,
+            self_updating: None,
+            main: None,
+            bridge: None,
         }
     }
 

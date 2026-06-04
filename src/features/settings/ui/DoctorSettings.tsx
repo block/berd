@@ -1,14 +1,19 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, ClipboardCopy, Check } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
+import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
 import {
-  runDoctor,
-  type DoctorCheck,
-  type DoctorReport,
-} from "@/shared/api/doctor";
+  useDoctorReport,
+  rerunDoctorReport,
+} from "@/shared/api/useDoctorReport";
+import {
+  describeAgentVersion,
+  type AgentBinaryReadout,
+} from "@/features/settings/lib/agentVersionDisplay";
 import { DoctorCheckRow } from "./DoctorCheckRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 
@@ -18,19 +23,10 @@ interface DoctorCheckGroup {
   checks: DoctorCheck[];
 }
 
-// Hide upstream Doctor agent checks because Goose's ACP layer manages agent
-// state separately, and the two views can differ. The Providers page is the
-// source of truth for agent setup and status in this app.
-const HIDDEN_DOCTOR_CATEGORIES = new Set(["agents"]);
-
 function groupDoctorChecks(checks: DoctorCheck[]): DoctorCheckGroup[] {
   const groups = new Map<string, DoctorCheckGroup>();
 
   for (const check of checks) {
-    if (HIDDEN_DOCTOR_CATEGORIES.has(check.category)) {
-      continue;
-    }
-
     const group = groups.get(check.category);
     if (group) {
       group.checks.push(check);
@@ -44,6 +40,39 @@ function groupDoctorChecks(checks: DoctorCheck[]): DoctorCheckGroup[] {
   }
 
   return Array.from(groups.values());
+}
+
+function readoutLabel(readout: AgentBinaryReadout): string {
+  return readout.role === "main"
+    ? " (main)"
+    : readout.role === "bridge"
+      ? " (bridge)"
+      : "";
+}
+
+function versionLines(check: DoctorCheck): string[] {
+  const display = describeAgentVersion(check);
+  if (!display) return [];
+  const lines: string[] = [];
+  for (const readout of display.readouts) {
+    const suffix = readoutLabel(readout);
+    if (readout.installSource) {
+      lines.push(`Install source${suffix}: ${readout.installSource}`);
+    }
+    if (readout.installedVersion) {
+      lines.push(`Installed version${suffix}: ${readout.installedVersion}`);
+    }
+    if (readout.latestVersion) {
+      lines.push(`Latest version${suffix}: ${readout.latestVersion}`);
+    }
+    if (readout.updateAvailable) {
+      lines.push(`Update available${suffix}: yes`);
+    }
+    if (readout.selfUpdating) {
+      lines.push(`Self-updating${suffix}: yes`);
+    }
+  }
+  return lines;
 }
 
 export function formatDebugReport(report: DoctorReport): string {
@@ -73,6 +102,8 @@ export function formatDebugReport(report: DoctorReport): string {
       lines.push(`  Message: ${check.message}`);
       if (check.path) lines.push(`  Path: ${check.path}`);
       if (check.bridgePath) lines.push(`  Bridge path: ${check.bridgePath}`);
+      if (check.authStatus) lines.push(`  Auth status: ${check.authStatus}`);
+      for (const line of versionLines(check)) lines.push(`  ${line}`);
       if (check.fixUrl) lines.push(`  Fix URL: ${check.fixUrl}`);
       if (check.fixCommand) lines.push(`  Fix command: ${check.fixCommand}`);
       if (check.rawOutput) {
@@ -93,32 +124,30 @@ export function formatDebugReport(report: DoctorReport): string {
 export function DoctorSettings() {
   const { t } = useTranslation(["settings", "common"]);
   const setTopBarActions = useSetTopBarActions();
-  const [report, setReport] = useState<DoctorReport | null>(null);
-  const [loading, setLoading] = useState(false);
+  const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
-  const mountedRef = useRef(true);
 
-  const runChecks = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await runDoctor();
-      if (mountedRef.current) setReport(result);
-    } catch (e) {
-      console.error("[Doctor] Failed to run checks:", e);
-    } finally {
-      if (mountedRef.current) setLoading(false);
-    }
-  }, []);
+  const query = useDoctorReport();
+  const report = query.data ?? null;
+  // `isPending` is only true before the first result, so a warm prefetch
+  // renders the page instantly; `isFetching` keeps the spinner up during a
+  // manual rerun.
+  const loading = query.isPending || query.isFetching;
 
-  useEffect(() => {
-    mountedRef.current = true;
-    runChecks();
-    return () => {
-      mountedRef.current = false;
-    };
-  }, [runChecks]);
+  const runChecks = useCallback(() => {
+    // Re-probe and re-run the freshness pass so version/update badges
+    // repopulate instead of blanking after a manual rerun or applied fix.
+    void rerunDoctorReport(queryClient);
+  }, [queryClient]);
 
-  const checkGroups = report ? groupDoctorChecks(report.checks) : [];
+  // The agents category is rendered on the AI providers detail page (with
+  // richer install/auth UI); hide it here so the Doctor page focuses on
+  // environment/tools/etc.
+  const checkGroups = report
+    ? groupDoctorChecks(report.checks).filter(
+        (group) => group.category !== "agents",
+      )
+    : [];
 
   const copyDebugInfo = useCallback(async () => {
     if (!report) return;

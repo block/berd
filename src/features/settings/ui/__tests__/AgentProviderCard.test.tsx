@@ -1,25 +1,54 @@
-import { act, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderWithProviders } from "@/test/render";
+import { I18nProvider } from "@/shared/i18n";
 import { AgentProviderCard } from "../AgentProviderCard";
+import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
+import type { DoctorCheck } from "@/shared/api/doctor";
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
 import enSettings from "@/shared/i18n/locales/en/settings.json";
 import { AGENT_SETUP_FAILURE_SIMULATION_KEY } from "@/features/providers/lib/agentSetupFailureSimulation";
 
 const checkAgentInstalled = vi.fn();
-const checkAgentAuth = vi.fn();
 const installAgent = vi.fn();
 const authenticateAgent = vi.fn();
+const updateAgent = vi.fn();
 const onAgentSetupOutput = vi.fn();
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) => checkAgentInstalled(...args),
-  checkAgentAuth: (...args: unknown[]) => checkAgentAuth(...args),
   installAgent: (...args: unknown[]) => installAgent(...args),
   authenticateAgent: (...args: unknown[]) => authenticateAgent(...args),
+  updateAgent: (...args: unknown[]) => updateAgent(...args),
   onAgentSetupOutput: (...args: unknown[]) => onAgentSetupOutput(...args),
 }));
+
+const rerunDoctorReport = vi.fn();
+const invalidateDoctorReport = vi.fn();
+
+vi.mock("@/shared/api/useDoctorReport", () => ({
+  rerunDoctorReport: (...args: unknown[]) => rerunDoctorReport(...args),
+  invalidateDoctorReport: (...args: unknown[]) =>
+    invalidateDoctorReport(...args),
+}));
+
+function renderCard(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const wrap = (node: ReactElement) => (
+    <QueryClientProvider client={queryClient}>
+      <I18nProvider>{node}</I18nProvider>
+    </QueryClientProvider>
+  );
+  const result = render(wrap(ui));
+  return {
+    ...result,
+    rerender: (node: ReactElement) => result.rerender(wrap(node)),
+  };
+}
 
 function createProvider(
   overrides: Partial<ProviderDisplayInfo> = {},
@@ -39,29 +68,46 @@ function createProvider(
   };
 }
 
+function createVersionCheck(overrides: Partial<DoctorCheck> = {}): DoctorCheck {
+  return {
+    id: "ai-agent-claude",
+    label: "Claude",
+    status: "pass",
+    message: "Installed",
+    fixUrl: null,
+    fixCommand: null,
+    fixType: null,
+    path: null,
+    bridgePath: null,
+    rawOutput: null,
+    authStatus: null,
+    installedVersion: null,
+    latestVersion: null,
+    updateAvailable: null,
+    installSource: null,
+    selfUpdating: null,
+    main: null,
+    bridge: null,
+    category: "agents",
+    categoryLabel: "Agents",
+    ...overrides,
+  };
+}
+
 describe("AgentProviderCard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.removeItem(AGENT_SETUP_FAILURE_SIMULATION_KEY);
     checkAgentInstalled.mockResolvedValue(false);
     onAgentSetupOutput.mockResolvedValue(vi.fn());
+    rerunDoctorReport.mockResolvedValue(undefined);
+    invalidateDoctorReport.mockResolvedValue(undefined);
   });
 
-  it("shows the checking indicator and does not show sign in while auth status is checking", async () => {
-    let resolveAuth!: (authenticated: boolean) => void;
-    const authPromise = new Promise<boolean>((resolve) => {
-      resolveAuth = resolve;
-    });
-
-    checkAgentInstalled.mockResolvedValue(true);
-    checkAgentAuth.mockReturnValue(authPromise);
-
-    renderWithProviders(<AgentProviderCard provider={createProvider()} />);
-
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
+  it("shows the checking indicator only during the shared report's first load", async () => {
+    const { rerender } = renderCard(
+      <AgentProviderCard provider={createProvider()} statusLoading={true} />,
+    );
 
     expect(
       screen.getByRole("status", { name: "Checking..." }),
@@ -71,21 +117,39 @@ describe("AgentProviderCard", () => {
       screen.queryByRole("button", { name: /sign in/i }),
     ).not.toBeInTheDocument();
 
-    await act(async () => {
-      resolveAuth(false);
-      await authPromise;
-    });
+    // The cold load resolved to "installed but not authenticated".
+    rerender(
+      <AgentProviderCard
+        provider={createProvider()}
+        statusLoading={false}
+        readiness={"not_ready" satisfies AgentProviderReadiness}
+      />,
+    );
 
     expect(
       screen.getByRole("button", { name: /sign in/i }),
     ).toBeInTheDocument();
+    // No per-card probe runs on mount anymore.
+    expect(checkAgentInstalled).not.toHaveBeenCalled();
   });
 
-  it("detects an installed local agent even when catalog status starts as not installed", async () => {
-    checkAgentInstalled.mockResolvedValue(true);
-    checkAgentAuth.mockResolvedValue(false);
+  it("does not re-spin on a warm-cache revisit", () => {
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider()}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+      />,
+    );
 
-    renderWithProviders(
+    expect(
+      screen.queryByRole("status", { name: "Checking..." }),
+    ).not.toBeInTheDocument();
+    expect(checkAgentInstalled).not.toHaveBeenCalled();
+  });
+
+  it("renders sign in for an installed-but-unauthenticated agent", () => {
+    renderCard(
       <AgentProviderCard
         provider={createProvider({
           status: "not_installed",
@@ -93,24 +157,21 @@ describe("AgentProviderCard", () => {
           supportsAuth: true,
           supportsAuthStatus: true,
         })}
+        statusLoading={false}
+        readiness={"not_ready" satisfies AgentProviderReadiness}
       />,
     );
 
-    await waitFor(() => {
-      expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
-    });
     expect(
-      await screen.findByRole("button", { name: /sign in/i }),
+      screen.getByRole("button", { name: /sign in/i }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /install claude/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("does not trust connected status when the local agent binary is missing", async () => {
-    checkAgentInstalled.mockResolvedValue(false);
-
-    renderWithProviders(
+  it("offers install when the report reports the binary missing", () => {
+    renderCard(
       <AgentProviderCard
         provider={createProvider({
           status: "connected",
@@ -119,15 +180,13 @@ describe("AgentProviderCard", () => {
           supportsAuthStatus: false,
           binaryName: "claude-agent-acp",
         })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
       />,
     );
 
     expect(
-      screen.getByRole("status", { name: "Checking..." }),
-    ).toBeInTheDocument();
-    expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
-    expect(
-      await screen.findByRole("button", { name: /install claude/i }),
+      screen.getByRole("button", { name: /install claude/i }),
     ).toBeInTheDocument();
   });
 
@@ -137,7 +196,7 @@ describe("AgentProviderCard", () => {
     installAgent.mockResolvedValue(undefined);
     checkAgentInstalled.mockResolvedValue(false);
 
-    renderWithProviders(
+    renderCard(
       <AgentProviderCard
         provider={createProvider({
           status: "not_installed",
@@ -145,6 +204,8 @@ describe("AgentProviderCard", () => {
           supportsAuth: false,
           supportsAuthStatus: false,
         })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
         onStartTroubleshootingChat={onStartTroubleshootingChat}
       />,
     );
@@ -193,7 +254,7 @@ describe("AgentProviderCard", () => {
       throw new Error("Command exited with code 1");
     });
 
-    renderWithProviders(
+    renderCard(
       <AgentProviderCard
         provider={createProvider({
           status: "not_installed",
@@ -201,6 +262,8 @@ describe("AgentProviderCard", () => {
           supportsAuth: false,
           supportsAuthStatus: false,
         })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
         onStartTroubleshootingChat={onStartTroubleshootingChat}
       />,
     );
@@ -223,6 +286,157 @@ describe("AgentProviderCard", () => {
     );
   });
 
+  it("surfaces install source and version from the shared report", () => {
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({ supportsAuth: false })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "brew",
+          installedVersion: "1.2.3",
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText("Installed via Homebrew · v1.2.3"),
+    ).toBeInTheDocument();
+  });
+
+  it("wires the bottom Update button to the per-readout update command", async () => {
+    const user = userEvent.setup();
+    updateAgent.mockResolvedValue(undefined);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "npm",
+          installedVersion: "1.2.3",
+          latestVersion: "1.3.0",
+          updateAvailable: true,
+          main: {
+            installSource: "npm",
+            installedVersion: "1.2.3",
+            latestVersion: "1.3.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+            updateFixType: "updateMain",
+          },
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Update available → v1.3.0")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /^update$/i }));
+
+    await waitFor(() => {
+      expect(updateAgent).toHaveBeenCalledWith(
+        "claude-acp",
+        "updateMain",
+        "npm install -g @anthropic-ai/claude-code@latest",
+      );
+    });
+    expect(installAgent).not.toHaveBeenCalled();
+
+    // After a successful update we re-run the freshness pass (not a bare
+    // invalidate) so the version badges repopulate instead of blanking out.
+    await waitFor(() => {
+      expect(rerunDoctorReport).toHaveBeenCalled();
+    });
+    expect(invalidateDoctorReport).not.toHaveBeenCalled();
+  });
+
+  it("runs every actionable readout sequentially when both main and bridge are out of date", async () => {
+    const user = userEvent.setup();
+    updateAgent.mockResolvedValue(undefined);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          main: {
+            installSource: "curlPipe",
+            installedVersion: "2.0.0",
+            latestVersion: "2.1.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "curl -fsSL https://example.com/install.sh | bash",
+            updateFixType: "updateMain",
+          },
+          bridge: {
+            installSource: "npm",
+            installedVersion: "0.34.0",
+            latestVersion: "0.39.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "npm install -g claude-agent-acp@latest",
+            updateFixType: "updateBridge",
+          },
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /^update$/i }));
+
+    await waitFor(() => {
+      expect(updateAgent).toHaveBeenCalledTimes(2);
+    });
+    expect(updateAgent).toHaveBeenNthCalledWith(
+      1,
+      "claude-acp",
+      "updateMain",
+      "curl -fsSL https://example.com/install.sh | bash",
+    );
+    expect(updateAgent).toHaveBeenNthCalledWith(
+      2,
+      "claude-acp",
+      "updateBridge",
+      "npm install -g claude-agent-acp@latest",
+    );
+  });
+
+  it("hides the update affordance for self-updating tools", () => {
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "curlPipe",
+          installedVersion: "1.2.3",
+          latestVersion: "1.3.0",
+          updateAvailable: true,
+          selfUpdating: true,
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(/auto-updates/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /update claude/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("can force a connected provider into a dev setup failure simulation", async () => {
     const user = userEvent.setup();
     localStorage.setItem(
@@ -233,7 +447,7 @@ describe("AgentProviderCard", () => {
       }),
     );
 
-    renderWithProviders(
+    renderCard(
       <AgentProviderCard
         provider={createProvider({
           status: "connected",
@@ -242,6 +456,8 @@ describe("AgentProviderCard", () => {
           supportsAuthStatus: false,
           binaryName: "claude-agent-acp",
         })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
       />,
     );
 

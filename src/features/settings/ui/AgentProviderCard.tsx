@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Spinner } from "@/shared/ui/spinner";
@@ -10,14 +11,23 @@ import {
   IconMessageCircle,
   IconPlus,
 } from "@tabler/icons-react";
+import { ArrowUpCircle } from "lucide-react";
 import {
   checkAgentInstalled,
-  checkAgentAuth,
   installAgent,
   authenticateAgent,
   onAgentSetupOutput,
+  updateAgent,
 } from "@/features/providers/api/agentSetup";
+import {
+  describeAgentVersion,
+  type AgentBinaryReadout,
+} from "../lib/agentVersionDisplay";
+import { rerunDoctorReport } from "@/shared/api/useDoctorReport";
+import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
+import type { DoctorCheck } from "@/shared/api/doctor";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
+import { AgentVersionInfo } from "./AgentVersionInfo";
 import {
   analyzeAgentSetupFailure,
   buildAgentSetupTroubleshootingRequest,
@@ -31,8 +41,6 @@ import {
 import type { ProviderDisplayInfo } from "@/shared/types/providers";
 
 type SetupPhase = "idle" | "checking" | "installing" | "authenticating";
-type InstallStatus = "checking" | "installed" | "missing";
-type AuthStatus = "checking" | "authenticated" | "unauthenticated" | "unknown";
 
 interface OutputLine {
   id: number;
@@ -43,56 +51,42 @@ const MAX_OUTPUT_LINES = 50;
 
 interface AgentProviderCardProps {
   provider: ProviderDisplayInfo;
+  // Per-agent readiness derived from the shared doctor report. `undefined`
+  // until that provider's check lands in the report.
+  readiness?: AgentProviderReadiness;
+  // The provider's raw doctor check, used to surface install source / version
+  // / update-available. `undefined` until the report (and freshness) land.
+  versionCheck?: DoctorCheck;
+  // True only during the shared report's cold first fetch, so a warm-cache
+  // revisit paints instantly instead of re-spinning.
+  statusLoading?: boolean;
   onStartTroubleshootingChat?: (
     request: AgentSetupTroubleshootingRequest,
   ) => void;
   onProviderReady?: (providerId: string) => void;
 }
 
-function initialInstallStatus({
-  forceMissingForSimulation,
-  hasBinary,
-  isBuiltIn,
-}: {
-  forceMissingForSimulation: boolean;
-  hasBinary: boolean;
-  isBuiltIn: boolean;
-}): InstallStatus {
-  if (forceMissingForSimulation) return "missing";
-  if (isBuiltIn || !hasBinary) return "installed";
-  return "checking";
-}
-
 export function AgentProviderCard({
   provider,
+  readiness,
+  versionCheck,
+  statusLoading = false,
   onStartTroubleshootingChat,
   onProviderReady,
 }: AgentProviderCardProps) {
   const { t } = useTranslation(["settings", "common"]);
+  const queryClient = useQueryClient();
   const isBuiltIn = provider.status === "built_in";
   const supportsInstall = provider.supportsInstall === true;
   const supportsAuth = provider.supportsAuth === true;
-  const supportsAuthStatus = provider.supportsAuthStatus === true;
   const hasBinary = !!provider.binaryName;
   const setupFailureSimulation = getAgentSetupFailureSimulation(provider.id);
   const forceMissingForSimulation = Boolean(setupFailureSimulation);
-  const initialInstall = initialInstallStatus({
-    forceMissingForSimulation,
-    hasBinary,
-    isBuiltIn,
-  });
   const [setupPhase, setSetupPhase] = useState<SetupPhase>("idle");
   const [setupOutput, setSetupOutput] = useState<OutputLine[]>([]);
   const [setupError, setSetupError] = useState<string | null>(null);
   const [setupFailureAnalysis, setSetupFailureAnalysis] =
     useState<AgentSetupFailureAnalysis | null>(null);
-  const [installStatus, setInstallStatus] =
-    useState<InstallStatus>(initialInstall);
-  const [authStatus, setAuthStatus] = useState<AuthStatus>(
-    supportsAuthStatus && initialInstall === "installed" && !isBuiltIn
-      ? "checking"
-      : "unknown",
-  );
   const outputRef = useRef<HTMLDivElement>(null);
   const outputLengthRef = useRef(0);
   const setupOutputLinesRef = useRef<OutputLine[]>([]);
@@ -102,21 +96,19 @@ export function AgentProviderCard({
 
   const icon = getProviderIcon(provider.id, "size-6");
   const isActive = setupPhase !== "idle";
-  const authStorageKey = `agent-provider-auth:${provider.id}`;
-  const setAuthHint = useCallback(
-    (value: boolean) => {
-      if (value) {
-        localStorage.setItem(authStorageKey, "true");
-      } else {
-        localStorage.removeItem(authStorageKey);
-      }
-    },
-    [authStorageKey],
-  );
 
-  const getAuthHint = useCallback(() => {
-    return localStorage.getItem(authStorageKey) === "true";
-  }, [authStorageKey]);
+  // Resolve display state from the shared report, with local-only overrides
+  // (dev failure simulation, built-in/no-binary agents that are always
+  // present). The spinner is gated on the report's cold first fetch only.
+  const isChecking =
+    !isBuiltIn && !forceMissingForSimulation && hasBinary && statusLoading;
+  const resolvedReadiness: AgentProviderReadiness = forceMissingForSimulation
+    ? "not_installed"
+    : isBuiltIn || !hasBinary
+      ? "ready"
+      : (readiness ?? "not_installed");
+  const isInstalled =
+    resolvedReadiness === "ready" || resolvedReadiness === "not_ready";
 
   const clearListener = useCallback(() => {
     unlistenRef.current?.();
@@ -131,92 +123,18 @@ export function AgentProviderCard({
     };
   }, [clearListener]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const applyMissing = () => {
-      if (cancelled || !isMountedRef.current) return;
-      setInstallStatus("missing");
-      setAuthStatus("unknown");
-      setAuthHint(false);
-    };
-
-    const applyInstalled = () => {
-      if (cancelled || !isMountedRef.current) return;
-      setInstallStatus("installed");
-
-      if (isBuiltIn) {
-        setAuthStatus("unknown");
-        return;
-      }
-
-      if (!supportsAuthStatus) {
-        setAuthStatus(getAuthHint() ? "authenticated" : "unknown");
-        return;
-      }
-
-      setAuthStatus("checking");
-      void checkAgentAuth(provider.id)
-        .then((authenticated) => {
-          if (cancelled || !isMountedRef.current) return;
-          setAuthStatus(authenticated ? "authenticated" : "unauthenticated");
-        })
-        .catch(() => {
-          if (cancelled || !isMountedRef.current) return;
-          setAuthStatus("unauthenticated");
-        });
-    };
-
-    if (forceMissingForSimulation) {
-      applyMissing();
-    } else if (isBuiltIn || !hasBinary) {
-      applyInstalled();
-    } else {
-      setInstallStatus("checking");
-      void checkAgentInstalled(provider.id)
-        .then((installed) => {
-          if (installed) {
-            applyInstalled();
-          } else {
-            applyMissing();
-          }
-        })
-        .catch(() => {
-          applyMissing();
-        });
-    }
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    forceMissingForSimulation,
-    getAuthHint,
-    hasBinary,
-    isBuiltIn,
-    provider.id,
-    supportsAuthStatus,
-    setAuthHint,
-  ]);
-
+  // Targeted post-install/auth verification (single user-initiated probe, not a
+  // mount-time storm). The shared report is the source of truth for display;
+  // this only confirms the CLI landed on PATH so we can surface a clear error.
   const refreshInstallStatus = useCallback(async (): Promise<boolean> => {
-    const installed =
-      !forceMissingForSimulation &&
-      (isBuiltIn || !hasBinary || (await checkAgentInstalled(provider.id)));
-    if (!isMountedRef.current) return false;
-    setInstallStatus(installed ? "installed" : "missing");
-    if (!installed) {
-      setAuthStatus("unknown");
-      setAuthHint(false);
+    if (forceMissingForSimulation) return false;
+    if (isBuiltIn || !hasBinary) return true;
+    try {
+      return await checkAgentInstalled(provider.id);
+    } catch {
+      return false;
     }
-    return installed;
-  }, [
-    forceMissingForSimulation,
-    hasBinary,
-    isBuiltIn,
-    provider.id,
-    setAuthHint,
-  ]);
+  }, [forceMissingForSimulation, hasBinary, isBuiltIn, provider.id]);
 
   useEffect(() => {
     if (outputRef.current && outputLengthRef.current !== setupOutput.length) {
@@ -242,7 +160,7 @@ export function AgentProviderCard({
     setupOutputLinesRef.current = [];
     lineCounterRef.current = 0;
 
-    if (supportsInstall && installStatus === "missing") {
+    if (supportsInstall && resolvedReadiness === "not_installed") {
       await runInstall();
     } else if (supportsAuth) {
       await runAuth();
@@ -276,13 +194,18 @@ export function AgentProviderCard({
       clearListener();
       if (!isMountedRef.current) return;
 
+      // The binary may now be present; refresh every surface from one report.
+      // Use `rerunDoctorReport` (not bare `invalidateDoctorReport`) so the
+      // freshness pass re-runs and version/install-source/update badges
+      // repopulate — invalidation alone refetches through the fast,
+      // freshness-off `runDoctor` queryFn and blanks them out.
+      void rerunDoctorReport(queryClient);
+
       if (hasBinary && provider.binaryName) {
         setSetupPhase("checking");
         const installed = await refreshInstallStatus();
         if (!isMountedRef.current) return;
         if (!installed) {
-          setAuthStatus("unknown");
-          setAuthHint(false);
           const message = t(
             "providers.agents.errors.installVerificationFailed",
           );
@@ -343,9 +266,64 @@ export function AgentProviderCard({
         setSetupPhase("idle");
         return;
       }
-      setAuthHint(true);
-      setAuthStatus("authenticated");
-      onProviderReady?.(provider.id);
+      // Auth state changed: refresh all surfaces, and keep the progress UI up
+      // until the report reflects the new state so the card doesn't flash back
+      // to "sign in" before the refetch settles. `rerunDoctorReport` also
+      // re-kicks the freshness pass so version badges don't blank out.
+      await rerunDoctorReport(queryClient);
+      if (!isMountedRef.current) return;
+      setSetupPhase("idle");
+    } catch (err) {
+      clearListener();
+      if (!isMountedRef.current) return;
+      const message = err instanceof Error ? err.message : String(err);
+      setSetupError(message);
+      setSetupFailureAnalysis(
+        analyzeAgentSetupFailure(message, setupOutputLinesRef.current),
+      );
+      setSetupPhase("idle");
+    }
+  }
+
+  // Run every actionable readout's source-aware update command in sequence.
+  // The doctor crate derives each command from `(install_source, package_id)`
+  // (e.g. `npm install -g <pkg>@latest`, `brew upgrade <pkg>`), so a Claude
+  // Code card with `claude` (native) + `claude-agent-acp` (npm) updates each
+  // binary with the correct recipe under one click. Never chains into auth —
+  // the agent is already set up; we're only refreshing binaries.
+  async function runUpdates(readouts: AgentBinaryReadout[]) {
+    if (readouts.length === 0) return;
+    setSetupError(null);
+    setSetupFailureAnalysis(null);
+    setSetupOutput([]);
+    setupOutputLinesRef.current = [];
+    lineCounterRef.current = 0;
+    setSetupPhase("installing");
+
+    clearListener();
+    const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
+    if (!isMountedRef.current) {
+      unlisten();
+      return;
+    }
+    unlistenRef.current = unlisten;
+
+    try {
+      for (const readout of readouts) {
+        if (!readout.updateFixType || !readout.updateCommand) continue;
+        await updateAgent(
+          provider.id,
+          readout.updateFixType,
+          readout.updateCommand,
+        );
+        if (!isMountedRef.current) return;
+      }
+      clearListener();
+      if (!isMountedRef.current) return;
+      // Re-run the freshness pass so the updated versions repopulate the
+      // readout instead of collapsing to a bare "Installed via <source>".
+      await rerunDoctorReport(queryClient);
+      if (!isMountedRef.current) return;
       setSetupPhase("idle");
     } catch (err) {
       clearListener();
@@ -391,32 +369,13 @@ export function AgentProviderCard({
     );
   }
 
-  const isReady =
-    isBuiltIn ||
-    (installStatus === "installed" && !supportsAuth) ||
-    (installStatus === "installed" && authStatus === "authenticated");
-  const needsAuth =
-    installStatus === "installed" &&
-    supportsAuth &&
-    authStatus !== "checking" &&
-    authStatus !== "authenticated";
-  const needsInstall = installStatus === "missing" && supportsInstall;
-  const isChecking =
-    installStatus === "checking" ||
-    (installStatus === "installed" && authStatus === "checking");
+  const isReady = isBuiltIn || resolvedReadiness === "ready";
+  const needsAuth = resolvedReadiness === "not_ready" && supportsAuth;
+  const needsInstall = resolvedReadiness === "not_installed" && supportsInstall;
 
-  if (provider.showOnlyWhenInstalled && installStatus !== "installed")
-    return null;
+  if (provider.showOnlyWhenInstalled && !isInstalled) return null;
 
   function renderStatusIndicator() {
-    if (isBuiltIn || isReady) {
-      return (
-        <div className="flex h-6 flex-shrink-0 items-center">
-          <IconCheck className="size-4 text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
-        </div>
-      );
-    }
-
     if (setupError) {
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
@@ -425,6 +384,11 @@ export function AgentProviderCard({
       );
     }
 
+    // Spin until the shared report *and* its freshness sibling have both
+    // settled, so the fast `runDoctor` pass doesn't paint a tick (or a
+    // sign-in button) before freshness reveals an "Update available"
+    // affordance. Built-ins / no-binary agents bypass this — `isChecking` is
+    // gated on `!isBuiltIn && hasBinary`, so they tick immediately.
     if (isChecking || isActive) {
       return (
         <div
@@ -441,6 +405,14 @@ export function AgentProviderCard({
             aria-hidden="true"
             className="size-4 text-foreground"
           />
+        </div>
+      );
+    }
+
+    if (isBuiltIn || isReady) {
+      return (
+        <div className="flex h-6 flex-shrink-0 items-center">
+          <IconCheck className="size-4 text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
         </div>
       );
     }
@@ -533,6 +505,16 @@ export function AgentProviderCard({
 
   const setupFailureMessage = getSetupFailureMessage();
 
+  const versionDisplay = versionCheck
+    ? describeAgentVersion(versionCheck)
+    : null;
+  const actionableReadouts =
+    versionDisplay?.readouts.filter(
+      (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
+    ) ?? [];
+  const showUpdateButton =
+    !isActive && !setupError && actionableReadouts.length > 0;
+
   return (
     <div
       className={cn(
@@ -553,11 +535,29 @@ export function AgentProviderCard({
           <p className="mt-1 text-xs text-muted-foreground">
             {provider.description}
           </p>
+          {versionCheck && !isActive ? (
+            <AgentVersionInfo check={versionCheck} className="mt-1" />
+          ) : null}
         </div>
         {renderStatusIndicator()}
       </div>
 
       {renderSetupProgress()}
+
+      {showUpdateButton && (
+        <div className="mt-3 flex justify-end">
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            leftIcon={<ArrowUpCircle aria-hidden="true" />}
+            onClick={() => void runUpdates(actionableReadouts)}
+            className="text-warning"
+          >
+            {t("providers.agents.applyUpdates")}
+          </Button>
+        </div>
+      )}
 
       {setupError && !isActive && (
         <div className="mt-3 space-y-2 border-t pt-3">

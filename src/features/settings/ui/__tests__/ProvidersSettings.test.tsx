@@ -1,8 +1,11 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
+import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { ProvidersSettings } from "../ProvidersSettings";
 
@@ -10,20 +13,33 @@ const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
   checkAgentInstalled: vi.fn(),
   installAgent: vi.fn(),
+  useAgentProviderStatus: vi.fn(),
 }));
 
 vi.mock("@/features/providers/hooks/useCredentials", () => ({
   useCredentials: () => mocks.useCredentials(),
 }));
 
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => mocks.useAgentProviderStatus(),
+}));
+
 vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) =>
     mocks.checkAgentInstalled(...args),
-  checkAgentAuth: vi.fn(),
   installAgent: (...args: unknown[]) => mocks.installAgent(...args),
   authenticateAgent: vi.fn(),
   onAgentSetupOutput: vi.fn(async () => vi.fn()),
 }));
+
+function renderProviders(ui: ReactElement) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>,
+  );
+}
 
 const providerCatalog: ProviderCatalogEntry[] = [
   {
@@ -104,6 +120,15 @@ describe("ProvidersSettings", () => {
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
     mocks.checkAgentInstalled.mockResolvedValue(true);
     mocks.installAgent.mockResolvedValue(undefined);
+    mocks.useAgentProviderStatus.mockReturnValue({
+      readyAgentIds: new Set<string>(["goose"]),
+      agentReadiness: new Map<string, AgentProviderReadiness>([
+        ["goose", "ready"],
+      ]),
+      agentChecks: new Map(),
+      loading: false,
+      refresh: vi.fn(),
+    });
     mocks.useCredentials.mockReturnValue({
       configuredIds: new Set<string>(),
       loading: false,
@@ -119,7 +144,7 @@ describe("ProvidersSettings", () => {
   });
 
   it("does not show the restart banner for provider credential changes", () => {
-    render(<ProvidersSettings />);
+    renderProviders(<ProvidersSettings />);
 
     expect(
       screen.queryByText(/restart to apply credential changes/i),
@@ -143,7 +168,7 @@ describe("ProvidersSettings", () => {
       completeNativeSetup: vi.fn(),
     });
 
-    render(<ProvidersSettings />);
+    renderProviders(<ProvidersSettings />);
 
     expect(screen.getByText("Anthropic")).toBeInTheDocument();
     expect(screen.getByText("Checking provider status...")).toBeInTheDocument();
@@ -163,7 +188,7 @@ describe("ProvidersSettings", () => {
       completeNativeSetup: vi.fn(),
     });
 
-    render(<ProvidersSettings />);
+    renderProviders(<ProvidersSettings />);
 
     const openai = screen.getByText("OpenAI");
     const databricks = screen.getByText("Databricks");
@@ -180,7 +205,7 @@ describe("ProvidersSettings", () => {
   });
 
   it("does not show the custom provider creation entry point", () => {
-    render(<ProvidersSettings />);
+    renderProviders(<ProvidersSettings />);
 
     expect(
       screen.queryByRole("button", { name: /add custom provider/i }),
@@ -190,16 +215,14 @@ describe("ProvidersSettings", () => {
   it("shows the agent draft return action after setup succeeds during a detour", async () => {
     const user = userEvent.setup();
     const onReturnToAgentDraft = vi.fn();
-    let claudeInstallChecks = 0;
-    mocks.checkAgentInstalled.mockImplementation(async (providerId) => {
-      if (providerId !== "claude-acp") {
-        return true;
-      }
-      claudeInstallChecks += 1;
-      return claudeInstallChecks > 1;
-    });
+    // Claude starts absent from the shared report (useAgentProviderStatus mock
+    // omits it), so the card renders "Install Claude". The post-install
+    // verification probe then confirms the CLI landed on PATH.
+    mocks.checkAgentInstalled.mockResolvedValue(true);
 
-    render(<ProvidersSettings onReturnToAgentDraft={onReturnToAgentDraft} />);
+    renderProviders(
+      <ProvidersSettings onReturnToAgentDraft={onReturnToAgentDraft} />,
+    );
 
     expect(
       screen.queryByRole("button", { name: "Return to agent draft" }),
@@ -221,7 +244,7 @@ describe("ProvidersSettings", () => {
       loaded: true,
       manifest: { present: true, providerAllowlist: "databricks" },
     });
-    render(<ProvidersSettings />);
+    renderProviders(<ProvidersSettings />);
 
     expect(screen.getByText("Databricks")).toBeInTheDocument();
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();

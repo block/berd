@@ -19,8 +19,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog";
-import { runDoctorFix, type DoctorCheck } from "@/shared/api/doctor";
+import {
+  runDoctorFix,
+  type DoctorCheck,
+  type FixType,
+} from "@/shared/api/doctor";
 import { useTranslation } from "react-i18next";
+import { AgentVersionInfo } from "./AgentVersionInfo";
 
 interface DoctorCheckRowProps {
   check: DoctorCheck;
@@ -44,15 +49,36 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
   const [showFixDialog, setShowFixDialog] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [fixError, setFixError] = useState<string | null>(null);
+  const [activeFix, setActiveFix] = useState<{
+    fixType: FixType;
+    command: string;
+    commandOverride: string | null;
+  } | null>(null);
 
   const Icon = STATUS_ICON[check.status];
 
+  function openInstallFixDialog() {
+    if (!check.fixType || !check.fixCommand) return;
+    setFixError(null);
+    setFixing(false);
+    setActiveFix({
+      fixType: check.fixType,
+      command: check.fixCommand,
+      commandOverride: null,
+    });
+    setShowFixDialog(true);
+  }
+
   async function confirmFix() {
-    if (!check.fixType) return;
+    if (!activeFix) return;
     setFixing(true);
     setFixError(null);
     try {
-      await runDoctorFix(check.id, check.fixType);
+      await runDoctorFix(
+        check.id,
+        activeFix.fixType,
+        activeFix.commandOverride ?? undefined,
+      );
       setShowFixDialog(false);
       onFixed?.();
     } catch (e) {
@@ -84,6 +110,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
               {check.bridgePath}
             </span>
           )}
+          <AgentVersionInfo check={check} className="mt-0.5" />
         </div>
 
         {check.fixType && check.status !== "pass" && (
@@ -92,11 +119,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
             variant="outline"
             size="xs"
             leftIcon={<Wrench />}
-            onClick={() => {
-              setFixError(null);
-              setFixing(false);
-              setShowFixDialog(true);
-            }}
+            onClick={openInstallFixDialog}
             className="flex-shrink-0"
           >
             {t("common:actions.fix")}
@@ -132,7 +155,7 @@ export function DoctorCheckRow({ check, onFixed }: DoctorCheckRowProps) {
               {t("settings:doctor.runFixDescription")}
             </AlertDialogDescription>
             <code className="block break-all rounded bg-muted px-3 py-2 font-mono text-xs">
-              {check.fixCommand}
+              {activeFix?.command ?? check.fixCommand}
             </code>
           </AlertDialogHeader>
           {fixError && <p className="text-xs text-destructive">{fixError}</p>}

@@ -101,6 +101,16 @@ vi.mock("@/features/updates/ui/UpdateButton", () => ({
   UpdateButton: () => null,
 }));
 
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => ({
+    readyAgentIds: new Set(["goose"]),
+    agentReadiness: new Map([["goose", "ready"]]),
+    agentChecks: new Map(),
+    loading: false,
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: (({
     activeView,

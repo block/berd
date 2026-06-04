@@ -1,4 +1,4 @@
-import type { ElementType } from "react";
+import type { ElementType, ReactNode } from "react";
 import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_NAV_ICON_CLASS } from "./sidebarNavIcons";
 import {
@@ -19,6 +19,13 @@ interface SidebarNavItemProps {
   testId?: string;
   navId?: string;
   labelTransitionDelay?: string;
+  // Optional trailing affordance (e.g. an "update available" indicator).
+  // Rendered inline at the right edge when expanded, and as a small overlay
+  // dot at the leading icon's corner when collapsed.
+  trailingIcon?: ReactNode;
+  // Screen-reader-only text appended for the trailing affordance, so the
+  // indicator is announced even when the lucide icon is aria-hidden.
+  trailingLabel?: string;
 }
 
 export function SidebarNavItem({
@@ -32,6 +39,8 @@ export function SidebarNavItem({
   testId,
   navId,
   labelTransitionDelay,
+  trailingIcon,
+  trailingLabel,
 }: SidebarNavItemProps) {
   const className = cn(
     "flex items-center w-full rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
@@ -42,6 +51,8 @@ export function SidebarNavItem({
       ? "bg-sidebar-accent text-sidebar-foreground"
       : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
   );
+
+  const ariaLabel = trailingLabel ? `${label} — ${trailingLabel}` : label;
 
   return (
     <button
@@ -59,12 +70,22 @@ export function SidebarNavItem({
       data-testid={testId}
       data-sidebar-nav-id={navId}
       onClick={onClick}
-      title={collapsed ? label : undefined}
-      aria-label={label}
+      title={collapsed ? ariaLabel : undefined}
+      aria-label={ariaLabel}
       aria-current={isActive ? "page" : undefined}
       className={className}
     >
-      {Icon ? <Icon className={SIDEBAR_NAV_ICON_CLASS} /> : null}
+      {Icon ? (
+        <span className="relative inline-flex shrink-0">
+          <Icon className={SIDEBAR_NAV_ICON_CLASS} />
+          {trailingIcon && collapsed ? (
+            <span
+              aria-hidden="true"
+              className="absolute -top-0.5 -right-0.5 size-1.5 rounded-full bg-warning"
+            />
+          ) : null}
+        </span>
+      ) : null}
       <span
         className={cn(
           "whitespace-nowrap",
@@ -75,6 +96,17 @@ export function SidebarNavItem({
       >
         {label}
       </span>
+      {trailingIcon && !collapsed ? (
+        <span className="ml-auto inline-flex shrink-0 items-center">
+          {trailingIcon}
+          {trailingLabel ? (
+            <span className="sr-only">{trailingLabel}</span>
+          ) : null}
+        </span>
+      ) : null}
+      {trailingIcon && collapsed && trailingLabel ? (
+        <span className="sr-only">{trailingLabel}</span>
+      ) : null}
     </button>
   );
 }

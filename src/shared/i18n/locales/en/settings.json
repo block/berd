@@ -149,7 +149,30 @@
     "runFixDescription": "Goose will run:",
     "running": "Running checks...",
     "title": "Doctor",
-    "tools": "Tools"
+    "tools": "Tools",
+    "version": {
+      "bridge": "ACP bridge",
+      "updateAvailable": "Update available → {{version}}",
+      "line": {
+        "full": "Installed via {{source}} · {{version}}",
+        "named": "{{name}} {{version}} via {{source}}",
+        "namedSourceOnly": "{{name}} via {{source}}",
+        "namedVersionOnly": "{{name}} {{version}}",
+        "sourceOnly": "Installed via {{source}}",
+        "versionOnly": "{{version}}"
+      },
+      "source": {
+        "asdf": "asdf",
+        "brew": "Homebrew",
+        "cargo": "Cargo",
+        "curlPipe": "native installer",
+        "mise": "mise",
+        "npm": "npm",
+        "system": "system",
+        "unknown": "an unknown source"
+      },
+      "updateLabel": "Update {{name}} to {{version}}"
+    }
   },
   "experiments": {
     "builderbot": {
@@ -243,6 +266,7 @@
     "extensions": "Extensions",
     "general": "General",
     "providers": "AI providers",
+    "providersUpdateAvailable": "Update available",
     "updates": "Updates"
   },
   "updates": {
@@ -310,6 +334,7 @@
   },
   "providers": {
     "agents": {
+      "applyUpdates": "Update",
       "description": "Goose is built into your workspace. Install others to add new agents.",
       "errors": {
         "genericSetupFailure": "Setup hit a snag.",

@@ -1,4 +1,5 @@
 import { fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { renderWithProviders } from "@/test/render";
@@ -18,11 +19,16 @@ function TopBarActionsSurface() {
 }
 
 function renderDoctor() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return renderWithProviders(
-    <TopBarActionsProvider>
-      <DoctorSettings />
-      <TopBarActionsSurface />
-    </TopBarActionsProvider>,
+    <QueryClientProvider client={queryClient}>
+      <TopBarActionsProvider>
+        <DoctorSettings />
+        <TopBarActionsSurface />
+      </TopBarActionsProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -45,6 +51,14 @@ function check(overrides: Partial<DoctorCheck>): DoctorCheck {
     path: null,
     bridgePath: null,
     rawOutput: null,
+    authStatus: null,
+    installedVersion: null,
+    latestVersion: null,
+    updateAvailable: null,
+    installSource: null,
+    selfUpdating: null,
+    main: null,
+    bridge: null,
     category: "tools",
     categoryLabel: "Tools",
     ...overrides,
@@ -151,7 +165,7 @@ describe("DoctorSettings", () => {
     ]);
   });
 
-  it("does not render the agents category", async () => {
+  it("hides the agents category (rendered on the AI providers page instead)", async () => {
     mockedInvoke.mockResolvedValue(
       report([
         check({
@@ -172,8 +186,10 @@ describe("DoctorSettings", () => {
     renderDoctor();
 
     expect(await screen.findByRole("heading", { name: "Tools" })).toBeVisible();
-    expect(screen.queryByRole("heading", { name: "Agents" })).toBeNull();
-    expect(screen.queryByText("Codex")).toBeNull();
+    expect(
+      screen.queryByRole("heading", { name: "Agents" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Codex")).not.toBeInTheDocument();
   });
 });
 
@@ -197,7 +213,46 @@ describe("formatDebugReport", () => {
     );
 
     expect(output).toContain("Tools (tools)");
-    expect(output).not.toContain("Agents (agents)");
-    expect(output).not.toContain("Codex");
+    expect(output).toContain("Agents (agents)");
+    expect(output).toContain("Codex");
+  });
+
+  it("includes install source, versions, and update availability", () => {
+    const output = formatDebugReport(
+      report([
+        check({
+          id: "ai-agent-claude",
+          label: "Claude Code",
+          category: "agents",
+          categoryLabel: "Agents",
+          authStatus: "notAuthenticated",
+          main: {
+            installSource: "curlPipe",
+            installedVersion: "1.4.0",
+            latestVersion: "1.4.0",
+            updateAvailable: false,
+            selfUpdating: true,
+          },
+          bridge: {
+            installSource: "npm",
+            installedVersion: "0.34.0",
+            latestVersion: "0.39.0",
+            updateAvailable: true,
+            selfUpdating: false,
+            updateCommand: "npm install -g claude-agent-acp@latest",
+            updateFixType: "updateBridge",
+          },
+        }),
+      ]),
+    );
+
+    expect(output).toContain("Auth status: notAuthenticated");
+    expect(output).toContain("Install source (main): curlPipe");
+    expect(output).toContain("Installed version (main): 1.4.0");
+    expect(output).toContain("Self-updating (main): yes");
+    expect(output).toContain("Install source (bridge): npm");
+    expect(output).toContain("Installed version (bridge): 0.34.0");
+    expect(output).toContain("Latest version (bridge): 0.39.0");
+    expect(output).toContain("Update available (bridge): yes");
   });
 });

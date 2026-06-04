@@ -38,6 +38,16 @@ vi.mock("@/features/agents/stores/agentStore", () => ({
   }),
 }));
 
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => ({
+    readyAgentIds: new Set(["goose"]),
+    agentReadiness: new Map([["goose", "ready"]]),
+    agentChecks: new Map(),
+    loading: false,
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
+}));
+
 import { AgentBuilderRail } from "../AgentBuilderRail";
 import { usePersonaSource } from "@/features/agents/hooks/usePersonaSource";
 import { promoteDraft } from "@/features/agents/lib/agentBuilderSession";

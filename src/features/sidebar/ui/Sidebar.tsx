@@ -12,6 +12,8 @@ import {
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { IconArrowLeft, IconPalette, IconServer } from "@tabler/icons-react";
+import { ArrowUpCircle } from "lucide-react";
+import { useAgentUpdatesAvailable } from "@/features/providers/hooks/useAgentUpdatesAvailable";
 import {
   SidebarNavAgentsIcon,
   SidebarNavAutomationsIcon,
@@ -379,6 +381,7 @@ export function Sidebar({
   projects,
 }: SidebarProps) {
   const { t } = useTranslation(["sidebar", "common", "settings"]);
+  const agentUpdatesAvailable = useAgentUpdatesAvailable();
   const navRef = useRef<HTMLElement>(null);
   const skipActiveSessionScrollRef = useRef<string | null>(null);
   const secondaryNavRef = useRef<HTMLElement>(null);
@@ -794,18 +797,35 @@ export function Sidebar({
                 <div className="space-y-0.5">
                   {isSettingsSurface ? (
                     <>
-                      {SETTINGS_SECTIONS.map((item) => (
-                        <SidebarNavItem
-                          key={item.id}
-                          icon={item.icon}
-                          label={t(`settings:${item.labelKey}`)}
-                          collapsed={collapsed}
-                          labelTransition={labelTransition}
-                          labelVisible={labelVisible}
-                          isActive={activeSettingsSection === item.id}
-                          onClick={() => onSettingsSectionChange?.(item.id)}
-                        />
-                      ))}
+                      {SETTINGS_SECTIONS.map((item) => {
+                        const showUpdate =
+                          item.id === "providers" && agentUpdatesAvailable;
+                        return (
+                          <SidebarNavItem
+                            key={item.id}
+                            icon={item.icon}
+                            label={t(`settings:${item.labelKey}`)}
+                            collapsed={collapsed}
+                            labelTransition={labelTransition}
+                            labelVisible={labelVisible}
+                            isActive={activeSettingsSection === item.id}
+                            onClick={() => onSettingsSectionChange?.(item.id)}
+                            trailingIcon={
+                              showUpdate ? (
+                                <ArrowUpCircle
+                                  aria-hidden="true"
+                                  className="size-3.5 text-warning"
+                                />
+                              ) : undefined
+                            }
+                            trailingLabel={
+                              showUpdate
+                                ? t("settings:nav.providersUpdateAvailable")
+                                : undefined
+                            }
+                          />
+                        );
+                      })}
                       {showDesignSystemSettingsItem && (
                         <SidebarNavItem
                           icon={IconPalette}

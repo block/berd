@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useQueryClient } from "@tanstack/react-query";
+import { RefreshCw } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { Separator } from "@/shared/ui/separator";
 import { Spinner } from "@/shared/ui/spinner";
 import { IconChevronDown } from "@tabler/icons-react";
 import {
+  rerunDoctorReport,
+  useDoctorReport,
+  useDoctorReportFreshnessFetching,
+} from "@/shared/api/useDoctorReport";
+import {
   getAgentProvidersFromEntries,
   getModelProvidersFromEntries,
 } from "@/features/providers/providerCatalog";
 import { useCredentials } from "@/features/providers/hooks/useCredentials";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import { filterModelProvidersForDistro } from "@/features/providers/distroProviderConstraints";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
@@ -63,6 +71,14 @@ export function ProvidersSettings({
     string | null
   >(null);
   const catalogEntries = useProviderCatalogStore((state) => state.entries);
+  const queryClient = useQueryClient();
+
+  const rerunAgentStatus = useCallback(() => {
+    // Bust the shared `["doctor","report"]` query and re-run the freshness
+    // pass, so install/auth state + version badges repopulate everywhere
+    // reading the report (this page, Doctor, chat picker).
+    void rerunDoctorReport(queryClient);
+  }, [queryClient]);
 
   const {
     configuredIds,
@@ -75,6 +91,26 @@ export function ProvidersSettings({
     remove,
     completeNativeSetup,
   } = useCredentials();
+
+  // Agent install/auth status comes from the shared doctor report (the same
+  // `["doctor","report"]` query the Doctor page and chat picker read), so the
+  // cards paint from the warmed cache instead of each probing on mount.
+  const {
+    agentReadiness,
+    agentChecks,
+    loading: agentStatusLoading,
+  } = useAgentProviderStatus();
+  // `agentStatusLoading` is `isPending` (first-load only). The shared query's
+  // `isFetching` tracks the fast `runDoctor` queryFn (covers manual reruns
+  // after `invalidateDoctorReport`), and `freshnessFetching` tracks the slower
+  // freshness pass driven through React Query as a sibling key. OR all three
+  // so the per-card "checking" state and the rerun button stay up until the
+  // version / install-source / update badges have actually populated, not
+  // just until the fast offline pass returns.
+  const doctorReportQuery = useDoctorReport();
+  const freshnessFetching = useDoctorReportFreshnessFetching();
+  const agentStatusRefreshing =
+    agentStatusLoading || doctorReportQuery.isFetching || freshnessFetching;
 
   const agents = useMemo(
     () =>
@@ -179,13 +215,32 @@ export function ProvidersSettings({
       ) : null}
 
       <section>
-        <div className="mb-3">
-          <h4 className="text-base text-foreground">
-            {t("providers.agents.title")}
-          </h4>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("providers.agents.description")}
-          </p>
+        <div className="mb-3 flex items-start justify-between gap-3">
+          <div>
+            <h4 className="text-base text-foreground">
+              {t("providers.agents.title")}
+            </h4>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {t("providers.agents.description")}
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="xs"
+            onClick={rerunAgentStatus}
+            disabled={agentStatusRefreshing}
+            leftIcon={
+              agentStatusRefreshing ? (
+                <Spinner className="size-3" />
+              ) : (
+                <RefreshCw className="size-3" />
+              )
+            }
+            className="shrink-0"
+          >
+            {t("doctor.rerun")}
+          </Button>
         </div>
 
         <div className="grid grid-cols-2 gap-3">
@@ -193,6 +248,9 @@ export function ProvidersSettings({
             <AgentProviderCard
               key={agent.id}
               provider={agent}
+              readiness={agentReadiness.get(agent.id)}
+              versionCheck={agentChecks.get(agent.id)}
+              statusLoading={agentStatusRefreshing}
               onStartTroubleshootingChat={onStartTroubleshootingChat}
               onProviderReady={handleProviderConnected}
             />

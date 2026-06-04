@@ -1,3 +1,5 @@
+import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ArchiveSettings } from "./ArchiveSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
@@ -11,6 +13,7 @@ import {
 import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
+import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
 
 interface SettingsViewProps {
   activeSection: SectionId;
@@ -29,6 +32,22 @@ export function SettingsView({
   onStartTroubleshootingChat,
   onReturnToAgentDraft,
 }: SettingsViewProps) {
+  const queryClient = useQueryClient();
+
+  // Warm the shared doctor report once per Settings visit. SettingsView mounts
+  // whenever Settings opens (every entry path: sidebar, restored URL, returning
+  // from design-system), so the Doctor and AI providers detail pages consume an
+  // already-warming cache instead of each kicking off its own `run_doctor`.
+  //
+  // `refreshDoctorReportFreshness` first runs the fast, offline status read
+  // (`ensureQueryData`, deduped + staleTime-respecting, so a re-open within the
+  // window is a no-op) to paint immediately, then runs the slower
+  // network-touching freshness pass off that path and seeds version/update
+  // badges into the same cache entry without blocking first paint.
+  useEffect(() => {
+    void refreshDoctorReportFreshness(queryClient);
+  }, [queryClient]);
+
   return (
     <PageShell contentWidth="narrow" contentClassName="gap-0">
       {activeSection === "providers" && (

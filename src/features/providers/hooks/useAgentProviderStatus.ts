@@ -1,79 +1,83 @@
-import { useState, useEffect, useCallback } from "react";
-import {
-  checkAgentAuth,
-  checkAgentInstalled,
-} from "@/features/providers/api/agentSetup";
-import { getAgentProvidersFromEntries } from "@/features/providers/providerCatalog";
-import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { useCallback, useMemo } from "react";
+import type { DoctorCheck, DoctorReport } from "@/shared/api/doctor";
+import { useDoctorReport } from "@/shared/api/useDoctorReport";
+import { crateCheckIdToProviderId } from "@/features/providers/lib/agentIdMap";
+import { CURATED_PROVIDER_CATALOG_BY_ID } from "@/features/providers/curatedProviders";
 
 export type AgentProviderReadiness = "ready" | "not_installed" | "not_ready";
 
 interface UseAgentProviderStatusReturn {
   readyAgentIds: Set<string>;
   agentReadiness: Map<string, AgentProviderReadiness>;
+  // The raw doctor check per provider id, so callers can surface install
+  // source / version / update-available without re-probing.
+  agentChecks: Map<string, DoctorCheck>;
   loading: boolean;
   refresh: () => Promise<void>;
 }
 
-async function checkAgentProviderReadiness(
-  provider: ProviderCatalogEntry,
-): Promise<AgentProviderReadiness> {
-  if (provider.category !== "agent") {
-    return "not_ready";
-  }
-
-  if (provider.setupMethod === "none") {
-    return "ready";
-  }
-
-  try {
-    if (provider.binaryName) {
-      const installed = await checkAgentInstalled(provider.id);
-      if (!installed) {
-        return "not_installed";
-      }
-    }
-
-    if (provider.supportsAuthStatus) {
-      return (await checkAgentAuth(provider.id)) ? "ready" : "not_ready";
-    }
-
-    if (provider.supportsAuth) {
-      return localStorage.getItem(`agent-provider-auth:${provider.id}`) ===
-        "true"
-        ? "ready"
-        : "not_ready";
-    }
-
-    return "ready";
-  } catch {
-    return provider.binaryName ? "not_installed" : "not_ready";
-  }
+function initialReadiness(): Map<string, AgentProviderReadiness> {
+  return new Map<string, AgentProviderReadiness>([["goose", "ready"]]);
 }
 
-const INITIAL_AGENT_READINESS = new Map<string, AgentProviderReadiness>([
-  ["goose", "ready"],
-]);
-const INITIAL_READY_AGENTS = new Set<string>(["goose"]);
+// Derive per-agent readiness from the doctor report. The crate identifies
+// agents by `ai-agent-<name>`; map those back to the frontend's provider ids
+// before recording readiness.
+function readinessFromReport(
+  report: DoctorReport,
+): Map<string, AgentProviderReadiness> {
+  const readiness = initialReadiness();
+  for (const check of report.checks) {
+    const providerId = crateCheckIdToProviderId(check.id);
+    if (!providerId) continue;
 
-async function checkAgentReadiness(
-  agents: ProviderCatalogEntry[],
-): Promise<Map<string, AgentProviderReadiness>> {
-  const readiness = await Promise.all(
-    agents.map(async (provider) => ({
-      id: provider.id,
-      readiness: await checkAgentProviderReadiness(provider),
-    })),
-  );
+    const installed =
+      (check.status === "pass" || check.status === "warn") &&
+      (check.path != null || check.bridgePath != null);
+    if (!installed) {
+      readiness.set(providerId, "not_installed");
+      continue;
+    }
 
-  return new Map<string, AgentProviderReadiness>([
-    ["goose", "ready"],
-    ...readiness.map((provider) => [provider.id, provider.readiness] as const),
-  ]);
+    // Three-case auth-readiness, gated on the curated catalog flags rather
+    // than on authStatus alone. authStatus=null is overloaded (not-installed,
+    // bridge-missing, genuine no-auth), so leaning on it would flip
+    // supportsAuth-without-a-probe agents to "ready" pre-sign-in.
+    const provider = CURATED_PROVIDER_CATALOG_BY_ID.get(providerId);
+    if (provider?.supportsAuthStatus) {
+      // Case 1: real CLI probe — trust the crate's authStatus.
+      readiness.set(
+        providerId,
+        check.authStatus === "notAuthenticated" ? "not_ready" : "ready",
+      );
+      continue;
+    }
+    if (provider?.supportsAuth) {
+      // Case 2: auth-capable but no real probe (e.g. copilot-acp, codex-acp
+      // until its probe lands) — pessimistic default. The post-sign-in flip
+      // is intentionally not restored; a real auth_status_command in the
+      // doctor crate is the long-term fix.
+      readiness.set(providerId, "not_ready");
+      continue;
+    }
+    // Case 3: no auth → ready once installed.
+    readiness.set(providerId, "ready");
+  }
+  return readiness;
 }
 
-function getReadyAgentIds(
+// Index the agent checks by frontend provider id, so cards can read their
+// version/install-source readout from the same shared report.
+function checksByProviderId(report: DoctorReport): Map<string, DoctorCheck> {
+  const checks = new Map<string, DoctorCheck>();
+  for (const check of report.checks) {
+    const providerId = crateCheckIdToProviderId(check.id);
+    if (providerId) checks.set(providerId, check);
+  }
+  return checks;
+}
+
+function readyIdsFromReadiness(
   readiness: Map<string, AgentProviderReadiness>,
 ): Set<string> {
   return new Set(
@@ -84,55 +88,33 @@ function getReadyAgentIds(
 }
 
 export function useAgentProviderStatus(): UseAgentProviderStatusReturn {
-  const catalogEntries = useProviderCatalogStore((state) => state.entries);
-  const [agentReadiness, setAgentReadiness] = useState<
-    Map<string, AgentProviderReadiness>
-  >(INITIAL_AGENT_READINESS);
-  const [readyAgentIds, setReadyAgentIds] =
-    useState<Set<string>>(INITIAL_READY_AGENTS);
-  const [loading, setLoading] = useState(true);
+  const query = useDoctorReport();
 
-  useEffect(() => {
-    let cancelled = false;
-    const agents = getAgentProvidersFromEntries(catalogEntries);
-    setLoading(true);
-    checkAgentReadiness(agents)
-      .then((nextAgentReadiness) => {
-        if (!cancelled) {
-          setAgentReadiness(nextAgentReadiness);
-          setReadyAgentIds(getReadyAgentIds(nextAgentReadiness));
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
+  const agentReadiness = useMemo(() => {
+    if (!query.data) return initialReadiness();
+    return readinessFromReport(query.data);
+  }, [query.data]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [catalogEntries]);
+  const readyAgentIds = useMemo(
+    () => readyIdsFromReadiness(agentReadiness),
+    [agentReadiness],
+  );
 
+  const agentChecks = useMemo(() => {
+    if (!query.data) return new Map<string, DoctorCheck>();
+    return checksByProviderId(query.data);
+  }, [query.data]);
+
+  const refetch = query.refetch;
   const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const catalogEntries = useProviderCatalogStore.getState().entries;
-      const agents = getAgentProvidersFromEntries(catalogEntries);
-      const nextAgentReadiness = await checkAgentReadiness(agents);
-      if (catalogEntries === useProviderCatalogStore.getState().entries) {
-        setAgentReadiness(nextAgentReadiness);
-        setReadyAgentIds(getReadyAgentIds(nextAgentReadiness));
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await refetch();
+  }, [refetch]);
 
   return {
     readyAgentIds,
     agentReadiness,
-    loading,
+    agentChecks,
+    loading: query.isPending,
     refresh,
   };
 }
