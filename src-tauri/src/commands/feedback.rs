@@ -1,3 +1,5 @@
+use crate::commands::doctor::DoctorReport;
+use crate::services::log_export::{self, LogDirs};
 use crate::services::{distro_bundle::DistroBundleState, kgoose};
 use base64::Engine as _;
 use reqwest::multipart::{Form, Part};
@@ -36,12 +38,16 @@ pub struct FeedbackAttachmentFile {
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn submit_feedback_issue(
+    app: tauri::AppHandle,
     state: State<'_, DistroBundleState>,
     title: String,
     description: String,
     attachment_paths: Option<Vec<String>>,
     attachment_files: Option<Vec<FeedbackAttachmentFile>>,
+    include_logs: Option<bool>,
+    doctor_report: Option<DoctorReport>,
 ) -> Result<Value, Value> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -60,13 +66,36 @@ pub async fn submit_feedback_issue(
 
     let attachment_paths = normalized_attachment_paths(attachment_paths.unwrap_or_default());
     let attachment_files = attachment_files.unwrap_or_default();
-    if !attachment_paths.is_empty() || !attachment_files.is_empty() {
+
+    // Opt-in diagnostics. Both the log directories (resolved here because it
+    // needs the AppHandle) and the doctor report — gathered up-front by the UI
+    // and passed in — are folded into a single zip. Best-effort: if the log
+    // directories can't be resolved we log and still attach whatever else we
+    // have rather than failing the report.
+    let (log_dirs, doctor_report_text) = if include_logs.unwrap_or(false) {
+        let log_dirs = match log_export::resolve_log_dirs(&app) {
+            Ok(dirs) => Some(dirs),
+            Err(error) => {
+                log::warn!("feedback: skipping diagnostic logs (resolve failed): {error}");
+                None
+            }
+        };
+        let doctor_report_text = doctor_report.map(|report| report.to_diagnostic_text());
+        (log_dirs, doctor_report_text)
+    } else {
+        (None, None)
+    };
+
+    let has_diagnostics = log_dirs.is_some() || doctor_report_text.is_some();
+    if !attachment_paths.is_empty() || !attachment_files.is_empty() || has_diagnostics {
         let form = tokio::task::spawn_blocking(move || {
             build_feedback_multipart_form(
                 &title,
                 &description,
                 &attachment_paths,
                 &attachment_files,
+                log_dirs,
+                doctor_report_text,
             )
         })
         .await
@@ -102,8 +131,34 @@ fn build_feedback_multipart_form(
     description: &str,
     attachment_paths: &[PathBuf],
     attachment_files: &[FeedbackAttachmentFile],
+    log_dirs: Option<LogDirs>,
+    doctor_report_text: Option<String>,
 ) -> Result<Form, Value> {
-    validate_attachment_count(attachment_paths.len() + attachment_files.len())?;
+    // Build the diagnostic zip first (best-effort). It is NOT routed through the
+    // image extension/MIME allowlist — that path is image-only; the zip is
+    // attached as its own `application/zip` part.
+    let log_zip = if log_dirs.is_some() || doctor_report_text.is_some() {
+        match log_export::build_logs_zip(log_dirs.as_ref(), doctor_report_text.as_deref()) {
+            Ok(bytes) if bytes.len() as u64 > MAX_ATTACHMENT_BYTES => {
+                log::warn!(
+                    "feedback: skipping diagnostic logs ({} bytes exceeds attachment limit)",
+                    bytes.len()
+                );
+                None
+            }
+            Ok(bytes) => Some(bytes),
+            Err(error) => {
+                log::warn!("feedback: skipping diagnostic logs: {error}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    validate_attachment_count(
+        attachment_paths.len() + attachment_files.len() + usize::from(log_zip.is_some()),
+    )?;
 
     let mut total_size = 0_u64;
     let mut form = Form::new()
@@ -119,8 +174,46 @@ fn build_feedback_multipart_form(
         let attachment = read_browser_image_attachment(file, &mut total_size)?;
         form = form.part("attachments", attachment);
     }
+    if let Some(bytes) = log_zip {
+        // DEBUG: drop a copy of the diagnostic-log zip on the desktop before
+        // uploading so we can inspect exactly what gets attached. Remove this
+        // (and the commit that adds it) once the feature is verified.
+        debug_dump_log_zip_to_desktop(&bytes);
+        form = form.part("attachments", build_log_zip_part(bytes)?);
+    }
 
     Ok(form)
+}
+
+// DEBUG: copy the diagnostic-log zip to the user's desktop for inspection.
+// Best-effort and only meant for local debugging — remove with its commit.
+fn debug_dump_log_zip_to_desktop(bytes: &[u8]) {
+    let Some(home) = std::env::var_os("HOME") else {
+        log::warn!("feedback: debug log-zip dump skipped (no HOME)");
+        return;
+    };
+    let dest = Path::new(&home)
+        .join("Desktop")
+        .join(log_export::LOG_ZIP_FILENAME);
+    match std::fs::write(&dest, bytes) {
+        Ok(()) => log::warn!(
+            "feedback: DEBUG wrote diagnostic-log zip to {}",
+            dest.display()
+        ),
+        Err(error) => log::warn!("feedback: debug log-zip dump failed: {error}"),
+    }
+}
+
+fn build_log_zip_part(bytes: Vec<u8>) -> Result<Part, Value> {
+    Part::bytes(bytes)
+        .file_name(log_export::LOG_ZIP_FILENAME.to_string())
+        .mime_str("application/zip")
+        .map_err(|error| {
+            feedback_error(
+                "submitFailed",
+                &format!("Failed to prepare diagnostic logs attachment: {error}"),
+            )
+        })
 }
 
 fn validate_attachment_count(attachment_count: usize) -> Result<(), Value> {
@@ -380,7 +473,7 @@ mod tests {
             .map(|index| PathBuf::from(format!("image-{index}.png")))
             .collect::<Vec<_>>();
 
-        let error = build_feedback_multipart_form("title", "description", &paths, &[])
+        let error = build_feedback_multipart_form("title", "description", &paths, &[], None, None)
             .expect_err("too many attachments should fail");
 
         assert!(error_message(&error).contains("up to 5 image attachments"));

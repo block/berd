@@ -5,6 +5,8 @@ pub mod bundled_skills;
 pub mod distro_bundle;
 pub(crate) mod goose_config;
 pub(crate) mod kgoose;
+pub(crate) mod log_export;
+pub(crate) mod log_redaction;
 pub mod path_env;
 pub mod shell_env;
 pub(crate) mod sse;

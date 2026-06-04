@@ -13,6 +13,7 @@
     "attachmentsPickerTitle": "Elegir imágenes",
     "imageFilesFilter": "Imágenes",
     "removeAttachment": "Eliminar {{name}}",
+    "attachLogs": "Adjuntar registros y diagnósticos",
     "attachmentLimitError": "Los comentarios admiten hasta {{count}} imágenes adjuntas.",
     "imageOnlyError": "Solo se pueden adjuntar archivos de imagen.",
     "imageReadError": "No se pudieron adjuntar algunas imágenes.",

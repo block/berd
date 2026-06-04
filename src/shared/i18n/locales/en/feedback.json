@@ -13,6 +13,7 @@
     "attachmentsPickerTitle": "Choose images",
     "imageFilesFilter": "Images",
     "removeAttachment": "Remove {{name}}",
+    "attachLogs": "Attach logs and diagnostics",
     "attachmentLimitError": "Feedback supports up to {{count}} image attachments.",
     "imageOnlyError": "Only image files can be attached.",
     "imageReadError": "Some images could not be attached.",

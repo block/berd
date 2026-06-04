@@ -61,6 +61,59 @@ pub struct DoctorReport {
     pub checks: Vec<DoctorCheck>,
 }
 
+impl DoctorReport {
+    /// Render the report as human-readable diagnostic text for attaching to a
+    /// feedback report. Checks are grouped by category in first-seen order. The
+    /// values surfaced here are already vetted by the checks themselves
+    /// (sensitive settings are reported as keys only, never values), so the
+    /// output is safe to include verbatim.
+    pub fn to_diagnostic_text(&self) -> String {
+        let mut out = String::from("Goose Internal doctor report\n");
+
+        let mut category_order: Vec<&str> = Vec::new();
+        for check in &self.checks {
+            if !category_order.contains(&check.category.as_str()) {
+                category_order.push(check.category.as_str());
+            }
+        }
+
+        for category in category_order {
+            let label = self
+                .checks
+                .iter()
+                .find(|check| check.category == category)
+                .map(|check| check.category_label.as_str())
+                .unwrap_or(category);
+            out.push_str(&format!("\n== {label} ==\n"));
+
+            for check in self
+                .checks
+                .iter()
+                .filter(|check| check.category == category)
+            {
+                out.push_str(&format!(
+                    "[{}] {} ({})\n",
+                    status_name(&check.status),
+                    check.label,
+                    check.id
+                ));
+                out.push_str(&format!("  message: {}\n", check.message));
+                if let Some(path) = &check.path {
+                    out.push_str(&format!("  path: {path}\n"));
+                }
+                if let Some(raw) = &check.raw_output {
+                    out.push_str("  details:\n");
+                    for line in raw.lines() {
+                        out.push_str(&format!("    {line}\n"));
+                    }
+                }
+            }
+        }
+
+        out
+    }
+}
+
 #[derive(Clone)]
 struct LocalDoctorFix {
     fix_type: FixType,
@@ -913,6 +966,36 @@ mod tests {
             Some("/tmp/fixture".to_string()),
             Some("fixture debug".to_string()),
         )
+    }
+
+    #[test]
+    fn doctor_report_renders_diagnostic_text_grouped_by_category() {
+        let report = DoctorReport {
+            checks: vec![
+                DoctorCheck {
+                    category: "tools".to_string(),
+                    category_label: "Tools".to_string(),
+                    raw_output: Some("exit status: 0\nstdout:\nv1.2.3".to_string()),
+                    path: Some("/usr/bin/git".to_string()),
+                    ..DoctorCheck::from(upstream_check("git"))
+                },
+                DoctorCheck {
+                    category: "environment-health".to_string(),
+                    category_label: "Environment Health".to_string(),
+                    ..DoctorCheck::from(upstream_check("internal-service-connectivity"))
+                },
+            ],
+        };
+
+        let text = report.to_diagnostic_text();
+
+        assert!(text.contains("== Tools =="));
+        assert!(text.contains("== Environment Health =="));
+        assert!(text.contains("[pass] Check (git)"));
+        assert!(text.contains("  path: /usr/bin/git"));
+        assert!(text.contains("  details:\n    exit status: 0"));
+        // Category headers appear before the checks that belong to them.
+        assert!(text.find("== Tools ==").unwrap() < text.find("(git)").unwrap());
     }
 
     #[test]

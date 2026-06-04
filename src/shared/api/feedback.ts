@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
+import type { DoctorReport } from "@/shared/api/doctor";
 
 export interface SubmitFeedbackIssueInput {
   title: string;
   description: string;
   attachmentPaths?: string[];
   attachmentFiles?: FeedbackAttachmentFileInput[];
+  includeLogs?: boolean;
+  doctorReport?: DoctorReport | null;
 }
 
 export interface FeedbackAttachmentFileInput {
@@ -41,6 +44,8 @@ export async function submitFeedbackIssue(
       description: input.description,
       attachmentPaths: input.attachmentPaths ?? [],
       attachmentFiles: input.attachmentFiles ?? [],
+      includeLogs: input.includeLogs ?? false,
+      doctorReport: input.doctorReport ?? null,
     });
   } catch (error) {
     throw normalizeFeedbackSubmissionError(error);

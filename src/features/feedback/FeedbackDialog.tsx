@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ImagePlus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { getVersion } from "@tauri-apps/api/app";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { type DoctorReport, runDoctor } from "@/shared/api/doctor";
 import {
   FeedbackSubmissionError,
   submitFeedbackIssue,
 } from "@/shared/api/feedback";
 import { getPlatform } from "@/shared/lib/platform";
 import { Button } from "@/shared/ui/button";
+import { Checkbox } from "@/shared/ui/checkbox";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import {
   EditDialog,
@@ -54,9 +56,15 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [includeLogs, setIncludeLogs] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<SuccessState | null>(null);
   const [discardOpen, setDiscardOpen] = useState(false);
+  // The doctor check is kicked off as soon as the form is shown so its output
+  // is ready to fold into the diagnostic zip; submission awaits this promise
+  // before attaching logs. Resolves to null if the check fails — a failed
+  // health check should never block a feedback report.
+  const doctorReportRef = useRef<Promise<DoctorReport | null> | null>(null);
   const {
     attachments,
     attachmentFiles,
@@ -81,27 +89,39 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       trimmedDescription.length > 0 ||
       attachments.length > 0);
 
+  const startDoctorCheck = useCallback(() => {
+    doctorReportRef.current = runDoctor().catch((doctorError) => {
+      console.warn("feedback: doctor check failed", doctorError);
+      return null;
+    });
+  }, []);
+
   function resetForm() {
     setTitle("");
     setDescription("");
     clearAttachments();
+    setIncludeLogs(false);
     setError(null);
     setSubmitting(false);
     setSuccess(null);
+    startDoctorCheck();
   }
 
   useEffect(() => {
     if (open) {
+      startDoctorCheck();
       return;
     }
+    doctorReportRef.current = null;
     setTitle("");
     setDescription("");
     clearAttachments();
+    setIncludeLogs(false);
     setError(null);
     setSubmitting(false);
     setSuccess(null);
     setDiscardOpen(false);
-  }, [clearAttachments, open]);
+  }, [clearAttachments, open, startDoctorCheck]);
 
   const handleClose = () => {
     if (submitting) {
@@ -134,11 +154,18 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
         version,
         platform,
       );
+      // Only the diagnostic zip carries the doctor output, so we only wait on
+      // the (pre-warmed) doctor check when the user opted into attaching logs.
+      const doctorReport = includeLogs
+        ? ((await doctorReportRef.current) ?? null)
+        : null;
       const result = await submitFeedbackIssue({
         title: trimmedTitle,
         description: enhancedDescription,
         attachmentPaths,
         attachmentFiles,
+        includeLogs,
+        doctorReport,
       });
       clearAttachments();
       setSuccess({ issueUrl: result.issueUrl });
@@ -321,6 +348,23 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                       ))}
                     </div>
                   ) : null}
+                </div>
+                <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
+                  <Checkbox
+                    id="feedback-include-logs"
+                    checked={includeLogs}
+                    onCheckedChange={(checked) => {
+                      setIncludeLogs(checked === true);
+                      setError(null);
+                    }}
+                    disabled={submitting}
+                  />
+                  <Label
+                    htmlFor="feedback-include-logs"
+                    className="min-w-0 text-xs font-medium text-foreground"
+                  >
+                    {t("dialog.attachLogs")}
+                  </Label>
                 </div>
                 {error ? (
                   <p

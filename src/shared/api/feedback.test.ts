@@ -27,6 +27,8 @@ describe("feedback api", () => {
       description: "Details",
       attachmentPaths: [],
       attachmentFiles: [],
+      includeLogs: false,
+      doctorReport: null,
     });
 
     mockInvoke.mockResolvedValueOnce({
@@ -64,6 +66,8 @@ describe("feedback api", () => {
           base64: "aW1hZ2U=",
         },
       ],
+      includeLogs: false,
+      doctorReport: null,
     });
   });
 
