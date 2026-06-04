@@ -224,6 +224,17 @@
       "spanish": "Spanish",
       "system": "System default ({{language}})"
     },
+    "terminalFallback": {
+      "change": "Change",
+      "chooseDialogTitle": "Choose terminal fallback folder",
+      "description": "Default terminal location when there is no selected workspace folder.",
+      "label": "Terminal folder",
+      "loading": "Loading...",
+      "reset": "Reset",
+      "resetSuccess": "Terminal fallback folder reset.",
+      "saveError": "Couldn't update the terminal fallback folder. Try again.",
+      "saveSuccess": "Terminal fallback folder updated."
+    },
     "title": "General"
   },
   "storage": {

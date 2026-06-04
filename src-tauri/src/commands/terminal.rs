@@ -1,4 +1,3 @@
-use crate::commands::git::is_git_repo_async;
 use crate::services::{path_env::build_extended_path, shell_env};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
@@ -90,9 +89,6 @@ pub async fn start_terminal(
     on_event: Channel<TerminalEvent>,
 ) -> Result<String, String> {
     let cwd = resolve_terminal_cwd(&cwd)?;
-    if !is_git_repo_async(&cwd).await? {
-        return Err("Terminal is available in git workspaces.".to_string());
-    }
 
     let mut shell_env = shell_env::capture_shell_env().await;
     add_fallback_env_vars(&mut shell_env);
@@ -373,5 +369,42 @@ fn add_fallback_env_vars(env: &mut HashMap<String, String>) {
         if let Ok(value) = std::env::var(key) {
             env.insert(key.to_string(), value);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_terminal_cwd;
+    use tempfile::{tempdir, NamedTempFile};
+
+    #[test]
+    fn resolve_terminal_cwd_accepts_plain_directory() {
+        let dir = tempdir().expect("tempdir");
+        let cwd = dir.path().to_string_lossy().to_string();
+
+        let resolved = resolve_terminal_cwd(&cwd).expect("resolve cwd");
+
+        assert_eq!(resolved, dir.path().canonicalize().expect("canonicalize"));
+    }
+
+    #[test]
+    fn resolve_terminal_cwd_rejects_file_path() {
+        let file = NamedTempFile::new().expect("temp file");
+        let cwd = file.path().to_string_lossy().to_string();
+
+        let error = resolve_terminal_cwd(&cwd).expect_err("file should fail");
+
+        assert!(error.contains("Terminal path is not a folder"));
+    }
+
+    #[test]
+    fn resolve_terminal_cwd_rejects_missing_path() {
+        let dir = tempdir().expect("tempdir");
+        let missing = dir.path().join("missing");
+        let cwd = missing.to_string_lossy().to_string();
+
+        let error = resolve_terminal_cwd(&cwd).expect_err("missing path should fail");
+
+        assert!(error.contains("Terminal folder does not exist"));
     }
 }

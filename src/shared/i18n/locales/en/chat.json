@@ -32,14 +32,12 @@
     "reload": "Reload session"
   },
   "terminal": {
-    "checkingWorkspace": "Checking workspace...",
     "close": "Close terminal",
     "collapse": "Collapse terminal",
     "confirmStopDescription": "This terminates the shell and closes the terminal panel.",
     "confirmStopTitle": "Stop terminal?",
     "expand": "Expand terminal",
     "exitedWithSignal": "Exited by {{signal}}",
-    "gitOnly": "Terminal is available in git workspaces.",
     "noWorkspace": "Assign a project or folder to open a terminal.",
     "open": "Open terminal",
     "restart": "Restart terminal",

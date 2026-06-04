@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { renderWithProviders } from "@/test/render";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
+import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -31,6 +32,10 @@ vi.mock("sonner", () => ({
 const clearLocalMediaCachesMock = vi.mocked(clearLocalMediaCaches);
 const toastErrorMock = vi.mocked(toast.error);
 const toastSuccessMock = vi.mocked(toast.success);
+
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
 
 function createQueryClient() {
   return new QueryClient({
@@ -137,8 +142,8 @@ describe("GeneralSettings appearance section", () => {
 
     renderGeneralSettings();
 
-    await screen.findByText("~/goose artifacts");
-    await user.click(screen.getByRole("button", { name: "Change" }));
+    await screen.findAllByText("~/goose artifacts");
+    await user.click(screen.getAllByRole("button", { name: "Change" })[0]);
 
     expect(mockOpenDialog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -153,6 +158,40 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(toastSuccessMock).toHaveBeenCalledWith("Artifact location updated.");
+  });
+
+  it("updates the terminal fallback folder", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/test");
+
+    renderGeneralSettings();
+
+    await screen.findAllByText("~/goose artifacts");
+    const changeButtons = screen.getAllByRole("button", { name: "Change" });
+    const terminalFallbackChangeButton = changeButtons.at(-1);
+    if (!terminalFallbackChangeButton) {
+      throw new Error("Terminal fallback change button not found");
+    }
+
+    await user.click(terminalFallbackChangeButton);
+
+    expect(mockOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "~/goose artifacts",
+        directory: true,
+        multiple: false,
+        title: "Choose terminal fallback folder",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(localStorage.getItem(TERMINAL_FALLBACK_CWD_STORAGE_KEY)).toBe(
+        "/Users/test",
+      );
+    });
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "Terminal fallback folder updated.",
+    );
   });
 
   it("restores animated avatar playback", async () => {

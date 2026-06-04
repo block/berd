@@ -184,6 +184,8 @@ describe("ContextPanel", () => {
   });
 
   it("shows path and init button for non-git directory", async () => {
+    const user = userEvent.setup();
+    const onToggleTerminal = vi.fn();
     mockUseGitState.mockReturnValue({
       data: {
         isGitRepo: false,
@@ -204,8 +206,12 @@ describe("ContextPanel", () => {
     renderContextPanel({
       sessionId: "test-session-2",
       projectWorkingDirs: ["/Users/test/not-a-repo"],
+      onToggleTerminal,
     });
 
+    await user.click(screen.getByRole("button", { name: /open terminal/i }));
+
+    expect(onToggleTerminal).toHaveBeenCalled();
     expect(
       screen.getByRole("button", { name: /initialize git/i }),
     ).toBeInTheDocument();
@@ -213,6 +219,7 @@ describe("ContextPanel", () => {
 
   it("shows artifact folder controls for no-project non-git chats", async () => {
     const user = userEvent.setup();
+    const onToggleTerminal = vi.fn();
     mockOpenDialog.mockResolvedValue("/Users/test/custom artifacts");
     mockUseGitState.mockReturnValue({
       data: {
@@ -235,9 +242,13 @@ describe("ContextPanel", () => {
       sessionId: "test-session-artifact-folder",
       projectWorkingDirs: [],
       sessionWorkingDir: "/Users/test/goose artifacts",
+      onToggleTerminal,
     });
 
     expect(screen.getByText("General chat")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /open terminal/i }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /change folder/i }),
     ).toBeInTheDocument();

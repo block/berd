@@ -95,7 +95,7 @@ export function WorkspaceWidget({
       onToggleOpen={onToggleOpen}
       action={
         <div className="flex items-center gap-1">
-          {gitState?.isGitRepo && onToggleTerminal ? (
+          {primaryWorkspaceRoot && onToggleTerminal ? (
             <Button
               type="button"
               variant="ghost"

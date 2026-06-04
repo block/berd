@@ -224,6 +224,17 @@
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
     },
+    "terminalFallback": {
+      "change": "Cambiar",
+      "chooseDialogTitle": "Elegir carpeta de reserva del terminal",
+      "description": "Ubicación predeterminada del terminal cuando no hay una carpeta de trabajo seleccionada.",
+      "label": "Carpeta del terminal",
+      "loading": "Cargando...",
+      "reset": "Restablecer",
+      "resetSuccess": "Carpeta de reserva del terminal restablecida.",
+      "saveError": "No se pudo actualizar la carpeta de reserva del terminal. Inténtalo de nuevo.",
+      "saveSuccess": "Carpeta de reserva del terminal actualizada."
+    },
     "title": "General"
   },
   "storage": {

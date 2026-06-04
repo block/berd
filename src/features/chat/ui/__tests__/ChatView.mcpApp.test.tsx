@@ -6,6 +6,7 @@ import {
   TopBarActionsProvider,
   useTopBarActions,
 } from "@/app/contexts/TopBarActionsContext";
+import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import type { ChatSession } from "../../stores/chatSessionStore";
 import { ChatView } from "../ChatView";
 
@@ -26,11 +27,6 @@ const mocks = vi.hoisted(() => ({
     string,
     { path: string; branch: string | null }
   >,
-  gitState: {
-    data: { isGitRepo: false },
-    isFetching: false,
-    isLoading: false,
-  },
 }));
 
 vi.mock("motion/react", () => ({
@@ -165,10 +161,6 @@ vi.mock("../../stores/chatSessionStore", () => ({
     }),
 }));
 
-vi.mock("@/shared/hooks/useGitState", () => ({
-  useGitState: () => mocks.gitState,
-}));
-
 vi.mock("@/features/projects/lib/chatProjectContext", () => ({
   defaultGlobalArtifactRoot: vi.fn().mockResolvedValue(null),
 }));
@@ -207,11 +199,6 @@ describe("ChatView MCP app messaging", () => {
     mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
     mocks.activeWorkspaceBySession = {};
-    mocks.gitState = {
-      data: { isGitRepo: false },
-      isFetching: false,
-      isLoading: false,
-    };
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.usePinToHomeWidget.mockReturnValue({
@@ -519,16 +506,11 @@ describe("ChatView MCP app messaging", () => {
     expect(chatInputProps.placeholder).toBe("input.agentBuilderPlaceholder");
   });
 
-  it("passes runnable shell commands through to the terminal runner", () => {
-    mocks.gitState = {
-      data: { isGitRepo: true },
-      isFetching: false,
-      isLoading: false,
-    };
+  it("passes runnable shell commands through to the terminal runner for a non-git working dir", () => {
     const activeSession = {
       id: "session-1",
       title: "Chat",
-      workingDir: "/Users/test/repo",
+      workingDir: "/Users/test/not-a-repo",
       createdAt: "2026-05-27T00:00:00.000Z",
       updatedAt: "2026-05-27T00:00:00.000Z",
       messageCount: 0,
@@ -545,16 +527,16 @@ describe("ChatView MCP app messaging", () => {
     act(() => timelineProps.onRunShellCommand?.("pnpm test"));
 
     expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
-      "session-1:/Users/test/repo",
+      "session-1:/Users/test/not-a-repo",
       "pnpm test",
     );
     expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(
-      "session-1:/Users/test/repo",
+      "session-1:/Users/test/not-a-repo",
       "pnpm test",
     );
     expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-cwd",
-      "/Users/test/repo",
+      "/Users/test/not-a-repo",
     );
     expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-collapsed",
@@ -562,12 +544,41 @@ describe("ChatView MCP app messaging", () => {
     );
   });
 
-  it("does not double queue runnable shell commands for existing terminal sessions", () => {
-    mocks.gitState = {
-      data: { isGitRepo: true },
-      isFetching: false,
-      isLoading: false,
+  it("uses the configured terminal fallback folder when no workspace is selected", () => {
+    localStorage.setItem(TERMINAL_FALLBACK_CWD_STORAGE_KEY, "/Users/test");
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onRunShellCommand?: (command: string) => void;
     };
+    expect(timelineProps.onRunShellCommand).toBeTypeOf("function");
+
+    act(() => timelineProps.onRunShellCommand?.("pwd"));
+
+    expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
+      "session-1:/Users/test",
+      "pwd",
+    );
+    expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(
+      "session-1:/Users/test",
+      "pwd",
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test",
+    );
+  });
+
+  it("does not double queue runnable shell commands for existing terminal sessions", () => {
     mocks.runCommandInTerminalSession.mockReturnValue(true);
     const activeSession = {
       id: "session-1",
@@ -600,11 +611,6 @@ describe("ChatView MCP app messaging", () => {
 
   it("persists terminal workspaces for the chat session", async () => {
     const user = userEvent.setup();
-    mocks.gitState = {
-      data: { isGitRepo: true },
-      isFetching: false,
-      isLoading: false,
-    };
     const activeSession = {
       id: "session-1",
       title: "Chat",
@@ -650,11 +656,6 @@ describe("ChatView MCP app messaging", () => {
 
   it("does not start a new terminal when the active workspace changes", async () => {
     const user = userEvent.setup();
-    mocks.gitState = {
-      data: { isGitRepo: true },
-      isFetching: false,
-      isLoading: false,
-    };
     const activeSession = {
       id: "session-1",
       title: "Chat",
@@ -712,11 +713,6 @@ describe("ChatView MCP app messaging", () => {
 
   it("expands only one terminal workspace at a time", async () => {
     const user = userEvent.setup();
-    mocks.gitState = {
-      data: { isGitRepo: true },
-      isFetching: false,
-      isLoading: false,
-    };
     const activeSession = {
       id: "session-1",
       title: "Chat",

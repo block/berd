@@ -32,6 +32,7 @@ import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPre
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPreference";
+import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 
 interface AboutAppInfo {
   name: string;
@@ -104,6 +105,7 @@ export function GeneralSettings() {
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const artifactRootPreference = useArtifactRootPreference();
+  const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const {
     themeMode,
     setThemeMode,
@@ -125,6 +127,9 @@ export function GeneralSettings() {
     },
   ];
   const gooseIcon = getProviderIcon("goose", "size-6");
+  const terminalFallbackPath =
+    terminalFallbackCwdPreference.fallbackCwd ??
+    artifactRootPreference.rootPath;
 
   useEffect(() => {
     let cancelled = false;
@@ -209,6 +214,38 @@ export function GeneralSettings() {
     }
   }
 
+  async function handleChooseTerminalFallbackCwd() {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const selected = await open({
+        defaultPath: terminalFallbackPath ?? undefined,
+        directory: true,
+        multiple: false,
+        title: t("general.terminalFallback.chooseDialogTitle"),
+      });
+
+      if (typeof selected !== "string") {
+        return;
+      }
+
+      terminalFallbackCwdPreference.setFallbackCwd(selected);
+      toast.success(t("general.terminalFallback.saveSuccess"));
+    } catch (error) {
+      console.warn("Failed to choose terminal fallback folder:", error);
+      toast.error(t("general.terminalFallback.saveError"));
+    }
+  }
+
+  function handleResetTerminalFallbackCwd() {
+    try {
+      terminalFallbackCwdPreference.resetFallbackCwd();
+      toast.success(t("general.terminalFallback.resetSuccess"));
+    } catch (error) {
+      console.warn("Failed to reset terminal fallback folder:", error);
+      toast.error(t("general.terminalFallback.saveError"));
+    }
+  }
+
   return (
     <SettingsPage contentClassName="space-y-8">
       <SettingsSection>
@@ -258,21 +295,57 @@ export function GeneralSettings() {
               <Button
                 type="button"
                 variant="ghost"
-                size="sm"
+                size="xs"
                 onClick={() => void handleResetArtifactRoot()}
                 disabled={!artifactRootPreference.hasCustomRoot}
               >
-                <RotateCcw className="size-4" />
+                <RotateCcw className="size-3.5" />
                 {t("general.artifacts.reset")}
               </Button>
               <Button
                 type="button"
                 variant="default"
-                size="sm"
+                size="xs"
                 onClick={() => void handleChooseArtifactRoot()}
               >
-                <FolderOpen className="size-4" />
+                <FolderOpen className="size-3.5" />
                 {t("general.artifacts.change")}
+              </Button>
+            </div>
+          </div>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.terminalFallback.label")}
+          description={t("general.terminalFallback.description")}
+          className="items-start"
+        >
+          <div className="flex max-w-80 flex-col items-end gap-2">
+            <p
+              className="max-w-80 truncate text-right text-xs text-muted-foreground"
+              title={terminalFallbackPath ?? undefined}
+            >
+              {terminalFallbackPath ?? t("general.terminalFallback.loading")}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={handleResetTerminalFallbackCwd}
+                disabled={!terminalFallbackCwdPreference.hasCustomFallbackCwd}
+              >
+                <RotateCcw className="size-3.5" />
+                {t("general.terminalFallback.reset")}
+              </Button>
+              <Button
+                type="button"
+                variant="default"
+                size="xs"
+                onClick={() => void handleChooseTerminalFallbackCwd()}
+              >
+                <FolderOpen className="size-3.5" />
+                {t("general.terminalFallback.change")}
               </Button>
             </div>
           </div>
@@ -401,9 +474,10 @@ export function GeneralSettings() {
           <Button
             type="button"
             variant="default"
+            size="xs"
             onClick={() => setClearCacheDialogOpen(true)}
           >
-            <Trash2 className="size-4" />
+            <Trash2 className="size-3.5" />
             {t("storage.cachedMedia.clear")}
           </Button>
         </SettingRow>

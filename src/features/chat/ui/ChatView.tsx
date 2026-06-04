@@ -26,7 +26,7 @@ import {
   queueTerminalCommand,
   runCommandInTerminalSession,
 } from "@/features/terminal/lib/terminalSessionManager";
-import { useGitState } from "@/shared/hooks/useGitState";
+import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
@@ -121,6 +121,8 @@ export function ChatView({
       ? (s.activeWorkspaceBySession[effectiveSession.id]?.path ?? null)
       : null,
   );
+  const { fallbackCwd: terminalFallbackCwd } =
+    useTerminalFallbackCwdPreference();
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
   const [terminalWorkspaceState, setTerminalWorkspaceState] =
     usePersistedState<TerminalWorkspaceState>(
@@ -152,17 +154,22 @@ export function ChatView({
         "--agent-builder-column-enter-y": "72px",
       } as CSSProperties)
     : undefined;
+  const projectTerminalCwd = controller.project?.workingDirs?.[0] ?? null;
+  const projectHasNoWorkspace = Boolean(
+    controller.project && controller.project.workingDirs.length === 0,
+  );
+  const useConfiguredTerminalFallback =
+    Boolean(terminalFallbackCwd) &&
+    !terminalWorkspacePath &&
+    !projectTerminalCwd &&
+    (!effectiveSession?.projectId || projectHasNoWorkspace);
+  const sessionTerminalCwd =
+    useConfiguredTerminalFallback && terminalFallbackCwd
+      ? terminalFallbackCwd
+      : effectiveSession?.workingDir;
   const terminalCwd =
-    terminalWorkspacePath ??
-    effectiveSession?.workingDir ??
-    controller.project?.workingDirs?.[0] ??
-    null;
-  const {
-    data: terminalGitState,
-    isLoading: terminalGitLoading,
-    isFetching: terminalGitFetching,
-  } = useGitState(terminalCwd, Boolean(effectiveSession?.id && terminalCwd));
-  const terminalAvailable = Boolean(terminalCwd && terminalGitState?.isGitRepo);
+    terminalWorkspacePath ?? sessionTerminalCwd ?? projectTerminalCwd ?? null;
+  const terminalAvailable = Boolean(terminalCwd);
   const terminalWorkspacePaths = terminalWorkspaceState.paths;
   const expandedTerminalPath = terminalWorkspaceState.expandedPath;
   const activeWorkspaceHasTerminal = terminalCwd
@@ -182,16 +189,6 @@ export function ChatView({
       return;
     }
 
-    if ((terminalGitLoading || terminalGitFetching) && !terminalGitState) {
-      toast.message(t("terminal.checkingWorkspace"));
-      return;
-    }
-
-    if (!terminalAvailable) {
-      toast.message(t("terminal.gitOnly"));
-      return;
-    }
-
     setTerminalWorkspaceState((state) => {
       const paths = state.paths.includes(terminalCwd)
         ? state.paths
@@ -201,15 +198,7 @@ export function ChatView({
         expandedPath: state.expandedPath === terminalCwd ? null : terminalCwd,
       };
     });
-  }, [
-    terminalAvailable,
-    terminalCwd,
-    terminalGitFetching,
-    terminalGitLoading,
-    terminalGitState,
-    setTerminalWorkspaceState,
-    t,
-  ]);
+  }, [terminalCwd, setTerminalWorkspaceState, t]);
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
@@ -297,16 +286,6 @@ export function ChatView({
         return;
       }
 
-      if ((terminalGitLoading || terminalGitFetching) && !terminalGitState) {
-        toast.message(t("terminal.checkingWorkspace"));
-        return;
-      }
-
-      if (!terminalAvailable) {
-        toast.message(t("terminal.gitOnly"));
-        return;
-      }
-
       const sessionKey = `${sessionId}:${terminalCwd}`;
       if (!runCommandInTerminalSession(sessionKey, command)) {
         queueTerminalCommand(sessionKey, command);
@@ -322,16 +301,7 @@ export function ChatView({
         };
       });
     },
-    [
-      sessionId,
-      setTerminalWorkspaceState,
-      terminalAvailable,
-      terminalCwd,
-      terminalGitFetching,
-      terminalGitLoading,
-      terminalGitState,
-      t,
-    ],
+    [sessionId, setTerminalWorkspaceState, terminalCwd, t],
   );
 
   const showIndicator =
