@@ -1,7 +1,11 @@
 {
   "card": {
     "deselect": "Deselect",
+    "focusWindowFailed": "Failed to focus session window",
     "open": "Open {{title}}",
+    "openInNewWindow": "Open in new window",
+    "openWindow": "Open window",
+    "openWindowFailed": "Failed to open session window",
     "optionsFor": "Options for {{title}}",
     "select": "Select"
   },

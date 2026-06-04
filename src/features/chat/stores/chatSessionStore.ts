@@ -14,6 +14,7 @@ import {
   archiveSession as acpArchiveSession,
   unarchiveSession as acpUnarchiveSession,
 } from "@/shared/api/acpApi";
+import { releaseSession } from "@/features/chat/lib/sessionWindowCommands";
 
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
@@ -216,6 +217,12 @@ function mergeSessionPage(
     sessionPageCursor: hasMoreSessions ? nextCursor : null,
     hasMoreSessions,
   };
+}
+
+function releaseWindowedSession(sessionId: string): void {
+  releaseSession(sessionId).catch((err: unknown) =>
+    console.error("Failed to release session window:", err),
+  );
 }
 
 function loadContextPanelOpenPreference(): boolean {
@@ -523,6 +530,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         modelSelectionIntentBySession,
       };
     });
+    releaseWindowedSession(id);
   },
 
   archiveSession: async (id) => {
@@ -535,6 +543,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       activeSessionId:
         state.activeSessionId === id ? null : state.activeSessionId,
     }));
+    releaseWindowedSession(id);
     const session = get().sessions.find((candidate) => candidate.id === id);
     if (session) {
       acpArchiveSession(session.id).catch((err: unknown) =>

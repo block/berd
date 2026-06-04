@@ -44,6 +44,8 @@ export interface ExperimentDefinition {
 
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
+export const MULTI_WINDOW_EXPERIMENT_ID = "multi-window";
+
 export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
 
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
@@ -58,6 +60,11 @@ export const EXPERIMENT_DEFINITIONS = [
     id: BUILDERBOT_SURFACE_EXPERIMENT_ID,
     titleKey: "experiments.builderbot.title",
     descriptionKey: "experiments.builderbot.description",
+  },
+  {
+    id: MULTI_WINDOW_EXPERIMENT_ID,
+    titleKey: "experiments.multiWindow.title",
+    descriptionKey: "experiments.multiWindow.description",
   },
   {
     id: GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID,

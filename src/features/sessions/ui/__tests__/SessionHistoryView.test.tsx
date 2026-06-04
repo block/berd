@@ -12,6 +12,16 @@ import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import {
+  focusSessionWindow,
+  openSessionWindow,
+} from "@/features/chat/lib/sessionWindowCommands";
+import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import { SessionHistoryView } from "../SessionHistoryView";
 
 const mocks = vi.hoisted(() => ({
@@ -29,6 +39,12 @@ vi.mock("@/shared/api/acp", () => ({
   acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpImportSession: (...args: unknown[]) => mocks.acpImportSession(...args),
   acpSearchSessions: (...args: unknown[]) => mocks.acpSearchSessions(...args),
+}));
+
+vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
+  focusSessionWindow: vi.fn().mockResolvedValue(undefined),
+  openSessionWindow: vi.fn().mockResolvedValue(undefined),
+  releaseSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("sonner", () => ({
@@ -84,16 +100,25 @@ vi.mock("../SessionCard", () => ({
     id,
     title,
     onDuplicate,
+    onOpenInWindow,
+    isOpenInWindow,
   }: {
     id: string;
     title: string;
     onDuplicate?: (id: string) => void;
+    onOpenInWindow?: (id: string) => void;
+    isOpenInWindow?: boolean;
   }) => (
     <div data-testid="session-card">
       <span>{title}</span>
       <button type="button" onClick={() => onDuplicate?.(id)}>
         Duplicate
       </button>
+      {onOpenInWindow ? (
+        <button type="button" onClick={() => onOpenInWindow(id)}>
+          {isOpenInWindow ? "Open window" : "Open in new window"} {title}
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -163,7 +188,9 @@ function scrollHistoryTo(scrollTop: number) {
 describe("SessionHistoryView", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     useChatStore.setState({ messagesBySession: {} });
+    useSessionWindowStore.getState().setSnapshot([]);
     setSessionStoreState({
       sessions: [],
       activeSessionId: null,
@@ -174,6 +201,55 @@ describe("SessionHistoryView", () => {
       loadMoreSessions: undefined,
     });
     mocks.acpSearchSessions.mockResolvedValue([]);
+  });
+
+  it("does not expose open-in-window from history while the experiment is off", () => {
+    setSessionStoreState({
+      sessions: [session()],
+    });
+
+    renderHistory();
+
+    expect(
+      screen.queryByRole("button", { name: /open in new window chat one/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("opens a session window from history while the experiment is on", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
+    setSessionStoreState({
+      sessions: [session()],
+    });
+
+    renderHistory();
+
+    await user.click(
+      screen.getByRole("button", { name: /open in new window chat one/i }),
+    );
+
+    expect(openSessionWindow).toHaveBeenCalledWith("session-1");
+    expect(focusSessionWindow).not.toHaveBeenCalled();
+  });
+
+  it("focuses an existing session window from history while the experiment is on", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
+    setSessionStoreState({
+      sessions: [session()],
+    });
+
+    renderHistory();
+
+    await user.click(
+      screen.getByRole("button", { name: /open window chat one/i }),
+    );
+
+    expect(focusSessionWindow).toHaveBeenCalledWith("session-1");
+    expect(openSessionWindow).not.toHaveBeenCalled();
   });
 
   it("loads the next session page near the bottom without immediately repeating", async () => {

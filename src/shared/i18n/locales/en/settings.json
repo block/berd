@@ -179,6 +179,10 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
+    "multiWindow": {
+      "description": "Open individual chats in their own desktop windows.",
+      "title": "Multi-window chats"
+    },
     "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
     "gooseStyleGuidelines": {

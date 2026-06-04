@@ -6,6 +6,7 @@ import {
   CheckSquare,
   Copy,
   Download,
+  ExternalLink,
   MoreHorizontal,
   Package,
   Pencil,
@@ -57,6 +58,8 @@ interface SessionCardProps {
   onExport?: (id: string) => void;
   onExportSelected?: () => void;
   onDuplicate?: (id: string) => void;
+  onOpenInWindow?: (id: string) => void;
+  isOpenInWindow?: boolean;
   onPinSelectedToHome?: () => void;
   isPinningSelectedToHome?: boolean;
 }
@@ -86,6 +89,8 @@ export function SessionCard({
   onExport,
   onExportSelected,
   onDuplicate,
+  onOpenInWindow,
+  isOpenInWindow = false,
   onPinSelectedToHome,
   isPinningSelectedToHome = false,
 }: SessionCardProps) {
@@ -339,10 +344,25 @@ export function SessionCard({
           ) : (
             <>
               {!shouldApplyToSelection && (
-                <DropdownMenuItem onClick={startRename}>
-                  <Pencil className="size-3.5" />
-                  {t("common:actions.rename")}
-                </DropdownMenuItem>
+                <>
+                  {onOpenInWindow ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onOpenInWindow(id);
+                      }}
+                    >
+                      <ExternalLink className="size-3.5" />
+                      {isOpenInWindow
+                        ? t("card.openWindow")
+                        : t("card.openInNewWindow")}
+                    </DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem onClick={startRename}>
+                    <Pencil className="size-3.5" />
+                    {t("common:actions.rename")}
+                  </DropdownMenuItem>
+                </>
               )}
               <DropdownMenuItem
                 onClick={() => {

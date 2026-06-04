@@ -76,6 +76,7 @@ function validateTerminalWorkspaceState(
 interface ChatViewProps {
   sessionId: string;
   activeSession?: ChatSession | null;
+  readOnlyStatus?: string;
   onCreatePersona?: () => void;
   onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
@@ -87,6 +88,7 @@ interface ChatViewProps {
 export function ChatView({
   sessionId,
   activeSession,
+  readOnlyStatus,
   onCreatePersona,
   onAgentBuilderSaved,
   onAgentBuilderClose,
@@ -108,6 +110,7 @@ export function ChatView({
   });
   const effectiveSession = controller.session ?? activeSession ?? null;
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
+  const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
     effectiveSession?.id
       ? (s.activeWorkspaceBySession[effectiveSession.id]?.path ?? null)
@@ -274,6 +277,13 @@ export function ChatView({
     },
     [setTerminalWorkspaceState],
   );
+  const handleCloseContextPanel = useCallback(() => {
+    if (!effectiveSession?.id) {
+      return;
+    }
+
+    setContextPanelOpen(effectiveSession.id, false);
+  }, [effectiveSession?.id, setContextPanelOpen]);
 
   const showIndicator =
     controller.chatState === "thinking" ||
@@ -289,8 +299,11 @@ export function ChatView({
     | "compacting";
   const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
   const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
+  const isReadOnly = Boolean(readOnlyStatus);
   let sendDisabledReason: string | undefined;
-  if (effectiveSession?.creationState === "pending") {
+  if (readOnlyStatus) {
+    sendDisabledReason = readOnlyStatus;
+  } else if (effectiveSession?.creationState === "pending") {
     sendDisabledReason = t("toolbar.sessionStarting");
   } else if (effectiveSession?.creationState === "failed") {
     sendDisabledReason =
@@ -331,7 +344,20 @@ export function ChatView({
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
-  const footerStatus = shouldShowLoadingIndicator ? (
+  const footerStatus = readOnlyStatus ? (
+    <div
+      className={cn(
+        "flex h-8 items-center gap-2 px-3 text-sm",
+        CHAT_RESPONDING_PILL_CLASS,
+      )}
+    >
+      <ActiveChatGooseIndicator
+        size={14}
+        className={CHAT_RESPONDING_GOOSE_CLASS}
+      />
+      <span>{readOnlyStatus}</span>
+    </div>
+  ) : shouldShowLoadingIndicator ? (
     <AnimatePresence initial={false}>
       <div
         className={cn(
@@ -365,28 +391,40 @@ export function ChatView({
             isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
           }
           controls={
-            effectiveSession?.intent === "build-agent"
+            isReadOnly
               ? {
                   agentModelPicker: false,
+                  attachments: false,
+                  autoFocus: false,
+                  fileMentions: false,
                   projectPicker: false,
+                  skills: false,
+                  voice: false,
                 }
-              : undefined
+              : effectiveSession?.intent === "build-agent"
+                ? {
+                    agentModelPicker: false,
+                    projectPicker: false,
+                  }
+                : undefined
           }
           composerActions={{
             onSend: controller.handleSend,
             onSendNow: controller.sendNow,
             onSendQueuedNow: controller.sendQueuedNow,
             disabled:
+              isReadOnly ||
               controller.projectMetadataPending ||
               controller.isCompactingContext,
-            sendDisabled: effectiveSession?.creationState != null,
+            sendDisabled: isReadOnly || effectiveSession?.creationState != null,
             sendDisabledReason,
             queuedMessage: controller.queue.queuedMessage,
             onDismissQueue: controller.queue.dismiss,
-            onStop: controller.stopStreaming,
+            onStop: isReadOnly ? undefined : controller.stopStreaming,
             isStreaming:
-              controller.chatState === "streaming" ||
-              controller.chatState === "thinking",
+              !isReadOnly &&
+              (controller.chatState === "streaming" ||
+                controller.chatState === "thinking"),
           }}
           initialValue={controller.draftValue}
           onDraftChange={controller.handleDraftChange}
@@ -471,7 +509,7 @@ export function ChatView({
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
       onScrollTargetHandled={controller.handleScrollTargetHandled}
-      onSendMcpAppMessage={controller.handleSend}
+      onSendMcpAppMessage={isReadOnly ? undefined : controller.handleSend}
       showPlaceholder={controller.isLoadingHistory}
       placeholder={conversationPlaceholder}
       footer={composerFooter}
@@ -558,6 +596,7 @@ export function ChatView({
           }
           builderColumnStyle={agentBuilderRailColumnStyle}
           terminalOpen={activeWorkspaceHasTerminal}
+          onRequestCloseContextPanel={handleCloseContextPanel}
           onToggleTerminal={toggleTerminal}
         />
       </div>

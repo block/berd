@@ -122,6 +122,7 @@ pub fn run() {
             app.manage(distro_state);
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
+            app.manage(commands::window_session::WindowSessionRegistry::default());
             let layout_app_data_dir = app.path().app_data_dir()?;
             let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
                 layout_app_data_dir,
@@ -142,6 +143,7 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 refresh_traffic_light_position_on_window_changes(app);
+                attach_main_window_lifecycle(app);
 
                 let app_menu = SubmenuBuilder::new(app, "Goose")
                     .about(Some(
@@ -275,26 +277,66 @@ pub fn run() {
             commands::terminal::write_terminal,
             commands::terminal::resize_terminal,
             commands::terminal::stop_terminal,
+            commands::window_session::open_session_window,
+            commands::window_session::release_session,
+            commands::window_session::complete_session_handoff,
+            commands::window_session::focus_session_window,
+            commands::window_session::list_session_windows,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
-        .run(|app, event| {
-            if matches!(event, RunEvent::Exit) {
+        .run(|app, event| match event {
+            RunEvent::Exit => {
                 app.state::<commands::automations::AutomationStreamState>()
                     .abort_all();
                 app.state::<commands::terminal::TerminalState>().stop_all();
                 services::acp::goose_serve::GooseServeProcess::kill_singleton();
             }
+            #[cfg(target_os = "macos")]
+            RunEvent::Reopen { .. } => {
+                if let Some(main) = app.get_webview_window("main") {
+                    let _ = main.show();
+                    let _ = main.set_focus();
+                }
+            }
+            _ => {}
         });
 }
 
 #[cfg(target_os = "macos")]
 fn refresh_traffic_light_position_on_window_changes(app: &tauri::App) {
-    let Some(window) = app.get_webview_window("main") else {
+    if let Some(window) = app.get_webview_window("main") {
+        attach_traffic_light_management(&window);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn attach_main_window_lifecycle(app: &tauri::App) {
+    let Some(main) = app.get_webview_window("main") else {
         return;
     };
 
-    schedule_traffic_light_position_refresh(&window);
+    let app_handle = app.handle().clone();
+    main.on_window_event(move |event| {
+        if let WindowEvent::CloseRequested { api, .. } = event {
+            let has_secondary_window = app_handle
+                .webview_windows()
+                .keys()
+                .any(|label| label != "main");
+
+            if has_secondary_window {
+                api.prevent_close();
+                if let Some(main) = app_handle.get_webview_window("main") {
+                    let _ = main.hide();
+                }
+            }
+        }
+    });
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn attach_traffic_light_management(window: &WebviewWindow) {
+    schedule_traffic_light_position_refresh(window);
 
     let window_for_events = window.clone();
     window.on_window_event(move |event| {

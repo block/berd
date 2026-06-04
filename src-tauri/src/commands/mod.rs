@@ -21,3 +21,4 @@ pub mod path_resolver;
 pub mod project_icons;
 pub mod system;
 pub mod terminal;
+pub mod window_session;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Archive,
+  ExternalLink,
   Mail,
   MailOpen,
   MoreHorizontal,
@@ -13,6 +14,13 @@ import {
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import {
+  focusSessionWindow,
+  openSessionWindow,
+} from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
@@ -38,6 +46,7 @@ import { Input } from "@/shared/ui/input";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
+import { toast } from "sonner";
 
 const INACTIVE_CHAT_ROW_CLASS = cn(
   "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
@@ -118,6 +127,8 @@ export function SidebarChatRow({
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
+  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
+  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
   const displayTitle = getDisplaySessionTitle(
     title,
     t("common:session.defaultTitle"),
@@ -130,6 +141,11 @@ export function SidebarChatRow({
   const rowPaddingClass = nested ? "pl-9" : SIDEBAR_CHAT_ROW_PADDING_CLASS;
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
+  const isOpenInWindow = useSessionWindowStore((s) =>
+    isMultiWindowEnabled ? s.isOpenInWindow(id) : false,
+  );
+  const openWindowLabel = t("actions.openInWindow");
+  const openNewWindowLabel = t("actions.openInNewWindow");
   const rowButtonStateClass = selected
     ? SELECTED_CHAT_ROW_CLASS
     : isActive
@@ -171,6 +187,29 @@ export function SidebarChatRow({
       return;
     }
     onRename?.(id, nextTitle);
+  };
+
+  const focusExistingWindow = () => {
+    void focusSessionWindow(id).catch((error) => {
+      console.error("Failed to focus session window:", error);
+      toast.error(t("actions.focusWindowFailed"));
+    });
+  };
+
+  const handleOpenInWindow = () => {
+    setMenuOpen(false);
+    void (async () => {
+      let handoffFrom: string | undefined;
+      if (isRunning && window.__TAURI_INTERNALS__) {
+        const { getCurrentWindow } = await import("@tauri-apps/api/window");
+        handoffFrom = getCurrentWindow().label;
+      }
+
+      await openSessionWindow(id, { handoffFrom });
+    })().catch((error) => {
+      console.error("Failed to open session window:", error);
+      toast.error(t("actions.openWindowFailed"));
+    });
   };
 
   if (editing) {
@@ -252,6 +291,10 @@ export function SidebarChatRow({
           if (selectionEnabled) {
             onSelectionClear?.();
           }
+          if (isOpenInWindow) {
+            focusExistingWindow();
+            return;
+          }
           onSelect?.(id);
         }}
         onDoubleClick={(event) => {
@@ -259,7 +302,7 @@ export function SidebarChatRow({
           event.stopPropagation();
           startRename();
         }}
-        title={t("actions.renameHint")}
+        title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
         className={cn(
           "flex-1 min-w-0 justify-start rounded-sm pr-8",
           SIDEBAR_ROW_HEIGHT_CLASS,
@@ -298,6 +341,16 @@ export function SidebarChatRow({
         <span className="flex-1 min-w-0 truncate text-left">
           {displayTitle}
         </span>
+        {isMultiWindowEnabled && isOpenInWindow ? (
+          <span
+            className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+            role="img"
+            aria-label={openWindowLabel}
+            title={openWindowLabel}
+          >
+            <ExternalLink className="size-3" aria-hidden="true" />
+          </span>
+        ) : null}
       </Button>
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
@@ -338,10 +391,22 @@ export function SidebarChatRow({
             </>
           )}
           {!shouldApplyToSelection && (
-            <DropdownMenuItem onClick={startRename}>
-              <Pencil className="size-3.5" />
-              {t("common:actions.rename")}
-            </DropdownMenuItem>
+            <>
+              {isMultiWindowEnabled ? (
+                <DropdownMenuItem
+                  onClick={
+                    isOpenInWindow ? focusExistingWindow : handleOpenInWindow
+                  }
+                >
+                  <ExternalLink className="size-3.5" />
+                  {isOpenInWindow ? openWindowLabel : openNewWindowLabel}
+                </DropdownMenuItem>
+              ) : null}
+              <DropdownMenuItem onClick={startRename}>
+                <Pencil className="size-3.5" />
+                {t("common:actions.rename")}
+              </DropdownMenuItem>
+            </>
           )}
           <DropdownMenuItem
             onClick={() => {

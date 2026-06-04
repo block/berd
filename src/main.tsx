@@ -33,17 +33,44 @@ const queryClient = new QueryClient({
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
 
-ReactDOM.createRoot(root).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <LocalMediaCacheEvents />
-      <I18nProvider>
-        <ThemeProvider>
-          <UpdaterProvider>
-            <App />
-          </UpdaterProvider>
-        </ThemeProvider>
-      </I18nProvider>
-    </QueryClientProvider>
-  </React.StrictMode>,
+function decodeSessionKey(sessionKey: string): string {
+  const base64 = sessionKey.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+  const bytes = Uint8Array.from(atob(padded), (char) => char.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+const sessionKey = new URLSearchParams(window.location.search).get(
+  "sessionKey",
 );
+const sessionId = sessionKey ? decodeSessionKey(sessionKey) : null;
+
+if (sessionId) {
+  Promise.all([
+    import("@/app/SessionWindowApp"),
+    import("@/app/SessionWindowRuntime"),
+  ]).then(([{ SessionWindowApp }, { SessionWindowRuntime }]) => {
+    ReactDOM.createRoot(root).render(
+      <React.StrictMode>
+        <SessionWindowRuntime queryClient={queryClient}>
+          <SessionWindowApp sessionId={sessionId} />
+        </SessionWindowRuntime>
+      </React.StrictMode>,
+    );
+  });
+} else {
+  ReactDOM.createRoot(root).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <LocalMediaCacheEvents />
+        <I18nProvider>
+          <ThemeProvider>
+            <UpdaterProvider>
+              <App />
+            </UpdaterProvider>
+          </ThemeProvider>
+        </I18nProvider>
+      </QueryClientProvider>
+    </React.StrictMode>,
+  );
+}

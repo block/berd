@@ -1,5 +1,5 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { cn } from "@/shared/lib/cn";
 import { ContextPanel } from "./ContextPanel";
 
@@ -44,6 +44,7 @@ interface ChatContextPanelProps {
   } | null;
   sessionWorkingDir?: string | null;
   terminalOpen?: boolean;
+  onRequestClose?: () => void;
   onToggleTerminal?: () => void;
 }
 
@@ -53,12 +54,38 @@ export function ChatContextPanel({
   project,
   sessionWorkingDir,
   terminalOpen = false,
+  onRequestClose,
   onToggleTerminal,
 }: ChatContextPanelProps) {
+  const panelRef = useRef<HTMLDivElement>(null);
   const shouldReduceMotion = useReducedMotion();
   const isCompactViewport = useChatContextPanelCompactViewport();
   const fadeTransition = { duration: shouldReduceMotion ? 0 : CP_FADE_S };
   const reflowDuration = shouldReduceMotion ? 0 : CP_REFLOW_MS;
+
+  useEffect(() => {
+    if (!isOpen || !onRequestClose) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (
+        target instanceof Node &&
+        panelRef.current &&
+        panelRef.current.contains(target)
+      ) {
+        return;
+      }
+
+      onRequestClose();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [isOpen, onRequestClose]);
 
   return (
     <div
@@ -74,6 +101,7 @@ export function ChatContextPanel({
       <AnimatePresence initial={false}>
         {isOpen ? (
           <motion.div
+            ref={panelRef}
             key="context-panel"
             className={cn(
               "flex self-start",

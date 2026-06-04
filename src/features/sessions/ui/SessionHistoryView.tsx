@@ -5,6 +5,13 @@ import { IconUpload } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
+import {
+  focusSessionWindow,
+  openSessionWindow,
+} from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
+import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "@/shared/ui/BottomFade";
@@ -113,6 +120,9 @@ export function SessionHistoryView({
   );
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const removeSession = useChatSessionStore((s) => s.removeSession);
+  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
+  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
+  const openSessions = useSessionWindowStore((s) => s.openSessions);
   const loadMoreInFlightRef = useRef(false);
   const activeSessions = useMemo(
     () =>
@@ -544,6 +554,29 @@ export function SessionHistoryView({
     ],
   );
 
+  const handleOpenInWindow = useCallback(
+    (sessionId: string) => {
+      const isOpenInWindow =
+        sessionId in useSessionWindowStore.getState().openSessions;
+      const action = isOpenInWindow ? focusSessionWindow : openSessionWindow;
+
+      void action(sessionId).catch((error) => {
+        console.error(
+          isOpenInWindow
+            ? "Failed to focus session window:"
+            : "Failed to open session window:",
+          error,
+        );
+        toast.error(
+          t(
+            isOpenInWindow ? "card.focusWindowFailed" : "card.openWindowFailed",
+          ),
+        );
+      });
+    },
+    [t],
+  );
+
   const { pinBatchToHome, isPinningBatch } = usePinBatchToHome();
   const handlePinSelectedToHome = useCallback(async () => {
     const ids = Array.from(selectedSessionIds);
@@ -684,6 +717,12 @@ export function SessionHistoryView({
         onExport={handleExport}
         onExportSelected={handleExportSelected}
         onDuplicate={handleDuplicate}
+        onOpenInWindow={
+          isMultiWindowEnabled && !session.archivedAt
+            ? handleOpenInWindow
+            : undefined
+        }
+        isOpenInWindow={isMultiWindowEnabled && session.id in openSessions}
         onPinSelectedToHome={handlePinSelectedToHome}
         isPinningSelectedToHome={isPinningBatch}
       />
@@ -699,12 +738,15 @@ export function SessionHistoryView({
       handleDuplicate,
       handleExport,
       handleExportSelected,
+      handleOpenInWindow,
       handlePinSelectedToHome,
+      isMultiWindowEnabled,
       isPinningBatch,
       handleSelectResult,
       isApplyingSelectionAction,
       onRenameChat,
       onSelectSession,
+      openSessions,
       selectedCount,
       selectedSessionIds,
       toggleSessionSelection,

@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
   acpListSessionsPage: vi.fn(),
   archiveSession: vi.fn(),
+  releaseSession: vi.fn(),
   unarchiveSession: vi.fn(),
 }));
 
@@ -20,6 +21,10 @@ vi.mock("@/shared/api/acpApi", () => ({
   unarchiveSession: (...args: unknown[]) => mocks.unarchiveSession(...args),
   renameSession: vi.fn().mockResolvedValue(undefined),
   updateSessionProject: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
+  releaseSession: (...args: unknown[]) => mocks.releaseSession(...args),
 }));
 
 function resetStore() {
@@ -98,7 +103,24 @@ describe("chatSessionStore", () => {
     resetStore();
     vi.clearAllMocks();
     mocks.archiveSession.mockResolvedValue(undefined);
+    mocks.releaseSession.mockResolvedValue(undefined);
     mocks.unarchiveSession.mockResolvedValue(undefined);
+  });
+
+  it("releases a windowed session when archiving", async () => {
+    seedSession({ id: "session-1" });
+
+    await useChatSessionStore.getState().archiveSession("session-1");
+
+    expect(mocks.releaseSession).toHaveBeenCalledWith("session-1");
+  });
+
+  it("releases a windowed session when removing it locally", () => {
+    seedSession({ id: "session-1" });
+
+    useChatSessionStore.getState().removeSession("session-1");
+
+    expect(mocks.releaseSession).toHaveBeenCalledWith("session-1");
   });
 
   describe("createSession", () => {

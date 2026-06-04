@@ -12,6 +12,10 @@
     "newProject": "Nuevo proyecto",
     "markRead": "Marcar como leído",
     "markUnread": "Marcar como no leído",
+    "openInNewWindow": "Abrir en ventana nueva",
+    "openInWindow": "Abrir ventana",
+    "openWindowFailed": "No se pudo abrir este chat en una ventana nueva.",
+    "focusWindowFailed": "No se pudo enfocar esta ventana de chat.",
     "selectChat": "Seleccionar {{title}}",
     "deselectChat": "Deseleccionar {{title}}",
     "renameHint": "Haz doble clic para renombrar"

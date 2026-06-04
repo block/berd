@@ -85,6 +85,16 @@ describe("ExperimentsSettings", () => {
         i18n.t("experiments.builderbot.description", { ns: "settings" }),
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: i18n.t("experiments.multiWindow.title", { ns: "settings" }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.multiWindow.description", { ns: "settings" }),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("renders injected experiment controls and persists changes after enabling", async () => {

@@ -6,11 +6,27 @@ import {
   resetHomeWidgetStoreForTests,
   useHomeWidgetStore,
 } from "@/features/home/stores/homeWidgetStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { SidebarChatRow } from "../SidebarChatRow";
+import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
+import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
+
+vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
+  focusSessionWindow: vi.fn().mockResolvedValue(undefined),
+  openSessionWindow: vi.fn().mockResolvedValue(undefined),
+  releaseSession: vi.fn().mockResolvedValue(undefined),
+}));
 
 describe("SidebarChatRow", () => {
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
+    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+    useSessionWindowStore.getState().setSnapshot([]);
+    vi.mocked(focusSessionWindow).mockClear();
   });
 
   it("starts inline rename on double-click and commits on Enter", async () => {
@@ -195,6 +211,59 @@ describe("SidebarChatRow", () => {
     expect(onSelectionClear).toHaveBeenCalled();
     expect(onSelect).toHaveBeenCalledWith("session-1");
     expect(onSelectionChange).not.toHaveBeenCalled();
+  });
+
+  it("selects normally when a session window exists but the experiment is off", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Windowed Chat"
+        isActive={false}
+        onSelect={onSelect}
+      />,
+    );
+
+    expect(screen.queryByLabelText(/open in window/i)).not.toBeInTheDocument();
+
+    await user.click(screen.getByTitle("Double-click to rename"));
+
+    expect(focusSessionWindow).not.toHaveBeenCalled();
+    expect(onSelect).toHaveBeenCalledWith("session-1");
+  });
+
+  it("focuses an existing session window instead of selecting the row when the experiment is on", async () => {
+    const user = userEvent.setup();
+    const onSelect = vi.fn();
+
+    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Windowed Chat"
+        isActive={false}
+        onSelect={onSelect}
+      />,
+    );
+
+    expect(screen.getByLabelText(/open in window/i)).toBeInTheDocument();
+
+    await user.click(
+      screen.getAllByRole("button", { name: /windowed chat/i })[0],
+    );
+
+    expect(focusSessionWindow).toHaveBeenCalledWith("session-1");
+    expect(onSelect).not.toHaveBeenCalled();
   });
 
   it("shows the unread dot in the icon slot only when the chat has unread output", () => {

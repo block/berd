@@ -29,6 +29,7 @@ import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
   selectActiveSessionId,
   selectHasHydratedSessions,
@@ -41,10 +42,7 @@ import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProv
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
-import {
-  DEFAULT_CHAT_TITLE,
-  isDefaultChatTitle,
-} from "@/features/chat/lib/sessionTitle";
+import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
@@ -74,13 +72,15 @@ import {
   updateSessionTitle,
 } from "@/features/chat/stores/chatSessionOperations";
 import {
-  clearReplayBuffer,
-  getAndDeleteReplayBuffer,
-} from "@/features/chat/hooks/replayBuffer";
+  activateSession as activateChatSession,
+  loadSessionMessages,
+} from "@/features/chat/lib/sessionActivation";
+import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionHandoffSource } from "@/features/chat/hooks/useSessionHandoffSource";
+import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
-import { sanitizeReplayMessages } from "@/features/chat/lib/replaySanitizer";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
 import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
@@ -95,13 +95,12 @@ import {
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import {
-  createSystemNotificationMessage,
-  getTextContent,
-  type Message,
-} from "@/shared/types/messages";
+import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  MULTI_WINDOW_EXPERIMENT_ID,
+} from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
@@ -135,23 +134,6 @@ const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
   "goose:design-system-inspector-visible:v2";
-
-function fallbackTitleFromReplay(messages: Message[]): string | null {
-  for (const message of messages) {
-    if (message.role !== "user") {
-      continue;
-    }
-
-    try {
-      const text = getTextContent(message).trim();
-      if (text) {
-        return text.replace(/\s+/g, " ").slice(0, 80);
-      }
-    } catch {}
-  }
-
-  return null;
-}
 
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
@@ -291,6 +273,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
   const isBuilderbotSurfaceEnabled = Boolean(builderbotExperiment?.enabled);
+  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
+  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -370,6 +354,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const activeProjectTint = useActiveProjectTint();
   const hasHydratedSessions = useChatSessionStore(selectHasHydratedSessions);
   const sessionsLoading = useChatSessionStore(selectSessionsLoading);
+  const activeSessionWindowLabel = useSessionWindowStore((s) =>
+    isMultiWindowEnabled && activeSessionId
+      ? s.openSessions[activeSessionId]
+      : undefined,
+  );
+  const activeSessionInHandoff = useSessionWindowStore((s) =>
+    isMultiWindowEnabled && activeSessionId
+      ? s.isInHandoff(activeSessionId)
+      : false,
+  );
   const createSession = useChatSessionStore((s) => s.createSession);
   const createDraftSession = useChatSessionStore((s) => s.createDraftSession);
   const promoteDraftSession = useChatSessionStore((s) => s.promoteDraftSession);
@@ -415,90 +409,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const migrationSettled =
     migrationGate.status === "ready" || migrationGate.status === "error";
   useDefaultModelGate(migrationSettled);
+  useSessionWindowTracking({ enabled: isMultiWindowEnabled });
+  useSessionHandoffSource({ enabled: isMultiWindowEnabled });
   const lastNonSecondaryViewRef = useRef<AppView>("home");
   const homeSessionRequestRef = useRef<Promise<ChatSession | null> | null>(
     null,
   );
   const hydratingPinnedSessionIdsRef = useRef<Set<string>>(new Set());
-  const loadSessionMessages = useCallback(async (sessionId: string) => {
-    const sid = sessionId.slice(0, 8);
-    const existingMsgs = useChatStore.getState().messagesBySession[sessionId];
-    if ((existingMsgs?.length ?? 0) > 0) {
-      perfLog(`[perf:load] ${sid} skip — has messages`);
-      useChatSessionStore
-        .getState()
-        .patchSession(sessionId, { pinnedLoadState: undefined });
-      return true;
-    }
-    const t0 = performance.now();
-    perfLog(`[perf:load] ${sid} start`);
-    useChatStore.getState().setSessionLoading(sessionId, true);
-    try {
-      const [{ acpLoadSession }, { getReplayPerf, clearReplayPerf }] =
-        await Promise.all([
-          import("@/shared/api/acp"),
-          import("@/shared/api/acpNotificationHandler"),
-        ]);
-      const t1 = performance.now();
-      perfLog(`[perf:load] ${sid} import in ${(t1 - t0).toFixed(1)}ms`);
-      const session = useChatSessionStore.getState().getSession(sessionId);
-      const project = session?.projectId
-        ? (useProjectStore
-            .getState()
-            .projects.find((p) => p.id === session.projectId) ?? null)
-        : null;
-      const activeWorkspace =
-        session?.id != null
-          ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
-          : undefined;
-      const workingDir = await resolveSessionCwd(
-        project,
-        activeWorkspace?.path ?? session?.workingDir,
-      );
-      await acpLoadSession(sessionId, workingDir);
-      const tFlush = performance.now();
-      useChatStore.getState().setSessionLoading(sessionId, false);
-      const buffer = getAndDeleteReplayBuffer(sessionId);
-      const replayMessages = buffer
-        ? sanitizeReplayMessages(buffer)
-        : undefined;
-      const replayStats = getReplayPerf(sessionId);
-      clearReplayPerf(sessionId);
-      if (replayMessages) {
-        useChatStore.getState().setMessages(sessionId, replayMessages);
-        const latestSession = useChatSessionStore
-          .getState()
-          .getSession(sessionId);
-        const sessionPatch: Partial<ChatSession> = {
-          messageCount: replayMessages.length,
-        };
-        if (
-          latestSession &&
-          !latestSession.userSetName &&
-          isDefaultChatTitle(latestSession.title)
-        ) {
-          const fallbackTitle = fallbackTitleFromReplay(replayMessages);
-          if (fallbackTitle) {
-            sessionPatch.title = fallbackTitle;
-          }
-        }
-        useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
-      }
-      useChatSessionStore
-        .getState()
-        .patchSession(sessionId, { pinnedLoadState: undefined });
-      const t2 = performance.now();
-      perfLog(
-        `[perf:load] ${sid} replay: notifs=${replayStats?.count ?? 0} span=${replayStats?.spanMs.toFixed(1) ?? "0"}ms msgs=${replayMessages?.length ?? 0} flush=${(t2 - tFlush).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`,
-      );
-      return true;
-    } catch (err) {
-      console.error("Failed to load session messages:", err);
-      clearReplayBuffer(sessionId);
-      useChatStore.getState().setSessionLoading(sessionId, false);
-      return false;
-    }
-  }, []);
 
   const hydratePinnedChatSessions = useCallback(
     async (sessionIds: string[]) => {
@@ -567,7 +484,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         ),
       );
     },
-    [loadSessionMessages],
+    [],
   );
 
   useEffect(() => {
@@ -577,6 +494,25 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   useEffect(() => {
     void prefetchProjectArtifactRenderer();
   }, []);
+
+  useEffect(() => {
+    if (
+      !activeSessionId ||
+      !activeSessionWindowLabel ||
+      activeSessionInHandoff
+    ) {
+      return;
+    }
+
+    clearSettingsSectionUrl();
+    setActiveView("home");
+    setActiveSession(null);
+  }, [
+    activeSessionId,
+    activeSessionInHandoff,
+    activeSessionWindowLabel,
+    setActiveSession,
+  ]);
 
   useEffect(() => {
     const isViewingChat = activeView === "chat" && Boolean(activeSessionId);
@@ -1504,7 +1440,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     return true;
   }, [
     agentBuilderSettingsReturnTarget,
-    loadSessionMessages,
     setActiveSession,
     setChatActiveSession,
   ]);
@@ -1681,21 +1616,23 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [homeSessionId, guardAppNavigation, setActiveSession, setChatActiveSession],
   );
 
-  const selectSessionDirect = useCallback(
-    (id: string) => {
-      setActiveSession(id);
-      clearSettingsSectionUrl();
-      setActiveView("chat");
-      setChatActiveSession(id);
-      useChatStore.getState().markSessionRead(id);
-      loadSessionMessages(id);
-    },
-    [loadSessionMessages, setActiveSession, setChatActiveSession],
-  );
+  const selectSessionDirect = useCallback((id: string) => {
+    activateChatSession(id);
+    clearSettingsSectionUrl();
+    setActiveView("chat");
+    void loadSessionMessages(id);
+  }, []);
   navigateAgentBuilderChatRef.current = selectSessionDirect;
 
   const handleSelectSession = useCallback(
     (id: string) => {
+      if (
+        isMultiWindowEnabled &&
+        useSessionWindowStore.getState().isOpenInWindow(id)
+      ) {
+        void focusSessionWindow(id);
+        return;
+      }
       if (id === useChatSessionStore.getState().activeSessionId) {
         return;
       }
@@ -1703,7 +1640,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         selectSessionDirect(id);
       });
     },
-    [guardAppNavigation, selectSessionDirect],
+    [guardAppNavigation, isMultiWindowEnabled, selectSessionDirect],
   );
 
   const handleSelectSearchResult = useCallback(
@@ -1917,13 +1854,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       setActiveSession(null);
       setActiveView(location.view === "chat" ? "home" : location.view);
     },
-    [
-      expandSidebar,
-      loadSessionMessages,
-      setActiveSession,
-      setChatActiveSession,
-      sidebarCollapsed,
-    ],
+    [expandSidebar, setActiveSession, setChatActiveSession, sidebarCollapsed],
   );
 
   const goBack = useCallback(() => {

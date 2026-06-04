@@ -1,0 +1,64 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "session-window",
+  "description": "Capability for popped-out chat session windows",
+  "windows": ["session:*"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-show",
+    "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:window:allow-set-size",
+    "core:window:allow-set-min-size",
+    "opener:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "linear://*"
+        },
+        {
+          "url": "https://linear.app/*"
+        }
+      ]
+    },
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        {
+          "path": "$HOME/**"
+        },
+        {
+          "path": "$HOME/.goose/**"
+        },
+        {
+          "path": "$TEMP/**"
+        },
+        {
+          "path": "/Volumes/**"
+        },
+        {
+          "path": "/mnt/**"
+        },
+        {
+          "path": "/workspace/**"
+        },
+        {
+          "path": "/workspaces/**"
+        },
+        {
+          "path": "/opt/**"
+        },
+        {
+          "path": "/srv/**"
+        },
+        {
+          "path": "*:/**"
+        }
+      ]
+    },
+    "dialog:allow-open",
+    "dialog:allow-save"
+  ]
+}

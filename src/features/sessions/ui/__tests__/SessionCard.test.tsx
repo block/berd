@@ -110,6 +110,38 @@ describe("SessionCard", () => {
     ).toBeInTheDocument();
   });
 
+  it("opens a session window from the active session menu", async () => {
+    const user = userEvent.setup();
+    const onOpenInWindow = vi.fn();
+
+    render(<SessionCard {...defaultProps} onOpenInWindow={onOpenInWindow} />);
+
+    await user.click(
+      screen.getByRole("button", { name: /options for fix sidebar bug/i }),
+    );
+    await user.click(
+      screen.getByRole("menuitem", { name: /open in new window/i }),
+    );
+
+    expect(onOpenInWindow).toHaveBeenCalledWith("s1");
+  });
+
+  it("uses focus copy when the session is already open in a window", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SessionCard {...defaultProps} isOpenInWindow onOpenInWindow={vi.fn()} />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for fix sidebar bug/i }),
+    );
+
+    expect(
+      screen.getByRole("menuitem", { name: /^open window$/i }),
+    ).toBeInTheDocument();
+  });
+
   it("shows restore option for archived sessions", async () => {
     const user = userEvent.setup();
 

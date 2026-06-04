@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChatContextPanel } from "../ChatContextPanel";
 
@@ -74,5 +74,25 @@ describe("ChatContextPanel", () => {
     expect(panel).toHaveClass("max-h-full");
     expect(panel).toHaveClass("shadow-popover");
     expect(panel).not.toHaveClass("h-full");
+  });
+
+  it("requests close on outside pointer down only", () => {
+    const onRequestClose = vi.fn();
+    render(
+      <>
+        <button type="button">Outside</button>
+        <ChatContextPanel
+          activeSessionId="session-1"
+          isOpen
+          onRequestClose={onRequestClose}
+        />
+      </>,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId("context-panel-content"));
+    expect(onRequestClose).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
+    expect(onRequestClose).toHaveBeenCalledTimes(1);
   });
 });
