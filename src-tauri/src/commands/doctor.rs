@@ -3,12 +3,15 @@
 use std::{
     collections::{BTreeSet, HashMap},
     env, fs,
+    future::Future,
     path::{Path, PathBuf},
-    process::Stdio,
+    process::{Output, Stdio},
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
+use tokio::time::timeout;
 
 use crate::services::{
     distro_bundle::DistroBundleState,
@@ -29,6 +32,12 @@ const AGENTS_CATEGORY_LABEL: &str = "Agents";
 const ENVIRONMENT_HEALTH_CATEGORY: &str = "environment-health";
 const ENVIRONMENT_HEALTH_CATEGORY_LABEL: &str = "Environment Health";
 const GOOSE_BIN_ENV: &str = "GOOSE_BIN";
+// App-side safety net while the upstream doctor crate adds per-command
+// timeouts. Keep these centralized so future tuning is a one-line change.
+const DOCTOR_REPORT_TIMEOUT: Duration = Duration::from_secs(60);
+const DOCTOR_FRESH_REPORT_TIMEOUT: Duration = Duration::from_secs(45);
+const LOCAL_DOCTOR_COMMAND_TIMEOUT: Duration = Duration::from_secs(10);
+const DOCTOR_TIMEOUT_CHECK_ID: &str = "doctor-timeout";
 const APP_CONFIG_PASS_MESSAGE: &str =
     "Checked config YAML, additional config files, thinking settings, and Goose binary override";
 const CLAUDE_THINKING_CONFIG_KEYS: &[&str] = &[
@@ -327,6 +336,14 @@ async fn run_local_path_check(check: &LocalPathCheck, extended_path: &str) -> Do
 }
 
 async fn resolve_binary_path(binary_name: &str, extended_path: &str) -> Option<String> {
+    resolve_binary_path_with_timeout(binary_name, extended_path, LOCAL_DOCTOR_COMMAND_TIMEOUT).await
+}
+
+async fn resolve_binary_path_with_timeout(
+    binary_name: &str,
+    extended_path: &str,
+    command_timeout: Duration,
+) -> Option<String> {
     let command = if cfg!(target_os = "windows") {
         "where"
     } else {
@@ -335,7 +352,9 @@ async fn resolve_binary_path(binary_name: &str, extended_path: &str) -> Option<S
     let mut cmd = tokio::process::Command::new(command);
     cmd.arg(binary_name).env("PATH", extended_path);
 
-    let output = cmd.output().await.ok();
+    let output = run_timed_command(cmd, &format!("{command} {binary_name}"), command_timeout)
+        .await
+        .ok();
     output
         .as_ref()
         .filter(|output| output.status.success())
@@ -351,15 +370,29 @@ async fn resolve_binary_path(binary_name: &str, extended_path: &str) -> Option<S
 }
 
 async fn run_local_command_check(check: &LocalCommandCheck, extended_path: &str) -> DoctorCheck {
-    let output = tokio::process::Command::new(check.command)
+    run_local_command_check_with_timeout(check, extended_path, LOCAL_DOCTOR_COMMAND_TIMEOUT).await
+}
+
+async fn run_local_command_check_with_timeout(
+    check: &LocalCommandCheck,
+    extended_path: &str,
+    command_timeout: Duration,
+) -> DoctorCheck {
+    let mut command = tokio::process::Command::new(check.command);
+    command
         .args(check.args)
         .env("PATH", extended_path)
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await;
+        .stderr(Stdio::piped());
+    let output = run_timed_command(
+        command,
+        &format!("{} {}", check.command, check.args.join(" ")),
+        command_timeout,
+    )
+    .await;
 
-    let path = resolve_binary_path(check.command, extended_path).await;
+    let path =
+        resolve_binary_path_with_timeout(check.command, extended_path, command_timeout).await;
     let (status, message, raw_output) = match output {
         Ok(output) if output.status.success() => {
             let version = String::from_utf8_lossy(&output.stdout)
@@ -392,6 +425,24 @@ async fn run_local_command_check(check: &LocalCommandCheck, extended_path: &str)
     };
 
     build_local_result(&check.meta, status, &message, path, raw_output)
+}
+
+async fn run_timed_command(
+    mut command: tokio::process::Command,
+    command_label: &str,
+    command_timeout: Duration,
+) -> Result<Output, String> {
+    command.kill_on_drop(true);
+    command.stdin(Stdio::null());
+    timeout(command_timeout, command.output())
+        .await
+        .map_err(|_| {
+            format!(
+                "{command_label} timed out after {} seconds",
+                command_timeout.as_secs()
+            )
+        })?
+        .map_err(|error| format!("failed to run command: {error}"))
 }
 
 fn format_command_output(output: &std::process::Output) -> String {
@@ -976,6 +1027,64 @@ async fn run_doctor_impl(
     DoctorReport { checks }
 }
 
+async fn run_doctor_or_timeout<F>(future: F, timeout_duration: Duration) -> DoctorReport
+where
+    F: Future<Output = DoctorReport>,
+{
+    match timeout(timeout_duration, future).await {
+        Ok(report) => report,
+        Err(_) => doctor_timeout_report(timeout_duration),
+    }
+}
+
+async fn run_doctor_fresh_or_timeout<F>(
+    future: F,
+    timeout_duration: Duration,
+) -> Result<DoctorReport, String>
+where
+    F: Future<Output = DoctorReport>,
+{
+    timeout(timeout_duration, future).await.map_err(|_| {
+        format!(
+            "Doctor freshness checks timed out after {} seconds",
+            timeout_duration.as_secs()
+        )
+    })
+}
+
+fn doctor_timeout_report(timeout_duration: Duration) -> DoctorReport {
+    DoctorReport {
+        checks: vec![DoctorCheck {
+            id: DOCTOR_TIMEOUT_CHECK_ID.to_string(),
+            label: "Doctor Checks".to_string(),
+            status: CheckStatus::Warn,
+            message: format!(
+                "Doctor timed out after {} seconds; a tool probe may be hanging",
+                timeout_duration.as_secs()
+            ),
+            fix_url: None,
+            fix_command: None,
+            fix_type: None,
+            path: None,
+            bridge_path: None,
+            raw_output: Some(format!(
+                "checked: app-side doctor timeout\ntimeout_seconds: {}\nmessage: Goose Internal stopped waiting for Doctor checks so the page could render. The upstream doctor crate may still have an unbounded subprocess running.",
+                timeout_duration.as_secs()
+            )),
+            auth_status: None,
+            installed_version: None,
+            latest_version: None,
+            update_available: None,
+            install_source: None,
+            self_updating: None,
+            main: None,
+            bridge: None,
+            category: ENVIRONMENT_HEALTH_CATEGORY.to_string(),
+            category_label: ENVIRONMENT_HEALTH_CATEGORY_LABEL.to_string(),
+        }],
+    }
+}
+
 /// Run all health checks and return the report.
 ///
 /// This is the fast, offline status read that paints the settings screen: it
@@ -985,7 +1094,11 @@ async fn run_doctor_impl(
 pub async fn run_doctor(
     distro_state: State<'_, DistroBundleState>,
 ) -> Result<DoctorReport, String> {
-    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), false).await)
+    Ok(run_doctor_or_timeout(
+        run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), false),
+        DOCTOR_REPORT_TIMEOUT,
+    )
+    .await)
 }
 
 /// Run all health checks *with the freshness pass enabled*.
@@ -1001,7 +1114,11 @@ pub async fn run_doctor(
 pub async fn run_doctor_fresh(
     distro_state: State<'_, DistroBundleState>,
 ) -> Result<DoctorReport, String> {
-    Ok(run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), true).await)
+    run_doctor_fresh_or_timeout(
+        run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), true),
+        DOCTOR_FRESH_REPORT_TIMEOUT,
+    )
+    .await
 }
 
 /// Run a fix command for a doctor check, identified by check ID and fix type.
@@ -1081,6 +1198,31 @@ mod tests {
             Some("/tmp/fixture".to_string()),
             Some("fixture debug".to_string()),
         )
+    }
+
+    #[test]
+    fn doctor_timeout_report_builds_synthetic_warning() {
+        let report = doctor_timeout_report(DOCTOR_REPORT_TIMEOUT);
+        let check = report.checks.first().expect("timeout check");
+
+        assert_eq!(check.id, DOCTOR_TIMEOUT_CHECK_ID);
+        assert_eq!(check.status, CheckStatus::Warn);
+        assert_eq!(check.category, ENVIRONMENT_HEALTH_CATEGORY);
+        assert_eq!(check.category_label, ENVIRONMENT_HEALTH_CATEGORY_LABEL);
+        assert!(check.message.contains("60 seconds"));
+        assert!(check
+            .raw_output
+            .as_deref()
+            .is_some_and(|raw| raw.contains("app-side doctor timeout")));
+    }
+
+    #[tokio::test]
+    async fn doctor_fresh_timeout_helper_returns_error() {
+        let error = run_doctor_fresh_or_timeout(std::future::pending(), Duration::from_millis(1))
+            .await
+            .expect_err("freshness timeout should be an error");
+
+        assert!(error.contains("Doctor freshness checks timed out"));
     }
 
     #[test]
@@ -1278,6 +1420,33 @@ mod tests {
             .raw_output
             .as_deref()
             .is_some_and(|output| output.contains("command-output")));
+    }
+
+    #[tokio::test]
+    async fn local_command_check_reports_timeout() {
+        let (command, args): (&str, &[&str]) = if cfg!(target_os = "windows") {
+            ("cmd", &["/C", "for /L %i in (0,0,1) do @rem"])
+        } else {
+            ("sh", &["-c", "while true; do :; done"])
+        };
+        let check = LocalCommandCheck {
+            meta: fixture_meta(),
+            command,
+            args,
+            pass_message_suffix: None,
+            fail_message: "command failed",
+        };
+
+        let path = std::env::var("PATH").unwrap_or_default();
+        let result =
+            run_local_command_check_with_timeout(&check, &path, Duration::from_millis(10)).await;
+
+        assert_eq!(result.status, CheckStatus::Fail);
+        assert_eq!(result.message, "command failed");
+        assert!(result
+            .raw_output
+            .as_deref()
+            .is_some_and(|output| output.contains("timed out")));
     }
 
     #[tokio::test]

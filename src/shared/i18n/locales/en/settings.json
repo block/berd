@@ -148,6 +148,7 @@
     "runFix": "Run fix command?",
     "runFixDescription": "Goose will run:",
     "running": "Running checks...",
+    "longRunning": "Still running after {{seconds}}s. We'll stop waiting after {{timeoutSeconds}}s if a check is stuck.",
     "title": "Doctor",
     "tools": "Tools",
     "version": {

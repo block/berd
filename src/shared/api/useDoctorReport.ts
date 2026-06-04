@@ -3,13 +3,18 @@ import {
   useQuery,
   type QueryClient,
 } from "@tanstack/react-query";
-import { runDoctor, runDoctorFresh } from "@/shared/api/doctor";
+import {
+  runDoctor,
+  runDoctorFresh,
+  type DoctorReport,
+} from "@/shared/api/doctor";
 
 // Single shared cache entry for the full doctor report. Every consumer (the
 // Doctor settings page, the AI providers card, the chat agent/model picker)
 // reads this one query so a single `run_doctor` is reused across detail pages
 // within a settings visit instead of each surface probing independently.
 export const DOCTOR_REPORT_QUERY_KEY = ["doctor", "report"] as const;
+export const DOCTOR_TIMEOUT_CHECK_ID = "doctor-timeout";
 
 // Sibling key tracking the slower freshness pass (binary --version probes +
 // registry lookups). Driven via `qc.fetchQuery` from `refreshDoctorReportFreshness`
@@ -24,6 +29,10 @@ export const DOCTOR_REPORT_FRESHNESS_QUERY_KEY = [
 
 // Reused within a settings visit; re-runs automatically on later opens.
 const DOCTOR_REPORT_STALE_TIME = 30_000;
+
+export function isDoctorTimeoutReport(report: DoctorReport): boolean {
+  return report.checks.some((check) => check.id === DOCTOR_TIMEOUT_CHECK_ID);
+}
 
 export function useDoctorReport() {
   return useQuery({
@@ -95,7 +104,8 @@ export function invalidateDoctorReport(qc: QueryClient) {
 // in-flight refetch after invalidation.
 export async function refreshDoctorReportFreshness(qc: QueryClient) {
   try {
-    await prefetchDoctorReport(qc);
+    const report = await prefetchDoctorReport(qc);
+    if (isDoctorTimeoutReport(report)) return;
     const fresh = await qc.fetchQuery({
       queryKey: DOCTOR_REPORT_FRESHNESS_QUERY_KEY,
       queryFn: runDoctorFresh,

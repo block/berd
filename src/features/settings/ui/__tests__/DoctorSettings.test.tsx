@@ -191,6 +191,29 @@ describe("DoctorSettings", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Codex")).not.toBeInTheDocument();
   });
+
+  it("renders the synthetic timeout report", async () => {
+    mockedInvoke.mockResolvedValue(
+      report([
+        check({
+          id: "doctor-timeout",
+          label: "Doctor Checks",
+          status: "warn",
+          message: "Doctor timed out after 60 seconds",
+          category: "environment-health",
+          categoryLabel: "Environment Health",
+        }),
+      ]),
+    );
+
+    renderDoctor();
+
+    expect(
+      await screen.findByRole("heading", { name: "Environment Health" }),
+    ).toBeVisible();
+    expect(screen.getByText("Doctor Checks")).toBeVisible();
+    expect(screen.getByText("Doctor timed out after 60 seconds")).toBeVisible();
+  });
 });
 
 describe("formatDebugReport", () => {

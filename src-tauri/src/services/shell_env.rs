@@ -1,7 +1,8 @@
-use std::collections::HashMap;
-use tokio::sync::OnceCell;
+use std::{collections::HashMap, process::Stdio, time::Duration};
+use tokio::{process::Command, sync::OnceCell, time::timeout};
 
 static SHELL_ENV: OnceCell<HashMap<String, String>> = OnceCell::const_new();
+const SHELL_ENV_CAPTURE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Capture environment variables from the user's login shell.
 ///
@@ -18,9 +19,7 @@ static SHELL_ENV: OnceCell<HashMap<String, String>> = OnceCell::const_new();
 pub async fn capture_shell_env() -> HashMap<String, String> {
     match SHELL_ENV
         .get_or_try_init(|| async {
-            let env = tokio::task::spawn_blocking(capture_shell_env_blocking)
-                .await
-                .unwrap_or_default();
+            let env = capture_shell_env_uncached().await;
             cacheable_shell_env(env)
         })
         .await
@@ -28,6 +27,28 @@ pub async fn capture_shell_env() -> HashMap<String, String> {
         Ok(env) => env.clone(),
         Err(env) => env,
     }
+}
+
+async fn capture_shell_env_uncached() -> HashMap<String, String> {
+    let shell = match std::env::var("SHELL") {
+        Ok(s) if !s.is_empty() => s,
+        _ => return HashMap::new(),
+    };
+
+    let mut command = Command::new(&shell);
+    command
+        .args(["-l", "-c", "env -0"])
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+
+    for (key, value) in std::env::vars() {
+        if should_remove_shell_env_var(&key, &value) {
+            command.env_remove(key);
+        }
+    }
+
+    capture_shell_env_from_command(&shell, command, SHELL_ENV_CAPTURE_TIMEOUT).await
 }
 
 fn cacheable_shell_env(
@@ -40,28 +61,25 @@ fn cacheable_shell_env(
     }
 }
 
-fn capture_shell_env_blocking() -> HashMap<String, String> {
-    let shell = match std::env::var("SHELL") {
-        Ok(s) if !s.is_empty() => s,
-        _ => return HashMap::new(),
+async fn capture_shell_env_from_command(
+    shell: &str,
+    mut command: Command,
+    timeout_duration: Duration,
+) -> HashMap<String, String> {
+    command.kill_on_drop(true);
+
+    let output_result = match timeout(timeout_duration, command.output()).await {
+        Ok(result) => result,
+        Err(_) => {
+            log::warn!(
+                "Shell env capture ({shell} -l -c 'env -0') timed out after {} seconds",
+                timeout_duration.as_secs()
+            );
+            return HashMap::new();
+        }
     };
 
-    let mut command = std::process::Command::new(&shell);
-    command
-        .args(["-l", "-c", "env -0"])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-
-    for (key, value) in std::env::vars() {
-        if should_remove_shell_env_var(&key, &value) {
-            command.env_remove(key);
-        }
-    }
-
-    let output = command.output();
-
-    let output = match output {
+    let output = match output_result {
         Ok(o) if o.status.success() => o,
         Ok(o) => {
             log::warn!(
@@ -76,7 +94,15 @@ fn capture_shell_env_blocking() -> HashMap<String, String> {
         }
     };
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let mut env = parse_shell_env_output(&output.stdout);
+    sanitize_shell_env(&mut env);
+
+    log::info!("Captured {} env vars from login shell", env.len());
+    env
+}
+
+fn parse_shell_env_output(stdout: &[u8]) -> HashMap<String, String> {
+    let stdout = String::from_utf8_lossy(stdout);
     let mut env = HashMap::new();
     for entry in stdout.split('\0') {
         if entry.is_empty() {
@@ -90,9 +116,6 @@ fn capture_shell_env_blocking() -> HashMap<String, String> {
             env.insert(key.to_string(), value.to_string());
         }
     }
-    sanitize_shell_env(&mut env);
-
-    log::info!("Captured {} env vars from login shell", env.len());
     env
 }
 
@@ -119,7 +142,7 @@ fn should_remove_shell_env_var(key: &str, value: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{cacheable_shell_env, sanitize_shell_env};
+    use super::{cacheable_shell_env, parse_shell_env_output, sanitize_shell_env};
     use std::collections::HashMap;
 
     #[test]
@@ -136,6 +159,14 @@ mod tests {
             cacheable_shell_env(env).unwrap().get("PATH"),
             Some(&"/shell/bin".to_string())
         );
+    }
+
+    #[test]
+    fn parse_shell_env_output_reads_null_delimited_entries() {
+        let env = parse_shell_env_output(b"PATH=/bin\0LANG=en_US.UTF-8\0\0");
+
+        assert_eq!(env.get("PATH"), Some(&"/bin".to_string()));
+        assert_eq!(env.get("LANG"), Some(&"en_US.UTF-8".to_string()));
     }
 
     #[test]

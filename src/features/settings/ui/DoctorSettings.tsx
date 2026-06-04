@@ -17,6 +17,9 @@ import {
 import { DoctorCheckRow } from "./DoctorCheckRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 
+const DOCTOR_LONG_RUNNING_HINT_DELAY_MS = 5_000;
+const DOCTOR_REPORT_TIMEOUT_SECONDS = 60;
+
 interface DoctorCheckGroup {
   category: string;
   categoryLabel: string;
@@ -73,6 +76,27 @@ function versionLines(check: DoctorCheck): string[] {
     }
   }
   return lines;
+}
+
+function useLoadingElapsedSeconds(loading: boolean): number {
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!loading) {
+      setElapsedSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    setElapsedSeconds(0);
+    const interval = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [loading]);
+
+  return elapsedSeconds;
 }
 
 export function formatDebugReport(report: DoctorReport): string {
@@ -133,6 +157,9 @@ export function DoctorSettings() {
   // renders the page instantly; `isFetching` keeps the spinner up during a
   // manual rerun.
   const loading = query.isPending || query.isFetching;
+  const elapsedSeconds = useLoadingElapsedSeconds(loading);
+  const showLongRunningHint =
+    elapsedSeconds * 1000 >= DOCTOR_LONG_RUNNING_HINT_DELAY_MS;
 
   const runChecks = useCallback(() => {
     // Re-probe and re-run the freshness pass so version/update badges
@@ -191,9 +218,19 @@ export function DoctorSettings() {
   return (
     <SettingsPage>
       {loading ? (
-        <div className="flex min-h-[160px] items-center justify-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="h-5 w-5" />
-          {t("doctor.running")}
+        <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center justify-center gap-2">
+            <Spinner className="h-5 w-5" />
+            <span>{t("doctor.running")}</span>
+          </div>
+          {showLongRunningHint ? (
+            <p className="text-xs">
+              {t("doctor.longRunning", {
+                seconds: elapsedSeconds,
+                timeoutSeconds: DOCTOR_REPORT_TIMEOUT_SECONDS,
+              })}
+            </p>
+          ) : null}
         </div>
       ) : report ? (
         <div className="space-y-6">

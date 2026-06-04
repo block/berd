@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
+import type { DoctorReport } from "../doctor";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
@@ -32,5 +33,20 @@ describe("doctor API", () => {
       checkId: "git",
       fixType: "command",
     });
+  });
+
+  it("detects synthetic doctor timeout reports", async () => {
+    const { isDoctorTimeoutReport } = await import("../useDoctorReport");
+
+    expect(
+      isDoctorTimeoutReport({
+        checks: [{ id: "doctor-timeout" }],
+      } as DoctorReport),
+    ).toBe(true);
+    expect(
+      isDoctorTimeoutReport({
+        checks: [{ id: "git" }],
+      } as DoctorReport),
+    ).toBe(false);
   });
 });

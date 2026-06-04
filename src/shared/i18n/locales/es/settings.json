@@ -148,6 +148,7 @@
     "runFix": "¿Ejecutar corrección?",
     "runFixDescription": "Esto ejecutará el siguiente comando:",
     "running": "Ejecutando comprobaciones...",
+    "longRunning": "Sigue ejecutándose después de {{seconds}} s. Dejaremos de esperar después de {{timeoutSeconds}} s si una comprobación se bloquea.",
     "title": "Diagnóstico",
     "tools": "Herramientas",
     "version": {
