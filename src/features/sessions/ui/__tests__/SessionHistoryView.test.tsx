@@ -43,6 +43,9 @@ vi.mock("@/shared/api/acp", () => ({
 
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
   focusSessionWindow: vi.fn().mockResolvedValue(undefined),
+  getSessionWindowSupport: vi
+    .fn()
+    .mockResolvedValue({ supported: true, reason: undefined }),
   openSessionWindow: vi.fn().mockResolvedValue(undefined),
   releaseSession: vi.fn().mockResolvedValue(undefined),
 }));
@@ -187,6 +190,10 @@ function scrollHistoryTo(scrollTop: number) {
 
 describe("SessionHistoryView", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
     vi.clearAllMocks();
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     useChatStore.setState({ messagesBySession: {} });
@@ -227,10 +234,14 @@ describe("SessionHistoryView", () => {
     renderHistory();
 
     await user.click(
-      screen.getByRole("button", { name: /open in new window chat one/i }),
+      await screen.findByRole("button", {
+        name: /open in new window chat one/i,
+      }),
     );
 
-    expect(openSessionWindow).toHaveBeenCalledWith("session-1");
+    expect(openSessionWindow).toHaveBeenCalledWith("session-1", {
+      handoff: false,
+    });
     expect(focusSessionWindow).not.toHaveBeenCalled();
   });
 
@@ -247,7 +258,7 @@ describe("SessionHistoryView", () => {
     renderHistory();
 
     await user.click(
-      screen.getByRole("button", { name: /open window chat one/i }),
+      await screen.findByRole("button", { name: /open window chat one/i }),
     );
 
     expect(focusSessionWindow).toHaveBeenCalledWith("session-1");

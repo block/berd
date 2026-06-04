@@ -624,6 +624,42 @@ describe("useChatSessionController", () => {
     expect(sendOptions?.assistantPrompt).toContain("draft-from-chat.md");
   });
 
+  it("blocks deferred persona sends while read-only", async () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Planner",
+          systemPrompt: "Plan clearly.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    const { result, rerender } = renderHook(
+      ({ readOnly }: { readOnly: boolean }) =>
+        useChatSessionController({ sessionId: "session-1", readOnly }),
+      {
+        initialProps: { readOnly: false },
+      },
+    );
+
+    let accepted: boolean | undefined;
+    let sendResult!: boolean | Promise<boolean>;
+    act(() => {
+      sendResult = result.current.handleSend("plan", "persona-1");
+      rerender({ readOnly: true });
+    });
+
+    await act(async () => {
+      accepted = sendResult instanceof Promise ? await sendResult : sendResult;
+    });
+
+    expect(accepted).toBe(false);
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().draftsBySession["session-1"]).toBe("plan");
+  });
+
   it("opens builder mode as soon as the agent-builder skill is selected", async () => {
     useChatStore.getState().setSkillDrafts("session-1", [
       {

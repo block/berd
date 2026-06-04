@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { useChatSessionStore, type ChatSession } from "../chatSessionStore";
 
 const mocks = vi.hoisted(() => ({
@@ -101,6 +102,7 @@ describe("chatSessionStore", () => {
   beforeEach(() => {
     window.localStorage.removeItem("goose:context-panel-open");
     resetStore();
+    useSessionWindowStore.getState().setSnapshot([]);
     vi.clearAllMocks();
     mocks.archiveSession.mockResolvedValue(undefined);
     mocks.releaseSession.mockResolvedValue(undefined);
@@ -109,6 +111,9 @@ describe("chatSessionStore", () => {
 
   it("releases a windowed session when archiving", async () => {
     seedSession({ id: "session-1" });
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
 
     await useChatSessionStore.getState().archiveSession("session-1");
 
@@ -117,6 +122,9 @@ describe("chatSessionStore", () => {
 
   it("releases a windowed session when removing it locally", () => {
     seedSession({ id: "session-1" });
+    useSessionWindowStore
+      .getState()
+      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
 
     useChatSessionStore.getState().removeSession("session-1");
 

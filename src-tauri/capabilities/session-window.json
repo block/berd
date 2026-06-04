@@ -2,6 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "session-window",
   "description": "Capability for popped-out chat session windows",
+  "platforms": ["macOS"],
   "windows": ["session:*"],
   "permissions": [
     "core:default",
@@ -20,41 +21,6 @@
         },
         {
           "url": "https://linear.app/*"
-        }
-      ]
-    },
-    {
-      "identifier": "opener:allow-open-path",
-      "allow": [
-        {
-          "path": "$HOME/**"
-        },
-        {
-          "path": "$HOME/.goose/**"
-        },
-        {
-          "path": "$TEMP/**"
-        },
-        {
-          "path": "/Volumes/**"
-        },
-        {
-          "path": "/mnt/**"
-        },
-        {
-          "path": "/workspace/**"
-        },
-        {
-          "path": "/workspaces/**"
-        },
-        {
-          "path": "/opt/**"
-        },
-        {
-          "path": "/srv/**"
-        },
-        {
-          "path": "*:/**"
         }
       ]
     },

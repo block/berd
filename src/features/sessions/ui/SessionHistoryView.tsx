@@ -9,6 +9,7 @@ import {
   focusSessionWindow,
   openSessionWindow,
 } from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -121,7 +122,10 @@ export function SessionHistoryView({
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const removeSession = useChatSessionStore((s) => s.removeSession);
   const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
-  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
+  const sessionWindowSupport = useSessionWindowSupport();
+  const isMultiWindowEnabled = Boolean(
+    multiWindowExperiment?.enabled && sessionWindowSupport.supported,
+  );
   const openSessions = useSessionWindowStore((s) => s.openSessions);
   const loadMoreInFlightRef = useRef(false);
   const activeSessions = useMemo(
@@ -558,9 +562,15 @@ export function SessionHistoryView({
     (sessionId: string) => {
       const isOpenInWindow =
         sessionId in useSessionWindowStore.getState().openSessions;
-      const action = isOpenInWindow ? focusSessionWindow : openSessionWindow;
+      const runtime = useChatStore.getState().sessionStateById[sessionId];
+      const isRunning = Boolean(
+        runtime && (runtime.chatState !== "idle" || runtime.streamingMessageId),
+      );
+      const action = isOpenInWindow
+        ? () => focusSessionWindow(sessionId)
+        : () => openSessionWindow(sessionId, { handoff: isRunning });
 
-      void action(sessionId).catch((error) => {
+      void action().catch((error) => {
         console.error(
           isOpenInWindow
             ? "Failed to focus session window:"

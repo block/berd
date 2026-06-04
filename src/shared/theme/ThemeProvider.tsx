@@ -19,7 +19,6 @@ type ThemeProviderState = {
   resetPrimaryColor: () => void;
 };
 
-const LEGACY_THEME_STORAGE_KEY = "goose-theme";
 const THEME_MODE_STORAGE_KEY = "goose-theme-mode";
 const PRIMARY_COLOR_STORAGE_KEY = "goose-primary-color";
 const DEPRECATED_DENSITY_STORAGE_KEY = "goose-density";
@@ -121,14 +120,6 @@ function readInitialThemeMode(): ThemeMode {
 
   if (isThemeMode(storedThemeMode)) {
     return storedThemeMode;
-  }
-
-  // Best-effort migration from the legacy "goose-theme" key when its value was
-  // one of system/light/dark. Legacy named (shiki) presets are intentionally
-  // ignored; stale storage keys are left in place.
-  const legacyTheme = window.localStorage.getItem(LEGACY_THEME_STORAGE_KEY);
-  if (isThemeMode(legacyTheme)) {
-    return legacyTheme;
   }
 
   return "system";

@@ -23,6 +23,14 @@
       "copyAsMarkdown": "Copy as Markdown"
     }
   },
+  "sessionWindow": {
+    "handoffPausedDescription": "The source window stopped sending live updates. Reload the session to recover the persisted conversation history.",
+    "handoffPausedTitle": "Session handoff paused",
+    "missingDescription": "We can't find this session. It may have been deleted.",
+    "missingTitle": "Session unavailable",
+    "readOnlyStatus": "Finishing current response...",
+    "reload": "Reload session"
+  },
   "terminal": {
     "checkingWorkspace": "Checking workspace...",
     "close": "Close terminal",

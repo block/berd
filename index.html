@@ -48,9 +48,22 @@
           return blackContrast >= whiteContrast ? "#000000" : "#ffffff";
         };
 
+        const readThemeMode = () => {
+          const storedThemeMode = localStorage.getItem("goose-theme-mode");
+          if (
+            storedThemeMode === "system" ||
+            storedThemeMode === "light" ||
+            storedThemeMode === "dark"
+          ) {
+            return storedThemeMode;
+          }
+
+          return "system";
+        };
+
         try {
           const root = document.documentElement;
-          const storedTheme = localStorage.getItem("goose-theme") || "system";
+          const storedTheme = readThemeMode();
           const resolvedTheme =
             storedTheme === "system"
               ? window.matchMedia("(prefers-color-scheme: dark)").matches
@@ -58,7 +71,7 @@
                 : "light"
               : storedTheme;
           const accent =
-            normalizeHexColor(localStorage.getItem("goose-accent-color")) ||
+            normalizeHexColor(localStorage.getItem("goose-primary-color")) ||
             getDefaultAccent(resolvedTheme);
           const foreground = getContrastColor(accent);
           const density = localStorage.getItem("goose-density") || "comfortable";

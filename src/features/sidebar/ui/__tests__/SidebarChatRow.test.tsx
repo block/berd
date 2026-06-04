@@ -17,12 +17,19 @@ import {
 
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
   focusSessionWindow: vi.fn().mockResolvedValue(undefined),
+  getSessionWindowSupport: vi
+    .fn()
+    .mockResolvedValue({ supported: true, reason: undefined }),
   openSessionWindow: vi.fn().mockResolvedValue(undefined),
   releaseSession: vi.fn().mockResolvedValue(undefined),
 }));
 
 describe("SidebarChatRow", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      configurable: true,
+      value: {},
+    });
     resetHomeWidgetStoreForTests();
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     useSessionWindowStore.getState().setSnapshot([]);
@@ -257,7 +264,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
-    expect(screen.getByLabelText(/open in window/i)).toBeInTheDocument();
+    expect(await screen.findByLabelText(/open in window/i)).toBeInTheDocument();
 
     await user.click(
       screen.getAllByRole("button", { name: /windowed chat/i })[0],

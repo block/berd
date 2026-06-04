@@ -2,24 +2,18 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
-  emitSessionHandoffComplete,
-  emitSessionHandoffSnapshot,
-} from "@/features/chat/lib/sessionHandoffEvents";
-import { completeSessionHandoff } from "@/features/chat/lib/sessionWindowCommands";
+  finishSessionHandoff,
+  publishSessionHandoffSnapshot,
+} from "@/features/chat/lib/sessionWindowCommands";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import type { Message } from "@/shared/types/messages";
 import { useSessionHandoffSource } from "../useSessionHandoffSource";
 
-vi.mock("@/features/chat/lib/sessionHandoffEvents", () => ({
-  emitSessionHandoffComplete: vi.fn().mockResolvedValue(undefined),
-  emitSessionHandoffFailed: vi.fn().mockResolvedValue(undefined),
-  emitSessionHandoffSnapshot: vi.fn().mockResolvedValue(undefined),
-}));
-
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
-  completeSessionHandoff: vi.fn().mockResolvedValue(undefined),
+  finishSessionHandoff: vi.fn().mockResolvedValue(undefined),
+  publishSessionHandoffSnapshot: vi.fn().mockResolvedValue(undefined),
 }));
 
 const textMessage = (id: string, text: string): Message => ({
@@ -29,7 +23,7 @@ const textMessage = (id: string, text: string): Message => ({
   content: [{ type: "text", text }],
 });
 
-function setActiveHandoff() {
+function setActiveHandoff(destinationReady = true) {
   useSessionWindowStore.getState().setSnapshot([
     {
       sessionId: "session-1",
@@ -38,6 +32,9 @@ function setActiveHandoff() {
         handoff: {
           fromLabel: "main",
           toLabel: "session:session-1",
+          destinationReady,
+          latestVersion: 0,
+          finalVersion: null,
         },
       },
     },
@@ -46,6 +43,7 @@ function setActiveHandoff() {
 
 describe("useSessionHandoffSource", () => {
   beforeEach(() => {
+    vi.useRealTimers();
     useSessionWindowStore.getState().setSnapshot([]);
     useChatStore.setState({
       messagesBySession: {},
@@ -56,12 +54,20 @@ describe("useSessionHandoffSource", () => {
       loadingSessionIds: new Set(),
       scrollTargetMessageBySession: {},
     });
-    vi.mocked(emitSessionHandoffComplete).mockClear();
-    vi.mocked(emitSessionHandoffSnapshot).mockClear();
-    vi.mocked(completeSessionHandoff).mockClear();
+    vi.mocked(finishSessionHandoff).mockClear();
+    vi.mocked(publishSessionHandoffSnapshot).mockClear();
   });
 
-  it("emits an immediate snapshot when this window owns a handoff", async () => {
+  it("waits for destination readiness before publishing", async () => {
+    setActiveHandoff(false);
+
+    renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(publishSessionHandoffSnapshot).not.toHaveBeenCalled();
+  });
+
+  it("publishes an immediate snapshot when this window owns a ready handoff", async () => {
     const message = textMessage("m1", "hello");
     useChatStore.getState().setMessages("session-1", [message]);
     useChatStore.setState({
@@ -78,24 +84,21 @@ describe("useSessionHandoffSource", () => {
     renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
 
     await waitFor(() => {
-      expect(emitSessionHandoffSnapshot).toHaveBeenCalledWith(
-        "session:session-1",
-        {
-          sessionId: "session-1",
-          fromLabel: "main",
-          toLabel: "session:session-1",
-          messages: [message],
-          sessionState: {
-            ...INITIAL_SESSION_CHAT_RUNTIME,
-            chatState: "streaming",
-            streamingMessageId: "m1",
-          },
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalledWith("session-1", {
+        sessionId: "session-1",
+        fromLabel: "main",
+        toLabel: "session:session-1",
+        messages: [message],
+        sessionState: {
+          ...INITIAL_SESSION_CHAT_RUNTIME,
+          chatState: "streaming",
+          streamingMessageId: "m1",
         },
-      );
+      });
     });
   });
 
-  it("mirrors message updates while the handoff is active", async () => {
+  it("coalesces message updates using the latest chat state", async () => {
     useChatStore
       .getState()
       .setMessages("session-1", [textMessage("m1", "hello")]);
@@ -110,17 +113,76 @@ describe("useSessionHandoffSource", () => {
     });
     setActiveHandoff();
     renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
-    await waitFor(() => expect(emitSessionHandoffSnapshot).toHaveBeenCalled());
-    vi.mocked(emitSessionHandoffSnapshot).mockClear();
+    await waitFor(() =>
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalled(),
+    );
+    vi.mocked(publishSessionHandoffSnapshot).mockClear();
+
+    const nextMessage = textMessage("m2", "still going");
+    const latestMessage = textMessage("m3", "latest token");
+    act(() => {
+      useChatStore.getState().addMessage("session-1", nextMessage);
+      useChatStore.getState().addMessage("session-1", latestMessage);
+    });
+
+    await waitFor(() => {
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalledWith(
+        "session-1",
+        expect.objectContaining({
+          messages: [textMessage("m1", "hello"), nextMessage, latestMessage],
+        }),
+      );
+    });
+  });
+
+  it("keeps pending coalesced publishes across unrelated registry refreshes", async () => {
+    useChatStore
+      .getState()
+      .setMessages("session-1", [textMessage("m1", "hello")]);
+    useChatStore.setState({
+      sessionStateById: {
+        "session-1": {
+          ...INITIAL_SESSION_CHAT_RUNTIME,
+          chatState: "streaming",
+          streamingMessageId: "m1",
+        },
+      },
+    });
+    setActiveHandoff();
+    renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
+    await waitFor(() =>
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalled(),
+    );
+    vi.mocked(publishSessionHandoffSnapshot).mockClear();
 
     const nextMessage = textMessage("m2", "still going");
     act(() => {
       useChatStore.getState().addMessage("session-1", nextMessage);
+      useSessionWindowStore.getState().setSnapshot([
+        {
+          sessionId: "session-1",
+          windowLabel: "session:session-1",
+          mode: {
+            handoff: {
+              fromLabel: "main",
+              toLabel: "session:session-1",
+              destinationReady: true,
+              latestVersion: 1,
+              finalVersion: null,
+            },
+          },
+        },
+        {
+          sessionId: "other-session",
+          windowLabel: "session:other-session",
+          mode: "owned",
+        },
+      ]);
     });
 
     await waitFor(() => {
-      expect(emitSessionHandoffSnapshot).toHaveBeenCalledWith(
-        "session:session-1",
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalledWith(
+        "session-1",
         expect.objectContaining({
           messages: [textMessage("m1", "hello"), nextMessage],
         }),
@@ -128,7 +190,7 @@ describe("useSessionHandoffSource", () => {
     });
   });
 
-  it("emits completion and marks the handoff complete when runtime settles idle", async () => {
+  it("finishes with a final snapshot when runtime settles idle after live activity", async () => {
     useChatStore
       .getState()
       .setMessages("session-1", [textMessage("m1", "done")]);
@@ -143,9 +205,10 @@ describe("useSessionHandoffSource", () => {
     });
     setActiveHandoff();
     renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
-    await waitFor(() => expect(emitSessionHandoffSnapshot).toHaveBeenCalled());
-    vi.mocked(emitSessionHandoffComplete).mockClear();
-    vi.mocked(completeSessionHandoff).mockClear();
+    await waitFor(() =>
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalled(),
+    );
+    vi.mocked(finishSessionHandoff).mockClear();
 
     act(() => {
       useChatStore.getState().setStreamingMessageId("session-1", null);
@@ -153,15 +216,46 @@ describe("useSessionHandoffSource", () => {
     });
 
     await waitFor(() => {
-      expect(emitSessionHandoffComplete).toHaveBeenCalledWith(
-        "session:session-1",
-        {
+      expect(finishSessionHandoff).toHaveBeenCalledWith(
+        "session-1",
+        expect.objectContaining({
           sessionId: "session-1",
           fromLabel: "main",
           toLabel: "session:session-1",
-        },
+        }),
       );
-      expect(completeSessionHandoff).toHaveBeenCalledWith("session-1");
+    });
+  });
+
+  it("finishes when a late-attached handoff is already idle", async () => {
+    const message = textMessage("m1", "done");
+    useChatStore.getState().setMessages("session-1", [message]);
+    useChatStore.setState({
+      sessionStateById: {
+        "session-1": {
+          ...INITIAL_SESSION_CHAT_RUNTIME,
+          chatState: "idle",
+          streamingMessageId: null,
+        },
+      },
+    });
+    setActiveHandoff();
+
+    renderHook(() => useSessionHandoffSource({ currentWindowLabel: "main" }));
+
+    await waitFor(() =>
+      expect(publishSessionHandoffSnapshot).toHaveBeenCalled(),
+    );
+    await waitFor(() => {
+      expect(finishSessionHandoff).toHaveBeenCalledWith(
+        "session-1",
+        expect.objectContaining({
+          sessionId: "session-1",
+          fromLabel: "main",
+          toLabel: "session:session-1",
+          messages: [message],
+        }),
+      );
     });
   });
 });

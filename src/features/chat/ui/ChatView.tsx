@@ -106,6 +106,7 @@ export function ChatView({
   } = usePinToHomeWidget({ kind: "chat", id: sessionId });
   const controller = useChatSessionController({
     sessionId,
+    readOnly: Boolean(readOnlyStatus),
     onCreatePersonaRequested: onCreatePersona,
   });
   const effectiveSession = controller.session ?? activeSession ?? null;

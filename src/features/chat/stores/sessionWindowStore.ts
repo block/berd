@@ -3,6 +3,9 @@ import { create } from "zustand";
 export interface SessionWindowHandoff {
   fromLabel: string;
   toLabel: string;
+  destinationReady: boolean;
+  latestVersion: number;
+  finalVersion?: number | null;
 }
 
 export type SessionWindowMode =

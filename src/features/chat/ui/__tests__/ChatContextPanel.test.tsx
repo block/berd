@@ -77,6 +77,7 @@ describe("ChatContextPanel", () => {
   });
 
   it("requests close on outside pointer down only", () => {
+    mockMatchMedia(true);
     const onRequestClose = vi.fn();
     render(
       <>

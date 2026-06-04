@@ -32,6 +32,8 @@ const queryClient = new QueryClient({
 
 const root = document.getElementById("root");
 if (!root) throw new Error("Root element not found");
+const appRoot: HTMLElement = root;
+const reactRoot = ReactDOM.createRoot(appRoot);
 
 function decodeSessionKey(sessionKey: string): string {
   const base64 = sessionKey.replace(/-/g, "+").replace(/_/g, "/");
@@ -40,26 +42,61 @@ function decodeSessionKey(sessionKey: string): string {
   return new TextDecoder().decode(bytes);
 }
 
+function renderBootError(message: string) {
+  reactRoot.render(
+    <React.StrictMode>
+      <div className="flex h-screen min-w-0 flex-col items-center justify-center gap-3 bg-background px-6 text-center text-foreground">
+        <h1 className="font-medium text-lg">Session window failed to load</h1>
+        <p className="max-w-md text-muted-foreground text-sm">{message}</p>
+        <button
+          type="button"
+          className="rounded-md border border-border px-3 py-1.5 text-sm"
+          onClick={() => window.location.reload()}
+        >
+          Reload
+        </button>
+      </div>
+    </React.StrictMode>,
+  );
+}
+
 const sessionKey = new URLSearchParams(window.location.search).get(
   "sessionKey",
 );
-const sessionId = sessionKey ? decodeSessionKey(sessionKey) : null;
+let sessionId: string | null = null;
+let bootError: string | null = null;
+if (sessionKey) {
+  try {
+    sessionId = decodeSessionKey(sessionKey);
+  } catch (error) {
+    console.error("Failed to decode session window key:", error);
+    bootError = "The session window URL is malformed.";
+  }
+}
 
-if (sessionId) {
+if (bootError) {
+  renderBootError(bootError);
+} else if (sessionId) {
+  const decodedSessionId = sessionId;
   Promise.all([
     import("@/app/SessionWindowApp"),
     import("@/app/SessionWindowRuntime"),
-  ]).then(([{ SessionWindowApp }, { SessionWindowRuntime }]) => {
-    ReactDOM.createRoot(root).render(
-      <React.StrictMode>
-        <SessionWindowRuntime queryClient={queryClient}>
-          <SessionWindowApp sessionId={sessionId} />
-        </SessionWindowRuntime>
-      </React.StrictMode>,
-    );
-  });
+  ])
+    .then(([{ SessionWindowApp }, { SessionWindowRuntime }]) => {
+      reactRoot.render(
+        <React.StrictMode>
+          <SessionWindowRuntime queryClient={queryClient}>
+            <SessionWindowApp sessionId={decodedSessionId} />
+          </SessionWindowRuntime>
+        </React.StrictMode>,
+      );
+    })
+    .catch((error) => {
+      console.error("Failed to load session window bundle:", error);
+      renderBootError("The session window bundle could not be loaded.");
+    });
 } else {
-  ReactDOM.createRoot(root).render(
+  reactRoot.render(
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <LocalMediaCacheEvents />

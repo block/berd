@@ -1414,9 +1414,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       cleanupChatSession(sessionId);
       setActiveSession(null);
       clearSettingsSectionUrl();
-      setActiveView("home");
+      if (activeView === "chat") {
+        setActiveView("home");
+      }
     },
-    [cleanupChatSession, setActiveSession],
+    [activeView, cleanupChatSession, setActiveSession],
   );
 
   const returnToAgentBuilderSettingsTarget = useCallback(() => {

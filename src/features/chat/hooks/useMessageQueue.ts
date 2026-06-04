@@ -50,6 +50,7 @@ export function useMessageQueue(
     attachments?: ChatAttachmentDraft[],
     sendOptions?: ChatSendOptions,
   ) => boolean | Promise<boolean>,
+  readOnly = false,
 ) {
   const queuedMessage = useChatStore(
     (s) => s.queuedMessageBySession[sessionId] ?? null,
@@ -95,6 +96,7 @@ export function useMessageQueue(
 
     if (
       chatState !== "idle" ||
+      readOnly ||
       !queuedMessage ||
       !queuedMessageKey ||
       hasReachedRetryLimit ||
@@ -153,7 +155,14 @@ export function useMessageQueue(
     } else {
       finalize(sendResult);
     }
-  }, [chatState, queuedMessage, queuedMessageKey, sendMessage, sessionId]);
+  }, [
+    chatState,
+    queuedMessage,
+    queuedMessageKey,
+    readOnly,
+    sendMessage,
+    sessionId,
+  ]);
 
   const enqueue = useCallback(
     (
@@ -162,6 +171,9 @@ export function useMessageQueue(
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
+      if (readOnly) {
+        return;
+      }
       useChatStore.getState().enqueueMessage(sessionId, {
         text,
         personaId,
@@ -169,7 +181,7 @@ export function useMessageQueue(
         sendOptions,
       });
     },
-    [sessionId],
+    [readOnly, sessionId],
   );
 
   const dismiss = useCallback(() => {

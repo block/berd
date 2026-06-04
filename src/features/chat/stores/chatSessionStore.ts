@@ -15,6 +15,7 @@ import {
   unarchiveSession as acpUnarchiveSession,
 } from "@/shared/api/acpApi";
 import { releaseSession } from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
@@ -220,6 +221,9 @@ function mergeSessionPage(
 }
 
 function releaseWindowedSession(sessionId: string): void {
+  if (!useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+    return;
+  }
   releaseSession(sessionId).catch((err: unknown) =>
     console.error("Failed to release session window:", err),
   );

@@ -18,6 +18,7 @@ import {
   focusSessionWindow,
   openSessionWindow,
 } from "@/features/chat/lib/sessionWindowCommands";
+import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -128,7 +129,10 @@ export function SidebarChatRow({
   } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
   const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
-  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
+  const sessionWindowSupport = useSessionWindowSupport();
+  const isMultiWindowEnabled = Boolean(
+    multiWindowExperiment?.enabled && sessionWindowSupport.supported,
+  );
   const displayTitle = getDisplaySessionTitle(
     title,
     t("common:session.defaultTitle"),
@@ -199,13 +203,7 @@ export function SidebarChatRow({
   const handleOpenInWindow = () => {
     setMenuOpen(false);
     void (async () => {
-      let handoffFrom: string | undefined;
-      if (isRunning && window.__TAURI_INTERNALS__) {
-        const { getCurrentWindow } = await import("@tauri-apps/api/window");
-        handoffFrom = getCurrentWindow().label;
-      }
-
-      await openSessionWindow(id, { handoffFrom });
+      await openSessionWindow(id, { handoff: isRunning });
     })().catch((error) => {
       console.error("Failed to open session window:", error);
       toast.error(t("actions.openWindowFailed"));

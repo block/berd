@@ -1,12 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
-  emitSessionHandoffComplete,
-  emitSessionHandoffFailed,
-  emitSessionHandoffSnapshot,
-  type SessionHandoffSnapshot,
-} from "@/features/chat/lib/sessionHandoffEvents";
-import { completeSessionHandoff } from "@/features/chat/lib/sessionWindowCommands";
+  finishSessionHandoff,
+  publishSessionHandoffSnapshot,
+  type SessionHandoffPayload,
+} from "@/features/chat/lib/sessionWindowCommands";
 import { useChatStore, type ChatStore } from "@/features/chat/stores/chatStore";
 import {
   useSessionWindowStore,
@@ -24,6 +22,9 @@ interface SourceHandoff {
   handoff: SessionWindowHandoff;
 }
 
+const SNAPSHOT_COALESCE_MS = 100;
+const IDLE_COMPLETE_DEBOUNCE_MS = 750;
+
 function getRuntime(state: ChatStore, sessionId: string) {
   return state.sessionStateById[sessionId];
 }
@@ -32,7 +33,7 @@ function getMessages(state: ChatStore, sessionId: string) {
   return state.messagesBySession[sessionId] ?? [];
 }
 
-function isHandoffComplete(runtime: SessionChatRuntime | undefined): boolean {
+function isHandoffIdle(runtime: SessionChatRuntime | undefined): boolean {
   return runtime?.chatState === "idle" && !runtime.streamingMessageId;
 }
 
@@ -40,7 +41,7 @@ function getSnapshot(
   state: ChatStore,
   sessionId: string,
   handoff: SessionWindowHandoff,
-): SessionHandoffSnapshot {
+): SessionHandoffPayload {
   return {
     sessionId,
     fromLabel: handoff.fromLabel,
@@ -50,8 +51,30 @@ function getSnapshot(
   };
 }
 
-function getErrorReason(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+function getReadySourceHandoffs(
+  handoffs: Record<string, SessionWindowHandoff>,
+  currentWindowLabel: string | null,
+): SourceHandoff[] {
+  if (!currentWindowLabel) {
+    return [];
+  }
+
+  return Object.entries(handoffs)
+    .filter(
+      ([, handoff]) =>
+        handoff.fromLabel === currentWindowLabel && handoff.destinationReady,
+    )
+    .map(([sessionId, handoff]) => ({ sessionId, handoff }));
+}
+
+function sourceHandoffSignature(sourceHandoffs: SourceHandoff[]): string {
+  return sourceHandoffs
+    .map(
+      ({ sessionId, handoff }) =>
+        `${sessionId}\u0000${handoff.fromLabel}\u0000${handoff.toLabel}`,
+    )
+    .sort()
+    .join("\u0001");
 }
 
 export function useSessionHandoffSource(
@@ -62,12 +85,13 @@ export function useSessionHandoffSource(
     options.currentWindowLabel ?? null,
   );
   const handoffs = useSessionWindowStore((s) => s.handoffs);
-  const sourceHandoffs = useMemo<SourceHandoff[]>(() => {
-    if (!enabled || !currentWindowLabel) return [];
-
-    return Object.entries(handoffs)
-      .filter(([, handoff]) => handoff.fromLabel === currentWindowLabel)
-      .map(([sessionId, handoff]) => ({ sessionId, handoff }));
+  const readySourceHandoffSignature = useMemo(() => {
+    if (!enabled) {
+      return "";
+    }
+    return sourceHandoffSignature(
+      getReadySourceHandoffs(handoffs, currentWindowLabel),
+    );
   }, [currentWindowLabel, enabled, handoffs]);
 
   useEffect(() => {
@@ -105,58 +129,82 @@ export function useSessionHandoffSource(
   }, [enabled, options.currentWindowLabel]);
 
   useEffect(() => {
-    const unsubscribers: Array<() => void> = [];
+    if (!enabled || !currentWindowLabel || !readySourceHandoffSignature) {
+      return;
+    }
+
+    const cleanups: Array<() => void> = [];
+    const sourceHandoffs = getReadySourceHandoffs(
+      useSessionWindowStore.getState().handoffs,
+      currentWindowLabel,
+    );
 
     for (const { sessionId, handoff } of sourceHandoffs) {
       let didComplete = false;
+      let publishTimer: ReturnType<typeof setTimeout> | null = null;
+      let idleTimer: ReturnType<typeof setTimeout> | null = null;
+      let publishedAtLeastOnce = false;
 
-      const emitFailed = async (reason: string) => {
-        try {
-          await emitSessionHandoffFailed(handoff.toLabel, {
-            sessionId,
-            fromLabel: handoff.fromLabel,
-            toLabel: handoff.toLabel,
-            reason,
-          });
-        } catch (error) {
-          console.error("Failed to emit session handoff failure:", error);
+      const clearIdleTimer = () => {
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+          idleTimer = null;
         }
       };
 
-      const emitSnapshot = async (state = useChatStore.getState()) => {
+      const publishSnapshot = async (
+        state = useChatStore.getState(),
+        final = false,
+      ) => {
         const snapshot = getSnapshot(state, sessionId, handoff);
-        await emitSessionHandoffSnapshot(handoff.toLabel, snapshot);
+        if (final) {
+          await finishSessionHandoff(sessionId, snapshot);
+        } else {
+          await publishSessionHandoffSnapshot(sessionId, snapshot);
+        }
+        publishedAtLeastOnce = true;
       };
 
-      const completeIfReady = async (state = useChatStore.getState()) => {
-        if (didComplete || !isHandoffComplete(getRuntime(state, sessionId))) {
+      const schedulePublish = () => {
+        if (didComplete || publishTimer) {
           return;
         }
 
-        didComplete = true;
-        try {
-          await emitSnapshot(state);
-          await emitSessionHandoffComplete(handoff.toLabel, {
-            sessionId,
-            fromLabel: handoff.fromLabel,
-            toLabel: handoff.toLabel,
+        publishTimer = setTimeout(() => {
+          publishTimer = null;
+          void publishSnapshot(useChatStore.getState()).catch((error) => {
+            console.error("Failed to publish session handoff snapshot:", error);
           });
-          await completeSessionHandoff(sessionId);
-        } catch (error) {
-          await emitFailed(getErrorReason(error));
-        }
+        }, SNAPSHOT_COALESCE_MS);
       };
 
-      const emitSnapshotSafely = async (state = useChatStore.getState()) => {
-        try {
-          await emitSnapshot(state);
-        } catch (error) {
-          await emitFailed(getErrorReason(error));
+      const scheduleCompleteIfIdle = (state = useChatStore.getState()) => {
+        clearIdleTimer();
+        const runtime = getRuntime(state, sessionId);
+        if (didComplete || !publishedAtLeastOnce || !isHandoffIdle(runtime)) {
+          return;
         }
+
+        idleTimer = setTimeout(() => {
+          idleTimer = null;
+          didComplete = true;
+          void publishSnapshot(useChatStore.getState(), true).catch((error) => {
+            didComplete = false;
+            console.error("Failed to finish session handoff:", error);
+          });
+        }, IDLE_COMPLETE_DEBOUNCE_MS);
       };
 
-      void emitSnapshotSafely();
-      void completeIfReady();
+      void publishSnapshot()
+        .then(() => {
+          scheduleCompleteIfIdle();
+        })
+        .catch((error) => {
+          console.error(
+            "Failed to publish initial session handoff snapshot:",
+            error,
+          );
+        });
 
       const unsubscribe = useChatStore.subscribe((state, previousState) => {
         const messages = getMessages(state, sessionId);
@@ -168,17 +216,27 @@ export function useSessionHandoffSource(
           return;
         }
 
-        void emitSnapshotSafely(state);
-        void completeIfReady(state);
+        clearIdleTimer();
+
+        schedulePublish();
+        scheduleCompleteIfIdle(state);
       });
 
-      unsubscribers.push(unsubscribe);
+      cleanups.push(() => {
+        if (publishTimer) {
+          clearTimeout(publishTimer);
+        }
+        if (idleTimer) {
+          clearTimeout(idleTimer);
+        }
+        unsubscribe();
+      });
     }
 
     return () => {
-      for (const unsubscribe of unsubscribers) {
-        unsubscribe();
+      for (const cleanup of cleanups) {
+        cleanup();
       }
     };
-  }, [sourceHandoffs]);
+  }, [currentWindowLabel, enabled, readySourceHandoffSignature]);
 }

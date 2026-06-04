@@ -4,18 +4,21 @@ import { useTranslation } from "react-i18next";
 import { runChatRuntimeStartup } from "@/app/lib/chatRuntimeStartup";
 import { SessionWindowTopBar } from "@/app/ui/SessionWindowTopBar";
 import {
-  listenSessionHandoffComplete,
-  listenSessionHandoffFailed,
-  listenSessionHandoffSnapshots,
-  type SessionHandoffComplete,
-  type SessionHandoffFailed,
-  type SessionHandoffSnapshot,
+  listenSessionHandoffSnapshotAvailable,
+  type SessionHandoffSnapshotAvailable,
 } from "@/features/chat/lib/sessionHandoffEvents";
 import {
   activateSession,
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
-import { listSessionWindows } from "@/features/chat/lib/sessionWindowCommands";
+import {
+  joinSessionHandoff,
+  listSessionWindows,
+  readSessionHandoffSnapshot,
+  recoverSessionHandoff,
+  type SessionHandoffPayload,
+  type SessionHandoffSnapshot,
+} from "@/features/chat/lib/sessionWindowCommands";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   useChatSessionStore,
@@ -70,21 +73,48 @@ async function resolveCurrentWindowLabel(fallback: string): Promise<string> {
 }
 
 function applyHandoffSnapshot(payload: SessionHandoffSnapshot) {
-  const runtime = payload.sessionState;
+  const handoffPayload = payload.payload;
+  const runtime = handoffPayload.sessionState;
   useChatStore.setState((state) => ({
     messagesBySession: {
       ...state.messagesBySession,
-      [payload.sessionId]: payload.messages,
+      [handoffPayload.sessionId]: handoffPayload.messages,
     },
     ...(runtime
       ? {
           sessionStateById: {
             ...state.sessionStateById,
-            [payload.sessionId]: runtime,
+            [handoffPayload.sessionId]: runtime,
           },
         }
       : {}),
   }));
+}
+
+function isSnapshotForWindow(
+  payload: SessionHandoffPayload,
+  sessionId: string,
+  currentWindowLabel: string,
+) {
+  return (
+    payload.sessionId === sessionId && payload.toLabel === currentWindowLabel
+  );
+}
+
+function applySnapshotForWindow(
+  snapshot: SessionHandoffSnapshot | undefined | null,
+  sessionId: string,
+  currentWindowLabel: string,
+) {
+  if (!snapshot) {
+    return false;
+  }
+  if (!isSnapshotForWindow(snapshot.payload, sessionId, currentWindowLabel)) {
+    return false;
+  }
+
+  applyHandoffSnapshot(snapshot);
+  return true;
 }
 
 export function SessionWindowApp({
@@ -97,15 +127,9 @@ export function SessionWindowApp({
   const [currentWindowLabel, setCurrentWindowLabel] = useState<string | null>(
     currentWindowLabelOverride ?? null,
   );
+  const [initialMirrorVersion, setInitialMirrorVersion] = useState(0);
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
-  const activeHandoff = useSessionWindowStore((state) => {
-    const handoff = state.handoffs[sessionId];
-    return handoff?.toLabel === currentWindowLabel ? handoff : null;
-  });
-  const openSessionWindowLabel = useSessionWindowStore(
-    (state) => state.openSessions[sessionId],
-  );
 
   const loadOwnedSession = useCallback(
     async (options: { force?: boolean } = {}) => {
@@ -151,10 +175,26 @@ export function SessionWindowApp({
       const handoff = getDestinationHandoff(entries, sessionId, label);
       if (handoff) {
         activateSession(sessionId);
+        const joined = await joinSessionHandoff(sessionId);
+        if (cancelled) return;
+        const joinedSnapshot = joined.snapshot;
+        let startingVersion = 0;
+        if (applySnapshotForWindow(joinedSnapshot, sessionId, label)) {
+          startingVersion = joinedSnapshot?.version ?? 0;
+          if (joinedSnapshot?.isFinal) {
+            setPhase("ready");
+            return;
+          }
+        }
+        useSessionWindowStore
+          .getState()
+          .setSnapshot(await listSessionWindows());
+        setInitialMirrorVersion(startingVersion);
         setPhase("mirror");
         return;
       }
 
+      setInitialMirrorVersion(0);
       await loadOwnedSession();
       if (!cancelled) setPhase("ready");
     }
@@ -172,99 +212,104 @@ export function SessionWindowApp({
     }
 
     let cancelled = false;
-    let completed = false;
-    const matchesThisHandoff = (
-      payload:
-        | SessionHandoffSnapshot
-        | SessionHandoffComplete
-        | SessionHandoffFailed,
-    ) =>
-      payload.sessionId === sessionId && payload.toLabel === currentWindowLabel;
+    let lastVersion = initialMirrorVersion;
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
-    async function completeHandoff() {
-      if (completed) {
+    const clearRecoveryTimer = () => {
+      if (recoveryTimer) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
+    };
+
+    const resetRecoveryTimer = () => {
+      clearRecoveryTimer();
+      recoveryTimer = setTimeout(() => {
+        if (!cancelled) {
+          setPhase("recoverable");
+        }
+      }, 5000);
+    };
+
+    const readLatestSnapshot = async (afterVersion = lastVersion) => {
+      const snapshot = await readSessionHandoffSnapshot(
+        sessionId,
+        afterVersion,
+      );
+      if (cancelled || !snapshot) {
         return;
       }
-      completed = true;
-      await loadOwnedSession({ force: true });
-      if (cancelled) return;
-      setPhase("ready");
-    }
-
-    async function setupHandoffListeners() {
-      const [unlistenSnapshot, unlistenComplete, unlistenFailed] =
-        await Promise.all([
-          listenSessionHandoffSnapshots((payload) => {
-            if (matchesThisHandoff(payload)) {
-              applyHandoffSnapshot(payload);
-            }
-          }),
-          listenSessionHandoffComplete((payload) => {
-            if (matchesThisHandoff(payload)) {
-              void completeHandoff();
-            }
-          }),
-          listenSessionHandoffFailed((payload) => {
-            if (matchesThisHandoff(payload) && !completed) {
-              setPhase("recoverable");
-            }
-          }),
-        ]);
-
-      if (cancelled) {
-        unlistenSnapshot();
-        unlistenComplete();
-        unlistenFailed();
+      if (!applySnapshotForWindow(snapshot, sessionId, currentWindowLabel)) {
+        return;
       }
 
-      return () => {
-        unlistenSnapshot();
-        unlistenComplete();
-        unlistenFailed();
-      };
-    }
+      lastVersion = snapshot.version;
+      if (snapshot.isFinal) {
+        clearRecoveryTimer();
+        setPhase("ready");
+      } else {
+        resetRecoveryTimer();
+      }
+    };
+
+    resetRecoveryTimer();
+
+    void readLatestSnapshot().catch((error) => {
+      console.error("Failed to read session handoff snapshot:", error);
+    });
+
+    const pollTimer = window.setInterval(() => {
+      void readLatestSnapshot().catch((error) => {
+        console.error("Failed to poll session handoff snapshot:", error);
+      });
+    }, 500);
 
     let cleanup: (() => void) | undefined;
-    void setupHandoffListeners().then((unlisten) => {
+    void listenSessionHandoffSnapshotAvailable(
+      (payload: SessionHandoffSnapshotAvailable) => {
+        if (
+          payload.sessionId === sessionId &&
+          payload.toLabel === currentWindowLabel
+        ) {
+          void readLatestSnapshot(lastVersion).catch((error) => {
+            console.error(
+              "Failed to read hinted session handoff snapshot:",
+              error,
+            );
+          });
+        }
+      },
+    ).then((unlisten) => {
       cleanup = unlisten;
+      if (cancelled) {
+        unlisten();
+      }
     });
 
     return () => {
       cancelled = true;
+      window.clearInterval(pollTimer);
+      clearRecoveryTimer();
       cleanup?.();
     };
-  }, [currentWindowLabel, loadOwnedSession, phase, sessionId]);
-
-  useEffect(() => {
-    if (phase !== "mirror" || activeHandoff || !currentWindowLabel) {
-      return;
-    }
-
-    if (openSessionWindowLabel === currentWindowLabel) {
-      void loadOwnedSession({ force: true }).then(() => setPhase("ready"));
-      return;
-    }
-
-    setPhase("recoverable");
-  }, [
-    activeHandoff,
-    currentWindowLabel,
-    loadOwnedSession,
-    openSessionWindowLabel,
-    phase,
-  ]);
+  }, [currentWindowLabel, initialMirrorVersion, phase, sessionId]);
 
   const handleReloadSession = useCallback(() => {
     setPhase("loading");
-    void loadOwnedSession({ force: true }).then(() => setPhase("ready"));
-  }, [loadOwnedSession]);
+    void recoverSessionHandoff(sessionId)
+      .catch((error) => {
+        console.error("Failed to recover session handoff:", error);
+      })
+      .then(() => loadOwnedSession({ force: true }))
+      .then(() => setPhase("ready"));
+  }, [loadOwnedSession, sessionId]);
 
   if (phase === "missing") {
     return (
       <div className="flex h-screen min-w-0 flex-col bg-background text-foreground">
-        <SessionWindowTopBar title="Session unavailable" />
+        <SessionWindowTopBar title={t("sessionWindow.missingTitle")} />
         <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-          We can&apos;t find this session. It may have been deleted.
+          {t("sessionWindow.missingDescription")}
         </div>
       </div>
     );
@@ -277,15 +322,14 @@ export function SessionWindowApp({
         <div className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center">
           <div className="max-w-md space-y-2">
             <h1 className="font-medium text-foreground text-lg">
-              Session handoff paused
+              {t("sessionWindow.handoffPausedTitle")}
             </h1>
             <p className="text-muted-foreground text-sm">
-              The source window stopped sending live updates. Reload the session
-              to recover the persisted conversation history.
+              {t("sessionWindow.handoffPausedDescription")}
             </p>
           </div>
           <Button type="button" onClick={handleReloadSession}>
-            Reload session
+            {t("sessionWindow.reload")}
           </Button>
         </div>
       </div>
@@ -307,7 +351,7 @@ export function SessionWindowApp({
             sessionId={sessionId}
             activeSession={session}
             readOnlyStatus={
-              phase === "mirror" ? "Finishing current response..." : undefined
+              phase === "mirror" ? t("sessionWindow.readOnlyStatus") : undefined
             }
           />
         </div>

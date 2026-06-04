@@ -198,52 +198,6 @@ describe("ThemeProvider", () => {
     });
   });
 
-  it("migrates legacy system/light/dark storage to theme mode", async () => {
-    localStorage.setItem("goose-theme", "dark");
-    createMediaQueryList(false);
-
-    render(
-      <ThemeProvider>
-        <ThemeConsumer />
-      </ThemeProvider>,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByTestId("theme-mode")).toHaveTextContent("dark");
-      expect(screen.getByTestId("resolved-theme")).toHaveTextContent("dark");
-    });
-  });
-
-  it("ignores and clears legacy cached theme vars", async () => {
-    localStorage.setItem(
-      "goose-theme-cache-v3",
-      JSON.stringify({
-        isDark: true,
-        primaryColor: "#ff79c6",
-        themePrimaryColor: "#ff79c6",
-        vars: {
-          "--background": "240 10% 4%",
-          "--foreground": "0 0% 100%",
-        },
-      }),
-    );
-    createMediaQueryList(false);
-
-    render(
-      <ThemeProvider>
-        <ThemeConsumer />
-      </ThemeProvider>,
-    );
-
-    await waitFor(() => {
-      expect(localStorage.getItem("goose-theme-cache-v3")).toBeNull();
-      expect(document.documentElement).toHaveClass("light");
-    });
-    expect(
-      document.documentElement.style.getPropertyValue("--background"),
-    ).toBe("");
-  });
-
   it("sets and resets a custom primary color override", async () => {
     const user = userEvent.setup();
     createMediaQueryList(false);

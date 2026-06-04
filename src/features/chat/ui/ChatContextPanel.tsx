@@ -64,7 +64,7 @@ export function ChatContextPanel({
   const reflowDuration = shouldReduceMotion ? 0 : CP_REFLOW_MS;
 
   useEffect(() => {
-    if (!isOpen || !onRequestClose) {
+    if (!isOpen || !onRequestClose || !isCompactViewport) {
       return;
     }
 
@@ -77,6 +77,14 @@ export function ChatContextPanel({
       ) {
         return;
       }
+      if (
+        target instanceof Element &&
+        target.closest(
+          "[data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-dropdown-menu-content]",
+        )
+      ) {
+        return;
+      }
 
       onRequestClose();
     };
@@ -85,7 +93,7 @@ export function ChatContextPanel({
     return () => {
       document.removeEventListener("pointerdown", handlePointerDown, true);
     };
-  }, [isOpen, onRequestClose]);
+  }, [isCompactViewport, isOpen, onRequestClose]);
 
   return (
     <div

@@ -56,6 +56,7 @@ import {
 interface UseChatSessionControllerOptions {
   sessionId: string | null;
   isHomeSession?: boolean;
+  readOnly?: boolean;
   onMessageAccepted?: (sessionId: string) => void;
   onCreatePersonaRequested?: () => void;
 }
@@ -203,6 +204,7 @@ async function syncPendingHomeModelSelection({
 export function useChatSessionController({
   sessionId,
   isHomeSession,
+  readOnly = false,
   onMessageAccepted,
   onCreatePersonaRequested,
 }: UseChatSessionControllerOptions) {
@@ -946,6 +948,7 @@ export function useChatSessionController({
     stateSessionId,
     queueChatState,
     sendWithAutoCompact,
+    readOnly,
   );
   const pendingBuilderActivationRef = useRef<
     Record<string, Promise<ChatSession | null>>
@@ -1044,10 +1047,17 @@ export function useChatSessionController({
       sendOptions?: ChatSendOptions,
     ) => {
       if (!sessionId) {
+        if (readOnly) {
+          return false;
+        }
         if (!queue.queuedMessage) {
           queue.enqueue(text, personaId, attachments, sendOptions);
         }
         return true;
+      }
+
+      if (readOnly) {
+        return false;
       }
 
       if (personaId && personaId !== selectedPersonaId) {
@@ -1094,6 +1104,7 @@ export function useChatSessionController({
       ensureCurrentSessionIsAgentBuilder,
       handlePersonaChange,
       queue,
+      readOnly,
       session?.intent,
       sessionId,
       selectedPersonaId,
@@ -1110,6 +1121,10 @@ export function useChatSessionController({
     ) => {
       if (!sessionId) {
         return handleSend(text, personaId, attachments, sendOptions);
+      }
+
+      if (readOnly) {
+        return false;
       }
 
       await stopStreaming();
@@ -1150,6 +1165,7 @@ export function useChatSessionController({
       ensureCurrentSessionIsAgentBuilder,
       handleSend,
       queue,
+      readOnly,
       sendWithAutoCompact,
       session?.intent,
       sessionId,
@@ -1175,6 +1191,12 @@ export function useChatSessionController({
     if (deferredSend.current && selectedPersona) {
       const { text, attachments, sendOptions, resolve } = deferredSend.current;
       deferredSend.current = null;
+      if (readOnly) {
+        useChatStore.getState().setDraft(stateSessionId, text);
+        resolve?.(false);
+        return;
+      }
+
       void (async () => {
         const builderSession =
           session?.intent !== "build-agent" &&
@@ -1208,6 +1230,7 @@ export function useChatSessionController({
     }
   }, [
     ensureCurrentSessionIsAgentBuilder,
+    readOnly,
     selectedPersona,
     sendWithAutoCompact,
     session?.intent,

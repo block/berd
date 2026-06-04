@@ -23,6 +23,14 @@
       "copyAsMarkdown": "Copiar como Markdown"
     }
   },
+  "sessionWindow": {
+    "handoffPausedDescription": "La ventana de origen dejó de enviar actualizaciones en vivo. Recarga la sesión para recuperar el historial de conversación persistido.",
+    "handoffPausedTitle": "Transferencia de sesión pausada",
+    "missingDescription": "No encontramos esta sesión. Es posible que se haya eliminado.",
+    "missingTitle": "Sesión no disponible",
+    "readOnlyStatus": "Terminando la respuesta actual...",
+    "reload": "Recargar sesión"
+  },
   "terminal": {
     "checkingWorkspace": "Comprobando espacio de trabajo...",
     "close": "Cerrar terminal",
