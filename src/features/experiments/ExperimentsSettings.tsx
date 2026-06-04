@@ -4,10 +4,12 @@ import { toast } from "sonner";
 import { EXPERIMENT_DEFINITIONS } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
 import {
+  clearExperimentEnabledOverride,
   setExperimentEnabled,
   useExperimentList,
   type ExperimentRegistry,
 } from "./experimentPreferences";
+import { Button } from "@/shared/ui/button";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Switch } from "@/shared/ui/switch";
 
@@ -31,6 +33,11 @@ export function ExperimentsSettings({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {t("experiments.description")}
           </p>
+          {import.meta.env.DEV ? (
+            <p className="mt-1 text-xs text-muted-foreground">
+              {t("experiments.autoEnable.description")}
+            </p>
+          ) : null}
         </div>
         {registry.length === 0 ? (
           <p className="text-xs text-muted-foreground">
@@ -64,21 +71,42 @@ export function ExperimentsSettings({
                         {t(definition.descriptionKey)}
                       </p>
                     </div>
-                    <Switch
-                      checked={experiment.enabled}
-                      onCheckedChange={(enabled) => {
-                        const didSave = setExperimentEnabled(
-                          definition.id,
-                          enabled,
-                          registry,
-                        );
-                        if (!didSave) {
-                          toast.error(t("experiments.saveError"));
-                        }
-                      }}
-                      aria-labelledby={titleId}
-                      aria-describedby={descriptionId}
-                    />
+                    <div className="flex shrink-0 items-center gap-2">
+                      {experiment.enabledSource === "explicit" ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            const didSave = clearExperimentEnabledOverride(
+                              definition.id,
+                              registry,
+                            );
+                            if (!didSave) {
+                              toast.error(t("experiments.saveError"));
+                            }
+                          }}
+                          aria-label={t("experiments.resetToAuto")}
+                        >
+                          {t("experiments.resetToAuto")}
+                        </Button>
+                      ) : null}
+                      <Switch
+                        checked={experiment.enabled}
+                        onCheckedChange={(enabled) => {
+                          const didSave = setExperimentEnabled(
+                            definition.id,
+                            enabled,
+                            registry,
+                          );
+                          if (!didSave) {
+                            toast.error(t("experiments.saveError"));
+                          }
+                        }}
+                        aria-labelledby={titleId}
+                        aria-describedby={descriptionId}
+                      />
+                    </div>
                   </div>
                   <ExperimentConfigControls
                     definition={definition}

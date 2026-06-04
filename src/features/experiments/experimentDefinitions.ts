@@ -38,7 +38,6 @@ export interface ExperimentDefinition {
   id: string;
   titleKey: string;
   descriptionKey: string;
-  defaultEnabled?: boolean;
   config?: Record<string, ExperimentConfigControl>;
 }
 

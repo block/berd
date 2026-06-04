@@ -175,6 +175,10 @@
     }
   },
   "experiments": {
+    "autoEnable": {
+      "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
+      "label": "Auto-enable new experiments"
+    },
     "builderbot": {
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
@@ -192,6 +196,7 @@
       "promptPlaceholder": "Enter style guidance for Goose",
       "title": "Goose style guidelines"
     },
+    "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
     "title": "Experiments"
   },

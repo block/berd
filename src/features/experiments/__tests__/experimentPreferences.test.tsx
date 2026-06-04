@@ -6,10 +6,14 @@ import {
   EXPERIMENT_PREFERENCES_CHANGE_EVENT,
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+  clearExperimentEnabledOverride,
   getExperiment,
+  getExperimentAutoEnable,
+  setExperimentAutoEnable,
   setExperimentConfigValue,
   setExperimentEnabled,
   useExperiment,
+  useExperimentAutoEnable,
 } from "../experimentPreferences";
 
 const testRegistry = [
@@ -82,16 +86,25 @@ describe("experimentPreferences", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     Object.defineProperty(window, "localStorage", {
       configurable: true,
       value: originalLocalStorage,
     });
   });
 
-  it("defaults known experiments off with default config", () => {
+  it("defaults auto-enable on in dev builds", () => {
+    vi.stubEnv("DEV", true);
+
+    expect(getExperimentAutoEnable()).toEqual({
+      enabled: true,
+      source: "default",
+      defaultEnabled: true,
+    });
     expect(getExperiment("test-experiment", testRegistry)).toEqual({
       id: "test-experiment",
-      enabled: false,
+      enabled: true,
+      enabledSource: "auto",
       config: {
         enabledConfig: false,
         mode: "stable",
@@ -101,7 +114,103 @@ describe("experimentPreferences", () => {
     });
   });
 
+  it("defaults auto-enable off in production builds", () => {
+    vi.stubEnv("DEV", false);
+
+    expect(getExperimentAutoEnable()).toEqual({
+      enabled: false,
+      source: "default",
+      defaultEnabled: false,
+    });
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: false,
+      enabledSource: "auto",
+    });
+  });
+
+  it("uses stored auto-enable instead of the build default", () => {
+    vi.stubEnv("DEV", false);
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 2,
+        autoEnable: true,
+        experiments: {},
+      }),
+    );
+
+    expect(getExperimentAutoEnable()).toEqual({
+      enabled: true,
+      source: "stored",
+      defaultEnabled: false,
+    });
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: true,
+      enabledSource: "auto",
+    });
+  });
+
+  it("lets explicit enabled true win over auto-enable false", () => {
+    vi.stubEnv("DEV", false);
+    setExperimentEnabled("test-experiment", true, testRegistry);
+
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: true,
+      enabledSource: "explicit",
+    });
+  });
+
+  it("lets explicit enabled false win over auto-enable true", () => {
+    vi.stubEnv("DEV", true);
+    setExperimentEnabled("test-experiment", false, testRegistry);
+
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: false,
+      enabledSource: "explicit",
+    });
+  });
+
+  it("clears explicit enabled overrides back to auto behavior", () => {
+    vi.stubEnv("DEV", false);
+    setExperimentAutoEnable(false);
+    setExperimentEnabled("test-experiment", true, testRegistry);
+
+    expect(
+      clearExperimentEnabledOverride("test-experiment", testRegistry),
+    ).toBe(true);
+
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: false,
+      enabledSource: "auto",
+    });
+    expect(
+      storedPreferences().experiments["test-experiment"].enabled,
+    ).toBeUndefined();
+  });
+
+  it("clears explicit enabled overrides without removing config", () => {
+    vi.stubEnv("DEV", false);
+    setExperimentConfigValue(
+      "test-experiment",
+      "mode",
+      "preview",
+      testRegistry,
+    );
+    setExperimentEnabled("test-experiment", true, testRegistry);
+
+    clearExperimentEnabledOverride("test-experiment", testRegistry);
+
+    expect(storedPreferences().experiments["test-experiment"]).toEqual({
+      config: { mode: "preview" },
+    });
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: false,
+      config: { mode: "preview" },
+    });
+  });
+
   it("falls back to defaults for invalid localStorage", () => {
+    vi.stubEnv("DEV", false);
     localStorage.setItem(EXPERIMENT_PREFERENCES_STORAGE_KEY, "not json");
 
     expect(getExperiment("test-experiment", testRegistry)?.enabled).toBe(false);
@@ -111,6 +220,7 @@ describe("experimentPreferences", () => {
   });
 
   it("falls back to defaults for unsupported storage versions", () => {
+    vi.stubEnv("DEV", false);
     localStorage.setItem(
       EXPERIMENT_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
@@ -131,6 +241,7 @@ describe("experimentPreferences", () => {
   });
 
   it("falls back to defaults when storage reads throw", () => {
+    vi.stubEnv("DEV", false);
     mockLocalStorage({
       getItem: () => {
         throw new Error("blocked");
@@ -148,6 +259,7 @@ describe("experimentPreferences", () => {
   });
 
   it("updates same-window subscribers when preferences change", () => {
+    vi.stubEnv("DEV", false);
     function Probe() {
       const experiment = useExperiment("test-experiment", testRegistry);
       return <div>{experiment?.enabled ? "enabled" : "disabled"}</div>;
@@ -162,6 +274,7 @@ describe("experimentPreferences", () => {
   });
 
   it("updates subscribers from cross-window storage events", () => {
+    vi.stubEnv("DEV", false);
     function Probe() {
       const experiment = useExperiment("test-experiment", testRegistry);
       return <div>{experiment?.enabled ? "enabled" : "disabled"}</div>;
@@ -171,7 +284,7 @@ describe("experimentPreferences", () => {
     expect(screen.getByText("disabled")).toBeInTheDocument();
 
     const nextValue = JSON.stringify({
-      version: 1,
+      version: 2,
       experiments: {
         "test-experiment": {
           enabled: true,
@@ -193,10 +306,11 @@ describe("experimentPreferences", () => {
   });
 
   it("updates subscribers when another window clears storage", () => {
+    vi.stubEnv("DEV", false);
     localStorage.setItem(
       EXPERIMENT_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         experiments: {
           "test-experiment": {
             enabled: true,
@@ -226,10 +340,11 @@ describe("experimentPreferences", () => {
   });
 
   it("validates stored config against typed controls", () => {
+    vi.stubEnv("DEV", false);
     localStorage.setItem(
       EXPERIMENT_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         experiments: {
           "test-experiment": {
             enabled: true,
@@ -247,6 +362,7 @@ describe("experimentPreferences", () => {
     expect(getExperiment("test-experiment", testRegistry)).toEqual({
       id: "test-experiment",
       enabled: true,
+      enabledSource: "explicit",
       config: {
         enabledConfig: false,
         mode: "stable",
@@ -260,7 +376,7 @@ describe("experimentPreferences", () => {
     localStorage.setItem(
       EXPERIMENT_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         experiments: {
           "branch-only": {
             enabled: true,
@@ -278,6 +394,9 @@ describe("experimentPreferences", () => {
       testRegistry,
     );
 
+    expect(storedPreferences()).toMatchObject({
+      version: 2,
+    });
     expect(storedPreferences().experiments["branch-only"]).toEqual({
       enabled: true,
       config: { value: "kept" },
@@ -292,7 +411,7 @@ describe("experimentPreferences", () => {
     localStorage.setItem(
       EXPERIMENT_PREFERENCES_STORAGE_KEY,
       JSON.stringify({
-        version: 1,
+        version: 2,
         experiments: {
           "test-experiment": {
             config: { label: "other-window" },
@@ -368,7 +487,67 @@ describe("experimentPreferences", () => {
 
     expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
       enabled: false,
+      enabledSource: "explicit",
       config: { label: "custom" },
     });
+  });
+
+  it("reads v1 storage and preserves enabled and config values", () => {
+    vi.stubEnv("DEV", false);
+    localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        experiments: {
+          "test-experiment": {
+            enabled: true,
+            config: { mode: "preview" },
+          },
+        },
+      }),
+    );
+
+    expect(getExperimentAutoEnable()).toMatchObject({
+      enabled: false,
+      source: "default",
+    });
+    expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: true,
+      enabledSource: "explicit",
+      config: { mode: "preview" },
+    });
+  });
+
+  it("updates auto-enable same-window and cross-window subscribers", () => {
+    vi.stubEnv("DEV", false);
+
+    function Probe() {
+      const autoEnable = useExperimentAutoEnable();
+      return <div>{autoEnable.enabled ? "auto on" : "auto off"}</div>;
+    }
+
+    render(<Probe />);
+    expect(screen.getByText("auto off")).toBeInTheDocument();
+
+    act(() => setExperimentAutoEnable(true));
+    expect(screen.getByText("auto on")).toBeInTheDocument();
+
+    const nextValue = JSON.stringify({
+      version: 2,
+      autoEnable: false,
+      experiments: {},
+    });
+
+    act(() => {
+      localStorage.setItem(EXPERIMENT_PREFERENCES_STORAGE_KEY, nextValue);
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: EXPERIMENT_PREFERENCES_STORAGE_KEY,
+          newValue: nextValue,
+        }),
+      );
+    });
+
+    expect(screen.getByText("auto off")).toBeInTheDocument();
   });
 });

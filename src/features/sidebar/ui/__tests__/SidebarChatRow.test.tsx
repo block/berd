@@ -216,6 +216,7 @@ describe("SidebarChatRow", () => {
   it("selects normally when a session window exists but the experiment is off", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
+    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, false);
 
     useSessionWindowStore
       .getState()

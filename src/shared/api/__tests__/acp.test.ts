@@ -7,6 +7,7 @@ import {
 import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+  setExperimentEnabled,
 } from "@/features/experiments/experimentPreferences";
 
 const mockLoadSession = vi.fn();
@@ -72,6 +73,8 @@ describe("acpSendMessage", () => {
   it.each(
     GOOSE_MANAGED_PROVIDER_IDS,
   )("updates only the client system prompt when style guidelines are disabled for %s", async (providerId) => {
+    setExperimentEnabled(GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID, false);
+
     const sessionRegistry = await import("../acpSessionRegistry");
     const { acpSendMessage } = await import("../acp");
     const sessionId = `acp-session-${providerId}`;

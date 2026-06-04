@@ -204,6 +204,8 @@ describe("SessionHistoryView", () => {
   });
 
   it("does not expose open-in-window from history while the experiment is off", () => {
+    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, false);
+
     setSessionStoreState({
       sessions: [session()],
     });

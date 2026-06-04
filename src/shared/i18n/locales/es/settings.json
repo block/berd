@@ -175,6 +175,10 @@
     }
   },
   "experiments": {
+    "autoEnable": {
+      "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
+      "label": "Activar nuevos experimentos automáticamente"
+    },
     "builderbot": {
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
@@ -192,6 +196,7 @@
       "promptPlaceholder": "Ingresa la guía de estilo para Goose",
       "title": "Guía de estilo de Goose"
     },
+    "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
     "title": "Experimentos"
   },

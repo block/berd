@@ -37,8 +37,16 @@ Each definition needs:
 
 - `id`: stable kebab-case string
 - `titleKey` and `descriptionKey`: settings i18n keys
-- `defaultEnabled`: optional, default `false`
 - `config`: optional typed controls
+
+Experiments without a manual per-experiment override follow the global
+`autoEnable` preference. That preference defaults on in dev builds and off in
+production builds. Users can force an experiment on/off or reset it back to auto
+from settings.
+
+Config entries under an experiment are settings for that experiment, not nested
+experiments or independent feature flags. Keep them stored with the parent
+experiment and gate their runtime effect on the parent experiment being enabled.
 
 Supported config controls:
 
@@ -57,7 +65,8 @@ Experiment preferences live in `localStorage` under
 
 ```json
 {
-  "version": 1,
+  "version": 2,
+  "autoEnable": false,
   "experiments": {
     "experiment-id": {
       "enabled": false,
@@ -69,6 +78,11 @@ Experiment preferences live in `localStorage` under
 
 - Treat `version` as real schema state. On newer stored versions, abort writes
   instead of overwriting; on older versions, migrate explicitly or discard.
+- Store `autoEnable` as the global default provider. Store `enabled` only for
+  explicit per-experiment overrides; clearing `enabled` returns that experiment
+  to auto behavior and must preserve `config`.
+- Keep `config` under the parent experiment. Do not migrate config keys into
+  separate experiment ids or apply auto-enable behavior to individual settings.
 - Preserve unknown experiment ids when writing so branch switches do not erase
   local choices.
 - Write only the touched experiment/key and re-read latest storage immediately
@@ -102,7 +116,9 @@ correctly.
 
 Cover:
 
-- default-off behavior
+- dev default-on and production default-off behavior
+- global auto-enable overrides and per-experiment explicit override precedence
+- resetting an explicit override back to auto while preserving config
 - enabled and disabled behavior for any gated caller
 - invalid localStorage fallback
 - unsupported storage version fallback or migration

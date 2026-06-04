@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { ExperimentDefinition } from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
@@ -57,7 +57,12 @@ describe("ExperimentsSettings", () => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   });
 
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("shows an empty state when no experiments are registered", () => {
+    vi.stubEnv("DEV", false);
     renderWithProviders(<ExperimentsSettings registry={[]} />);
 
     expect(
@@ -73,6 +78,7 @@ describe("ExperimentsSettings", () => {
   });
 
   it("renders the registered Builderbot experiment", () => {
+    vi.stubEnv("DEV", false);
     renderWithProviders(<ExperimentsSettings />);
 
     expect(
@@ -97,7 +103,37 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders dev default copy on a separate line", () => {
+    vi.stubEnv("DEV", true);
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    expect(
+      screen.getByText(
+        i18n.t("experiments.autoEnable.description", { ns: "settings" }),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("hides dev default copy outside dev builds", () => {
+    vi.stubEnv("DEV", false);
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    expect(
+      screen.queryByText(
+        i18n.t("experiments.autoEnable.description", { ns: "settings" }),
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("applies the dev default to untouched experiments", () => {
+    vi.stubEnv("DEV", true);
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    expect(screen.getByRole("switch", { name: "Experiments" })).toBeChecked();
+  });
+
   it("renders injected experiment controls and persists changes after enabling", async () => {
+    vi.stubEnv("DEV", false);
     const user = userEvent.setup();
 
     renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
@@ -145,5 +181,64 @@ describe("ExperimentsSettings", () => {
         mode: "preview",
       },
     });
+  });
+
+  it("shows reset-to-auto after a manual experiment override", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    const experimentSwitch = screen.getByRole("switch", {
+      name: "Experiments",
+    });
+
+    expect(experimentSwitch).toBeChecked();
+
+    await user.click(experimentSwitch);
+    expect(experimentSwitch).not.toBeChecked();
+    expect(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.resetToAuto", { ns: "settings" }),
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("resets explicit experiment overrides back to the dev auto default", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    const experimentSwitch = screen.getByRole("switch", {
+      name: "Experiments",
+    });
+
+    expect(experimentSwitch).toBeChecked();
+
+    await user.click(experimentSwitch);
+    expect(experimentSwitch).not.toBeChecked();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("experiments.resetToAuto", { ns: "settings" }),
+      }),
+    );
+
+    expect(experimentSwitch).toBeChecked();
+    expect(
+      screen.queryByRole("button", {
+        name: i18n.t("experiments.resetToAuto", { ns: "settings" }),
+      }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps config controls nested and disabled when effective experiment state is off", () => {
+    vi.stubEnv("DEV", false);
+
+    renderWithProviders(<ExperimentsSettings registry={uiRegistry} />);
+
+    expect(screen.getByLabelText("Archive")).toBeDisabled();
+    expect(screen.getByLabelText("Updates")).toBeDisabled();
   });
 });

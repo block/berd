@@ -8,7 +8,7 @@ import {
 } from "./experimentDefinitions";
 
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
-export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 1;
+export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
 export const EXPERIMENT_PREFERENCES_CHANGE_EVENT =
   "goose:experimental-features-change";
 const EMPTY_STORAGE_SNAPSHOT = "__goose_experiments_empty__";
@@ -20,6 +20,7 @@ interface StoredExperimentPreference {
 
 interface StoredPreferences {
   version: number;
+  autoEnable?: boolean;
   experiments: Record<string, StoredExperimentPreference>;
 }
 
@@ -31,10 +32,19 @@ type ExperimentPreferencePatch =
       config: Record<string, ExperimentConfigValue>;
     };
 
+export type ExperimentEnabledSource = "auto" | "explicit";
+
 export interface ExperimentState {
   id: string;
   enabled: boolean;
+  enabledSource: ExperimentEnabledSource;
   config: Record<string, ExperimentConfigValue>;
+}
+
+export interface ExperimentAutoEnableState {
+  enabled: boolean;
+  source: "stored" | "default";
+  defaultEnabled: boolean;
 }
 
 export type ExperimentRegistry = readonly ExperimentDefinition[];
@@ -47,6 +57,9 @@ const experimentSnapshotCache = new WeakMap<
   ExperimentRegistry,
   Map<string, { key: string; value: ExperimentState | null }>
 >();
+let autoEnableSnapshotCache:
+  | { key: string; value: ExperimentAutoEnableState }
+  | undefined;
 
 function getStorage(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -58,6 +71,10 @@ function defaultStoredPreferences(): StoredPreferences {
     version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
     experiments: {},
   };
+}
+
+function getDefaultAutoEnable() {
+  return import.meta.env.DEV;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -76,11 +93,7 @@ function readStorageValue(): string | null {
 }
 
 function parseStoredPreferencesValue(parsed: unknown): StoredPreferences {
-  if (
-    !isRecord(parsed) ||
-    parsed.version !== EXPERIMENT_PREFERENCES_STORAGE_VERSION ||
-    !isRecord(parsed.experiments)
-  ) {
+  if (!isRecord(parsed) || !isRecord(parsed.experiments)) {
     return defaultStoredPreferences();
   }
 
@@ -91,8 +104,22 @@ function parseStoredPreferencesValue(parsed: unknown): StoredPreferences {
     }
   }
 
+  if (parsed.version === 1) {
+    return {
+      version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+      autoEnable: undefined,
+      experiments,
+    };
+  }
+
+  if (parsed.version !== EXPERIMENT_PREFERENCES_STORAGE_VERSION) {
+    return defaultStoredPreferences();
+  }
+
   return {
     version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+    autoEnable:
+      typeof parsed.autoEnable === "boolean" ? parsed.autoEnable : undefined,
     experiments,
   };
 }
@@ -113,22 +140,21 @@ function readStoredPreferences(): StoredPreferences {
 }
 
 function getStorageSnapshotKey() {
-  return readStorageValue() ?? EMPTY_STORAGE_SNAPSHOT;
+  return `${getDefaultAutoEnable() ? "dev" : "prod"}:${
+    readStorageValue() ?? EMPTY_STORAGE_SNAPSHOT
+  }`;
 }
 
-function writeExperimentPreference(
-  id: string,
-  patch: ExperimentPreferencePatch,
-) {
+function readLatestWritablePreferences() {
   const storage = getStorage();
-  if (!storage) return false;
+  if (!storage) return null;
 
   let latestPreferences = defaultStoredPreferences();
   let rawValue: string | null = null;
   try {
     rawValue = storage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
   } catch {
-    return false;
+    return null;
   }
 
   if (rawValue) {
@@ -139,7 +165,7 @@ function writeExperimentPreference(
         typeof parsed.version === "number" &&
         parsed.version > EXPERIMENT_PREFERENCES_STORAGE_VERSION
       ) {
-        return false;
+        return null;
       }
       latestPreferences = parseStoredPreferencesValue(parsed);
     } catch {
@@ -147,6 +173,34 @@ function writeExperimentPreference(
     }
   }
 
+  return latestPreferences;
+}
+
+function writeStoredPreferences(nextPreferences: StoredPreferences) {
+  const storage = getStorage();
+  if (!storage) return false;
+
+  try {
+    storage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify(nextPreferences),
+    );
+  } catch {
+    return false;
+  }
+
+  window.dispatchEvent(new CustomEvent(EXPERIMENT_PREFERENCES_CHANGE_EVENT));
+  return true;
+}
+
+function writeExperimentPreference(
+  id: string,
+  patch: ExperimentPreferencePatch,
+) {
+  const writablePreferences = readLatestWritablePreferences();
+  if (!writablePreferences) return false;
+
+  const latestPreferences = writablePreferences;
   const existing = latestPreferences.experiments[id] ?? {};
   const existingConfig = isRecord(existing.config) ? existing.config : {};
   const nextPreference =
@@ -163,23 +217,14 @@ function writeExperimentPreference(
           enabled: patch.enabled,
         };
 
-  try {
-    storage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          ...latestPreferences.experiments,
-          [id]: nextPreference,
-        },
-      }),
-    );
-  } catch {
-    return false;
-  }
-
-  window.dispatchEvent(new CustomEvent(EXPERIMENT_PREFERENCES_CHANGE_EVENT));
-  return true;
+  return writeStoredPreferences({
+    ...latestPreferences,
+    version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+    experiments: {
+      ...latestPreferences.experiments,
+      [id]: nextPreference,
+    },
+  });
 }
 
 function getDefaultConfig(definition: ExperimentDefinition) {
@@ -241,12 +286,16 @@ function resolveExperimentState(
     config[key] = coerceConfigValue(control, storedConfig[key]);
   }
 
+  const explicitEnabled =
+    typeof storedPreference?.enabled === "boolean"
+      ? storedPreference.enabled
+      : undefined;
+  const autoEnable = getExperimentAutoEnable();
+
   return {
     id: definition.id,
-    enabled:
-      typeof storedPreference?.enabled === "boolean"
-        ? storedPreference.enabled
-        : (definition.defaultEnabled ?? false),
+    enabled: explicitEnabled ?? autoEnable.enabled,
+    enabledSource: explicitEnabled === undefined ? "auto" : "explicit",
     config,
   };
 }
@@ -291,6 +340,53 @@ export function setExperimentEnabled(
   return writeExperimentPreference(id, { enabled });
 }
 
+export function clearExperimentEnabledOverride(
+  id: string,
+  registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
+) {
+  const definition = findDefinition(id, registry);
+  if (!definition) return false;
+
+  const writablePreferences = readLatestWritablePreferences();
+  if (!writablePreferences) return false;
+
+  const latestPreferences = writablePreferences;
+  const existing = latestPreferences.experiments[id] ?? {};
+  const { enabled: _enabled, ...nextPreference } = existing;
+
+  return writeStoredPreferences({
+    ...latestPreferences,
+    version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+    experiments: {
+      ...latestPreferences.experiments,
+      [id]: nextPreference,
+    },
+  });
+}
+
+export function getExperimentAutoEnable(): ExperimentAutoEnableState {
+  const storedPreferences = readStoredPreferences();
+  const defaultEnabled = getDefaultAutoEnable();
+
+  return {
+    enabled: storedPreferences.autoEnable ?? defaultEnabled,
+    source: storedPreferences.autoEnable === undefined ? "default" : "stored",
+    defaultEnabled,
+  };
+}
+
+export function setExperimentAutoEnable(enabled: boolean) {
+  const writablePreferences = readLatestWritablePreferences();
+  if (!writablePreferences) return false;
+
+  const latestPreferences = writablePreferences;
+  return writeStoredPreferences({
+    ...latestPreferences,
+    version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+    autoEnable: enabled,
+  });
+}
+
 export function setExperimentConfigValue(
   id: string,
   key: string,
@@ -327,6 +423,25 @@ export function useExperimentList(
     () => getExperimentListSnapshot(registry),
     () => getExperimentListSnapshot(registry),
   );
+}
+
+export function useExperimentAutoEnable() {
+  return useSyncExternalStore(
+    subscribeToExperimentChanges,
+    getExperimentAutoEnableSnapshot,
+    getExperimentAutoEnableSnapshot,
+  );
+}
+
+function getExperimentAutoEnableSnapshot() {
+  const storageKey = getStorageSnapshotKey();
+  if (autoEnableSnapshotCache?.key === storageKey) {
+    return autoEnableSnapshotCache.value;
+  }
+
+  const snapshot = getExperimentAutoEnable();
+  autoEnableSnapshotCache = { key: storageKey, value: snapshot };
+  return snapshot;
 }
 
 function getExperimentListSnapshot(registry: ExperimentRegistry) {

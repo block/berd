@@ -534,6 +534,8 @@ describe("Sidebar", () => {
   });
 
   it("hides Builderbot from main navigation until the experiment is enabled", () => {
+    setExperimentEnabled(BUILDERBOT_SURFACE_EXPERIMENT_ID, false);
+
     renderSidebar();
 
     expect(screen.queryByRole("button", { name: /builderbot/i })).toBeNull();

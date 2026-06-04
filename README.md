@@ -51,9 +51,11 @@ matching the `"externalBin": ["binaries/goosed"]` entry in
 
 ## Adding an experiment
 
-Experiments are user-local, opt-in preferences for unstable UI or workflow
-behavior. Use `.agents/skills/experimental-features/SKILL.md` for the current
-workflow, registry contract, storage rules, Tauri guardrails, and test coverage.
+Experiments are user-local preferences for unstable UI or workflow behavior.
+Untouched experiments follow the global auto-enable setting, which defaults on
+in dev builds and off in production builds. Use
+`.agents/skills/experimental-features/SKILL.md` for the current workflow,
+registry contract, storage rules, Tauri guardrails, and test coverage.
 
 ## Publishing avatar assets
 
