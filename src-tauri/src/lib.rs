@@ -137,6 +137,9 @@ pub fn run() {
                 }
             });
 
+            // Surface WKWebView renderer memory and detect silent OOM reaps.
+            services::renderer_monitor::start(app.handle().clone());
+
             // Build a custom macOS application menu so that the app submenu,
             // "About" item, and "Quit" item use the capitalised product name
             // "Goose" instead of the lowercase Cargo binary name "goose".
@@ -233,6 +236,7 @@ pub fn run() {
             commands::acp::get_goose_serve_host_info,
             commands::project_icons::scan_project_icons,
             commands::project_icons::read_project_icon,
+            commands::renderer::log_renderer_event,
             commands::artifacts::get_artifacts,
             commands::doctor::run_doctor,
             commands::doctor::run_doctor_fresh,

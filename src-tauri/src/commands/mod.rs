@@ -19,6 +19,7 @@ pub mod model_setup;
 pub mod openai_realtime;
 pub mod path_resolver;
 pub mod project_icons;
+pub mod renderer;
 pub mod system;
 pub mod terminal;
 pub mod window_session;

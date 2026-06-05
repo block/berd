@@ -5,6 +5,7 @@ import ReactDOM from "react-dom/client";
 import { preloadStartupLoadingMedia } from "@/app/lib/preloadStartupLoadingMedia";
 import { App } from "@/app/App";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
+import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
@@ -100,6 +101,7 @@ if (bootError) {
     <React.StrictMode>
       <QueryClientProvider client={queryClient}>
         <LocalMediaCacheEvents />
+        <RendererTelemetry />
         <I18nProvider>
           <ThemeProvider>
             <UpdaterProvider>
