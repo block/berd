@@ -171,7 +171,7 @@
   "input": {
     "ariaLabel": "Chat message input",
     "agentBuilderPlaceholder": "Describe your agent.",
-    "placeholder": "Chat with {{agent}} or @ to add an agent or skill"
+    "placeholder": "Chat with {{agent}} or @ to add files, paths, agents, or skills"
   },
   "loading": {
     "compacting": "Compacting conversation...",
@@ -179,10 +179,27 @@
     "responding": "Responding..."
   },
   "mention": {
-    "ariaLabel": "Mention suggestions",
-    "title": "Mention an agent",
+    "ariaLabel": "Reference suggestions",
+    "title": "Agents",
+    "referencesTitle": "References",
+    "pathsTitle": "Paths",
     "skillsTitle": "Skills",
-    "filesTitle": "Files"
+    "filesTitle": "Files",
+    "projectRoot": "Project root",
+    "homeFolder": "Home folder",
+    "filesystemRoot": "Filesystem root",
+    "loadingPaths": "Loading paths...",
+    "noMatches": "No matches",
+    "loadError": "Couldn't load paths",
+    "status": {
+      "loadingPaths": "Loading paths",
+      "referencesAvailable_one": "{{count}} reference available",
+      "referencesAvailable_other": "{{count}} references available",
+      "noMatches": "No matches",
+      "loadError": "Couldn't load paths"
+    },
+    "enterKey": "Enter",
+    "toInsert": "to insert"
   },
   "notifications": {
     "compactionComplete": "Conversation compacted. Older context was summarized.",

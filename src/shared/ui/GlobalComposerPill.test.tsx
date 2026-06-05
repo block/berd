@@ -17,7 +17,7 @@ import { GlobalComposerPill } from "./GlobalComposerPill";
 const mockOpenDialog = vi.fn();
 const mockInspectAttachmentPaths = vi.fn();
 const mockReadImageAttachment = vi.fn();
-const mockListFilesForMentions = vi.fn();
+const mockSearchFilesForMentions = vi.fn();
 const mockResizeImage = vi.fn();
 const mockGetModelsForAgent = vi.fn();
 const mockRefreshAllModelProviders = vi.fn();
@@ -39,8 +39,12 @@ vi.mock("@/shared/api/system", () => ({
   inspectAttachmentPaths: (paths: string[]) =>
     mockInspectAttachmentPaths(paths),
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
-  listFilesForMentions: (roots: string[], maxResults?: number) =>
-    mockListFilesForMentions(roots, maxResults),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => mockSearchFilesForMentions(input),
 }));
 
 vi.mock("@/features/chat/lib/resizeImage", () => ({
@@ -188,7 +192,7 @@ describe("GlobalComposerPill", () => {
     mockOpenDialog.mockReset();
     mockInspectAttachmentPaths.mockReset();
     mockReadImageAttachment.mockReset();
-    mockListFilesForMentions.mockReset();
+    mockSearchFilesForMentions.mockReset();
     mockResizeImage.mockReset();
     mockGetModelsForAgent.mockReset();
     mockGetModelsForAgent.mockReturnValue([]);
@@ -202,7 +206,7 @@ describe("GlobalComposerPill", () => {
       base64: "path-image",
       mimeType: "image/png",
     });
-    mockListFilesForMentions.mockResolvedValue([]);
+    mockSearchFilesForMentions.mockResolvedValue([]);
     mockResizeImage.mockImplementation((file: File) =>
       Promise.resolve({ base64: `base64:${file.name}`, mimeType: file.type }),
     );
@@ -740,28 +744,65 @@ describe("GlobalComposerPill", () => {
   it("inserts selected project file mentions as paths", async () => {
     const user = userEvent.setup();
     renderGlobalComposer();
-    mockListFilesForMentions.mockResolvedValue([
-      "/workspace/project/src/readme.md",
+    mockSearchFilesForMentions.mockResolvedValue([
+      {
+        resolvedPath: "/workspace/project/src/readme.md",
+        displayPath: "project/src/readme.md",
+        filename: "readme.md",
+        kind: "file",
+        source: "project",
+      },
     ]);
 
     await user.click(screen.getByRole("textbox"));
     await user.click(screen.getByRole("button", { name: /select project/i }));
     await user.click(screen.getByRole("menuitem", { name: /Project One/i }));
 
-    await waitFor(() => {
-      expect(mockListFilesForMentions).toHaveBeenCalledWith(
-        ["/workspace/project"],
-        undefined,
-      );
-    });
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
     await user.type(screen.getByRole("textbox"), "@read");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/workspace/project"],
+        query: "read",
+        maxResults: 12,
+      });
+    });
+
     await user.click(
       await screen.findByRole("option", { name: /readme\.md/i }),
     );
 
     expect(screen.getByRole("textbox")).toHaveValue(
-      "/workspace/project/src/readme.md ",
+      "@/workspace/project/src/readme.md ",
+    );
+  });
+
+  it("uses textarea-safe aria for mention suggestions", async () => {
+    const user = userEvent.setup();
+    renderGlobalComposer();
+
+    await user.click(screen.getByRole("textbox"));
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Project One/i }));
+    await user.type(screen.getByRole("textbox"), "@");
+
+    const input = screen.getByRole("textbox");
+    expect(input).not.toHaveAttribute("aria-expanded");
+    expect(input).not.toHaveAttribute("aria-autocomplete");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+    expect(input).toHaveAttribute("aria-controls");
+    expect(input).toHaveAttribute("aria-describedby");
+
+    const status = document.getElementById(
+      input.getAttribute("aria-describedby") as string,
+    );
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(screen.getByRole("listbox")).toHaveAttribute(
+      "id",
+      input.getAttribute("aria-controls"),
     );
   });
 

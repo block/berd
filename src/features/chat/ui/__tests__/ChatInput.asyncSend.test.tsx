@@ -29,13 +29,21 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   }),
 }));
 
-const mockListFilesForMentions = vi.fn<
-  (roots: string[], maxResults?: number) => Promise<string[]>
+const mockSearchFilesForMentions = vi.fn<
+  (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => Promise<unknown[]>
 >(async () => []);
 
 vi.mock("@/shared/api/system", () => ({
-  listFilesForMentions: (roots: string[], maxResults?: number) =>
-    mockListFilesForMentions(roots, maxResults),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => mockSearchFilesForMentions(input),
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
@@ -44,8 +52,8 @@ vi.mock("@/features/skills/api/skills", () => ({
 
 describe("ChatInput async send handling", () => {
   beforeEach(() => {
-    mockListFilesForMentions.mockClear();
-    mockListFilesForMentions.mockResolvedValue([]);
+    mockSearchFilesForMentions.mockClear();
+    mockSearchFilesForMentions.mockResolvedValue([]);
     mockVoiceDictation.isEnabled = true;
     mockVoiceDictation.isRecording = false;
     mockVoiceDictation.isTranscribing = false;

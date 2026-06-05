@@ -171,7 +171,7 @@
   "input": {
     "ariaLabel": "Entrada de mensaje del chat",
     "agentBuilderPlaceholder": "Describe tu agente.",
-    "placeholder": "Chatea con {{agent}} o @ para agregar un agente o habilidad"
+    "placeholder": "Chatea con {{agent}} o @ para agregar archivos, rutas, agentes o habilidades"
   },
   "loading": {
     "compacting": "Compactando conversación...",
@@ -179,10 +179,27 @@
     "responding": "Respondiendo..."
   },
   "mention": {
-    "ariaLabel": "Sugerencias de menciones",
-    "title": "Menciona un agente",
+    "ariaLabel": "Sugerencias de referencias",
+    "title": "Agentes",
+    "referencesTitle": "Referencias",
+    "pathsTitle": "Rutas",
     "skillsTitle": "Habilidades",
-    "filesTitle": "Archivos"
+    "filesTitle": "Archivos",
+    "projectRoot": "Raíz del proyecto",
+    "homeFolder": "Carpeta de inicio",
+    "filesystemRoot": "Raíz del sistema de archivos",
+    "loadingPaths": "Cargando rutas...",
+    "noMatches": "Sin resultados",
+    "loadError": "No se pudieron cargar las rutas",
+    "status": {
+      "loadingPaths": "Cargando rutas",
+      "referencesAvailable_one": "{{count}} referencia disponible",
+      "referencesAvailable_other": "{{count}} referencias disponibles",
+      "noMatches": "Sin resultados",
+      "loadError": "No se pudieron cargar las rutas"
+    },
+    "enterKey": "Enter",
+    "toInsert": "para insertar"
   },
   "notifications": {
     "compactionComplete": "Conversacion compactada. El contexto anterior se resumio.",

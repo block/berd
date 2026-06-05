@@ -26,8 +26,12 @@ vi.mock("@/shared/lib/platform", () => ({
   getPlatform: () => "mac",
 }));
 
-const mockListFilesForMentions = vi.fn<
-  (roots: string[], maxResults?: number) => Promise<string[]>
+const mockSearchFilesForMentions = vi.fn<
+  (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => Promise<unknown[]>
 >(async () => []);
 const mockInspectAttachmentPaths = vi.fn<
   (paths: string[]) => Promise<
@@ -44,8 +48,12 @@ const mockReadImageAttachment = vi.fn<
 >(async () => ({ base64: "abc", mimeType: "image/png" }));
 
 vi.mock("@/shared/api/system", () => ({
-  listFilesForMentions: (roots: string[], maxResults?: number) =>
-    mockListFilesForMentions(roots, maxResults),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => mockSearchFilesForMentions(input),
   inspectAttachmentPaths: (paths: string[]) =>
     mockInspectAttachmentPaths(paths),
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
@@ -66,8 +74,8 @@ vi.mock("@tauri-apps/api/core", () => ({
 
 describe("ChatInput attachments", () => {
   beforeEach(() => {
-    mockListFilesForMentions.mockClear();
-    mockListFilesForMentions.mockResolvedValue([]);
+    mockSearchFilesForMentions.mockClear();
+    mockSearchFilesForMentions.mockResolvedValue([]);
     mockInspectAttachmentPaths.mockClear();
     mockInspectAttachmentPaths.mockResolvedValue([]);
     mockReadImageAttachment.mockClear();

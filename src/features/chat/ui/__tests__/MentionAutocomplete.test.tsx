@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
   MentionAutocomplete,
@@ -36,18 +36,21 @@ const FILES: FileMentionItem[] = [
     displayPath: `src/file${i}.ts`,
     filename: `file${i}.ts`,
     kind: "file" as const,
+    source: "project" as const,
   })),
   {
     resolvedPath: "/project/crates/sprout-acp/src/acp.rs",
     displayPath: "crates/sprout-acp/src/acp.rs",
     filename: "acp.rs",
     kind: "file" as const,
+    source: "project" as const,
   },
   {
     resolvedPath: "/project/crates/sprout-acp/src/config.rs",
     displayPath: "crates/sprout-acp/src/config.rs",
     filename: "config.rs",
     kind: "file" as const,
+    source: "project" as const,
   },
 ];
 
@@ -150,7 +153,6 @@ describe("MentionAutocomplete", () => {
     renderAutocomplete({ selectedIndex: 3 });
 
     const options = screen.getAllByRole("option");
-    // Index 3 = file index 1 (after 2 personas)
     for (let i = 0; i < options.length; i++) {
       if (i === 3) {
         expect(options[i]).toHaveAttribute("aria-selected", "true");
@@ -179,6 +181,93 @@ describe("MentionAutocomplete", () => {
     );
 
     expect(container.querySelector("[role='listbox']")).not.toBeInTheDocument();
+  });
+
+  it("renders loading, empty, error, and footer states", () => {
+    const { rerender } = render(
+      <Popover open>
+        <PopoverAnchor asChild>
+          <div />
+        </PopoverAnchor>
+        <MentionAutocomplete
+          filteredPersonas={[]}
+          filteredSkills={[]}
+          filteredFiles={[]}
+          isOpen
+          pathsLoading
+          onSelectPersona={vi.fn()}
+        />
+      </Popover>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Loading paths...");
+    expect(
+      within(screen.getByRole("listbox")).queryByText("Loading paths..."),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("Enter")).toBeInTheDocument();
+    expect(screen.getByText("to insert")).toBeInTheDocument();
+
+    rerender(
+      <Popover open>
+        <PopoverAnchor asChild>
+          <div />
+        </PopoverAnchor>
+        <MentionAutocomplete
+          filteredPersonas={[]}
+          filteredSkills={[]}
+          filteredFiles={[]}
+          isOpen
+          onSelectPersona={vi.fn()}
+        />
+      </Popover>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("No matches");
+    expect(
+      within(screen.getByRole("listbox")).queryByText("No matches"),
+    ).not.toBeInTheDocument();
+
+    rerender(
+      <Popover open>
+        <PopoverAnchor asChild>
+          <div />
+        </PopoverAnchor>
+        <MentionAutocomplete
+          filteredPersonas={[]}
+          filteredSkills={[]}
+          filteredFiles={[]}
+          isOpen
+          pathsError="load-error"
+          onSelectPersona={vi.fn()}
+        />
+      </Popover>,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Couldn't load paths");
+    expect(
+      within(screen.getByRole("listbox")).queryByText("Couldn't load paths"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders paths before agents and skills with stable option ids", () => {
+    renderAutocomplete({
+      selectedIndex: 0,
+      filteredSkills: SKILLS,
+      filteredFiles: FILES.slice(0, 1),
+    });
+
+    const options = screen.getAllByRole("option");
+    expect(options.map((option) => option.textContent)).toEqual([
+      expect.stringContaining("file0.ts"),
+      expect.stringContaining("Solo"),
+      expect.stringContaining("Reviewer"),
+      expect.stringContaining("code-review"),
+    ]);
+    expect(options[0]).toHaveAttribute(
+      "id",
+      "mention-autocomplete-listbox-option-0",
+    );
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
   });
 });
 

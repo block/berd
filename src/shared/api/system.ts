@@ -13,6 +13,14 @@ export interface AttachmentPathInfo {
   mimeType?: string | null;
 }
 
+export interface FileMentionPathEntry {
+  resolvedPath: string;
+  displayPath: string;
+  filename: string;
+  kind: "file" | "folder" | "path";
+  source: "project" | "session" | "home" | "filesystem";
+}
+
 export interface ImageAttachmentPayload {
   base64: string;
   mimeType: string;
@@ -53,11 +61,16 @@ export async function ensureDirectory(path: string): Promise<void> {
   return invoke("ensure_directory", { path });
 }
 
-export async function listFilesForMentions(
-  roots: string[],
-  maxResults = 1500,
-): Promise<string[]> {
-  return invoke("list_files_for_mentions", { roots, maxResults });
+export async function searchFilesForMentions(input: {
+  roots: string[];
+  query: string;
+  maxResults?: number;
+}): Promise<FileMentionPathEntry[]> {
+  return invoke("search_file_mentions", {
+    roots: input.roots,
+    query: input.query,
+    maxResults: input.maxResults,
+  });
 }
 
 export async function listDirectoryEntries(

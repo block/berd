@@ -5,6 +5,7 @@ import {
   useEffect,
   useMemo,
   useLayoutEffect,
+  useId,
 } from "react";
 import { X } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
@@ -222,6 +223,8 @@ export function ChatInput({
     filteredPersonas,
     filteredSkills,
     filteredFiles,
+    fileMentionsLoading,
+    fileMentionsError,
     resolveSkillSlashCommand,
     detectMention,
     closeMention,
@@ -243,6 +246,21 @@ export function ChatInput({
     onPersonaChange,
     onSkillMentionSelect: handleSkillMentionAdded,
   });
+  const mentionListboxId = useId();
+  const mentionStatusId = useId();
+  const mentionOptionCount =
+    filteredFiles.length + filteredPersonas.length + filteredSkills.length;
+  const mentionStatusText = mentionOpen
+    ? fileMentionsLoading
+      ? t("mention.status.loadingPaths")
+      : fileMentionsError
+        ? t("mention.status.loadError")
+        : mentionOptionCount > 0
+          ? t("mention.status.referencesAvailable", {
+              count: mentionOptionCount,
+            })
+          : t("mention.status.noMatches")
+    : undefined;
 
   const resolveAutoSkill = useCallback(
     (message: string) =>
@@ -387,7 +405,9 @@ export function ChatInput({
   }, [onSendQueuedNow]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
-    if (mentionOpen) {
+    const isComposing =
+      event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+    if (mentionOpen && !isComposing) {
       if (event.key === "Escape") {
         event.preventDefault();
         closeMention();
@@ -398,11 +418,25 @@ export function ChatInput({
         navigateMention(event.key === "ArrowDown" ? "down" : "up");
         return;
       }
-      if (event.key === "Enter" || event.key === "Tab") {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        const item = confirmMention();
+        if (item) {
+          handleMentionConfirm(item);
+        }
+        return;
+      }
+      if (
+        event.key === "Tab" &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.metaKey &&
+        !event.altKey
+      ) {
         const item = confirmMention();
         if (item) {
           event.preventDefault();
-          handleMentionConfirm(item);
+          handleMentionConfirm(item, { completeDirectories: true });
           return;
         }
       }
@@ -595,6 +629,9 @@ export function ChatInput({
                 onSelectFile={handleFileMentionSelect}
                 onClose={closeMention}
                 selectedIndex={mentionSelectedIndex}
+                listboxId={mentionListboxId}
+                pathsLoading={fileMentionsLoading}
+                pathsError={fileMentionsError}
               />
 
               <ChatInputAttachments
@@ -636,6 +673,14 @@ export function ChatInput({
                 </div>
               )}
 
+              <div
+                id={mentionStatusId}
+                role="status"
+                aria-live="polite"
+                className="sr-only"
+              >
+                {mentionStatusText}
+              </div>
               <PopoverAnchor asChild>
                 <textarea
                   ref={textareaRef}
@@ -655,6 +700,8 @@ export function ChatInput({
                     "scrollbar-none",
                   )}
                   aria-label={t("input.ariaLabel")}
+                  aria-controls={mentionOpen ? mentionListboxId : undefined}
+                  aria-describedby={mentionOpen ? mentionStatusId : undefined}
                   data-testid="chat-composer"
                 />
               </PopoverAnchor>

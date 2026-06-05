@@ -4,6 +4,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useId,
   useState,
 } from "react";
 import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
@@ -468,6 +469,8 @@ export function GlobalComposerPill({
     filteredPersonas,
     filteredSkills,
     filteredFiles,
+    fileMentionsLoading,
+    fileMentionsError,
     detectMention,
     closeMention,
     navigateMention,
@@ -484,6 +487,21 @@ export function GlobalComposerPill({
     onPersonaChange: handlePersonaChange,
     onSkillMentionSelect: handleSkillMentionSelected,
   });
+  const mentionListboxId = useId();
+  const mentionStatusId = useId();
+  const mentionOptionCount =
+    filteredFiles.length + filteredPersonas.length + filteredSkills.length;
+  const mentionStatusText = mentionOpen
+    ? fileMentionsLoading
+      ? t("mention.status.loadingPaths")
+      : fileMentionsError
+        ? t("mention.status.loadError")
+        : mentionOptionCount > 0
+          ? t("mention.status.referencesAvailable", {
+              count: mentionOptionCount,
+            })
+          : t("mention.status.noMatches")
+    : undefined;
 
   const submitCompose = useCallback(
     (draftText: string) => {
@@ -753,6 +771,14 @@ export function GlobalComposerPill({
           )}
         >
           <Popover open={mentionOpen}>
+            <div
+              id={mentionStatusId}
+              role="status"
+              aria-live="polite"
+              className="sr-only"
+            >
+              {mentionStatusText}
+            </div>
             <PopoverAnchor asChild>
               <textarea
                 ref={textareaRef}
@@ -765,7 +791,10 @@ export function GlobalComposerPill({
                   detectMention(value, cursor);
                 }}
                 onKeyDown={(event) => {
-                  if (mentionOpen) {
+                  const isComposing =
+                    event.nativeEvent.isComposing ||
+                    event.nativeEvent.keyCode === 229;
+                  if (mentionOpen && !isComposing) {
                     if (event.key === "Escape") {
                       event.preventDefault();
                       closeMention();
@@ -778,11 +807,27 @@ export function GlobalComposerPill({
                       );
                       return;
                     }
-                    if (event.key === "Enter" || event.key === "Tab") {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      const item = confirmMention();
+                      if (item) {
+                        handleMentionConfirm(item);
+                      }
+                      return;
+                    }
+                    if (
+                      event.key === "Tab" &&
+                      !event.shiftKey &&
+                      !event.ctrlKey &&
+                      !event.metaKey &&
+                      !event.altKey
+                    ) {
                       const item = confirmMention();
                       if (item) {
                         event.preventDefault();
-                        handleMentionConfirm(item);
+                        handleMentionConfirm(item, {
+                          completeDirectories: true,
+                        });
                         return;
                       }
                     }
@@ -800,6 +845,8 @@ export function GlobalComposerPill({
                 onPaste={handlePaste}
                 onFocus={() => setFocused(true)}
                 placeholder={effectivePlaceholder}
+                aria-controls={mentionOpen ? mentionListboxId : undefined}
+                aria-describedby={mentionOpen ? mentionStatusId : undefined}
                 className={cn(
                   "focus-override max-h-[200px] w-full resize-none appearance-none overflow-y-auto scrollbar-none border-0 bg-transparent text-[16px] leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-opacity placeholder:duration-300 placeholder:ease-in-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
                   expanded
@@ -824,6 +871,9 @@ export function GlobalComposerPill({
               onSelectFile={(file) =>
                 handleMentionConfirm({ type: "file", file })
               }
+              listboxId={mentionListboxId}
+              pathsLoading={fileMentionsLoading}
+              pathsError={fileMentionsError}
             />
           </Popover>
         </div>

@@ -109,7 +109,8 @@ vi.mock("@/shared/api/system", () => ({
   inspectAttachmentPaths: (paths: string[]) =>
     mockInspectAttachmentPaths(paths),
   readImageAttachment: (path: string) => mockReadImageAttachment(path),
-  listFilesForMentions: vi.fn().mockResolvedValue([]),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/features/chat/hooks/useChatSessionController", () => ({
@@ -219,7 +220,7 @@ describe("HomeScreen", () => {
     renderHome();
     expect(
       screen.getByPlaceholderText(
-        "Chat with Goose or @ to add an agent or skill",
+        "Chat with Goose or @ to add files, paths, agents, or skills",
       ),
     ).toBeInTheDocument();
   });

@@ -563,7 +563,7 @@ export function buildInitScript(options?: {
               return Promise.resolve(PROJECTS);
             case "get_project":
               return Promise.resolve(PROJECTS.find(p => p.id === args?.id) ?? null);
-            case "list_files_for_mentions":
+            case "search_file_mentions":
               return Promise.resolve([]);
             case "get_home_dir":
               return Promise.resolve("/tmp/home");

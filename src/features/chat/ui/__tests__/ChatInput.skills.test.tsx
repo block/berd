@@ -40,7 +40,8 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
 }));
 
 vi.mock("@/shared/api/system", () => ({
-  listFilesForMentions: vi.fn().mockResolvedValue([]),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: vi.fn().mockResolvedValue([]),
 }));
 
 type SkillMentionFixture = {

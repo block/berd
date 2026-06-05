@@ -4,7 +4,11 @@ import {
   expandSkillSlashCommand,
   resolveSkillSlashCommand,
 } from "@/features/skills/lib/skillChatPrompt";
-import { listFilesForMentions } from "@/shared/api/system";
+import {
+  getHomeDir,
+  searchFilesForMentions,
+  type FileMentionPathEntry,
+} from "@/shared/api/system";
 import type { Persona } from "@/shared/types/agents";
 import {
   useMentionDetection,
@@ -26,6 +30,16 @@ interface MentionHandlersOptions {
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
 }
 
+const FILE_MENTION_SEARCH_DEBOUNCE_MS = 90;
+const FILE_MENTION_SEARCH_LIMIT = 12;
+const PATH_SEARCH_CACHE_TTL_MS = 60_000;
+const MAX_PATH_SEARCH_CACHE_ENTRIES = 200;
+
+type PathSearchCacheEntry = {
+  entries: FileMentionPathEntry[];
+  cachedAt: number;
+};
+
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
@@ -41,26 +55,134 @@ function normalizeRoots(roots: string[] | undefined): string[] {
   );
 }
 
-function toDisplayPath(path: string, roots: string[]): string {
-  const normalizedPath = path.replace(/\\/g, "/");
-  for (const root of roots) {
-    const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
-    const prefix = `${normalizedRoot}/`;
-    if (normalizedPath.startsWith(prefix)) {
-      const relative = normalizedPath.slice(prefix.length);
-      const rootName = basename(normalizedRoot);
-      return `${rootName}/${relative}`;
-    }
-  }
-  return path;
+function filesystemRootFromPath(path: string | null): string {
+  if (!path) return "/";
+  const windowsRoot = path.match(/^[A-Za-z]:[\\/]/);
+  if (windowsRoot) return windowsRoot[0].replace(/\//g, "\\");
+  return "/";
 }
 
-function sameStringArray(a: string[], b: string[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i += 1) {
-    if (a[i] !== b[i]) return false;
+function isFilesystemRootQuery(query: string): boolean {
+  return query === "/" || /^[A-Za-z]:[\\/]?$/.test(query);
+}
+
+function isFilesystemPathSearchQuery(query: string): boolean {
+  return (
+    (query.startsWith("/") && query !== "/") ||
+    query.startsWith("~/") ||
+    query.startsWith("~\\") ||
+    /^[A-Za-z]:[\\/].+/.test(query)
+  );
+}
+
+function shouldSearchPathMentions(
+  query: string,
+  hasProjectRoots: boolean,
+): boolean {
+  const trimmed = query.trim();
+  if (!trimmed || isFilesystemRootQuery(trimmed)) {
+    return false;
+  }
+  if (isFilesystemPathSearchQuery(trimmed)) return true;
+  if (trimmed.startsWith("~") || !hasProjectRoots) return false;
+  if (trimmed.length === 1 && /^[A-Za-z0-9]$/.test(trimmed)) {
+    return false;
   }
   return true;
+}
+
+function sameFileMentionArray(
+  a: FileMentionPathEntry[],
+  b: FileMentionPathEntry[],
+): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    const left = a[i];
+    const right = b[i];
+    if (
+      left.resolvedPath !== right.resolvedPath ||
+      left.displayPath !== right.displayPath ||
+      left.filename !== right.filename ||
+      left.kind !== right.kind ||
+      left.source !== right.source
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function rememberPathSearchEntries(
+  cache: Map<string, PathSearchCacheEntry>,
+  key: string,
+  entries: FileMentionPathEntry[],
+) {
+  cache.delete(key);
+  cache.set(key, { entries, cachedAt: Date.now() });
+  while (cache.size > MAX_PATH_SEARCH_CACHE_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    if (oldestKey == null) break;
+    cache.delete(oldestKey);
+  }
+}
+
+function addFileMentionItem(
+  dedup: Map<string, FileMentionItem>,
+  item: FileMentionItem,
+) {
+  const key = item.resolvedPath.trim().toLowerCase();
+  if (!key || dedup.has(key)) return;
+  dedup.set(key, item);
+}
+
+function toFileMentionItem(entry: FileMentionPathEntry): FileMentionItem {
+  return {
+    resolvedPath: entry.resolvedPath,
+    displayPath: entry.displayPath,
+    filename: entry.filename,
+    kind: entry.kind,
+    source: entry.source,
+  };
+}
+
+function buildStaticPathItems(
+  roots: string[],
+  homeDir: string | null,
+): FileMentionItem[] {
+  const entries: FileMentionItem[] = roots.map((root) => {
+    const name = basename(root);
+    return {
+      resolvedPath: root,
+      displayPath: "Project root",
+      filename: name,
+      kind: "folder",
+      source: "project",
+      shortcut: "projectRoot",
+    };
+  });
+
+  if (homeDir) {
+    entries.push({
+      resolvedPath: homeDir,
+      displayPath: homeDir,
+      filename: "Home folder",
+      kind: "path",
+      source: "home",
+      shortcut: "home",
+    });
+  }
+
+  const filesystemRoot = filesystemRootFromPath(homeDir);
+  entries.push({
+    resolvedPath: filesystemRoot,
+    displayPath: filesystemRoot,
+    filename: "Filesystem root",
+    kind: "path",
+    source: "filesystem",
+    shortcut: "filesystemRoot",
+  });
+
+  return entries;
 }
 
 function replaceMentionQuery(
@@ -104,6 +226,20 @@ function removeMentionQuery(
   };
 }
 
+function isCompletablePathMention(file: FileMentionItem): boolean {
+  return file.kind !== "file";
+}
+
+function withTrailingPathSeparator(path: string): string {
+  const trimmed = path.trim();
+  if (!trimmed || /[\\/]$/.test(trimmed)) {
+    return trimmed;
+  }
+  const separator =
+    trimmed.includes("\\") && !trimmed.includes("/") ? "\\" : "/";
+  return `${trimmed}${separator}`;
+}
+
 /**
  * Combines persona + skill + file mention detection, filtering, and selection handlers.
  * Keeps ChatInput under the file-size limit by centralising mention logic.
@@ -128,10 +264,40 @@ export function useMentionHandlers({
     () => normalizedProjectRoots.join("\n"),
     [normalizedProjectRoots],
   );
-  const [projectFilePaths, setProjectFilePaths] = useState<string[]>([]);
+  const [projectFileEntries, setProjectFileEntries] = useState<
+    FileMentionPathEntry[]
+  >([]);
+  const [fileMentionsLoading, setFileMentionsLoading] = useState(false);
+  const [fileMentionsError, setFileMentionsError] = useState<string | null>(
+    null,
+  );
+  const [homeDir, setHomeDir] = useState<string | null>(null);
   const [skillMentionItems, setSkillMentionItems] = useState<
     SkillMentionItem[]
   >([]);
+  const pathSearchCacheRef = useRef<Map<string, PathSearchCacheEntry>>(
+    new Map(),
+  );
+  const pathSearchInFlightRef = useRef<
+    Map<string, Promise<FileMentionPathEntry[]>>
+  >(new Map());
+  const pathSearchRequestIdRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void getHomeDir()
+      .then((dir) => {
+        if (!cancelled) setHomeDir(dir);
+      })
+      .catch(() => {
+        if (!cancelled) setHomeDir(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -164,35 +330,6 @@ export function useMentionHandlers({
     };
   }, [normalizedProjectRoots, skillsEnabled]);
 
-  useEffect(() => {
-    // Clear stale results immediately so users never see files from the
-    // previous project while the new scan is in flight.
-    setProjectFilePaths([]);
-
-    if (!fileMentionsEnabled || !rootsKey) {
-      return;
-    }
-
-    let cancelled = false;
-
-    void listFilesForMentions(normalizedProjectRoots)
-      .then((paths) => {
-        if (cancelled) return;
-        setProjectFilePaths((prev) =>
-          sameStringArray(prev, paths) ? prev : paths,
-        );
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to load project files for mentions:", error);
-        setProjectFilePaths((prev) => (prev.length === 0 ? prev : []));
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [rootsKey, normalizedProjectRoots, fileMentionsEnabled]);
-
   const fileMentionItems: FileMentionItem[] = useMemo(() => {
     const dedup = new Map<string, FileMentionItem>();
 
@@ -201,32 +338,28 @@ export function useMentionHandlers({
     }
 
     for (const artifact of getAllSessionArtifacts()) {
-      const key = artifact.resolvedPath.trim().toLowerCase();
-      if (!key || dedup.has(key)) continue;
-      dedup.set(key, {
+      addFileMentionItem(dedup, {
         resolvedPath: artifact.resolvedPath,
         displayPath: artifact.displayPath,
         filename: artifact.filename,
         kind: artifact.kind,
+        source: "session",
       });
     }
 
-    for (const path of projectFilePaths) {
-      const key = path.trim().toLowerCase();
-      if (!key || dedup.has(key)) continue;
-      dedup.set(key, {
-        resolvedPath: path,
-        displayPath: toDisplayPath(path, normalizedProjectRoots),
-        filename: basename(path),
-        kind: "file",
-      });
+    for (const item of buildStaticPathItems(normalizedProjectRoots, homeDir)) {
+      addFileMentionItem(dedup, item);
+    }
+    for (const entry of projectFileEntries) {
+      addFileMentionItem(dedup, toFileMentionItem(entry));
     }
 
     return Array.from(dedup.values());
   }, [
     fileMentionsEnabled,
     getAllSessionArtifacts,
-    projectFilePaths,
+    homeDir,
+    projectFileEntries,
     normalizedProjectRoots,
   ]);
 
@@ -243,6 +376,95 @@ export function useMentionHandlers({
     navigateMention,
     confirmMention,
   } = useMentionDetection(personas, skillMentionItems, fileMentionItems);
+
+  useEffect(() => {
+    if (!fileMentionsEnabled || !mentionOpen) {
+      pathSearchRequestIdRef.current += 1;
+      setProjectFileEntries([]);
+      setFileMentionsLoading(false);
+      setFileMentionsError(null);
+      return;
+    }
+
+    const query = mentionQuery.trim();
+    if (!shouldSearchPathMentions(query, rootsKey.length > 0)) {
+      pathSearchRequestIdRef.current += 1;
+      setProjectFileEntries([]);
+      setFileMentionsLoading(false);
+      setFileMentionsError(null);
+      return;
+    }
+
+    const cacheKey = `${rootsKey}\0${query}\0${FILE_MENTION_SEARCH_LIMIT}`;
+    pathSearchRequestIdRef.current += 1;
+    const requestId = pathSearchRequestIdRef.current;
+    const cachedEntry = pathSearchCacheRef.current.get(cacheKey);
+    const cachedEntries =
+      cachedEntry &&
+      Date.now() - cachedEntry.cachedAt <= PATH_SEARCH_CACHE_TTL_MS
+        ? cachedEntry.entries
+        : null;
+    if (cachedEntry && !cachedEntries) {
+      pathSearchCacheRef.current.delete(cacheKey);
+    }
+    if (cachedEntries) {
+      setProjectFileEntries((prev) =>
+        sameFileMentionArray(prev, cachedEntries) ? prev : cachedEntries,
+      );
+      setFileMentionsLoading(false);
+      setFileMentionsError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setFileMentionsLoading(true);
+    setFileMentionsError(null);
+
+    const timeoutId = window.setTimeout(() => {
+      let request = pathSearchInFlightRef.current.get(cacheKey);
+      if (!request) {
+        request = searchFilesForMentions({
+          roots: normalizedProjectRoots,
+          query,
+          maxResults: FILE_MENTION_SEARCH_LIMIT,
+        }).finally(() => {
+          pathSearchInFlightRef.current.delete(cacheKey);
+        });
+        pathSearchInFlightRef.current.set(cacheKey, request);
+      }
+
+      void request
+        .then((entries) => {
+          rememberPathSearchEntries(
+            pathSearchCacheRef.current,
+            cacheKey,
+            entries,
+          );
+          if (cancelled || pathSearchRequestIdRef.current !== requestId) return;
+          setProjectFileEntries((prev) =>
+            sameFileMentionArray(prev, entries) ? prev : entries,
+          );
+          setFileMentionsLoading(false);
+        })
+        .catch((error) => {
+          if (cancelled || pathSearchRequestIdRef.current !== requestId) return;
+          console.error("Failed to search project files for mentions:", error);
+          setFileMentionsError("load-error");
+          setFileMentionsLoading(false);
+        });
+    }, FILE_MENTION_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [
+    fileMentionsEnabled,
+    mentionOpen,
+    mentionQuery,
+    normalizedProjectRoots,
+    rootsKey,
+  ]);
 
   // ---- post-selection cursor placement ------------------------------------
   // After a mention is confirmed we update `text` via setState. A useEffect
@@ -292,13 +514,27 @@ export function useMentionHandlers({
     (file: FileMentionItem) => {
       const before = text.slice(0, mentionStartIndex);
       const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
-      const inserted = file.resolvedPath;
+      const inserted = `@${file.resolvedPath.trim()}`;
       const newText = `${before}${inserted} ${after}`;
       pendingCursorRef.current = before.length + inserted.length + 1;
       setText(newText);
       closeMention();
     },
     [text, mentionStartIndex, mentionQuery, closeMention, setText],
+  );
+
+  const handleFileMentionComplete = useCallback(
+    (file: FileMentionItem) => {
+      const before = text.slice(0, mentionStartIndex);
+      const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
+      const inserted = `@${withTrailingPathSeparator(file.resolvedPath)}`;
+      const newText = `${before}${inserted}${after}`;
+      const cursorPosition = before.length + inserted.length;
+      pendingCursorRef.current = cursorPosition;
+      setText(newText);
+      detectMention(newText, cursorPosition);
+    },
+    [text, mentionStartIndex, mentionQuery, detectMention, setText],
   );
 
   const handleSkillMentionSelect = useCallback(
@@ -325,11 +561,16 @@ export function useMentionHandlers({
   );
 
   const handleMentionConfirm = useCallback(
-    (item: MentionItem) => {
+    (item: MentionItem, options?: { completeDirectories?: boolean }) => {
       if (item.type === "persona") {
         handlePersonaMentionSelect(item.persona);
       } else if (item.type === "skill") {
         handleSkillMentionSelect(item.skill);
+      } else if (
+        options?.completeDirectories &&
+        isCompletablePathMention(item.file)
+      ) {
+        handleFileMentionComplete(item.file);
       } else {
         handleFileMentionSelect(item.file);
       }
@@ -337,6 +578,7 @@ export function useMentionHandlers({
     [
       handlePersonaMentionSelect,
       handleSkillMentionSelect,
+      handleFileMentionComplete,
       handleFileMentionSelect,
     ],
   );
@@ -351,6 +593,8 @@ export function useMentionHandlers({
     filteredPersonas,
     filteredSkills,
     filteredFiles,
+    fileMentionsLoading,
+    fileMentionsError,
     expandSkillSlashCommand: (message: string) =>
       skillsEnabled
         ? expandSkillSlashCommand(message, skillMentionItems)
@@ -366,6 +610,7 @@ export function useMentionHandlers({
     handlePersonaMentionSelect,
     handleSkillMentionSelect,
     handleFileMentionSelect,
+    handleFileMentionComplete,
     handleMentionConfirm,
   };
 }

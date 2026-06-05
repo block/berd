@@ -1,5 +1,11 @@
 import { beforeEach, describe, it, expect, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { ChatInput } from "./chatInputTestUtils";
@@ -33,12 +39,20 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   }),
 }));
 
-const mockListFilesForMentions = vi.fn<
-  (roots: string[], maxResults?: number) => Promise<string[]>
+const mockSearchFilesForMentions = vi.fn<
+  (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => Promise<unknown[]>
 >(async () => []);
 vi.mock("@/shared/api/system", () => ({
-  listFilesForMentions: (roots: string[], maxResults?: number) =>
-    mockListFilesForMentions(roots, maxResults),
+  getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
+  searchFilesForMentions: (input: {
+    roots: string[];
+    query: string;
+    maxResults?: number;
+  }) => mockSearchFilesForMentions(input),
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
@@ -85,10 +99,76 @@ function StatefulChatInput({
   );
 }
 
+const PROJECT_FILE_MENTION_ENTRIES = [
+  {
+    resolvedPath: "/Users/wesb/dev/goose2/README.md",
+    displayPath: "goose2/README.md",
+    filename: "README.md",
+    kind: "file",
+    source: "project",
+  },
+  {
+    resolvedPath: "/Users/wesb/dev/goose2/src",
+    displayPath: "goose2/src",
+    filename: "src",
+    kind: "folder",
+    source: "project",
+  },
+  {
+    resolvedPath: "/Users/wesb/dev/goose2/src/features/chat/ui/ChatInput.tsx",
+    displayPath: "goose2/src/features/chat/ui/ChatInput.tsx",
+    filename: "ChatInput.tsx",
+    kind: "file",
+    source: "project",
+  },
+];
+
+function renderProjectChatInput(onSend = vi.fn()) {
+  return render(
+    <ChatInput
+      onSend={onSend}
+      selectedProjectId="project-1"
+      availableProjects={[
+        {
+          id: "project-1",
+          name: "goose2",
+          workingDirs: ["/Users/wesb/dev/goose2"],
+        },
+      ]}
+    />,
+  );
+}
+
+function renderLongPathProjectChatInput() {
+  return render(
+    <ChatInput
+      onSend={vi.fn()}
+      selectedProjectId="project-1"
+      availableProjects={[
+        {
+          id: "project-1",
+          name: "goose-internal",
+          workingDirs: ["/Users/wesb/Development/squareup/goose-internal"],
+        },
+      ]}
+    />,
+  );
+}
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("ChatInput", () => {
   beforeEach(() => {
-    mockListFilesForMentions.mockClear();
-    mockListFilesForMentions.mockResolvedValue([]);
+    mockSearchFilesForMentions.mockClear();
+    mockSearchFilesForMentions.mockResolvedValue([]);
     mockVoiceDictation.isEnabled = true;
     mockVoiceDictation.isRecording = false;
     mockVoiceDictation.isTranscribing = false;
@@ -102,7 +182,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(
       screen.getByPlaceholderText(
-        "Chat with Goose or @ to add an agent or skill",
+        "Chat with Goose or @ to add files, paths, agents, or skills",
       ),
     ).toBeInTheDocument();
   });
@@ -582,41 +662,542 @@ describe("ChatInput", () => {
 
   it("shows project files in @mention results and inserts the selected path", async () => {
     const user = userEvent.setup();
-    mockListFilesForMentions.mockResolvedValue([
-      "/Users/wesb/dev/goose2/README.md",
-      "/Users/wesb/dev/goose2/src/features/chat/ui/ChatInput.tsx",
-    ]);
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
 
-    render(
-      <ChatInput
-        onSend={vi.fn()}
-        selectedProjectId="project-1"
-        availableProjects={[
-          {
-            id: "project-1",
-            name: "goose2",
-            workingDirs: ["/Users/wesb/dev/goose2"],
-          },
-        ]}
-      />,
-    );
+    renderProjectChatInput();
 
-    expect(mockListFilesForMentions).toHaveBeenCalledWith(
-      ["/Users/wesb/dev/goose2"],
-      undefined,
-    );
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
     const input = screen.getByRole("textbox");
     await user.type(input, "@read");
 
-    expect(await screen.findByText("Files")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query: "read",
+        maxResults: 12,
+      });
+    });
+
+    expect(await screen.findByText("Paths")).toBeInTheDocument();
 
     const fileOption = await screen.findByRole("option", {
       name: /readme\.md/i,
     });
     await user.click(fileOption);
 
-    expect(input).toHaveValue("/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+  });
+
+  it("pressing Enter inserts the active path mention without sending", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput(onSend);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("pressing Tab inserts the active file path mention", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+  });
+
+  it("pressing Tab completes the active folder path without closing mentions", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@src");
+    expect(
+      await screen.findByRole("option", { name: /^src/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/src/");
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query: "/Users/wesb/dev/goose2/src/",
+        maxResults: 12,
+      });
+    });
+    expect(
+      await screen.findByRole("option", { name: /chatinput\.tsx/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps path mentions open when typing after a long project root completion", async () => {
+    const user = userEvent.setup();
+    const projectRoot = "/Users/wesb/Development/squareup/goose-internal";
+    mockSearchFilesForMentions.mockImplementation(async ({ query }) =>
+      query === `${projectRoot}/src`
+        ? [
+            {
+              resolvedPath: `${projectRoot}/src/features`,
+              displayPath: `${projectRoot}/src/features`,
+              filename: "features",
+              kind: "folder",
+              source: "filesystem",
+            },
+          ]
+        : [],
+    );
+    renderLongPathProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@");
+    expect(
+      await screen.findByRole("option", {
+        name: /goose-internal project root/i,
+      }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Tab}");
+    expect(input).toHaveValue(`@${projectRoot}/`);
+
+    await user.type(input, "src");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: [projectRoot],
+        query: `${projectRoot}/src`,
+        maxResults: 12,
+      });
+    });
+    expect(
+      await screen.findByRole("option", { name: /features/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("pressing Escape closes path mentions without changing text", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    expect(input).toHaveValue("@read");
+    expect(
+      screen.queryByRole("option", { name: /readme\.md/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("inserts folder and static root references as @path tokens", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@src");
+    const folderOptions = await screen.findAllByRole("option", {
+      name: /src/i,
+    });
+    await user.click(folderOptions[0]);
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/src ");
+
+    await user.clear(input);
+    await user.type(input, "@goose2");
+    await user.click(await screen.findByRole("option", { name: /^goose2/i }));
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2 ");
+  });
+
+  it("shows static path shortcuts on empty @ without searching project files", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@");
+
+    expect(await screen.findByText("Paths")).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /goose2 project root/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: /home folder/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /filesystem root/i }),
+    ).not.toBeInTheDocument();
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
+
+    await user.type(input, "/");
+    expect(
+      await screen.findByRole("option", { name: /filesystem root/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Home folder")).not.toBeInTheDocument();
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
+
+    await user.clear(input);
+    await user.type(input, "@~");
+    expect(
+      await screen.findByRole("option", { name: /home folder/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Filesystem root")).not.toBeInTheDocument();
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
+  });
+
+  it("does not search project files for single-character plain queries", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    await user.type(screen.getByRole("textbox"), "@r");
+
+    expect(screen.queryByText("Paths")).not.toBeInTheDocument();
+    expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
+  });
+
+  it("searches typed absolute path prefixes without a selected project", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue([
+      {
+        resolvedPath: "/tmp/zsh-fzf-tab-kalvin",
+        displayPath: "/tmp/zsh-fzf-tab-kalvin",
+        filename: "zsh-fzf-tab-kalvin",
+        kind: "folder",
+        source: "filesystem",
+      },
+    ]);
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@/tmp/zs");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: [],
+        query: "/tmp/zs",
+        maxResults: 12,
+      });
+    });
+
+    await user.click(
+      await screen.findByRole("option", { name: /zsh-fzf-tab-kalvin/i }),
+    );
+
+    expect(input).toHaveValue("@/tmp/zsh-fzf-tab-kalvin ");
+  });
+
+  it("keeps long project-relative path mentions searchable past the text mention cap", async () => {
+    const user = userEvent.setup();
+    const query =
+      "src/features/chat/ui/very/long/path/with/more/segments/file.ts";
+    renderProjectChatInput();
+
+    await user.type(screen.getByRole("textbox"), `@${query}`);
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query,
+        maxResults: 12,
+      });
+    });
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("keeps absolute path mentions open when the path contains spaces", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue([
+      {
+        resolvedPath: "/Users/wesb/My Project/src",
+        displayPath: "/Users/wesb/My Project/src",
+        filename: "src",
+        kind: "folder",
+        source: "filesystem",
+      },
+    ]);
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@/Users/wesb/My Project/");
+    await user.type(input, "src");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: [],
+        query: "/Users/wesb/My Project/src",
+        maxResults: 12,
+      });
+    });
+    expect(
+      await screen.findByRole("option", { name: /^src/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("prevents Enter from sending a partial path mention while paths are loading", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    mockSearchFilesForMentions.mockReturnValue(new Promise(() => {}));
+    renderProjectChatInput(onSend);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query: "read",
+        maxResults: 12,
+      });
+    });
+
+    const wasNotPrevented = fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(wasNotPrevented).toBe(false);
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input).toHaveValue("@read");
+  });
+
+  it("lets Shift+Tab use native focus behavior instead of completing folders", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@src");
+    expect(
+      await screen.findByRole("option", { name: /^src/i }),
+    ).toBeInTheDocument();
+
+    const wasNotPrevented = fireEvent.keyDown(input, {
+      key: "Tab",
+      shiftKey: true,
+    });
+
+    expect(wasNotPrevented).toBe(true);
+    expect(input).toHaveValue("@src");
+  });
+
+  it("ranks concrete home path results ahead of the Home shortcut for longer queries", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue([
+      {
+        resolvedPath: "/Users/wesb/Downloads",
+        displayPath: "~/Downloads",
+        filename: "Downloads",
+        kind: "folder",
+        source: "filesystem",
+      },
+    ]);
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@~/Dow");
+    expect(
+      await screen.findByRole("option", { name: /^downloads/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Enter}");
+
+    expect(input).toHaveValue("@/Users/wesb/Downloads ");
+  });
+
+  it("does not match static shortcut labels for plain text file mentions", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@pro");
+
+    expect(
+      screen.queryByRole("option", { name: /project root/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not match absolute path prefixes for plain text file mentions", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@users");
+
+    expect(
+      screen.queryByRole("option", { name: /project root/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /home folder/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("closes dotted plain mentions when the user types a space", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@v2.0");
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    await user.type(input, " release notes");
+
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+  });
+
+  it("does not debounce-search single-character plain mentions", async () => {
+    vi.useFakeTimers();
+    try {
+      renderProjectChatInput();
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, {
+        target: { value: "@r", selectionStart: 2 },
+      });
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps compatible previous path rows visible while the next search is pending", async () => {
+    const user = userEvent.setup();
+    const nextSearch = deferred<unknown[]>();
+    mockSearchFilesForMentions.mockImplementation(({ query }) => {
+      if (query === "read") {
+        return Promise.resolve([PROJECT_FILE_MENTION_ENTRIES[0]]);
+      }
+      if (query === "readm") {
+        return nextSearch.promise;
+      }
+      return Promise.resolve([]);
+    });
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    await user.type(input, "m");
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query: "readm",
+        maxResults: 12,
+      });
+    });
+
+    expect(
+      screen.getByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    nextSearch.resolve([PROJECT_FILE_MENTION_ENTRIES[0]]);
+    await waitFor(() => {
+      expect(screen.queryByText("Loading paths...")).not.toBeInTheDocument();
+    });
+  });
+
+  it("clamps the active path selection when async results shrink", async () => {
+    const user = userEvent.setup();
+    Element.prototype.scrollIntoView = vi.fn();
+    const readme = PROJECT_FILE_MENTION_ENTRIES[0];
+    mockSearchFilesForMentions.mockImplementation(({ query }) => {
+      if (query === "read") {
+        return Promise.resolve([
+          readme,
+          {
+            resolvedPath: "/Users/wesb/dev/goose2/reader.md",
+            displayPath: "goose2/reader.md",
+            filename: "reader.md",
+            kind: "file",
+            source: "project",
+          },
+          {
+            resolvedPath: "/Users/wesb/dev/goose2/read-later.md",
+            displayPath: "goose2/read-later.md",
+            filename: "read-later.md",
+            kind: "file",
+            source: "project",
+          },
+        ]);
+      }
+      if (query === "readm") {
+        return Promise.resolve([readme]);
+      }
+      return Promise.resolve([]);
+    });
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /reader\.md/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("option", { name: /reader\.md/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await user.type(input, "m");
+    await waitFor(() => {
+      expect(screen.queryByText("reader.md")).not.toBeInTheDocument();
+    });
+
+    await user.keyboard("{Enter}");
+
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+  });
+
+  it("uses textarea-safe aria with live mention status and stable listbox options", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@");
+
+    expect(input).not.toHaveAttribute("aria-expanded");
+    expect(input).not.toHaveAttribute("aria-autocomplete");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+    expect(input).toHaveAttribute("aria-controls");
+    expect(input).toHaveAttribute("aria-describedby");
+
+    const statusId = input.getAttribute("aria-describedby");
+    expect(statusId).toBeTruthy();
+    const status = document.getElementById(statusId as string);
+    expect(status).toHaveAttribute("role", "status");
+    expect(status).toHaveAttribute("aria-live", "polite");
+    expect(status).toHaveTextContent("2 references available");
+
+    const listbox = screen.getByRole("listbox", {
+      name: "Reference suggestions",
+    });
+    const options = within(listbox).getAllByRole("option");
+    expect(options[0]).toHaveAttribute(
+      "id",
+      `${input.getAttribute("aria-controls")}-option-0`,
+    );
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
   });
 
   // ---------------------------------------------------------------------------

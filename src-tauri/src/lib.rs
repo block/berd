@@ -302,7 +302,7 @@ pub fn run() {
             commands::system::ensure_directory,
             commands::system::list_directory_entries,
             commands::system::inspect_attachment_paths,
-            commands::system::list_files_for_mentions,
+            commands::system::search_file_mentions,
             commands::system::read_image_attachment,
             commands::terminal::start_terminal,
             commands::terminal::write_terminal,

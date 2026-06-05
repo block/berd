@@ -4,13 +4,22 @@ use tauri::{AppHandle, Window};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
-use std::collections::HashSet;
+use std::cmp::Ordering;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
-const DEFAULT_FILE_MENTION_LIMIT: usize = 1500;
-const MAX_FILE_MENTION_LIMIT: usize = 5000;
+const DEFAULT_FILE_MENTION_LIMIT: usize = 12;
+const MAX_FILE_MENTION_LIMIT: usize = 32;
 const MAX_SCAN_DEPTH: usize = 8;
+const MAX_FILE_MENTION_INDEX_ENTRIES: usize = 100_000;
+const MAX_FILESYSTEM_PATH_LOOKUP_ENTRIES: usize = 5000;
+const FILE_MENTION_INDEX_CACHE_LIMIT: usize = 8;
+const FILE_MENTION_INDEX_CACHE_TTL: Duration = Duration::from_secs(60);
+const MIN_FILE_MENTION_FUZZY_QUERY_CHARS: usize = 3;
 const MAX_IMAGE_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -29,6 +38,99 @@ pub struct AttachmentPathInfo {
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMentionPathEntry {
+    pub resolved_path: String,
+    pub display_path: String,
+    pub filename: String,
+    pub kind: String,
+    pub source: String,
+}
+
+#[derive(Clone, Debug)]
+struct IndexedFileMentionEntry {
+    entry: FileMentionPathEntry,
+    normalized_filename: String,
+    normalized_relative_path: String,
+    is_directory: bool,
+    depth: usize,
+}
+
+#[derive(Clone, Debug)]
+struct FileMentionIndex {
+    canonical_root: PathBuf,
+    entries: Vec<IndexedFileMentionEntry>,
+}
+
+#[derive(Clone)]
+struct CachedFileMentionIndex {
+    built_at: Instant,
+    index: Arc<FileMentionIndex>,
+}
+
+#[derive(Default)]
+struct FileMentionBuildSignal {
+    completed: Mutex<bool>,
+    ready: Condvar,
+}
+
+impl FileMentionBuildSignal {
+    fn wait(&self) {
+        let mut completed = self.completed.lock().expect("file mention build lock");
+        while !*completed {
+            completed = self.ready.wait(completed).expect("file mention build wait");
+        }
+    }
+
+    fn finish(&self) {
+        {
+            let mut completed = self.completed.lock().expect("file mention build lock");
+            *completed = true;
+        }
+        self.ready.notify_all();
+    }
+}
+
+#[derive(Default)]
+struct FileMentionIndexCache {
+    order: VecDeque<String>,
+    entries: HashMap<String, CachedFileMentionIndex>,
+    building: HashMap<String, Arc<FileMentionBuildSignal>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct FileMentionScore {
+    rank: u8,
+    match_position: usize,
+    boundary_penalty: u8,
+    fuzzy_span: usize,
+    fuzzy_gaps: usize,
+    directory_penalty: u8,
+    depth: usize,
+    path_len: usize,
+}
+
+#[derive(Clone)]
+struct FileMentionCandidate {
+    entry: FileMentionPathEntry,
+    normalized_resolved_path: String,
+    normalized_relative_path: String,
+    score: FileMentionScore,
+}
+
+#[derive(Clone, Copy)]
+struct IndexedFileMentionCandidate<'a> {
+    entry: &'a IndexedFileMentionEntry,
+    score: FileMentionScore,
+}
+
+static FILE_MENTION_INDEX_CACHE: OnceLock<Mutex<FileMentionIndexCache>> = OnceLock::new();
+
+fn file_mention_index_cache() -> &'static Mutex<FileMentionIndexCache> {
+    FILE_MENTION_INDEX_CACHE.get_or_init(|| Mutex::new(FileMentionIndexCache::default()))
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -449,93 +551,973 @@ fn normalize_roots(roots: Vec<String>) -> Vec<PathBuf> {
     normalized
 }
 
-fn scan_files_for_mentions(roots: Vec<String>, max_results: Option<usize>) -> Vec<String> {
+fn file_name_for_path(path: &Path) -> String {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .map(str::to_owned)
+        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+}
+
+fn display_path_for_mention(path: &Path, root: &Path) -> String {
+    let root_name = file_name_for_path(root);
+    match path.strip_prefix(root) {
+        Ok(relative) if relative.as_os_str().is_empty() => root_name,
+        Ok(relative) => format!("{}/{}", root_name, relative.to_string_lossy()),
+        Err(_) => path.to_string_lossy().into_owned(),
+    }
+}
+
+fn normalize_relative_path(path: &Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn has_hidden_path_segment(path: &str) -> bool {
+    path.split('/')
+        .any(|segment| segment.starts_with('.') && segment != "." && segment != "..")
+}
+
+fn relative_depth(relative_path: &str) -> usize {
+    relative_path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .count()
+}
+
+fn is_safe_relative_file_mention_path(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn build_file_mention_entry(path: &Path, root: &Path, is_directory: bool) -> FileMentionPathEntry {
+    FileMentionPathEntry {
+        resolved_path: path.to_string_lossy().into_owned(),
+        display_path: display_path_for_mention(path, root),
+        filename: file_name_for_path(path),
+        kind: if is_directory { "folder" } else { "file" }.to_owned(),
+        source: "project".to_owned(),
+    }
+}
+
+fn filesystem_display_path_for_query(query: &str, path: &Path) -> String {
+    if query.starts_with("~/") || query.starts_with("~\\") {
+        if let Some(home) = dirs::home_dir() {
+            if let Ok(relative_path) = path.strip_prefix(home) {
+                if relative_path.as_os_str().is_empty() {
+                    return "~".to_string();
+                }
+                return format!("~/{}", normalize_relative_path(relative_path));
+            }
+        }
+    }
+
+    path.to_string_lossy().into_owned()
+}
+
+fn build_filesystem_file_mention_entry(
+    path: &Path,
+    display_path: String,
+    is_directory: bool,
+) -> FileMentionPathEntry {
+    FileMentionPathEntry {
+        resolved_path: path.to_string_lossy().into_owned(),
+        display_path,
+        filename: file_name_for_path(path),
+        kind: if is_directory { "folder" } else { "file" }.to_owned(),
+        source: "filesystem".to_owned(),
+    }
+}
+
+fn insert_file_mention_index_entry(
+    entries: &mut Vec<IndexedFileMentionEntry>,
+    seen: &mut HashSet<String>,
+    root_path: &Path,
+    relative_path: &str,
+) {
+    let normalized_relative_path = relative_path.trim_matches('/').replace('\\', "/");
+    let depth = relative_depth(&normalized_relative_path);
+    if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES
+        || depth == 0
+        || depth > MAX_SCAN_DEPTH
+        || !is_safe_relative_file_mention_path(&normalized_relative_path)
+        || has_hidden_path_segment(&normalized_relative_path)
+        || !seen.insert(normalized_relative_path.clone())
+    {
+        return;
+    }
+
+    let path = root_path.join(Path::new(&normalized_relative_path));
+    let Ok(metadata) = fs::symlink_metadata(&path) else {
+        return;
+    };
+    let file_type = metadata.file_type();
+    if file_type.is_symlink() || (!file_type.is_dir() && !file_type.is_file()) {
+        return;
+    }
+
+    let actual_is_directory = file_type.is_dir();
+    let entry = build_file_mention_entry(&path, root_path, actual_is_directory);
+    entries.push(IndexedFileMentionEntry {
+        normalized_filename: entry.filename.to_lowercase(),
+        normalized_relative_path: normalized_relative_path.to_lowercase(),
+        entry,
+        is_directory: actual_is_directory,
+        depth,
+    });
+}
+
+fn insert_parent_file_mention_directories(
+    entries: &mut Vec<IndexedFileMentionEntry>,
+    seen: &mut HashSet<String>,
+    root_path: &Path,
+    relative_path: &str,
+) {
+    let mut current = Path::new(relative_path).parent();
+    while let Some(parent) = current {
+        if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES {
+            break;
+        }
+        if parent.as_os_str().is_empty() {
+            break;
+        }
+        let normalized_parent = normalize_relative_path(parent);
+        insert_file_mention_index_entry(entries, seen, root_path, &normalized_parent);
+        current = parent.parent();
+    }
+}
+
+fn load_git_file_mention_paths(root_path: &Path) -> Option<Vec<String>> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root_path)
+        .args([
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            ".",
+        ])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let mut paths = Vec::new();
+    for entry in output.stdout.split(|byte| *byte == 0) {
+        if entry.is_empty() {
+            continue;
+        }
+        let value = String::from_utf8_lossy(entry).trim().to_string();
+        if !value.is_empty() {
+            paths.push(value);
+        }
+    }
+
+    Some(paths)
+}
+
+fn insert_walk_file_mention_directories(
+    entries: &mut Vec<IndexedFileMentionEntry>,
+    seen: &mut HashSet<String>,
+    root_path: &Path,
+) {
+    let mut builder = ignore::WalkBuilder::new(root_path);
+    builder
+        .max_depth(Some(MAX_SCAN_DEPTH))
+        .follow_links(false)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true);
+
+    for result in builder.build() {
+        if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES {
+            break;
+        }
+
+        let Ok(entry) = result else {
+            continue;
+        };
+        let path = entry.path();
+        if path == root_path {
+            continue;
+        }
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        let Ok(relative_path) = path.strip_prefix(root_path) else {
+            continue;
+        };
+        let normalized_relative_path = normalize_relative_path(relative_path);
+        insert_file_mention_index_entry(entries, seen, root_path, &normalized_relative_path);
+    }
+}
+
+fn build_git_file_mention_index(root_path: &Path) -> Option<Vec<IndexedFileMentionEntry>> {
+    let git_paths = load_git_file_mention_paths(root_path)?;
+    let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+
+    for relative_path in git_paths {
+        if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES {
+            break;
+        }
+
+        insert_file_mention_index_entry(&mut entries, &mut seen, root_path, &relative_path);
+        if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES {
+            break;
+        }
+        insert_parent_file_mention_directories(&mut entries, &mut seen, root_path, &relative_path);
+    }
+
+    if entries.len() < MAX_FILE_MENTION_INDEX_ENTRIES {
+        insert_walk_file_mention_directories(&mut entries, &mut seen, root_path);
+    }
+
+    Some(entries)
+}
+
+fn build_walk_file_mention_index(root_path: &Path) -> Vec<IndexedFileMentionEntry> {
+    let mut builder = ignore::WalkBuilder::new(root_path);
+    builder
+        .max_depth(Some(MAX_SCAN_DEPTH))
+        .follow_links(false)
+        .hidden(true)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true);
+
+    let mut entries = Vec::new();
+    let mut seen = HashSet::new();
+
+    for result in builder.build() {
+        if entries.len() >= MAX_FILE_MENTION_INDEX_ENTRIES {
+            break;
+        }
+
+        let Ok(entry) = result else {
+            continue;
+        };
+        let path = entry.path();
+        if path == root_path {
+            continue;
+        }
+        let Some(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() && !file_type.is_file() {
+            continue;
+        }
+        let Ok(relative_path) = path.strip_prefix(root_path) else {
+            continue;
+        };
+        let normalized_relative_path = normalize_relative_path(relative_path);
+        insert_file_mention_index_entry(
+            &mut entries,
+            &mut seen,
+            root_path,
+            &normalized_relative_path,
+        );
+    }
+
+    entries
+}
+
+fn build_file_mention_index(root_path: &Path) -> Result<FileMentionIndex, String> {
+    let canonical_root = root_path.canonicalize().map_err(|error| {
+        format!(
+            "Failed to resolve root '{}': {}",
+            root_path.display(),
+            error
+        )
+    })?;
+    if !canonical_root.is_dir() {
+        return Err(format!("Root is not a directory: {}", root_path.display()));
+    }
+
+    let entries = build_git_file_mention_index(&canonical_root)
+        .unwrap_or_else(|| build_walk_file_mention_index(&canonical_root));
+
+    Ok(FileMentionIndex {
+        canonical_root,
+        entries,
+    })
+}
+
+fn touch_file_mention_cache_key(order: &mut VecDeque<String>, key: &str) {
+    if let Some(index) = order.iter().position(|entry| entry == key) {
+        order.remove(index);
+    }
+    order.push_back(key.to_string());
+}
+
+fn remove_file_mention_cache_key(cache: &mut FileMentionIndexCache, key: &str) {
+    cache.entries.remove(key);
+    if let Some(index) = cache.order.iter().position(|entry| entry == key) {
+        cache.order.remove(index);
+    }
+}
+
+enum FileMentionBuildSlot {
+    Wait(Arc<FileMentionBuildSignal>),
+    Leader(Arc<FileMentionBuildSignal>),
+}
+
+struct FileMentionBuildGuard<'a> {
+    cache: &'a Mutex<FileMentionIndexCache>,
+    cache_key: String,
+    signal: Arc<FileMentionBuildSignal>,
+}
+
+impl Drop for FileMentionBuildGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            if cache
+                .building
+                .get(&self.cache_key)
+                .is_some_and(|signal| Arc::ptr_eq(signal, &self.signal))
+            {
+                cache.building.remove(&self.cache_key);
+            }
+        }
+        self.signal.finish();
+    }
+}
+
+fn get_or_build_file_mention_index(root_path: &Path) -> Result<Arc<FileMentionIndex>, String> {
+    get_or_build_file_mention_index_from_cache(
+        file_mention_index_cache(),
+        root_path,
+        build_file_mention_index,
+    )
+}
+
+fn get_or_build_file_mention_index_from_cache<F>(
+    cache: &Mutex<FileMentionIndexCache>,
+    root_path: &Path,
+    build_file_mention_index: F,
+) -> Result<Arc<FileMentionIndex>, String>
+where
+    F: Fn(&Path) -> Result<FileMentionIndex, String>,
+{
+    let canonical_root = root_path.canonicalize().map_err(|error| {
+        format!(
+            "Failed to resolve root '{}': {}",
+            root_path.display(),
+            error
+        )
+    })?;
+    if !canonical_root.is_dir() {
+        return Err(format!("Root is not a directory: {}", root_path.display()));
+    }
+    let cache_key = normalized_path_key(&canonical_root);
+
+    let build_signal = loop {
+        let build_slot = {
+            let mut cache = cache.lock().expect("file mention cache lock");
+            let cached_index = cache.entries.get(&cache_key).and_then(|cached| {
+                (cached.built_at.elapsed() <= FILE_MENTION_INDEX_CACHE_TTL)
+                    .then(|| Arc::clone(&cached.index))
+            });
+            if let Some(index) = cached_index {
+                touch_file_mention_cache_key(&mut cache.order, &cache_key);
+                return Ok(index);
+            }
+
+            remove_file_mention_cache_key(&mut cache, &cache_key);
+            if let Some(signal) = cache.building.get(&cache_key) {
+                FileMentionBuildSlot::Wait(Arc::clone(signal))
+            } else {
+                let signal = Arc::new(FileMentionBuildSignal::default());
+                cache
+                    .building
+                    .insert(cache_key.clone(), Arc::clone(&signal));
+                FileMentionBuildSlot::Leader(signal)
+            }
+        };
+
+        match build_slot {
+            FileMentionBuildSlot::Wait(signal) => signal.wait(),
+            FileMentionBuildSlot::Leader(signal) => break signal,
+        }
+    };
+
+    let _build_guard = FileMentionBuildGuard {
+        cache,
+        cache_key: cache_key.clone(),
+        signal: Arc::clone(&build_signal),
+    };
+    let index = build_file_mention_index(&canonical_root).map(Arc::new);
+    {
+        let mut cache = cache.lock().expect("file mention cache lock");
+        if let Ok(index) = &index {
+            cache.entries.insert(
+                cache_key.clone(),
+                CachedFileMentionIndex {
+                    built_at: Instant::now(),
+                    index: Arc::clone(index),
+                },
+            );
+            touch_file_mention_cache_key(&mut cache.order, &cache_key);
+            while cache.order.len() > FILE_MENTION_INDEX_CACHE_LIMIT {
+                if let Some(oldest_key) = cache.order.pop_front() {
+                    cache.entries.remove(&oldest_key);
+                }
+            }
+        }
+    }
+
+    index
+}
+
+fn find_file_mention_segment_prefix(path: &str, query: &str) -> Option<usize> {
+    for (index, segment) in path.split('/').enumerate() {
+        if segment.starts_with(query) {
+            return Some(index);
+        }
+    }
+    None
+}
+
+#[derive(Clone, Copy)]
+struct FuzzyFileMentionScore {
+    match_position: usize,
+    boundary_penalty: u8,
+    span: usize,
+    gaps: usize,
+}
+
+fn is_file_mention_fuzzy_boundary(previous: Option<char>) -> bool {
+    match previous {
+        None => true,
+        Some(character) => {
+            !character.is_alphanumeric() || matches!(character, '/' | '-' | '_' | '.')
+        }
+    }
+}
+
+fn find_file_mention_fuzzy_match(haystack: &str, query: &str) -> Option<FuzzyFileMentionScore> {
+    let mut query_chars = query.chars();
+    let mut next_query_char = query_chars.next()?;
+    let mut matched_chars = 0usize;
+    let mut first_match_position = None;
+    let mut boundary_penalty = 1u8;
+    let mut previous = None;
+
+    for (position, character) in haystack.chars().enumerate() {
+        if character != next_query_char {
+            previous = Some(character);
+            continue;
+        }
+
+        if first_match_position.is_none() {
+            first_match_position = Some(position);
+            boundary_penalty = u8::from(!is_file_mention_fuzzy_boundary(previous));
+        }
+
+        matched_chars += 1;
+        if let Some(query_character) = query_chars.next() {
+            next_query_char = query_character;
+            previous = Some(character);
+            continue;
+        }
+
+        let first_match_position = first_match_position?;
+        let span = position.saturating_sub(first_match_position);
+        let gaps = span.saturating_sub(matched_chars.saturating_sub(1));
+        return Some(FuzzyFileMentionScore {
+            match_position: first_match_position,
+            boundary_penalty,
+            span,
+            gaps,
+        });
+    }
+
+    None
+}
+
+fn can_use_file_mention_fuzzy_search(query: &str) -> bool {
+    !query.contains('/') && query.chars().count() >= MIN_FILE_MENTION_FUZZY_QUERY_CHARS
+}
+
+fn score_file_mention_entry(
+    entry: &IndexedFileMentionEntry,
+    normalized_query: &str,
+) -> Option<FileMentionScore> {
+    if normalized_query.contains('/') {
+        if entry.normalized_relative_path == normalized_query {
+            return Some(file_mention_score(entry, 0, 0, 0, 0, 0));
+        }
+        if entry.normalized_relative_path.starts_with(normalized_query) {
+            return Some(file_mention_score(entry, 1, 0, 0, 0, 0));
+        }
+        let match_position = entry.normalized_relative_path.find(normalized_query)?;
+        return Some(file_mention_score(entry, 3, match_position, 0, 0, 0));
+    }
+
+    if entry.normalized_filename == normalized_query {
+        return Some(file_mention_score(entry, 0, 0, 0, 0, 0));
+    }
+    if entry.normalized_filename.starts_with(normalized_query) {
+        return Some(file_mention_score(entry, 1, 0, 0, 0, 0));
+    }
+    if let Some(match_position) =
+        find_file_mention_segment_prefix(&entry.normalized_relative_path, normalized_query)
+    {
+        return Some(file_mention_score(entry, 2, match_position, 0, 0, 0));
+    }
+    if let Some(match_position) = entry.normalized_relative_path.find(normalized_query) {
+        return Some(file_mention_score(entry, 3, match_position, 0, 0, 0));
+    }
+
+    if can_use_file_mention_fuzzy_search(normalized_query) {
+        if let Some(fuzzy_match) =
+            find_file_mention_fuzzy_match(&entry.normalized_filename, normalized_query)
+        {
+            return Some(file_mention_score(
+                entry,
+                4,
+                fuzzy_match.match_position,
+                fuzzy_match.boundary_penalty,
+                fuzzy_match.span,
+                fuzzy_match.gaps,
+            ));
+        }
+        if let Some(fuzzy_match) =
+            find_file_mention_fuzzy_match(&entry.normalized_relative_path, normalized_query)
+        {
+            return Some(file_mention_score(
+                entry,
+                5,
+                fuzzy_match.match_position,
+                fuzzy_match.boundary_penalty,
+                fuzzy_match.span,
+                fuzzy_match.gaps,
+            ));
+        }
+    }
+
+    None
+}
+
+fn file_mention_score(
+    entry: &IndexedFileMentionEntry,
+    rank: u8,
+    match_position: usize,
+    boundary_penalty: u8,
+    fuzzy_span: usize,
+    fuzzy_gaps: usize,
+) -> FileMentionScore {
+    FileMentionScore {
+        rank,
+        match_position,
+        boundary_penalty,
+        fuzzy_span,
+        fuzzy_gaps,
+        directory_penalty: if entry.is_directory { 0 } else { 1 },
+        depth: entry.depth,
+        path_len: entry.normalized_relative_path.len(),
+    }
+}
+
+fn compare_indexed_file_mention_candidates(
+    left: IndexedFileMentionCandidate<'_>,
+    right: IndexedFileMentionCandidate<'_>,
+) -> Ordering {
+    compare_file_mention_scores(left.score, right.score).then_with(|| {
+        left.entry
+            .normalized_relative_path
+            .cmp(&right.entry.normalized_relative_path)
+    })
+}
+
+fn compare_file_mention_candidates(
+    left: &FileMentionCandidate,
+    right: &FileMentionCandidate,
+) -> Ordering {
+    compare_file_mention_scores(left.score, right.score).then_with(|| {
+        left.normalized_relative_path
+            .cmp(&right.normalized_relative_path)
+    })
+}
+
+fn compare_file_mention_scores(left: FileMentionScore, right: FileMentionScore) -> Ordering {
+    left.rank
+        .cmp(&right.rank)
+        .then_with(|| left.match_position.cmp(&right.match_position))
+        .then_with(|| left.boundary_penalty.cmp(&right.boundary_penalty))
+        .then_with(|| left.fuzzy_span.cmp(&right.fuzzy_span))
+        .then_with(|| left.fuzzy_gaps.cmp(&right.fuzzy_gaps))
+        .then_with(|| left.directory_penalty.cmp(&right.directory_penalty))
+        .then_with(|| left.depth.cmp(&right.depth))
+        .then_with(|| left.path_len.cmp(&right.path_len))
+}
+
+fn canonicalize_existing_path_prefix(path: &Path) -> Option<PathBuf> {
+    let mut existing = path.to_path_buf();
+    let mut missing_segments = Vec::new();
+
+    while !existing.exists() {
+        let name = existing.file_name()?.to_os_string();
+        missing_segments.push(name);
+        existing = existing.parent()?.to_path_buf();
+    }
+
+    let mut canonical = existing.canonicalize().ok()?;
+    for segment in missing_segments.iter().rev() {
+        canonical.push(segment);
+    }
+    Some(canonical)
+}
+
+fn expand_file_mention_query_path(query: &str) -> PathBuf {
+    if let Some(rest) = query
+        .strip_prefix("~/")
+        .or_else(|| query.strip_prefix("~\\"))
+    {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+
+    PathBuf::from(query)
+}
+
+fn normalize_file_mention_query_for_root(root_path: &Path, query: &str) -> Option<String> {
+    let normalized_query = query.trim().replace('\\', "/");
+    if normalized_query.is_empty() {
+        return Some(String::new());
+    }
+
+    let expanded_query = expand_file_mention_query_path(&normalized_query);
+    if expanded_query.is_absolute() {
+        let canonical_query = canonicalize_existing_path_prefix(&expanded_query)?;
+        let query_path = canonical_query.to_string_lossy().replace('\\', "/");
+        let root = root_path.to_string_lossy().replace('\\', "/");
+        let normalized_query_path = query_path.to_lowercase();
+        let normalized_root = root.trim_end_matches('/').to_lowercase();
+        let root_with_slash = format!("{}/", normalized_root);
+        if normalized_query_path == normalized_root {
+            return Some(String::new());
+        }
+        if normalized_query_path.starts_with(&root_with_slash) {
+            return Some(normalized_query_path[root_with_slash.len()..].to_string());
+        }
+        return None;
+    }
+
+    let root = root_path.to_string_lossy().replace('\\', "/");
+    let root_with_slash = format!("{}/", root.trim_end_matches('/'));
+    if normalized_query == root {
+        return Some(String::new());
+    }
+    if normalized_query.starts_with(&root_with_slash) {
+        return Some(normalized_query[root_with_slash.len()..].to_lowercase());
+    }
+
+    Some(normalized_query.trim_start_matches('/').to_lowercase())
+}
+
+fn search_file_mention_index(
+    index: &FileMentionIndex,
+    query: &str,
+    max_results: usize,
+) -> Vec<FileMentionCandidate> {
+    let Some(normalized_query) =
+        normalize_file_mention_query_for_root(&index.canonical_root, query)
+    else {
+        return Vec::new();
+    };
+    if normalized_query.is_empty() || max_results == 0 {
+        return Vec::new();
+    }
+
+    let mut matches: Vec<IndexedFileMentionCandidate<'_>> = Vec::new();
+    for entry in &index.entries {
+        let Some(score) = score_file_mention_entry(entry, &normalized_query) else {
+            continue;
+        };
+        let candidate = IndexedFileMentionCandidate { entry, score };
+        let insert_at = matches
+            .iter()
+            .position(|existing| {
+                compare_indexed_file_mention_candidates(candidate, *existing).is_lt()
+            })
+            .unwrap_or(matches.len());
+        if insert_at >= max_results {
+            continue;
+        }
+        matches.insert(insert_at, candidate);
+        if matches.len() > max_results {
+            matches.pop();
+        }
+    }
+
+    matches
+        .into_iter()
+        .map(|candidate| FileMentionCandidate {
+            entry: candidate.entry.entry.clone(),
+            normalized_resolved_path: normalized_path_key(Path::new(
+                &candidate.entry.entry.resolved_path,
+            )),
+            normalized_relative_path: candidate.entry.normalized_relative_path.clone(),
+            score: candidate.score,
+        })
+        .collect()
+}
+
+fn should_search_file_mention_root(
+    root_path: &Path,
+    query: &str,
+    is_filesystem_query: bool,
+) -> bool {
+    if !is_filesystem_query {
+        return true;
+    }
+
+    let Ok(canonical_root) = root_path.canonicalize() else {
+        return false;
+    };
+
+    normalize_file_mention_query_for_root(&canonical_root, query).is_some()
+}
+
+fn insert_ranked_file_mention_candidate(
+    matches: &mut Vec<FileMentionCandidate>,
+    candidate: FileMentionCandidate,
+    max_results: usize,
+) {
+    if matches
+        .iter()
+        .any(|existing| existing.normalized_resolved_path == candidate.normalized_resolved_path)
+    {
+        return;
+    }
+
+    let insert_at = matches
+        .iter()
+        .position(|existing| compare_file_mention_candidates(&candidate, existing).is_lt())
+        .unwrap_or(matches.len());
+    if insert_at >= max_results {
+        return;
+    }
+    matches.insert(insert_at, candidate);
+    if matches.len() > max_results {
+        matches.pop();
+    }
+}
+
+fn is_filesystem_file_mention_query(query: &str) -> bool {
+    let trimmed = query.trim();
+    trimmed.starts_with("~/") || trimmed.starts_with("~\\") || Path::new(trimmed).is_absolute()
+}
+
+fn expand_filesystem_file_mention_query(query: &str) -> Option<PathBuf> {
+    let trimmed = query.trim();
+    if let Some(rest) = trimmed
+        .strip_prefix("~/")
+        .or_else(|| trimmed.strip_prefix("~\\"))
+    {
+        return dirs::home_dir().map(|home| home.join(rest));
+    }
+
+    let path = PathBuf::from(trimmed);
+    path.is_absolute().then_some(path)
+}
+
+fn filesystem_file_mention_lookup(query: &str) -> Option<(PathBuf, String)> {
+    let expanded = expand_filesystem_file_mention_query(query)?;
+    let parent = expanded.parent()?.to_path_buf();
+
+    if query.ends_with('/') || query.ends_with('\\') {
+        return Some((expanded, String::new()));
+    }
+
+    let partial = expanded
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default()
+        .to_string();
+    Some((parent, partial))
+}
+
+fn filesystem_file_mention_candidate_score(
+    path: &Path,
+    name: &str,
+    partial: &str,
+    is_directory: bool,
+) -> Option<FileMentionScore> {
+    let normalized_name = name.to_lowercase();
+    let normalized_partial = partial.to_lowercase();
+    let (rank, match_position) = if normalized_partial.is_empty() {
+        (2, 0)
+    } else if normalized_name == normalized_partial {
+        (0, 0)
+    } else if normalized_name.starts_with(&normalized_partial) {
+        (1, 0)
+    } else if normalized_partial.len() >= 2 {
+        let position = normalized_name.find(&normalized_partial)?;
+        (3, position)
+    } else {
+        return None;
+    };
+
+    Some(FileMentionScore {
+        rank,
+        match_position,
+        boundary_penalty: 0,
+        fuzzy_span: 0,
+        fuzzy_gaps: 0,
+        directory_penalty: if is_directory { 0 } else { 1 },
+        depth: path.components().count(),
+        path_len: path.to_string_lossy().len(),
+    })
+}
+
+fn search_filesystem_path_mentions(query: &str, max_results: usize) -> Vec<FileMentionCandidate> {
+    if max_results == 0 {
+        return Vec::new();
+    }
+
+    let Some((lookup_dir, partial)) = filesystem_file_mention_lookup(query) else {
+        return Vec::new();
+    };
+    if lookup_dir
+        .canonicalize()
+        .map_or(true, |path| !path.is_dir())
+    {
+        return Vec::new();
+    }
+
+    let Ok(entries) = fs::read_dir(&lookup_dir) else {
+        return Vec::new();
+    };
+
+    let mut matches = Vec::new();
+    for result in entries.take(MAX_FILESYSTEM_PATH_LOOKUP_ENTRIES) {
+        let Ok(entry) = result else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.is_empty() || (name.starts_with('.') && !partial.starts_with('.')) {
+            continue;
+        }
+
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_symlink() || (!file_type.is_dir() && !file_type.is_file()) {
+            continue;
+        }
+
+        let path = lookup_dir.join(&name);
+        let Some(score) =
+            filesystem_file_mention_candidate_score(&path, &name, &partial, file_type.is_dir())
+        else {
+            continue;
+        };
+        let normalized_resolved_path = normalized_path_key(&path);
+        let candidate = FileMentionCandidate {
+            entry: build_filesystem_file_mention_entry(
+                &path,
+                filesystem_display_path_for_query(query, &path),
+                file_type.is_dir(),
+            ),
+            normalized_relative_path: normalized_resolved_path.clone(),
+            normalized_resolved_path,
+            score,
+        };
+        insert_ranked_file_mention_candidate(&mut matches, candidate, max_results);
+    }
+
+    matches
+}
+
+fn search_file_mentions_blocking(
+    roots: Vec<String>,
+    query: String,
+    max_results: Option<usize>,
+) -> Vec<FileMentionPathEntry> {
     let roots = normalize_roots(roots);
-    if roots.is_empty() {
+    let query = query.trim();
+    if query.is_empty() {
         return Vec::new();
     }
 
     let limit = max_results
         .unwrap_or(DEFAULT_FILE_MENTION_LIMIT)
         .clamp(1, MAX_FILE_MENTION_LIMIT);
+    let is_filesystem_query = is_filesystem_file_mention_query(query);
 
-    let mut builder = ignore::WalkBuilder::new(&roots[0]);
-    for root in &roots[1..] {
-        builder.add(root);
+    if roots.is_empty() && !is_filesystem_query {
+        return Vec::new();
     }
-    builder
-        .max_depth(Some(MAX_SCAN_DEPTH))
-        .follow_links(false) // don't traverse symlinks
-        .hidden(true) // skip hidden files/dirs
-        .git_ignore(true) // respect .gitignore
-        .git_global(true) // respect global gitignore
-        .git_exclude(true); // respect .git/info/exclude
 
-    // Canonicalize roots so we can reject paths that escape via symlink targets
-    let canonical_roots: Vec<PathBuf> = roots
-        .iter()
-        .filter_map(|root| root.canonicalize().ok())
-        .collect();
-
-    let mut seen = HashSet::new();
-    let mut files = Vec::new();
-
-    for entry in builder.build().flatten() {
-        if files.len() >= limit {
-            break;
+    let mut matches = Vec::new();
+    for root in roots {
+        if !should_search_file_mention_root(&root, query, is_filesystem_query) {
+            continue;
         }
-        let Some(ft) = entry.file_type() else {
+        let Ok(index) = get_or_build_file_mention_index(&root) else {
             continue;
         };
-        if !ft.is_file() {
-            continue;
-        }
-        // Reject any path that resolved outside the project roots
-        let canonical = match entry.path().canonicalize() {
-            Ok(c) => c,
-            Err(_) => continue,
-        };
-        if !canonical_roots
-            .iter()
-            .any(|root| canonical.starts_with(root))
-        {
-            continue;
-        }
-        let path_str = entry.path().to_string_lossy().to_string();
-        let dedup_key = normalized_path_key(entry.path());
-        if seen.insert(dedup_key) {
-            files.push(path_str);
+        for candidate in search_file_mention_index(&index, query, limit) {
+            insert_ranked_file_mention_candidate(&mut matches, candidate, limit);
         }
     }
 
-    files.sort_by_key(|path| path.to_lowercase());
-    files
+    if is_filesystem_query {
+        for candidate in search_filesystem_path_mentions(query, limit) {
+            insert_ranked_file_mention_candidate(&mut matches, candidate, limit);
+        }
+    }
+
+    matches
+        .into_iter()
+        .map(|candidate| candidate.entry)
+        .collect()
 }
 
 #[tauri::command]
-pub async fn list_files_for_mentions(
+pub async fn search_file_mentions(
     roots: Vec<String>,
+    query: String,
     max_results: Option<usize>,
-) -> Result<Vec<String>, String> {
-    tokio::task::spawn_blocking(move || scan_files_for_mentions(roots, max_results))
+) -> Result<Vec<FileMentionPathEntry>, String> {
+    tokio::task::spawn_blocking(move || search_file_mentions_blocking(roots, query, max_results))
         .await
-        .map_err(|error| format!("Failed to scan files for mentions: {}", error))
+        .map_err(|error| format!("Failed to search files for mentions: {}", error))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_file_tree_entry, ensure_directory_path, inspect_attachment_path,
+        build_file_mention_index, build_file_tree_entry, ensure_directory_path,
+        get_or_build_file_mention_index_from_cache, inspect_attachment_path,
         inspect_attachment_paths, normalize_attachment_paths, normalize_roots,
-        read_directory_entries, read_image_attachment, scan_files_for_mentions,
-        validate_external_url, MAX_IMAGE_ATTACHMENT_BYTES,
+        read_directory_entries, read_image_attachment, search_file_mentions_blocking,
+        validate_external_url, FileMentionIndexCache, MAX_IMAGE_ATTACHMENT_BYTES,
     };
     use base64::Engine;
     use std::fs;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
-    use std::path::PathBuf;
+    use std::panic::{self, AssertUnwindSafe};
+    use std::path::{Path, PathBuf};
     use std::process::Command;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering as AtomicOrdering},
+        Arc, Barrier, Mutex,
+    };
+    use std::thread;
+    use std::time::Duration;
     use tempfile::tempdir;
 
     /// Create a temp dir with `git init` so the ignore crate picks up `.gitignore`.
@@ -549,6 +1531,26 @@ mod tests {
         dir
     }
 
+    fn mention_paths_joined(entries: &[super::FileMentionPathEntry]) -> String {
+        entries
+            .iter()
+            .map(|entry| entry.resolved_path.as_str())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn search_mentions(
+        root: &Path,
+        query: &str,
+        max_results: usize,
+    ) -> Vec<super::FileMentionPathEntry> {
+        search_file_mentions_blocking(
+            vec![root.to_string_lossy().to_string()],
+            query.to_string(),
+            Some(max_results),
+        )
+    }
+
     #[test]
     fn respects_gitignore() {
         let dir = git_tempdir();
@@ -559,12 +1561,12 @@ mod tests {
         fs::create_dir_all(&src).expect("src dir");
         fs::create_dir_all(&ignored).expect("ignored dir");
         fs::write(src.join("main.ts"), "export {}").expect("source file");
-        fs::write(ignored.join("index.js"), "module.exports = {}").expect("ignored file");
+        fs::write(ignored.join("main.ts"), "module.exports = {}").expect("ignored file");
         fs::write(root.join(".gitignore"), "node_modules/\n").expect(".gitignore");
 
-        let files = scan_files_for_mentions(vec![root.to_string_lossy().to_string()], Some(50));
+        let files = search_mentions(root, "main", 50);
 
-        let joined = files.join("\n");
+        let joined = mention_paths_joined(&files);
         assert!(joined.contains("main.ts"), "should include source files");
         assert!(
             !joined.contains("node_modules"),
@@ -578,13 +1580,339 @@ mod tests {
         let root = dir.path();
 
         fs::write(root.join("visible.ts"), "").expect("visible file");
-        fs::write(root.join(".hidden"), "").expect("hidden file");
+        fs::write(root.join(".visible.ts"), "").expect("hidden file");
 
-        let files = scan_files_for_mentions(vec![root.to_string_lossy().to_string()], Some(50));
+        let files = search_mentions(root, "visible", 50);
 
-        let joined = files.join("\n");
+        let joined = mention_paths_joined(&files);
         assert!(joined.contains("visible.ts"));
-        assert!(!joined.contains(".hidden"));
+        assert!(!joined.contains(".visible.ts"));
+    }
+
+    #[test]
+    fn matches_project_paths_case_insensitively() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let api = root.join("Src").join("API");
+
+        fs::create_dir_all(&api).expect("api dir");
+        fs::write(api.join("Client.ts"), "").expect("client file");
+
+        let entries = search_mentions(root, "src/api", 50);
+
+        assert!(
+            entries.iter().any(|entry| {
+                entry.display_path.ends_with("/Src/API/Client.ts") && entry.filename == "Client.ts"
+            }),
+            "expected mixed-case path to match lowercase query: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn returns_structured_folder_and_file_entries() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let src = root.join("src");
+
+        fs::create_dir_all(&src).expect("src dir");
+        fs::write(src.join("main.ts"), "").expect("source file");
+
+        let entries = search_mentions(root, "src", 50);
+        let canonical_src = src.canonicalize().expect("canonical src");
+        let canonical_main = src.join("main.ts").canonicalize().expect("canonical main");
+
+        assert!(entries.iter().any(|entry| {
+            entry.resolved_path == canonical_src.to_string_lossy()
+                && entry.display_path.ends_with("/src")
+                && entry.filename == "src"
+                && entry.kind == "folder"
+        }));
+        assert!(entries.iter().any(|entry| {
+            entry.resolved_path == canonical_main.to_string_lossy()
+                && entry.display_path.ends_with("/src/main.ts")
+                && entry.filename == "main.ts"
+                && entry.kind == "file"
+        }));
+    }
+
+    #[test]
+    fn honors_max_depth_and_max_results() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let shallow = root.join("src");
+        let too_deep = root
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f")
+            .join("g")
+            .join("h");
+
+        fs::create_dir_all(&shallow).expect("shallow dir");
+        fs::create_dir_all(&too_deep).expect("deep dir");
+        fs::write(shallow.join("main.ts"), "").expect("shallow file");
+        fs::write(too_deep.join("deep.ts"), "").expect("deep file");
+        for index in 0..5 {
+            fs::write(root.join(format!("file-{index}.ts")), "").expect("file");
+        }
+
+        let capped = search_mentions(root, "file", 2);
+        assert_eq!(capped.len(), 2);
+
+        let entries = search_mentions(root, "main", 50);
+        let joined = mention_paths_joined(&entries);
+        assert!(joined.contains("main.ts"));
+
+        let entries = search_mentions(root, "deep", 50);
+        let joined = mention_paths_joined(&entries);
+        assert!(!joined.contains("deep.ts"));
+    }
+
+    #[test]
+    fn git_index_skips_files_beyond_max_depth() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let too_deep = root
+            .join("a")
+            .join("b")
+            .join("c")
+            .join("d")
+            .join("e")
+            .join("f")
+            .join("g")
+            .join("h")
+            .join("i");
+
+        fs::create_dir_all(&too_deep).expect("deep dir");
+        fs::write(too_deep.join("deep-target.ts"), "").expect("deep file");
+
+        let entries = search_mentions(root, "deep-target", 50);
+        let joined = mention_paths_joined(&entries);
+
+        assert!(!joined.contains("deep-target.ts"));
+    }
+
+    #[test]
+    fn git_index_includes_empty_folders() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let empty_folder = root.join("empty-folder");
+
+        fs::create_dir_all(&empty_folder).expect("empty folder");
+        fs::write(root.join("main.ts"), "").expect("source file");
+
+        let entries = search_mentions(root, "empty-folder", 50);
+        let canonical_empty_folder = empty_folder.canonicalize().expect("canonical empty folder");
+
+        assert!(
+            entries.iter().any(|entry| {
+                entry.resolved_path == canonical_empty_folder.to_string_lossy()
+                    && entry.filename == "empty-folder"
+                    && entry.kind == "folder"
+            }),
+            "expected empty folder entry: {entries:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escapes() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let external = tempdir().expect("external tempdir");
+        let external_file = external.path().join("secret.txt");
+
+        fs::write(&external_file, "secret").expect("external file");
+        std::os::unix::fs::symlink(&external_file, root.join("secret-link.txt")).expect("symlink");
+
+        let entries = search_mentions(root, "secret", 50);
+        let joined = mention_paths_joined(&entries);
+
+        assert!(!joined.contains("secret-link.txt"));
+        assert!(!joined.contains("secret.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_tracked_symlink_entries() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let external = tempdir().expect("external tempdir");
+        let external_file = external.path().join("secret.txt");
+        let symlink = root.join("tracked-secret.txt");
+
+        fs::write(&external_file, "secret").expect("external file");
+        std::os::unix::fs::symlink(&external_file, &symlink).expect("symlink");
+        Command::new("git")
+            .args(["add", "tracked-secret.txt"])
+            .current_dir(root)
+            .output()
+            .expect("git add");
+
+        let entries = search_mentions(root, "tracked-secret", 50);
+        let joined = mention_paths_joined(&entries);
+
+        assert!(!joined.contains("tracked-secret.txt"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn strips_symlinked_project_root_from_absolute_queries() {
+        let real_dir = git_tempdir();
+        let real_root = real_dir.path();
+        let link_parent = tempdir().expect("link parent");
+        let symlink_root = link_parent.path().join("workspace-link");
+        let src = real_root.join("src");
+        let file = src.join("client.ts");
+
+        fs::create_dir_all(&src).expect("src dir");
+        fs::write(&file, "").expect("client file");
+        std::os::unix::fs::symlink(real_root, &symlink_root).expect("root symlink");
+
+        let entries = search_file_mentions_blocking(
+            vec![symlink_root.to_string_lossy().into_owned()],
+            format!("{}/src/client", symlink_root.to_string_lossy()),
+            Some(50),
+        );
+        let canonical_file = file.canonicalize().expect("canonical file");
+
+        assert!(
+            entries.iter().any(|entry| {
+                entry.resolved_path == canonical_file.to_string_lossy()
+                    && entry.display_path.ends_with("/src/client.ts")
+                    && entry.filename == "client.ts"
+                    && entry.source == "project"
+            }),
+            "expected symlink-root absolute query to match indexed project file: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn ranks_exact_basename_prefix_segment_and_fuzzy_matches() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        fs::create_dir_all(root.join("docs")).expect("docs dir");
+        fs::create_dir_all(root.join("src/render")).expect("src dir");
+        fs::write(root.join("readme.md"), "").expect("readme file");
+        fs::write(root.join("reader.md"), "").expect("reader file");
+        fs::write(root.join("docs").join("my-readme.md"), "").expect("docs file");
+        fs::write(root.join("src/render").join("app.ts"), "").expect("app file");
+
+        let entries = search_mentions(root, "readme", 10);
+        assert_eq!(
+            entries.first().map(|entry| entry.filename.as_str()),
+            Some("readme.md")
+        );
+
+        let entries = search_mentions(root, "render", 10);
+        assert_eq!(
+            entries.first().map(|entry| entry.filename.as_str()),
+            Some("render")
+        );
+
+        let entries = search_mentions(root, "rdme", 10);
+        assert!(
+            entries.iter().any(|entry| entry.filename == "readme.md"),
+            "expected fuzzy basename match"
+        );
+    }
+
+    #[test]
+    fn walks_absolute_path_prefixes_without_project_roots() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+        let child = root.join("zsh-fzf-tab-kalvin");
+        let file = child.join("test");
+
+        fs::create_dir_all(&child).expect("child dir");
+        fs::write(&file, "").expect("child file");
+
+        let entries = search_file_mentions_blocking(
+            vec![],
+            format!("{}/zs", root.to_string_lossy()),
+            Some(10),
+        );
+        assert!(entries.iter().any(|entry| {
+            entry.resolved_path == child.to_string_lossy()
+                && entry.filename == "zsh-fzf-tab-kalvin"
+                && entry.kind == "folder"
+                && entry.source == "filesystem"
+        }));
+
+        let entries = search_file_mentions_blocking(
+            vec![],
+            format!("{}/te", child.to_string_lossy()),
+            Some(10),
+        );
+        assert!(entries.iter().any(|entry| {
+            entry.resolved_path == file.to_string_lossy()
+                && entry.filename == "test"
+                && entry.kind == "file"
+                && entry.source == "filesystem"
+        }));
+    }
+
+    #[test]
+    fn coalesces_concurrent_file_mention_index_builds() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
+        fs::write(root.join("main.ts"), "").expect("source file");
+
+        let cache = Arc::new(Mutex::new(FileMentionIndexCache::default()));
+        let build_count = Arc::new(AtomicUsize::new(0));
+        let barrier = Arc::new(Barrier::new(6));
+        let mut handles = Vec::new();
+
+        for _ in 0..6 {
+            let cache = Arc::clone(&cache);
+            let build_count = Arc::clone(&build_count);
+            let barrier = Arc::clone(&barrier);
+            let root = root.clone();
+            handles.push(thread::spawn(move || {
+                barrier.wait();
+                get_or_build_file_mention_index_from_cache(&cache, &root, |path| {
+                    build_count.fetch_add(1, AtomicOrdering::SeqCst);
+                    thread::sleep(Duration::from_millis(25));
+                    build_file_mention_index(path)
+                })
+                .expect("index")
+            }));
+        }
+
+        let indexes = handles
+            .into_iter()
+            .map(|handle| handle.join().expect("worker"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(build_count.load(AtomicOrdering::SeqCst), 1);
+        assert!(indexes.iter().all(|index| Arc::ptr_eq(index, &indexes[0])));
+    }
+
+    #[test]
+    fn clears_file_mention_build_slot_after_builder_panic() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path().to_path_buf();
+        fs::write(root.join("main.ts"), "").expect("source file");
+
+        let cache = Mutex::new(FileMentionIndexCache::default());
+        let panic_result = panic::catch_unwind(AssertUnwindSafe(|| {
+            let _ = get_or_build_file_mention_index_from_cache(&cache, &root, |_| {
+                panic!("index builder panic")
+            });
+        }));
+
+        assert!(panic_result.is_err());
+
+        let index =
+            get_or_build_file_mention_index_from_cache(&cache, &root, build_file_mention_index)
+                .expect("index");
+        assert!(index
+            .entries
+            .iter()
+            .any(|entry| entry.entry.filename == "main.ts"));
     }
 
     #[test]
