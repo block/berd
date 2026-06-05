@@ -18,7 +18,7 @@ base64 = "0.22"
 bytes = "1"
 chrono = { version = "0.4", features = ["serde"] }
 dirs = "6.0.0"
-doctor = { git = "https://github.com/block/builderbot", rev = "0198cb477773aa8390029e6faf4efb9a67195503" }
+doctor = { git = "https://github.com/block/builderbot", rev = "31d08d924f15bc4bb857b3d764dc9f9c4b20cd40" }
 etcetera = "0.11.0"
 ignore = "0.4.25"
 infer = "0.19.0"
