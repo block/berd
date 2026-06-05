@@ -16,6 +16,7 @@ pub mod git_changes;
 pub mod layout;
 pub mod migration;
 pub mod model_setup;
+pub mod notifications;
 pub mod openai_realtime;
 pub mod path_resolver;
 pub mod project_icons;

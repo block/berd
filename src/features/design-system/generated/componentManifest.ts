@@ -2624,7 +2624,7 @@ export const designSystemComponentManifest = [
   {
     name: "Toaster",
     source: "src/shared/ui/sonner.tsx",
-    exports: ["Toaster"],
+    exports: ["ToastActionButton", "Toaster"],
     slots: [],
     cva: [],
     tokenClasses: [],

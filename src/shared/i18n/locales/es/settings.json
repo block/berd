@@ -293,9 +293,24 @@
     "experiments": "Experimentos",
     "extensions": "Extensiones",
     "general": "General",
+    "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
     "updates": "Actualizaciones"
+  },
+  "notifications": {
+    "title": "Notificaciones",
+    "enabled": {
+      "label": "Activar notificaciones"
+    },
+    "inApp": {
+      "label": "En la app",
+      "description": "Mostrar un aviso cuando un chat termina y estás en otra sesión."
+    },
+    "desktop": {
+      "label": "Escritorio",
+      "description": "Enviar una notificación del sistema cuando la app está en segundo plano."
+    }
   },
   "updates": {
     "actions": {

@@ -4,6 +4,7 @@ import { ArchiveSettings } from "./ArchiveSettings";
 import { DoctorSettings } from "./DoctorSettings";
 import { ProvidersSettings } from "./ProvidersSettings";
 import { GeneralSettings } from "./GeneralSettings";
+import { NotificationSettings } from "./NotificationSettings";
 import type { SectionId } from "./settingsSections";
 import { ExperimentsSettings } from "@/features/experiments/ExperimentsSettings";
 import {
@@ -65,6 +66,7 @@ export function SettingsView({
       {activeSection === "doctor" && <DoctorSettings />}
       {activeSection === "experiments" && <ExperimentsSettings />}
       {activeSection === "general" && <GeneralSettings />}
+      {activeSection === "notifications" && <NotificationSettings />}
       {activeSection === "archive" && <ArchiveSettings />}
       {activeSection === "updates" && <UpdatesSettings />}
     </PageShell>

@@ -1,12 +1,20 @@
 import { Toaster as Sonner, type ToasterProps } from "sonner";
 import { useTheme } from "@/shared/theme/ThemeProvider";
-import { buttonVariants } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
+import { Button, type ButtonProps, buttonVariants } from "@/shared/ui/button";
+
+const toastActionButtonLayoutClassName = "ml-auto shrink-0";
 
 const toastActionButtonClassName = buttonVariants({
   size: "xxs",
-  className:
+  className: cn(
+    toastActionButtonLayoutClassName,
+    "relative select-none cursor-pointer",
     "!bg-primary !text-primary-foreground hover:!bg-primary/90 focus-visible:!ring-2 focus-visible:!ring-ring",
+  ),
 });
+
+type ToastActionButtonProps = Omit<ButtonProps, "size" | "variant">;
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { isDark } = useTheme();
@@ -19,6 +27,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
       expand
       visibleToasts={3}
       gap={8}
+      swipeDirections={["right", "bottom"]}
       offset={{ bottom: "var(--toast-bottom-offset)", right: 12 }}
       mobileOffset={{
         bottom: "var(--toast-mobile-bottom-offset)",
@@ -40,6 +49,10 @@ const Toaster = ({ ...props }: ToasterProps) => {
           WebkitBackdropFilter: "var(--backdrop-composer-glass)",
         },
         classNames: {
+          toast: "select-none cursor-pointer",
+          content: "select-none cursor-pointer",
+          title: "select-none cursor-pointer",
+          description: "select-none cursor-pointer",
           actionButton: toastActionButtonClassName,
         },
       }}
@@ -48,4 +61,31 @@ const Toaster = ({ ...props }: ToasterProps) => {
   );
 };
 
-export { Toaster };
+function ToastActionButton({
+  className,
+  type = "button",
+  ...props
+}: ToastActionButtonProps) {
+  return (
+    <Button
+      {...props}
+      type={type}
+      variant="composer-action"
+      size="xxs"
+      className={cn(
+        toastActionButtonLayoutClassName,
+        "relative select-none cursor-pointer",
+        className,
+      )}
+    >
+      <span aria-hidden="true" className="invisible select-none">
+        {props.children}
+      </span>
+      <span className="absolute inset-0 flex select-none cursor-pointer items-center justify-center">
+        {props.children}
+      </span>
+    </Button>
+  );
+}
+
+export { Toaster, ToastActionButton };

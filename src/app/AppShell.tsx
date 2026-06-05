@@ -44,6 +44,7 @@ import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { findExistingDraft } from "@/features/chat/lib/newChat";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { useAppStartup } from "./hooks/useAppStartup";
+import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifications";
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { useProjectDialog } from "./hooks/useProjectDialog";
@@ -392,6 +393,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
+  const handleNavigateToSession = useCallback(
+    (sessionId: string) => {
+      setActiveSession(sessionId);
+      setChatActiveSession(sessionId);
+      setActiveView("chat");
+      useChatStore.getState().markSessionRead(sessionId);
+    },
+    [setActiveSession, setChatActiveSession],
+  );
+
+  useCompletionNotifications(handleNavigateToSession);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const archiveSession = useChatSessionStore((s) => s.archiveSession);
   const selectedProvider = useAgentStore(selectSelectedProvider);

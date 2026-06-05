@@ -293,9 +293,24 @@
     "experiments": "Experiments",
     "extensions": "Extensions",
     "general": "General",
+    "notifications": "Notifications",
     "providers": "AI providers",
     "providersUpdateAvailable": "Update available",
     "updates": "Updates"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "enabled": {
+      "label": "Enable notifications"
+    },
+    "inApp": {
+      "label": "In-app",
+      "description": "Show a banner when a chat finishes and you're in a different session."
+    },
+    "desktop": {
+      "label": "Desktop",
+      "description": "Send an OS notification when the app is in the background."
+    }
   },
   "updates": {
     "actions": {

@@ -21,6 +21,7 @@ const biomeBinPath = path.join(
   path.dirname(biomePackagePath),
   biomePackage.bin.biome,
 );
+const displayNameOverrides = new Map([["sonner.tsx", "Toaster"]]);
 
 const sourceTokenNames = new Set([
   "accent",
@@ -344,6 +345,16 @@ function getCvaMaps(sourceFile) {
 }
 
 function displayNameFromFile(fileName, exportEntries) {
+  const displayNameOverride = displayNameOverrides.get(fileName);
+  if (
+    displayNameOverride &&
+    exportEntries.some(
+      (entry) => entry.kind === "value" && entry.name === displayNameOverride,
+    )
+  ) {
+    return displayNameOverride;
+  }
+
   const baseName = fileName.replace(/\.tsx$/, "");
   const expectedExportName = baseName.includes("-")
     ? baseName

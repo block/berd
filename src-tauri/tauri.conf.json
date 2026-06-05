@@ -72,7 +72,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../distro": "distro"
+      "../distro": "distro",
+      "../resources/notification-complete.mp3": "notification-complete.mp3"
     },
     "externalBin": ["binaries/goosed"],
     "linux": {

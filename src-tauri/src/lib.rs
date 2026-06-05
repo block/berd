@@ -54,6 +54,7 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
@@ -284,6 +285,7 @@ pub fn run() {
             commands::migration::mark_migration_complete,
             commands::migration::dismiss_migration_banner,
             commands::model_setup::authenticate_model_provider,
+            commands::notifications::show_completion_notification,
             commands::openai_realtime::get_openai_realtime_status,
             commands::openai_realtime::create_openai_realtime_session,
             commands::agent_setup::check_agent_installed,
