@@ -165,6 +165,56 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function recallTextbox(): HTMLTextAreaElement {
+  return screen.getByRole("textbox") as HTMLTextAreaElement;
+}
+
+function pressRecallArrowUp(eventInit: Record<string, unknown> = {}) {
+  fireEvent.keyDown(recallTextbox(), { key: "ArrowUp", ...eventInit });
+}
+
+function renderQueuedRecallInput(
+  props: Partial<Parameters<typeof ChatInput>[0]> = {},
+) {
+  const onDismissQueue = vi.fn();
+  const onRecallLastUserMessage = vi.fn(() => "my previous message");
+  render(
+    <ChatInput
+      onSend={vi.fn()}
+      queuedMessage={{ text: "queued follow up" }}
+      onDismissQueue={onDismissQueue}
+      onRecallLastUserMessage={onRecallLastUserMessage}
+      {...props}
+    />,
+  );
+  return { onDismissQueue, onRecallLastUserMessage };
+}
+
+function expectNoRecallShortcutAction({
+  onDismissQueue,
+  onRecallLastUserMessage,
+}: ReturnType<typeof renderQueuedRecallInput>) {
+  expect(onDismissQueue).not.toHaveBeenCalled();
+  expect(onRecallLastUserMessage).not.toHaveBeenCalled();
+}
+
+async function stageRecallAttachment() {
+  const composer = recallTextbox().closest("div.rounded-composer");
+  if (!composer) {
+    throw new Error("Expected composer container");
+  }
+
+  fireEvent.drop(composer, {
+    dataTransfer: {
+      files: [new File(["draft"], "draft.txt", { type: "text/plain" })],
+      items: [{ kind: "file" }],
+      types: ["Files"],
+    },
+  });
+
+  expect(await screen.findByText("draft.txt")).toBeInTheDocument();
+}
+
 describe("ChatInput", () => {
   beforeEach(() => {
     mockSearchFilesForMentions.mockClear();
@@ -1367,5 +1417,86 @@ describe("ChatInput", () => {
 
     expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined);
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
+  });
+
+  it("recalls the last user message from an empty composer", () => {
+    const onRecall = vi.fn(() => "my previous message");
+    render(<ChatInput onSend={vi.fn()} onRecallLastUserMessage={onRecall} />);
+
+    pressRecallArrowUp();
+
+    expect(onRecall).toHaveBeenCalledTimes(1);
+    expect(recallTextbox()).toHaveValue("my previous message");
+    expect(recallTextbox().selectionStart).toBe("my previous message".length);
+    expect(recallTextbox().selectionEnd).toBe("my previous message".length);
+  });
+
+  it("edits a queued message before recalling history", () => {
+    const onDismissQueue = vi.fn();
+    const onPersonaChange = vi.fn();
+    const { onRecallLastUserMessage } = renderQueuedRecallInput({
+      onDismissQueue,
+      onPersonaChange,
+      queuedMessage: {
+        text: "queued follow up",
+        personaId: "persona-1",
+        attachments: [
+          {
+            id: "file-1",
+            kind: "file" as const,
+            name: "notes.txt",
+            path: "/tmp/notes.txt",
+          },
+        ],
+      },
+    });
+
+    pressRecallArrowUp();
+
+    expect(onDismissQueue).toHaveBeenCalledTimes(1);
+    expect(onRecallLastUserMessage).not.toHaveBeenCalled();
+    expect(onPersonaChange).toHaveBeenCalledWith("persona-1");
+    expect(recallTextbox()).toHaveValue("queued follow up");
+    expect(recallTextbox().selectionStart).toBe("queued follow up".length);
+    expect(screen.getByText("notes.txt")).toBeInTheDocument();
+  });
+
+  it.each(["draft text", "\n  "])("leaves draft text alone", (draft) => {
+    const callbacks = renderQueuedRecallInput();
+
+    fireEvent.change(recallTextbox(), { target: { value: draft } });
+    pressRecallArrowUp();
+
+    expectNoRecallShortcutAction(callbacks);
+    expect(recallTextbox()).toHaveValue(draft);
+  });
+
+  it("leaves staged attachments and skills alone", async () => {
+    const onSkillsChange = vi.fn();
+    const callbacks = renderQueuedRecallInput({
+      selectedSkills: [{ id: "code-review", name: "code-review" }],
+      onSkillsChange,
+    });
+
+    await stageRecallAttachment();
+    pressRecallArrowUp();
+
+    expectNoRecallShortcutAction(callbacks);
+    expect(onSkillsChange).not.toHaveBeenCalled();
+    expect(screen.getByText("draft.txt")).toBeInTheDocument();
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+    expect(recallTextbox()).toHaveValue("");
+  });
+
+  it("keeps native modified and IME ArrowUp behavior", () => {
+    const onRecall = vi.fn(() => "recalled");
+    render(<ChatInput onSend={vi.fn()} onRecallLastUserMessage={onRecall} />);
+
+    pressRecallArrowUp({ metaKey: true });
+    pressRecallArrowUp({ isComposing: true });
+    pressRecallArrowUp({ keyCode: 229 });
+
+    expect(onRecall).not.toHaveBeenCalled();
+    expect(recallTextbox()).toHaveValue("");
   });
 });

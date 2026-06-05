@@ -56,7 +56,12 @@ export interface ChatInputComposerActions {
   disabled?: boolean;
   sendDisabled?: boolean;
   sendDisabledReason?: string;
-  queuedMessage?: { text: string } | null;
+  queuedMessage?: {
+    text: string;
+    personaId?: string;
+    attachments?: ChatAttachmentDraft[];
+    sendOptions?: ChatSendOptions;
+  } | null;
   onDismissQueue?: () => void;
 }
 
@@ -132,6 +137,8 @@ export interface ChatInputProps {
   projectPicker?: ChatInputProjectPicker;
   contextUsage?: ChatInputContextUsage;
   controls?: ChatInputControls;
+  /** Called when ↑ should recall the last sent user message. */
+  onRecallLastUserMessage?: () => string | null;
   /**
    * Visual surface for the composer.
    * - "pill" (default): translucent glass pill — used by the Home composer.

@@ -56,6 +56,7 @@ export function ChatInput({
   projectPicker,
   contextUsage,
   controls,
+  onRecallLastUserMessage,
   surface = "pill",
 }: ChatInputProps) {
   const {
@@ -142,12 +143,14 @@ export function ChatInput({
   );
   const [isCompact, setIsCompact] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const pendingCursorOffsetRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const {
     attachments,
     addBrowserFiles,
     addPathAttachments,
     removeAttachment,
+    replaceAttachments,
     clearAttachments,
   } = useChatInputAttachments();
   const attachmentsRef = useRef(attachments);
@@ -178,14 +181,25 @@ export function ChatInput({
 
   useLayoutEffect(() => {
     resizeTextarea();
+    const cursorOffset = pendingCursorOffsetRef.current;
+    if (cursorOffset === null) {
+      return;
+    }
+    pendingCursorOffsetRef.current = null;
+    const textarea = textareaRef.current;
+    if (textarea) {
+      textarea.selectionStart = cursorOffset;
+      textarea.selectionEnd = cursorOffset;
+    }
   });
 
   const hasQueuedMessage = queuedMessage !== null;
   const canInterruptAndSendNow = isStreaming && Boolean(onSendNow);
-  const hasComposedMessage =
-    text.trim().length > 0 ||
+  const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
+  const hasComposedMessage = text.trim().length > 0 || hasDraftContext;
+  const hasDraftContent = text.length > 0 || hasDraftContext;
   const canQueueMessage =
     hasComposedMessage && !hasQueuedMessage && !disabled && !sendDisabled;
   const canSendNow =
@@ -404,6 +418,28 @@ export function ChatInput({
     void onSendQueuedNow();
   }, [onSendQueuedNow]);
 
+  const setTextWithCursorAtEnd = (value: string) => {
+    setText(value);
+    pendingCursorOffsetRef.current = value.length;
+  };
+
+  const restoreQueuedMessage = () => {
+    if (!queuedMessage || !onDismissQueue) {
+      return false;
+    }
+
+    const nextText =
+      queuedMessage.sendOptions?.displayText ?? queuedMessage.text;
+    setTextWithCursorAtEnd(nextText);
+    onPersonaChange?.(queuedMessage.personaId ?? null);
+    replaceAttachments(
+      scopedControls.attachments ? (queuedMessage.attachments ?? []) : [],
+    );
+    setSelectedSkills([]);
+    onDismissQueue();
+    return true;
+  };
+
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing =
       event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
@@ -439,6 +475,31 @@ export function ChatInput({
           handleMentionConfirm(item, { completeDirectories: true });
           return;
         }
+      }
+    }
+    if (
+      event.key === "ArrowUp" &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing &&
+      event.nativeEvent.keyCode !== 229 &&
+      !hasDraftContent
+    ) {
+      if (queuedMessage) {
+        if (restoreQueuedMessage()) {
+          event.preventDefault();
+        }
+        return;
+      }
+
+      // ↑ in an empty composer recalls the most recent sent message (single level).
+      const recalled = onRecallLastUserMessage?.() ?? null;
+      if (recalled !== null) {
+        event.preventDefault();
+        setTextWithCursorAtEnd(recalled);
+        return;
       }
     }
     if (

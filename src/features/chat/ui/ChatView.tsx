@@ -51,6 +51,7 @@ import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/termin
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { getTextContent } from "@/shared/types/messages";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-composer bg-surface-chat-composer shadow-[var(--shadow-chat-composer)] [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -701,6 +702,20 @@ export function ChatView({
       </div>
     </AnimatePresence>
   ) : null;
+
+  // ↑-to-edit: recall the text of the most recent user message in this session.
+  const handleRecallLastUserMessage = useCallback((): string | null => {
+    const msgs = controller.messages;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const msg = msgs[i];
+      if (msg.role === "user") {
+        const text = getTextContent(msg).trim();
+        if (text.length > 0) return text;
+      }
+    }
+    return null;
+  }, [controller.messages]);
+
   const composerFooter = (
     <div className="px-4">
       <div
@@ -750,6 +765,9 @@ export function ChatView({
               (controller.chatState === "streaming" ||
                 controller.chatState === "thinking"),
           }}
+          onRecallLastUserMessage={
+            isReadOnly ? undefined : handleRecallLastUserMessage
+          }
           initialValue={controller.draftValue}
           onDraftChange={controller.handleDraftChange}
           selectedSkills={controller.selectedSkills}

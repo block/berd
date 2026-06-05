@@ -204,6 +204,23 @@ export function useChatInputAttachments() {
     });
   }, []);
 
+  const replaceAttachments = useCallback(
+    (nextAttachments: ChatAttachmentDraft[]) => {
+      setAttachments((previous) => {
+        const retainedIds = new Set(
+          nextAttachments.map((attachment) => attachment.id),
+        );
+        for (const attachment of previous) {
+          if (!retainedIds.has(attachment.id)) {
+            revokeAttachmentPreview(attachment);
+          }
+        }
+        return [...nextAttachments];
+      });
+    },
+    [],
+  );
+
   const clearAttachments = useCallback(() => {
     setAttachments((previous) => {
       for (const attachment of previous) {
@@ -218,6 +235,7 @@ export function useChatInputAttachments() {
     addBrowserFiles,
     addPathAttachments,
     removeAttachment,
+    replaceAttachments,
     clearAttachments,
   };
 }
