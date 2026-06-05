@@ -15,7 +15,13 @@ import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
+import { toast } from "sonner";
+import type {
+  ComponentProps,
+  HTMLAttributes,
+  MouseEvent,
+  ReactElement,
+} from "react";
 import {
   createContext,
   memo,
@@ -329,6 +335,40 @@ export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
+export type MermaidDownloadFormat = "svg" | "png" | "mmd";
+
+export function detectStreamdownMermaidDownloadFormat(
+  target: EventTarget | null,
+): MermaidDownloadFormat | null {
+  if (!(target instanceof Element)) {
+    return null;
+  }
+
+  const button = target.closest("button");
+  if (!button?.closest('[data-streamdown="mermaid-block-actions"]')) {
+    return null;
+  }
+
+  const label =
+    `${button.getAttribute("title") ?? ""} ${button.textContent ?? ""}`
+      .trim()
+      .toLowerCase();
+
+  if (/\bsvg\b/.test(label)) return "svg";
+  if (/\bpng\b/.test(label)) return "png";
+  if (/\bmmd\b/.test(label)) return "mmd";
+
+  return null;
+}
+
+async function openDownloadsFolder() {
+  const [{ downloadDir }, { openPath }] = await Promise.all([
+    import("@tauri-apps/api/path"),
+    import("@tauri-apps/plugin-opener"),
+  ]);
+  await openPath(await downloadDir());
+}
+
 type OpenLinkSafetyModal = (url: string) => void;
 
 const LinkSafetyContext = createContext<OpenLinkSafetyModal | null>(null);
@@ -394,6 +434,7 @@ const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
 
 export const MessageResponse = memo(
   ({ className, codeRenderers, ...props }: MessageResponseProps) => {
+    const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
 
     const openModal = useCallback((url: string) => {
@@ -404,22 +445,54 @@ export const MessageResponse = memo(
       setModalUrl(null);
     }, []);
 
+    const handleClickCapture = useCallback(
+      (event: MouseEvent<HTMLDivElement>) => {
+        const format = detectStreamdownMermaidDownloadFormat(event.target);
+        if (!format) {
+          return;
+        }
+
+        const filename = `diagram.${format}`;
+        const options = window.__TAURI_INTERNALS__
+          ? {
+              action: {
+                label: t("components.mermaid.openDownloads"),
+                onClick: () => {
+                  void openDownloadsFolder().catch((error) => {
+                    console.error("Failed to open Downloads folder:", error);
+                    toast.error(t("components.mermaid.openDownloadsError"));
+                  });
+                },
+              },
+            }
+          : {};
+
+        toast.message(
+          t("components.mermaid.downloadStarted", { filename }),
+          options,
+        );
+      },
+      [t],
+    );
+
     return (
       <LinkSafetyContext.Provider value={openModal}>
-        <Streamdown
-          className={cn(
-            "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-            className,
-          )}
-          components={streamdownComponents}
-          linkSafety={linkSafetyConfig}
-          plugins={
-            codeRenderers
-              ? { ...streamdownPlugins, renderers: codeRenderers }
-              : streamdownPlugins
-          }
-          {...props}
-        />
+        <div className="contents" onClickCapture={handleClickCapture}>
+          <Streamdown
+            className={cn(
+              "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+              className,
+            )}
+            components={streamdownComponents}
+            linkSafety={linkSafetyConfig}
+            plugins={
+              codeRenderers
+                ? { ...streamdownPlugins, renderers: codeRenderers }
+                : streamdownPlugins
+            }
+            {...props}
+          />
+        </div>
         <LinkSafetyModal
           isOpen={modalUrl !== null}
           onClose={closeModal}

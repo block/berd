@@ -66,6 +66,11 @@
       "openLink": "Open link",
       "title": "Open external link?"
     },
+    "mermaid": {
+      "downloadStarted": "Download started: {{filename}}",
+      "openDownloads": "Open Downloads",
+      "openDownloadsError": "Couldn't open Downloads."
+    },
     "messageBranch": {
       "next": "Next branch",
       "page": "{{current}} of {{total}}",

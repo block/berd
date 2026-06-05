@@ -61,6 +61,11 @@
       "openLink": "Abrir enlace",
       "title": "¿Abrir enlace externo?"
     },
+    "mermaid": {
+      "downloadStarted": "Descarga iniciada: {{filename}}",
+      "openDownloads": "Abrir Descargas",
+      "openDownloadsError": "No se pudo abrir Descargas."
+    },
     "environmentVariables": {
       "copyLabel": "Copiar variable de entorno",
       "title": "Variables de entorno",
