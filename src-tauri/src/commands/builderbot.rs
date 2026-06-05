@@ -47,8 +47,218 @@ pub async fn get_builderbot_routing_rules(limit: Option<u32>) -> Result<Value, S
     Ok(response)
 }
 
+#[tauri::command]
+pub async fn update_builderbot_scheduled_trigger(
+    reference: String,
+    request: Value,
+) -> Result<Value, String> {
+    let _user = require_builderbot_user()?;
+    let reference = trim_builderbot_reference(&reference)?;
+    let endpoint = format!("/api/v1/scheduled-triggers/{reference}");
+    builderbot::put_json(
+        &endpoint,
+        sanitize_scheduled_trigger_update(&reference, request)?,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn update_builderbot_routing_rule(
+    reference: String,
+    request: Value,
+) -> Result<Value, String> {
+    let _user = require_builderbot_user()?;
+    let reference = trim_builderbot_reference(&reference)?;
+    let endpoint = format!("/api/v1/routing-rules/{reference}");
+    builderbot::put_json(
+        &endpoint,
+        sanitize_routing_rule_update(&reference, request)?,
+    )
+    .await
+}
+
 fn normalize_limit(limit: Option<u32>) -> u32 {
     limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT)
+}
+
+fn trim_builderbot_reference(reference: &str) -> Result<String, String> {
+    let trimmed = reference.trim();
+    if trimmed.is_empty() {
+        return Err("Builderbot reference is required.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('?') || trimmed.contains('#') {
+        return Err("Builderbot reference is invalid.".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+fn sanitize_scheduled_trigger_update(reference: &str, request: Value) -> Result<Value, String> {
+    let Some(object) = request.as_object() else {
+        return Err("Builderbot scheduled trigger update must be an object.".to_string());
+    };
+
+    let mut sanitized = Map::new();
+    if let Some(body_reference) = object.get("reference").and_then(Value::as_str) {
+        let body_reference = trim_builderbot_reference(body_reference)?;
+        if body_reference != reference {
+            return Err("Builderbot scheduled trigger name cannot be changed here.".to_string());
+        }
+        sanitized.insert("reference".to_string(), Value::String(body_reference));
+    }
+    if let Some(enabled) = object.get("enabled").and_then(Value::as_bool) {
+        sanitized.insert("enabled".to_string(), Value::Bool(enabled));
+    }
+    if let Some(cron_expression) = object.get("cron_expression").and_then(Value::as_str) {
+        let trimmed = cron_expression.trim();
+        if trimmed.is_empty() {
+            return Err("Builderbot schedule is required.".to_string());
+        }
+        sanitized.insert(
+            "cron_expression".to_string(),
+            Value::String(trimmed.to_string()),
+        );
+    }
+    if let Some(routine) = object.get("routine") {
+        if !routine.is_object() {
+            return Err("Builderbot routine update must be an object.".to_string());
+        }
+        sanitized.insert("routine".to_string(), routine.clone());
+    }
+    if let Some(task_config_json) = object.get("task_config_json").and_then(Value::as_str) {
+        let trimmed = task_config_json.trim();
+        if trimmed.is_empty() {
+            return Err("Builderbot task payload is required.".to_string());
+        }
+        sanitized.insert(
+            "task_config_json".to_string(),
+            Value::String(trimmed.to_string()),
+        );
+    }
+    if let Some(owners) = object.get("owners") {
+        let Some(owners_array) = owners.as_array() else {
+            return Err("Builderbot scheduled trigger owners must be an array.".to_string());
+        };
+        let sanitized_owners = owners_array
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|owner| !owner.is_empty())
+            .map(|owner| Value::String(owner.to_string()))
+            .collect();
+        sanitized.insert("owners".to_string(), Value::Array(sanitized_owners));
+    }
+
+    if sanitized.is_empty() {
+        return Err("Builderbot scheduled trigger update has no editable fields.".to_string());
+    }
+    Ok(Value::Object(sanitized))
+}
+
+fn sanitize_routing_rule_update(reference: &str, request: Value) -> Result<Value, String> {
+    let Some(object) = request.as_object() else {
+        return Err("Builderbot routing rule update must be an object.".to_string());
+    };
+
+    let mut sanitized = Map::new();
+    if let Some(body_reference) = object.get("reference").and_then(Value::as_str) {
+        let body_reference = trim_builderbot_reference(body_reference)?;
+        if body_reference != reference {
+            return Err("Builderbot routing rule name cannot be changed here.".to_string());
+        }
+        sanitized.insert("reference".to_string(), Value::String(body_reference));
+    }
+    if let Some(enabled) = object.get("enabled").and_then(Value::as_bool) {
+        sanitized.insert("enabled".to_string(), Value::Bool(enabled));
+    }
+    if let Some(source) = object.get("source").and_then(Value::as_str) {
+        let trimmed = source.trim();
+        if trimmed.is_empty() {
+            return Err("Builderbot routing source is required.".to_string());
+        }
+        sanitized.insert("source".to_string(), Value::String(trimmed.to_string()));
+    }
+    if let Some(conditions) = object.get("conditions") {
+        if !conditions.is_array() {
+            return Err("Builderbot routing conditions must be an array.".to_string());
+        }
+        sanitized.insert("conditions".to_string(), conditions.clone());
+    }
+    if let Some(outcome_labels) = object.get("outcome_labels") {
+        let Some(labels_array) = outcome_labels.as_array() else {
+            return Err("Builderbot routing labels must be an array.".to_string());
+        };
+        let sanitized_labels = labels_array
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .map(|label| Value::String(label.to_string()))
+            .collect();
+        sanitized.insert("outcome_labels".to_string(), Value::Array(sanitized_labels));
+    }
+    if let Some(task_status) = object.get("task_status").and_then(Value::as_str) {
+        let trimmed = task_status.trim();
+        if !trimmed.is_empty() {
+            sanitized.insert(
+                "task_status".to_string(),
+                Value::String(trimmed.to_string()),
+            );
+        }
+    }
+    if let Some(description_template) = object.get("description_template").and_then(Value::as_str) {
+        sanitized.insert(
+            "description_template".to_string(),
+            Value::String(description_template.to_string()),
+        );
+    }
+    if let Some(idempotency_key_template) = object
+        .get("idempotency_key_template")
+        .and_then(Value::as_str)
+    {
+        sanitized.insert(
+            "idempotency_key_template".to_string(),
+            Value::String(idempotency_key_template.to_string()),
+        );
+    }
+    if let Some(max_matches_per_idempotency) = object
+        .get("max_matches_per_idempotency")
+        .and_then(Value::as_u64)
+    {
+        sanitized.insert(
+            "max_matches_per_idempotency".to_string(),
+            Value::Number(max_matches_per_idempotency.into()),
+        );
+    }
+    if let Some(idempotency_enabled) = object.get("idempotency_enabled").and_then(Value::as_bool) {
+        sanitized.insert(
+            "idempotency_enabled".to_string(),
+            Value::Bool(idempotency_enabled),
+        );
+    }
+    if let Some(routine) = object.get("routine") {
+        if !routine.is_object() {
+            return Err("Builderbot routine update must be an object.".to_string());
+        }
+        sanitized.insert("routine".to_string(), routine.clone());
+    }
+    if let Some(owners) = object.get("owners") {
+        let Some(owners_array) = owners.as_array() else {
+            return Err("Builderbot routing rule owners must be an array.".to_string());
+        };
+        let sanitized_owners = owners_array
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::trim)
+            .filter(|owner| !owner.is_empty())
+            .map(|owner| Value::String(owner.to_string()))
+            .collect();
+        sanitized.insert("owners".to_string(), Value::Array(sanitized_owners));
+    }
+
+    if sanitized.is_empty() {
+        return Err("Builderbot routing rule update has no editable fields.".to_string());
+    }
+    Ok(Value::Object(sanitized))
 }
 
 fn current_builderbot_user() -> Option<String> {

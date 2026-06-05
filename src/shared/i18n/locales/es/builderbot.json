@@ -1,31 +1,113 @@
 {
   "tabs": {
     "tasks": "Tareas",
-    "automations": "Automatizaciones"
+    "automations": "Automatizaciones",
+    "details": "Detalles"
   },
   "states": {
     "errorTitle": "Builderbot no cargó",
     "errorBody": "Revisa tu conexión e inténtalo de nuevo."
   },
+  "details": {
+    "notAvailable": "No disponible",
+    "notFoundTitle": "Elemento de Builderbot no encontrado",
+    "notFoundBody": "Vuelve a Builderbot y elige otro elemento.",
+    "key": "Clave",
+    "description": "Descripción",
+    "status": "Estado",
+    "author": "Autor",
+    "assignee": "Asignado a",
+    "latestActor": "Último actor",
+    "labels": "Etiquetas",
+    "created": "Creada",
+    "updated": "Actualizada",
+    "artifacts": "Artefactos",
+    "thread": "Hilo",
+    "reference": "Nombre",
+    "enabled": "Estado",
+    "triggerType": "Tipo de activador",
+    "schedule": "Programación",
+    "source": "Fuente",
+    "conditionCount": "Cantidad de condiciones",
+    "conditions": "Condiciones",
+    "actionType": "Tipo de acción",
+    "runAs": "Ejecutar como",
+    "prompt": "Prompt",
+    "payload": "Prompt o payload",
+    "noPayload": "Sin prompt ni payload",
+    "editPayload": "Editar prompt o payload",
+    "owners": "Propietarios",
+    "createdBy": "Creada por",
+    "lastRun": "Última ejecución",
+    "nextRun": "Próxima ejecución",
+    "lastStatus": "Último estado",
+    "timeZone": "Zona horaria",
+    "links": "Enlaces",
+    "trigger": "Activador",
+    "runMetadata": "Metadatos de ejecución"
+  },
+  "edit": {
+    "payloadRequired": "Agrega un prompt o payload antes de guardar.",
+    "fields": {
+      "scheduleRepeats": "Repetición",
+      "scheduleDay": "Día",
+      "scheduleTime": "Hora",
+      "scheduleCustom": "Expresión cron",
+      "schedulePlaceholder": "30 0 * * *",
+      "timeZoneEmpty": "No se encontraron zonas horarias.",
+      "timeZoneSearch": "Buscar zonas horarias"
+    },
+    "schedulePresets": {
+      "none": "Sin programación",
+      "hourly": "Cada hora",
+      "daily": "Diaria",
+      "weekdays": "Días laborales",
+      "weekly": "Semanal",
+      "custom": "Personalizada"
+    },
+    "weekdays": {
+      "sunday": "Domingo",
+      "monday": "Lunes",
+      "tuesday": "Martes",
+      "wednesday": "Miércoles",
+      "thursday": "Jueves",
+      "friday": "Viernes",
+      "saturday": "Sábado"
+    }
+  },
+  "actions": {
+    "edit": "Editar",
+    "cancel": "Cancelar",
+    "saveChanges": "Guardar cambios",
+    "saving": "Guardando"
+  },
   "tasks": {
     "title": "Tareas",
     "item": "Tarea de Builderbot",
+    "openDetails": "Abrir detalles de {{title}}",
     "by": "por {{user}}",
+    "artifactsCount_one": "{{displayCount}} artefacto",
+    "artifactsCount_other": "{{displayCount}} artefactos",
+    "artifactsLink_one": "Abrir {{displayCount}} artefacto",
+    "artifactsLink_other": "Abrir {{displayCount}} artefactos",
+    "artifactsLinkUnknown": "Abrir artefactos",
+    "threadLink": "Abrir hilo",
     "emptyTitle": "No hay tareas",
     "emptyBody": "Builderbot no devolvió tareas para ti."
   },
   "automations": {
     "title": "Automatizaciones",
+    "openDetails": "Abrir detalles de {{reference}}",
     "emptyTitle": "No hay automatizaciones",
     "emptyBody": "Builderbot no devolvió automatizaciones programadas o activadas de tu propiedad.",
-    "enabled": "activada",
-    "disabled": "desactivada",
+    "enabled": "Activada",
+    "disabled": "Desactivada",
     "nextRun": "próxima {{time}}",
     "conditions_one": "{{displayCount}} condición",
     "conditions_other": "{{displayCount}} condiciones",
     "kind": {
-      "scheduled": "programada",
-      "routing": "activada"
+      "scheduled": "Programada",
+      "routing": "Activada"
     },
     "action": {
       "agent": "Agente",
@@ -36,6 +118,13 @@
     "runAs": {
       "me": "Ejecutar como yo",
       "builderbot": "Ejecutar como Builderbot"
+    },
+    "source": {
+      "github": "GitHub",
+      "linear": "Linear",
+      "jira": "Jira",
+      "actionable_ci": "Actionable CI",
+      "pagerduty": "PagerDuty"
     }
   }
 }

@@ -8,6 +8,11 @@ import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+} from "@/features/experiments/experimentPreferences";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -61,6 +66,9 @@ vi.mock("@/features/sidebar/ui/Sidebar", () => ({
       </button>
       <button type="button" onClick={() => onNavigate?.("automations")}>
         Sidebar automations
+      </button>
+      <button type="button" onClick={() => onNavigate?.("builderbot")}>
+        Sidebar builderbot
       </button>
       <button type="button" onClick={() => onNavigate?.("agents")}>
         Sidebar agents
@@ -118,12 +126,15 @@ vi.mock("./ui/AppShellContent", () => ({
     activeSkillsSkillId,
     activeAgentsPersonaId,
     activeAutomationsRoute,
+    activeBuilderbotRoute,
     onNavigateSkills,
     onNavigateAgents,
     onNavigateAutomations,
+    onNavigateBuilderbot,
     onSkillsBreadcrumbLabelChange,
     onAgentsBreadcrumbLabelChange,
     onAutomationsBreadcrumbLabelChange,
+    onBuilderbotBreadcrumbLabelChange,
     onAutomationBuilderLeaveActionChange,
     onCreatePersona,
     onExitSearch,
@@ -136,6 +147,9 @@ vi.mock("./ui/AppShellContent", () => ({
       <div data-testid="agent-route">{activeAgentsPersonaId ?? "list"}</div>
       <div data-testid="automation-route">
         {JSON.stringify(activeAutomationsRoute)}
+      </div>
+      <div data-testid="builderbot-route">
+        {JSON.stringify(activeBuilderbotRoute)}
       </div>
       <button
         type="button"
@@ -175,6 +189,15 @@ vi.mock("./ui/AppShellContent", () => ({
         }}
       >
         Open automation builder
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          onBuilderbotBreadcrumbLabelChange?.("TASK-1");
+          onNavigateBuilderbot({ surface: "task", taskKey: "TASK-1" });
+        }}
+      >
+        Open builderbot task
       </button>
       {activeView === "automations" &&
       activeAutomationsRoute.surface === "builder" ? (
@@ -526,6 +549,51 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("automation-route")).toHaveTextContent(
         '"surface":"history"',
+      );
+    });
+  });
+
+  it("goes back and forward through Builderbot detail subroutes", async () => {
+    window.localStorage.setItem(
+      EXPERIMENT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+        experiments: {
+          [BUILDERBOT_SURFACE_EXPERIMENT_ID]: { enabled: true },
+        },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar builderbot" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open builderbot task" }),
+    );
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("builderbot");
+    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+      '"surface":"task"',
+    );
+    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+      '"taskKey":"TASK-1"',
+    );
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+        '"surface":"overview"',
+      );
+    });
+
+    await user.click(screen.getByRole("button", { name: "Forward" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+        '"surface":"task"',
       );
     });
   });

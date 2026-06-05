@@ -113,6 +113,7 @@ import type {
   AppNavigationUpdateOptions,
   AppView,
   AutomationNavigationRoute,
+  BuilderbotNavigationRoute,
 } from "./types/appNavigation";
 import type { TopBarBreadcrumb } from "./ui/TopBar";
 import { STARTUP_LOADING_MIN_DISPLAY_MS } from "./lib/startupLoading";
@@ -282,6 +283,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const pendingGlobalComposerFocusViewRef = useRef<AppView | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
+  const [builderbotRoute, setBuilderbotRoute] =
+    useState<BuilderbotNavigationRoute>({ surface: "overview" });
   const [skillsBreadcrumbLabel, setSkillsBreadcrumbLabel] = useState<
     string | null
   >(null);
@@ -289,6 +292,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     string | null
   >(null);
   const [automationsBreadcrumbLabel, setAutomationsBreadcrumbLabel] = useState<
+    string | null
+  >(null);
+  const [builderbotBreadcrumbLabel, setBuilderbotBreadcrumbLabel] = useState<
     string | null
   >(null);
   const [
@@ -307,6 +313,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         initialSettingsSection ?? DEFAULT_SETTINGS_SECTION,
         null,
         null,
+        { surface: "overview" },
         { surface: "overview" },
         DEFAULT_DESIGN_SYSTEM_SECTION,
       ),
@@ -595,6 +602,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       skillsSkillId,
       agentsPersonaId,
       automationsRoute,
+      builderbotRoute,
       activeDesignSystemSection,
     );
     const currentLocation = history.entries[history.index];
@@ -638,6 +646,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     activeView,
     agentsPersonaId,
     automationsRoute,
+    builderbotRoute,
     skillsSkillId,
     updateNavigationAvailability,
   ]);
@@ -1716,6 +1725,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         if (view === "automations") {
           setAutomationsRoute({ surface: "overview" });
         }
+        if (view === "builderbot") {
+          setBuilderbotRoute({ surface: "overview" });
+        }
         clearSettingsSectionUrl();
         setActiveView(view);
       });
@@ -1783,6 +1795,22 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [guardAppNavigation, setActiveSession],
   );
 
+  const navigateBuilderbot = useCallback(
+    (
+      route: BuilderbotNavigationRoute,
+      options?: AppNavigationUpdateOptions,
+    ) => {
+      guardAppNavigation(() => {
+        replaceNextNavigationEntryRef.current = Boolean(options?.replace);
+        setBuilderbotRoute(route);
+        setActiveSession(null);
+        clearSettingsSectionUrl();
+        setActiveView("builderbot");
+      });
+    },
+    [guardAppNavigation, setActiveSession],
+  );
+
   const applyNavigationLocation = useCallback(
     (location: AppNavigationLocation) => {
       navigationHistoryRef.current.isApplying = true;
@@ -1830,6 +1858,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveSession(null);
         setAutomationsRoute(location.route);
         setActiveView("automations");
+        return;
+      }
+
+      if (location.view === "builderbot") {
+        setActiveSession(null);
+        setBuilderbotRoute(location.route);
+        setActiveView("builderbot");
         return;
       }
 
@@ -2032,7 +2067,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             ]
           : [current("automations", "Automations")];
       case "builderbot":
-        return [current("builderbot", "Builderbot")];
+        return builderbotBreadcrumbLabel
+          ? [
+              parent("builderbot", "Builderbot", () =>
+                handleNavigate("builderbot"),
+              ),
+              current("builderbot-detail", builderbotBreadcrumbLabel),
+            ]
+          : [current("builderbot", "Builderbot")];
       case "design-system": {
         const designSystemSectionLabel = DESIGN_SYSTEM_SECTIONS.find(
           (section) => section.id === activeDesignSystemSection,
@@ -2093,6 +2135,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     agentsBreadcrumbLabel,
     agentsPersonaId,
     automationsBreadcrumbLabel,
+    builderbotBreadcrumbLabel,
     handleNavigate,
     openDesignSystem,
     openSettings,
@@ -2281,16 +2324,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               activeSkillsSkillId={skillsSkillId}
               activeAgentsPersonaId={agentsPersonaId}
               activeAutomationsRoute={automationsRoute}
+              activeBuilderbotRoute={builderbotRoute}
               activeDesignSystemSection={activeDesignSystemSection}
               activeSession={activeSession}
               homeSessionId={homeSessionId}
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}
               onNavigateAutomations={navigateAutomations}
+              onNavigateBuilderbot={navigateBuilderbot}
               onConnectionsTabChange={setActiveConnectionsTab}
               onSkillsBreadcrumbLabelChange={setSkillsBreadcrumbLabel}
               onAgentsBreadcrumbLabelChange={setAgentsBreadcrumbLabel}
               onAutomationsBreadcrumbLabelChange={setAutomationsBreadcrumbLabel}
+              onBuilderbotBreadcrumbLabelChange={setBuilderbotBreadcrumbLabel}
               onAutomationBuilderLeaveActionChange={
                 handleAutomationBuilderLeaveActionChange
               }

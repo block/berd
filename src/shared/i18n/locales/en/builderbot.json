@@ -1,31 +1,113 @@
 {
   "tabs": {
     "tasks": "Tasks",
-    "automations": "Automations"
+    "automations": "Automations",
+    "details": "Details"
   },
   "states": {
     "errorTitle": "Builderbot did not load",
     "errorBody": "Check your connection and try again."
   },
+  "details": {
+    "notAvailable": "Not available",
+    "notFoundTitle": "Builderbot item not found",
+    "notFoundBody": "Go back to Builderbot and choose another item.",
+    "key": "Key",
+    "description": "Description",
+    "status": "Status",
+    "author": "Author",
+    "assignee": "Assignee",
+    "latestActor": "Latest actor",
+    "labels": "Labels",
+    "created": "Created",
+    "updated": "Updated",
+    "artifacts": "Artifacts",
+    "thread": "Thread",
+    "reference": "Name",
+    "enabled": "Status",
+    "triggerType": "Trigger type",
+    "schedule": "Schedule",
+    "source": "Source",
+    "conditionCount": "Condition count",
+    "conditions": "Conditions",
+    "actionType": "Action type",
+    "runAs": "Run as",
+    "prompt": "Prompt",
+    "payload": "Prompt or payload",
+    "noPayload": "No prompt or payload",
+    "editPayload": "Edit prompt or payload",
+    "owners": "Owners",
+    "createdBy": "Created by",
+    "lastRun": "Last run",
+    "nextRun": "Next run",
+    "lastStatus": "Last status",
+    "timeZone": "Time zone",
+    "links": "Links",
+    "trigger": "Trigger",
+    "runMetadata": "Run metadata"
+  },
+  "edit": {
+    "payloadRequired": "Add a prompt or payload before saving.",
+    "fields": {
+      "scheduleRepeats": "Repeats",
+      "scheduleDay": "Day",
+      "scheduleTime": "Time",
+      "scheduleCustom": "Cron expression",
+      "schedulePlaceholder": "30 0 * * *",
+      "timeZoneEmpty": "No time zones found.",
+      "timeZoneSearch": "Search timezones"
+    },
+    "schedulePresets": {
+      "none": "No schedule",
+      "hourly": "Hourly",
+      "daily": "Daily",
+      "weekdays": "Weekdays",
+      "weekly": "Weekly",
+      "custom": "Custom"
+    },
+    "weekdays": {
+      "sunday": "Sunday",
+      "monday": "Monday",
+      "tuesday": "Tuesday",
+      "wednesday": "Wednesday",
+      "thursday": "Thursday",
+      "friday": "Friday",
+      "saturday": "Saturday"
+    }
+  },
+  "actions": {
+    "edit": "Edit",
+    "cancel": "Cancel",
+    "saveChanges": "Save changes",
+    "saving": "Saving"
+  },
   "tasks": {
     "title": "Tasks",
     "item": "Builderbot task",
+    "openDetails": "Open {{title}} details",
     "by": "by {{user}}",
+    "artifactsCount_one": "{{displayCount}} artifact",
+    "artifactsCount_other": "{{displayCount}} artifacts",
+    "artifactsLink_one": "Open {{displayCount}} artifact",
+    "artifactsLink_other": "Open {{displayCount}} artifacts",
+    "artifactsLinkUnknown": "Open artifacts",
+    "threadLink": "Open thread",
     "emptyTitle": "No tasks",
     "emptyBody": "Builderbot returned no tasks for you."
   },
   "automations": {
     "title": "Automations",
+    "openDetails": "Open {{reference}} details",
     "emptyTitle": "No automations",
     "emptyBody": "Builderbot returned no scheduled or triggered automations owned by you.",
-    "enabled": "enabled",
-    "disabled": "disabled",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
     "nextRun": "next {{time}}",
     "conditions_one": "{{displayCount}} condition",
     "conditions_other": "{{displayCount}} conditions",
     "kind": {
-      "scheduled": "scheduled",
-      "routing": "triggered"
+      "scheduled": "Scheduled",
+      "routing": "Triggered"
     },
     "action": {
       "agent": "Agent",
@@ -36,6 +118,13 @@
     "runAs": {
       "me": "Run as me",
       "builderbot": "Run as Builderbot"
+    },
+    "source": {
+      "github": "GitHub",
+      "linear": "Linear",
+      "jira": "Jira",
+      "actionable_ci": "Actionable CI",
+      "pagerduty": "PagerDuty"
     }
   }
 }

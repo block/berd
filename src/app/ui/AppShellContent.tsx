@@ -25,6 +25,7 @@ import type {
   AppNavigationUpdateOptions,
   AppView,
   AutomationNavigationRoute,
+  BuilderbotNavigationRoute,
 } from "../types/appNavigation";
 import type { SectionId } from "@/features/settings/ui/settingsSections";
 import type { DesignSystemSection } from "@/features/design-system/ui/designSystemSections";
@@ -36,6 +37,7 @@ interface AppShellContentProps {
   activeSkillsSkillId: string | null;
   activeAgentsPersonaId: string | null;
   activeAutomationsRoute: AutomationNavigationRoute;
+  activeBuilderbotRoute: BuilderbotNavigationRoute;
   activeDesignSystemSection: DesignSystemSection;
   activeSession?: ChatSession;
   homeSessionId: string | null;
@@ -51,10 +53,15 @@ interface AppShellContentProps {
     route: AutomationNavigationRoute,
     options?: AppNavigationUpdateOptions,
   ) => void;
+  onNavigateBuilderbot: (
+    route: BuilderbotNavigationRoute,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
   onConnectionsTabChange: (tab: ConnectionsTab) => void;
   onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
+  onBuilderbotBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationBuilderLeaveActionChange?: (
     action: AutomationBuilderLeaveAction | null,
   ) => void;
@@ -98,16 +105,19 @@ export function AppShellContent({
   activeSkillsSkillId,
   activeAgentsPersonaId,
   activeAutomationsRoute,
+  activeBuilderbotRoute,
   activeDesignSystemSection,
   activeSession,
   homeSessionId,
   onNavigateSkills,
   onNavigateAgents,
   onNavigateAutomations,
+  onNavigateBuilderbot,
   onConnectionsTabChange,
   onSkillsBreadcrumbLabelChange,
   onAgentsBreadcrumbLabelChange,
   onAutomationsBreadcrumbLabelChange,
+  onBuilderbotBreadcrumbLabelChange,
   onAutomationBuilderLeaveActionChange,
   onCreatePersona,
   onAgentBuilderSaved,
@@ -181,7 +191,15 @@ export function AppShellContent({
         />
       );
     case "builderbot":
-      return builderbotExperiment?.enabled ? <BuilderbotView /> : homeContent;
+      return builderbotExperiment?.enabled ? (
+        <BuilderbotView
+          route={activeBuilderbotRoute}
+          onRouteChange={onNavigateBuilderbot}
+          onBreadcrumbLabelChange={onBuilderbotBreadcrumbLabelChange}
+        />
+      ) : (
+        homeContent
+      );
     case "skills":
       return (
         <SkillsView

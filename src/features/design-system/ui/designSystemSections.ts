@@ -135,8 +135,8 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   id: DesignSystemSection;
   label: string;
 }> = [
-  { id: "component-aspect-ratio", label: "Aspect Ratio" },
   { id: "component-accordion", label: "Accordion" },
+  { id: "component-aspect-ratio", label: "Aspect Ratio" },
   { id: "component-button-group", label: "Button Group" },
   { id: "component-calendar", label: "Calendar" },
   { id: "component-card", label: "Card" },

@@ -4,6 +4,7 @@ import type {
   AppNavigationLocation,
   AppView,
   AutomationNavigationRoute,
+  BuilderbotNavigationRoute,
 } from "../types/appNavigation";
 
 export function getAppNavigationLocation(
@@ -13,6 +14,7 @@ export function getAppNavigationLocation(
   skillsSkillId: string | null,
   agentsPersonaId: string | null,
   automationsRoute: AutomationNavigationRoute,
+  builderbotRoute: BuilderbotNavigationRoute,
   designSystemSection: DesignSystemSection,
 ): AppNavigationLocation {
   switch (view) {
@@ -20,6 +22,8 @@ export function getAppNavigationLocation(
       return { view, sessionId };
     case "automations":
       return { view, route: automationsRoute };
+    case "builderbot":
+      return { view, route: builderbotRoute };
     case "design-system":
       return { view, designSystemSection };
     case "skills":
@@ -29,7 +33,6 @@ export function getAppNavigationLocation(
     case "settings":
       return { view, settingsSection };
     case "home":
-    case "builderbot":
     case "projects":
     case "search":
     case "session-history":

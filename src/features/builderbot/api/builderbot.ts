@@ -20,6 +20,13 @@ export interface BuilderbotTask {
   created_at_ms?: number;
   updated_at_ms?: number;
   labels?: string[];
+  artifacts?: unknown[];
+  artifact_count?: number;
+  artifacts_count?: number;
+  artifacts_url?: string;
+  artifacts_link?: string;
+  thread_url?: string;
+  thread_link?: string;
 }
 
 export interface BuilderbotRoutineConfig {
@@ -45,6 +52,18 @@ export interface BuilderbotScheduledTrigger {
   task_config_json?: string;
 }
 
+export type UpdateBuilderbotScheduledTriggerRequest = Partial<
+  Pick<
+    BuilderbotScheduledTrigger,
+    | "reference"
+    | "enabled"
+    | "cron_expression"
+    | "routine"
+    | "task_config_json"
+    | "owners"
+  >
+>;
+
 export interface BuilderbotRoutingCondition {
   path?: string;
   operator?: string;
@@ -68,6 +87,30 @@ export interface BuilderbotRoutingRule {
   outcome_labels?: string[];
   conditions?: BuilderbotRoutingCondition[];
   routine?: BuilderbotRoutineConfig;
+}
+
+export type UpdateBuilderbotRoutingRuleRequest = Partial<
+  Pick<
+    BuilderbotRoutingRule,
+    | "reference"
+    | "enabled"
+    | "source"
+    | "conditions"
+    | "outcome_labels"
+    | "task_status"
+    | "description_template"
+    | "idempotency_key_template"
+    | "max_matches_per_idempotency"
+    | "idempotency_enabled"
+    | "routine"
+    | "owners"
+  >
+>;
+
+export interface BuilderbotTaskLinks {
+  artifactCount?: number;
+  artifactsUrl?: string;
+  threadUrl?: string;
 }
 
 export type BuilderbotAutomation =
@@ -128,6 +171,85 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function uniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values.filter((value) => {
+    const normalized = value.toLowerCase();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+}
+
+function numberValue(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  return undefined;
+}
+
+function stringValue(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function nestedStringValue(
+  value: unknown,
+  keys: readonly string[],
+): string | undefined {
+  if (!isRecord(value)) return undefined;
+  for (const key of keys) {
+    const nested = stringValue(value[key]);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+export function getBuilderbotTaskLinks(
+  task: BuilderbotTask,
+): BuilderbotTaskLinks {
+  const taskRecord = task as Record<string, unknown>;
+  const artifactCount =
+    numberValue(task.artifacts_count) ??
+    numberValue(task.artifact_count) ??
+    numberValue(taskRecord.artifactsCount) ??
+    (Array.isArray(task.artifacts) ? task.artifacts.length : undefined) ??
+    (Array.isArray(taskRecord.artifact_urls)
+      ? taskRecord.artifact_urls.length
+      : undefined) ??
+    (Array.isArray(taskRecord.artifactUrls)
+      ? taskRecord.artifactUrls.length
+      : undefined);
+
+  const artifactsUrl =
+    stringValue(task.artifacts_url) ??
+    stringValue(task.artifacts_link) ??
+    stringValue(taskRecord.artifact_url) ??
+    stringValue(taskRecord.artifactUrl) ??
+    stringValue(taskRecord.artifactsUrl) ??
+    nestedStringValue(taskRecord.artifacts, ["url", "href", "link"]);
+
+  const threadUrl =
+    stringValue(task.thread_url) ??
+    stringValue(task.thread_link) ??
+    stringValue(taskRecord.threadUrl) ??
+    nestedStringValue(taskRecord.thread, ["url", "href", "link"]);
+
+  return {
+    artifactCount,
+    artifactsUrl,
+    threadUrl,
+  };
+}
+
+export function summarizeBuilderbotCondition(
+  condition: BuilderbotRoutingCondition,
+): string | null {
+  const parts = [condition.path, condition.operator, condition.value]
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part));
+  return parts.length ? parts.join(" ") : null;
+}
+
 function asTasksResponse(value: unknown): BuilderbotTasksResponse {
   if (!isRecord(value)) return { tasks: [] };
   return {
@@ -166,18 +288,18 @@ function ownerMatches(currentUser: string | undefined, owners: string[]) {
 }
 
 function scheduledTriggerOwners(trigger: BuilderbotScheduledTrigger): string[] {
-  return [
+  return uniqueStrings([
     ...stringArray(trigger.owners),
     ...(trigger.created_by ? [trigger.created_by] : []),
-  ];
+  ]);
 }
 
 function routingRuleOwners(rule: BuilderbotRoutingRule): string[] {
-  return [
+  return uniqueStrings([
     ...stringArray(rule.owners),
     ...(rule.owner ? [rule.owner] : []),
     ...(rule.created_by ? [rule.created_by] : []),
-  ];
+  ]);
 }
 
 function scheduledTriggerToAutomation(
@@ -259,4 +381,24 @@ export async function getBuilderbotAutomations(limit = 50) {
       (a, b) => (b.updatedAtMs ?? 0) - (a.updatedAtMs ?? 0),
     ),
   };
+}
+
+export async function updateBuilderbotScheduledTrigger(
+  reference: string,
+  request: UpdateBuilderbotScheduledTriggerRequest,
+) {
+  return invoke<unknown>("update_builderbot_scheduled_trigger", {
+    reference,
+    request,
+  });
+}
+
+export async function updateBuilderbotRoutingRule(
+  reference: string,
+  request: UpdateBuilderbotRoutingRuleRequest,
+) {
+  return invoke<unknown>("update_builderbot_routing_rule", {
+    reference,
+    request,
+  });
 }

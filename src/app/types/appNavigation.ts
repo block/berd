@@ -33,11 +33,16 @@ export type AutomationNavigationRoute =
       selectedRunKey: string | null;
     };
 
+export type BuilderbotNavigationRoute =
+  | { surface: "overview"; tab?: "tasks" | "automations" }
+  | { surface: "task"; taskKey: string }
+  | { surface: "automation"; automationId: string };
+
 export type AppNavigationLocation =
   | { view: "home" }
   | { view: "chat"; sessionId: string | null }
   | { view: "automations"; route: AutomationNavigationRoute }
-  | { view: "builderbot" }
+  | { view: "builderbot"; route: BuilderbotNavigationRoute }
   | { view: "design-system"; designSystemSection: DesignSystemSection }
   | { view: "skills"; skillId: string | null }
   | { view: "agents"; personaId: string | null }

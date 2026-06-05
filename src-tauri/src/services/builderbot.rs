@@ -27,6 +27,27 @@ pub(crate) async fn get_json(endpoint: &str, query: &[(&str, String)]) -> Result
     response_to_json(url, response).await
 }
 
+pub(crate) async fn put_json(endpoint: &str, body: Value) -> Result<Value, String> {
+    let url = build_url(endpoint, &[])?;
+    let response = client()
+        .put(url.clone())
+        .header(ACCEPT, "application/json")
+        .json(&body)
+        .timeout(BUILDERBOT_REQUEST_TIMEOUT)
+        .send()
+        .await
+        .map_err(|error| {
+            if error.is_timeout() || error.is_connect() {
+                "Unable to reach Builderbot. Check that you're connected to Cloudflare WARP and try again."
+                    .to_string()
+            } else {
+                format!("Builderbot request failed: {error}")
+            }
+        })?;
+
+    response_to_json(url, response).await
+}
+
 fn build_url(endpoint: &str, query: &[(&str, String)]) -> Result<reqwest::Url, String> {
     let base_url = env::var(BUILDERBOT_BASE_URL_ENV)
         .ok()
