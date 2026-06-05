@@ -75,6 +75,25 @@ describe("TerminalPanel", () => {
     expect(mocks.resumeResize).not.toHaveBeenCalled();
   });
 
+  it("focuses xterm when the pane jump focus event is dispatched", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    screen
+      .getByRole("region", { name: "terminal.title" })
+      .dispatchEvent(new CustomEvent("goose-terminal-focus"));
+
+    expect(mocks.focusAndResize).toHaveBeenCalledOnce();
+  });
+
   it("resumes terminal resize after expansion even without a transition event", () => {
     vi.useFakeTimers();
     try {

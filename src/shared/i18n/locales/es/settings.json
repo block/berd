@@ -188,6 +188,13 @@
       "description": "Abre chats individuales en sus propias ventanas de escritorio.",
       "title": "Chats en varias ventanas"
     },
+    "paneJumpNavigation": {
+      "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
+      "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
+      "shortcutLabel": "Atajo",
+      "shortcutPlaceholder": "Ctrl+;",
+      "title": "Navegación de paneles"
+    },
     "description": "Activa funciones de Goose en desarrollo en este dispositivo. Los experimentos pueden cambiar, fallar o desaparecer.",
     "emptyDescription": "Los nuevos experimentos aparecerán aquí cuando estén listos para probarse.",
     "gooseStyleGuidelines": {

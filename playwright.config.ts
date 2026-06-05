@@ -47,6 +47,13 @@ export default defineConfig({
       },
     },
     {
+      name: "navigation-keyboard",
+      testMatch: ["**/navigation-keyboard.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+    {
       name: "provider-setup",
       testMatch: ["**/provider-setup-failure.spec.ts"],
       use: {

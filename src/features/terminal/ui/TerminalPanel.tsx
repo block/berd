@@ -168,6 +168,7 @@ export function TerminalPanel({
 }: TerminalPanelProps) {
   const { t } = useTranslation("chat");
   const { resolvedTheme } = useTheme();
+  const sectionRef = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousCollapsedRef = useRef(collapsed);
   const displayPath = useMemo(() => shortenPath(cwd), [cwd]);
@@ -296,8 +297,27 @@ export function TerminalPanel({
     };
   }, [collapsed, session]);
 
+  useEffect(() => {
+    const section = sectionRef.current;
+    if (!section || !session) {
+      return;
+    }
+
+    const handleTerminalFocus = () => {
+      if (!collapsed) {
+        session.focusAndResize();
+      }
+    };
+
+    section.addEventListener("goose-terminal-focus", handleTerminalFocus);
+    return () => {
+      section.removeEventListener("goose-terminal-focus", handleTerminalFocus);
+    };
+  }, [collapsed, session]);
+
   return (
     <section
+      ref={sectionRef}
       data-terminal-panel
       className={cn(
         "flex h-full min-h-0 flex-col overflow-hidden bg-card text-foreground",

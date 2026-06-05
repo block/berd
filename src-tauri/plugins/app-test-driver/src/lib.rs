@@ -146,6 +146,19 @@ fn build_js(cmd: &TestCommand) -> String {
             })()
         "#
         .to_string(),
+        "active" => r#"
+            (function() {
+                const el = document.activeElement;
+                if (!el) return "";
+                const parts = [el.tagName.toLowerCase()];
+                if (el.getAttribute("data-testid")) parts.push("data-testid=" + el.getAttribute("data-testid"));
+                if (el.getAttribute("aria-label")) parts.push("aria-label=" + el.getAttribute("aria-label"));
+                if (el.getAttribute("placeholder")) parts.push("placeholder=" + el.getAttribute("placeholder"));
+                if (el.className && typeof el.className === "string") parts.push("class=" + el.className);
+                return parts.join(" ");
+            })()
+        "#
+        .to_string(),
         "click" => {
             let sel = cmd.selector.as_deref().unwrap_or("body");
             with_wait_for(sel, r#"el.click(); return "clicked";"#, timeout_ms)
@@ -170,12 +183,28 @@ fn build_js(cmd: &TestCommand) -> String {
         }
         "keypress" => {
             let sel = cmd.selector.as_deref().unwrap_or("body");
-            let key = cmd.value.as_deref().unwrap_or("Enter");
+            let raw_key = cmd.value.as_deref().unwrap_or("Enter");
+            let mut key = raw_key;
+            let mut ctrl_key = false;
+            let mut meta_key = false;
+            let mut alt_key = false;
+            let mut shift_key = false;
+            if raw_key.contains('+') {
+                for part in raw_key.split('+') {
+                    match part {
+                        "Control" | "Ctrl" => ctrl_key = true,
+                        "Meta" | "Command" | "Cmd" => meta_key = true,
+                        "Alt" | "Option" => alt_key = true,
+                        "Shift" => shift_key = true,
+                        value => key = value,
+                    }
+                }
+            }
             let escaped_key = escape_js_string(key);
             with_wait_for(
                 sel,
                 &format!(
-                    r#"const opts = {{ key: "{escaped_key}", code: "{escaped_key}", keyCode: "{escaped_key}" === "Enter" ? 13 : 0, bubbles: true, cancelable: true }};
+                    r#"const opts = {{ key: "{escaped_key}", code: "{escaped_key}", keyCode: "{escaped_key}" === "Enter" ? 13 : 0, ctrlKey: {ctrl_key}, metaKey: {meta_key}, altKey: {alt_key}, shiftKey: {shift_key}, bubbles: true, cancelable: true }};
                 el.dispatchEvent(new KeyboardEvent('keydown', opts));
                 el.dispatchEvent(new KeyboardEvent('keypress', opts));
                 el.dispatchEvent(new KeyboardEvent('keyup', opts));

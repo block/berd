@@ -89,6 +89,7 @@ import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelG
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
+import { FocusRegionProvider } from "./focus/FocusRegionProvider";
 import {
   GlobalComposerPill,
   type GlobalComposeOptions,
@@ -100,6 +101,7 @@ import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/desi
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   MULTI_WINDOW_EXPERIMENT_ID,
+  PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
@@ -276,6 +278,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const isBuilderbotSurfaceEnabled = Boolean(builderbotExperiment?.enabled);
   const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
   const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
+  const paneJumpNavigationExperiment = useExperiment(
+    PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
+  );
+  const isPaneJumpNavigationEnabled = Boolean(
+    paneJumpNavigationExperiment?.enabled,
+  );
+  const paneJumpNavigationShortcut =
+    typeof paneJumpNavigationExperiment?.config.shortcut === "string"
+      ? paneJumpNavigationExperiment.config.shortcut
+      : undefined;
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -2231,7 +2243,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   return (
-    <>
+    <FocusRegionProvider
+      enabled={isPaneJumpNavigationEnabled}
+      shortcut={paneJumpNavigationShortcut}
+    >
       <AppShellLayout
         topBar={{
           breadcrumbs: topBarBreadcrumbs,
@@ -2395,6 +2410,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onSave={() => void saveAutomationLeave()}
       />
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
-    </>
+    </FocusRegionProvider>
   );
 }

@@ -6,6 +6,7 @@ import {
   type ExperimentConfigValue,
   type ExperimentDefinition,
 } from "./experimentDefinitions";
+import { normalizeKeyboardShortcut } from "@/shared/keyboard/keyboardShortcut";
 
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
 export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
@@ -249,6 +250,8 @@ function coerceConfigValue(
         control.options.some((option) => option.value === value)
         ? value
         : control.defaultValue;
+    case "shortcut":
+      return normalizeKeyboardShortcut(value, control.defaultValue);
     case "number": {
       const numberValue =
         typeof value === "number" ? value : control.defaultValue;

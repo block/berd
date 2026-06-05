@@ -129,7 +129,6 @@ export function TopBar({
     chromeInsets.leading === "trafficLights"
       ? "w-[var(--spacing-app-top-bar-leading)]"
       : "w-4";
-
   return (
     <header
       className={cn(

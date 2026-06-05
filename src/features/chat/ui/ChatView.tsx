@@ -27,6 +27,7 @@ import { ArtifactPolicyProvider } from "../hooks/ArtifactPolicyContext";
 import { ChatRightRail } from "./ChatRightRail";
 import { useChatContextPanelCompactViewport } from "./ChatContextPanel";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
+import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Button } from "@/shared/ui/button";
@@ -315,6 +316,8 @@ export function ChatView({
   const { fallbackCwd: terminalFallbackCwd } =
     useTerminalFallbackCwdPreference();
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
+  const [terminalRegionElement, setTerminalRegionElement] =
+    useState<HTMLDivElement | null>(null);
   const [terminalWorkspaceState, setTerminalWorkspaceState] =
     usePersistedState<TerminalWorkspaceState>(
       `${TERMINAL_WORKSPACE_STORAGE_KEY_PREFIX}:${sessionId}`,
@@ -840,6 +843,30 @@ export function ChatView({
       footerStatus={footerStatus}
     />
   );
+  useFocusRegion({
+    id: "terminal",
+    label: "terminal",
+    key: "t",
+    enabled: terminalVisible && terminalExpanded,
+    element: terminalRegionElement,
+    getInitialFocus: () => {
+      const terminalPanel =
+        terminalRegionElement?.querySelector<HTMLElement>(
+          "[data-terminal-panel]",
+        ) ?? null;
+      terminalPanel?.dispatchEvent(new CustomEvent("goose-terminal-focus"));
+      return (
+        terminalRegionElement?.querySelector<HTMLElement>(
+          ".xterm-helper-textarea, .xterm textarea, textarea",
+        ) ??
+        terminalPanel ??
+        terminalRegionElement?.querySelector<HTMLElement>(
+          "button:not(:disabled)",
+        ) ??
+        null
+      );
+    },
+  });
 
   return (
     <ArtifactPolicyProvider
@@ -863,8 +890,9 @@ export function ChatView({
             {messageTimeline}
           </div>
           {terminalVisible ? (
-            <div ref={terminalRootRef} className="shrink-0">
+            <div ref={terminalRootRef} className="flex shrink-0 flex-col gap-2">
               <div
+                ref={terminalExpanded ? setTerminalRegionElement : undefined}
                 onTransitionEnd={(event) => {
                   if (
                     event.target !== event.currentTarget ||

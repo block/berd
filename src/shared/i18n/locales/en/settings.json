@@ -188,6 +188,13 @@
       "description": "Open individual chats in their own desktop windows.",
       "title": "Multi-window chats"
     },
+    "paneJumpNavigation": {
+      "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
+      "shortcutDescription": "Choose the prefix that opens pane jump mode.",
+      "shortcutLabel": "Shortcut",
+      "shortcutPlaceholder": "Ctrl+;",
+      "title": "Pane jump navigation"
+    },
     "description": "Opt into in-progress Goose features on this device. Experiments can change, break, or disappear.",
     "emptyDescription": "New experiments will appear here when they are ready for opt-in testing.",
     "gooseStyleGuidelines": {

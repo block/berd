@@ -77,7 +77,7 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the registered Builderbot experiment", () => {
+  it("renders the registered experiments", () => {
     vi.stubEnv("DEV", false);
     renderWithProviders(<ExperimentsSettings />);
 
@@ -101,6 +101,48 @@ describe("ExperimentsSettings", () => {
         i18n.t("experiments.multiWindow.description", { ns: "settings" }),
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: i18n.t("experiments.paneJumpNavigation.title", {
+          ns: "settings",
+        }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.paneJumpNavigation.description", {
+          ns: "settings",
+        }),
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", {
+        name: i18n.t("experiments.paneJumpNavigation.shortcutLabel", {
+          ns: "settings",
+        }),
+      }),
+    ).toHaveValue("Ctrl+;");
+  });
+
+  it("records shortcut config from key presses", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+    renderWithProviders(<ExperimentsSettings />);
+
+    const shortcutInput = screen.getByRole("textbox", {
+      name: i18n.t("experiments.paneJumpNavigation.shortcutLabel", {
+        ns: "settings",
+      }),
+    });
+
+    await user.click(shortcutInput);
+    await user.keyboard("{Control>}k{/Control}");
+
+    expect(shortcutInput).toHaveValue("Ctrl+K");
+    expect(
+      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
+        .experiments["pane-jump-navigation"].config.shortcut,
+    ).toBe("ctrl+k");
   });
 
   it("renders dev default copy on a separate line", () => {

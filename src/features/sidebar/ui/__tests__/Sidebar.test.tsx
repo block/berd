@@ -249,6 +249,44 @@ describe("Sidebar", () => {
     expect(onNewChat).toHaveBeenCalledOnce();
   });
 
+  it("moves roving focus through main sidebar rows", () => {
+    renderSidebar();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    const home = within(mainNavigation).getByRole("button", { name: "Home" });
+    const agents = within(mainNavigation).getByRole("button", {
+      name: "Agents",
+    });
+    const skills = within(mainNavigation).getByRole("button", {
+      name: "Skills",
+    });
+
+    home.focus();
+    fireEvent.keyDown(home, { key: "ArrowDown" });
+    expect(agents).toHaveFocus();
+    fireEvent.keyDown(agents, { key: "ArrowDown" });
+    expect(skills).toHaveFocus();
+    fireEvent.keyDown(skills, { key: "ArrowUp" });
+    expect(agents).toHaveFocus();
+  });
+
+  it("expands and collapses a focused project row with horizontal arrows", () => {
+    seedProjectChats(1);
+    renderSidebar({ projects: [mockProject()] });
+
+    const project = screen.getByRole("button", { name: "Project One" });
+    expect(project).toHaveAttribute("aria-expanded", "false");
+
+    project.focus();
+    fireEvent.keyDown(project, { key: "ArrowRight" });
+    expect(project).toHaveAttribute("aria-expanded", "true");
+
+    fireEvent.keyDown(project, { key: "ArrowLeft" });
+    expect(project).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("only fades the bottom of the main navigation when more content is below", async () => {
     renderSidebar();
 

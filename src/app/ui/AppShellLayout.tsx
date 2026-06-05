@@ -1,4 +1,5 @@
 import {
+  useMemo,
   useState,
   type ComponentProps,
   type CSSProperties,
@@ -16,6 +17,7 @@ import {
 } from "@/shared/ui/sidebar-tokens";
 import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
+import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 
 interface AppShellLayoutProps {
   children: ReactNode;
@@ -48,6 +50,19 @@ interface AppShellLayoutProps {
   topBar: ComponentProps<typeof TopBar>;
 }
 
+function findFirstFocusable(
+  root: HTMLElement | null,
+  selectors: string[],
+): HTMLElement | null {
+  for (const selector of selectors) {
+    const element = root?.querySelector<HTMLElement>(selector);
+    if (element) {
+      return element;
+    }
+  }
+  return null;
+}
+
 export function AppShellLayout({
   children,
   contentUnderSidebar = false,
@@ -72,6 +87,10 @@ export function AppShellLayout({
   topBar,
 }: AppShellLayoutProps) {
   const [sidebarHovered, setSidebarHovered] = useState(false);
+  const [sidebarElement, setSidebarElement] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [mainElement, setMainElement] = useState<HTMLElement | null>(null);
   const sidebarElevated = sidebarHovered || isResizing;
   const sidebarHandleFadeTransition = isResizing
     ? "none"
@@ -87,6 +106,44 @@ export function AppShellLayout({
   const shellStyle = {
     "--project-tint": projectTint ?? "transparent",
   } as CSSProperties;
+  useFocusRegion(
+    useMemo(
+      () => ({
+        id: "sidebar",
+        label: "sidebar",
+        key: "s",
+        enabled: !sidebarCollapsed,
+        element: sidebarElement,
+        getInitialFocus: () =>
+          sidebarElement?.querySelector<HTMLElement>(
+            "[aria-current='page'], button:not(:disabled), a[href]",
+          ) ?? null,
+      }),
+      [sidebarCollapsed, sidebarElement],
+    ),
+  );
+  useFocusRegion(
+    useMemo(
+      () => ({
+        id: "main",
+        label: "main content",
+        key: "m",
+        enabled: true,
+        element: mainElement,
+        getInitialFocus: () =>
+          findFirstFocusable(mainElement, [
+            "[data-testid='chat-composer']:not(:disabled)",
+            "textarea:not(:disabled)",
+            "input:not(:disabled)",
+            "select:not(:disabled)",
+            "button:not(:disabled)",
+            "a[href]",
+            "[tabindex]:not([tabindex='-1'])",
+          ]),
+      }),
+      [mainElement],
+    ),
+  );
 
   return (
     <div
@@ -120,6 +177,7 @@ export function AppShellLayout({
           aria-hidden={sidebarCollapsed || undefined}
         >
           <div
+            ref={setSidebarElement}
             className={cn(
               // overflow-visible on every view: the sidebar card clips its own
               // content via `overflow-hidden rounded-md`, so the only things
@@ -205,6 +263,8 @@ export function AppShellLayout({
         />
 
         <main
+          ref={setMainElement}
+          tabIndex={-1}
           className={
             contentUnderSidebar
               ? "absolute inset-0 z-0 min-h-0 min-w-0"

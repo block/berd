@@ -32,6 +32,14 @@ export type ExperimentConfigControl =
       descriptionKey?: string;
       defaultValue: string;
       placeholderKey?: string;
+      multiline?: boolean;
+    }
+  | {
+      type: "shortcut";
+      labelKey: string;
+      descriptionKey?: string;
+      defaultValue: string;
+      placeholderKey?: string;
     };
 
 export interface ExperimentDefinition {
@@ -46,6 +54,9 @@ export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 export const MULTI_WINDOW_EXPERIMENT_ID = "multi-window";
 
 export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
+
+export const PANE_JUMP_NAVIGATION_EXPERIMENT_ID = "pane-jump-navigation";
+export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
 - Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
@@ -64,6 +75,20 @@ export const EXPERIMENT_DEFINITIONS = [
     id: MULTI_WINDOW_EXPERIMENT_ID,
     titleKey: "experiments.multiWindow.title",
     descriptionKey: "experiments.multiWindow.description",
+  },
+  {
+    id: PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
+    titleKey: "experiments.paneJumpNavigation.title",
+    descriptionKey: "experiments.paneJumpNavigation.description",
+    config: {
+      shortcut: {
+        type: "shortcut",
+        labelKey: "experiments.paneJumpNavigation.shortcutLabel",
+        descriptionKey: "experiments.paneJumpNavigation.shortcutDescription",
+        defaultValue: DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT,
+        placeholderKey: "experiments.paneJumpNavigation.shortcutPlaceholder",
+      },
+    },
   },
   {
     id: GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID,

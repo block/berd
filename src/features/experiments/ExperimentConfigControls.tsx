@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -13,6 +13,10 @@ import {
 } from "./experimentPreferences";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
+import {
+  formatKeyboardShortcut,
+  keyboardShortcutFromEvent,
+} from "@/shared/keyboard/keyboardShortcut";
 import {
   Select,
   SelectContent,
@@ -61,13 +65,14 @@ export function ExperimentConfigControls({
         const description = control.descriptionKey
           ? t(control.descriptionKey)
           : null;
-        const isTextControl = control.type === "text";
+        const isMultilineTextControl =
+          control.type === "text" && control.multiline !== false;
 
         return (
           <div
             key={key}
             className={
-              isTextControl
+              isMultilineTextControl
                 ? "flex flex-col gap-2 py-3 pl-8 pr-4"
                 : "flex items-center justify-between gap-6 py-3 pl-8 pr-4"
             }
@@ -85,7 +90,11 @@ export function ExperimentConfigControls({
                 </p>
               ) : null}
             </div>
-            <div className={isTextControl ? "w-full" : "w-40 flex-shrink-0"}>
+            <div
+              className={
+                isMultilineTextControl ? "w-full" : "w-40 flex-shrink-0"
+              }
+            >
               {control.type === "boolean" ? (
                 <Switch
                   id={controlId}
@@ -128,6 +137,16 @@ export function ExperimentConfigControls({
                 <TextExperimentControl
                   id={controlId}
                   disabled={disabled}
+                  multiline={control.multiline !== false}
+                  value={String(experiment.config[key])}
+                  placeholder={control.placeholderKey}
+                  onCommit={(value) => handleConfigChange(key, value)}
+                />
+              ) : null}
+              {control.type === "shortcut" ? (
+                <ShortcutExperimentControl
+                  id={controlId}
+                  disabled={disabled}
                   value={String(experiment.config[key])}
                   placeholder={control.placeholderKey}
                   onCommit={(value) => handleConfigChange(key, value)}
@@ -144,12 +163,14 @@ export function ExperimentConfigControls({
 function TextExperimentControl({
   id,
   disabled,
+  multiline,
   value,
   placeholder,
   onCommit,
 }: {
   id: string;
   disabled: boolean;
+  multiline: boolean;
   value: string;
   placeholder?: string;
   onCommit: (value: string) => boolean;
@@ -184,16 +205,57 @@ function TextExperimentControl({
     return () => window.clearTimeout(timeoutId);
   }, [commitDraft, disabled, draftValue, value]);
 
+  const inputProps = {
+    id,
+    disabled,
+    value: draftValue,
+    placeholder: placeholder ? t(placeholder) : undefined,
+    onBlur: () => commitDraft(),
+    onChange: (
+      event: ChangeEvent<HTMLInputElement> | ChangeEvent<HTMLTextAreaElement>,
+    ) => setDraftValue(event.currentTarget.value),
+  };
+
+  if (!multiline) {
+    return <Input {...inputProps} />;
+  }
+
   return (
-    <Textarea
+    <Textarea {...inputProps} className="min-h-32 resize-y" variant="code" />
+  );
+}
+
+function ShortcutExperimentControl({
+  id,
+  disabled,
+  value,
+  placeholder,
+  onCommit,
+}: {
+  id: string;
+  disabled: boolean;
+  value: string;
+  placeholder?: string;
+  onCommit: (value: string) => boolean;
+}) {
+  const { t } = useTranslation("settings");
+
+  return (
+    <Input
       id={id}
-      className="min-h-32 resize-y"
-      variant="code"
+      readOnly
       disabled={disabled}
-      value={draftValue}
+      value={formatKeyboardShortcut(value)}
       placeholder={placeholder ? t(placeholder) : undefined}
-      onBlur={() => commitDraft()}
-      onChange={(event) => setDraftValue(event.currentTarget.value)}
+      onKeyDown={(event) => {
+        const shortcut = keyboardShortcutFromEvent(event.nativeEvent);
+        if (!shortcut) {
+          return;
+        }
+
+        event.preventDefault();
+        onCommit(shortcut);
+      }}
     />
   );
 }

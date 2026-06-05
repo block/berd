@@ -1,10 +1,21 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { PANE_JUMP_NAVIGATION_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import {
+  setExperimentConfigValue,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -31,6 +42,26 @@ function deferred<T>() {
     reject = promiseReject;
   });
   return { promise, reject, resolve };
+}
+
+function rect(left = 0, top = 0, width = 100, height = 100): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function mockVisibleRegionRects() {
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+    rect(),
+  );
 }
 
 vi.mock("./hooks/useAppStartup", () => ({
@@ -233,6 +264,7 @@ vi.mock("./ui/AppShellContent", () => ({
           Exit search
         </button>
       ) : null}
+      <input aria-label="Mock search input" />
     </section>
   )) satisfies typeof AppShellContentType,
 }));
@@ -312,6 +344,82 @@ describe("AppShell global navigation", () => {
         "--project-tint",
       ),
     ).toBe("transparent");
+  });
+
+  it("opens pane jump mode and focuses app regions by badge key", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        if (this.tagName === "HEADER") {
+          return rect(0, 0, 1000, 48);
+        }
+        if (this.tagName === "MAIN") {
+          return rect(260, 48, 740, 652);
+        }
+        if (this.querySelector('nav[aria-label="mock sidebar"]')) {
+          return rect(0, 48, 260, 652);
+        }
+        return rect(760, 580, 220, 100);
+      },
+    );
+    render(<AppShell />);
+
+    fireEvent.keyDown(window, { key: ";", ctrlKey: true });
+    expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
+    expect(screen.getByText("s")).toBeInTheDocument();
+    expect(screen.getByText("sidebar")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "s" });
+    expect(
+      screen.getByRole("button", { name: "Sidebar new chat" }),
+    ).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: ";", ctrlKey: true });
+    fireEvent.keyDown(window, { key: "l" });
+    expect(screen.getByPlaceholderText("Start a conversation")).toHaveFocus();
+    expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
+  });
+
+  it("starts pane jump mode from the main composer", () => {
+    mockVisibleRegionRects();
+    render(<AppShell />);
+
+    screen.getByPlaceholderText("Start a conversation").focus();
+    fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
+      key: ";",
+      ctrlKey: true,
+    });
+
+    expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
+  });
+
+  it("starts pane jump mode from the configured experiment shortcut", () => {
+    setExperimentConfigValue(
+      PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
+      "shortcut",
+      "Ctrl+.",
+    );
+    mockVisibleRegionRects();
+    render(<AppShell />);
+
+    fireEvent.keyDown(window, { key: ";", ctrlKey: true });
+    expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: ".", ctrlKey: true });
+    expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
+  });
+
+  it("does not start pane jump mode when the experiment is disabled", () => {
+    setExperimentEnabled(PANE_JUMP_NAVIGATION_EXPERIMENT_ID, false);
+    mockVisibleRegionRects();
+    render(<AppShell />);
+
+    screen.getByPlaceholderText("Start a conversation").focus();
+    fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
+      key: ";",
+      ctrlKey: true,
+    });
+
+    expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
   });
 
   it("starts a full blank chat from the saved artifact location", async () => {

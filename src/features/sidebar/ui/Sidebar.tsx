@@ -8,6 +8,7 @@ import {
   useRef,
   useState,
   type ComponentProps,
+  type KeyboardEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -348,6 +349,15 @@ function getSidebarSelector(attribute: string, value: string | null) {
   return value ? `[${attribute}="${CSS.escape(value)}"]` : null;
 }
 
+function getRovingSidebarButtons(container: HTMLElement) {
+  return Array.from(
+    container.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+  ).filter((button) => {
+    const hiddenParent = button.closest("[aria-hidden='true'], [inert]");
+    return !button.hidden && !hiddenParent;
+  });
+}
+
 export function Sidebar({
   collapsed,
   width,
@@ -643,6 +653,53 @@ export function Sidebar({
       }),
     );
   };
+  const handleSidebarNavKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLElement>) => {
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowLeft"
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (!(target instanceof HTMLButtonElement)) {
+        return;
+      }
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        const buttons = getRovingSidebarButtons(event.currentTarget);
+        const currentIndex = buttons.indexOf(target);
+        if (currentIndex === -1) {
+          return;
+        }
+
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        const nextButton =
+          buttons[(currentIndex + direction + buttons.length) % buttons.length];
+        nextButton?.focus();
+        nextButton?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+        return;
+      }
+
+      const expanded = target.getAttribute("aria-expanded");
+      if (expanded !== "true" && expanded !== "false") {
+        return;
+      }
+
+      if (
+        (event.key === "ArrowRight" && expanded === "false") ||
+        (event.key === "ArrowLeft" && expanded === "true")
+      ) {
+        event.preventDefault();
+        target.click();
+      }
+    },
+    [],
+  );
 
   return (
     <div
@@ -677,6 +734,7 @@ export function Sidebar({
             >
               <nav
                 ref={navRef}
+                onKeyDown={handleSidebarNavKeyDown}
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-1 pb-1 scrollbar-none"
                 style={showBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={t("navigation.main")}
@@ -786,6 +844,7 @@ export function Sidebar({
             >
               <nav
                 ref={secondaryNavRef}
+                onKeyDown={handleSidebarNavKeyDown}
                 className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2.5 py-1 pb-12 scrollbar-none"
                 style={showSecondaryBottomMask ? BOTTOM_MASK_STYLE : undefined}
                 aria-label={

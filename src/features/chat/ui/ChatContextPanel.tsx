@@ -1,7 +1,14 @@
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { cn } from "@/shared/lib/cn";
 import { ContextPanel } from "./ContextPanel";
+import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 
 const CP_PANEL_W = 315;
 export const CP_TOTAL_W = CP_PANEL_W;
@@ -58,10 +65,26 @@ export function ChatContextPanel({
   onToggleTerminal,
 }: ChatContextPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
+  const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null);
   const shouldReduceMotion = useReducedMotion();
   const isCompactViewport = useChatContextPanelCompactViewport();
   const fadeTransition = { duration: shouldReduceMotion ? 0 : CP_FADE_S };
   const reflowDuration = shouldReduceMotion ? 0 : CP_REFLOW_MS;
+  const handlePanelRef = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    setPanelElement(node);
+  }, []);
+  useFocusRegion({
+    id: "context",
+    label: "context",
+    key: "x",
+    enabled: isOpen,
+    element: panelElement,
+    getInitialFocus: () =>
+      panelElement?.querySelector<HTMLElement>(
+        "button:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])",
+      ) ?? null,
+  });
 
   useEffect(() => {
     if (!isOpen || !onRequestClose || !isCompactViewport) {
@@ -109,7 +132,7 @@ export function ChatContextPanel({
       <AnimatePresence initial={false}>
         {isOpen ? (
           <motion.div
-            ref={panelRef}
+            ref={handlePanelRef}
             key="context-panel"
             className={cn(
               "flex self-start",

@@ -41,6 +41,7 @@ import { Button } from "@/shared/ui/button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
+import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 
 export interface GlobalComposeOptions {
   providerId?: string;
@@ -154,6 +155,8 @@ export function GlobalComposerPill({
   const personas = useAgentStore(selectPersonas);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [containerElement, setContainerElement] =
+    useState<HTMLDivElement | null>(null);
   const lastFocusRequestRef = useRef(focusRequest);
   const routePersonaIdRef = useRef<string | null>(suggestedPersonaId);
   const personaSelectionSourceRef = useRef<"none" | "route" | "user">("none");
@@ -620,6 +623,19 @@ export function GlobalComposerPill({
     : dictation.isTranscribing
       ? t("toolbar.voiceInputTranscribing")
       : placeholder;
+  useFocusRegion(
+    useMemo(
+      () => ({
+        id: "composer",
+        label: "composer",
+        key: "c",
+        enabled: true,
+        element: containerElement,
+        getInitialFocus: () => textareaRef.current,
+      }),
+      [containerElement],
+    ),
+  );
 
   const handleSend = useCallback(() => {
     if (!canSend) {
@@ -671,10 +687,14 @@ export function GlobalComposerPill({
     disabled: false,
     addPathAttachments,
   });
+  const handleContainerRef = useCallback((node: HTMLDivElement | null) => {
+    containerRef.current = node;
+    setContainerElement(node);
+  }, []);
 
   return (
     <div
-      ref={containerRef}
+      ref={handleContainerRef}
       role="region"
       aria-label={t("globalPill.ariaLabel")}
       onDragEnter={handleDragEnter}
