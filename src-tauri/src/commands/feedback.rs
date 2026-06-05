@@ -175,33 +175,10 @@ fn build_feedback_multipart_form(
         form = form.part("attachments", attachment);
     }
     if let Some(bytes) = log_zip {
-        // DEBUG: drop a copy of the diagnostic-log zip on the desktop before
-        // uploading so we can inspect exactly what gets attached. Remove this
-        // (and the commit that adds it) once the feature is verified.
-        debug_dump_log_zip_to_desktop(&bytes);
         form = form.part("attachments", build_log_zip_part(bytes)?);
     }
 
     Ok(form)
-}
-
-// DEBUG: copy the diagnostic-log zip to the user's desktop for inspection.
-// Best-effort and only meant for local debugging — remove with its commit.
-fn debug_dump_log_zip_to_desktop(bytes: &[u8]) {
-    let Some(home) = std::env::var_os("HOME") else {
-        log::warn!("feedback: debug log-zip dump skipped (no HOME)");
-        return;
-    };
-    let dest = Path::new(&home)
-        .join("Desktop")
-        .join(log_export::LOG_ZIP_FILENAME);
-    match std::fs::write(&dest, bytes) {
-        Ok(()) => log::warn!(
-            "feedback: DEBUG wrote diagnostic-log zip to {}",
-            dest.display()
-        ),
-        Err(error) => log::warn!("feedback: debug log-zip dump failed: {error}"),
-    }
 }
 
 fn build_log_zip_part(bytes: Vec<u8>) -> Result<Part, Value> {
