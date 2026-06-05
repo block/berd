@@ -3,13 +3,28 @@ import {
   __resetAllPersonaHandoffs,
   buildPersonaHandoffPreamble,
   claimPersonaHandoff,
+  DEFAULT_GOOSE_MODEL_PROVIDER_ID,
   isExternalAgentProvider,
   isGooseManagedProvider,
   resetPersonaHandoff,
+  toWireProviderId,
 } from "../acpPersonaHandoff";
 
 beforeEach(() => {
   __resetAllPersonaHandoffs();
+});
+
+describe("toWireProviderId", () => {
+  it("translates the goose agent sentinel to the default model provider", () => {
+    expect(toWireProviderId("goose")).toBe(DEFAULT_GOOSE_MODEL_PROVIDER_ID);
+    expect(DEFAULT_GOOSE_MODEL_PROVIDER_ID).toBe("databricks_v2");
+  });
+
+  it("passes real provider ids through unchanged", () => {
+    expect(toWireProviderId("databricks_v2")).toBe("databricks_v2");
+    expect(toWireProviderId("claude-acp")).toBe("claude-acp");
+    expect(toWireProviderId("codex-acp")).toBe("codex-acp");
+  });
 });
 
 describe("isExternalAgentProvider", () => {

@@ -6,6 +6,7 @@ import type {
   SessionInfo,
 } from "@agentclientprotocol/sdk";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
+import { toWireProviderId } from "./acpPersonaHandoff";
 import { getClient } from "./acpConnection";
 import { perfLog } from "@/shared/lib/perfLog";
 
@@ -143,14 +144,15 @@ export async function setProvider(
   const sid = sessionId.slice(0, 8);
   const tClient = performance.now();
   const client = await getClient();
+  const wireProvider = toWireProviderId(providerId);
   const tCall = performance.now();
   await client.setSessionConfigOption({
     sessionId,
     configId: "provider",
-    value: providerId,
+    value: wireProvider,
   });
   perfLog(
-    `[perf:api] ${sid} setProvider(${providerId}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
+    `[perf:api] ${sid} setProvider(${providerId}→${wireProvider}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
 }
 
@@ -239,7 +241,7 @@ export async function newSession(
   };
 
   const meta: Record<string, string> = {};
-  if (providerId) meta.provider = providerId;
+  if (providerId) meta.provider = toWireProviderId(providerId);
   if (projectId) meta.projectId = projectId;
   if (personaId) meta.personaId = personaId;
   if (Object.keys(meta).length > 0) request._meta = meta;

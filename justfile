@@ -17,6 +17,10 @@ default:
 goose-sync:
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
 
+# Regenerate the vendored ACP schema from the pinned Goose backend and rebuild the SDK (kept out of setup; mutates tracked files).
+sync-schema:
+    ./scripts/regenerate-sdk-schema.sh
+
 # Install dependencies and build workspace packages.
 setup:
     pnpm install
@@ -198,9 +202,10 @@ dev-debug: dev
 dev-frontend:
     pnpm dev
 
-# Resolve a Goose ref/tag/sha and update goose-backend.lock.json.
+# Resolve a Goose ref/tag/sha, update goose-backend.lock.json, and refresh the SDK schema.
 bump-goose ref="main":
     ./scripts/update-goose-backend-lock.sh "{{ ref }}"
+    just sync-schema
 
 # ── Utilities ────────────────────────────────────────────────
 

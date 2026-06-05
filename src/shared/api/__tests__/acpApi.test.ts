@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
   listSessions: vi.fn(),
   unstableForkSession: vi.fn(),
+  newSession: vi.fn(),
+  setSessionConfigOption: vi.fn(),
 }));
 
 vi.mock("../acpConnection", () => ({
@@ -169,6 +171,66 @@ describe("forkSession", () => {
       sessionId: "session-1",
       cwd: "/tmp/project",
       mcpServers: [],
+    });
+  });
+});
+
+describe("provider wire translation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getClient.mockResolvedValue({
+      newSession: mocks.newSession,
+      setSessionConfigOption: mocks.setSessionConfigOption,
+    });
+    mocks.newSession.mockResolvedValue({ sessionId: "session-9" });
+    mocks.setSessionConfigOption.mockResolvedValue(undefined);
+  });
+
+  it("sends the default model provider when newSession is given the goose sentinel", async () => {
+    const { newSession } = await import("../acpApi");
+
+    await newSession("/tmp/project", "goose");
+
+    expect(mocks.newSession).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      mcpServers: [],
+      _meta: { provider: "databricks_v2" },
+    });
+  });
+
+  it("passes a real provider id through newSession unchanged", async () => {
+    const { newSession } = await import("../acpApi");
+
+    await newSession("/tmp/project", "claude-acp", "project-1");
+
+    expect(mocks.newSession).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      mcpServers: [],
+      _meta: { provider: "claude-acp", projectId: "project-1" },
+    });
+  });
+
+  it("persists the default model provider when setProvider is given the goose sentinel", async () => {
+    const { setProvider } = await import("../acpApi");
+
+    await setProvider("session-9", "goose");
+
+    expect(mocks.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-9",
+      configId: "provider",
+      value: "databricks_v2",
+    });
+  });
+
+  it("passes a real provider id through setProvider unchanged", async () => {
+    const { setProvider } = await import("../acpApi");
+
+    await setProvider("session-9", "codex-acp");
+
+    expect(mocks.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-9",
+      configId: "provider",
+      value: "codex-acp",
     });
   });
 });

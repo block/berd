@@ -15,9 +15,34 @@
  * re-injects.
  */
 
+import { DEFAULT_PROVIDER_ID } from "@/features/migration/lib/constants";
 import { getCatalogEntry } from "@/features/providers/providerCatalog";
 
-const GOOSE_PROVIDER_ID = "goose";
+export const GOOSE_PROVIDER_ID = "goose";
+
+/**
+ * Real model provider the Goose agent resolves to on the wire. `"goose"` is a
+ * UI agent sentinel meaning "the Goose-managed default", not a registry
+ * provider, so it must be translated to a concrete provider before it reaches
+ * the backend's `session/new` (which resolves providers strictly against the
+ * registry and rejects the sentinel with `Unknown provider 'goose'`).
+ *
+ * Aliased to `DEFAULT_PROVIDER_ID` so the distro default lives in one place;
+ * both track `distro/distro.json`'s `providerAllowlist`.
+ */
+export const DEFAULT_GOOSE_MODEL_PROVIDER_ID = DEFAULT_PROVIDER_ID;
+
+/**
+ * Translate a UI provider id into the value sent to the backend. Only the
+ * `"goose"` agent sentinel is rewritten to the concrete default model provider;
+ * every real provider id (`claude-acp`, `codex-acp`, `databricks_v2`, ...)
+ * passes through unchanged.
+ */
+export function toWireProviderId(providerId: string): string {
+  return providerId === GOOSE_PROVIDER_ID
+    ? DEFAULT_GOOSE_MODEL_PROVIDER_ID
+    : providerId;
+}
 
 /**
  * Tracks which persona handoffs have already been delivered, keyed by
