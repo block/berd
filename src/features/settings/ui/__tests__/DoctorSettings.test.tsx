@@ -191,7 +191,6 @@ describe("DoctorSettings", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText("Codex")).not.toBeInTheDocument();
   });
-
   it("renders the synthetic timeout report", async () => {
     mockedInvoke.mockResolvedValue(
       report([

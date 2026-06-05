@@ -3,12 +3,17 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 
 import { preloadStartupLoadingMedia } from "@/app/lib/preloadStartupLoadingMedia";
+import {
+  installRendererDiagnostics,
+  reportRendererError,
+} from "@/app/lib/rendererDiagnostics";
 import { App } from "@/app/App";
 import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import { RendererErrorBoundary } from "@/app/ui/RendererErrorBoundary";
 import "@xterm/xterm/css/xterm.css";
 import "@/shared/styles/globals.css";
 
@@ -71,9 +76,12 @@ if (sessionKey) {
     sessionId = decodeSessionKey(sessionKey);
   } catch (error) {
     console.error("Failed to decode session window key:", error);
+    reportRendererError("session_key_decode_failed", error);
     bootError = "The session window URL is malformed.";
   }
 }
+
+installRendererDiagnostics({ windowKind: sessionId ? "session" : "main" });
 
 if (bootError) {
   renderBootError(bootError);
@@ -86,30 +94,35 @@ if (bootError) {
     .then(([{ SessionWindowApp }, { SessionWindowRuntime }]) => {
       reactRoot.render(
         <React.StrictMode>
-          <SessionWindowRuntime queryClient={queryClient}>
-            <SessionWindowApp sessionId={decodedSessionId} />
-          </SessionWindowRuntime>
+          <RendererErrorBoundary>
+            <SessionWindowRuntime queryClient={queryClient}>
+              <SessionWindowApp sessionId={decodedSessionId} />
+            </SessionWindowRuntime>
+          </RendererErrorBoundary>
         </React.StrictMode>,
       );
     })
     .catch((error) => {
       console.error("Failed to load session window bundle:", error);
+      reportRendererError("session_window_bundle_load_failed", error);
       renderBootError("The session window bundle could not be loaded.");
     });
 } else {
   reactRoot.render(
     <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <LocalMediaCacheEvents />
-        <RendererTelemetry />
-        <I18nProvider>
-          <ThemeProvider>
-            <UpdaterProvider>
-              <App />
-            </UpdaterProvider>
-          </ThemeProvider>
-        </I18nProvider>
-      </QueryClientProvider>
+      <RendererErrorBoundary>
+        <QueryClientProvider client={queryClient}>
+          <LocalMediaCacheEvents />
+          <RendererTelemetry />
+          <I18nProvider>
+            <ThemeProvider>
+              <UpdaterProvider>
+                <App />
+              </UpdaterProvider>
+            </ThemeProvider>
+          </I18nProvider>
+        </QueryClientProvider>
+      </RendererErrorBoundary>
     </React.StrictMode>,
   );
 }

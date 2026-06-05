@@ -14,6 +14,7 @@
     "imageFilesFilter": "Imágenes",
     "removeAttachment": "Eliminar {{name}}",
     "attachLogs": "Adjuntar registros y diagnósticos",
+    "attachLogsHelp": "Incluye metadatos locales seguros y registros saneados. Se excluyen prompts, respuestas, payloads de herramientas y bases de datos de sesiones.",
     "attachmentLimitError": "Los comentarios admiten hasta {{count}} imágenes adjuntas.",
     "imageOnlyError": "Solo se pueden adjuntar archivos de imagen.",
     "imageReadError": "No se pudieron adjuntar algunas imágenes.",

@@ -90,6 +90,11 @@
   "errors": {
     "clipboardUnavailable": "La API del portapapeles no está disponible"
   },
+  "rendererError": {
+    "description": "Goose tuvo un error del renderizador. Recarga la ventana para intentarlo de nuevo.",
+    "reload": "Recargar",
+    "title": "Algo salió mal"
+  },
   "startup": {
     "loadingLabel": "Iniciando Goose",
     "error": {

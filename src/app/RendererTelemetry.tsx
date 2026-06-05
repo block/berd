@@ -9,8 +9,9 @@ import { perfLog } from "@/shared/lib/perfLog";
 const LAST_BOOT_KEY = "goose.renderer.lastBootAt";
 
 /**
- * If two boots happen within this window the renderer almost certainly
- * reloaded on its own (a WebKit OOM reap) rather than the user restarting.
+ * If two production boots happen within this window the renderer likely
+ * reloaded on its own (for example, a WebKit OOM reap) rather than the user
+ * restarting. Dev reloads are expected during Vite/Tauri workflows.
  */
 const RAPID_RELOAD_MS = 60_000;
 
@@ -42,10 +43,11 @@ function reportBoot(): void {
     const elapsedMs = Date.now() - previousBootAt;
     const elapsedSec = Math.round(elapsedMs / 1000);
     if (elapsedMs >= 0 && elapsedMs < RAPID_RELOAD_MS) {
-      void logRendererEvent(
-        "warn",
-        `renderer reloaded ${elapsedSec}s after the previous load; likely an unexpected reload (possible OOM reap)`,
+      const event = buildRapidReloadEvent(
+        elapsedSec,
+        import.meta.env.DEV && import.meta.env.MODE !== "test",
       );
+      void logRendererEvent(event.level, event.message);
     } else {
       void logRendererEvent(
         "info",
@@ -55,6 +57,23 @@ function reportBoot(): void {
   } else {
     void logRendererEvent("info", "renderer booted (first load this install)");
   }
+}
+
+function buildRapidReloadEvent(
+  elapsedSec: number,
+  isDev: boolean,
+): { level: "info" | "warn"; message: string } {
+  if (isDev) {
+    return {
+      level: "info",
+      message: `renderer reloaded ${elapsedSec}s after the previous load during dev`,
+    };
+  }
+
+  return {
+    level: "warn",
+    message: `renderer reloaded ${elapsedSec}s after the previous load; likely an unexpected reload (possible OOM reap)`,
+  };
 }
 
 /**

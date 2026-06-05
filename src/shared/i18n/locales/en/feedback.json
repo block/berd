@@ -14,6 +14,7 @@
     "imageFilesFilter": "Images",
     "removeAttachment": "Remove {{name}}",
     "attachLogs": "Attach logs and diagnostics",
+    "attachLogsHelp": "Includes safe local metadata and sanitized logs. Prompts, responses, tool payloads, and session databases are excluded.",
     "attachmentLimitError": "Feedback supports up to {{count}} image attachments.",
     "imageOnlyError": "Only image files can be attached.",
     "imageReadError": "Some images could not be attached.",

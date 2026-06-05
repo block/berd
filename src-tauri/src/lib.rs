@@ -17,15 +17,31 @@ use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 28.0);
+const APP_LOG_MAX_FILE_SIZE_BYTES: u128 = 10 * 1024 * 1024;
+
+fn install_panic_logging_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let backtrace = std::backtrace::Backtrace::force_capture();
+        let backtrace = backtrace.to_string();
+        let panic_message = info.to_string();
+        let message = format!("PANIC: {panic_message}\nbacktrace:\n{backtrace}");
+        services::diagnostic_log::record_panic(panic_message, backtrace.clone());
+        eprintln!("{message}");
+        log::error!("{message}");
+    }));
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    install_panic_logging_hook();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(
             tauri_plugin_log::Builder::new()
                 .level(log::LevelFilter::Info)
                 .level_for("perf", log::LevelFilter::Debug)
+                .max_file_size(APP_LOG_MAX_FILE_SIZE_BYTES)
                 .targets([
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
@@ -49,6 +65,14 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            services::diagnostic_log::record_event(
+                services::diagnostic_log::DiagnosticLevel::Info,
+                services::diagnostic_log::DiagnosticCategory::Startup,
+                "app_setup",
+                None,
+                std::collections::BTreeMap::new(),
+            );
+
             let deep_link_app = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {
@@ -268,6 +292,7 @@ pub fn run() {
             commands::agent_setup::update_agent,
             commands::path_resolver::resolve_path,
             commands::diagnostics::probe_kgoose_connectivity,
+            commands::diagnostics::write_diagnostic_event,
             commands::distro::get_distro_bundle,
             commands::system::get_home_dir,
             commands::system::open_in_chrome,

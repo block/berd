@@ -7,6 +7,9 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use crate::services::diagnostic_log::{
+    self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
+};
 use crate::services::distro_bundle::DistroBundleState;
 use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
@@ -68,8 +71,7 @@ impl GooseServeProcess {
     /// Kill the child process. Called from the app exit handler to ensure
     /// the child doesn't outlive the Tauri process.
     pub fn kill(&self) {
-        let pid = self._child.id();
-        if let Some(pid) = pid {
+        if let Some(pid) = self._child.id() {
             log::info!("Killing goose serve child (pid {pid})");
             // SAFETY: sending SIGTERM to a known child process.
             unsafe {
@@ -89,6 +91,8 @@ impl GooseServeProcess {
     }
 
     async fn spawn(app_handle: tauri::AppHandle) -> Result<GooseServeProcess, String> {
+        let process_started_at = Instant::now();
+
         // Kill any orphaned goose serve process left by a previous run
         // (e.g. tauri dev hot-reload).
         kill_stale_serve_process().await;
@@ -155,22 +159,82 @@ impl GooseServeProcess {
             "Spawning long-lived goose serve: binary={binary_display} port={port} cwd={}",
             working_dir.display(),
         );
+        diagnostic_log::record_event(
+            DiagnosticLevel::Info,
+            DiagnosticCategory::GooseServe,
+            "spawn_start",
+            None,
+            diagnostic_log::fields([
+                ("binaryPath", binary_display.clone().into()),
+                ("cwd", working_dir.to_string_lossy().to_string().into()),
+                ("port", port.into()),
+            ]),
+        );
 
         let mut child = command.spawn().map_err(|error| {
+            diagnostic_log::record_event(
+                DiagnosticLevel::Error,
+                DiagnosticCategory::GooseServe,
+                "spawn_failed",
+                Some(process_started_at.elapsed().as_millis() as u64),
+                diagnostic_log::fields([
+                    ("classification", "spawn_failed".into()),
+                    ("error", error.to_string().into()),
+                    ("binaryPath", binary_display.clone().into()),
+                    ("cwd", working_dir.to_string_lossy().to_string().into()),
+                    ("port", port.into()),
+                ]),
+            );
             format!(
                 "Failed to spawn goose serve (binary: {binary_display}, cwd: {}): {error}",
                 working_dir.display()
             )
         })?;
+        let pid = child.id();
+        diagnostic_log::record_event(
+            DiagnosticLevel::Info,
+            DiagnosticCategory::GooseServe,
+            "spawn_success",
+            Some(process_started_at.elapsed().as_millis() as u64),
+            diagnostic_log::fields([("pid", optional_u32_value(pid)), ("port", port.into())]),
+        );
 
         spawn_log_reader(child.stdout.take(), "stdout");
         spawn_log_reader(child.stderr.take(), "stderr");
 
-        wait_for_server_ready(port, &mut child).await?;
+        match wait_for_server_ready(port, &mut child).await {
+            Ok(()) => {
+                diagnostic_log::record_event(
+                    DiagnosticLevel::Info,
+                    DiagnosticCategory::GooseServe,
+                    "ready",
+                    Some(process_started_at.elapsed().as_millis() as u64),
+                    diagnostic_log::fields([
+                        ("pid", optional_u32_value(pid)),
+                        ("port", port.into()),
+                    ]),
+                );
+            }
+            Err(error) => {
+                diagnostic_log::record_event(
+                    DiagnosticLevel::Error,
+                    DiagnosticCategory::GooseServe,
+                    "ready_failed",
+                    Some(process_started_at.elapsed().as_millis() as u64),
+                    diagnostic_log::fields([
+                        ("classification", "ready_failed".into()),
+                        ("error", error.to_string().into()),
+                        ("pid", optional_u32_value(pid)),
+                        ("port", port.into()),
+                    ]),
+                );
+                return Err(error);
+            }
+        }
 
         log::info!("Goose serve is ready on port {port}");
 
-        if let Some(pid) = child.id() {
+        if let Some(pid) = pid {
             write_pid_file(pid);
         }
 
@@ -288,6 +352,13 @@ async fn kill_stale_serve_process() {
     }
 
     log::info!("Killing orphaned goose serve process (pid {pid})");
+    diagnostic_log::record_event(
+        DiagnosticLevel::Warn,
+        DiagnosticCategory::GooseServe,
+        "stale_process_kill",
+        None,
+        diagnostic_log::fields([("pid", (pid as i64).into())]),
+    );
     // SAFETY: sending SIGTERM to the orphaned child.
     unsafe {
         libc::kill(pid, libc::SIGTERM);
@@ -298,6 +369,13 @@ async fn kill_stale_serve_process() {
     // SAFETY: checking if process still exists after SIGTERM.
     if unsafe { libc::kill(pid, 0) } == 0 {
         log::warn!("Orphaned goose serve (pid {pid}) did not exit after SIGTERM, sending SIGKILL");
+        diagnostic_log::record_event(
+            DiagnosticLevel::Warn,
+            DiagnosticCategory::GooseServe,
+            "stale_process_kill_forced",
+            None,
+            diagnostic_log::fields([("pid", (pid as i64).into())]),
+        );
         // SAFETY: sending SIGKILL as a last resort.
         unsafe {
             libc::kill(pid, libc::SIGKILL);
@@ -377,6 +455,10 @@ async fn wait_for_server_ready(port: u16, child: &mut Child) -> Result<(), Strin
             }
         }
     }
+}
+
+fn optional_u32_value(value: Option<u32>) -> DiagnosticFieldValue {
+    value.map(Into::into).unwrap_or(DiagnosticFieldValue::Null)
 }
 
 fn default_serve_working_dir() -> PathBuf {

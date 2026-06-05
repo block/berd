@@ -146,7 +146,7 @@ export function formatDebugReport(report: DoctorReport): string {
 }
 
 export function DoctorSettings() {
-  const { t } = useTranslation(["settings", "common"]);
+  const { t } = useTranslation("settings");
   const setTopBarActions = useSetTopBarActions();
   const queryClient = useQueryClient();
   const [copied, setCopied] = useState(false);
@@ -217,24 +217,24 @@ export function DoctorSettings() {
 
   return (
     <SettingsPage>
-      {loading ? (
-        <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
-          <div className="flex items-center justify-center gap-2">
-            <Spinner className="h-5 w-5" />
-            <span>{t("doctor.running")}</span>
+      <div className="space-y-6">
+        {loading ? (
+          <div className="flex min-h-[160px] flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
+            <div className="flex items-center justify-center gap-2">
+              <Spinner className="h-5 w-5" />
+              <span>{t("doctor.running")}</span>
+            </div>
+            {showLongRunningHint ? (
+              <p className="text-xs">
+                {t("doctor.longRunning", {
+                  seconds: elapsedSeconds,
+                  timeoutSeconds: DOCTOR_REPORT_TIMEOUT_SECONDS,
+                })}
+              </p>
+            ) : null}
           </div>
-          {showLongRunningHint ? (
-            <p className="text-xs">
-              {t("doctor.longRunning", {
-                seconds: elapsedSeconds,
-                timeoutSeconds: DOCTOR_REPORT_TIMEOUT_SECONDS,
-              })}
-            </p>
-          ) : null}
-        </div>
-      ) : report ? (
-        <div className="space-y-6">
-          {checkGroups.map((group) => (
+        ) : report ? (
+          checkGroups.map((group) => (
             <div
               key={group.category}
               className="mx-auto w-full max-w-xl space-y-2"
@@ -252,13 +252,13 @@ export function DoctorSettings() {
                 ))}
               </div>
             </div>
-          ))}
-        </div>
-      ) : (
-        <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
-          {t("doctor.empty")}
-        </div>
-      )}
+          ))
+        ) : (
+          <div className="flex min-h-[160px] items-center justify-center text-sm text-muted-foreground">
+            {t("doctor.empty")}
+          </div>
+        )}
+      </div>
     </SettingsPage>
   );
 }

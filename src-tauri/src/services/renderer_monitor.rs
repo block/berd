@@ -8,8 +8,8 @@
 //!
 //! This service makes those failures visible:
 //!   * It samples the renderer's resident set size (RSS) on a fixed interval
-//!     and writes it to `goose.log`, with a louder warning once the renderer
-//!     approaches the size at which WebKit tends to reap it.
+//!     and logs a warning once the renderer approaches the size at which WebKit
+//!     tends to reap it.
 //!   * It detects the reap itself by watching the WebContent process id: when
 //!     the id changes, WebKit has spun up a fresh renderer in place of one it
 //!     killed, so we log a warning with the last-known footprint.
@@ -24,7 +24,7 @@
 //! platforms the monitor is simply never started.
 
 #[cfg(target_os = "macos")]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[cfg(target_os = "macos")]
 use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
@@ -43,6 +43,12 @@ const START_DELAY: Duration = Duration::from_secs(15);
 /// Interval between renderer memory samples.
 #[cfg(target_os = "macos")]
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Minimum interval between high-memory RSS warning lines. Sampling stays more
+/// frequent so the UI and reap detector remain responsive without filling
+/// `goose.log`.
+#[cfg(target_os = "macos")]
+const MEMORY_WARNING_LOG_INTERVAL: Duration = Duration::from_secs(5 * 60);
 
 /// Soft limit (MB) above which we warn that the renderer is at risk of being
 /// reaped by WebKit. Empirically WebContent has been observed reaching ~5–6 GB
@@ -80,6 +86,7 @@ fn run_loop(app: AppHandle) {
     let mut sys = System::new();
     let mut last_pid: Option<u32> = None;
     let mut last_rss: Option<u64> = None;
+    let mut last_memory_warning_log_at: Option<Instant> = None;
 
     std::thread::sleep(START_DELAY);
 
@@ -98,8 +105,9 @@ fn run_loop(app: AppHandle) {
 
             if let Some(bytes) = rss {
                 let mb = bytes / (1024 * 1024);
-                log::info!("[renderer] WebContent pid={current} rss={mb} MB");
-                if mb >= WARN_RSS_MB {
+                if mb >= WARN_RSS_MB
+                    && should_log_memory_warning(&mut last_memory_warning_log_at, Instant::now())
+                {
                     log::warn!(
                         "[renderer] WebContent pid={current} rss={mb} MB is above the {WARN_RSS_MB} MB soft limit; renderer is at risk of being reaped by WebKit"
                     );
@@ -121,6 +129,17 @@ fn run_loop(app: AppHandle) {
         }
 
         std::thread::sleep(SAMPLE_INTERVAL);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn should_log_memory_warning(last_logged_at: &mut Option<Instant>, now: Instant) -> bool {
+    match *last_logged_at {
+        Some(last) if now.duration_since(last) < MEMORY_WARNING_LOG_INTERVAL => false,
+        _ => {
+            *last_logged_at = Some(now);
+            true
+        }
     }
 }
 
@@ -224,5 +243,21 @@ mod tests {
         let message =
             detect_reap(Some(10), None, 11).expect("pid change should be reported as a reap");
         assert!(message.contains("unknown"));
+    }
+
+    #[test]
+    fn memory_warning_logging_is_throttled() {
+        let start = Instant::now();
+        let mut last_logged_at = None;
+
+        assert!(should_log_memory_warning(&mut last_logged_at, start));
+        assert!(!should_log_memory_warning(
+            &mut last_logged_at,
+            start + Duration::from_secs(60)
+        ));
+        assert!(should_log_memory_warning(
+            &mut last_logged_at,
+            start + MEMORY_WARNING_LOG_INTERVAL
+        ));
     }
 }

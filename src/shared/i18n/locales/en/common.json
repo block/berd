@@ -90,6 +90,11 @@
   "errors": {
     "clipboardUnavailable": "Clipboard API not available"
   },
+  "rendererError": {
+    "description": "Goose hit a renderer error. Reload the window to try again.",
+    "reload": "Reload",
+    "title": "Something went wrong"
+  },
   "startup": {
     "loadingLabel": "Starting Goose",
     "error": {

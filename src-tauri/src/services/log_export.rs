@@ -7,8 +7,9 @@
 //! 1. This app's Tauri shell log (`app_log_dir()`): `goose.log` plus rotated
 //!    `goose.<N>.log` files. Each line is run through
 //!    [`sanitize_app_log_line`], which drops the captured goosed
-//!    stdout/stderr lines (they can carry conversation/LLM content) and applies
-//!    the secret-key redactor to what remains.
+//!    stdout/stderr lines (they can carry conversation/LLM content), applies
+//!    the secret-key redactor to what remains, and includes app diagnostic
+//!    events emitted as `[diagnostic] key=value` records.
 //! 2. goosed's own diagnostic logs under `<goose-state>/logs/cli/**` and
 //!    `<goose-state>/logs/server/**` — the `.log` files only. These are
 //!    metadata-only diagnostics (session IDs, durations, token counts, tool and
@@ -34,11 +35,11 @@ use zip::{CompressionMethod, ZipWriter};
 /// Overall budget on raw (pre-compression) log bytes read across all files.
 /// Deliberately kept well under kgoose's 10 MB per-file attachment limit so the
 /// resulting `.zip` stays comfortably small after deflate compression.
-const MAX_TOTAL_RAW_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_TOTAL_RAW_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Per-file cap. Files larger than this are tailed to their final
 /// `PER_FILE_TAIL_BYTES` (the most recent activity is what matters for triage).
-const PER_FILE_TAIL_BYTES: u64 = 1024 * 1024;
+const PER_FILE_TAIL_BYTES: u64 = 2 * 1024 * 1024;
 
 /// Recency window: only log files modified within this much of "now" are
 /// collected. Layered on TOP of the filename allowlist / hard-exclude guard /
@@ -123,15 +124,15 @@ pub(crate) fn build_logs_zip(
     let mut budget = MAX_TOTAL_RAW_BYTES;
     let mut entries: Vec<ZipEntry> = Vec::new();
 
-    // Recency cutoff applied uniformly to both log sources. `checked_sub` guards
-    // the (practically impossible) pre-epoch clock; falling back to the epoch
-    // disables the filter rather than dropping everything.
+    // Recency cutoffs applied on top of filename allowlists and size caps.
+    // `checked_sub` guards the practically impossible pre-epoch clock; falling
+    // back to the epoch disables that filter rather than dropping everything.
     let cutoff = SystemTime::now()
         .checked_sub(MAX_LOG_AGE)
         .unwrap_or(SystemTime::UNIX_EPOCH);
-
     if let Some(dirs) = dirs {
-        // 1. Tauri shell log(s) — redacted + sidecar lines dropped.
+        // 1. Tauri shell log(s) — redacted + sidecar lines dropped. App
+        // diagnostic events are emitted here as `[diagnostic] key=value`.
         for path in enumerate_app_shell_logs(&dirs.app_log_dir, cutoff) {
             if budget == 0 {
                 break;
@@ -599,7 +600,9 @@ mod tests {
         fs::write(
             app_log_dir.join("goose.log"),
             format!(
-                "{shell_ts}[INFO] hello token=abc\n{shell_ts}[INFO] [goose serve stdout] private\n"
+                "{shell_ts}[INFO] hello token=abc\n\
+                 {shell_ts}[INFO] [diagnostic] category=gooseServe event=ready port=1234 api_key=abc\n\
+                 {shell_ts}[INFO] [goose serve stdout] private\n"
             ),
         )
         .unwrap();
@@ -630,6 +633,13 @@ mod tests {
             .any(|n| n == "goosed-logs/cli/2026-01-01/run.log"));
         assert!(names.iter().any(|n| n == "doctor/report.txt"));
         assert!(names.iter().all(|n| !n.contains("llm_request")));
+
+        let mut app_log_entry = archive.by_name("app-shell/goose.log").unwrap();
+        let mut app_log_text = String::new();
+        app_log_entry.read_to_string(&mut app_log_text).unwrap();
+        assert!(app_log_text.contains("[diagnostic]"));
+        assert!(app_log_text.contains("api_key=[redacted]"));
+        assert!(!app_log_text.contains("api_key=abc"));
     }
 
     #[test]

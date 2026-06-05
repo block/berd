@@ -349,7 +349,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                     </div>
                   ) : null}
                 </div>
-                <div className="flex items-center gap-2 rounded-md border border-input bg-background px-3 py-2">
+                <div className="flex items-start gap-2 rounded-md border border-input bg-background px-3 py-2">
                   <Checkbox
                     id="feedback-include-logs"
                     checked={includeLogs}
@@ -358,13 +358,19 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
                       setError(null);
                     }}
                     disabled={submitting}
+                    className="mt-0.5"
                   />
-                  <Label
-                    htmlFor="feedback-include-logs"
-                    className="min-w-0 text-xs font-medium text-foreground"
-                  >
-                    {t("dialog.attachLogs")}
-                  </Label>
+                  <div className="min-w-0">
+                    <Label
+                      htmlFor="feedback-include-logs"
+                      className="text-xs font-medium text-foreground"
+                    >
+                      {t("dialog.attachLogs")}
+                    </Label>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                      {t("dialog.attachLogsHelp")}
+                    </p>
+                  </div>
                 </div>
                 {error ? (
                   <p
