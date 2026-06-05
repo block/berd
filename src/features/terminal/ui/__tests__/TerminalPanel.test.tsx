@@ -5,12 +5,18 @@ import { TerminalPanel } from "../TerminalPanel";
 
 const mocks = vi.hoisted(() => ({
   attach: vi.fn(() => vi.fn()),
+  detach: vi.fn(),
   deferResize: vi.fn(),
   focusAndResize: vi.fn(),
   resumeResize: vi.fn(),
   restart: vi.fn(),
+  sessionStatus: "running",
   stop: vi.fn(),
-  subscribe: vi.fn(() => vi.fn()),
+  subscriptionListener: null as (() => void) | null,
+  subscribe: vi.fn((listener: () => void) => {
+    mocks.subscriptionListener = listener;
+    return vi.fn();
+  }),
   t: vi.fn((key: string) => key),
 }));
 
@@ -24,12 +30,14 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
 
 vi.mock("../../lib/terminalSessionManager", () => ({
   getOrCreateTerminalSession: vi.fn(() => ({
-    attach: mocks.attach,
+    attach: mocks.attach.mockImplementation(() => mocks.detach),
     deferResize: mocks.deferResize,
     focusAndResize: mocks.focusAndResize,
     resumeResize: mocks.resumeResize,
     restart: mocks.restart,
-    status: "running",
+    get status() {
+      return mocks.sessionStatus;
+    },
     stop: mocks.stop,
     subscribe: mocks.subscribe,
     updateLabels: vi.fn(),
@@ -39,11 +47,14 @@ vi.mock("../../lib/terminalSessionManager", () => ({
 describe("TerminalPanel", () => {
   beforeEach(() => {
     mocks.attach.mockClear();
+    mocks.detach.mockClear();
     mocks.deferResize.mockClear();
     mocks.focusAndResize.mockClear();
     mocks.resumeResize.mockClear();
     mocks.restart.mockClear();
+    mocks.sessionStatus = "running";
     mocks.stop.mockClear();
+    mocks.subscriptionListener = null;
     mocks.subscribe.mockClear();
     mocks.t.mockClear();
   });
@@ -103,6 +114,67 @@ describe("TerminalPanel", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("renders without the built-in header for external tab chrome", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:tab-1"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        showHeader={false}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("button", { name: "terminal.restart" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "terminal.collapse" }),
+    ).toBeNull();
+    expect(mocks.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it("reattaches the terminal surface after a selected tab was detached", () => {
+    const { unmount } = render(
+      <TerminalPanel
+        sessionKey="session:tab-1"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        showHeader={false}
+      />,
+    );
+
+    expect(mocks.attach).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(mocks.detach).toHaveBeenCalledTimes(1);
+
+    render(
+      <TerminalPanel
+        sessionKey="session:tab-1"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        showHeader={false}
+      />,
+    );
+
+    expect(mocks.attach).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not close itself when mounted with an already exited session", () => {
+    mocks.sessionStatus = "exited";
+
+    render(
+      <TerminalPanel
+        sessionKey="session:tab-1"
+        cwd="/Users/test/repo"
+        collapsed={false}
+      />,
+    );
+
+    expect(screen.getByText("terminal.status.exited")).toBeInTheDocument();
+    expect(mocks.attach).toHaveBeenCalledTimes(1);
   });
 
   it("toggles when the header background is clicked", async () => {
@@ -165,9 +237,11 @@ describe("TerminalPanel", () => {
     expect(onCollapse).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByRole("button", { name: "terminal.stopAndClose" }),
+      screen.getByRole("button", { name: "terminal.stopAndCloseTab" }),
     );
-    expect(screen.getByText("terminal.confirmStopTitle")).toBeInTheDocument();
+    expect(
+      screen.getByText("terminal.confirmStopTabTitle"),
+    ).toBeInTheDocument();
     expect(mocks.stop).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
 
@@ -175,11 +249,11 @@ describe("TerminalPanel", () => {
       screen.getByRole("button", { name: "common:actions.cancel" }),
     );
     expect(
-      screen.queryByText("terminal.confirmStopTitle"),
+      screen.queryByText("terminal.confirmStopTabTitle"),
     ).not.toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "terminal.stopAndClose" }),
+      screen.getByRole("button", { name: "terminal.stopAndCloseTab" }),
     );
     await user.click(screen.getByRole("button", { name: "terminal.stop" }));
 

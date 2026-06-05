@@ -26,10 +26,11 @@ interface TerminalPanelProps {
   sessionKey: string;
   cwd: string;
   collapsed?: boolean;
+  showHeader?: boolean;
   className?: string;
-  onCollapse: () => void;
-  onExpand: () => void;
-  onClose: () => void;
+  onCollapse?: () => void;
+  onExpand?: () => void;
+  onClose?: () => void;
 }
 
 function shortenPath(path: string): string {
@@ -159,6 +160,7 @@ export function TerminalPanel({
   sessionKey,
   cwd,
   collapsed = false,
+  showHeader = true,
   className,
   onCollapse,
   onExpand,
@@ -180,6 +182,12 @@ export function TerminalPanel({
   const [session, setSession] = useState<TerminalSession | null>(null);
   const [status, setStatus] = useState<TerminalStatus>("starting");
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+  const stopAndCloseLabel = t("terminal.stopAndCloseTab", {
+    path: displayPath,
+  });
+  const confirmStopTitle = t("terminal.confirmStopTabTitle", {
+    path: displayPath,
+  });
 
   useEffect(() => {
     const nextSession = getOrCreateTerminalSession({
@@ -216,23 +224,23 @@ export function TerminalPanel({
   const handleRestart = useCallback(() => {
     session?.restart();
     if (collapsed) {
-      onExpand();
+      onExpand?.();
     }
   }, [collapsed, onExpand, session]);
 
   const handleStop = useCallback(() => {
     session?.stop({ writeStopped: true });
     setStopConfirmOpen(false);
-    onClose();
+    onClose?.();
   }, [onClose, session]);
 
   const handleHeaderToggle = useCallback(() => {
     if (collapsed) {
-      onExpand();
+      onExpand?.();
       return;
     }
 
-    onCollapse();
+    onCollapse?.();
   }, [collapsed, onCollapse, onExpand]);
 
   useEffect(() => {
@@ -297,114 +305,118 @@ export function TerminalPanel({
       )}
       aria-label={t("terminal.title")}
     >
-      <div
-        className={cn(
-          "relative flex h-10 shrink-0 items-center gap-2 px-3",
-          !collapsed && "border-b border-border/80",
-        )}
-      >
-        <button
-          type="button"
-          onClick={handleHeaderToggle}
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? t("terminal.expand") : t("terminal.collapse")}
-          className="absolute inset-0 z-0 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:bg-muted/30"
-        />
-        <div className="pointer-events-none relative z-10 min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="text-sm font-light">{t("terminal.title")}</span>
-            <span className="truncate font-mono text-[11px] text-muted-foreground">
-              {displayPath}
+      {showHeader ? (
+        <div
+          className={cn(
+            "relative flex h-10 shrink-0 items-center gap-2 px-3",
+            !collapsed && "border-b border-border/80",
+          )}
+        >
+          <button
+            type="button"
+            onClick={handleHeaderToggle}
+            aria-expanded={!collapsed}
+            aria-label={
+              collapsed ? t("terminal.expand") : t("terminal.collapse")
+            }
+            className="absolute inset-0 z-0 text-left outline-none transition-colors hover:bg-muted/30 focus-visible:bg-muted/30"
+          />
+          <div className="pointer-events-none relative z-10 min-w-0 flex-1">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className="text-sm font-light">{t("terminal.title")}</span>
+              <span className="truncate font-mono text-[11px] text-muted-foreground">
+                {displayPath}
+              </span>
+            </div>
+          </div>
+          <Badge
+            variant="secondary"
+            className="pointer-events-none relative z-10 h-5 px-2 text-[10px] font-normal"
+          >
+            {t(`terminal.status.${status}`)}
+          </Badge>
+          <div className="pointer-events-none relative z-10 flex items-center gap-0.5">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={handleRestart}
+                  aria-label={t("terminal.restart")}
+                  className="pointer-events-auto rounded-md"
+                >
+                  <IconRotateClockwise className="size-3" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{t("terminal.restart")}</TooltipContent>
+            </Tooltip>
+            <Popover open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      aria-label={stopAndCloseLabel}
+                      className="pointer-events-auto rounded-md"
+                    >
+                      <IconX className="size-3" />
+                    </Button>
+                  </PopoverTrigger>
+                </TooltipTrigger>
+                <TooltipContent>{stopAndCloseLabel}</TooltipContent>
+              </Tooltip>
+              <PopoverContent
+                side="top"
+                align="end"
+                sideOffset={8}
+                className="w-64 rounded-md p-3 text-left"
+              >
+                <div className="space-y-3">
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      {confirmStopTitle}
+                    </p>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      {t("terminal.confirmStopDescription")}
+                    </p>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={() => setStopConfirmOpen(false)}
+                    >
+                      {t("common:actions.cancel")}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="xs"
+                      onClick={handleStop}
+                    >
+                      {t("terminal.stop")}
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <span
+              className="flex size-6 items-center justify-center rounded-md text-muted-foreground"
+              aria-hidden="true"
+            >
+              {collapsed ? (
+                <IconChevronUp className="size-3" />
+              ) : (
+                <IconChevronDown className="size-3" />
+              )}
             </span>
           </div>
         </div>
-        <Badge
-          variant="secondary"
-          className="pointer-events-none relative z-10 h-5 px-2 text-[10px] font-normal"
-        >
-          {t(`terminal.status.${status}`)}
-        </Badge>
-        <div className="pointer-events-none relative z-10 flex items-center gap-0.5">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-xs"
-                onClick={handleRestart}
-                aria-label={t("terminal.restart")}
-                className="pointer-events-auto rounded-md"
-              >
-                <IconRotateClockwise className="size-3" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("terminal.restart")}</TooltipContent>
-          </Tooltip>
-          <Popover open={stopConfirmOpen} onOpenChange={setStopConfirmOpen}>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-xs"
-                    aria-label={t("terminal.stopAndClose")}
-                    className="pointer-events-auto rounded-md"
-                  >
-                    <IconX className="size-3" />
-                  </Button>
-                </PopoverTrigger>
-              </TooltipTrigger>
-              <TooltipContent>{t("terminal.stopAndClose")}</TooltipContent>
-            </Tooltip>
-            <PopoverContent
-              side="top"
-              align="end"
-              sideOffset={8}
-              className="w-64 rounded-md p-3 text-left"
-            >
-              <div className="space-y-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("terminal.confirmStopTitle")}
-                  </p>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    {t("terminal.confirmStopDescription")}
-                  </p>
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => setStopConfirmOpen(false)}
-                  >
-                    {t("common:actions.cancel")}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="xs"
-                    onClick={handleStop}
-                  >
-                    {t("terminal.stop")}
-                  </Button>
-                </div>
-              </div>
-            </PopoverContent>
-          </Popover>
-          <span
-            className="flex size-6 items-center justify-center rounded-md text-muted-foreground"
-            aria-hidden="true"
-          >
-            {collapsed ? (
-              <IconChevronUp className="size-3" />
-            ) : (
-              <IconChevronDown className="size-3" />
-            )}
-          </span>
-        </div>
-      </div>
+      ) : null}
       <div
         className={cn(
           "goose-terminal min-h-0 flex-1 overflow-hidden p-2 opacity-100 transition-opacity duration-150 ease-out motion-reduce:transition-none",

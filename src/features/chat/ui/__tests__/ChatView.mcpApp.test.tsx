@@ -1,5 +1,11 @@
 import type { ReactNode } from "react";
-import { act, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -16,7 +22,20 @@ const mocks = vi.hoisted(() => ({
   chatRightRailSpy: vi.fn(),
   handleSend: vi.fn(() => true),
   queueTerminalCommand: vi.fn(),
+  restartTerminalSession: vi.fn(),
   runCommandInTerminalSession: vi.fn(),
+  stopTerminalSession: vi.fn(),
+  terminalStatusListeners: new Map<
+    string,
+    Set<
+      (change: {
+        key: string;
+        status: "starting" | "running" | "exited" | "error";
+        previousStatus: "starting" | "running" | "exited" | "error";
+        source: "backend-exit" | "client-stop" | "start" | "error";
+      }) => void
+    >
+  >(),
   pinToHome: vi.fn(),
   unpinFromHome: vi.fn(),
   t: vi.fn((key: string) => key),
@@ -110,32 +129,38 @@ vi.mock("../ChatRightRail", () => ({
 
 vi.mock("@/features/terminal/lib/terminalSessionManager", () => ({
   queueTerminalCommand: mocks.queueTerminalCommand,
+  restartTerminalSession: mocks.restartTerminalSession,
   runCommandInTerminalSession: mocks.runCommandInTerminalSession,
+  stopTerminalSession: mocks.stopTerminalSession,
+  subscribeTerminalSessionStatus: vi.fn((sessionKey, listener) => {
+    const listeners =
+      mocks.terminalStatusListeners.get(sessionKey) ?? new Set();
+    listeners.add(listener);
+    mocks.terminalStatusListeners.set(sessionKey, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        mocks.terminalStatusListeners.delete(sessionKey);
+      }
+    };
+  }),
 }));
 
 vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
   TerminalPanel: (props: {
+    sessionKey: string;
     cwd: string;
     collapsed?: boolean;
-    onClose?: () => void;
-    onCollapse?: () => void;
-    onExpand?: () => void;
+    showHeader?: boolean;
   }) => (
     <div
       data-testid="terminal-panel"
+      data-session-key={props.sessionKey}
       data-cwd={props.cwd}
       data-collapsed={String(props.collapsed)}
+      data-show-header={String(props.showHeader)}
     >
       <span>{props.cwd}</span>
-      <button type="button" onClick={props.onCollapse}>
-        collapse terminal
-      </button>
-      <button type="button" onClick={props.onExpand}>
-        expand terminal
-      </button>
-      <button type="button" onClick={props.onClose}>
-        close terminal
-      </button>
     </div>
   ),
 }));
@@ -186,6 +211,52 @@ function mockMatchMedia(matches: boolean) {
   });
 }
 
+const terminalStorageKey = "goose:chat-terminal-workspaces:session-1";
+
+interface PersistedTerminalTab {
+  id: string;
+  cwd: string;
+}
+
+function readPersistedTerminalTabs(): PersistedTerminalTab[] {
+  const rawState = window.localStorage.getItem(terminalStorageKey);
+  if (!rawState) {
+    return [];
+  }
+
+  const parsedState = JSON.parse(rawState) as {
+    tabs?: PersistedTerminalTab[];
+  };
+  return parsedState.tabs ?? [];
+}
+
+function emitTerminalStatus(
+  sessionKey: string,
+  source: "backend-exit" | "client-stop" | "start" | "error" = "backend-exit",
+) {
+  const listeners = mocks.terminalStatusListeners.get(sessionKey);
+  for (const listener of listeners ?? []) {
+    listener({
+      key: sessionKey,
+      status: "exited",
+      previousStatus: "running",
+      source,
+    });
+  }
+}
+
+function chatSessionWithWorkingDir(workingDir: string): ChatSession {
+  return {
+    id: "session-1",
+    title: "Chat",
+    workingDir,
+    createdAt: "2026-05-27T00:00:00.000Z",
+    updatedAt: "2026-05-27T00:00:00.000Z",
+    messageCount: 0,
+    intent: null,
+  };
+}
+
 describe("ChatView MCP app messaging", () => {
   beforeEach(() => {
     mocks.messageTimelineSpy.mockClear();
@@ -193,8 +264,11 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatRightRailSpy.mockClear();
     mocks.handleSend.mockClear();
     mocks.queueTerminalCommand.mockClear();
+    mocks.restartTerminalSession.mockClear();
     mocks.runCommandInTerminalSession.mockClear();
     mocks.runCommandInTerminalSession.mockReturnValue(false);
+    mocks.stopTerminalSession.mockClear();
+    mocks.terminalStatusListeners.clear();
     mocks.pinToHome.mockClear();
     mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
@@ -507,15 +581,7 @@ describe("ChatView MCP app messaging", () => {
   });
 
   it("passes runnable shell commands through to the terminal runner for a non-git working dir", () => {
-    const activeSession = {
-      id: "session-1",
-      title: "Chat",
-      workingDir: "/Users/test/not-a-repo",
-      createdAt: "2026-05-27T00:00:00.000Z",
-      updatedAt: "2026-05-27T00:00:00.000Z",
-      messageCount: 0,
-      intent: null,
-    } satisfies ChatSession;
+    const activeSession = chatSessionWithWorkingDir("/Users/test/not-a-repo");
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
@@ -526,21 +592,53 @@ describe("ChatView MCP app messaging", () => {
 
     act(() => timelineProps.onRunShellCommand?.("pnpm test"));
 
+    const terminalPanel = screen.getByTestId("terminal-panel");
+    const sessionKey = terminalPanel.getAttribute("data-session-key");
     expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
-      "session-1:/Users/test/not-a-repo",
+      sessionKey,
       "pnpm test",
     );
     expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(
-      "session-1:/Users/test/not-a-repo",
+      sessionKey,
       "pnpm test",
     );
-    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
-      "data-cwd",
-      "/Users/test/not-a-repo",
+    expect(sessionKey).toEqual(expect.stringMatching(/^session-1:tab-/));
+    expect(terminalPanel).toHaveAttribute("data-cwd", "/Users/test/not-a-repo");
+    expect(terminalPanel).toHaveAttribute("data-collapsed", "false");
+    expect(terminalPanel).toHaveAttribute("data-show-header", "false");
+  });
+
+  it("routes repeated shell commands in one render tick to the same default tab", async () => {
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onRunShellCommand?: (command: string) => void;
+    };
+
+    act(() => {
+      timelineProps.onRunShellCommand?.("pnpm test");
+      timelineProps.onRunShellCommand?.("pnpm lint");
+    });
+
+    await waitFor(() => expect(readPersistedTerminalTabs()).toHaveLength(1));
+    const tabs = readPersistedTerminalTabs();
+    expect(tabs).toHaveLength(1);
+    const sessionKey = `session-1:${tabs[0]?.id}`;
+    expect(mocks.queueTerminalCommand).toHaveBeenNthCalledWith(
+      1,
+      sessionKey,
+      "pnpm test",
+    );
+    expect(mocks.queueTerminalCommand).toHaveBeenNthCalledWith(
+      2,
+      sessionKey,
+      "pnpm lint",
     );
     expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
-      "data-collapsed",
-      "false",
+      "data-session-key",
+      sessionKey,
     );
   });
 
@@ -564,14 +662,14 @@ describe("ChatView MCP app messaging", () => {
 
     act(() => timelineProps.onRunShellCommand?.("pwd"));
 
+    const sessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
     expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
-      "session-1:/Users/test",
+      sessionKey,
       "pwd",
     );
-    expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(
-      "session-1:/Users/test",
-      "pwd",
-    );
+    expect(mocks.queueTerminalCommand).toHaveBeenCalledWith(sessionKey, "pwd");
     expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-cwd",
       "/Users/test",
@@ -580,15 +678,7 @@ describe("ChatView MCP app messaging", () => {
 
   it("does not double queue runnable shell commands for existing terminal sessions", () => {
     mocks.runCommandInTerminalSession.mockReturnValue(true);
-    const activeSession = {
-      id: "session-1",
-      title: "Chat",
-      workingDir: "/Users/test/repo",
-      createdAt: "2026-05-27T00:00:00.000Z",
-      updatedAt: "2026-05-27T00:00:00.000Z",
-      messageCount: 0,
-      intent: null,
-    } satisfies ChatSession;
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
@@ -598,8 +688,11 @@ describe("ChatView MCP app messaging", () => {
 
     act(() => timelineProps.onRunShellCommand?.("pnpm test"));
 
+    const sessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
     expect(mocks.runCommandInTerminalSession).toHaveBeenCalledWith(
-      "session-1:/Users/test/repo",
+      sessionKey,
       "pnpm test",
     );
     expect(mocks.queueTerminalCommand).not.toHaveBeenCalled();
@@ -609,17 +702,9 @@ describe("ChatView MCP app messaging", () => {
     );
   });
 
-  it("persists terminal workspaces for the chat session", async () => {
+  it("persists terminal tabs for the chat session", async () => {
     const user = userEvent.setup();
-    const activeSession = {
-      id: "session-1",
-      title: "Chat",
-      workingDir: "/Users/test/repo",
-      createdAt: "2026-05-27T00:00:00.000Z",
-      updatedAt: "2026-05-27T00:00:00.000Z",
-      messageCount: 0,
-      intent: null,
-    } satisfies ChatSession;
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
 
     const { unmount } = render(
       <ChatView sessionId="session-1" activeSession={activeSession} />,
@@ -634,6 +719,9 @@ describe("ChatView MCP app messaging", () => {
       "data-cwd",
       "/Users/test/repo",
     );
+    expect(readPersistedTerminalTabs()).toMatchObject([
+      { cwd: "/Users/test/repo" },
+    ]);
 
     unmount();
     const { unmount: unmountRestored } = render(
@@ -645,8 +733,15 @@ describe("ChatView MCP app messaging", () => {
       "false",
     );
 
-    await user.click(screen.getByRole("button", { name: "close terminal" }));
+    await user.click(
+      screen.getByRole("button", { name: "terminal.stopAndCloseTab" }),
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
     expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+    expect(mocks.stopTerminalSession).toHaveBeenCalledWith(
+      expect.stringMatching(/^session-1:tab-/),
+      { writeStopped: true },
+    );
 
     unmountRestored();
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
@@ -654,17 +749,34 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
   });
 
-  it("does not start a new terminal when the active workspace changes", async () => {
+  it("migrates legacy terminal workspace state into tabs", async () => {
+    window.localStorage.setItem(
+      terminalStorageKey,
+      JSON.stringify({
+        paths: ["/Users/test/repo-a", "/Users/test/repo-b"],
+        expandedPath: "/Users/test/repo-b",
+      }),
+    );
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo-a");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    expect(await screen.findByText("~/test/repo-a")).toBeInTheDocument();
+    expect(screen.getByText("~/test/repo-b")).toBeInTheDocument();
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-b",
+    );
+    expect(
+      screen.getByTestId("terminal-panel").getAttribute("data-session-key"),
+    ).toEqual(expect.stringMatching(/^session-1:legacy-1-/));
+
+    await waitFor(() => expect(readPersistedTerminalTabs()).toHaveLength(2));
+  });
+
+  it("opens, selects, and collapses the current workspace default tab", async () => {
     const user = userEvent.setup();
-    const activeSession = {
-      id: "session-1",
-      title: "Chat",
-      workingDir: "/Users/test/repo-a",
-      createdAt: "2026-05-27T00:00:00.000Z",
-      updatedAt: "2026-05-27T00:00:00.000Z",
-      messageCount: 0,
-      intent: null,
-    } satisfies ChatSession;
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo-a");
 
     const { rerender } = render(
       <ChatView sessionId="session-1" activeSession={activeSession} />,
@@ -681,47 +793,235 @@ describe("ChatView MCP app messaging", () => {
     };
     rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
-    const panelsAfterSwitch = screen.getAllByTestId("terminal-panel");
-    expect(panelsAfterSwitch).toHaveLength(1);
-    expect(panelsAfterSwitch[0]).toHaveAttribute(
-      "data-cwd",
-      "/Users/test/repo-a",
-    );
-    expect(panelsAfterSwitch[0]).toHaveAttribute("data-collapsed", "true");
-
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
 
-    const panelsAfterOpeningSecond = screen.getAllByTestId("terminal-panel");
-    expect(panelsAfterOpeningSecond).toHaveLength(2);
-    expect(panelsAfterOpeningSecond[0]).toHaveAttribute(
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-cwd",
       "/Users/test/repo-b",
     );
-    expect(panelsAfterOpeningSecond[0]).toHaveAttribute(
-      "data-collapsed",
-      "false",
-    );
-    expect(panelsAfterOpeningSecond[1]).toHaveAttribute(
+    expect(screen.getByText("~/test/repo-a")).toBeInTheDocument();
+    expect(screen.getByText("~/test/repo-b")).toBeInTheDocument();
+
+    mocks.activeWorkspaceBySession = {};
+    rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-cwd",
       "/Users/test/repo-a",
     );
-    expect(panelsAfterOpeningSecond[1]).toHaveAttribute(
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-collapsed",
+      "false",
+    );
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
       "data-collapsed",
       "true",
     );
+    expect(
+      screen.getByRole("button", { name: "terminal.expand" }),
+    ).toBeInTheDocument();
   });
 
-  it("expands only one terminal workspace at a time", async () => {
+  it("creates duplicate cwd tabs with distinct labels", async () => {
     const user = userEvent.setup();
-    const activeSession = {
-      id: "session-1",
-      title: "Chat",
-      workingDir: "/Users/test/repo-a",
-      createdAt: "2026-05-27T00:00:00.000Z",
-      updatedAt: "2026-05-27T00:00:00.000Z",
-      messageCount: 0,
-      intent: null,
-    } satisfies ChatSession;
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.newTab" }));
+
+    expect(screen.getByText("~/test/repo (1)")).toBeInTheDocument();
+    expect(screen.getByText("~/test/repo (2)")).toBeInTheDocument();
+    expect(readPersistedTerminalTabs()).toMatchObject([
+      { cwd: "/Users/test/repo" },
+      { cwd: "/Users/test/repo" },
+    ]);
+
+    const secondTab = screen
+      .getByText("~/test/repo (2)")
+      .closest('[role="tab"]');
+    if (!secondTab) {
+      throw new Error("expected duplicate terminal tab");
+    }
+    expect(secondTab).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("restarts the active terminal tab from the tab bar", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    const sessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
+    if (!sessionKey) {
+      throw new Error("expected active terminal session key");
+    }
+
+    await user.click(screen.getByRole("button", { name: "terminal.restart" }));
+
+    expect(mocks.restartTerminalSession).toHaveBeenCalledWith(sessionKey);
+  });
+
+  it("wires terminal tabs to tabpanels with roving focus state", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.newTab" }));
+
+    expect(screen.getByRole("tablist", { name: "terminal.tabs" })).toBeTruthy();
+    const tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    const panels = screen.getAllByRole("tabpanel", { hidden: true });
+    expect(tabs).toHaveLength(2);
+    expect(panels).toHaveLength(2);
+
+    expect(tabs[0]).toHaveAttribute("tabindex", "-1");
+    expect(tabs[1]).toHaveAttribute("tabindex", "0");
+    for (const tab of tabs) {
+      const panelId = tab.getAttribute("aria-controls");
+      expect(panelId).toBeTruthy();
+      const panel = document.getElementById(panelId ?? "");
+      expect(panel).toHaveAttribute("role", "tabpanel");
+      expect(panel).toHaveAttribute("aria-labelledby", tab.id);
+    }
+  });
+
+  it("moves terminal tab selection with arrow, home, and end keys", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.newTab" }));
+    let tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+
+    tabs[1].focus();
+    await user.keyboard("{ArrowLeft}");
+    tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(tabs[0]).toHaveFocus());
+
+    await user.keyboard("{ArrowRight}");
+    tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(tabs[1]).toHaveFocus());
+
+    await user.keyboard("{Home}");
+    tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{End}");
+    tabs = screen.getAllByRole("tab", { name: "terminal.selectTab" });
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("opens a new terminal tab with cmd+t", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.keyboard("{Meta>}t{/Meta}");
+
+    expect(screen.queryByText("~/test/repo (1)")).not.toBeInTheDocument();
+
+    screen.getByRole("tab", { name: "terminal.selectTab" }).focus();
+    await user.keyboard("{Meta>}t{/Meta}");
+
+    expect(screen.getByText("~/test/repo (1)")).toBeInTheDocument();
+    expect(screen.getByText("~/test/repo (2)")).toBeInTheDocument();
+  });
+
+  it("ignores terminal shortcuts while a key event is composing", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    screen.getByRole("tab", { name: "terminal.selectTab" }).focus();
+
+    fireEvent.keyDown(window, {
+      key: "t",
+      metaKey: true,
+      isComposing: true,
+    });
+
+    expect(screen.queryByText("~/test/repo (1)")).not.toBeInTheDocument();
+  });
+
+  it("selects the nearest tab after closing the active tab", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo-a");
+
+    const { rerender } = render(
+      <ChatView sessionId="session-1" activeSession={activeSession} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    mocks.activeWorkspaceBySession = {
+      "session-1": { path: "/Users/test/repo-b", branch: "repo-b" },
+    };
+    rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    mocks.activeWorkspaceBySession = {
+      "session-1": { path: "/Users/test/repo-c", branch: "repo-c" },
+    };
+    rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-c",
+    );
+
+    await user.click(
+      screen.getAllByRole("button", { name: "terminal.stopAndCloseTab" })[2],
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-b",
+    );
+    expect(mocks.stopTerminalSession).toHaveBeenCalledWith(expect.any(String), {
+      writeStopped: true,
+    });
+
+    await user.click(
+      screen.getAllByRole("button", { name: "terminal.stopAndCloseTab" })[1],
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-a",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "terminal.stopAndCloseTab" }),
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
+
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+  });
+
+  it("removes the tab when the terminal shell exits", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo-a");
 
     const { rerender } = render(
       <ChatView sessionId="session-1" activeSession={activeSession} />,
@@ -734,14 +1034,57 @@ describe("ChatView MCP app messaging", () => {
     rerender(<ChatView sessionId="session-1" activeSession={activeSession} />);
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
 
-    await user.click(
-      screen.getAllByRole("button", { name: "expand terminal" })[1],
+    const exitedSessionKey = screen
+      .getByTestId("terminal-panel")
+      .getAttribute("data-session-key");
+    if (!exitedSessionKey) {
+      throw new Error("expected active terminal session key");
+    }
+
+    act(() => emitTerminalStatus(exitedSessionKey));
+
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/repo-a",
+    );
+    expect(mocks.stopTerminalSession).toHaveBeenCalledWith(exitedSessionKey);
+  });
+
+  it("routes chat commands to the default tab for the cwd", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.click(screen.getByRole("button", { name: "terminal.newTab" }));
+    await waitFor(() => expect(readPersistedTerminalTabs()).toHaveLength(2));
+    const [defaultTab, activeDuplicateTab] = readPersistedTerminalTabs();
+    if (!defaultTab || !activeDuplicateTab) {
+      throw new Error("expected duplicate terminal tabs");
+    }
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-session-key",
+      `session-1:${activeDuplicateTab.id}`,
     );
 
-    const panels = screen.getAllByTestId("terminal-panel");
-    expect(panels[0]).toHaveAttribute("data-cwd", "/Users/test/repo-b");
-    expect(panels[0]).toHaveAttribute("data-collapsed", "true");
-    expect(panels[1]).toHaveAttribute("data-cwd", "/Users/test/repo-a");
-    expect(panels[1]).toHaveAttribute("data-collapsed", "false");
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onRunShellCommand?: (command: string) => void;
+    };
+
+    act(() => timelineProps.onRunShellCommand?.("pnpm test"));
+
+    expect(mocks.runCommandInTerminalSession).toHaveBeenLastCalledWith(
+      `session-1:${defaultTab.id}`,
+      "pnpm test",
+    );
+    expect(mocks.queueTerminalCommand).toHaveBeenLastCalledWith(
+      `session-1:${defaultTab.id}`,
+      "pnpm test",
+    );
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-session-key",
+      `session-1:${defaultTab.id}`,
+    );
   });
 });

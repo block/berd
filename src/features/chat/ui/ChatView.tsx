@@ -1,7 +1,22 @@
-import { useCallback, useEffect, useRef, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { PinIcon } from "lucide-react";
+import {
+  IconChevronDown,
+  IconChevronUp,
+  IconPlus,
+  IconRotateClockwise,
+  IconX,
+} from "@tabler/icons-react";
 import { toast } from "sonner";
 import { MessageTimeline } from "./MessageTimeline";
 import { ChatInput } from "./ChatInput";
@@ -15,6 +30,8 @@ import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
 import { Button } from "@/shared/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
 import { useChatSessionController } from "../hooks/useChatSessionController";
 import {
@@ -24,7 +41,10 @@ import {
 import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
 import {
   queueTerminalCommand,
+  restartTerminalSession,
   runCommandInTerminalSession,
+  stopTerminalSession,
+  subscribeTerminalSessionStatus,
 } from "@/features/terminal/lib/terminalSessionManager";
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -38,17 +58,162 @@ const CHAT_RESPONDING_PILL_CLASS =
 const CHAT_RESPONDING_GOOSE_CLASS =
   "[filter:var(--filter-chat-responding-goose)]";
 
+interface TerminalWorkspaceTab {
+  id: string;
+  cwd: string;
+}
+
 interface TerminalWorkspaceState {
-  paths: string[];
-  expandedPath: string | null;
+  tabs: TerminalWorkspaceTab[];
+  activeTabId: string | null;
+  expanded: boolean;
 }
 
 const TERMINAL_WORKSPACE_STORAGE_KEY_PREFIX = "goose:chat-terminal-workspaces";
 
 const DEFAULT_TERMINAL_WORKSPACE_STATE: TerminalWorkspaceState = {
-  paths: [],
-  expandedPath: null,
+  tabs: [],
+  activeTabId: null,
+  expanded: false,
 };
+
+let terminalTabIdSequence = 0;
+
+function hashTerminalTabPath(path: string): string {
+  let hash = 0;
+  for (let index = 0; index < path.length; index += 1) {
+    hash = (hash * 31 + path.charCodeAt(index)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function createLegacyTerminalTabId(cwd: string, index: number): string {
+  return `legacy-${index}-${hashTerminalTabPath(cwd)}`;
+}
+
+function createTerminalTabId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `tab-${crypto.randomUUID()}`;
+  }
+
+  terminalTabIdSequence += 1;
+  return `tab-${Date.now().toString(36)}-${terminalTabIdSequence.toString(36)}`;
+}
+
+function createTerminalTab(cwd: string): TerminalWorkspaceTab {
+  return {
+    id: createTerminalTabId(),
+    cwd,
+  };
+}
+
+function appendActiveTerminalTab(
+  state: TerminalWorkspaceState,
+  tab: TerminalWorkspaceTab,
+): TerminalWorkspaceState {
+  return {
+    tabs: [...state.tabs, tab],
+    activeTabId: tab.id,
+    expanded: true,
+  };
+}
+
+function removeTerminalTab(
+  state: TerminalWorkspaceState,
+  tabId: string,
+): TerminalWorkspaceState {
+  const closedIndex = state.tabs.findIndex((tab) => tab.id === tabId);
+  if (closedIndex === -1) {
+    return state;
+  }
+
+  const tabs = state.tabs.filter((tab) => tab.id !== tabId);
+  if (tabs.length === 0) {
+    return DEFAULT_TERMINAL_WORKSPACE_STATE;
+  }
+
+  const activeTabStillOpen = tabs.some((tab) => tab.id === state.activeTabId);
+  const nearestTab = tabs[Math.min(closedIndex, tabs.length - 1)];
+  return {
+    tabs,
+    activeTabId: activeTabStillOpen ? state.activeTabId : nearestTab.id,
+    expanded: state.expanded,
+  };
+}
+
+function normalizeTerminalTabs(tabs: unknown[]): TerminalWorkspaceTab[] {
+  const seenIds = new Set<string>();
+
+  return tabs.reduce<TerminalWorkspaceTab[]>((normalizedTabs, item, index) => {
+    if (!item || typeof item !== "object") {
+      return normalizedTabs;
+    }
+
+    const tab = item as Partial<TerminalWorkspaceTab>;
+    if (typeof tab.cwd !== "string" || tab.cwd.length === 0) {
+      return normalizedTabs;
+    }
+
+    const baseId =
+      typeof tab.id === "string" && tab.id.length > 0
+        ? tab.id
+        : createLegacyTerminalTabId(tab.cwd, index);
+    let id = baseId;
+    let duplicateIndex = 1;
+    while (seenIds.has(id)) {
+      duplicateIndex += 1;
+      id = `${baseId}-${duplicateIndex}`;
+    }
+
+    seenIds.add(id);
+    normalizedTabs.push({ id, cwd: tab.cwd });
+    return normalizedTabs;
+  }, []);
+}
+
+function findDefaultTerminalTab(
+  tabs: TerminalWorkspaceTab[],
+  cwd: string | null,
+): TerminalWorkspaceTab | null {
+  if (!cwd) {
+    return null;
+  }
+
+  return tabs.find((tab) => tab.cwd === cwd) ?? null;
+}
+
+function shortenTerminalPath(path: string): string {
+  const normalized = path.replace(/\/+$/, "");
+  const segments = normalized.split("/").filter(Boolean);
+  if (segments.length <= 2) {
+    return normalized || path;
+  }
+
+  return `~/${segments.slice(-2).join("/")}`;
+}
+
+function terminalTabLabel(
+  tab: TerminalWorkspaceTab,
+  tabs: TerminalWorkspaceTab[],
+): string {
+  const baseLabel = shortenTerminalPath(tab.cwd);
+  const matchingTabs = tabs.filter((candidate) => candidate.cwd === tab.cwd);
+  if (matchingTabs.length <= 1) {
+    return baseLabel;
+  }
+
+  const duplicateIndex =
+    matchingTabs.findIndex((candidate) => candidate.id === tab.id) + 1;
+  return `${baseLabel} (${duplicateIndex})`;
+}
+
+function terminalTabButtonId(tabId: string): string {
+  return `terminal-tab-${tabId}`;
+}
+
+function terminalTabPanelId(tabId: string): string {
+  return `terminal-tabpanel-${tabId}`;
+}
 
 function validateTerminalWorkspaceState(
   value: unknown,
@@ -59,21 +224,44 @@ function validateTerminalWorkspaceState(
   }
 
   const parsed = value as Partial<TerminalWorkspaceState>;
-  const paths = Array.isArray(parsed.paths)
-    ? parsed.paths.filter(
+  if (Array.isArray(parsed.tabs)) {
+    const tabs = normalizeTerminalTabs(parsed.tabs);
+    const activeTabId =
+      typeof parsed.activeTabId === "string" &&
+      tabs.some((tab) => tab.id === parsed.activeTabId)
+        ? parsed.activeTabId
+        : (tabs[0]?.id ?? null);
+
+    return {
+      tabs,
+      activeTabId,
+      expanded: tabs.length > 0 && parsed.expanded === true,
+    };
+  }
+
+  const legacyParsed = value as {
+    paths?: unknown;
+    expandedPath?: unknown;
+  };
+  const legacyPaths = Array.isArray(legacyParsed.paths)
+    ? legacyParsed.paths.filter(
         (path): path is string => typeof path === "string" && path.length > 0,
       )
-    : defaults.paths;
-  const uniquePaths = Array.from(new Set(paths));
-  const expandedPath =
-    typeof parsed.expandedPath === "string" &&
-    uniquePaths.includes(parsed.expandedPath)
-      ? parsed.expandedPath
+    : [];
+  const uniquePaths = Array.from(new Set(legacyPaths));
+  const tabs = uniquePaths.map((cwd, index) => ({
+    id: createLegacyTerminalTabId(cwd, index),
+    cwd,
+  }));
+  const activeTab =
+    typeof legacyParsed.expandedPath === "string"
+      ? (tabs.find((tab) => tab.cwd === legacyParsed.expandedPath) ?? null)
       : null;
 
   return {
-    paths: uniquePaths,
-    expandedPath,
+    tabs,
+    activeTabId: activeTab?.id ?? tabs[0]?.id ?? defaults.activeTabId,
+    expanded: Boolean(activeTab),
   };
 }
 
@@ -100,7 +288,10 @@ export function ChatView({
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
-  const previousTerminalCwdRef = useRef<string | null>(null);
+  const terminalRootRef = useRef<HTMLDivElement | null>(null);
+  const [closingTerminalTabId, setClosingTerminalTabId] = useState<
+    string | null
+  >(null);
   const setTopBarActions = useSetTopBarActions();
   const {
     isPinned: isPinnedToHome,
@@ -130,6 +321,21 @@ export function ChatView({
       DEFAULT_TERMINAL_WORKSPACE_STATE,
       validateTerminalWorkspaceState,
     );
+  const terminalWorkspaceStateRef = useRef(terminalWorkspaceState);
+  useEffect(() => {
+    terminalWorkspaceStateRef.current = terminalWorkspaceState;
+  }, [terminalWorkspaceState]);
+  const commitTerminalWorkspaceState = useCallback(
+    (
+      updater: (state: TerminalWorkspaceState) => TerminalWorkspaceState,
+    ): TerminalWorkspaceState => {
+      const nextState = updater(terminalWorkspaceStateRef.current);
+      terminalWorkspaceStateRef.current = nextState;
+      setTerminalWorkspaceState(nextState);
+      return nextState;
+    },
+    [setTerminalWorkspaceState],
+  );
   const isAgentBuilderSession =
     effectiveSession?.intent === "build-agent" &&
     Boolean(
@@ -170,18 +376,21 @@ export function ChatView({
   const terminalCwd =
     terminalWorkspacePath ?? sessionTerminalCwd ?? projectTerminalCwd ?? null;
   const terminalAvailable = Boolean(terminalCwd);
-  const terminalWorkspacePaths = terminalWorkspaceState.paths;
-  const expandedTerminalPath = terminalWorkspaceState.expandedPath;
-  const activeWorkspaceHasTerminal = terminalCwd
-    ? terminalWorkspacePaths.includes(terminalCwd)
-    : false;
-  const orderedTerminalPaths = terminalCwd
-    ? [
-        ...terminalWorkspacePaths.filter((path) => path === terminalCwd),
-        ...terminalWorkspacePaths.filter((path) => path !== terminalCwd),
-      ]
-    : terminalWorkspacePaths;
-  const terminalVisible = orderedTerminalPaths.length > 0;
+  const terminalTabs = terminalWorkspaceState.tabs;
+  const activeTerminalTab = useMemo(
+    () =>
+      terminalTabs.find(
+        (tab) => tab.id === terminalWorkspaceState.activeTabId,
+      ) ??
+      terminalTabs[0] ??
+      null,
+    [terminalTabs, terminalWorkspaceState.activeTabId],
+  );
+  const activeWorkspaceHasTerminal = Boolean(
+    findDefaultTerminalTab(terminalTabs, terminalCwd),
+  );
+  const terminalVisible = terminalTabs.length > 0;
+  const terminalExpanded = terminalWorkspaceState.expanded;
 
   const toggleTerminal = useCallback(() => {
     if (!terminalCwd) {
@@ -189,88 +398,139 @@ export function ChatView({
       return;
     }
 
-    setTerminalWorkspaceState((state) => {
-      const paths = state.paths.includes(terminalCwd)
-        ? state.paths
-        : [...state.paths, terminalCwd];
+    commitTerminalWorkspaceState((state) => {
+      const defaultTab = findDefaultTerminalTab(state.tabs, terminalCwd);
+      if (!defaultTab) {
+        return appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
+      }
+
       return {
-        paths,
-        expandedPath: state.expandedPath === terminalCwd ? null : terminalCwd,
+        ...state,
+        activeTabId: defaultTab.id,
+        expanded: state.activeTabId === defaultTab.id ? !state.expanded : true,
       };
     });
-  }, [terminalCwd, setTerminalWorkspaceState, t]);
+  }, [commitTerminalWorkspaceState, terminalCwd, t]);
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
     perfLog(`[perf:chatview] ${sessionId.slice(0, 8)} mounted in ${ms}ms`);
   }, [sessionId]);
 
+  const handleAddTerminalTab = useCallback(() => {
+    if (!terminalCwd) {
+      toast.message(t("terminal.noWorkspace"));
+      return;
+    }
+
+    commitTerminalWorkspaceState((state) => {
+      return appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
+    });
+  }, [commitTerminalWorkspaceState, terminalCwd, t]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key.toLowerCase() !== "j" ||
-        event.shiftKey ||
-        event.altKey ||
-        !(event.metaKey || event.ctrlKey)
-      ) {
+      if (event.isComposing || event.keyCode === 229) {
         return;
       }
 
-      event.preventDefault();
-      toggleTerminal();
+      if (event.shiftKey || event.altKey || !(event.metaKey || event.ctrlKey)) {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+      if (key === "j") {
+        event.preventDefault();
+        toggleTerminal();
+        return;
+      }
+
+      if (key === "t") {
+        const target = event.target;
+        const terminalHasFocus =
+          target instanceof Node &&
+          Boolean(terminalRootRef.current?.contains(target));
+        if (!terminalHasFocus) {
+          return;
+        }
+
+        event.preventDefault();
+        handleAddTerminalTab();
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggleTerminal]);
+  }, [handleAddTerminalTab, toggleTerminal]);
 
-  useEffect(() => {
-    const previousTerminalCwd = previousTerminalCwdRef.current;
-    previousTerminalCwdRef.current = terminalCwd;
-    if (!previousTerminalCwd || previousTerminalCwd === terminalCwd) {
-      return;
-    }
-
-    setTerminalWorkspaceState((state) =>
-      state.expandedPath === previousTerminalCwd
-        ? { ...state, expandedPath: null }
-        : state,
-    );
-  }, [setTerminalWorkspaceState, terminalCwd]);
-
-  const handleCollapseTerminal = useCallback(
-    (path: string) => {
-      setTerminalWorkspaceState((state) =>
-        state.expandedPath === path ? { ...state, expandedPath: null } : state,
+  const handleSelectTerminalTab = useCallback(
+    (tabId: string) => {
+      commitTerminalWorkspaceState((state) =>
+        state.tabs.some((tab) => tab.id === tabId)
+          ? { ...state, activeTabId: tabId, expanded: true }
+          : state,
       );
     },
-    [setTerminalWorkspaceState],
+    [commitTerminalWorkspaceState],
   );
 
-  const handleExpandTerminal = useCallback(
-    (path: string) => {
-      setTerminalWorkspaceState((state) => ({
-        ...state,
-        expandedPath: path,
-      }));
+  const handleCollapseTerminal = useCallback(() => {
+    commitTerminalWorkspaceState((state) =>
+      state.expanded ? { ...state, expanded: false } : state,
+    );
+  }, [commitTerminalWorkspaceState]);
+
+  const handleExpandTerminal = useCallback(() => {
+    commitTerminalWorkspaceState((state) =>
+      state.tabs.length > 0 ? { ...state, expanded: true } : state,
+    );
+  }, [commitTerminalWorkspaceState]);
+
+  const handleRemoveTerminalTab = useCallback(
+    (tabId: string) => {
+      setClosingTerminalTabId(null);
+      commitTerminalWorkspaceState((state) => removeTerminalTab(state, tabId));
     },
-    [setTerminalWorkspaceState],
+    [commitTerminalWorkspaceState],
   );
 
   const handleCloseTerminal = useCallback(
-    (path: string) => {
-      setTerminalWorkspaceState((state) => {
-        const paths = state.paths.filter(
-          (existingPath) => existingPath !== path,
-        );
-        return {
-          paths,
-          expandedPath: state.expandedPath === path ? null : state.expandedPath,
-        };
-      });
+    (tabId: string) => {
+      stopTerminalSession(`${sessionId}:${tabId}`, { writeStopped: true });
+      handleRemoveTerminalTab(tabId);
     },
-    [setTerminalWorkspaceState],
+    [handleRemoveTerminalTab, sessionId],
   );
+
+  const handleRestartTerminal = useCallback(() => {
+    if (!activeTerminalTab) {
+      return;
+    }
+
+    restartTerminalSession(`${sessionId}:${activeTerminalTab.id}`);
+    if (!terminalExpanded) {
+      handleExpandTerminal();
+    }
+  }, [activeTerminalTab, handleExpandTerminal, sessionId, terminalExpanded]);
+
+  useEffect(() => {
+    const unsubscribes = terminalTabs.map((tab) =>
+      subscribeTerminalSessionStatus(`${sessionId}:${tab.id}`, (change) => {
+        if (change.status !== "exited" || change.source !== "backend-exit") {
+          return;
+        }
+
+        stopTerminalSession(change.key);
+        handleRemoveTerminalTab(tab.id);
+      }),
+    );
+
+    return () => {
+      for (const unsubscribe of unsubscribes) {
+        unsubscribe();
+      }
+    };
+  }, [handleRemoveTerminalTab, sessionId, terminalTabs]);
   const handleCloseContextPanel = useCallback(() => {
     if (!effectiveSession?.id) {
       return;
@@ -286,22 +546,64 @@ export function ChatView({
         return;
       }
 
-      const sessionKey = `${sessionId}:${terminalCwd}`;
+      const nextState = commitTerminalWorkspaceState((state) => {
+        const defaultTab = findDefaultTerminalTab(state.tabs, terminalCwd);
+        return defaultTab
+          ? { ...state, activeTabId: defaultTab.id, expanded: true }
+          : appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
+      });
+      const targetTab = findDefaultTerminalTab(nextState.tabs, terminalCwd);
+      if (!targetTab) {
+        return;
+      }
+
+      const sessionKey = `${sessionId}:${targetTab.id}`;
       if (!runCommandInTerminalSession(sessionKey, command)) {
         queueTerminalCommand(sessionKey, command);
       }
+    },
+    [commitTerminalWorkspaceState, sessionId, terminalCwd, t],
+  );
 
-      setTerminalWorkspaceState((state) => {
-        const paths = state.paths.includes(terminalCwd)
-          ? state.paths
-          : [...state.paths, terminalCwd];
-        return {
-          paths,
-          expandedPath: terminalCwd,
-        };
+  const handleTerminalTabKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLButtonElement>, tabId: string) => {
+      const currentIndex = terminalTabs.findIndex((tab) => tab.id === tabId);
+      if (currentIndex === -1) {
+        return;
+      }
+
+      let nextTab: TerminalWorkspaceTab | null = null;
+      switch (event.key) {
+        case "ArrowRight":
+          nextTab = terminalTabs[(currentIndex + 1) % terminalTabs.length];
+          break;
+        case "ArrowLeft":
+          nextTab =
+            terminalTabs[
+              (currentIndex - 1 + terminalTabs.length) % terminalTabs.length
+            ];
+          break;
+        case "Home":
+          nextTab = terminalTabs[0] ?? null;
+          break;
+        case "End":
+          nextTab = terminalTabs.at(-1) ?? null;
+          break;
+        default:
+          return;
+      }
+
+      if (!nextTab) {
+        return;
+      }
+
+      event.preventDefault();
+      handleSelectTerminalTab(nextTab.id);
+      window.requestAnimationFrame(() => {
+        document.getElementById(terminalTabButtonId(nextTab.id))?.focus();
       });
     },
-    [sessionId, setTerminalWorkspaceState, terminalCwd, t],
+    [handleSelectTerminalTab, terminalTabs],
   );
 
   const showIndicator =
@@ -561,48 +863,245 @@ export function ChatView({
             {messageTimeline}
           </div>
           {terminalVisible ? (
-            <div className="flex shrink-0 flex-col gap-2">
-              {orderedTerminalPaths.map((path) => {
-                const terminalExpanded = expandedTerminalPath === path;
-                return (
-                  <div
-                    key={path}
-                    onTransitionEnd={(event) => {
-                      if (
-                        event.target !== event.currentTarget ||
-                        event.propertyName !== "height"
-                      ) {
-                        return;
-                      }
+            <div ref={terminalRootRef} className="shrink-0">
+              <div
+                onTransitionEnd={(event) => {
+                  if (
+                    event.target !== event.currentTarget ||
+                    event.propertyName !== "height"
+                  ) {
+                    return;
+                  }
 
-                      const terminalElement = event.currentTarget.querySelector(
-                        "[data-terminal-panel]",
-                      );
-                      terminalElement?.dispatchEvent(
-                        new CustomEvent("goose-terminal-shell-transition-end", {
-                          bubbles: true,
-                        }),
-                      );
-                    }}
-                    className={cn(
-                      "shrink-0 overflow-hidden transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
-                      terminalExpanded
-                        ? "h-[clamp(220px,34vh,320px)]"
-                        : "h-10 [&_.goose-terminal]:hidden",
-                    )}
+                  const terminalElement = event.currentTarget.querySelector(
+                    "[data-terminal-panel]",
+                  );
+                  terminalElement?.dispatchEvent(
+                    new CustomEvent("goose-terminal-shell-transition-end", {
+                      bubbles: true,
+                    }),
+                  );
+                }}
+                className={cn(
+                  "flex shrink-0 flex-col overflow-hidden rounded-md bg-card text-foreground transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
+                  terminalExpanded ? "h-[clamp(220px,34vh,320px)]" : "h-10",
+                )}
+              >
+                <div
+                  className={cn(
+                    "flex h-10 shrink-0 items-center gap-2 px-2",
+                    terminalExpanded && "border-b border-border/80",
+                  )}
+                >
+                  <div
+                    role="tablist"
+                    aria-label={t("terminal.tabs")}
+                    className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto"
                   >
-                    <TerminalPanel
-                      sessionKey={`${sessionId}:${path}`}
-                      cwd={path}
-                      collapsed={!terminalExpanded}
-                      onCollapse={() => handleCollapseTerminal(path)}
-                      onExpand={() => handleExpandTerminal(path)}
-                      onClose={() => handleCloseTerminal(path)}
-                      className="h-full rounded-md bg-card"
-                    />
+                    {terminalTabs.map((tab) => {
+                      const label = terminalTabLabel(tab, terminalTabs);
+                      const selected = tab.id === activeTerminalTab?.id;
+                      const stopAndCloseLabel = t("terminal.stopAndCloseTab", {
+                        path: label,
+                      });
+                      const confirmStopTitle = t(
+                        "terminal.confirmStopTabTitle",
+                        {
+                          path: label,
+                        },
+                      );
+                      return (
+                        <div
+                          key={tab.id}
+                          className={cn(
+                            "group flex h-7 min-w-0 max-w-48 shrink-0 items-center rounded-md border border-transparent",
+                            selected
+                              ? "[background:color-mix(in_srgb,var(--foreground)_8%,var(--card))] text-foreground"
+                              : "text-muted-foreground hover:[background:color-mix(in_srgb,var(--foreground)_5%,var(--card))] hover:text-foreground",
+                          )}
+                        >
+                          <button
+                            id={terminalTabButtonId(tab.id)}
+                            type="button"
+                            role="tab"
+                            aria-selected={selected}
+                            aria-controls={terminalTabPanelId(tab.id)}
+                            aria-label={t("terminal.selectTab", {
+                              path: label,
+                            })}
+                            tabIndex={selected ? 0 : -1}
+                            onClick={() => handleSelectTerminalTab(tab.id)}
+                            onKeyDown={(event) =>
+                              handleTerminalTabKeyDown(event, tab.id)
+                            }
+                            className="min-w-0 flex-1 truncate px-2 py-1 text-left font-mono text-[11px] outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                          >
+                            {label}
+                          </button>
+                          <Popover
+                            open={closingTerminalTabId === tab.id}
+                            onOpenChange={(open) =>
+                              setClosingTerminalTabId(open ? tab.id : null)
+                            }
+                          >
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-xs"
+                                    aria-label={stopAndCloseLabel}
+                                    className="mr-0.5 size-6 rounded-md opacity-70 hover:opacity-100"
+                                  >
+                                    <IconX className="size-3" />
+                                  </Button>
+                                </PopoverTrigger>
+                              </TooltipTrigger>
+                              <TooltipContent>
+                                {stopAndCloseLabel}
+                              </TooltipContent>
+                            </Tooltip>
+                            <PopoverContent
+                              side="top"
+                              align="end"
+                              sideOffset={8}
+                              className="w-64 rounded-md p-3 text-left"
+                            >
+                              <div className="space-y-3">
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-foreground">
+                                    {confirmStopTitle}
+                                  </p>
+                                  <p className="text-xs leading-5 text-muted-foreground">
+                                    {t("terminal.confirmStopDescription")}
+                                  </p>
+                                </div>
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="xs"
+                                    onClick={() =>
+                                      setClosingTerminalTabId(null)
+                                    }
+                                  >
+                                    {t("common:actions.cancel")}
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="destructive"
+                                    size="xs"
+                                    onClick={() => handleCloseTerminal(tab.id)}
+                                  >
+                                    {t("terminal.stop")}
+                                  </Button>
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={handleRestartTerminal}
+                        disabled={!activeTerminalTab}
+                        aria-label={t("terminal.restart")}
+                        className="rounded-md"
+                      >
+                        <IconRotateClockwise className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.restart")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={handleAddTerminalTab}
+                        disabled={!terminalCwd}
+                        aria-label={t("terminal.newTab")}
+                        className="rounded-md"
+                      >
+                        <IconPlus className="size-3" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{t("terminal.newTab")}</TooltipContent>
+                  </Tooltip>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={
+                          terminalExpanded
+                            ? handleCollapseTerminal
+                            : handleExpandTerminal
+                        }
+                        aria-expanded={terminalExpanded}
+                        aria-label={
+                          terminalExpanded
+                            ? t("terminal.collapse")
+                            : t("terminal.expand")
+                        }
+                        className="rounded-md"
+                      >
+                        {terminalExpanded ? (
+                          <IconChevronDown className="size-3" />
+                        ) : (
+                          <IconChevronUp className="size-3" />
+                        )}
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {terminalExpanded
+                        ? t("terminal.collapse")
+                        : t("terminal.expand")}
+                    </TooltipContent>
+                  </Tooltip>
+                </div>
+                <div
+                  className={cn(
+                    "min-h-0 flex-1",
+                    !terminalExpanded && "hidden",
+                  )}
+                >
+                  {terminalTabs.map((tab) => {
+                    const selected = tab.id === activeTerminalTab?.id;
+                    return (
+                      <div
+                        key={tab.id}
+                        id={terminalTabPanelId(tab.id)}
+                        role="tabpanel"
+                        aria-labelledby={terminalTabButtonId(tab.id)}
+                        tabIndex={selected ? 0 : undefined}
+                        hidden={!selected}
+                        className="h-full min-h-0"
+                      >
+                        {selected ? (
+                          <TerminalPanel
+                            key={tab.id}
+                            sessionKey={`${sessionId}:${tab.id}`}
+                            cwd={tab.cwd}
+                            collapsed={!terminalExpanded}
+                            showHeader={false}
+                            className="h-full bg-card"
+                          />
+                        ) : null}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           ) : null}
         </div>

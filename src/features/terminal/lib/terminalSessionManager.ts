@@ -27,7 +27,27 @@ interface TerminalSessionOptions {
   fontFamily: string;
 }
 
+interface TerminalSessionStopOptions {
+  writeStopped?: boolean;
+}
+
 type TerminalSessionListener = () => void;
+export type TerminalSessionStatusSource =
+  | "backend-exit"
+  | "client-stop"
+  | "start"
+  | "error";
+
+export interface TerminalSessionStatusChange {
+  key: string;
+  status: TerminalStatus;
+  previousStatus: TerminalStatus;
+  source: TerminalSessionStatusSource;
+}
+
+type TerminalSessionStatusListener = (
+  change: TerminalSessionStatusChange,
+) => void;
 
 const MIN_COLS = 20;
 const MIN_ROWS = 5;
@@ -36,6 +56,7 @@ const DEFAULT_ROWS = 24;
 
 const sessions = new Map<string, TerminalSession>();
 const queuedCommands = new Map<string, string[]>();
+const statusListeners = new Map<string, Set<TerminalSessionStatusListener>>();
 
 function clearQueuedCommands(sessionKey: string): void {
   queuedCommands.delete(sessionKey);
@@ -55,6 +76,17 @@ function formatCommandInput(command: string): string {
   }
 
   return `${trimmedCommand}\r`;
+}
+
+function emitStatusChange(change: TerminalSessionStatusChange): void {
+  const listeners = statusListeners.get(change.key);
+  if (!listeners) {
+    return;
+  }
+
+  for (const listener of listeners) {
+    listener(change);
+  }
 }
 
 export class TerminalSession {
@@ -137,6 +169,10 @@ export class TerminalSession {
     this.attachedContainer = container;
     container.textContent = "";
     if (this.terminal.element) {
+      // Tab switching intentionally reparents the existing xterm DOM element
+      // so the live session and scrollback survive panel unmounts. The
+      // reattach test covers this path; revisit if xterm renderers/addons
+      // change how the terminal owns its element.
       container.appendChild(this.terminal.element);
     } else {
       this.terminal.open(container);
@@ -237,7 +273,7 @@ export class TerminalSession {
     this.start();
   }
 
-  stop({ writeStopped = false }: { writeStopped?: boolean } = {}): void {
+  stop({ writeStopped = false }: TerminalSessionStopOptions = {}): void {
     if (this.disposed) {
       return;
     }
@@ -265,14 +301,14 @@ export class TerminalSession {
     this.inputSubscription?.dispose();
     this.inputSubscription = null;
     this.terminal.dispose();
-    this.setStatus("exited");
+    this.setStatus("exited", "client-stop");
     this.listeners.clear();
   }
 
   private start(): void {
     const startupToken = Symbol("terminal-startup");
     this.startupToken = startupToken;
-    this.setStatus("starting");
+    this.setStatus("starting", "start");
 
     const cols = Math.max(this.terminal.cols || DEFAULT_COLS, MIN_COLS);
     const rows = Math.max(this.terminal.rows || DEFAULT_ROWS, MIN_ROWS);
@@ -300,7 +336,7 @@ export class TerminalSession {
         }
 
         this.terminalId = terminalId;
-        this.setStatus("running");
+        this.setStatus("running", "start");
         this.fitAndResize();
       })
       .catch((error) => {
@@ -308,7 +344,7 @@ export class TerminalSession {
           return;
         }
 
-        this.setStatus("error");
+        this.setStatus("error", "error");
         const message =
           error instanceof Error ? error.message : this.labels.startFailed;
         this.terminal.writeln(`[${message}]`);
@@ -319,7 +355,7 @@ export class TerminalSession {
     switch (event.event) {
       case "started":
         this.terminalId = event.data.terminalId;
-        this.setStatus("running");
+        this.setStatus("running", "start");
         this.fitAndResize();
         break;
       case "output":
@@ -331,16 +367,16 @@ export class TerminalSession {
         this.lastBackendRows = null;
         this.pendingBackendCols = null;
         this.pendingBackendRows = null;
-        this.setStatus("exited");
         if (event.data.signal) {
           this.terminal.writeln("");
           this.terminal.writeln(
             `[${this.labels.exitedWithSignal(event.data.signal)}]`,
           );
         }
+        this.setStatus("exited", "backend-exit");
         break;
       case "error":
-        this.setStatus("error");
+        this.setStatus("error", "error");
         this.terminal.writeln("");
         this.terminal.writeln(`[${event.data.message}]`);
         break;
@@ -460,11 +496,21 @@ export class TerminalSession {
     }
   }
 
-  private setStatus(status: TerminalStatus): void {
+  private setStatus(
+    status: TerminalStatus,
+    source: TerminalSessionStatusSource,
+  ): void {
+    const previousStatus = this.statusValue;
     this.statusValue = status;
     if (status === "running") {
       this.flushQueuedCommands();
     }
+    emitStatusChange({
+      key: this.key,
+      status,
+      previousStatus,
+      source,
+    });
     for (const listener of this.listeners) {
       listener();
     }
@@ -496,6 +542,46 @@ export function runCommandInTerminalSession(
 
   session.runCommand(command);
   return true;
+}
+
+export function restartTerminalSession(sessionKey: string): boolean {
+  const session = sessions.get(sessionKey);
+  if (!session) {
+    return false;
+  }
+
+  session.restart();
+  return true;
+}
+
+export function stopTerminalSession(
+  sessionKey: string,
+  options: TerminalSessionStopOptions = {},
+): boolean {
+  const session = sessions.get(sessionKey);
+  if (!session) {
+    clearQueuedCommands(sessionKey);
+    return false;
+  }
+
+  session.stop(options);
+  return true;
+}
+
+export function subscribeTerminalSessionStatus(
+  sessionKey: string,
+  listener: TerminalSessionStatusListener,
+): () => void {
+  const listeners = statusListeners.get(sessionKey) ?? new Set();
+  listeners.add(listener);
+  statusListeners.set(sessionKey, listeners);
+
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) {
+      statusListeners.delete(sessionKey);
+    }
+  };
 }
 
 export function getOrCreateTerminalSession(
