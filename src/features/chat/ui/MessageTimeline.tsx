@@ -895,7 +895,7 @@ export function MessageTimeline({
         onPointerDown={handleUserScrollIntent}
         data-testid="message-timeline-scroll"
         className={cn(
-          "scrollbar-none relative z-0 min-h-0 flex-1 overflow-y-auto",
+          "scrollbar-subtle relative z-0 min-h-0 flex-1 overflow-y-auto overscroll-contain",
           !hasFooter && "rounded-md bg-card",
         )}
       >

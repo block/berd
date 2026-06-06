@@ -81,6 +81,34 @@ function readColorToken(
   return resolveCssColor(readToken(styles, name, fallback), property);
 }
 
+function withAlpha(color: string, alpha: number): string {
+  const match = color.match(
+    /rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/,
+  );
+
+  if (!match) {
+    return color;
+  }
+
+  const [, red, green, blue] = match;
+  return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+}
+
+function readPercentageToken(
+  styles: CSSStyleDeclaration,
+  name: string,
+  fallback: number,
+): number {
+  const value = readToken(styles, name, `${fallback * 100}%`);
+  const parsed = Number.parseFloat(value);
+
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return value.endsWith("%") ? parsed / 100 : parsed;
+}
+
 function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
   if (typeof window === "undefined") {
     return {};
@@ -105,6 +133,16 @@ function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
   const green = readColorToken(styles, "--success", "var(--success)");
   const yellow = readColorToken(styles, "--warning", "var(--warning)");
   const blue = readColorToken(styles, "--info", "var(--info)");
+  const scrollbarAlpha = readPercentageToken(
+    styles,
+    "--scrollbar-thumb-alpha",
+    resolvedTheme === "dark" ? 0.16 : 0.14,
+  );
+  const scrollbarHoverAlpha = readPercentageToken(
+    styles,
+    "--scrollbar-thumb-hover-alpha",
+    resolvedTheme === "dark" ? 0.26 : 0.22,
+  );
 
   return {
     background,
@@ -117,6 +155,9 @@ function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
       "var(--accent)",
       "backgroundColor",
     ),
+    scrollbarSliderBackground: withAlpha(foreground, scrollbarAlpha),
+    scrollbarSliderHoverBackground: withAlpha(foreground, scrollbarHoverAlpha),
+    scrollbarSliderActiveBackground: withAlpha(foreground, scrollbarHoverAlpha),
     black: mutedForeground,
     brightBlack: foreground,
     red,

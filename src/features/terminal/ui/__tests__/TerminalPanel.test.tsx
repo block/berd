@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { getOrCreateTerminalSession } from "../../lib/terminalSessionManager";
 import { TerminalPanel } from "../TerminalPanel";
 
 const mocks = vi.hoisted(() => ({
@@ -44,6 +45,8 @@ vi.mock("../../lib/terminalSessionManager", () => ({
   })),
 }));
 
+const getOrCreateTerminalSessionMock = vi.mocked(getOrCreateTerminalSession);
+
 describe("TerminalPanel", () => {
   beforeEach(() => {
     mocks.attach.mockClear();
@@ -57,6 +60,11 @@ describe("TerminalPanel", () => {
     mocks.subscriptionListener = null;
     mocks.subscribe.mockClear();
     mocks.t.mockClear();
+    getOrCreateTerminalSessionMock.mockClear();
+    document.documentElement.style.removeProperty("--scrollbar-thumb-alpha");
+    document.documentElement.style.removeProperty(
+      "--scrollbar-thumb-hover-alpha",
+    );
   });
 
   it("does not defer terminal resize when mounted expanded", () => {
@@ -92,6 +100,38 @@ describe("TerminalPanel", () => {
       .dispatchEvent(new CustomEvent("goose-terminal-focus"));
 
     expect(mocks.focusAndResize).toHaveBeenCalledOnce();
+  });
+
+  it("passes the app scrollbar opacity tokens to xterm", () => {
+    document.documentElement.style.setProperty(
+      "--scrollbar-thumb-alpha",
+      "14%",
+    );
+    document.documentElement.style.setProperty(
+      "--scrollbar-thumb-hover-alpha",
+      "22%",
+    );
+
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(getOrCreateTerminalSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          scrollbarSliderBackground: "rgba(36, 36, 36, 0.14)",
+          scrollbarSliderHoverBackground: "rgba(36, 36, 36, 0.22)",
+          scrollbarSliderActiveBackground: "rgba(36, 36, 36, 0.22)",
+        }),
+      }),
+    );
   });
 
   it("resumes terminal resize after expansion even without a transition event", () => {

@@ -793,6 +793,17 @@ describe("MessageTimeline", () => {
     );
   });
 
+  it("uses a scoped subtle scrollbar for the transcript scroller", () => {
+    renderWithProviders(
+      <MessageTimeline messages={[message("user-1", "user", "Question")]} />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+
+    expect(scroller).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(scroller).not.toHaveClass("scrollbar-none");
+  });
+
   it("keeps Jump hidden or clears it when the transcript has no scrollable overflow", async () => {
     const animationFrame = mockRequestAnimationFrame();
     const messages = [

@@ -1259,6 +1259,15 @@ describe("ChatInput", () => {
     expect(screen.getByRole("textbox")).not.toBeDisabled();
   });
 
+  it("uses a scoped subtle scrollbar for long composer drafts", () => {
+    render(<ChatInput onSend={vi.fn()} />);
+
+    const input = screen.getByRole("textbox");
+
+    expect(input).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(input).not.toHaveClass("scrollbar-none");
+  });
+
   it("shows send button instead of stop when streaming with text entered", async () => {
     const user = userEvent.setup();
     render(<ChatInput onSend={vi.fn()} onStop={vi.fn()} isStreaming />);

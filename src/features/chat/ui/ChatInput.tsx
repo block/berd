@@ -756,9 +756,7 @@ export function ChatInput({
                     "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
                     // Backstop for the JS auto-resize cap (textareaMaxHeightPx).
                     surface === "bare" ? "max-h-[184px]" : "max-h-[200px]",
-                    // The composer text scrolls with the cursor, but never shows
-                    // its own scrollbar.
-                    "scrollbar-none",
+                    "scrollbar-subtle overscroll-contain",
                   )}
                   aria-label={t("input.ariaLabel")}
                   aria-controls={mentionOpen ? mentionListboxId : undefined}

@@ -15,9 +15,10 @@
   background-color: var(--card) !important;
 }
 
-.goose-terminal .xterm-viewport {
-  scrollbar-color: color-mix(in oklab, var(--foreground) 20%, transparent)
-    transparent;
+.goose-terminal .xterm-scrollable-element > .scrollbar.vertical > .slider {
+  border-radius: 999px;
+  left: var(--terminal-scrollbar-thumb-offset) !important;
+  width: var(--terminal-scrollbar-thumb-size) !important;
 }
 
 /* Dark variant fires for either selector during the migration:
@@ -221,6 +222,32 @@
   --border: var(--color-gray-200);
   --input: var(--color-gray-300);
   --ring: var(--color-gray-400);
+  --scrollbar-size: 12px;
+  --scrollbar-thumb-inset: 1px;
+  --scrollbar-thumb-alpha: 14%;
+  --scrollbar-thumb-hover-alpha: 22%;
+  --scrollbar-thumb: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-alpha),
+    transparent
+  );
+  --scrollbar-thumb-hover: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-hover-alpha),
+    transparent
+  );
+  --terminal-scrollbar-track-size: 14px;
+  --terminal-scrollbar-thumb-size: calc(
+    var(--scrollbar-size) -
+    (var(--scrollbar-thumb-inset) * 6)
+  );
+  --terminal-scrollbar-thumb-offset: calc(
+    (
+      var(--terminal-scrollbar-track-size) -
+      var(--terminal-scrollbar-thumb-size)
+    ) /
+    2
+  );
 
   /* shadcn sidebar tokens. Sidebar hover/selected rows use sidebar-accent. */
   --sidebar: rgba(255, 255, 255, 0.8);
@@ -593,6 +620,18 @@
   --border: var(--color-gray-700);
   --input: var(--color-gray-700);
   --ring: var(--color-gray-400);
+  --scrollbar-thumb-alpha: 16%;
+  --scrollbar-thumb-hover-alpha: 26%;
+  --scrollbar-thumb: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-alpha),
+    transparent
+  );
+  --scrollbar-thumb-hover: color-mix(
+    in oklab,
+    var(--foreground) var(--scrollbar-thumb-hover-alpha),
+    transparent
+  );
 
   --sidebar: rgba(0, 0, 0, 0.8);
   --sidebar-nav-font-weight: 400;
@@ -1403,18 +1442,20 @@ body,
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
   }
   ::-webkit-scrollbar-track {
     background: transparent;
   }
   ::-webkit-scrollbar-thumb {
     background: transparent;
+    background-clip: content-box;
+    border: var(--scrollbar-thumb-inset) solid transparent;
     border-radius: 999px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-gray-500);
+    background: transparent;
   }
 
   [data-theme="dark"] ::-webkit-scrollbar-thumb,
@@ -1423,7 +1464,27 @@ body,
   }
   [data-theme="dark"] ::-webkit-scrollbar-thumb:hover,
   .dark ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-gray-600);
+    background: transparent;
+  }
+
+  .scrollbar-subtle {
+    scrollbar-color: var(--scrollbar-thumb) transparent;
+    scrollbar-width: auto;
+  }
+  .scrollbar-subtle::-webkit-scrollbar {
+    width: var(--scrollbar-size);
+    height: var(--scrollbar-size);
+  }
+  .scrollbar-subtle::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
+  .scrollbar-subtle:hover::-webkit-scrollbar-thumb,
+  .scrollbar-subtle:focus-within::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+  }
+  .scrollbar-subtle:hover::-webkit-scrollbar-thumb:hover,
+  .scrollbar-subtle:focus-within::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
   }
 
   .scrollbar-none {

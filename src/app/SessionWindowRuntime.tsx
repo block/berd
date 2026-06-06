@@ -4,7 +4,6 @@ import { useEffect, type ReactNode } from "react";
 import { TopBarActionsProvider } from "@/app/contexts/TopBarActionsContext";
 import { SelectedTextContextMenu } from "@/app/ui/SelectedTextContextMenu";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
-import { useScrollFade } from "@/shared/hooks/useScrollFade";
 import { useZoom } from "@/shared/hooks/useZoom";
 import { I18nProvider } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
@@ -19,7 +18,6 @@ export function SessionWindowRuntime({
   queryClient,
   children,
 }: SessionWindowRuntimeProps) {
-  useScrollFade();
   useZoom();
   useSessionWindowTracking();
 

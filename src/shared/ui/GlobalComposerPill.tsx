@@ -848,7 +848,7 @@ export function GlobalComposerPill({
                 aria-controls={mentionOpen ? mentionListboxId : undefined}
                 aria-describedby={mentionOpen ? mentionStatusId : undefined}
                 className={cn(
-                  "focus-override max-h-[200px] w-full resize-none appearance-none overflow-y-auto scrollbar-none border-0 bg-transparent text-[16px] leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-opacity placeholder:duration-300 placeholder:ease-in-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
+                  "focus-override scrollbar-subtle max-h-[200px] w-full resize-none appearance-none overflow-y-auto overscroll-contain border-0 bg-transparent text-[16px] leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-opacity placeholder:duration-300 placeholder:ease-in-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
                   expanded
                     ? "min-h-10 py-2.5 pr-2"
                     : "h-8 min-h-0 py-0 pr-[5.75rem]",

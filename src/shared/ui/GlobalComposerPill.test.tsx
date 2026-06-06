@@ -248,6 +248,15 @@ describe("GlobalComposerPill", () => {
     });
   });
 
+  it("uses a scoped subtle scrollbar for long global composer drafts", () => {
+    renderGlobalComposer(vi.fn());
+
+    const input = screen.getByRole("textbox");
+
+    expect(input).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(input).not.toHaveClass("scrollbar-none");
+  });
+
   it("applies the suggested persona's provider and model to the send payload", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
