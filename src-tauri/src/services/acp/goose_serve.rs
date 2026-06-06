@@ -4,8 +4,10 @@ use tauri_plugin_shell::ShellExt;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+use serde::{Deserialize, Serialize};
 
 use crate::services::diagnostic_log::{
     self, DiagnosticCategory, DiagnosticFieldValue, DiagnosticLevel,
@@ -78,8 +80,8 @@ impl GooseServeProcess {
                 libc::kill(pid as libc::pid_t, libc::SIGTERM);
             }
         }
-        // Clean up the PID file.
-        let _ = std::fs::remove_file(pid_file_path());
+        // Clean up this app instance's stale-process record.
+        let _ = std::fs::remove_file(process_record_path());
     }
 
     /// Kill the singleton goose serve process if it exists. Called from the
@@ -277,10 +279,35 @@ where
 }
 
 // ---------------------------------------------------------------------------
-// PID-file helpers — best-effort orphan cleanup
+// Stale-process record helpers — best-effort orphan cleanup
 // ---------------------------------------------------------------------------
 
-fn pid_file_path() -> PathBuf {
+const PROCESS_RECORD_DIR_NAME: &str = "goose-internal-serve";
+const PROCESS_RECORD_EXTENSION: &str = "json";
+
+#[derive(Debug, Deserialize, Serialize)]
+struct ServeProcessRecord {
+    owner_pid: u32,
+    serve_pid: u32,
+}
+
+fn process_record_dir() -> PathBuf {
+    std::env::temp_dir().join(PROCESS_RECORD_DIR_NAME)
+}
+
+fn process_record_path() -> PathBuf {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let exe_hash = fnv1a(exe.to_string_lossy().as_bytes());
+    process_record_dir().join(format!(
+        "{}-{exe_hash:016x}.{PROCESS_RECORD_EXTENSION}",
+        std::process::id()
+    ))
+}
+
+/// Legacy single-slot PID file used before per-owner process records. It is
+/// unsafe when multiple dev worktrees share the same Tauri executable path, so
+/// new launches remove it without killing the recorded process.
+fn legacy_pid_file_path() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
     let hash = fnv1a(exe.to_string_lossy().as_bytes());
     std::env::temp_dir().join(format!("goose-internal-serve-{hash:016x}.pid"))
@@ -298,56 +325,176 @@ fn fnv1a(bytes: &[u8]) -> u64 {
     hash
 }
 
-fn write_pid_file(pid: u32) {
-    let path = pid_file_path();
+fn write_pid_file(serve_pid: u32) {
+    let dir = process_record_dir();
+    if let Err(error) = std::fs::create_dir_all(&dir) {
+        log::warn!(
+            "Failed to create goose serve process record dir {}: {error}",
+            dir.display()
+        );
+        return;
+    }
+
+    let path = process_record_path();
+    let record = ServeProcessRecord {
+        owner_pid: std::process::id(),
+        serve_pid,
+    };
     match std::fs::File::create(&path) {
-        Ok(mut f) => {
-            if let Err(e) = write!(f, "{pid}") {
-                log::warn!("Failed to write PID file {}: {e}", path.display());
+        Ok(mut file) => {
+            if let Err(error) = serde_json::to_writer(&mut file, &record) {
+                log::warn!(
+                    "Failed to write goose serve process record {}: {error}",
+                    path.display()
+                );
+            }
+            if let Err(error) = file.write_all(b"\n") {
+                log::warn!(
+                    "Failed to finish goose serve process record {}: {error}",
+                    path.display()
+                );
             }
         }
-        Err(e) => {
-            log::warn!("Failed to create PID file {}: {e}", path.display());
+        Err(error) => {
+            log::warn!(
+                "Failed to create goose serve process record {}: {error}",
+                path.display()
+            );
         }
     }
 }
 
-/// Read the PID file left by a previous run, check whether that process is
-/// still alive, and kill it if so. All errors are logged and swallowed so
-/// that app startup is never blocked.
+/// Scan records left by previous runs and kill only true orphans: backend
+/// processes whose owning Tauri process is no longer alive. All errors are
+/// logged and swallowed so startup is never blocked.
 async fn kill_stale_serve_process() {
-    let path = pid_file_path();
-    let contents = match std::fs::read_to_string(&path) {
-        Ok(c) => c,
-        Err(_) => return, // no PID file — nothing to clean up
-    };
+    remove_legacy_pid_file();
 
-    let pid: libc::pid_t = match contents.trim().parse() {
-        Ok(p) => p,
-        Err(_) => {
-            log::warn!("Stale PID file contains non-numeric value, removing");
-            let _ = std::fs::remove_file(&path);
+    let dir = process_record_dir();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+        Err(error) => {
+            log::warn!(
+                "Failed to read goose serve process record dir {}: {error}",
+                dir.display()
+            );
             return;
         }
     };
 
-    // Check whether the process is still alive (signal 0 = existence check).
-    // SAFETY: sending signal 0 to check process existence.
-    let alive = unsafe { libc::kill(pid, 0) } == 0;
-    if !alive {
-        log::info!(
-            "Previous goose serve (pid {pid}) is no longer running, removing stale PID file"
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !is_process_record_path(&path) {
+            continue;
+        }
+        cleanup_process_record(&path).await;
+    }
+}
+
+fn remove_legacy_pid_file() {
+    let path = legacy_pid_file_path();
+    if !path.exists() {
+        return;
+    }
+
+    log::info!(
+        "Removing legacy goose serve PID file {} without killing its recorded process",
+        path.display()
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+fn is_process_record_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension == PROCESS_RECORD_EXTENSION)
+}
+
+async fn cleanup_process_record(path: &Path) {
+    let record = match read_process_record(path) {
+        Ok(record) => record,
+        Err(error) => {
+            log::warn!(
+                "Failed to read goose serve process record {}: {error}; removing",
+                path.display()
+            );
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+    };
+
+    let Some(owner_pid) = pid_t_from_u32(record.owner_pid) else {
+        log::warn!(
+            "Goose serve process record {} has invalid owner pid {}; removing",
+            path.display(),
+            record.owner_pid
         );
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+
+    if process_is_alive(owner_pid) {
+        log::debug!(
+            "Goose serve process record {} is still owned by live process {}; leaving it alone",
+            path.display(),
+            record.owner_pid
+        );
+        return;
+    }
+
+    let Some(serve_pid) = pid_t_from_u32(record.serve_pid) else {
+        log::warn!(
+            "Goose serve process record {} has invalid serve pid {}; removing",
+            path.display(),
+            record.serve_pid
+        );
+        let _ = std::fs::remove_file(path);
+        return;
+    };
+
+    cleanup_orphaned_serve_process(path, serve_pid).await;
+}
+
+fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
+    let contents = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
+    serde_json::from_str(&contents).map_err(|error| error.to_string())
+}
+
+fn pid_t_from_u32(pid: u32) -> Option<libc::pid_t> {
+    if pid > i32::MAX as u32 {
+        None
+    } else {
+        Some(pid as libc::pid_t)
+    }
+}
+
+fn process_is_alive(pid: libc::pid_t) -> bool {
+    // SAFETY: sending signal 0 to check process existence.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+
+    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
+    if !process_is_alive(pid) {
+        log::info!(
+            "Previous goose serve (pid {pid}) is no longer running, removing process record {}",
+            path.display()
+        );
+        let _ = std::fs::remove_file(path);
         return;
     }
 
     // Guard against PID recycling: verify the process is actually a goose binary.
     if !is_goose_process(pid) {
         log::warn!(
-            "PID {pid} is alive but is not a goose process (PID was likely recycled), removing stale PID file"
+            "PID {pid} is alive but is not a goose process (PID was likely recycled), removing process record {}",
+            path.display()
         );
-        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path);
         return;
     }
 
@@ -359,15 +506,14 @@ async fn kill_stale_serve_process() {
         None,
         diagnostic_log::fields([("pid", (pid as i64).into())]),
     );
-    // SAFETY: sending SIGTERM to the orphaned child.
+    // SAFETY: sending SIGTERM to an orphaned goose serve process.
     unsafe {
         libc::kill(pid, libc::SIGTERM);
     }
 
     // Give it a moment to exit, then force-kill if still alive.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    // SAFETY: checking if process still exists after SIGTERM.
-    if unsafe { libc::kill(pid, 0) } == 0 {
+    if process_is_alive(pid) {
         log::warn!("Orphaned goose serve (pid {pid}) did not exit after SIGTERM, sending SIGKILL");
         diagnostic_log::record_event(
             DiagnosticLevel::Warn,
@@ -382,7 +528,7 @@ async fn kill_stale_serve_process() {
         }
     }
 
-    let _ = std::fs::remove_file(&path);
+    let _ = std::fs::remove_file(path);
 }
 
 /// Check whether the given PID belongs to a goose binary. Uses
