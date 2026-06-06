@@ -4,11 +4,14 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getNotificationPrefs } from "@/features/settings/lib/notificationPrefs";
 import { isDefaultChatTitle } from "@/features/chat/lib/sessionTitle";
 import { showCompletionNotificationToast } from "@/shared/notifications/CompletionNotificationToast";
+import {
+  getNotificationSoundResource,
+  playNotificationSound,
+} from "@/shared/notifications/notificationSounds";
 import { getPlatform } from "@/shared/lib/platform";
 import type { Message } from "@/shared/types/messages";
 
 const COMPLETION_NOTIFICATION_CLICKED_EVENT = "completion-notification-clicked";
-const DEFAULT_COMPLETION_NOTIFICATION_SOUND = "notification-complete.mp3";
 
 function focusCurrentWindow(): void {
   import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
@@ -177,11 +180,12 @@ export function useCompletionNotifications(
               void invoke("show_completion_notification", {
                 body,
                 sessionId,
-                sound: DEFAULT_COMPLETION_NOTIFICATION_SOUND,
+                sound: getNotificationSoundResource(prefs.desktopSound) ?? null,
               });
             });
           } else {
             if (!prefs.inApp) continue;
+            playNotificationSound(prefs.inAppSound);
             showCompletionNotificationToast({
               title: body,
               outcome,

@@ -91,12 +91,10 @@ fn configure_macos_completion_notification_sound(
 
     if !is_plain_sound_resource_name(sound) {
         log::warn!("Ignoring invalid completion notification sound resource: {sound}");
-        notification.default_sound();
         return;
     }
 
     if tauri::is_dev() {
-        notification.default_sound();
         play_completion_notification_sound(app, sound);
     } else {
         notification.sound(sound);
@@ -228,18 +226,14 @@ mod tests {
 
     #[test]
     fn bundled_completion_sound_exists_for_dev_resolution() {
-        assert!(dev_completion_notification_sound_path("notification-complete.mp3").exists());
+        assert!(dev_completion_notification_sound_path("goose-sounds-4.mp3").exists());
     }
 
     #[test]
     fn sound_resource_name_must_be_plain_filename() {
-        assert!(is_plain_sound_resource_name("notification-complete.mp3"));
+        assert!(is_plain_sound_resource_name("goose-sounds-4.mp3"));
         assert!(!is_plain_sound_resource_name(""));
-        assert!(!is_plain_sound_resource_name(
-            "../notification-complete.mp3"
-        ));
-        assert!(!is_plain_sound_resource_name(
-            "/tmp/notification-complete.mp3"
-        ));
+        assert!(!is_plain_sound_resource_name("../goose-sounds-4.mp3"));
+        assert!(!is_plain_sound_resource_name("/tmp/goose-sounds-4.mp3"));
     }
 }

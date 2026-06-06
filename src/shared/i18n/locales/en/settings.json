@@ -307,9 +307,30 @@
       "label": "In-app",
       "description": "Show a banner when a chat finishes and you're in a different session."
     },
+    "inAppSound": {
+      "label": "Choose sound",
+      "ariaLabel": "In-app choose sound"
+    },
     "desktop": {
       "label": "Desktop",
       "description": "Send an OS notification when the app is in the background."
+    },
+    "desktopSound": {
+      "label": "Choose sound",
+      "ariaLabel": "Desktop choose sound"
+    },
+    "soundPreview": {
+      "ariaLabel": "Preview {{sound}}"
+    },
+    "sounds": {
+      "badNewsBird": "Very Excited",
+      "beakYeah": "Excited",
+      "dingDongGoose": "Ding Dong",
+      "paidInBread": "A Bit of Everything",
+      "politeHonk": "Goose",
+      "quickPeep": "Chime",
+      "silent": "Silent",
+      "youHaveGotGoose": "Twinkle"
     }
   },
   "updates": {

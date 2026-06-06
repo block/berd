@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   sendNotification: vi.fn(),
   onAction: vi.fn(),
   getPlatform: vi.fn(),
+  audioPlay: vi.fn(),
   toast: vi.fn(),
   toastCustom: vi.fn(),
   toastError: vi.fn(),
@@ -156,7 +157,14 @@ describe("useCompletionNotifications", () => {
     mocks.invoke.mockResolvedValue(undefined);
     mocks.listen.mockResolvedValue(vi.fn());
     mocks.onAction.mockResolvedValue({ unregister: vi.fn() });
+    mocks.audioPlay.mockResolvedValue(undefined);
     mocks.getPlatform.mockReturnValue("linux");
+    vi.stubGlobal(
+      "Audio",
+      vi.fn(function MockAudio() {
+        return { play: mocks.audioPlay };
+      }),
+    );
     mocks.getCurrentWindow.mockReturnValue({
       onFocusChanged: vi.fn().mockResolvedValue(vi.fn()),
       unminimize: vi.fn().mockResolvedValue(undefined),
@@ -229,7 +237,7 @@ describe("useCompletionNotifications", () => {
         {
           body: "Review fixes finished",
           sessionId: "session-1",
-          sound: "notification-complete.mp3",
+          sound: "goose-sounds-4.mp3",
         },
       ),
     );
@@ -287,6 +295,7 @@ describe("useCompletionNotifications", () => {
         }),
       ),
     );
+    expect(mocks.audioPlay).toHaveBeenCalledTimes(1);
     const options = mocks.toast.mock.calls[0]?.[1] as {
       action?: unknown;
     };
@@ -301,5 +310,53 @@ describe("useCompletionNotifications", () => {
     }
     expect(mocks.toastCustom).not.toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("passes null sound to desktop notifications when desktop sound is silent", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    window.localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ desktopSound: "silent" }),
+    );
+
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    renderHook(() => useCompletionNotifications(vi.fn()));
+
+    await waitFor(() => expect(focusChanged).toBeTruthy());
+
+    useChatSessionStore.getState().addSession({
+      id: "session-3",
+      title: "Quiet mode",
+      createdAt: "2026-06-05T00:00:00.000Z",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      messageCount: 1,
+    });
+    useChatStore.getState().setMessages("session-3", [makeMsg("completed")]);
+
+    act(() => {
+      focusChanged?.({ payload: false });
+      useChatStore.getState().setChatState("session-3", "streaming");
+      useChatStore.getState().setChatState("session-3", "idle");
+    });
+
+    await waitFor(() =>
+      expect(mocks.invoke).toHaveBeenCalledWith(
+        "show_completion_notification",
+        {
+          body: "Quiet mode finished",
+          sessionId: "session-3",
+          sound: null,
+        },
+      ),
+    );
   });
 });

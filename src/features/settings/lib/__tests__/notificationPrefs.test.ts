@@ -14,6 +14,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
     });
   });
 
@@ -26,6 +28,36 @@ describe("getNotificationPrefs", () => {
       enabled: false,
       inApp: true,
       desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
+    });
+  });
+
+  it("preserves existing disabled channels while adding default sounds", () => {
+    localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ enabled: false, inApp: false, desktop: false }),
+    );
+    expect(getNotificationPrefs()).toEqual({
+      enabled: false,
+      inApp: false,
+      desktop: false,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
+    });
+  });
+
+  it("normalizes invalid stored sounds to the default", () => {
+    localStorage.setItem(
+      "goose:notifications",
+      JSON.stringify({ inAppSound: "missing.mp3", desktopSound: "silent" }),
+    );
+    expect(getNotificationPrefs()).toEqual({
+      enabled: true,
+      inApp: true,
+      desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "silent",
     });
   });
 
@@ -35,6 +67,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
     });
   });
 
@@ -46,6 +80,8 @@ describe("getNotificationPrefs", () => {
       enabled: true,
       inApp: true,
       desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
     });
   });
 });
@@ -61,6 +97,8 @@ describe("setNotificationPrefs", () => {
       enabled: false,
       inApp: true,
       desktop: true,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
     });
   });
 
@@ -71,6 +109,8 @@ describe("setNotificationPrefs", () => {
       enabled: true,
       inApp: false,
       desktop: false,
+      inAppSound: "goose-sounds-4.mp3",
+      desktopSound: "goose-sounds-4.mp3",
     });
   });
 

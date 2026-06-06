@@ -307,9 +307,30 @@
       "label": "En la app",
       "description": "Mostrar un aviso cuando un chat termina y estás en otra sesión."
     },
+    "inAppSound": {
+      "label": "Elegir sonido",
+      "ariaLabel": "Elegir sonido en la app"
+    },
     "desktop": {
       "label": "Escritorio",
       "description": "Enviar una notificación del sistema cuando la app está en segundo plano."
+    },
+    "desktopSound": {
+      "label": "Elegir sonido",
+      "ariaLabel": "Elegir sonido de escritorio"
+    },
+    "soundPreview": {
+      "ariaLabel": "Previsualizar {{sound}}"
+    },
+    "sounds": {
+      "badNewsBird": "Very Excited",
+      "beakYeah": "Excited",
+      "dingDongGoose": "Ding Dong",
+      "paidInBread": "A Bit of Everything",
+      "politeHonk": "Goose",
+      "quickPeep": "Chime",
+      "silent": "Silencio",
+      "youHaveGotGoose": "Twinkle"
     }
   },
   "updates": {
