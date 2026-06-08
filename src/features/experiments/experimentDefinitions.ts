@@ -58,7 +58,6 @@ export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
 - Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
-- Keep progress updates short and focused on the immediate work or next step.
 - For simple answers or small changes, use plain sentences or a short list instead of heavy structure.
 - For final responses, lead with the outcome, mention verification or blockers, and stay compact by default.
 - Expand only when extra detail is needed for correctness or user understanding.`;
