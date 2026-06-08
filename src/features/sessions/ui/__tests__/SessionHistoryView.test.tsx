@@ -15,13 +15,9 @@ import {
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import {
   focusSessionWindow,
+  getSessionWindowSupport,
   openSessionWindow,
 } from "@/features/chat/lib/sessionWindowCommands";
-import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
 import { SessionHistoryView } from "../SessionHistoryView";
 
 const mocks = vi.hoisted(() => ({
@@ -195,7 +191,10 @@ describe("SessionHistoryView", () => {
       value: {},
     });
     vi.clearAllMocks();
-    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
+    vi.mocked(getSessionWindowSupport).mockResolvedValue({
+      supported: true,
+      reason: undefined,
+    });
     useChatStore.setState({ messagesBySession: {} });
     useSessionWindowStore.getState().setSnapshot([]);
     setSessionStoreState({
@@ -210,23 +209,25 @@ describe("SessionHistoryView", () => {
     mocks.acpSearchSessions.mockResolvedValue([]);
   });
 
-  it("does not expose open-in-window from history while the experiment is off", () => {
-    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, false);
-
+  it("does not expose open-in-window from history when session windows are unsupported", async () => {
+    vi.mocked(getSessionWindowSupport).mockResolvedValue({
+      supported: false,
+      reason: "unsupported platform",
+    });
     setSessionStoreState({
       sessions: [session()],
     });
 
     renderHistory();
 
+    await waitFor(() => expect(getSessionWindowSupport).toHaveBeenCalled());
     expect(
       screen.queryByRole("button", { name: /open in new window chat one/i }),
     ).not.toBeInTheDocument();
   });
 
-  it("opens a session window from history while the experiment is on", async () => {
+  it("opens a session window from history when session windows are supported", async () => {
     const user = userEvent.setup();
-    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
     setSessionStoreState({
       sessions: [session()],
     });
@@ -245,9 +246,8 @@ describe("SessionHistoryView", () => {
     expect(focusSessionWindow).not.toHaveBeenCalled();
   });
 
-  it("focuses an existing session window from history while the experiment is on", async () => {
+  it("focuses an existing session window from history when session windows are supported", async () => {
     const user = userEvent.setup();
-    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
     useSessionWindowStore
       .getState()
       .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);

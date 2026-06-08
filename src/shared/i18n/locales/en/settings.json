@@ -184,10 +184,6 @@
       "description": "Show the Builderbot tasks and automations surface.",
       "title": "Builderbot"
     },
-    "multiWindow": {
-      "description": "Open individual chats in their own desktop windows.",
-      "title": "Multi-window chats"
-    },
     "paneJumpNavigation": {
       "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
       "shortcutDescription": "Choose the prefix that opens pane jump mode.",

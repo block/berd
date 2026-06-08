@@ -93,16 +93,6 @@ describe("ExperimentsSettings", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("switch", {
-        name: i18n.t("experiments.multiWindow.title", { ns: "settings" }),
-      }),
-    ).not.toBeChecked();
-    expect(
-      screen.getByText(
-        i18n.t("experiments.multiWindow.description", { ns: "settings" }),
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", {
         name: i18n.t("experiments.paneJumpNavigation.title", {
           ns: "settings",
         }),

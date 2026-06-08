@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
@@ -8,12 +8,10 @@ import {
 } from "@/features/home/stores/homeWidgetStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { SidebarChatRow } from "../SidebarChatRow";
-import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
-import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
-  EXPERIMENT_PREFERENCES_STORAGE_KEY,
-  setExperimentEnabled,
-} from "@/features/experiments/experimentPreferences";
+  focusSessionWindow,
+  getSessionWindowSupport,
+} from "@/features/chat/lib/sessionWindowCommands";
 
 vi.mock("@/features/chat/lib/sessionWindowCommands", () => ({
   focusSessionWindow: vi.fn().mockResolvedValue(undefined),
@@ -31,9 +29,11 @@ describe("SidebarChatRow", () => {
       value: {},
     });
     resetHomeWidgetStoreForTests();
-    localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     useSessionWindowStore.getState().setSnapshot([]);
-    vi.mocked(focusSessionWindow).mockClear();
+    vi.mocked(getSessionWindowSupport).mockResolvedValue({
+      supported: true,
+      reason: undefined,
+    });
   });
 
   it("starts inline rename on double-click and commits on Enter", async () => {
@@ -220,10 +220,13 @@ describe("SidebarChatRow", () => {
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 
-  it("selects normally when a session window exists but the experiment is off", async () => {
+  it("selects normally when a session window exists but session windows are unsupported", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
-    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, false);
+    vi.mocked(getSessionWindowSupport).mockResolvedValue({
+      supported: false,
+      reason: "unsupported platform",
+    });
 
     useSessionWindowStore
       .getState()
@@ -238,6 +241,7 @@ describe("SidebarChatRow", () => {
       />,
     );
 
+    await waitFor(() => expect(getSessionWindowSupport).toHaveBeenCalled());
     expect(screen.queryByLabelText(/open in window/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByTitle("Double-click to rename"));
@@ -246,11 +250,10 @@ describe("SidebarChatRow", () => {
     expect(onSelect).toHaveBeenCalledWith("session-1");
   });
 
-  it("focuses an existing session window instead of selecting the row when the experiment is on", async () => {
+  it("focuses an existing session window instead of selecting the row when session windows are supported", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();
 
-    setExperimentEnabled(MULTI_WINDOW_EXPERIMENT_ID, true);
     useSessionWindowStore
       .getState()
       .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);

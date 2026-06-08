@@ -11,8 +11,6 @@ import {
 } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "@/shared/ui/BottomFade";
@@ -121,11 +119,8 @@ export function SessionHistoryView({
   );
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const removeSession = useChatSessionStore((s) => s.removeSession);
-  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
   const sessionWindowSupport = useSessionWindowSupport();
-  const isMultiWindowEnabled = Boolean(
-    multiWindowExperiment?.enabled && sessionWindowSupport.supported,
-  );
+  const isMultiWindowEnabled = sessionWindowSupport.supported;
   const openSessions = useSessionWindowStore((s) => s.openSessions);
   const loadMoreInFlightRef = useRef(false);
   const activeSessions = useMemo(

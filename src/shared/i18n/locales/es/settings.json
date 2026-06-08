@@ -184,10 +184,6 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
-    "multiWindow": {
-      "description": "Abre chats individuales en sus propias ventanas de escritorio.",
-      "title": "Chats en varias ventanas"
-    },
     "paneJumpNavigation": {
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",

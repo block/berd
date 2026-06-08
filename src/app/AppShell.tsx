@@ -78,6 +78,7 @@ import {
 } from "@/features/chat/lib/sessionActivation";
 import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionHandoffSource } from "@/features/chat/hooks/useSessionHandoffSource";
+import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
@@ -101,7 +102,6 @@ import { createSystemNotificationMessage } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
-  MULTI_WINDOW_EXPERIMENT_ID,
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
@@ -277,8 +277,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
   const isBuilderbotSurfaceEnabled = Boolean(builderbotExperiment?.enabled);
-  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
-  const isMultiWindowEnabled = Boolean(multiWindowExperiment?.enabled);
+  const sessionWindowSupport = useSessionWindowSupport();
+  const isMultiWindowEnabled = sessionWindowSupport.supported;
   const paneJumpNavigationExperiment = useExperiment(
     PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
   );

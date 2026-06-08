@@ -20,8 +20,6 @@ import {
 } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { MULTI_WINDOW_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { cn } from "@/shared/lib/cn";
@@ -128,11 +126,8 @@ export function SidebarChatRow({
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
-  const multiWindowExperiment = useExperiment(MULTI_WINDOW_EXPERIMENT_ID);
   const sessionWindowSupport = useSessionWindowSupport();
-  const isMultiWindowEnabled = Boolean(
-    multiWindowExperiment?.enabled && sessionWindowSupport.supported,
-  );
+  const isMultiWindowEnabled = sessionWindowSupport.supported;
   const displayTitle = getDisplaySessionTitle(
     title,
     t("common:session.defaultTitle"),
