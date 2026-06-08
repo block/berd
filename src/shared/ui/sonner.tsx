@@ -14,7 +14,9 @@ const toastActionButtonClassName = buttonVariants({
   ),
 });
 
-type ToastActionButtonProps = Omit<ButtonProps, "size" | "variant">;
+type ToastActionButtonProps = Omit<ButtonProps, "size" | "variant"> & {
+  emphasis?: "primary" | "secondary";
+};
 
 const Toaster = ({ ...props }: ToasterProps) => {
   const { isDark } = useTheme();
@@ -63,14 +65,18 @@ const Toaster = ({ ...props }: ToasterProps) => {
 
 function ToastActionButton({
   className,
+  emphasis = "primary",
   type = "button",
   ...props
 }: ToastActionButtonProps) {
+  const variant =
+    emphasis === "secondary" ? "quiet-inverse" : "composer-action";
+
   return (
     <Button
       {...props}
       type={type}
-      variant="composer-action"
+      variant={variant}
       size="xxs"
       className={cn(
         toastActionButtonLayoutClassName,
@@ -88,4 +94,10 @@ function ToastActionButton({
   );
 }
 
-export { Toaster, ToastActionButton };
+function ToastActionGroup({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="ml-auto flex shrink-0 items-center gap-1.5">{children}</div>
+  );
+}
+
+export { Toaster, ToastActionButton, ToastActionGroup };

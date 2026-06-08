@@ -17,6 +17,8 @@ import {
   playNotificationSound,
   type NotificationSoundId,
 } from "@/shared/notifications/notificationSounds";
+import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
+import { recordAssistiveMomentRetired } from "@/shared/assistive-ux/runtime";
 import { cn } from "@/shared/lib/cn";
 
 interface SoundOption {
@@ -239,6 +241,10 @@ export function NotificationSettings() {
 
   function update(patch: Partial<NotificationPrefs>) {
     setNotificationPrefs(patch);
+    recordAssistiveMomentRetired(
+      ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+      "settingsChanged",
+    );
     setPrefs((current) => ({ ...current, ...patch }));
   }
 

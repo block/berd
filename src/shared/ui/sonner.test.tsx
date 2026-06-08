@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import type { ToasterProps } from "sonner";
 import { describe, expect, it, vi } from "vitest";
-import { Toaster, ToastActionButton } from "./sonner";
+import { Toaster, ToastActionButton, ToastActionGroup } from "./sonner";
 
 const sonnerMocks = vi.hoisted(() => ({
   toaster: vi.fn((_props: ToasterProps) => null),
@@ -47,5 +47,22 @@ describe("Toaster", () => {
     expect(button).toHaveAttribute("type", "button");
     expect(button).toHaveClass("ml-auto", "shrink-0", "select-none");
     expect(button.querySelector(".absolute.inset-0")).toHaveTextContent("View");
+  });
+
+  it("exposes a shared toast action group for multiple actions", () => {
+    render(
+      <ToastActionGroup>
+        <ToastActionButton className="ml-0" emphasis="secondary">
+          Change sound
+        </ToastActionButton>
+        <ToastActionButton className="ml-0">View</ToastActionButton>
+      </ToastActionGroup>,
+    );
+
+    expect(screen.getByRole("button", { name: "Change sound" })).toHaveClass(
+      "text-foreground",
+      "hover:text-muted-foreground",
+    );
+    expect(screen.getByRole("button", { name: "View" })).toHaveClass("ml-0");
   });
 });

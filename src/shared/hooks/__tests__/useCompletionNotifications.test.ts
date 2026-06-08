@@ -1,4 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
+import type React from "react";
 import { isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -9,7 +10,11 @@ import {
 import type { Message } from "@/shared/types/messages";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
-import { ToastActionButton } from "@/shared/ui/sonner";
+import { ToastActionButton, ToastActionGroup } from "@/shared/ui/sonner";
+import {
+  ASSISTIVE_UX_STORAGE_KEY,
+  ASSISTIVE_UX_RULES,
+} from "@/shared/assistive-ux/registry";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -149,6 +154,7 @@ describe("useCompletionNotifications", () => {
     vi.clearAllMocks();
     resetStores();
     window.localStorage.removeItem("goose:notifications");
+    window.localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
     Object.defineProperty(window, "__TAURI_INTERNALS__", {
       configurable: true,
       value: {},
@@ -300,16 +306,97 @@ describe("useCompletionNotifications", () => {
       action?: unknown;
     };
     expect(isValidElement(options.action)).toBe(true);
-    if (isValidElement(options.action)) {
-      expect(options.action.type).toBe(ToastActionButton);
-      expect(options.action.props).toEqual(
-        expect.objectContaining({
-          children: "View",
-        }),
-      );
-    }
+    if (!isValidElement(options.action)) return;
+    const action = options.action as React.ReactElement<{
+      children: [
+        React.ReactElement<{
+          onClick?: () => void;
+          children: React.ReactNode;
+        }>,
+        React.ReactElement<{
+          onClick?: () => void;
+          children: React.ReactNode;
+        }>,
+      ];
+    }>;
+    expect(action.type).toBe(ToastActionGroup);
+    const [changeSoundAction, viewAction] = action.props.children;
+    expect(changeSoundAction.type).toBe(ToastActionButton);
+    expect(changeSoundAction.props.children).toBe("Change sound");
+    expect(viewAction.type).toBe(ToastActionButton);
+    expect(viewAction.props.children).toBe("View");
+    expect(
+      JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
+        .moments[ASSISTIVE_UX_RULES.notificationsChangeSound.id].shownCount,
+    ).toBe(1);
     expect(mocks.toastCustom).not.toHaveBeenCalled();
     expect(mocks.toastError).not.toHaveBeenCalled();
+  });
+
+  it("opens notification settings and retires the discover moment from Change sound", async () => {
+    let focusChanged: ((event: { payload: boolean }) => void) | null = null;
+    const settingsEvents: CustomEvent[] = [];
+    const onOpenSettings = (event: Event) => {
+      settingsEvents.push(event as CustomEvent);
+    };
+    window.addEventListener("goose:open-settings", onOpenSettings);
+
+    mocks.getCurrentWindow.mockReturnValue({
+      onFocusChanged: vi.fn((handler) => {
+        focusChanged = handler;
+        return Promise.resolve(vi.fn());
+      }),
+      unminimize: vi.fn().mockResolvedValue(undefined),
+      show: vi.fn().mockResolvedValue(undefined),
+      setFocus: vi.fn().mockResolvedValue(undefined),
+    });
+
+    try {
+      renderHook(() => useCompletionNotifications(vi.fn()));
+
+      await waitFor(() => expect(focusChanged).toBeTruthy());
+
+      useChatSessionStore.getState().addSession({
+        id: "session-4",
+        title: "Tune sound",
+        createdAt: "2026-06-05T00:00:00.000Z",
+        updatedAt: "2026-06-05T00:00:00.000Z",
+        messageCount: 1,
+      });
+      useChatStore.getState().setMessages("session-4", [makeMsg("completed")]);
+
+      act(() => {
+        focusChanged?.({ payload: true });
+        useChatStore.getState().setChatState("session-4", "streaming");
+        useChatStore.getState().setChatState("session-4", "idle");
+      });
+
+      await waitFor(() => expect(mocks.toast).toHaveBeenCalled());
+
+      const options = mocks.toast.mock.calls[0]?.[1] as {
+        action?: unknown;
+      };
+      expect(isValidElement(options.action)).toBe(true);
+      if (!isValidElement(options.action)) return;
+
+      const action = options.action as React.ReactElement<{
+        children: [React.ReactElement<{ onClick?: () => void }>];
+      }>;
+      const [changeSoundAction] = action.props.children;
+      act(() => {
+        changeSoundAction.props.onClick?.();
+      });
+
+      expect(settingsEvents).toHaveLength(1);
+      expect(settingsEvents[0]?.detail).toEqual({ section: "notifications" });
+      expect(
+        JSON.parse(
+          window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}",
+        ).moments[ASSISTIVE_UX_RULES.notificationsChangeSound.id].retiredReason,
+      ).toBe("accepted");
+    } finally {
+      window.removeEventListener("goose:open-settings", onOpenSettings);
+    }
   });
 
   it("passes null sound to desktop notifications when desktop sound is silent", async () => {

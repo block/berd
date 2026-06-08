@@ -1,7 +1,7 @@
 import type React from "react";
 import { isValidElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ToastActionButton } from "@/shared/ui/sonner";
+import { ToastActionButton, ToastActionGroup } from "@/shared/ui/sonner";
 
 const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
@@ -113,5 +113,50 @@ describe("CompletionNotificationToast", () => {
     expect(mocks.toastDismiss).toHaveBeenCalledWith("error-toast-id");
     expect(onView).toHaveBeenCalledOnce();
     expect(mocks.toastCustom).not.toHaveBeenCalled();
+  });
+
+  it("adds a secondary Change sound action when provided", () => {
+    const onView = vi.fn();
+    const onChangeSound = vi.fn();
+    mocks.toast.mockReturnValue("completion-toast-id");
+
+    showCompletionNotificationToast({
+      title: "Review fixes finished",
+      outcome: "completed",
+      onView,
+      onChangeSound,
+    });
+
+    const options = mocks.toast.mock.calls[0]?.[1] as {
+      action?: unknown;
+    };
+    expect(isValidElement(options.action)).toBe(true);
+    if (!isValidElement(options.action)) return;
+
+    const action = options.action as React.ReactElement<{
+      children: [
+        React.ReactElement<{
+          onClick?: () => void;
+          children: React.ReactNode;
+        }>,
+        React.ReactElement<{
+          onClick?: () => void;
+          children: React.ReactNode;
+        }>,
+      ];
+    }>;
+    expect(action.type).toBe(ToastActionGroup);
+    const [changeSoundAction, viewAction] = action.props.children;
+
+    expect(changeSoundAction.type).toBe(ToastActionButton);
+    expect(changeSoundAction.props.children).toBe("Change sound");
+    expect(viewAction.type).toBe(ToastActionButton);
+    expect(viewAction.props.children).toBe("View");
+
+    changeSoundAction.props.onClick?.();
+
+    expect(mocks.toastDismiss).toHaveBeenCalledWith("completion-toast-id");
+    expect(onChangeSound).toHaveBeenCalledOnce();
+    expect(onView).not.toHaveBeenCalled();
   });
 });

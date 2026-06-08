@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import { NotificationSettings } from "../NotificationSettings";
 import enSettings from "@/shared/i18n/locales/en/settings.json";
+import {
+  ASSISTIVE_UX_STORAGE_KEY,
+  ASSISTIVE_UX_RULES,
+} from "@/shared/assistive-ux/registry";
 
 const getPrefs = vi.fn();
 const setPrefs = vi.fn();
@@ -35,6 +39,7 @@ describe("NotificationSettings", () => {
       desktopSound: "goose-sounds-4.mp3",
     });
     setPrefs.mockClear();
+    window.localStorage.removeItem(ASSISTIVE_UX_STORAGE_KEY);
   });
 
   it("renders the master toggle", () => {
@@ -79,6 +84,21 @@ describe("NotificationSettings", () => {
     });
     await user.click(masterSwitch);
     expect(setPrefs).toHaveBeenCalledWith({ enabled: false });
+  });
+
+  it("retires the change sound discover moment when notification settings change", async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<NotificationSettings />);
+    const masterSwitch = screen.getByRole("switch", {
+      name: enSettings.notifications.enabled.label,
+    });
+
+    await user.click(masterSwitch);
+
+    expect(
+      JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
+        .moments[ASSISTIVE_UX_RULES.notificationsChangeSound.id].retiredReason,
+    ).toBe("settingsChanged");
   });
 
   it("calls setNotificationPrefs with inApp:false when in-app toggle is turned off", async () => {

@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { ToastActionButton } from "@/shared/ui/sonner";
+import { ToastActionButton, ToastActionGroup } from "@/shared/ui/sonner";
 
 export type CompletionNotificationOutcome = "completed" | "error" | "stopped";
 
@@ -17,10 +17,12 @@ export function showCompletionNotificationToast({
   title,
   outcome,
   onView,
+  onChangeSound,
 }: {
   title: string;
   outcome: CompletionNotificationOutcome;
   onView: () => void;
+  onChangeSound?: () => void;
 }): void {
   let toastId: string | number | undefined;
   const handleView = () => {
@@ -29,9 +31,32 @@ export function showCompletionNotificationToast({
     }
     onView();
   };
+  const handleChangeSound = () => {
+    if (toastId !== undefined) {
+      toast.dismiss(toastId);
+    }
+    onChangeSound?.();
+  };
+
+  const action = onChangeSound ? (
+    <ToastActionGroup>
+      <ToastActionButton
+        className="ml-0"
+        emphasis="secondary"
+        onClick={handleChangeSound}
+      >
+        Change sound
+      </ToastActionButton>
+      <ToastActionButton className="ml-0" onClick={handleView}>
+        View
+      </ToastActionButton>
+    </ToastActionGroup>
+  ) : (
+    <ToastActionButton onClick={handleView}>View</ToastActionButton>
+  );
 
   const options = {
-    action: <ToastActionButton onClick={handleView}>View</ToastActionButton>,
+    action,
     description: getCompletionToastDescription(outcome),
     duration: TOAST_DURATION_MS,
   };

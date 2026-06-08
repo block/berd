@@ -970,6 +970,26 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       textIcon: "--foreground",
     },
   ],
+  "quiet-inverse": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "transparent",
+      textIcon: "--foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "transparent",
+      textIcon: "--muted-foreground",
+    },
+    {
+      anatomy: "Button",
+      state: "Open",
+      background: "transparent",
+      textIcon: "--muted-foreground",
+    },
+  ],
   "page-header": [
     {
       anatomy: "Button",

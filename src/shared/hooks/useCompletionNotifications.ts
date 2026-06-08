@@ -2,12 +2,19 @@ import { useEffect, useRef } from "react";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getNotificationPrefs } from "@/features/settings/lib/notificationPrefs";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { isDefaultChatTitle } from "@/features/chat/lib/sessionTitle";
 import { showCompletionNotificationToast } from "@/shared/notifications/CompletionNotificationToast";
 import {
   getNotificationSoundResource,
   playNotificationSound,
 } from "@/shared/notifications/notificationSounds";
+import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
+import {
+  recordAssistiveMomentAccepted,
+  recordAssistiveMomentShown,
+  shouldShowAssistiveMoment,
+} from "@/shared/assistive-ux/runtime";
 import { getPlatform } from "@/shared/lib/platform";
 import type { Message } from "@/shared/types/messages";
 
@@ -186,10 +193,26 @@ export function useCompletionNotifications(
           } else {
             if (!prefs.inApp) continue;
             playNotificationSound(prefs.inAppSound);
+            const shouldShowChangeSound = shouldShowAssistiveMoment(
+              ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+            );
+            if (shouldShowChangeSound) {
+              recordAssistiveMomentShown(
+                ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+              );
+            }
             showCompletionNotificationToast({
               title: body,
               outcome,
               onView: () => navigateRef.current(sessionId),
+              onChangeSound: shouldShowChangeSound
+                ? () => {
+                    recordAssistiveMomentAccepted(
+                      ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                    );
+                    requestOpenSettings("notifications");
+                  }
+                : undefined,
             });
           }
         }
