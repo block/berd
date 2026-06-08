@@ -206,7 +206,7 @@ export async function acpCreateSession(
   await directAcp.setProvider(sessionId, providerId);
   sessionRegistry.registerPreparedSession(sessionId, providerId, workingDir);
   if (options.modelId) {
-    await directAcp.setModel(sessionId, options.modelId);
+    await sessionRegistry.applySessionModel(sessionId, options.modelId);
   }
   return { sessionId };
 }
@@ -215,7 +215,9 @@ export async function acpSetModel(
   sessionId: string,
   modelId: string,
 ): Promise<void> {
-  return directAcp.setModel(sessionId, modelId);
+  // Routed through the registry so repeat applies of the unchanged model are
+  // not sent over the wire (the backend rebuilds the provider on every set).
+  return sessionRegistry.applySessionModel(sessionId, modelId);
 }
 
 export type { AcpSessionInfo, AcpSessionsPage };

@@ -331,6 +331,55 @@ describe("acpCreateSession", () => {
   });
 });
 
+describe("acpSetModel", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("skips redundant wire calls when the model is unchanged", async () => {
+    const sessionRegistry = await import("../acpSessionRegistry");
+    const { acpSetModel } = await import("../acp");
+
+    sessionRegistry.registerPreparedSession(
+      "acp-session-model",
+      "codex-acp",
+      "/tmp/project",
+    );
+
+    // The chat send path re-applies the session config before every message;
+    // only the first apply of a given model may reach the wire (the backend
+    // rebuilds the provider on every set, destroying ACP child threads).
+    await acpSetModel("acp-session-model", "gpt-5.5");
+    await acpSetModel("acp-session-model", "gpt-5.5");
+    await acpSetModel("acp-session-model", "gpt-5.5");
+
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+    expect(mockSetModel).toHaveBeenCalledWith("acp-session-model", "gpt-5.5");
+
+    await acpSetModel("acp-session-model", "gpt-5.4");
+    expect(mockSetModel).toHaveBeenCalledTimes(2);
+    expect(mockSetModel).toHaveBeenLastCalledWith(
+      "acp-session-model",
+      "gpt-5.4",
+    );
+  });
+
+  it("dedupes the model applied during acpCreateSession", async () => {
+    mockNewSession.mockResolvedValue({ sessionId: "acp-session-created" });
+
+    const { acpCreateSession, acpSetModel } = await import("../acp");
+
+    await acpCreateSession("codex-acp", "/tmp/project", {
+      modelId: "gpt-5.5",
+    });
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+
+    await acpSetModel("acp-session-created", "gpt-5.5");
+    expect(mockSetModel).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("acpDuplicateSession", () => {
   const forkedSession = {
     sessionId: "session-2",

@@ -4,6 +4,11 @@ import { perfLog } from "@/shared/lib/perfLog";
 interface PreparedSession {
   providerId: string;
   workingDir: string;
+  /**
+   * Last model id this window successfully applied via setModel. Tracked so
+   * repeat applies of the same model skip the wire call.
+   */
+  modelId?: string;
 }
 
 const prepared = new Map<string, PreparedSession>();
@@ -31,6 +36,10 @@ export async function prepareSession(
         `[perf:prepare] ${sid} reuse setProvider(${providerId}) in ${(performance.now() - tProv).toFixed(1)}ms`,
       );
       existing.providerId = providerId;
+      // A provider change rebuilds the backend provider with that provider's
+      // default model, so the last model we applied no longer reflects
+      // backend state.
+      delete existing.modelId;
       changed = true;
     }
     perfLog(
@@ -55,6 +64,36 @@ export async function prepareSession(
   prepared.set(sessionId, entry);
 
   return;
+}
+
+/**
+ * Apply a model to a session, skipping the wire call when this window already
+ * applied the same model.
+ */
+export async function applySessionModel(
+  sessionId: string,
+  modelId: string,
+): Promise<void> {
+  const sid = sessionId.slice(0, 8);
+  const entry = prepared.get(sessionId);
+  if (entry?.modelId === modelId) {
+    perfLog(`[perf:prepare] ${sid} skip setModel(${modelId}) — unchanged`);
+    return;
+  }
+
+  try {
+    await acpApi.setModel(sessionId, modelId);
+  } catch (error) {
+    // Drop the cached value so the next attempt retries over the wire.
+    if (entry) {
+      delete entry.modelId;
+    }
+    throw error;
+  }
+
+  if (entry) {
+    entry.modelId = modelId;
+  }
 }
 
 export function isSessionPrepared(sessionId: string): boolean {
