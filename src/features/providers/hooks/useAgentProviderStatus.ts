@@ -53,10 +53,8 @@ function readinessFromReport(
       continue;
     }
     if (provider?.supportsAuth) {
-      // Case 2: auth-capable but no real probe (e.g. copilot-acp, codex-acp
-      // until its probe lands) — pessimistic default. The post-sign-in flip
-      // is intentionally not restored; a real auth_status_command in the
-      // doctor crate is the long-term fix.
+      // Case 2: auth-capable but no real probe (e.g. copilot-acp) —
+      // pessimistic default until the provider has an auth-status probe.
       readiness.set(providerId, "not_ready");
       continue;
     }

@@ -261,8 +261,7 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.agentReadiness.get("copilot-acp")).toBe("not_ready");
   });
 
-  it("marks codex-acp not_ready when its probe is unavailable", async () => {
-    // codex-acp is currently supportsAuthStatus=false in the catalog; case 2.
+  it("marks codex-acp ready when its auth probe reports authenticated", async () => {
     runDoctor.mockResolvedValue(
       report([
         check({
@@ -270,7 +269,30 @@ describe("useAgentProviderStatus", () => {
           status: "pass",
           path: "/usr/local/bin/codex",
           bridgePath: "/usr/local/bin/codex-acp",
-          authStatus: "notApplicable",
+          authStatus: "authenticated",
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("codex-acp")).toBe("ready");
+    expect(result.current.readyAgentIds.has("codex-acp")).toBe(true);
+  });
+
+  it("marks codex-acp not_ready when its auth probe reports notAuthenticated", async () => {
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-codex",
+          status: "warn",
+          path: "/usr/local/bin/codex",
+          bridgePath: "/usr/local/bin/codex-acp",
+          authStatus: "notAuthenticated",
         }),
       ]),
     );
@@ -282,5 +304,6 @@ describe("useAgentProviderStatus", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     expect(result.current.agentReadiness.get("codex-acp")).toBe("not_ready");
+    expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
   });
 });

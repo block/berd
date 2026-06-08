@@ -35,7 +35,7 @@ export const CURATED_PROVIDER_CATALOG: ProviderCatalogEntry[] = [
     aliases: ["codex-acp", "codex_cli", "codex-cli", "codex"],
     supportsInstall: true,
     supportsAuth: true,
-    supportsAuthStatus: false,
+    supportsAuthStatus: true,
   },
   {
     id: "copilot-acp",
