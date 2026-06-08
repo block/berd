@@ -11,12 +11,16 @@ import {
   normalizeRunnableShellCommand,
 } from "@/shared/lib/runnableShellCommand";
 
+export interface RunCommandOptions {
+  newTerminal?: boolean;
+}
+
 interface RunnableCodeBlockProps {
   code: string;
   language: string;
   isIncomplete?: boolean;
   meta?: string;
-  onRun?: (command: string) => void;
+  onRun?: (command: string, options?: RunCommandOptions) => void;
 }
 
 function selectedTextInside(container: HTMLElement | null): string | null {
@@ -54,19 +58,22 @@ export function RunnableCodeBlock({
     onRun && !isIncomplete && command && isRunnableShellLanguage(language),
   );
 
-  const handleRun = useCallback(() => {
-    if (!canRun) {
-      return;
-    }
+  const handleRun = useCallback(
+    (event: React.MouseEvent) => {
+      if (!canRun) {
+        return;
+      }
 
-    const source = selectedTextInside(blockRef.current) ?? code;
-    const commandToRun = normalizeRunnableShellCommand(source);
-    if (!commandToRun) {
-      return;
-    }
+      const source = selectedTextInside(blockRef.current) ?? code;
+      const commandToRun = normalizeRunnableShellCommand(source);
+      if (!commandToRun) {
+        return;
+      }
 
-    onRun?.(commandToRun);
-  }, [canRun, code, onRun]);
+      onRun?.(commandToRun, event.metaKey ? { newTerminal: true } : undefined);
+    },
+    [canRun, code, onRun],
+  );
 
   return (
     <div ref={blockRef} className="contents">

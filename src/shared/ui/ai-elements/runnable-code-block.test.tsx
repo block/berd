@@ -53,7 +53,7 @@ describe("RunnableCodeBlock", () => {
 
     await user.click(screen.getByRole("button", { name: "Run in terminal" }));
 
-    expect(onRun).toHaveBeenCalledWith("pnpm test");
+    expect(onRun).toHaveBeenCalledWith("pnpm test", undefined);
   });
 
   it("runs only selected text when the selection is inside the code block", async () => {
@@ -69,7 +69,7 @@ describe("RunnableCodeBlock", () => {
 
     await user.click(screen.getByRole("button", { name: "Run in terminal" }));
 
-    expect(onRun).toHaveBeenCalledWith("pnpm lint\npnpm build");
+    expect(onRun).toHaveBeenCalledWith("pnpm lint\npnpm build", undefined);
   });
 
   it("falls back to the full command when selection is outside the code block", async () => {
@@ -89,7 +89,36 @@ describe("RunnableCodeBlock", () => {
 
     await user.click(screen.getByRole("button", { name: "Run in terminal" }));
 
-    expect(onRun).toHaveBeenCalledWith("pnpm test");
+    expect(onRun).toHaveBeenCalledWith("pnpm test", undefined);
+  });
+
+  it("passes newTerminal option when Cmd+clicking the run button", async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+
+    render(
+      <RunnableCodeBlock code="pnpm test" language="bash" onRun={onRun} />,
+    );
+
+    const button = screen.getByRole("button", { name: "Run in terminal" });
+    await user.keyboard("{Meta>}");
+    await user.click(button);
+    await user.keyboard("{/Meta}");
+
+    expect(onRun).toHaveBeenCalledWith("pnpm test", { newTerminal: true });
+  });
+
+  it("does not pass newTerminal option on regular click", async () => {
+    const user = userEvent.setup();
+    const onRun = vi.fn();
+
+    render(
+      <RunnableCodeBlock code="pnpm test" language="bash" onRun={onRun} />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Run in terminal" }));
+
+    expect(onRun).toHaveBeenCalledWith("pnpm test", undefined);
   });
 
   it("does not show run controls for incomplete streamed code", () => {

@@ -15,7 +15,10 @@ import {
 } from "@/shared/ui/icons/ProviderIcons";
 import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
-import { RunnableCodeBlock } from "@/shared/ui/ai-elements/runnable-code-block";
+import {
+  RunnableCodeBlock,
+  type RunCommandOptions,
+} from "@/shared/ui/ai-elements/runnable-code-block";
 import {
   Reasoning,
   ReasoningTrigger,
@@ -88,7 +91,7 @@ interface MessageBubbleProps {
   onEditMessage?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
-  onRunShellCommand?: (command: string) => void;
+  onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
 }
 
 interface ContentSection {
@@ -200,7 +203,7 @@ function renderContentBlock(
     contentBlocks: MessageContent[];
     onSendMcpAppMessage?: McpAppMessageHandler;
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
-    onRunShellCommand?: (command: string) => void;
+    onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
     runItCodeRenderers?: CustomRenderer[];
   },
   isStreamingMsg?: boolean,

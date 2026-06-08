@@ -544,19 +544,25 @@ export function ChatView({
   }, [effectiveSession?.id, setContextPanelOpen]);
 
   const handleRunShellCommand = useCallback(
-    (command: string) => {
+    (command: string, options?: { newTerminal?: boolean }) => {
       if (!terminalCwd) {
         toast.message(t("terminal.noWorkspace"));
         return;
       }
 
       const nextState = commitTerminalWorkspaceState((state) => {
+        if (options?.newTerminal) {
+          return appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
+        }
         const defaultTab = findDefaultTerminalTab(state.tabs, terminalCwd);
         return defaultTab
           ? { ...state, activeTabId: defaultTab.id, expanded: true }
           : appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
       });
-      const targetTab = findDefaultTerminalTab(nextState.tabs, terminalCwd);
+
+      const targetTab = options?.newTerminal
+        ? nextState.tabs[nextState.tabs.length - 1]
+        : findDefaultTerminalTab(nextState.tabs, terminalCwd);
       if (!targetTab) {
         return;
       }

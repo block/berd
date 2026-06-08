@@ -15,6 +15,7 @@ import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { Button } from "@/shared/ui/button";
 import { MessageBubble } from "./MessageBubble";
+import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { getTextContent, type Message } from "@/shared/types/messages";
 
@@ -36,7 +37,7 @@ interface MessageTimelineProps {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
-  onRunShellCommand?: (command: string) => void;
+  onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
   className?: string;
   tailPaddingPx?: number;
   /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
