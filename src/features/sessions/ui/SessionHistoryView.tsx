@@ -41,7 +41,11 @@ import {
   saveExportedSessionFiles,
 } from "@/shared/api/system";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
-import { defaultExportFilename, downloadJson } from "../lib/exportSession";
+import {
+  defaultExportFilename,
+  downloadJson,
+  exportFilenameFromPath,
+} from "../lib/exportSession";
 import {
   areSetsEqual,
   normalizeSelectedSessionIds,
@@ -483,18 +487,22 @@ export function SessionHistoryView({
         const session = activeSessions.find((s) => s.id === sessionId);
         const json = await acpExportSession(sessionId);
         const filename = defaultExportFilename(session?.title ?? "session");
+        const sessionName = session
+          ? getDisplayTitle(session)
+          : defaultSessionTitle;
 
         if (window.__TAURI_INTERNALS__) {
           const savedPath = await saveExportedSessionFile(filename, json);
           if (!savedPath) {
             return;
           }
-          toast.success(`Exported session to ${filename}`);
+          const savedFilename = exportFilenameFromPath(savedPath, filename);
+          toast.success(`Exported ${sessionName} to ${savedFilename}`);
           return;
         }
 
         downloadJson(json, filename);
-        toast.success(`Exported session to ${filename}`);
+        toast.success(`Exported ${sessionName} to ${filename}`);
       } catch (error) {
         console.error("Export failed:", error);
         if (isSessionNotFoundError(error)) {
@@ -503,7 +511,13 @@ export function SessionHistoryView({
         toast.error(formatAcpErrorMessage(error, "Failed to export session"));
       }
     },
-    [activeSessions, isSessionNotFoundError, removeSession],
+    [
+      activeSessions,
+      defaultSessionTitle,
+      getDisplayTitle,
+      isSessionNotFoundError,
+      removeSession,
+    ],
   );
 
   const handleDuplicate = useCallback(

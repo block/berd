@@ -12,6 +12,15 @@ export function defaultExportFilename(title: string): string {
   return `${sanitized || "session"}.json`;
 }
 
+export function exportFilenameFromPath(
+  path: string,
+  fallbackFilename: string,
+): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+  const filename = normalized.split("/").pop();
+  return filename?.trim() ? filename : fallbackFilename;
+}
+
 export function downloadJson(json: string, filename: string): void {
   const blob = new Blob([json], { type: "application/json" });
   const url = URL.createObjectURL(blob);

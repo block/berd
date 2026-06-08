@@ -18,6 +18,7 @@ import {
   getSessionWindowSupport,
   openSessionWindow,
 } from "@/features/chat/lib/sessionWindowCommands";
+import { saveExportedSessionFile } from "@/shared/api/system";
 import { SessionHistoryView } from "../SessionHistoryView";
 
 const mocks = vi.hoisted(() => ({
@@ -92,6 +93,7 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
 
 vi.mock("@/shared/api/system", () => ({
   saveExportedSessionFile: vi.fn(),
+  saveExportedSessionFiles: vi.fn(),
 }));
 
 vi.mock("../SessionCard", () => ({
@@ -99,12 +101,14 @@ vi.mock("../SessionCard", () => ({
     id,
     title,
     onDuplicate,
+    onExport,
     onOpenInWindow,
     isOpenInWindow,
   }: {
     id: string;
     title: string;
     onDuplicate?: (id: string) => void;
+    onExport?: (id: string) => void;
     onOpenInWindow?: (id: string) => void;
     isOpenInWindow?: boolean;
   }) => (
@@ -112,6 +116,9 @@ vi.mock("../SessionCard", () => ({
       <span>{title}</span>
       <button type="button" onClick={() => onDuplicate?.(id)}>
         Duplicate
+      </button>
+      <button type="button" onClick={() => onExport?.(id)}>
+        Export
       </button>
       {onOpenInWindow ? (
         <button type="button" onClick={() => onOpenInWindow(id)}>
@@ -451,5 +458,29 @@ describe("SessionHistoryView", () => {
     expect(mocks.toastError).toHaveBeenCalledWith(
       "This session has no working directory and can't be duplicated.",
     );
+  });
+
+  it("reports the renamed file from the native export save path", async () => {
+    mocks.acpExportSession.mockResolvedValue('{"messages":[]}');
+    vi.mocked(saveExportedSessionFile).mockResolvedValue(
+      "/Users/kalvin/Desktop/test.json",
+    );
+    setSessionStoreState({
+      sessions: [session({ title: "Codebase Research" })],
+    });
+
+    renderHistory();
+
+    await userEvent.click(screen.getByRole("button", { name: "Export" }));
+
+    await waitFor(() => {
+      expect(saveExportedSessionFile).toHaveBeenCalledWith(
+        "Codebase Research.json",
+        '{"messages":[]}',
+      );
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        "Exported Codebase Research to test.json",
+      );
+    });
   });
 });
