@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutConstraints } from "@/features/layout/api/layout";
+import type { WidgetInstance } from "../widgets/types";
 import {
   resolveWidgetResize,
   resolveWidgetResizeFromOffset,
@@ -70,5 +71,27 @@ describe("homeWidgetResize", () => {
       width: 360,
       height: 360,
     });
+  });
+});
+
+describe("resolveWidgetResize — clock profiles", () => {
+  const digitalClock: WidgetInstance = {
+    id: "c1",
+    type: "clock",
+    x: 0,
+    y: 0,
+    z: 1,
+    width: 264,
+    height: 104,
+    state: { mode: "digital" },
+  };
+
+  it("keeps the digital landscape aspect ratio when resizing", () => {
+    const resolved = resolveWidgetResize({
+      instance: digitalClock,
+      requestedSize: { width: 360, height: 360 },
+    });
+    expect(resolved.width).toBe(360);
+    expect(resolved.height).toBeCloseTo(360 * (104 / 264), 5);
   });
 });

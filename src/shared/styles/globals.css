@@ -89,6 +89,24 @@
   font-display: swap;
 }
 
+/* Cash Sans Mono — self-hosted, used by the digital clock face for an even,
+   instrument-like readout. Only the two weights the face needs are bundled. */
+@font-face {
+  font-family: "Cash Sans Mono";
+  src: url("../../app/assets/fonts/cash-sans-mono-light.woff2") format("woff2");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Cash Sans Mono";
+  src: url("../../app/assets/fonts/cash-sans-mono-medium.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 /* Symbols-only Nerd Font fallback for terminal prompts that use icon glyphs. */
 @font-face {
   font-family: "NerdFontsSymbols Nerd Font";
@@ -1138,7 +1156,32 @@
   --animate-exit-to-left: exit-to-left 0.2s ease;
   --animate-exit-to-right: exit-to-right 0.2s ease;
   --animate-word-reveal: word-reveal 0.4s ease-out;
+  /* Clock widget: digital-face fade-in on toggle; the red colon blinks once a
+     second, mirroring the analog second hand's tick. Both disabled under
+     reduced motion. */
+  --animate-clock-face-fade: clock-face-fade 180ms ease-out;
+  --animate-clock-colon-blink: clock-colon-blink 1s linear infinite;
 
+  @keyframes clock-face-fade {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  /* Hard on/off blink — no fade — for an editorial digital-display feel.
+     The 0.001% window makes the toggle instant under linear timing. */
+  @keyframes clock-colon-blink {
+    0%,
+    49.999% {
+      opacity: 1;
+    }
+    50%,
+    100% {
+      opacity: 0;
+    }
+  }
   @keyframes accordion-down {
     from {
       height: 0;
@@ -1302,6 +1345,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shimmer-text {
+    animation: none !important;
+  }
+
+  .animate-clock-face-fade,
+  .animate-clock-colon-blink {
     animation: none !important;
   }
 }

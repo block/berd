@@ -183,7 +183,11 @@ interface HomeWidgetStore extends HomeWidgetState {
   bumpZ: (id: string) => void;
   toggleCleanUpWidgets: (bounds?: WidgetPlacementInput) => void;
   removeWidget: (id: string) => void;
-  updateWidgetState: (id: string, state: Record<string, unknown>) => void;
+  updateWidgetState: (
+    id: string,
+    state: Record<string, unknown>,
+    bounds?: WidgetPlacementInput,
+  ) => void;
   replaceChatPinSessionId: (
     draftSessionId: string,
     backendSessionId: string,
@@ -415,9 +419,14 @@ function createHomeWidgetStore() {
       removeWidget: (id) => {
         applyMutation((instances) => removeWidgetMutation(instances, id));
       },
-      updateWidgetState: (id, state) => {
+      updateWidgetState: (id, state, bounds) => {
         applyMutation((instances) =>
-          updateWidgetStateMutation(instances, id, state),
+          updateWidgetStateMutation(
+            instances,
+            id,
+            state,
+            resolvePlacementBounds(bounds),
+          ),
         );
       },
       replaceChatPinSessionId: (draftSessionId, backendSessionId) => {

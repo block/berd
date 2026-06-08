@@ -38,6 +38,7 @@ export interface LayoutItem {
   height: number;
   zIndex: number;
   titleOverride: string | null;
+  widgetState?: Record<string, unknown> | null;
 }
 
 export interface Layout {

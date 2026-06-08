@@ -5,9 +5,10 @@ import {
   snapPoint,
 } from "./snapToGrid";
 import {
-  clampWidgetSize,
+  clampWidgetSizeForInstance,
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
+  widgetSizeProfile,
 } from "../widgets/catalog";
 import type { WidgetInstance, WidgetSize } from "../widgets/types";
 
@@ -57,16 +58,16 @@ function requestedSizeFromOffset({
     x: offset.x / viewportZoom,
     y: offset.y / viewportZoom,
   };
-  const entry = HOME_WIDGET_CATALOG_BY_ID[instance.type];
+  const profile = widgetSizeProfile(instance);
 
-  if (!entry?.sizeBounds.lockAspectRatio) {
+  if (!profile.sizeBounds.lockAspectRatio) {
     return {
       width: startSize.width + delta.x,
       height: startSize.height + delta.y,
     };
   }
 
-  const aspectRatio = entry.defaultSize.height / entry.defaultSize.width;
+  const aspectRatio = profile.defaultSize.height / profile.defaultSize.width;
   const width =
     Math.abs(delta.x) >= Math.abs(delta.y / aspectRatio)
       ? startSize.width + delta.x
@@ -83,7 +84,7 @@ export function resolveWidgetResize({
   requestedSize,
   bounds,
 }: ResizeInput): ResolvedWidgetResize {
-  const size = clampWidgetSize(instance.type, requestedSize);
+  const size = clampWidgetSizeForInstance(instance, requestedSize);
   const position = clampResizePosition(instance, size, bounds);
 
   return {

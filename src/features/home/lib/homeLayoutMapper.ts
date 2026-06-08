@@ -1,9 +1,11 @@
 import type { LayoutItem, LayoutItemKind } from "@/features/layout/api/layout";
 import {
   clampWidgetSize,
+  clampWidgetSizeForInstance,
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
 } from "../widgets/catalog";
+import { clockModeOf } from "../widgets/clockWidgetMode";
 import type { CanvasBounds, WidgetInstance } from "../widgets/types";
 import { clampToBounds, snapPoint } from "./snapToGrid";
 
@@ -67,8 +69,71 @@ function syntheticTarget(instanceId: string): string {
   return `widget:${instanceId}`;
 }
 
+const DIGITAL_CLOCK_TARGET_SUFFIX = ":digital";
+const SIZE_BY_PROFILE_STATE_KEY = "__sizeByProfile";
+
+function isWidgetSize(
+  value: unknown,
+): value is { width: number; height: number } {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const size = value as Record<string, unknown>;
+  return (
+    typeof size.width === "number" &&
+    Number.isFinite(size.width) &&
+    size.width > 0 &&
+    typeof size.height === "number" &&
+    Number.isFinite(size.height) &&
+    size.height > 0
+  );
+}
+
+function readSizeByProfile(
+  state: Record<string, unknown> | null | undefined,
+): Record<string, { width: number; height: number }> | undefined {
+  const raw = state?.[SIZE_BY_PROFILE_STATE_KEY];
+  if (typeof raw !== "object" || raw === null) {
+    return undefined;
+  }
+
+  const entries = Object.entries(raw).filter(
+    (entry): entry is [string, { width: number; height: number }] =>
+      typeof entry[0] === "string" && isWidgetSize(entry[1]),
+  );
+  if (entries.length === 0) {
+    return undefined;
+  }
+
+  return Object.fromEntries(entries);
+}
+
+function clockStateFromTarget(
+  targetId: string,
+): Record<string, unknown> | undefined {
+  return targetId.endsWith(DIGITAL_CLOCK_TARGET_SUFFIX)
+    ? { mode: "digital" }
+    : undefined;
+}
+
+function mergeState(
+  ...states: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+  const merged = Object.assign({}, ...states.filter(Boolean));
+  return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function persistedClockStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  const sizeByProfile = readSizeByProfile(item.widgetState);
+  return sizeByProfile
+    ? { [SIZE_BY_PROFILE_STATE_KEY]: sizeByProfile }
+    : undefined;
+}
+
 function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
-  if (isSyntheticTarget(item.targetId)) {
+  if (item.kind !== "clock" && isSyntheticTarget(item.targetId)) {
     return undefined;
   }
 
@@ -82,7 +147,10 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
     case "automation":
       return { automationId: item.targetId };
     case "clock":
-      return undefined;
+      return mergeState(
+        clockStateFromTarget(item.targetId),
+        persistedClockStateFromItem(item),
+      );
     case "stickyNote":
       return { noteId: item.targetId };
     case "skill":
@@ -92,6 +160,20 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
       return exhaustive;
     }
   }
+}
+
+function widgetStateForLayoutItem(
+  instance: WidgetInstance,
+  kind: HomeLayoutKind,
+): Record<string, unknown> | undefined {
+  if (kind !== "clock") {
+    return undefined;
+  }
+
+  const sizeByProfile = readSizeByProfile(instance.state);
+  return sizeByProfile
+    ? { [SIZE_BY_PROFILE_STATE_KEY]: sizeByProfile }
+    : undefined;
 }
 
 function nonEmptyStateString(value: unknown): string | null {
@@ -105,7 +187,9 @@ function targetIdForWidget(
   const state = instance.state ?? {};
   switch (kind) {
     case "clock":
-      return syntheticTarget(instance.id);
+      return clockModeOf(instance) === "digital"
+        ? `${syntheticTarget(instance.id)}${DIGITAL_CLOCK_TARGET_SUFFIX}`
+        : syntheticTarget(instance.id);
     case "stickyNote":
       return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
     case "persona":
@@ -143,11 +227,20 @@ export function layoutItemsToHomeWidgets(
     if (!size) {
       return [];
     }
-    const widgetSize = clampWidgetSize(type, {
-      width: item.width,
-      height: item.height,
-    });
     const state = stateForItem(item);
+    const widgetSize = clampWidgetSizeForInstance(
+      {
+        id: item.id,
+        type,
+        x: 0,
+        y: 0,
+        z: item.zIndex,
+        width: item.width,
+        height: item.height,
+        ...(state ? { state } : {}),
+      },
+      { width: item.width, height: item.height },
+    );
     return [
       {
         id: item.id,
@@ -175,6 +268,7 @@ export function homeWidgetsToLayoutItems(
       return [];
     }
     const size = widgetSizeForInstance(instance);
+    const widgetState = widgetStateForLayoutItem(instance, kind);
     return [
       {
         id: instance.id,
@@ -186,6 +280,7 @@ export function homeWidgetsToLayoutItems(
         height: size.height,
         zIndex: instance.z,
         titleOverride: null,
+        ...(widgetState ? { widgetState } : {}),
       },
     ];
   });

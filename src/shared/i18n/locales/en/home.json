@@ -22,7 +22,9 @@
     "clock": {
       "label": "Clock",
       "description": "Time",
-      "current": "Current time"
+      "current": "Current time",
+      "toggleToDigital": "Switch to digital clock",
+      "toggleToAnalog": "Switch to analog clock"
     },
     "agentPin": {
       "label": "Pin an agent",

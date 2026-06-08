@@ -282,6 +282,143 @@ describe("homeLayoutMapper", () => {
     ]);
   });
 
+  describe("clock mode persistence round-trip", () => {
+    it("encodes digital mode into the clock targetId and round-trips it", () => {
+      const digitalClock = {
+        id: "clk-1",
+        type: "clock",
+        x: 100,
+        y: 50,
+        z: 3,
+        width: 264,
+        height: 104,
+        state: { mode: "digital" },
+      } as const;
+
+      const [item] = homeWidgetsToLayoutItems([{ ...digitalClock }]);
+      expect(item.kind).toBe("clock");
+      expect(item.targetId.endsWith(":digital")).toBe(true);
+      expect(item.width).toBe(264);
+      expect(item.height).toBe(104);
+
+      const [restored] = layoutItemsToHomeWidgets([item]);
+      expect(restored.state).toEqual({ mode: "digital" });
+      expect(restored.width).toBe(264);
+      expect(restored.height).toBe(104);
+    });
+
+    it("leaves an analog clock with a plain synthetic target and no state", () => {
+      const analogClock = {
+        id: "clk-2",
+        type: "clock",
+        x: 0,
+        y: 0,
+        z: 1,
+        width: 240,
+        height: 240,
+      } as const;
+
+      const [item] = homeWidgetsToLayoutItems([{ ...analogClock }]);
+      expect(item.targetId).toBe("widget:clk-2");
+      expect(item.targetId.includes(":digital")).toBe(false);
+
+      const [restored] = layoutItemsToHomeWidgets([item]);
+      expect(restored.state).toBeUndefined();
+      expect(restored.width).toBe(240);
+      expect(restored.height).toBe(240);
+    });
+
+    it("reshapes a persisted digital clock to the digital profile on load", () => {
+      // Simulate a stored digital clock item directly.
+      const storedDigital = {
+        id: "clk-3",
+        kind: "clock" as const,
+        targetId: "widget:clk-3:digital",
+        centerX: 200,
+        centerY: 200,
+        width: 264,
+        height: 104,
+        zIndex: 2,
+        titleOverride: null,
+      };
+      const [restored] = layoutItemsToHomeWidgets([storedDigital]);
+      expect(restored.state).toEqual({ mode: "digital" });
+      expect(restored.width).toBe(264);
+      expect(restored.height).toBe(104);
+    });
+
+    it("round-trips clock per-mode sizes through persisted widget state", () => {
+      const digitalHeight = 360 * (104 / 264);
+      const analogClock: WidgetInstance = {
+        id: "00000000-0000-0000-0000-000000000004",
+        type: "clock",
+        x: 100,
+        y: 50,
+        z: 3,
+        width: 300,
+        height: 300,
+        state: {
+          __sizeByProfile: {
+            "264x104": { width: 360, height: digitalHeight },
+          },
+        },
+      };
+
+      const [analogItem] = homeWidgetsToLayoutItems([analogClock]);
+      expect(analogItem.widgetState).toEqual({
+        __sizeByProfile: {
+          "264x104": { width: 360, height: digitalHeight },
+        },
+      });
+
+      const [restoredAnalog] = layoutItemsToHomeWidgets([analogItem]);
+      expect(restoredAnalog).toMatchObject({
+        state: {
+          __sizeByProfile: {
+            "264x104": { width: 360, height: digitalHeight },
+          },
+        },
+        width: 300,
+        height: 300,
+      });
+
+      const digitalClock: WidgetInstance = {
+        ...restoredAnalog,
+        state: {
+          ...restoredAnalog.state,
+          mode: "digital",
+          __sizeByProfile: {
+            "240x240": { width: 300, height: 300 },
+          },
+        },
+        width: 360,
+        height: digitalHeight,
+      };
+
+      const [digitalItem] = homeWidgetsToLayoutItems([digitalClock]);
+      expect(digitalItem.targetId).toBe(
+        "widget:00000000-0000-0000-0000-000000000004:digital",
+      );
+      expect(digitalItem.widgetState).toEqual({
+        __sizeByProfile: {
+          "240x240": { width: 300, height: 300 },
+        },
+      });
+
+      const [restoredDigital] = layoutItemsToHomeWidgets([digitalItem]);
+      expect(restoredDigital).toMatchObject({
+        state: {
+          mode: "digital",
+          __sizeByProfile: {
+            "240x240": { width: 300, height: 300 },
+          },
+        },
+        width: 360,
+        height: digitalHeight,
+      });
+    });
+  });
+
   it("returns only missing default sticky notes", () => {
     const defaultStickies = createDefaultStickyNoteWidgets();
     const missingStickies = missingDefaultStickyNoteWidgets([

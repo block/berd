@@ -107,6 +107,8 @@ pub struct LayoutItem {
     height: f64,
     z_index: i32,
     title_override: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    widget_state: Option<serde_json::Value>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash)]
@@ -257,6 +259,7 @@ struct LayoutItemRow {
     height: f64,
     z_index: i64,
     title_override: Option<String>,
+    widget_state: Option<String>,
 }
 
 #[tauri::command]
@@ -452,10 +455,16 @@ async fn save_layout_items_in_pool(
     }
 
     for (item, sort_seq) in assigned_items {
+        let widget_state = item
+            .widget_state
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(|error| format!("Failed to serialize layout item widgetState: {error}"))?;
         if let Err(error) = sqlx::query(
             "INSERT INTO layout_items (
-                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                layout_id, id, kind, target_id, center_x, center_y, width, height, z_index, sort_seq, title_override, widget_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&layout_id)
         .bind(item.id)
@@ -468,6 +477,7 @@ async fn save_layout_items_in_pool(
         .bind(item.z_index)
         .bind(sort_seq)
         .bind(item.title_override)
+        .bind(widget_state)
         .execute(&mut *conn)
         .await
         .map_err(db_error)
@@ -646,7 +656,7 @@ async fn read_layout(pool: &SqlitePool, layout_id: &str) -> Result<Layout, Strin
     .map_err(db_error)?;
 
     let item_rows = sqlx::query_as::<_, LayoutItemRow>(
-        "SELECT id, kind, target_id, center_x, center_y, width, height, z_index, title_override
+        "SELECT id, kind, target_id, center_x, center_y, width, height, z_index, title_override, widget_state
          FROM layout_items
          WHERE layout_id = ?
          ORDER BY z_index ASC, sort_seq ASC, id ASC",
@@ -880,6 +890,11 @@ fn layout_item_from_row(row: LayoutItemRow) -> Result<Option<LayoutItem>, String
         z_index: i32::try_from(row.z_index)
             .map_err(|_| "Stored zIndex is outside the supported range".to_string())?,
         title_override: row.title_override,
+        widget_state: row
+            .widget_state
+            .map(|value| serde_json::from_str(&value))
+            .transpose()
+            .map_err(|error| format!("Stored widgetState is invalid JSON: {error}"))?,
     }))
 }
 
@@ -958,6 +973,7 @@ mod tests {
             height: 80.0,
             z_index,
             title_override: None,
+            widget_state: None,
         }
     }
 
@@ -1262,6 +1278,59 @@ mod tests {
                 .await
                 .expect("next sort seq");
         assert_eq!(next_sort_seq, 4);
+    }
+
+    #[tokio::test]
+    async fn save_layout_items_round_trips_widget_state() {
+        let state = test_state().await;
+        let clock_id = "00000000-0000-0000-0000-000000000001";
+        let mut clock = item(
+            clock_id,
+            LayoutItemKind::Clock,
+            "widget:00000000-0000-0000-0000-000000000001",
+            1,
+        );
+        clock.widget_state = Some(json!({
+            "__sizeByProfile": {
+                "264x104": {
+                    "width": 360,
+                    "height": 141.8181818181818
+                }
+            }
+        }));
+
+        let result = save_layout_items_in_pool(
+            &state.pool,
+            SaveLayoutItemsRequest {
+                layout_id: HOME_LAYOUT_ID.to_string(),
+                expected_revision: 0,
+                replace_kinds: all_known_kinds(),
+                items: vec![clock],
+            },
+        )
+        .await
+        .expect("save layout item with widget state");
+
+        let LayoutMutationResult::Saved { layout } = result else {
+            panic!("expected saved layout");
+        };
+        let saved_clock = layout
+            .items
+            .iter()
+            .find(|item| item.id == clock_id)
+            .expect("saved clock item");
+
+        assert_eq!(
+            saved_clock.widget_state,
+            Some(json!({
+                "__sizeByProfile": {
+                    "264x104": {
+                        "width": 360,
+                        "height": 141.8181818181818
+                    }
+                }
+            }))
+        );
     }
 
     #[tokio::test]

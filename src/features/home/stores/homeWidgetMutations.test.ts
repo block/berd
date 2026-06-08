@@ -6,6 +6,7 @@ import {
   cleanUpWidgetsMutation,
   moveWidgetMutation,
   resizeWidgetMutation,
+  updateWidgetStateMutation,
 } from "./homeWidgetMutations";
 
 const CONSTRAINTS: LayoutConstraints = {
@@ -178,5 +179,127 @@ describe("homeWidgetMutations", () => {
     ];
 
     expect(cleanUpWidgetsMutation(widgets)).toBeNull();
+  });
+});
+
+describe("updateWidgetStateMutation — clock mode resize", () => {
+  const analogClock: WidgetInstance = {
+    id: "c1",
+    type: "clock",
+    x: 0,
+    y: 0,
+    z: 1,
+    width: 240,
+    height: 240,
+  };
+
+  it("snaps to the digital profile size when toggled to digital", () => {
+    const next = updateWidgetStateMutation([analogClock], "c1", {
+      mode: "digital",
+    });
+    expect(next?.[0]).toMatchObject({
+      width: 264,
+      height: 104,
+      state: { mode: "digital" },
+    });
+  });
+
+  it("preserves the clock center when toggled to another size profile", () => {
+    const next = updateWidgetStateMutation(
+      [{ ...analogClock, x: 120, y: 150, width: 300, height: 300 }],
+      "c1",
+      { mode: "digital" },
+    );
+
+    expect(next?.[0]).toMatchObject({
+      x: 138,
+      y: 248,
+      width: 264,
+      height: 104,
+    });
+    expect((next?.[0]?.x ?? 0) + (next?.[0]?.width ?? 0) / 2).toBe(270);
+    expect((next?.[0]?.y ?? 0) + (next?.[0]?.height ?? 0) / 2).toBe(300);
+  });
+
+  it("clamps a center-preserving toggle within layout bounds", () => {
+    const next = updateWidgetStateMutation(
+      [{ ...analogClock, x: 120, y: 120, width: 300, height: 300 }],
+      "c1",
+      { mode: "digital" },
+      CONSTRAINTS,
+    );
+
+    expect(next?.[0]).toMatchObject({
+      x: 108,
+      y: 188,
+      width: 264,
+      height: 104,
+    });
+  });
+
+  it("snaps back to the analog profile size when toggled to analog", () => {
+    const digital: WidgetInstance = {
+      ...analogClock,
+      width: 264,
+      height: 104,
+      state: { mode: "digital" },
+    };
+    const next = updateWidgetStateMutation([digital], "c1", { mode: "analog" });
+    expect(next?.[0]).toMatchObject({
+      width: 240,
+      height: 240,
+      state: { mode: "analog" },
+    });
+  });
+
+  it("does not resize when a non-profile state key changes", () => {
+    const note: WidgetInstance = {
+      id: "n1",
+      type: "stickyNote",
+      x: 0,
+      y: 0,
+      z: 1,
+      width: 224,
+      height: 196,
+      state: { noteId: "a" },
+    };
+    const next = updateWidgetStateMutation([note], "n1", { noteId: "b" });
+    expect(next?.[0]).toMatchObject({ width: 224, height: 196 });
+  });
+
+  it("remembers a custom size per mode across toggles", () => {
+    // The user resized the analog face to 300x300.
+    const resizedAnalog: WidgetInstance = {
+      ...analogClock,
+      width: 300,
+      height: 300,
+    };
+
+    // First toggle to digital: no digital size remembered yet -> digital default.
+    const toDigital = updateWidgetStateMutation([resizedAnalog], "c1", {
+      mode: "digital",
+    });
+    expect(toDigital?.[0]).toMatchObject({ width: 264, height: 104 });
+
+    // The user then resizes the digital readout (committed via resize mutation).
+    const resizedDigital: WidgetInstance = {
+      ...(toDigital?.[0] as WidgetInstance),
+      width: 360,
+      height: Math.round(360 * (104 / 264)),
+    };
+
+    // Toggle back to analog: restores the remembered 300x300, not the 240 default.
+    const backToAnalog = updateWidgetStateMutation([resizedDigital], "c1", {
+      mode: "analog",
+    });
+    expect(backToAnalog?.[0]).toMatchObject({ width: 300, height: 300 });
+
+    // Toggle to digital again: restores the remembered ~360-wide digital size.
+    const digitalAgain = updateWidgetStateMutation(
+      [backToAnalog?.[0] as WidgetInstance],
+      "c1",
+      { mode: "digital" },
+    );
+    expect(digitalAgain?.[0]).toMatchObject({ width: 360 });
   });
 });

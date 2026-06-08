@@ -9,10 +9,13 @@ import {
 } from "../lib/snapToGrid";
 import {
   clampWidgetSize,
+  clampWidgetSizeForInstance,
   HOME_WIDGET_CATALOG,
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
+  widgetSizeProfile,
 } from "../widgets/catalog";
+import type { WidgetSizeProfile } from "../widgets/types";
 import type {
   MoveWidgetOptions,
   WidgetInstance,
@@ -153,6 +156,24 @@ function groupedForCleanUp(instances: WidgetInstance[]): WidgetInstance[][] {
   }
 
   return [...groups.values()];
+}
+
+/** Reserved state key holding the last size used in each size profile, so a
+ *  profile-switching widget (the clock's analog<->digital toggle) restores the
+ *  user's custom size for the mode they return to instead of the default. */
+const SIZE_BY_PROFILE_STATE_KEY = "__sizeByProfile";
+
+function profileKey(profile: WidgetSizeProfile): string {
+  return `${profile.defaultSize.width}x${profile.defaultSize.height}`;
+}
+
+function readSizeMemory(
+  state: Record<string, unknown> | undefined,
+): Record<string, WidgetSize> {
+  const raw = state?.[SIZE_BY_PROFILE_STATE_KEY];
+  return raw && typeof raw === "object"
+    ? (raw as Record<string, WidgetSize>)
+    : {};
 }
 
 function isStateMergeNoop(
@@ -428,6 +449,7 @@ export function updateWidgetStateMutation(
   instances: WidgetInstance[],
   id: string,
   state: Record<string, unknown>,
+  bounds?: LayoutConstraints,
 ): WidgetInstance[] | null {
   const target = instances.find((instance) => instance.id === id);
   if (!target) {
@@ -439,7 +461,49 @@ export function updateWidgetStateMutation(
   }
 
   const nextState = { ...(target.state ?? {}), ...state };
-  return instances.map((instance) =>
-    instance.id === id ? { ...instance, state: nextState } : instance,
-  );
+  const nextInstance: WidgetInstance = { ...target, state: nextState };
+
+  const prevProfile = widgetSizeProfile(target);
+  const nextProfile = widgetSizeProfile(nextInstance);
+  const profileChanged =
+    prevProfile.defaultSize.width !== nextProfile.defaultSize.width ||
+    prevProfile.defaultSize.height !== nextProfile.defaultSize.height;
+
+  if (!profileChanged) {
+    return instances.map((instance) =>
+      instance.id === id ? nextInstance : instance,
+    );
+  }
+
+  // The state change moved the instance to a different size profile (the
+  // clock's analog<->digital toggle). Remember the size we're leaving, then
+  // restore the size last used in the profile we're entering — falling back to
+  // that profile's default the first time it's seen. This lets each face keep
+  // its own custom size across toggles.
+  const sizeMemory = {
+    ...readSizeMemory(target.state),
+    [profileKey(prevProfile)]: widgetSizeForInstance(target),
+  };
+  const remembered = sizeMemory[profileKey(nextProfile)];
+  const nextSize = remembered
+    ? clampWidgetSizeForInstance(nextInstance, remembered)
+    : nextProfile.defaultSize;
+  const prevSize = widgetSizeForInstance(target);
+  const centeredPosition = {
+    x: Math.round(target.x + (prevSize.width - nextSize.width) / 2),
+    y: Math.round(target.y + (prevSize.height - nextSize.height) / 2),
+  };
+  const position = isLayoutConstraints(bounds)
+    ? clampToLayoutConstraints(centeredPosition, nextSize, bounds)
+    : centeredPosition;
+
+  const sized: WidgetInstance = {
+    ...nextInstance,
+    ...position,
+    width: nextSize.width,
+    height: nextSize.height,
+    state: { ...nextState, [SIZE_BY_PROFILE_STATE_KEY]: sizeMemory },
+  };
+
+  return instances.map((instance) => (instance.id === id ? sized : instance));
 }

@@ -5,6 +5,7 @@ import {
   type MouseEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
+import type { LayoutConstraints } from "@/features/layout/api/layout";
 import { HOME_WIDGET_CATALOG_BY_ID } from "../widgets/catalog";
 import type {
   WidgetInstance,
@@ -18,6 +19,7 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   instance: WidgetInstance;
   currentMaxZ: number;
   mutations: WidgetMutationHandlers;
+  constraints?: LayoutConstraints | null;
   canvasGestureActive?: boolean;
   widgetResizePreviewActive?: boolean;
   shouldIgnoreActivation?: () => boolean;
@@ -44,6 +46,7 @@ export function WidgetFrame({
   instance,
   currentMaxZ,
   mutations,
+  constraints,
   canvasGestureActive = false,
   widgetResizePreviewActive = false,
   shouldIgnoreActivation = () => false,
@@ -66,8 +69,9 @@ export function WidgetFrame({
   const [pill, setPill] = useState<UnpinPillState>(CLOSED_PILL);
 
   const handleUpdateState = useCallback(
-    (next: Record<string, unknown>) => updateWidgetState(instance.id, next),
-    [instance.id, updateWidgetState],
+    (next: Record<string, unknown>) =>
+      updateWidgetState(instance.id, next, constraints ?? undefined),
+    [constraints, instance.id, updateWidgetState],
   );
 
   const handleRemove = useCallback(() => {

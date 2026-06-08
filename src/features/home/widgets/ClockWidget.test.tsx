@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ClockWidget } from "./ClockWidget";
 import type { WidgetRenderProps } from "./types";
@@ -17,7 +17,9 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/shared/i18n", () => ({
   useLocaleFormatting: () => ({
+    locale: "en",
     formatDate: () => "Sunday, June 1 at 2:30 PM",
+    getTimeParts: () => ({ hour: "2", minute: "30", dayPeriod: "PM" }),
   }),
 }));
 
@@ -55,5 +57,42 @@ describe("ClockWidget", () => {
     });
 
     expect(container.innerHTML).toContain("rotate(276deg)");
+  });
+
+  it("toggles to digital when the toggle button is clicked", () => {
+    const onUpdateState = vi.fn();
+    render(<ClockWidget {...clockWidgetProps} onUpdateState={onUpdateState} />);
+    fireEvent.click(
+      screen.getByRole("button", { name: "widgets.clock.toggleToDigital" }),
+    );
+    expect(onUpdateState).toHaveBeenCalledWith({ mode: "digital" });
+  });
+
+  it("does not toggle while a drag/resize gesture is active", () => {
+    const onUpdateState = vi.fn();
+    render(
+      <ClockWidget
+        {...clockWidgetProps}
+        onUpdateState={onUpdateState}
+        shouldIgnoreActivation={() => true}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "widgets.clock.toggleToDigital" }),
+    );
+    expect(onUpdateState).not.toHaveBeenCalled();
+  });
+
+  it("renders a digital readout (no second hand) when mode is digital", () => {
+    const { container } = render(
+      <ClockWidget
+        {...clockWidgetProps}
+        instance={{ ...clockWidgetProps.instance, state: { mode: "digital" } }}
+      />,
+    );
+    expect(screen.getByText("2")).toBeInTheDocument();
+    expect(screen.getByText("30")).toBeInTheDocument();
+    expect(screen.getByText("PM")).toBeInTheDocument();
+    expect(container.querySelector(".bg-clock-hand")).not.toBeInTheDocument();
   });
 });

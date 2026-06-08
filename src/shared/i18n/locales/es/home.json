@@ -22,7 +22,9 @@
     "clock": {
       "label": "Reloj",
       "description": "Hora",
-      "current": "Hora actual"
+      "current": "Hora actual",
+      "toggleToDigital": "Cambiar a reloj digital",
+      "toggleToAnalog": "Cambiar a reloj analógico"
     },
     "agentPin": {
       "label": "Fijar un agente",

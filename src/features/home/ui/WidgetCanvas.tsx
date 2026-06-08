@@ -11,6 +11,7 @@ import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import {
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
+  widgetSizeProfile,
 } from "../widgets/catalog";
 import type {
   WidgetInstance,
@@ -484,7 +485,11 @@ export function WidgetCanvas({
                 height: previewSize.height,
               }
             : instance;
-          const defaultSize = catalogEntry.defaultSize;
+          // Scale text against the instance's *active* size profile, not the
+          // static catalog default. The clock's digital profile (landscape)
+          // differs from its analog default (square); using the catalog default
+          // here pinned the digital font to its clamp floor.
+          const defaultSize = widgetSizeProfile(instance).defaultSize;
           const widgetScale = Math.min(
             size.width / defaultSize.width,
             size.height / defaultSize.height,
@@ -534,6 +539,7 @@ export function WidgetCanvas({
               >
                 <WidgetFrame
                   instance={renderInstance}
+                  constraints={constraints}
                   canvasGestureActive={canvasGestureActive}
                   widgetResizePreviewActive={isResizePreview}
                   currentMaxZ={currentMaxZ}

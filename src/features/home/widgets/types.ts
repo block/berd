@@ -33,6 +33,11 @@ export interface WidgetSizeBounds {
   lockAspectRatio?: boolean;
 }
 
+export interface WidgetSizeProfile {
+  defaultSize: WidgetSize;
+  sizeBounds: WidgetSizeBounds;
+}
+
 export interface WidgetInstance {
   id: string;
   type: string;
@@ -75,6 +80,10 @@ export interface WidgetCatalogEntry {
   sizeBounds: WidgetSizeBounds;
   /** Optional Tailwind classes for the canvas resize handle (defaults to corner). */
   resizeHandleClassName?: string;
+  /** Optional per-instance size profile. When present, sizing/resize use the
+   *  returned profile instead of the entry's static defaultSize/sizeBounds.
+   *  Only widgets whose shape depends on state (the clock) provide this. */
+  resolveProfile?: (instance: WidgetInstance) => WidgetSizeProfile;
   /** Renderable component for this widget type. Entries without a Component
    *  are catalog stubs — they appear in data but are not rendered on the canvas
    *  until the component is supplied (Task C fills in the pin types). */
@@ -118,7 +127,11 @@ export interface WidgetMutationHandlers {
   ) => void;
   bumpZ: (id: string) => void;
   removeWidget: (id: string) => void;
-  updateWidgetState: (id: string, state: Record<string, unknown>) => void;
+  updateWidgetState: (
+    id: string,
+    state: Record<string, unknown>,
+    bounds?: LayoutConstraints,
+  ) => void;
 }
 
 export type AgentPinState = { agentId: string };
