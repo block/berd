@@ -602,11 +602,9 @@ export function ChatInput({
     agentToolsTip !== null &&
     dismissedAgentToolsTipId !== agentToolsTip.id;
 
-  useEffect(() => {
-    if (!agentToolsTip) {
-      setDismissedAgentToolsTipId(null);
-    }
-  }, [agentToolsTip]);
+  if (!agentToolsTip && dismissedAgentToolsTipId !== null) {
+    setDismissedAgentToolsTipId(null);
+  }
 
   const handleClearStickyPersona = useCallback(() => {
     onPersonaChange?.(null);

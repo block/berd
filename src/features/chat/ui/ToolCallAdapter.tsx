@@ -44,6 +44,12 @@ interface ToolCallAdapterProps {
 
 function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
   const [elapsed, setElapsed] = useState(0);
+  const timerKey = `${status}:${startedAt ?? ""}`;
+  const [previousTimerKey, setPreviousTimerKey] = useState(timerKey);
+  if (previousTimerKey !== timerKey) {
+    setPreviousTimerKey(timerKey);
+    setElapsed(0);
+  }
 
   useEffect(() => {
     if (status === "in_progress") {
@@ -54,10 +60,9 @@ function useElapsedTime(status: ToolCallStatus, startedAt?: number) {
       }, 1000);
       return () => clearInterval(interval);
     }
-    setElapsed(0);
   }, [status, startedAt]);
 
-  return elapsed;
+  return status === "in_progress" ? elapsed : 0;
 }
 
 function getLocationKind(path: string): "file" | "folder" | "path" {

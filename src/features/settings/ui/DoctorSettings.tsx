@@ -80,15 +80,18 @@ function versionLines(check: DoctorCheck): string[] {
 
 function useLoadingElapsedSeconds(loading: boolean): number {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [previousLoading, setPreviousLoading] = useState(loading);
+  if (previousLoading !== loading) {
+    setPreviousLoading(loading);
+    setElapsedSeconds(0);
+  }
 
   useEffect(() => {
     if (!loading) {
-      setElapsedSeconds(0);
       return;
     }
 
     const startedAt = Date.now();
-    setElapsedSeconds(0);
     const interval = window.setInterval(() => {
       setElapsedSeconds(Math.floor((Date.now() - startedAt) / 1000));
     }, 1000);
@@ -96,7 +99,7 @@ function useLoadingElapsedSeconds(loading: boolean): number {
     return () => window.clearInterval(interval);
   }, [loading]);
 
-  return elapsedSeconds;
+  return loading ? elapsedSeconds : 0;
 }
 
 export function formatDebugReport(report: DoctorReport): string {

@@ -131,12 +131,14 @@ export function useResolvedAgentModelPicker({
     [gooseDefaultSelection],
   );
 
+  if (selectedAgentId !== "goose" && gooseDefaultSelection !== null) {
+    setGooseDefaultSelection(null);
+  }
+
   useEffect(() => {
     if (selectedAgentId !== "goose") {
-      setGooseDefaultSelection(null);
       return;
     }
-
     let cancelled = false;
 
     const loadGooseDefaultSelection = async () => {

@@ -23,12 +23,16 @@ export function AutomationHistory({
   onSelectRun: (runKey: string | null) => void;
 }) {
   const { t } = useTranslation("automations");
-  const historyQuery = useQuery({
+  const {
+    data: historyData,
+    error: historyError,
+    isLoading: isHistoryLoading,
+  } = useQuery({
     queryKey: ["automationTileResults", tileId],
     queryFn: () => getAutomationTileResults(tileId),
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });
-  const results = keyAutomationResults(historyQuery.data?.tilesResults ?? []);
+  const results = keyAutomationResults(historyData?.tilesResults ?? []);
   const selectedRun = results.find((item) => item.runKey === selectedRunKey);
   const scrollSelectedRow = useCallback((node: HTMLDivElement | null) => {
     node?.scrollIntoView({
@@ -36,7 +40,7 @@ export function AutomationHistory({
     });
   }, []);
 
-  if (historyQuery.isLoading) {
+  if (isHistoryLoading) {
     return (
       <div className="flex min-h-48 items-center justify-center">
         <Spinner className="size-5 text-primary" />
@@ -44,11 +48,11 @@ export function AutomationHistory({
     );
   }
 
-  if (historyQuery.error) {
+  if (historyError) {
     return (
       <EmptyState
         title={t("history.loadErrorTitle")}
-        body={historyQuery.error.message}
+        body={historyError.message}
       />
     );
   }

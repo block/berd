@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, CircleIcon, ClockIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -190,24 +190,22 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   const hasExpandedToolItem = toolItems.some((item) =>
     expandedKeys.has(item.key),
   );
-  useEffect(() => {
-    if (
-      wasActiveChainRef.current &&
-      !isActiveChain &&
-      !userInteractedRef.current
-    ) {
-      setChainExpanded(false);
-      setExpandedKeys(new Set());
-      setShowInternalSteps(false);
-    }
+  if (
+    wasActiveChainRef.current &&
+    !isActiveChain &&
+    !userInteractedRef.current
+  ) {
+    setChainExpanded(false);
+    setExpandedKeys(new Set());
+    setShowInternalSteps(false);
+  }
 
-    if (!wasGroupedRef.current && grouped && hasExpandedToolItem) {
-      setChainExpanded(true);
-    }
+  if (!wasGroupedRef.current && grouped && hasExpandedToolItem) {
+    setChainExpanded(true);
+  }
 
-    wasActiveChainRef.current = isActiveChain;
-    wasGroupedRef.current = grouped;
-  }, [grouped, hasExpandedToolItem, isActiveChain]);
+  wasActiveChainRef.current = isActiveChain;
+  wasGroupedRef.current = grouped;
 
   const handleOpenChange = (key: string, open: boolean) => {
     userInteractedRef.current = true;

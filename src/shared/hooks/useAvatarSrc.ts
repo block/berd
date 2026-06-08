@@ -78,6 +78,14 @@ export function useAvatarMediaState(
   const [loading, setLoading] = useState(false);
   const [unavailable, setUnavailable] = useState(false);
   const [retryToken, setRetryToken] = useState(0);
+  const loadKey = `${shouldLoadCachedAvatar}:${avatarRef}:${retryToken}:${Boolean(queryClient)}`;
+  const [previousLoadKey, setPreviousLoadKey] = useState(loadKey);
+  if (previousLoadKey !== loadKey) {
+    setPreviousLoadKey(loadKey);
+    setRemoteMedia(undefined);
+    setLoading(shouldLoadCachedAvatar && Boolean(queryClient));
+    setUnavailable(shouldLoadCachedAvatar && !queryClient);
+  }
 
   const retry = useCallback(() => {
     setRetryToken((value) => value + 1);
@@ -120,22 +128,13 @@ export function useAvatarMediaState(
   // biome-ignore lint/correctness/useExhaustiveDependencies: retryToken intentionally retriggers the same cached lookup when retry is called.
   useEffect(() => {
     if (!shouldLoadCachedAvatar) {
-      setRemoteMedia(undefined);
-      setLoading(false);
-      setUnavailable(false);
       return;
     }
 
     let cancelled = false;
-    setRemoteMedia(undefined);
     if (!queryClient) {
-      setLoading(false);
-      setUnavailable(true);
       return;
     }
-
-    setLoading(true);
-    setUnavailable(false);
 
     void queryClient
       .fetchQuery({

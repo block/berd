@@ -81,7 +81,7 @@ function hasCachedCollectionAssets({
 export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [catalog, setCatalog] = useState<AvatarCatalog | null>(null);
   const [catalogRetryToken, setCatalogRetryToken] = useState(0);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(enabled);
   const [cacheChecking, setCacheChecking] = useState(false);
   const [error, setError] = useState(false);
   const [errorCode, setErrorCode] = useState<AvatarLibraryErrorCode | null>(
@@ -96,6 +96,18 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
   const [cachedAvatarMediaById, setCachedAvatarMediaById] = useState<
     Record<string, CachedAvatarMediaEntry>
   >({});
+  const catalogLoadKey = enabled ? `${catalogRetryToken}` : "disabled";
+  const [previousCatalogLoadKey, setPreviousCatalogLoadKey] =
+    useState(catalogLoadKey);
+  if (previousCatalogLoadKey !== catalogLoadKey) {
+    setPreviousCatalogLoadKey(catalogLoadKey);
+    if (enabled) {
+      setLoading(true);
+      setCacheChecking(false);
+      setError(false);
+      setErrorCode(null);
+    }
+  }
 
   useEffect(() => {
     if (!enabled) {
@@ -118,11 +130,6 @@ export function useAvatarLibrary(enabled: boolean): AvatarLibraryState {
     }
 
     let cancelled = false;
-    setLoading(true);
-    setCacheChecking(false);
-    setError(false);
-    setErrorCode(null);
-
     const loadCachedAvatarCollections = async (nextCatalog: AvatarCatalog) => {
       try {
         setCacheChecking(true);

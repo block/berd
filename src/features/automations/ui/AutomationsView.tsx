@@ -122,21 +122,26 @@ export function AutomationsWorkbench({
     [isRouteControlled, onRouteChange],
   );
 
-  const automationsQuery = useQuery({
+  const {
+    data: automationsData,
+    error: automationsError,
+    isLoading: isAutomationsLoading,
+    refetch: refetchAutomations,
+  } = useQuery({
     queryKey: ["automationTiles"],
     queryFn: getAutomationTiles,
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });
 
   const automations = useMemo(
-    () => automationsQuery.data?.tiles ?? [],
-    [automationsQuery.data?.tiles],
+    () => automationsData?.tiles ?? [],
+    [automationsData?.tiles],
   );
 
   useEffect(() => {
     if (!automations.length) {
       if (
-        !automationsQuery.isLoading &&
+        !isAutomationsLoading &&
         currentRoute.surface !== "overview" &&
         currentRoute.surface !== "builder"
       ) {
@@ -170,7 +175,7 @@ export function AutomationsWorkbench({
     }
   }, [
     automations,
-    automationsQuery.isLoading,
+    isAutomationsLoading,
     currentRoute.surface,
     detailAutomationId,
     pendingCreatedAutomationId,
@@ -184,14 +189,19 @@ export function AutomationsWorkbench({
     automations.find((tile) => tile.id === deleteAutomationId) ??
     (detailAutomationId === deleteAutomationId ? detailAutomation : undefined);
 
-  const detailQuery = useQuery({
+  const {
+    data: detailData,
+    error: detailError,
+    isLoading: isDetailLoading,
+    refetch: refetchDetail,
+  } = useQuery({
     queryKey: ["automationTile", detailAutomationId],
     queryFn: () => getAutomationTile(detailAutomationId ?? ""),
     enabled: Boolean(detailAutomationId),
     refetchInterval: AUTOMATIONS_REFETCH_INTERVAL_MS,
   });
 
-  const detailTile = detailQuery.data?.tileInfo ?? detailAutomation;
+  const detailTile = detailData?.tileInfo ?? detailAutomation;
   const detailTileId = detailTile?.id;
   const deleteAutomationName = deleteAutomation
     ? automationTitle(deleteAutomation, t("fallbacks.untitledAutomation"))
@@ -253,7 +263,7 @@ export function AutomationsWorkbench({
     // kgoose list propagation can lag tile creation, so refetch once more
     // after the immediate refresh.
     delayedRefetchTimeoutRef.current = setTimeout(() => {
-      void automationsQuery.refetch();
+      void refetchAutomations();
       delayedRefetchTimeoutRef.current = null;
     }, 1_500);
   };
@@ -330,8 +340,8 @@ export function AutomationsWorkbench({
       });
       await invalidateAutomationQueries();
       window.setTimeout(() => {
-        void automationsQuery.refetch();
-        void detailQuery.refetch();
+        void refetchAutomations();
+        void refetchDetail();
       }, 250);
     },
     onError: (error) => {
@@ -388,8 +398,6 @@ export function AutomationsWorkbench({
     setDeleteAutomationId(null);
   }, [setNavigationRoute]);
 
-  const { refetch: refetchAutomations } = automationsQuery;
-  const { refetch: refetchDetail } = detailQuery;
   const { mutate: duplicateMutate } = duplicateMutation;
   const { mutate: refreshMutate } = refreshMutation;
   const isUpdating = updateMutation.isPending;
@@ -506,7 +514,7 @@ export function AutomationsWorkbench({
           if (automationId) {
             selectCreatedAutomation(automationId);
           }
-          void automationsQuery.refetch().then(() => {
+          void refetchAutomations().then(() => {
             if (!automationId) return;
             scheduleDelayedAutomationsRefetch();
           });
@@ -515,7 +523,7 @@ export function AutomationsWorkbench({
           if (automationId) {
             selectCreatedAutomation(automationId);
           }
-          void automationsQuery.refetch().then(() => {
+          void refetchAutomations().then(() => {
             void refetchDetail();
           });
         }}
@@ -528,14 +536,14 @@ export function AutomationsWorkbench({
     <>
       <PageShell contentClassName="gap-6" contentWidth="default">
         {detailAutomationId ? (
-          detailQuery.isLoading && !detailTile ? (
+          isDetailLoading && !detailTile ? (
             <div className="space-y-4">
               <div className="h-7 w-64 rounded-md bg-muted" />
               <div className="h-40 rounded-md bg-muted" />
             </div>
           ) : detailTile ? (
             <>
-              {detailQuery.error ? (
+              {detailError ? (
                 <div className="mb-4">
                   <Badge variant="destructive">
                     <IconAlertTriangle aria-hidden="true" />
@@ -626,17 +634,17 @@ export function AutomationsWorkbench({
             </TabsList>
 
             <TabsContent value="overview" className="mt-6">
-              {automationsQuery.isLoading ? (
+              {isAutomationsLoading ? (
                 <div className="space-y-3">
                   <div className="h-[86px] rounded-md bg-card" />
                   <div className="h-[86px] rounded-md bg-card" />
                   <div className="h-[86px] rounded-md bg-card" />
                 </div>
-              ) : automationsQuery.error ? (
+              ) : automationsError ? (
                 <EmptyState
                   title={t("list.loadErrorTitle")}
                   body={errorMessage(
-                    automationsQuery.error,
+                    automationsError,
                     t("list.loadErrorTitle"),
                   )}
                 />

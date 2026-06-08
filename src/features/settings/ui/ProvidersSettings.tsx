@@ -183,11 +183,9 @@ export function ProvidersSettings({
   const showSetupDetourReturn =
     Boolean(onReturnToAgentDraft) && Boolean(setupDetourReadyProviderId);
 
-  useEffect(() => {
-    if (!onReturnToAgentDraft) {
-      setSetupDetourReadyProviderId(null);
-    }
-  }, [onReturnToAgentDraft]);
+  if (!onReturnToAgentDraft && setupDetourReadyProviderId !== null) {
+    setSetupDetourReadyProviderId(null);
+  }
 
   function handleProviderConnected(providerId: string) {
     if (onReturnToAgentDraft) {

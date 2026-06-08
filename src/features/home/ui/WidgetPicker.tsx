@@ -396,12 +396,14 @@ export function WidgetPicker({
     [instances],
   );
 
-  useEffect(() => {
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
     if (open) {
       setActivePanel(null);
       setQuery("");
     }
-  }, [open]);
+  }
 
   useEffect(() => {
     if (!open || activePanel !== "automation") {

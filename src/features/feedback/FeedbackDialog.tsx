@@ -95,6 +95,21 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
       return null;
     });
   }, []);
+  const [previousOpen, setPreviousOpen] = useState(open);
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
+    if (!open) {
+      doctorReportRef.current = null;
+      setTitle("");
+      setDescription("");
+      clearAttachments();
+      setIncludeLogs(false);
+      setError(null);
+      setSubmitting(false);
+      setSuccess(null);
+      setDiscardOpen(false);
+    }
+  }
 
   function resetForm() {
     setTitle("");
@@ -110,18 +125,8 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
   useEffect(() => {
     if (open) {
       startDoctorCheck();
-      return;
     }
-    doctorReportRef.current = null;
-    setTitle("");
-    setDescription("");
-    clearAttachments();
-    setIncludeLogs(false);
-    setError(null);
-    setSubmitting(false);
-    setSuccess(null);
-    setDiscardOpen(false);
-  }, [clearAttachments, open, startDoctorCheck]);
+  }, [open, startDoctorCheck]);
 
   const handleClose = () => {
     if (submitting) {

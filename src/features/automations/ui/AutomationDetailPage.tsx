@@ -125,8 +125,35 @@ export function AutomationDetailPage({
     tile.enableNotifications ?? false,
   );
   const [localError, setLocalError] = useState<string | null>(null);
-  const previousTileIdRef = useRef(tile.id);
+  const [previousTile, setPreviousTile] = useState(tile);
   const instructionsDraftRef = useRef(instructionsDraft);
+  if (previousTile !== tile) {
+    const nextSchedule = parseScheduleForm(tile.schedule);
+    const nextInstructions = instructionsToText(tile);
+    const tileIdChanged = previousTile.id !== tile.id;
+
+    setPreviousTile(tile);
+    setTitleDraft(tile.title ?? "");
+    if (
+      tileIdChanged ||
+      (!isEditingInstructions && instructionsSaveState === "idle") ||
+      (instructionsSaveState === "savedPendingRefresh" &&
+        nextInstructions.trim() === instructionsDraftRef.current.trim())
+    ) {
+      setInstructionsDraft(nextInstructions);
+    }
+    if (tileIdChanged) {
+      setIsEditingInstructions(false);
+      setInstructionsSaveState("idle");
+    }
+    setSchedulePreset(nextSchedule.preset);
+    setScheduleTime(nextSchedule.time);
+    setScheduleWeekday(nextSchedule.weekday);
+    setCustomSchedule(nextSchedule.customSchedule);
+    setTimeZoneDraft(automationTimeZone(tile));
+    setNotificationsDraft(tile.enableNotifications ?? false);
+    setLocalError(null);
+  }
   const timeZoneOptions = useMemo(
     () =>
       [
@@ -155,34 +182,6 @@ export function AutomationDetailPage({
   useEffect(() => {
     instructionsDraftRef.current = instructionsDraft;
   }, [instructionsDraft]);
-
-  useEffect(() => {
-    const nextSchedule = parseScheduleForm(tile.schedule);
-    const nextInstructions = instructionsToText(tile);
-    const tileIdChanged = previousTileIdRef.current !== tile.id;
-    previousTileIdRef.current = tile.id;
-
-    setTitleDraft(tile.title ?? "");
-    if (
-      tileIdChanged ||
-      (!isEditingInstructions && instructionsSaveState === "idle") ||
-      (instructionsSaveState === "savedPendingRefresh" &&
-        nextInstructions.trim() === instructionsDraftRef.current.trim())
-    ) {
-      setInstructionsDraft(nextInstructions);
-    }
-    if (tileIdChanged) {
-      setIsEditingInstructions(false);
-      setInstructionsSaveState("idle");
-    }
-    setSchedulePreset(nextSchedule.preset);
-    setScheduleTime(nextSchedule.time);
-    setScheduleWeekday(nextSchedule.weekday);
-    setCustomSchedule(nextSchedule.customSchedule);
-    setTimeZoneDraft(automationTimeZone(tile));
-    setNotificationsDraft(tile.enableNotifications ?? false);
-    setLocalError(null);
-  }, [tile, instructionsSaveState, isEditingInstructions]);
 
   useEffect(() => {
     if (instructionsSaveState === "requested" && isSaving) {

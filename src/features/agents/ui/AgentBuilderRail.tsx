@@ -95,6 +95,13 @@ export function AgentBuilderRail({
     useState<string | null>(null);
   const avatarLibrary = useAvatarLibrary(true);
   const missingDraftRecoveryKey = `${sessionId}:${targetAgentPath}`;
+  const [previousMissingDraftRecoveryKey, setPreviousMissingDraftRecoveryKey] =
+    useState(missingDraftRecoveryKey);
+  if (previousMissingDraftRecoveryKey !== missingDraftRecoveryKey) {
+    setPreviousMissingDraftRecoveryKey(missingDraftRecoveryKey);
+    setRecoveringMissingDraftKey(null);
+    setFailedMissingDraftRecoveryKey(null);
+  }
   const shouldRecoverMissingDraft =
     error === "missing" &&
     !data &&
@@ -125,12 +132,6 @@ export function AgentBuilderRail({
     recoveringMissingDraftKey,
     shouldRecoverMissingDraft,
   ]);
-
-  useEffect(() => {
-    void missingDraftRecoveryKey;
-    setRecoveringMissingDraftKey(null);
-    setFailedMissingDraftRecoveryKey(null);
-  }, [missingDraftRecoveryKey]);
 
   const isRecoveringMissingDraft =
     shouldRecoverMissingDraft ||

@@ -54,6 +54,32 @@ export function usePersonaSource(
   const mountedRef = useRef(true);
   const [saveStatus, setSaveStatus] =
     useState<UsePersonaSourceResult["saveStatus"]>("saved");
+  const sourceIdentity = `${builderSessionId ?? ""}\u0000${path ?? ""}`;
+  const [previousSourceIdentity, setPreviousSourceIdentity] =
+    useState(sourceIdentity);
+  if (previousSourceIdentity !== sourceIdentity) {
+    setPreviousSourceIdentity(sourceIdentity);
+    saveIdentityRef.current = sourceIdentity;
+    activeWritePathRef.current = path;
+    missingPollsRef.current = 0;
+    pendingPatchRef.current = null;
+    inFlightPatchRef.current = null;
+    inFlightPromiseRef.current = null;
+    externalOverrideVersionRef.current += 1;
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    dataRef.current = null;
+    baseSourceRef.current = null;
+    setData(null);
+    setError(null);
+    setSaveStatus("saved");
+    setIsLoading(true);
+  } else {
+    saveIdentityRef.current = sourceIdentity;
+    activeWritePathRef.current = path;
+  }
 
   const shouldAutoSave = useCallback(
     (source: AgentSourceEntry | null = dataRef.current) =>
@@ -359,24 +385,6 @@ export function usePersonaSource(
   }, [onResolvedPathChange]);
 
   useEffect(() => {
-    const identity = `${builderSessionId ?? ""}\u0000${path ?? ""}`;
-    saveIdentityRef.current = identity;
-    activeWritePathRef.current = path;
-    missingPollsRef.current = 0;
-    pendingPatchRef.current = null;
-    inFlightPatchRef.current = null;
-    inFlightPromiseRef.current = null;
-    externalOverrideVersionRef.current += 1;
-    if (flushTimerRef.current) {
-      clearTimeout(flushTimerRef.current);
-      flushTimerRef.current = null;
-    }
-    dataRef.current = null;
-    baseSourceRef.current = null;
-    setData(null);
-    setError(null);
-    setSaveStatus("saved");
-    setIsLoading(true);
     void reload();
 
     if (!path) {
@@ -390,7 +398,7 @@ export function usePersonaSource(
     return () => {
       clearInterval(intervalId);
     };
-  }, [builderSessionId, path, reload]);
+  }, [path, reload]);
 
   useEffect(() => {
     mountedRef.current = true;

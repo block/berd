@@ -91,7 +91,7 @@ export function AutomationOutputWidget({
   const { formatRelativeTimeToNow } = useLocaleFormatting();
   const automationId = getAutomationId(instance.state);
 
-  const tileQuery = useQuery<GetAutomationTileResponse>({
+  const { data: tileData } = useQuery<GetAutomationTileResponse>({
     queryKey: ["automation-tile", automationId],
     queryFn: () =>
       automationId
@@ -101,7 +101,7 @@ export function AutomationOutputWidget({
     staleTime: 15_000,
   });
 
-  const listQuery = useQuery({
+  const { data: listData } = useQuery({
     queryKey: ["automation-tiles"],
     queryFn: () => getAutomationTiles().then((r) => r.tiles),
     enabled: !automationId,
@@ -109,10 +109,10 @@ export function AutomationOutputWidget({
   });
 
   const tile =
-    tileQuery.data?.tileInfo ??
+    tileData?.tileInfo ??
     (automationId
-      ? listQuery.data?.find((t) => t.id === automationId)
-      : listQuery.data?.[0]);
+      ? listData?.find((t) => t.id === automationId)
+      : listData?.[0]);
 
   const handleClick = useWidgetActivationGuard(shouldIgnoreActivation, () => {
     if (tile?.id) onOpenAutomation?.(tile.id);

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type FormEvent } from "react";
+import { useState, useEffect, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
@@ -135,18 +135,19 @@ export function CreateProjectDialog({
 
   // Pre-fill fields when the dialog opens or when the project identity changes,
   // but NOT on every parent re-render (which would reset user edits mid-typing).
-  const prevOpenRef = useRef(false);
-  const prevEditingIdRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    const justOpened = isOpen && !prevOpenRef.current;
-    prevOpenRef.current = isOpen;
+  const [previousOpen, setPreviousOpen] = useState(false);
+  const [previousEditingId, setPreviousEditingId] = useState<
+    string | undefined
+  >(undefined);
+  const justOpened = isOpen && !previousOpen;
+  const projectIdChanged =
+    isOpen && !justOpened && editingProject?.id !== previousEditingId;
+  if (previousOpen !== isOpen || previousEditingId !== editingProject?.id) {
+    setPreviousOpen(isOpen);
+    setPreviousEditingId(editingProject?.id);
+  }
 
-    const projectIdChanged =
-      isOpen && !justOpened && editingProject?.id !== prevEditingIdRef.current;
-    prevEditingIdRef.current = editingProject?.id;
-
-    if (!justOpened && !projectIdChanged) return;
-
+  if (justOpened || projectIdChanged) {
     if (editingProject) {
       setName(editingProject.name);
       setPrompt(editingProject.prompt);
@@ -167,7 +168,7 @@ export function CreateProjectDialog({
       setWorkingDir(seedDir);
       setError(null);
     }
-  }, [isOpen, editingProject, initialWorkingDir, resetIcon]);
+  }
 
   const canSave = name.trim().length > 0 && !saving;
 

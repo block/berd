@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type DragEvent } from "react";
+import { useCallback, useState, type DragEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
@@ -114,11 +114,9 @@ export function SidebarProjectSection({
   const canAcceptDraggedSession =
     draggingSession != null && draggingSession.fromProjectId !== project.id;
 
-  useEffect(() => {
-    if (!isExpanded) {
-      setShowExpandedChats(false);
-    }
-  }, [isExpanded]);
+  if (!isExpanded && showExpandedChats) {
+    setShowExpandedChats(false);
+  }
 
   const activeChatIndex = activeSessionId
     ? projectChats.findIndex((session) => session.id === activeSessionId)
@@ -126,11 +124,13 @@ export function SidebarProjectSection({
 
   // Reveal the rest of the project's chats when the active one is ranked beyond
   // the collapsed top-N cutoff, so its row renders and can be scrolled into view.
-  useEffect(() => {
-    if (isExpanded && activeChatIndex >= MAX_VISIBLE_PROJECT_CHATS) {
-      setShowExpandedChats(true);
-    }
-  }, [isExpanded, activeChatIndex]);
+  if (
+    isExpanded &&
+    activeChatIndex >= MAX_VISIBLE_PROJECT_CHATS &&
+    !showExpandedChats
+  ) {
+    setShowExpandedChats(true);
+  }
 
   const handleDragOver = useCallback(
     (e: DragEvent<HTMLDivElement>) => {

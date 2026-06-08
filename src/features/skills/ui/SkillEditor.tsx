@@ -112,7 +112,13 @@ export function SkillEditor({
   const titleText = isEditing ? t("dialog.editTitle") : t("dialog.newTitle");
 
   // Pre-fill fields when editing.
-  useEffect(() => {
+  const editorResetKey = isOpen
+    ? `${editingSkill?.path ?? "new"}\u0000${initialProjectId ?? ""}`
+    : "closed";
+  const [previousEditorResetKey, setPreviousEditorResetKey] =
+    useState("uninitialized");
+  if (previousEditorResetKey !== editorResetKey) {
+    setPreviousEditorResetKey(editorResetKey);
     if (isOpen && editingSkill) {
       setName(editingSkill.name);
       setDescription(editingSkill.description);
@@ -131,7 +137,7 @@ export function SkillEditor({
       setColor(null);
       setError(null);
     }
-  }, [isOpen, editingSkill, initialProjectId]);
+  }
 
   const nameValid = isValidSkillName(name);
   const canSave = nameValid && description.trim().length > 0 && !saving;
@@ -231,9 +237,12 @@ export function SkillEditor({
     );
   }, []);
 
+  if (!isOpen && formHasScrollBelow) {
+    setFormHasScrollBelow(false);
+  }
+
   useEffect(() => {
     if (!isOpen) {
-      setFormHasScrollBelow(false);
       return;
     }
 

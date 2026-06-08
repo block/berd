@@ -27,23 +27,31 @@ export function useProjectIconSelection({
   const [iconCandidates, setIconCandidates] = useState<ProjectIconCandidate[]>(
     [],
   );
-  const [iconScanPending, setIconScanPending] = useState(false);
+  const [iconScanPending, setIconScanPending] = useState(() => {
+    const initialWorkingDirKey = parseEditorText(prompt).workingDirs.join("\n");
+    return isOpen && initialWorkingDirKey.length > 0;
+  });
 
   const scannedWorkingDirKey = useMemo(
     () => parseEditorText(prompt).workingDirs.join("\n"),
     [prompt],
   );
+  const shouldScanIcons = isOpen && scannedWorkingDirKey.length > 0;
+  const scanKey = shouldScanIcons ? scannedWorkingDirKey : "";
+  const [previousScanKey, setPreviousScanKey] = useState(scanKey);
+  if (previousScanKey !== scanKey) {
+    setPreviousScanKey(scanKey);
+    setIconCandidates([]);
+    setIconScanPending(Boolean(scanKey));
+  }
 
   useEffect(() => {
-    const workingDirs = scannedWorkingDirKey.split("\n").filter(Boolean);
-    if (!isOpen || workingDirs.length === 0) {
-      setIconCandidates([]);
-      setIconScanPending(false);
+    const workingDirs = scanKey.split("\n").filter(Boolean);
+    if (workingDirs.length === 0) {
       return;
     }
 
     let active = true;
-    setIconScanPending(true);
     const timeout = window.setTimeout(() => {
       scanProjectIcons(workingDirs)
         .then((candidates) => {
@@ -67,7 +75,7 @@ export function useProjectIconSelection({
       active = false;
       window.clearTimeout(timeout);
     };
-  }, [isOpen, scannedWorkingDirKey]);
+  }, [scanKey]);
 
   const resetIcon = useCallback((nextIcon?: string | null) => {
     setIcon(normalizeProjectIcon(nextIcon));

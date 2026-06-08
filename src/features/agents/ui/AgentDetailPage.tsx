@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import type { ChangeEvent } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -111,7 +111,9 @@ export function AgentDetailPage({
   const [avatarPreviewFailed, setAvatarPreviewFailed] = useState(false);
   const [avatarSavePending, setAvatarSavePending] = useState(false);
   const [showAvatarSection, setShowAvatarSection] = useState(false);
-  const previousPersonaIdRef = useRef(persona.id);
+  const [previousPersonaAvatarValue, setPreviousPersonaAvatarValue] =
+    useState(personaAvatarValue);
+  const [previousPersonaId, setPreviousPersonaId] = useState(persona.id);
   const avatarLibrary = useAvatarLibrary(isEditable);
   const trimmedAvatarValue = avatarValue.trim();
   const normalizedAvatarValue = normalizeAvatarUrl(trimmedAvatarValue);
@@ -149,17 +151,16 @@ export function AgentDetailPage({
     updatedLabel ? { label: t("view.updated"), value: updatedLabel } : null,
   ].filter(Boolean) as Array<{ label: string; value: string }>;
 
-  useEffect(() => {
+  if (previousPersonaAvatarValue !== personaAvatarValue) {
+    setPreviousPersonaAvatarValue(personaAvatarValue);
     setAvatarValue(personaAvatarValue);
     setAvatarPreviewFailed(false);
-  }, [personaAvatarValue]);
+  }
 
-  useEffect(() => {
-    if (previousPersonaIdRef.current !== persona.id) {
-      previousPersonaIdRef.current = persona.id;
-      setShowAvatarSection(false);
-    }
-  }, [persona.id]);
+  if (previousPersonaId !== persona.id) {
+    setPreviousPersonaId(persona.id);
+    setShowAvatarSection(false);
+  }
 
   const handleOpenAvatarSection = useCallback(() => {
     runAgentViewTransition(() => setShowAvatarSection(true));

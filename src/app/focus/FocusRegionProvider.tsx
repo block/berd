@@ -291,13 +291,9 @@ export function FocusRegionProvider({
     [closePaneJump, paneJumpActive, refreshVisibleRegions],
   );
 
-  useEffect(() => {
-    if (enabled || !paneJumpActive) {
-      return;
-    }
-
+  if (!enabled && paneJumpActive) {
     closePaneJump();
-  }, [closePaneJump, enabled, paneJumpActive]);
+  }
 
   useEffect(() => {
     if (!enabled || !paneJumpActive) {

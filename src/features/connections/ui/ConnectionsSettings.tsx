@@ -163,7 +163,7 @@ export function ConnectionsSettings({
   const { t } = useTranslation("settings");
   const queryClient = useQueryClient();
 
-  const connectionsQuery = useQuery({
+  const { data: connectionsData } = useQuery({
     queryKey: ["connections"],
     queryFn: listConnections,
     refetchInterval: CONNECTIONS_REFETCH_INTERVAL_MS,
@@ -189,11 +189,11 @@ export function ConnectionsSettings({
 
   const connectionsByName = useMemo(() => {
     const map = new Map<string, Connection>();
-    for (const entry of connectionsQuery.data?.connections ?? []) {
+    for (const entry of connectionsData?.connections ?? []) {
       map.set(entry.name, entry);
     }
     return map;
-  }, [connectionsQuery.data?.connections]);
+  }, [connectionsData?.connections]);
 
   const nowMs = Date.now();
 

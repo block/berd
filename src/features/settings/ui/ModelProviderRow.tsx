@@ -153,12 +153,10 @@ export function ModelProviderRow({
     }
   }, [expanded, hasFields, loadConfig]);
 
-  useEffect(() => {
-    if (isConnected) {
-      setAuthenticating(false);
-      setSetupError("");
-    }
-  }, [isConnected]);
+  if (isConnected && (authenticating || setupError)) {
+    setAuthenticating(false);
+    setSetupError("");
+  }
 
   useLayoutEffect(() => {
     if (!shouldRestorePanelFocus.current) {

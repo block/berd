@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
@@ -117,22 +117,26 @@ export function WorkspaceCreateDialog({
         ? worktreeDialogValid
         : false;
 
-  useEffect(() => {
-    if (!mode) {
-      return;
+  const resetKey = mode
+    ? `${mode}\u0000${defaultBaseBranch}\u0000${availableExistingBranches.join("\u0000")}`
+    : "closed";
+  const [previousResetKey, setPreviousResetKey] = useState(resetKey);
+  if (previousResetKey !== resetKey) {
+    setPreviousResetKey(resetKey);
+    if (mode) {
+      const defaultUseNewBranch = true;
+      setBranchName("");
+      setBaseBranch(defaultBaseBranch);
+      setWorktreeName("");
+      setUseNewBranch(defaultUseNewBranch);
+      setExistingBranch(
+        defaultUseNewBranch ? "" : (availableExistingBranches[0] ?? ""),
+      );
+      setBranchNameManuallyEdited(false);
+      setError(null);
+      setSaving(false);
     }
-    const defaultUseNewBranch = true;
-    setBranchName("");
-    setBaseBranch(defaultBaseBranch);
-    setWorktreeName("");
-    setUseNewBranch(defaultUseNewBranch);
-    setExistingBranch(
-      defaultUseNewBranch ? "" : (availableExistingBranches[0] ?? ""),
-    );
-    setBranchNameManuallyEdited(false);
-    setError(null);
-    setSaving(false);
-  }, [availableExistingBranches, defaultBaseBranch, mode]);
+  }
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();

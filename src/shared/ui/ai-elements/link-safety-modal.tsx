@@ -28,9 +28,9 @@ export function LinkSafetyModal({
   const [isCopied, setIsCopied] = useState(false);
   const timeoutRef = useRef<number>(0);
 
-  useEffect(() => {
-    if (isOpen) setIsCopied(false);
-  }, [isOpen]);
+  if (isOpen && isCopied) {
+    setIsCopied(false);
+  }
 
   useEffect(
     () => () => {

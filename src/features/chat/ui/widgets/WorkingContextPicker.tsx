@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -94,10 +94,14 @@ export function WorkingContextPicker({
     gitState?.mainWorktreePath ??
     worktrees.find((worktree) => worktree.isMain)?.path ??
     null;
-  const worktreeByBranch = new Map(
-    worktrees
-      .filter((worktree) => worktree.branch)
-      .map((worktree) => [worktree.branch as string, worktree]),
+  const worktreeByBranch = useMemo(
+    () =>
+      new Map(
+        worktrees
+          .filter((worktree) => worktree.branch)
+          .map((worktree) => [worktree.branch as string, worktree]),
+      ),
+    [worktrees],
   );
 
   const handleWorktreeSelect = useCallback(

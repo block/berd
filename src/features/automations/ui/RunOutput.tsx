@@ -31,12 +31,16 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
   const summary = getOutputBody(result.tileData);
   const hasTileOutput = Boolean(summary || result.tileData);
   const shouldLoadSessionFallback = !hasTileOutput && Boolean(result.sessionId);
-  const sessionQuery = useQuery({
+  const {
+    data: sessionData,
+    error: sessionError,
+    isLoading: isSessionLoading,
+  } = useQuery({
     queryKey: ["automationSessionMessages", result.sessionId],
     queryFn: () => getAutomationSessionMessages(result.sessionId ?? ""),
     enabled: shouldLoadSessionFallback,
   });
-  const messages = sessionQuery.data?.messages ?? [];
+  const messages = sessionData?.messages ?? [];
 
   return (
     <section className="min-w-0 space-y-3">
@@ -77,14 +81,14 @@ export function RunOutput({ result }: { result: AutomationTileResult }) {
             <p className="text-sm text-muted-foreground">
               {t("history.sessionUnavailable")}
             </p>
-          ) : sessionQuery.isLoading ? (
+          ) : isSessionLoading ? (
             <div className="flex min-h-32 items-center justify-center">
               <Spinner className="size-5 text-primary" />
             </div>
-          ) : sessionQuery.error ? (
+          ) : sessionError ? (
             <EmptyState
               title={t("history.sessionLoadErrorTitle")}
-              body={sessionQuery.error.message}
+              body={sessionError.message}
             />
           ) : messages.length ? (
             <div className="h-[34rem] overflow-hidden rounded-sm border border-border/80 bg-background">

@@ -234,6 +234,12 @@ export function useAutomationBuilderSession({
 
   const activeDraftToolRequestId =
     effectiveDraftState.draft?.toolRequestId ?? null;
+  if (draftOverrideState.toolRequestId !== activeDraftToolRequestId) {
+    setDraftOverrideState({
+      toolRequestId: activeDraftToolRequestId,
+      overrides: {},
+    });
+  }
   const activeDraftOverrides =
     activeDraftToolRequestId &&
     draftOverrideState.toolRequestId === activeDraftToolRequestId
@@ -268,14 +274,6 @@ export function useAutomationBuilderSession({
     Boolean(mergedDraftState.draft) &&
     !mergedDraftState.created &&
     (Boolean(messageDraftState.draft) || hasActiveDraftOverrides || !isEditing);
-
-  useEffect(() => {
-    setDraftOverrideState((current) =>
-      current.toolRequestId === activeDraftToolRequestId
-        ? current
-        : { toolRequestId: activeDraftToolRequestId, overrides: {} },
-    );
-  }, [activeDraftToolRequestId]);
 
   // Fetch the existing tile in edit mode and synthesize the seed draft.
   useEffect(() => {

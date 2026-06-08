@@ -207,14 +207,16 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
       });
   }, []);
 
-  useEffect(() => {
+  const [previousRootsKey, setPreviousRootsKey] = useState(rootsKey);
+  if (previousRootsKey !== rootsKey) {
     const nextRoots = rootsKey ? rootsKey.split("\n") : [];
+    setPreviousRootsKey(rootsKey);
     generationRef.current += 1;
     directoryStatesRef.current = {};
     setDirectoryStates({});
     setExpandedPaths(new Set(nextRoots));
     setSelectedPath(undefined);
-  }, [rootsKey]);
+  }
 
   useEffect(() => {
     const nextRoots = rootsKey ? rootsKey.split("\n") : [];

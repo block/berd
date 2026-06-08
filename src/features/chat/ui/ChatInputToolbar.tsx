@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
@@ -176,11 +176,9 @@ export function ChatInputToolbar({
     requestOpenSettings("general");
   };
 
-  useEffect(() => {
-    if (!showContextUsage && isContextPopoverOpen) {
-      setIsContextPopoverOpen(false);
-    }
-  }, [isContextPopoverOpen, showContextUsage]);
+  if (!showContextUsage && isContextPopoverOpen) {
+    setIsContextPopoverOpen(false);
+  }
 
   return (
     <div

@@ -282,6 +282,9 @@ export function useMentionHandlers({
     Map<string, Promise<FileMentionPathEntry[]>>
   >(new Map());
   const pathSearchRequestIdRef = useRef(0);
+  if (!skillsEnabled && skillMentionItems.length > 0) {
+    setSkillMentionItems([]);
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -303,7 +306,6 @@ export function useMentionHandlers({
     let cancelled = false;
 
     if (!skillsEnabled) {
-      setSkillMentionItems([]);
       return;
     }
 
@@ -377,55 +379,62 @@ export function useMentionHandlers({
     confirmMention,
   } = useMentionDetection(personas, skillMentionItems, fileMentionItems);
 
-  useEffect(() => {
-    if (!fileMentionsEnabled || !mentionOpen) {
-      pathSearchRequestIdRef.current += 1;
-      setProjectFileEntries([]);
-      setFileMentionsLoading(false);
-      setFileMentionsError(null);
-      return;
-    }
-
-    const query = mentionQuery.trim();
-    if (!shouldSearchPathMentions(query, rootsKey.length > 0)) {
-      pathSearchRequestIdRef.current += 1;
-      setProjectFileEntries([]);
-      setFileMentionsLoading(false);
-      setFileMentionsError(null);
-      return;
-    }
-
-    const cacheKey = `${rootsKey}\0${query}\0${FILE_MENTION_SEARCH_LIMIT}`;
+  const pathMentionQuery = mentionQuery.trim();
+  const pathMentionSearchKey =
+    fileMentionsEnabled &&
+    mentionOpen &&
+    shouldSearchPathMentions(pathMentionQuery, rootsKey.length > 0)
+      ? `${rootsKey}\0${pathMentionQuery}\0${FILE_MENTION_SEARCH_LIMIT}`
+      : "";
+  const pathMentionCachedEntry = pathMentionSearchKey
+    ? pathSearchCacheRef.current.get(pathMentionSearchKey)
+    : null;
+  const pathMentionCachedEntries =
+    pathMentionCachedEntry &&
+    Date.now() - pathMentionCachedEntry.cachedAt <= PATH_SEARCH_CACHE_TTL_MS
+      ? pathMentionCachedEntry.entries
+      : null;
+  if (pathMentionCachedEntry && !pathMentionCachedEntries) {
+    pathSearchCacheRef.current.delete(pathMentionSearchKey);
+  }
+  const [previousPathMentionSearchKey, setPreviousPathMentionSearchKey] =
+    useState(pathMentionSearchKey);
+  if (previousPathMentionSearchKey !== pathMentionSearchKey) {
+    setPreviousPathMentionSearchKey(pathMentionSearchKey);
     pathSearchRequestIdRef.current += 1;
-    const requestId = pathSearchRequestIdRef.current;
-    const cachedEntry = pathSearchCacheRef.current.get(cacheKey);
-    const cachedEntries =
-      cachedEntry &&
-      Date.now() - cachedEntry.cachedAt <= PATH_SEARCH_CACHE_TTL_MS
-        ? cachedEntry.entries
-        : null;
-    if (cachedEntry && !cachedEntries) {
-      pathSearchCacheRef.current.delete(cacheKey);
-    }
-    if (cachedEntries) {
+    if (!pathMentionSearchKey) {
+      setProjectFileEntries([]);
+      setFileMentionsLoading(false);
+      setFileMentionsError(null);
+    } else if (pathMentionCachedEntries) {
       setProjectFileEntries((prev) =>
-        sameFileMentionArray(prev, cachedEntries) ? prev : cachedEntries,
+        sameFileMentionArray(prev, pathMentionCachedEntries)
+          ? prev
+          : pathMentionCachedEntries,
       );
       setFileMentionsLoading(false);
       setFileMentionsError(null);
+    } else {
+      setFileMentionsLoading(true);
+      setFileMentionsError(null);
+    }
+  }
+
+  useEffect(() => {
+    if (!pathMentionSearchKey || pathMentionCachedEntries) {
       return;
     }
 
-    let cancelled = false;
-    setFileMentionsLoading(true);
-    setFileMentionsError(null);
+    const cacheKey = pathMentionSearchKey;
+    const requestId = pathSearchRequestIdRef.current;
 
+    let cancelled = false;
     const timeoutId = window.setTimeout(() => {
       let request = pathSearchInFlightRef.current.get(cacheKey);
       if (!request) {
         request = searchFilesForMentions({
           roots: normalizedProjectRoots,
-          query,
+          query: pathMentionQuery,
           maxResults: FILE_MENTION_SEARCH_LIMIT,
         }).finally(() => {
           pathSearchInFlightRef.current.delete(cacheKey);
@@ -459,11 +468,10 @@ export function useMentionHandlers({
       window.clearTimeout(timeoutId);
     };
   }, [
-    fileMentionsEnabled,
-    mentionOpen,
-    mentionQuery,
     normalizedProjectRoots,
-    rootsKey,
+    pathMentionCachedEntries,
+    pathMentionQuery,
+    pathMentionSearchKey,
   ]);
 
   // ---- post-selection cursor placement ------------------------------------

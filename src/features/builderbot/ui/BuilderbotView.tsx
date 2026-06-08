@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
@@ -673,17 +673,21 @@ function AutomationRow({
 
 function TasksTab({ onOpenTask }: { onOpenTask: (taskKey: string) => void }) {
   const { t } = useTranslation("builderbot");
-  const query = useQuery({
+  const {
+    data: tasksData,
+    error: tasksError,
+    isLoading: isTasksLoading,
+  } = useQuery({
     queryKey: ["builderbotTasks"],
     queryFn: () => getBuilderbotTasks(),
     refetchInterval: REFETCH_INTERVAL_MS,
   });
-  const tasks = query.data?.tasks ?? [];
+  const tasks = tasksData?.tasks ?? [];
 
-  if (query.isLoading) return <LoadingRows />;
-  if (query.error) {
+  if (isTasksLoading) return <LoadingRows />;
+  if (tasksError) {
     return (
-      <ErrorPanel message={errorMessage(query.error, t("states.errorBody"))} />
+      <ErrorPanel message={errorMessage(tasksError, t("states.errorBody"))} />
     );
   }
   if (!tasks.length) {
@@ -710,17 +714,23 @@ function AutomationsTab({
   onOpenAutomation: (automationId: string) => void;
 }) {
   const { t } = useTranslation("builderbot");
-  const query = useQuery({
+  const {
+    data: automationsData,
+    error: automationsError,
+    isLoading: isAutomationsLoading,
+  } = useQuery({
     queryKey: ["builderbotAutomations"],
     queryFn: () => getBuilderbotAutomations(),
     refetchInterval: REFETCH_INTERVAL_MS,
   });
-  const automations = query.data?.automations ?? [];
+  const automations = automationsData?.automations ?? [];
 
-  if (query.isLoading) return <LoadingRows />;
-  if (query.error) {
+  if (isAutomationsLoading) return <LoadingRows />;
+  if (automationsError) {
     return (
-      <ErrorPanel message={errorMessage(query.error, t("states.errorBody"))} />
+      <ErrorPanel
+        message={errorMessage(automationsError, t("states.errorBody"))}
+      />
     );
   }
   if (!automations.length) {
@@ -754,12 +764,16 @@ function TaskDetailPage({
 }) {
   const { t } = useTranslation("builderbot");
   const formatting = useLocaleFormatting();
-  const query = useQuery({
+  const {
+    data: tasksData,
+    error: tasksError,
+    isLoading: isTasksLoading,
+  } = useQuery({
     queryKey: ["builderbotTasks"],
     queryFn: () => getBuilderbotTasks(),
     refetchInterval: REFETCH_INTERVAL_MS,
   });
-  const tasks = query.data?.tasks ?? [];
+  const tasks = tasksData?.tasks ?? [];
   const task = tasks.find(
     (candidate, index) => taskRouteKey(candidate, index) === taskKey,
   );
@@ -781,13 +795,11 @@ function TaskDetailPage({
     return () => onBreadcrumbLabelChange?.(null);
   }, [onBreadcrumbLabelChange, title]);
 
-  if (query.isLoading) return <LoadingDetail />;
-  if (query.error) {
+  if (isTasksLoading) return <LoadingDetail />;
+  if (tasksError) {
     return (
       <PageShell contentClassName="gap-6" contentWidth="default">
-        <ErrorPanel
-          message={errorMessage(query.error, t("states.errorBody"))}
-        />
+        <ErrorPanel message={errorMessage(tasksError, t("states.errorBody"))} />
       </PageShell>
     );
   }
@@ -907,12 +919,16 @@ function AutomationDetailPage({
   const { t } = useTranslation("builderbot");
   const formatting = useLocaleFormatting();
   const queryClient = useQueryClient();
-  const query = useQuery({
+  const {
+    data: automationsData,
+    error: automationsError,
+    isLoading: isAutomationsLoading,
+  } = useQuery({
     queryKey: ["builderbotAutomations"],
     queryFn: () => getBuilderbotAutomations(),
     refetchInterval: REFETCH_INTERVAL_MS,
   });
-  const automation = query.data?.automations.find(
+  const automation = automationsData?.automations.find(
     (candidate) => candidate.id === automationId,
   );
   const scheduledAutomation =
@@ -941,7 +957,40 @@ function AutomationDetailPage({
   const [payloadDraft, setPayloadDraft] = useState(editablePayload.text);
   const [isEditingPayload, setIsEditingPayload] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
-  const previousAutomationIdRef = useRef(automationId);
+  const [previousAutomation, setPreviousAutomation] = useState(automation);
+  const [previousAutomationTimeZone, setPreviousAutomationTimeZone] =
+    useState(timeZoneDraft);
+  if (
+    previousAutomation !== automation ||
+    previousAutomationTimeZone !== timeZoneDraft
+  ) {
+    const automationChanged = previousAutomation?.id !== automation?.id;
+    setPreviousAutomation(automation);
+    setPreviousAutomationTimeZone(timeZoneDraft);
+
+    if (!automation) {
+      setIsEditingPayload(false);
+      setLocalError(null);
+    } else {
+      setEnabledDraft(automation.enabled);
+      setRunAsDraft(runAsLabel(automation.routine));
+      if (scheduledAutomation) {
+        setScheduleDraft(
+          parseBuilderbotCronSchedule(
+            scheduledAutomation.source.cron_expression,
+            timeZoneDraft,
+          ),
+        );
+      }
+      if (automationChanged || !isEditingPayload) {
+        setPayloadDraft(editableAutomationPayload(automation).text);
+      }
+      if (automationChanged) {
+        setIsEditingPayload(false);
+        setLocalError(null);
+      }
+    }
+  }
   const timeZoneOptions = useMemo(
     () => builderbotTimeZoneOptions(timeZoneDraft),
     [timeZoneDraft],
@@ -1014,41 +1063,6 @@ function AutomationDetailPage({
     onBreadcrumbLabelChange?.(automation?.reference ?? automationId);
     return () => onBreadcrumbLabelChange?.(null);
   }, [automation?.reference, automationId, onBreadcrumbLabelChange]);
-
-  useEffect(() => {
-    const automationChanged = previousAutomationIdRef.current !== automationId;
-    previousAutomationIdRef.current = automationId;
-
-    if (!automation) {
-      setIsEditingPayload(false);
-      setLocalError(null);
-      return;
-    }
-
-    setEnabledDraft(automation.enabled);
-    setRunAsDraft(runAsLabel(automation.routine));
-    if (scheduledAutomation) {
-      setScheduleDraft(
-        parseBuilderbotCronSchedule(
-          scheduledAutomation.source.cron_expression,
-          timeZoneDraft,
-        ),
-      );
-    }
-    if (automationChanged || !isEditingPayload) {
-      setPayloadDraft(editableAutomationPayload(automation).text);
-    }
-    if (automationChanged) {
-      setIsEditingPayload(false);
-      setLocalError(null);
-    }
-  }, [
-    automation,
-    automationId,
-    scheduledAutomation,
-    timeZoneDraft,
-    isEditingPayload,
-  ]);
 
   const updateScheduledAutomation = (
     patch: UpdateBuilderbotScheduledTriggerRequest,
@@ -1186,12 +1200,12 @@ function AutomationDetailPage({
     }
   };
 
-  if (query.isLoading) return <LoadingDetail />;
-  if (query.error) {
+  if (isAutomationsLoading) return <LoadingDetail />;
+  if (automationsError) {
     return (
       <PageShell contentClassName="gap-6" contentWidth="default">
         <ErrorPanel
-          message={errorMessage(query.error, t("states.errorBody"))}
+          message={errorMessage(automationsError, t("states.errorBody"))}
         />
       </PageShell>
     );
