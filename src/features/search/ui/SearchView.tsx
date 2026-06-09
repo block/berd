@@ -6,6 +6,7 @@ import type { ExtensionEntry } from "@/features/extensions/types";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
+  type ChatSession,
   getVisibleSessions,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
@@ -94,12 +95,16 @@ export function SearchView({
   );
 
   const defaultTitle = t("common:session.defaultTitle");
+  const getDisplayTitle = useCallback(
+    (session: ChatSession) =>
+      getDisplaySessionTitle(session.title, defaultTitle),
+    [defaultTitle],
+  );
   const chatSearch = useSessionSearch({
     sessions: visibleSessions,
     resolvers,
     locale: i18n.resolvedLanguage,
-    getDisplayTitle: (session) =>
-      getDisplaySessionTitle(session.title, defaultTitle),
+    getDisplayTitle,
   });
   const {
     clear: clearChatSearch,
