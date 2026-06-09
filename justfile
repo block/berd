@@ -22,9 +22,16 @@ sync-schema:
     ./scripts/regenerate-sdk-schema.sh
 
 # Install dependencies and build workspace packages.
-setup:
+_setup-dev-deps:
     pnpm install
     cd sdk && pnpm build
+
+# Install dependencies, build workspace packages, and prepare local development hooks.
+_setup-no-goose: _setup-dev-deps
+    lefthook install --force
+
+# Install dependencies, build workspace packages, build managed Goose, and prepare local development hooks.
+setup: _setup-dev-deps
     GOOSE_DEV_MODE=required ./scripts/ensure-local-goose.sh
     lefthook install --force
 
@@ -149,6 +156,12 @@ test-e2e-all:
 dev:
     #!/usr/bin/env bash
     set -euo pipefail
+
+    if [[ -n "${GOOSE_BIN:-}" ]]; then
+        just _setup-no-goose
+    else
+        just setup
+    fi
 
     VITE_PORT={{ vite_port }}
     export VITE_PORT
