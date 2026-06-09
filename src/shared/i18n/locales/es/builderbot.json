@@ -102,12 +102,23 @@
     "emptyBody": "Builderbot no devolvió automatizaciones programadas o activadas de tu propiedad.",
     "enabled": "Activada",
     "disabled": "Desactivada",
-    "nextRun": "próxima {{time}}",
+    "nextRun": "Próxima {{time}}",
+    "paused": "Pausada",
+    "listening": "Activa",
+    "triggeredBy": "Activada por {{source}}",
     "conditions_one": "{{displayCount}} condición",
     "conditions_other": "{{displayCount}} condiciones",
     "kind": {
       "scheduled": "Programada",
       "routing": "Activada"
+    },
+    "schedule": {
+      "hourly": "Cada hora",
+      "dailyAt": "Diaria a las {{time}}",
+      "weekdaysAt": "Días laborales a las {{time}}",
+      "weekly": "Semanal",
+      "weeklyAt": "{{day}} a las {{time}}",
+      "custom": "Programación personalizada"
     },
     "action": {
       "agent": "Agente",

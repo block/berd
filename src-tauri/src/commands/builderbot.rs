@@ -28,11 +28,8 @@ pub async fn get_builderbot_tasks(limit: Option<u32>) -> Result<Value, String> {
 pub async fn get_builderbot_scheduled_triggers(limit: Option<u32>) -> Result<Value, String> {
     let limit = normalize_limit(limit);
     let user = require_builderbot_user()?;
-    let mut response = builderbot::get_json(
-        "/api/v1/scheduled-triggers",
-        &[("limit", limit.to_string())],
-    )
-    .await?;
+    let query = user_owned_list_query(limit, &user);
+    let mut response = builderbot::get_json("/api/v1/scheduled-triggers", &query).await?;
     attach_current_user(&mut response, &user);
     Ok(response)
 }
@@ -41,8 +38,8 @@ pub async fn get_builderbot_scheduled_triggers(limit: Option<u32>) -> Result<Val
 pub async fn get_builderbot_routing_rules(limit: Option<u32>) -> Result<Value, String> {
     let limit = normalize_limit(limit);
     let user = require_builderbot_user()?;
-    let mut response =
-        builderbot::get_json("/api/v1/routing-rules", &[("limit", limit.to_string())]).await?;
+    let query = user_owned_list_query(limit, &user);
+    let mut response = builderbot::get_json("/api/v1/routing-rules", &query).await?;
     attach_current_user(&mut response, &user);
     Ok(response)
 }
@@ -79,6 +76,13 @@ pub async fn update_builderbot_routing_rule(
 
 fn normalize_limit(limit: Option<u32>) -> u32 {
     limit.unwrap_or(DEFAULT_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT)
+}
+
+fn user_owned_list_query(limit: u32, user: &str) -> Vec<(&'static str, String)> {
+    vec![
+        ("limit", limit.to_string()),
+        ("owner", user.trim().to_string()),
+    ]
 }
 
 fn trim_builderbot_reference(reference: &str) -> Result<String, String> {
@@ -379,5 +383,16 @@ mod tests {
         let merged = merge_task_responses(authored, assigned, 2);
 
         assert_eq!(merged["tasks"].as_array().expect("tasks array").len(), 2);
+    }
+
+    #[test]
+    fn user_owned_list_query_filters_before_backend_pagination() {
+        assert_eq!(
+            user_owned_list_query(50, " morganm "),
+            vec![
+                ("limit", "50".to_string()),
+                ("owner", "morganm".to_string())
+            ]
+        );
     }
 }

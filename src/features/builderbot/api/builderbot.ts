@@ -118,6 +118,7 @@ export type BuilderbotAutomation =
       kind: "scheduled";
       id: string;
       reference: string;
+      displayName: string;
       enabled: boolean;
       createdBy?: string;
       updatedAtMs?: number;
@@ -132,6 +133,7 @@ export type BuilderbotAutomation =
       kind: "routing";
       id: string;
       reference: string;
+      displayName: string;
       enabled: boolean;
       createdBy?: string;
       updatedAtMs?: number;
@@ -302,8 +304,63 @@ function routingRuleOwners(rule: BuilderbotRoutingRule): string[] {
   ]);
 }
 
+const DISPLAY_TOKEN_OVERRIDES: Record<string, string> = {
+  ai: "AI",
+  api: "API",
+  bb: "BB",
+  builderbot: "BuilderBot",
+  ci: "CI",
+  github: "GitHub",
+  goose: "Goose",
+  jira: "Jira",
+  pr: "PR",
+  sa: "SA",
+  sentry: "Sentry",
+  slack: "Slack",
+  tg: "TG",
+  ui: "UI",
+  url: "URL",
+};
+
+function stripCurrentUserPrefix(
+  reference: string,
+  currentUser: string | undefined,
+) {
+  const user = currentUser?.trim().toLowerCase();
+  if (!user) return reference;
+  const normalized = reference.toLowerCase();
+  if (normalized.startsWith(`${user}-`) || normalized.startsWith(`${user}_`)) {
+    return reference.slice(user.length + 1);
+  }
+  return reference;
+}
+
+function displayToken(token: string, index: number) {
+  const normalized = token.toLowerCase();
+  const override = DISPLAY_TOKEN_OVERRIDES[normalized];
+  if (override) return override;
+  if (index === 0 && normalized) {
+    return `${normalized.charAt(0).toUpperCase()}${normalized.slice(1)}`;
+  }
+  return normalized;
+}
+
+export function builderbotReferenceDisplayName(
+  reference: string,
+  currentUser?: string,
+) {
+  const stripped = stripCurrentUserPrefix(reference.trim(), currentUser);
+  const tokens = stripped
+    .split(/[-_\s]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  if (!tokens.length) return reference.trim();
+  return tokens.map(displayToken).join(" ");
+}
+
 function scheduledTriggerToAutomation(
   trigger: BuilderbotScheduledTrigger,
+  currentUser: string | undefined,
 ): BuilderbotAutomation | null {
   const reference = trigger.reference?.trim();
   if (!reference) return null;
@@ -311,6 +368,7 @@ function scheduledTriggerToAutomation(
     kind: "scheduled",
     id: `scheduled:${reference}`,
     reference,
+    displayName: builderbotReferenceDisplayName(reference, currentUser),
     enabled: trigger.enabled ?? false,
     createdBy: trigger.created_by,
     updatedAtMs: trigger.updated_at_ms ?? trigger.created_at_ms,
@@ -325,6 +383,7 @@ function scheduledTriggerToAutomation(
 
 function routingRuleToAutomation(
   rule: BuilderbotRoutingRule,
+  currentUser: string | undefined,
 ): BuilderbotAutomation | null {
   const reference = rule.reference?.trim();
   if (!reference) return null;
@@ -332,6 +391,7 @@ function routingRuleToAutomation(
     kind: "routing",
     id: `routing:${reference}`,
     reference,
+    displayName: builderbotReferenceDisplayName(reference, currentUser),
     enabled: rule.enabled ?? false,
     createdBy: rule.created_by ?? rule.owner,
     updatedAtMs: rule.updated_at_ms ?? rule.created_at_ms,
@@ -364,13 +424,13 @@ export async function getBuilderbotAutomations(limit = 50) {
     .filter((trigger) =>
       ownerMatches(currentUser, scheduledTriggerOwners(trigger)),
     )
-    .map(scheduledTriggerToAutomation)
+    .map((trigger) => scheduledTriggerToAutomation(trigger, currentUser))
     .filter((automation): automation is BuilderbotAutomation =>
       Boolean(automation),
     );
   const routingAutomations = (routing.rules ?? [])
     .filter((rule) => ownerMatches(currentUser, routingRuleOwners(rule)))
-    .map(routingRuleToAutomation)
+    .map((rule) => routingRuleToAutomation(rule, currentUser))
     .filter((automation): automation is BuilderbotAutomation =>
       Boolean(automation),
     );

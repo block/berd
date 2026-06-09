@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { IconPencil } from "@tabler/icons-react";
+import { IconCheck, IconLoader2, IconPencil, IconX } from "@tabler/icons-react";
 import { ExternalLinkIcon } from "lucide-react";
 import { PageShell } from "@/shared/ui/page-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
@@ -25,6 +25,7 @@ import {
 } from "@/shared/ui/select";
 import { Switch } from "@/shared/ui/switch";
 import { Textarea } from "@/shared/ui/textarea";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import type {
   AppNavigationUpdateOptions,
   BuilderbotNavigationRoute,
@@ -121,9 +122,9 @@ function ErrorPanel({ message }: { message: string }) {
 function LoadingRows() {
   return (
     <div className="space-y-3">
-      <div className="h-[86px] rounded-md bg-card" />
-      <div className="h-[86px] rounded-md bg-card" />
-      <div className="h-[86px] rounded-md bg-card" />
+      <div className="h-[84px] rounded-md bg-card" />
+      <div className="h-[84px] rounded-md bg-card" />
+      <div className="h-[84px] rounded-md bg-card" />
     </div>
   );
 }
@@ -167,12 +168,75 @@ function compactStatus(value: string | undefined) {
   );
 }
 
+function taskStatusIcon(value: string | undefined) {
+  const status = compactStatus(value);
+  if (!status) return null;
+
+  if (/\b(completed|complete|success|succeeded|done|ok)\b/.test(status)) {
+    return IconCheck;
+  }
+
+  if (/\b(cancelled|canceled)\b/.test(status)) {
+    return IconX;
+  }
+
+  if (/\b(pending|queued|running|in progress|started)\b/.test(status)) {
+    return IconLoader2;
+  }
+
+  return null;
+}
+
 function formatTimestamp(
   value: number | undefined,
   formatRelativeTimeToNow: (value: number) => string,
 ) {
   if (!value) return null;
   return formatRelativeTimeToNow(value);
+}
+
+function formatLongRelativeTimestamp(
+  value: number | undefined,
+  formatting: ReturnType<typeof useLocaleFormatting>,
+) {
+  if (!value) return null;
+
+  const diffMs = value - Date.now();
+  const diffSeconds = Math.round(diffMs / 1000);
+  const options: Intl.RelativeTimeFormatOptions = {
+    numeric: "auto",
+    style: "long",
+  };
+
+  if (Math.abs(diffSeconds) < 45) {
+    return formatting.formatRelativeTime(0, "second", options);
+  }
+
+  const diffMinutes = Math.round(diffMs / 60_000);
+  if (Math.abs(diffMinutes) < 45) {
+    return formatting.formatRelativeTime(diffMinutes, "minute", options);
+  }
+
+  const diffHours = Math.round(diffMs / 3_600_000);
+  if (Math.abs(diffHours) < 24) {
+    return formatting.formatRelativeTime(diffHours, "hour", options);
+  }
+
+  const diffDays = Math.round(diffMs / 86_400_000);
+  if (Math.abs(diffDays) < 45) {
+    return formatting.formatRelativeTime(diffDays, "day", options);
+  }
+
+  const diffMonths = Math.round(diffDays / 30);
+  if (Math.abs(diffMonths) < 18) {
+    return formatting.formatRelativeTime(diffMonths, "month", options);
+  }
+
+  return formatting.formatRelativeTime(
+    Math.round(diffDays / 365),
+    "year",
+    options,
+  );
 }
 
 function msFromSec(value: number | undefined) {
@@ -258,6 +322,70 @@ function automationTriggerLabel(
   return automation.kind === "routing"
     ? routingSourceLabel(automation.triggerLabel, t)
     : automation.triggerLabel;
+}
+
+function weekdayLabel(
+  weekday: string,
+  t: (key: string) => string,
+): string | null {
+  const option = WEEKDAY_OPTIONS.find((item) => item.value === weekday);
+  return option ? t(option.labelKey) : null;
+}
+
+function scheduledOverviewLabel(
+  automation: Extract<BuilderbotAutomation, { kind: "scheduled" }>,
+  t: (key: string, options?: Record<string, string>) => string,
+) {
+  const schedule = parseBuilderbotCronSchedule(automation.triggerLabel);
+  switch (schedule.preset) {
+    case "hourly":
+      return t("automations.schedule.hourly");
+    case "daily":
+      return t("automations.schedule.dailyAt", {
+        time: formatTimeLabel(schedule.time),
+      });
+    case "weekdays":
+      return t("automations.schedule.weekdaysAt", {
+        time: formatTimeLabel(schedule.time),
+      });
+    case "weekly": {
+      const day = weekdayLabel(schedule.weekday, t);
+      return t("automations.schedule.weeklyAt", {
+        day: day ?? t("automations.schedule.weekly"),
+        time: formatTimeLabel(schedule.time),
+      });
+    }
+    case "custom":
+      return t("automations.schedule.custom");
+    default:
+      return t("automations.kind.scheduled");
+  }
+}
+
+function automationOverviewTriggerLabel(
+  automation: BuilderbotAutomation,
+  t: (key: string, options?: Record<string, string>) => string,
+) {
+  if (automation.kind === "scheduled") {
+    return scheduledOverviewLabel(automation, t);
+  }
+  return t("automations.triggeredBy", {
+    source: automationTriggerLabel(automation, t),
+  });
+}
+
+function automationOverviewStatusLabel(
+  automation: BuilderbotAutomation,
+  nextRun: string | null,
+  t: (key: string, options?: Record<string, string>) => string,
+) {
+  if (!automation.enabled) {
+    return t("automations.paused");
+  }
+  if (automation.kind === "scheduled") {
+    return nextRun ? t("automations.nextRun", { time: nextRun }) : null;
+  }
+  return t("automations.listening");
 }
 
 function formatPayload(value: string | undefined) {
@@ -563,39 +691,49 @@ function TaskRow({
     task.updated_at_ms ?? task.created_at_ms,
     formatting.formatRelativeTimeToNow,
   );
+  const statusLabel = compactStatus(task.status);
+  const StatusIcon = taskStatusIcon(task.status);
 
-  return (
+  const row = (
     <button
       type="button"
-      className="grid w-full gap-3 rounded-md border border-border/60 bg-card px-5 py-4 text-left transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring/50 focus-visible:outline-none md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+      className="group grid min-h-[84px] w-full gap-3 rounded-md bg-card px-6 py-4 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
       aria-label={t("tasks.openDetails", { title })}
       onClick={() => onOpen(routeKey)}
     >
       <span className="min-w-0">
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-sm text-foreground">{title}</span>
-          {task.status ? (
-            <Badge variant="secondary">{compactStatus(task.status)}</Badge>
-          ) : null}
+        <span className="block truncate text-base font-normal text-foreground">
+          {title}
         </span>
-        <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-light text-muted-foreground">
-          {task.key ? <span>{task.key}</span> : null}
-          {task.author ? (
-            <span>{t("tasks.by", { user: task.author })}</span>
-          ) : null}
+        <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
           {updatedAt ? <span>{updatedAt}</span> : null}
         </span>
       </span>
-      {task.labels?.length ? (
-        <span className="flex max-w-md flex-wrap gap-1 md:justify-end">
-          {task.labels.slice(0, 3).map((label) => (
-            <Badge key={label} variant="outline">
-              {label}
-            </Badge>
-          ))}
+      {statusLabel ? (
+        <span className="flex justify-start md:justify-end">
+          {StatusIcon ? (
+            <span
+              aria-label={statusLabel}
+              role="img"
+              className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors group-hover:text-foreground"
+            >
+              <StatusIcon aria-hidden="true" className="size-4" />
+            </span>
+          ) : (
+            <span className="text-sm text-muted-foreground">{statusLabel}</span>
+          )}
         </span>
       ) : null}
     </button>
+  );
+
+  if (!StatusIcon || !statusLabel) return row;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{row}</TooltipTrigger>
+      <TooltipContent>{statusLabel}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -608,64 +746,40 @@ function AutomationRow({
 }) {
   const { t } = useTranslation("builderbot");
   const formatting = useLocaleFormatting();
-  const updatedAt = formatTimestamp(
-    automation.updatedAtMs,
-    formatting.formatRelativeTimeToNow,
-  );
-  const nextRun = formatTimestamp(
+  const nextRunLabel = formatLongRelativeTimestamp(
     automation.kind === "scheduled"
       ? msFromSec(automation.nextRunAtSec)
       : undefined,
-    formatting.formatRelativeTimeToNow,
+    formatting,
   );
-  const type = actionType(automation.routine);
-  const runAs = runAsLabel(automation.routine);
-  const triggerLabel = automationTriggerLabel(automation, t);
+  const triggerLabel = automationOverviewTriggerLabel(automation, t);
+  const statusLabel = automationOverviewStatusLabel(
+    automation,
+    nextRunLabel,
+    t,
+  );
 
   return (
     <button
       type="button"
-      className="grid w-full gap-3 rounded-md border border-border/60 bg-card px-5 py-4 text-left transition-colors hover:bg-accent/40 focus-visible:border-ring focus-visible:ring-[1px] focus-visible:ring-ring/50 focus-visible:outline-none md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
+      className="group grid min-h-[84px] w-full gap-3 rounded-md bg-card px-6 py-4 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
       aria-label={t("automations.openDetails", {
-        reference: automation.reference,
+        reference: automation.displayName,
       })}
       onClick={() => onOpen(automation.id)}
     >
       <span className="min-w-0">
-        <span className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="truncate text-sm text-foreground">
-            {automation.reference}
+        <span className="flex min-w-0 items-center">
+          <span className="truncate text-base font-normal text-foreground">
+            {automation.displayName}
           </span>
-          <Badge variant={automation.enabled ? "secondary" : "outline"}>
-            {automation.enabled
-              ? t("automations.enabled")
-              : t("automations.disabled")}
-          </Badge>
-          <Badge variant="outline">
-            {t(`automations.kind.${automation.kind}`)}
-          </Badge>
         </span>
-        <span className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs font-light text-muted-foreground">
-          <span>{triggerLabel}</span>
-          <span>{t(`automations.action.${type}`)}</span>
-          <span>{t(`automations.runAs.${runAs}`)}</span>
-          {updatedAt ? <span>{updatedAt}</span> : null}
+        <span className="mt-1.5 block truncate text-sm text-muted-foreground">
+          {triggerLabel}
         </span>
       </span>
-      <span className="flex flex-wrap gap-1 md:justify-end">
-        {nextRun ? (
-          <Badge variant="outline">
-            {t("automations.nextRun", { time: nextRun })}
-          </Badge>
-        ) : null}
-        {automation.kind === "routing" ? (
-          <Badge variant="outline">
-            {t("automations.conditions", {
-              count: automation.conditionCount,
-              displayCount: automation.conditionCount,
-            })}
-          </Badge>
-        ) : null}
+      <span className="text-sm text-muted-foreground md:max-w-64 md:truncate md:text-right">
+        {statusLabel}
       </span>
     </button>
   );
@@ -1060,9 +1174,9 @@ function AutomationDetailPage({
   const payloadChanged = payloadDraft.trim() !== editablePayload.text.trim();
 
   useEffect(() => {
-    onBreadcrumbLabelChange?.(automation?.reference ?? automationId);
+    onBreadcrumbLabelChange?.(automation?.displayName ?? automationId);
     return () => onBreadcrumbLabelChange?.(null);
-  }, [automation?.reference, automationId, onBreadcrumbLabelChange]);
+  }, [automation?.displayName, automationId, onBreadcrumbLabelChange]);
 
   const updateScheduledAutomation = (
     patch: UpdateBuilderbotScheduledTriggerRequest,
@@ -1669,16 +1783,24 @@ export function BuilderbotView({
           })
         }
       >
-        <TabsList variant="weight">
-          <TabsTrigger value="tasks" variant="weight">
+        <TabsList variant="weight" className="gap-8">
+          <TabsTrigger
+            value="tasks"
+            variant="weight"
+            className="py-2 text-base"
+          >
             {t("tabs.tasks")}
           </TabsTrigger>
-          <TabsTrigger value="automations" variant="weight">
+          <TabsTrigger
+            value="automations"
+            variant="weight"
+            className="py-2 text-base"
+          >
             {t("tabs.automations")}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="tasks" className="mt-5">
+        <TabsContent value="tasks" className="mt-6">
           <TasksTab
             onOpenTask={(taskKey) =>
               setNavigationRoute({ surface: "task", taskKey })
@@ -1686,7 +1808,7 @@ export function BuilderbotView({
           />
         </TabsContent>
 
-        <TabsContent value="automations" className="mt-5">
+        <TabsContent value="automations" className="mt-6">
           <AutomationsTab
             onOpenAutomation={(automationId) =>
               setNavigationRoute({ surface: "automation", automationId })

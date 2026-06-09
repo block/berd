@@ -102,12 +102,23 @@
     "emptyBody": "Builderbot returned no scheduled or triggered automations owned by you.",
     "enabled": "Enabled",
     "disabled": "Disabled",
-    "nextRun": "next {{time}}",
+    "nextRun": "Next {{time}}",
+    "paused": "Paused",
+    "listening": "Active",
+    "triggeredBy": "Triggered by {{source}}",
     "conditions_one": "{{displayCount}} condition",
     "conditions_other": "{{displayCount}} conditions",
     "kind": {
       "scheduled": "Scheduled",
       "routing": "Triggered"
+    },
+    "schedule": {
+      "hourly": "Hourly",
+      "dailyAt": "Daily at {{time}}",
+      "weekdaysAt": "Weekdays at {{time}}",
+      "weekly": "Weekly",
+      "weeklyAt": "{{day}} at {{time}}",
+      "custom": "Custom schedule"
     },
     "action": {
       "agent": "Agent",

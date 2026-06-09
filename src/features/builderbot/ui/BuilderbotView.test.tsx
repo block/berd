@@ -56,6 +56,30 @@ function mockBuilderbotResponses({
                 "https://builderbot.sqprod.co/tasks/TASK-1/artifacts",
               thread_url: "https://builderbot.sqprod.co/threads/thread-1",
             },
+            {
+              key: "TASK-2",
+              description: "Publish the Builderbot card polish",
+              status: "TASK_STATUS_COMPLETED",
+              author: "morgan",
+              updated_at_ms: 1714568500000,
+              labels: ["design"],
+            },
+            {
+              key: "TASK-3",
+              description: "Archive stale Builderbot experiment",
+              status: "TASK_STATUS_CANCELLED",
+              author: "morgan",
+              updated_at_ms: 1714568500000,
+              labels: ["cleanup"],
+            },
+            {
+              key: "TASK-4",
+              description: "Queue Builderbot follow-up",
+              status: "TASK_STATUS_PENDING",
+              author: "morgan",
+              updated_at_ms: 1714568500000,
+              labels: ["follow-up"],
+            },
           ],
         });
       case "get_builderbot_scheduled_triggers":
@@ -66,7 +90,9 @@ function mockBuilderbotResponses({
               reference: "daily-docs",
               enabled: true,
               cron_expression: "0 9 * * 1-5",
-              next_run_at_sec: 1714570000,
+              next_run_at_sec: Math.floor(
+                (Date.now() + 7 * 60 * 60 * 1000) / 1000,
+              ),
               last_run_at_sec: 1714560000,
               last_status: "TRIGGER_RUN_STATUS_SUCCESS",
               updated_at_ms: 1714568500000,
@@ -103,6 +129,20 @@ function mockBuilderbotResponses({
                 routine_identifier: "blox-repo-command",
                 input_payload: '{"command":"pnpm test"}',
                 run_as_service: "builderbot",
+              },
+            },
+            {
+              reference: "linear-active",
+              source: "linear",
+              enabled: true,
+              updated_at_ms: 1714568700000,
+              created_by: "morgan",
+              owner: "morgan",
+              owners: ["morgan"],
+              conditions: [],
+              routine: {
+                routine_identifier: "blox-vanilla",
+                input_payload: '{"prompt":"Watch Linear"}',
               },
             },
           ],
@@ -170,6 +210,24 @@ describe("BuilderbotView", () => {
     ).toBeInTheDocument();
   });
 
+  it("keeps task overview cards focused on status and timing", async () => {
+    renderBuilderbotView();
+
+    const row = await screen.findByRole("button", {
+      name: /Ship richer Builderbot details/i,
+    });
+
+    expect(row).not.toHaveTextContent("TASK-1");
+    expect(row).not.toHaveTextContent("by morgan");
+    expect(row).not.toHaveTextContent("builderbot");
+    expect(row).not.toHaveTextContent("ux");
+    expect(row).not.toHaveTextContent("in progress");
+    expect(screen.getByLabelText("in progress")).toBeInTheDocument();
+    expect(screen.getByLabelText("completed")).toBeInTheDocument();
+    expect(screen.getByLabelText("cancelled")).toBeInTheDocument();
+    expect(screen.getByLabelText("pending")).toBeInTheDocument();
+  });
+
   it("reveals scheduled automation run metadata and payload", async () => {
     const user = userEvent.setup();
 
@@ -177,7 +235,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /daily-docs/i }),
+      await screen.findByRole("button", { name: /Daily docs/i }),
     );
 
     expect(screen.getByText("Repeats")).toBeInTheDocument();
@@ -189,6 +247,30 @@ describe("BuilderbotView", () => {
     expect(screen.getByText("Summarize docs")).toBeInTheDocument();
   });
 
+  it("keeps automation overview cards focused on status and trigger", async () => {
+    const user = userEvent.setup();
+
+    renderBuilderbotView();
+
+    await user.click(screen.getByRole("tab", { name: "Automations" }));
+
+    expect(
+      await screen.findByRole("button", { name: /Daily docs/i }),
+    ).toHaveTextContent("Weekdays at");
+    expect(screen.getByText("Daily docs")).toBeInTheDocument();
+    expect(screen.queryByText("daily-docs")).not.toBeInTheDocument();
+    expect(screen.getByText("Next in 7 hours")).toBeInTheDocument();
+    expect(screen.queryByText("0 9 * * 1-5")).not.toBeInTheDocument();
+    expect(screen.queryByText(/hr\\./i)).not.toBeInTheDocument();
+    expect(screen.queryByText("1 condition")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run as Builderbot")).not.toBeInTheDocument();
+    expect(screen.queryByText("Script")).not.toBeInTheDocument();
+    expect(screen.queryByText("Disabled")).not.toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText("Listening")).not.toBeInTheDocument();
+  });
+
   it("updates the scheduled automation prompt through Builderbot", async () => {
     const user = userEvent.setup();
 
@@ -196,7 +278,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /daily-docs/i }),
+      await screen.findByRole("button", { name: /Daily docs/i }),
     );
     await user.click(
       screen.getByRole("button", { name: "Edit prompt or payload" }),
@@ -236,7 +318,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /daily-docs/i }),
+      await screen.findByRole("button", { name: /Daily docs/i }),
     );
     await user.click(
       screen.getByRole("button", { name: "Edit prompt or payload" }),
@@ -262,7 +344,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /daily-docs/i }),
+      await screen.findByRole("button", { name: /Daily docs/i }),
     );
     await user.click(screen.getByRole("combobox", { name: "Repeats" }));
 
@@ -278,7 +360,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /daily-docs/i }),
+      await screen.findByRole("button", { name: /Daily docs/i }),
     );
     await user.click(screen.getByRole("switch", { name: "Status" }));
 
@@ -308,7 +390,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /repo-failure/i }),
+      await screen.findByRole("button", { name: /Repo failure/i }),
     );
 
     expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
@@ -327,7 +409,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /repo-failure/i }),
+      await screen.findByRole("button", { name: /Repo failure/i }),
     );
     await user.click(screen.getByRole("combobox", { name: "Run as" }));
     await user.click(await screen.findByRole("option", { name: "Run as me" }));
@@ -367,7 +449,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /repo-failure/i }),
+      await screen.findByRole("button", { name: /Repo failure/i }),
     );
     await user.click(screen.getByRole("switch", { name: "Status" }));
 
@@ -407,7 +489,7 @@ describe("BuilderbotView", () => {
 
     await user.click(screen.getByRole("tab", { name: "Automations" }));
     await user.click(
-      await screen.findByRole("button", { name: /repo-failure/i }),
+      await screen.findByRole("button", { name: /Repo failure/i }),
     );
     await user.click(
       screen.getByRole("button", { name: "Edit prompt or payload" }),
