@@ -106,19 +106,24 @@
     "errors": {
       "gitRead": "Git status is unavailable right now.",
       "gitChangesRead": "Git changes are unavailable right now.",
-      "artifactFolderChange": "Couldn't change the artifact folder."
+      "folderChange": "Couldn't change the folder."
     },
     "artifacts": {
-      "changeFolder": "Change folder",
-      "changeFolderDialogTitle": "Choose artifact folder",
-      "changeFolderSuccess": "Artifact folder updated.",
       "folderLabel": "Artifact folder",
       "workspaceLabel": "General chat"
+    },
+    "folder": {
+      "change": "Change folder",
+      "changeDialogTitle": "Choose working folder",
+      "changeSuccess": "Working folder updated.",
+      "label": "Working folder"
     },
     "picker": {
       "selectContext": "Select worktree or branch",
       "worktrees": "Worktrees",
       "allBranches": "All branches",
+      "changeFolder": "Change folder…",
+      "changesStashed": "Your changes were stashed first — restore them with \"git stash pop\".",
       "checkedOutBranch": "{{branch}}",
       "currentBranch": "Current branch",
       "dirtyTitle": "Uncommitted changes",

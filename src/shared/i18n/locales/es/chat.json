@@ -106,19 +106,24 @@
     "errors": {
       "gitRead": "El estado de git no está disponible en este momento.",
       "gitChangesRead": "Los cambios de git no están disponibles en este momento.",
-      "artifactFolderChange": "No se pudo cambiar la carpeta de artefactos."
+      "folderChange": "No se pudo cambiar la carpeta."
     },
     "artifacts": {
-      "changeFolder": "Cambiar carpeta",
-      "changeFolderDialogTitle": "Elegir carpeta de artefactos",
-      "changeFolderSuccess": "Carpeta de artefactos actualizada.",
       "folderLabel": "Carpeta de artefactos",
       "workspaceLabel": "Chat general"
+    },
+    "folder": {
+      "change": "Cambiar carpeta",
+      "changeDialogTitle": "Elegir carpeta de trabajo",
+      "changeSuccess": "Carpeta de trabajo actualizada.",
+      "label": "Carpeta de trabajo"
     },
     "picker": {
       "selectContext": "Seleccionar árbol de trabajo o rama",
       "worktrees": "Árboles de trabajo",
       "allBranches": "Todas las ramas",
+      "changeFolder": "Cambiar carpeta…",
+      "changesStashed": "Tus cambios se guardaron primero en el stash — restáuralos con \"git stash pop\".",
       "checkedOutBranch": "{{branch}}",
       "currentBranch": "Rama actual",
       "dirtyTitle": "Cambios sin confirmar",

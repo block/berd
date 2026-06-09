@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { FilesList } from "./FilesList";
 import { useGitState } from "@/shared/hooks/useGitState";
@@ -19,12 +20,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import type { ActiveWorkspace } from "../stores/chatSessionStore";
 import { WorkspaceWidget } from "./widgets/WorkspaceWidget";
+import { formatErrorMessage } from "./widgets/formatError";
 import { ChangesWidget } from "./widgets/ChangesWidget";
 import { ArtifactsWidget } from "./widgets/ArtifactsWidget";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { updateWorkingDir } from "@/shared/api/acpApi";
 import { toast } from "sonner";
-import { setArtifactRootPreference } from "@/shared/artifacts/sessionArtifactLocation";
 
 interface ContextPanelProps {
   sessionId: string;
@@ -78,8 +79,7 @@ export function ContextPanel({
 }: ContextPanelProps) {
   const { t } = useTranslation("chat");
   const [activeTab, setActiveTab] = useState<ContextPanelTab>("details");
-  const [isChangingArtifactFolder, setIsChangingArtifactFolder] =
-    useState(false);
+  const [isChangingFolder, setIsChangingFolder] = useState(false);
   const [sectionVisibility, setSectionVisibility] = usePersistedState(
     SECTION_VISIBILITY_STORAGE_KEY,
     DEFAULT_SECTION_VISIBILITY,
@@ -104,12 +104,12 @@ export function ContextPanel({
       : sessionWorkingDir
         ? [sessionWorkingDir]
         : [];
+  const queryClient = useQueryClient();
   const {
     data: gitState,
     error,
     isLoading,
     isFetching,
-    refetch,
   } = useGitState(gitTargetPath, activeTab === "details");
 
   const {
@@ -117,7 +117,6 @@ export function ContextPanel({
     error: changedFilesError,
     isLoadingError: isChangedFilesLoadingError,
     isLoading: isFilesLoading,
-    refetch: refetchFiles,
   } = useChangedFiles(gitTargetPath, activeTab === "details");
   const shouldShowChanges = gitState?.isGitRepo !== false;
   const shouldShowArtifacts = gitState?.isGitRepo === false;
@@ -129,28 +128,54 @@ export function ContextPanel({
     [sessionId, setActiveWorkspace],
   );
 
+  // Git mutations can move branches in any worktree of the repo, and the
+  // routing decisions in the picker depend on that repo-wide picture, so
+  // invalidate every cached path — not just the one this panel is showing.
   const refetchAll = useCallback(async () => {
     await Promise.all([
-      refetch().catch(() => undefined),
-      refetchFiles().catch(() => undefined),
+      queryClient
+        .invalidateQueries({ queryKey: ["git-state"] })
+        .catch(() => undefined),
+      queryClient
+        .invalidateQueries({ queryKey: ["changed-files"] })
+        .catch(() => undefined),
     ]);
-  }, [refetch, refetchFiles]);
+  }, [queryClient]);
 
   const handleSwitchBranch = useCallback(
     async (path: string, branch: string) => {
-      await switchBranch(path, branch);
-      await refetchAll();
+      try {
+        await switchBranch(path, branch);
+      } finally {
+        // Re-sync even when git refuses the switch, so the picker reflects
+        // reality without a manual refresh.
+        await refetchAll();
+      }
     },
     [refetchAll],
   );
 
   const handleStashAndSwitch = useCallback(
     async (path: string, branch: string) => {
-      await stashChanges(path);
-      await switchBranch(path, branch);
-      await refetchAll();
+      try {
+        await stashChanges(path);
+        try {
+          await switchBranch(path, branch);
+        } catch (error) {
+          // The stash already succeeded: make sure the failure toast tells
+          // the user their changes are parked in the stash, not lost.
+          throw new Error(
+            `${formatErrorMessage(
+              error,
+              t("contextPanel.picker.switchError", { branch }),
+            )} ${t("contextPanel.picker.changesStashed")}`,
+          );
+        }
+      } finally {
+        await refetchAll();
+      }
     },
-    [refetchAll],
+    [refetchAll, t],
   );
 
   const handleInitRepo = useCallback(
@@ -161,8 +186,10 @@ export function ContextPanel({
     [refetchAll],
   );
 
-  const handleChangeArtifactFolder = useCallback(async () => {
-    setIsChangingArtifactFolder(true);
+  // Re-points the current chat only. The default folder for new general
+  // chats lives in Settings and is intentionally not touched here.
+  const handleChangeFolder = useCallback(async () => {
+    setIsChangingFolder(true);
 
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
@@ -170,7 +197,7 @@ export function ContextPanel({
         defaultPath: gitTargetPath ?? undefined,
         directory: true,
         multiple: false,
-        title: t("contextPanel.artifacts.changeFolderDialogTitle"),
+        title: t("contextPanel.folder.changeDialogTitle"),
       });
 
       if (typeof selected !== "string") {
@@ -179,16 +206,15 @@ export function ContextPanel({
 
       await ensureDirectory(selected);
       await updateWorkingDir(sessionId, selected);
-      setArtifactRootPreference(selected);
       patchSession(sessionId, { workingDir: selected });
       setActiveWorkspace(sessionId, { path: selected, branch: null });
       await refetchAll();
-      toast.success(t("contextPanel.artifacts.changeFolderSuccess"));
+      toast.success(t("contextPanel.folder.changeSuccess"));
     } catch (error) {
-      console.warn("Failed to change artifact folder:", error);
-      toast.error(t("contextPanel.errors.artifactFolderChange"));
+      console.warn("Failed to change working folder:", error);
+      toast.error(t("contextPanel.errors.folderChange"));
     } finally {
-      setIsChangingArtifactFolder(false);
+      setIsChangingFolder(false);
     }
   }, [
     gitTargetPath,
@@ -304,13 +330,13 @@ export function ContextPanel({
             onSwitchBranch={handleSwitchBranch}
             onStashAndSwitch={handleStashAndSwitch}
             onInitRepo={handleInitRepo}
-            onChangeArtifactFolder={handleChangeArtifactFolder}
+            onChangeFolder={handleChangeFolder}
             onFetch={handleFetch}
             onPull={handlePull}
             onCreateBranch={handleCreateBranch}
             onCreateWorktree={handleCreateWorktree}
             onRefresh={handleRefresh}
-            isChangingArtifactFolder={isChangingArtifactFolder}
+            isChangingFolder={isChangingFolder}
             isOpen={sectionVisibility.workspace}
             onToggleOpen={() => toggleSection("workspace")}
             terminalOpen={terminalOpen}

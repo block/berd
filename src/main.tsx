@@ -1,4 +1,8 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  focusManager,
+  QueryClient,
+  QueryClientProvider,
+} from "@tanstack/react-query";
 import React from "react";
 import ReactDOM from "react-dom/client";
 
@@ -26,6 +30,25 @@ try {
 }
 
 preloadStartupLoadingMedia();
+
+// React Query's default focus detection relies on `visibilitychange`, which
+// the Tauri webview does not fire when the app window merely loses or regains
+// OS focus. Drive it from real window focus events so queries opted into
+// refetchOnWindowFocus re-sync when the user comes back to the app.
+focusManager.setEventListener((handleFocus) => {
+  const onFocus = () => handleFocus(true);
+  const onBlur = () => handleFocus(false);
+  const onVisibilityChange = () =>
+    handleFocus(document.visibilityState !== "hidden");
+  window.addEventListener("focus", onFocus);
+  window.addEventListener("blur", onBlur);
+  document.addEventListener("visibilitychange", onVisibilityChange);
+  return () => {
+    window.removeEventListener("focus", onFocus);
+    window.removeEventListener("blur", onBlur);
+    document.removeEventListener("visibilitychange", onVisibilityChange);
+  };
+});
 
 const queryClient = new QueryClient({
   defaultOptions: {

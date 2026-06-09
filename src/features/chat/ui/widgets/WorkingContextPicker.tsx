@@ -4,6 +4,7 @@ import { toast } from "sonner";
 import {
   IconChevronDown,
   IconFolder,
+  IconFolderOpen,
   IconGitBranch,
 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
@@ -18,9 +19,10 @@ import {
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog";
 import { buttonVariants } from "@/shared/ui/button";
-import { cn } from "@/shared/lib/cn";
+import { RowButton } from "@/shared/ui/row-button";
 import type { GitState } from "@/shared/types/git";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
+import { formatErrorMessage } from "./formatError";
 
 interface WorkingContextPickerProps {
   currentProjectPath: string | null;
@@ -29,6 +31,8 @@ interface WorkingContextPickerProps {
   onSelect: (context: ActiveWorkspace) => void;
   onSwitchBranch: (path: string, branch: string) => Promise<void>;
   onStashAndSwitch: (path: string, branch: string) => Promise<void>;
+  onChangeFolder?: () => Promise<void> | void;
+  isChangingFolder?: boolean;
 }
 
 export function shortenPath(fullPath: string): string {
@@ -53,6 +57,14 @@ function normalizeComparablePath(path: string) {
   return path.replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+function isSamePath(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  if (!a || !b) return false;
+  return normalizeComparablePath(a) === normalizeComparablePath(b);
+}
+
 export function WorkingContextPicker({
   currentProjectPath,
   gitState,
@@ -60,6 +72,8 @@ export function WorkingContextPicker({
   onSelect,
   onSwitchBranch,
   onStashAndSwitch,
+  onChangeFolder,
+  isChangingFolder = false,
 }: WorkingContextPickerProps) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
@@ -79,9 +93,10 @@ export function WorkingContextPicker({
     )?.path ?? worktrees[0]?.path;
   const currentPath = activeContext?.path ?? defaultWorktreePath;
   const activeWorktree =
-    worktrees.find((worktree) => worktree.path === currentPath) ?? null;
+    worktrees.find((worktree) => isSamePath(worktree.path, currentPath)) ??
+    null;
   const activeBranch =
-    activeContext?.branch ?? activeWorktree?.branch ?? gitState?.currentBranch;
+    activeWorktree?.branch ?? activeContext?.branch ?? gitState?.currentBranch;
   const activeWorktreeLabel = activeWorktree
     ? shortenPath(activeWorktree.path)
     : currentPath
@@ -127,8 +142,13 @@ export function WorkingContextPicker({
       try {
         await onSwitchBranch(path, branch);
         finishSwitch(path, branch);
-      } catch {
-        toast.error(t("contextPanel.picker.switchError", { branch }));
+      } catch (error) {
+        toast.error(
+          formatErrorMessage(
+            error,
+            t("contextPanel.picker.switchError", { branch }),
+          ),
+        );
       } finally {
         setSwitching(false);
       }
@@ -143,8 +163,10 @@ export function WorkingContextPicker({
         await onStashAndSwitch(path, branch);
         finishSwitch(path, branch);
         toast.success(t("contextPanel.picker.stashSuccess", { branch }));
-      } catch {
-        toast.error(t("contextPanel.picker.stashError"));
+      } catch (error) {
+        toast.error(
+          formatErrorMessage(error, t("contextPanel.picker.stashError")),
+        );
       } finally {
         setSwitching(false);
       }
@@ -169,13 +191,16 @@ export function WorkingContextPicker({
   const handleBranchSelect = useCallback(
     (branch: string) => {
       const worktreeForBranch = worktreeByBranch.get(branch);
-      if (worktreeForBranch && worktreeForBranch.path !== currentPath) {
+      if (
+        worktreeForBranch &&
+        !isSamePath(worktreeForBranch.path, currentPath)
+      ) {
         handleWorktreeSelect(worktreeForBranch.path, worktreeForBranch.branch);
         return;
       }
       const targetPath = getBranchTargetPath(branch);
       if (!targetPath) return;
-      if (targetPath === currentPath && dirtyFileCount > 0) {
+      if (isSamePath(targetPath, currentPath) && dirtyFileCount > 0) {
         setPendingSwitch({ path: targetPath, branch });
       } else {
         void performCarrySwitch(targetPath, branch);
@@ -192,7 +217,7 @@ export function WorkingContextPicker({
   );
 
   const isWorktreeSelected = (path: string) => {
-    return currentPath === path;
+    return isSamePath(currentPath, path);
   };
 
   if (!gitState?.isGitRepo) return null;
@@ -204,28 +229,20 @@ export function WorkingContextPicker({
     <>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
-          <button
-            type="button"
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2",
-              "text-sm text-foreground transition-colors",
-              "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-            )}
+          <RowButton
+            variant="field"
             aria-label={t("contextPanel.picker.selectContext")}
-          >
-            <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate text-foreground">
-                {activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet")}
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {t("contextPanel.picker.checkedOutBranch", {
-                  branch: activeBranchLabel,
-                })}
-              </span>
-            </span>
-            <IconChevronDown className="size-3 shrink-0 text-muted-foreground" />
-          </button>
+            icon={
+              <IconFolder className="size-4 shrink-0 text-muted-foreground" />
+            }
+            label={activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet")}
+            description={t("contextPanel.picker.checkedOutBranch", {
+              branch: activeBranchLabel,
+            })}
+            trailing={
+              <IconChevronDown className="size-3 shrink-0 text-muted-foreground" />
+            }
+          />
         </PopoverTrigger>
 
         <PopoverContent
@@ -239,28 +256,18 @@ export function WorkingContextPicker({
                 {t("contextPanel.picker.worktrees")}
               </p>
               {worktrees.map((wt) => (
-                <button
+                <RowButton
                   key={wt.path}
-                  type="button"
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                    "hover:bg-muted focus-visible:outline-none focus-visible:bg-muted",
-                    isWorktreeSelected(wt.path) && "bg-muted",
-                  )}
+                  selected={isWorktreeSelected(wt.path)}
                   onClick={() => handleWorktreeSelect(wt.path, wt.branch)}
-                >
-                  <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate font-normal text-foreground">
-                      {worktreeName(wt.path)}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">
-                      {t("contextPanel.picker.checkedOutBranch", {
-                        branch: wt.branch ?? t("contextPanel.states.detached"),
-                      })}
-                    </span>
-                  </div>
-                </button>
+                  icon={
+                    <IconFolder className="size-4 shrink-0 text-muted-foreground" />
+                  }
+                  label={worktreeName(wt.path)}
+                  description={t("contextPanel.picker.checkedOutBranch", {
+                    branch: wt.branch ?? t("contextPanel.states.detached"),
+                  })}
+                />
               ))}
             </div>
           ) : null}
@@ -282,31 +289,40 @@ export function WorkingContextPicker({
                     : null;
 
                 return (
-                  <button
+                  <RowButton
                     key={branch}
-                    type="button"
                     disabled={switching || isCurrentBranch}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors",
-                      "hover:bg-muted focus-visible:outline-none focus-visible:bg-muted",
-                      "disabled:opacity-50",
-                    )}
                     onClick={() => handleBranchSelect(branch)}
-                  >
-                    <IconGitBranch className="size-4 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0 flex-1">
-                      <span className="block truncate text-foreground">
-                        {branch}
-                      </span>
-                      {branchMeta ? (
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {branchMeta}
-                        </span>
-                      ) : null}
-                    </div>
-                  </button>
+                    icon={
+                      <IconGitBranch className="size-4 shrink-0 text-muted-foreground" />
+                    }
+                    label={branch}
+                    description={branchMeta}
+                  />
                 );
               })}
+            </div>
+          ) : null}
+
+          {onChangeFolder ? (
+            <div
+              className={
+                hasWorktrees || hasBranches
+                  ? "mt-1 border-t border-border pt-1"
+                  : ""
+              }
+            >
+              <RowButton
+                disabled={isChangingFolder}
+                onClick={() => {
+                  setOpen(false);
+                  void onChangeFolder();
+                }}
+                icon={
+                  <IconFolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                }
+                label={t("contextPanel.picker.changeFolder")}
+              />
             </div>
           ) : null}
         </PopoverContent>

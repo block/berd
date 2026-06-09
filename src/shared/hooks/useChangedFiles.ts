@@ -11,6 +11,8 @@ export function useChangedFiles(
     enabled: enabled && Boolean(path),
     retry: false,
     staleTime: Number.POSITIVE_INFINITY,
-    refetchOnWindowFocus: true,
+    // "always" rather than true: with an infinite staleTime, plain `true`
+    // never fires because the data is never considered stale.
+    refetchOnWindowFocus: "always",
   });
 }

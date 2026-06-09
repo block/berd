@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import * as gitApi from "@/shared/api/git";
+import type { GitState } from "@/shared/types/git";
+import { useChatSessionStore } from "../../stores/chatSessionStore";
 import { ContextPanel } from "../ContextPanel";
 
 const {
@@ -13,6 +16,8 @@ const {
   mockEnsureDirectory,
   mockUpdateWorkingDir,
   mockOpenDialog,
+  mockToastError,
+  mockToastSuccess,
 } = vi.hoisted(() => ({
   mockUseGitState: vi.fn(),
   mockRefetch: vi.fn(),
@@ -22,6 +27,19 @@ const {
   mockEnsureDirectory: vi.fn(),
   mockUpdateWorkingDir: vi.fn(),
   mockOpenDialog: vi.fn(),
+  mockToastError: vi.fn(),
+  mockToastSuccess: vi.fn(),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: mockToastError,
+    success: mockToastSuccess,
+    info: vi.fn(),
+    warning: vi.fn(),
+    message: vi.fn(),
+    dismiss: vi.fn(),
+  },
 }));
 
 vi.mock("@/shared/hooks/useGitState", () => ({
@@ -82,11 +100,13 @@ describe("ContextPanel", () => {
     props: Partial<Parameters<typeof ContextPanel>[0]> = {},
   ) =>
     render(
-      <ContextPanel
-        sessionId="test-session"
-        projectWorkingDirs={["/Users/test/goose2"]}
-        {...props}
-      />,
+      <QueryClientProvider client={new QueryClient()}>
+        <ContextPanel
+          sessionId="test-session"
+          projectWorkingDirs={["/Users/test/goose2"]}
+          {...props}
+        />
+      </QueryClientProvider>,
     );
 
   beforeEach(() => {
@@ -215,6 +235,9 @@ describe("ContextPanel", () => {
     expect(
       screen.getByRole("button", { name: /initialize git/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /change folder/i }),
+    ).toHaveTextContent("Working folder");
   });
 
   it("shows artifact folder controls for no-project non-git chats", async () => {
@@ -269,13 +292,47 @@ describe("ContextPanel", () => {
       }),
     );
     await waitFor(() => {
-      expect(localStorage.getItem("goose:artifact-root-path")).toBe(
+      expect(mockUpdateWorkingDir).toHaveBeenCalledWith(
+        "test-session-artifact-folder",
         "/Users/test/custom artifacts",
       );
     });
+    // The context panel re-points this chat only; the default folder for new
+    // general chats is managed in Settings.
+    expect(localStorage.getItem("goose:artifact-root-path")).toBeNull();
     expect(
       screen.queryByRole("button", { name: /initialize git/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("changes the working folder from the git picker dropdown", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue("/Users/test/another-folder");
+
+    renderContextPanel({
+      sessionId: "test-session-git-change-folder",
+      projectName: "Desktop UX",
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /select worktree or branch/i }),
+    );
+    await user.click(screen.getByRole("button", { name: /change folder/i }));
+
+    expect(mockOpenDialog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        defaultPath: "/Users/test/goose2",
+        directory: true,
+        multiple: false,
+      }),
+    );
+    await waitFor(() => {
+      expect(mockUpdateWorkingDir).toHaveBeenCalledWith(
+        "test-session-git-change-folder",
+        "/Users/test/another-folder",
+      );
+    });
+    expect(localStorage.getItem("goose:artifact-root-path")).toBeNull();
   });
 
   it("does not show session artifacts for git-backed chats", () => {
@@ -397,6 +454,27 @@ describe("ContextPanel", () => {
     ).toHaveTextContent("feat/context-panel");
   });
 
+  it("uses refreshed git state instead of a stale stored branch for the selected path", () => {
+    useChatSessionStore
+      .getState()
+      .setActiveWorkspace("test-session-stale-branch", {
+        path: "/Users/test/goose2",
+        branch: "dev",
+      });
+
+    renderContextPanel({
+      sessionId: "test-session-stale-branch",
+      projectName: "Desktop UX",
+    });
+
+    const picker = screen.getByRole("button", {
+      name: /select worktree or branch/i,
+    });
+    expect(picker).toHaveTextContent("~/goose2");
+    expect(picker).toHaveTextContent("main");
+    expect(picker).not.toHaveTextContent("dev");
+  });
+
   it("shows all branches on the main worktree and uses folder subtext for branch targets", async () => {
     const user = userEvent.setup();
 
@@ -430,6 +508,78 @@ describe("ContextPanel", () => {
   it("shows all branches on non-main worktrees and routes untied branches through main", async () => {
     const user = userEvent.setup();
 
+    let gitState: GitState = {
+      isGitRepo: true,
+      currentBranch: "feat/context-panel",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [
+        {
+          path: "/Users/test/goose2",
+          branch: "main",
+          isMain: true,
+        },
+        {
+          path: "/Users/test/goose2-feature",
+          branch: "feat/context-panel",
+          isMain: false,
+        },
+      ],
+      isWorktree: true,
+      mainWorktreePath: "/Users/test/goose2",
+      localBranches: ["feat/context-panel", "main", "dev"],
+    };
+    mockUseGitState.mockImplementation(() => ({
+      data: gitState,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    }));
+    vi.mocked(gitApi.switchBranch).mockImplementationOnce(
+      async (_path, branch) => {
+        gitState = {
+          ...gitState,
+          currentBranch: branch,
+          worktrees: gitState.worktrees.map((worktree) =>
+            worktree.path === "/Users/test/goose2"
+              ? { ...worktree, branch }
+              : worktree,
+          ),
+        };
+      },
+    );
+
+    renderContextPanel({
+      sessionId: "test-session-4c",
+      projectWorkingDirs: ["/Users/test/goose2-feature"],
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /select worktree or branch/i }),
+    );
+
+    expect(screen.getByText("All branches")).toBeInTheDocument();
+    expect(getBranchButton("main")).toHaveTextContent("~/goose2");
+    expect(getBranchButton("dev")).toHaveTextContent("~/goose2");
+
+    await user.click(screen.getByText("dev"));
+
+    expect(vi.mocked(gitApi.switchBranch)).toHaveBeenCalledWith(
+      "/Users/test/goose2",
+      "dev",
+    );
+    expect(
+      screen.getByRole("button", { name: /select worktree or branch/i }),
+    ).toHaveTextContent("~/goose2");
+    expect(
+      screen.getByRole("button", { name: /select worktree or branch/i }),
+    ).toHaveTextContent("dev");
+  });
+
+  it("surfaces the real git error when a branch switch fails", async () => {
+    const user = userEvent.setup();
+
     mockUseGitState.mockReturnValue({
       data: {
         isGitRepo: true,
@@ -457,32 +607,58 @@ describe("ContextPanel", () => {
       isFetching: false,
       refetch: mockRefetch,
     });
+    // Tauri invoke rejects with the plain string from the Rust command.
+    vi.mocked(gitApi.switchBranch).mockRejectedValueOnce(
+      "git switch dev failed: fatal: 'dev' is already used by worktree at '/Users/test/elsewhere'",
+    );
 
     renderContextPanel({
-      sessionId: "test-session-4c",
+      sessionId: "test-session-switch-error",
       projectWorkingDirs: ["/Users/test/goose2-feature"],
     });
 
     await user.click(
       screen.getByRole("button", { name: /select worktree or branch/i }),
     );
-
-    expect(screen.getByText("All branches")).toBeInTheDocument();
-    expect(getBranchButton("main")).toHaveTextContent("~/goose2");
-    expect(getBranchButton("dev")).toHaveTextContent("~/goose2");
-
     await user.click(screen.getByText("dev"));
 
-    expect(vi.mocked(gitApi.switchBranch)).toHaveBeenCalledWith(
-      "/Users/test/goose2",
-      "dev",
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("already used by worktree"),
+      );
+    });
+    // The picker stays on the real current context instead of pretending
+    // the switch happened.
+    expect(
+      screen.getByRole("button", { name: /select worktree or branch/i }),
+    ).toHaveTextContent("feat/context-panel");
+  });
+
+  it("tells the user their changes are stashed when the switch fails after stashing", async () => {
+    const user = userEvent.setup();
+    vi.mocked(gitApi.switchBranch).mockRejectedValueOnce(
+      "git switch dev failed: fatal: something went wrong",
     );
-    expect(
+
+    // Default state: main worktree with 3 dirty files, so picking an
+    // untied branch routes through the stash-and-switch confirmation.
+    renderContextPanel({ sessionId: "test-session-stash-fail" });
+
+    await user.click(
       screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("~/goose2");
-    expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("dev");
+    );
+    await user.click(screen.getByText("dev"));
+    await user.click(screen.getByRole("button", { name: /stash & switch/i }));
+
+    expect(vi.mocked(gitApi.stashChanges)).toHaveBeenCalled();
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith(
+        expect.stringContaining("git stash pop"),
+      );
+    });
+    expect(mockToastError).toHaveBeenCalledWith(
+      expect.stringContaining("something went wrong"),
+    );
   });
 
   it("shows the current branch in the picker when it is the only option", async () => {
@@ -578,6 +754,49 @@ describe("ContextPanel", () => {
 
   it("creates a branch from the workspace actions dialog", async () => {
     const user = userEvent.setup();
+
+    let gitState: GitState = {
+      isGitRepo: true,
+      currentBranch: "main",
+      dirtyFileCount: 3,
+      incomingCommitCount: 0,
+      worktrees: [
+        {
+          path: "/Users/test/goose2",
+          branch: "main",
+          isMain: true,
+        },
+        {
+          path: "/Users/test/goose2-feature",
+          branch: "feat/context-panel",
+          isMain: false,
+        },
+      ],
+      isWorktree: false,
+      mainWorktreePath: "/Users/test/goose2",
+      localBranches: ["main", "feat/context-panel", "dev", "old-feature"],
+    };
+    mockUseGitState.mockImplementation(() => ({
+      data: gitState,
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    }));
+    vi.mocked(gitApi.createBranch).mockImplementationOnce(
+      async (_path, name) => {
+        gitState = {
+          ...gitState,
+          currentBranch: name,
+          localBranches: [...gitState.localBranches, name],
+          worktrees: gitState.worktrees.map((worktree) =>
+            worktree.path === "/Users/test/goose2"
+              ? { ...worktree, branch: name }
+              : worktree,
+          ),
+        };
+      },
+    );
 
     renderContextPanel({ sessionId: "test-session-7" });
 

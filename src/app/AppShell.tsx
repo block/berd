@@ -85,7 +85,6 @@ import { perfLog } from "@/shared/lib/perfLog";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
-import { resolveInheritedProjectWorkspace } from "@/features/chat/lib/workspaceContext";
 import { useMigrationGate } from "@/features/migration/hooks/useMigrationGate";
 import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelGate";
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
@@ -164,15 +163,7 @@ function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
   return "home";
 }
 
-function getOptimisticSessionCwd(
-  project?: ProjectInfo | null,
-  inheritedWorkspacePath?: string | null,
-): string {
-  const workspacePath = inheritedWorkspacePath?.trim();
-  if (workspacePath) {
-    return workspacePath;
-  }
-
+function getOptimisticSessionCwd(project?: ProjectInfo | null): string {
   const projectWorkingDir = (project?.workingDirs ?? [])
     .map((directory) => directory.trim())
     .find((directory) => directory.length > 0);
@@ -391,7 +382,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     (s) => s.markSessionCreationFailed,
   );
   const patchSession = useChatSessionStore((s) => s.patchSession);
-  const setActiveWorkspace = useChatSessionStore((s) => s.setActiveWorkspace);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
   const handleNavigateToSession = useCallback(
     (sessionId: string) => {
@@ -962,12 +952,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           : resolvedSessionModelPreference;
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
-      const inheritedWorkspace = resolveInheritedProjectWorkspace({
-        projectId: project?.id,
-        sessions: sessionState.sessions,
-        activeSessionId: sessionState.activeSessionId,
-        activeWorkspaceBySession: sessionState.activeWorkspaceBySession,
-      });
+      // New chats always start at the project default folder; worktree
+      // selections in other chats are per-chat state and do not carry over.
       const existingDraft = findExistingDraft({
         sessions: sessionState.sessions,
         activeSessionId: sessionState.activeSessionId,
@@ -980,12 +966,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       });
 
       if (existingDraft) {
-        if (inheritedWorkspace) {
-          setActiveWorkspace(existingDraft.id, inheritedWorkspace);
-          patchSession(existingDraft.id, {
-            workingDir: inheritedWorkspace.path,
-          });
-        }
         if (shouldActivate) {
           clearSettingsSectionUrl();
           setActiveSession(existingDraft.id);
@@ -999,10 +979,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }
 
       if (!shouldActivate) {
-        const workingDir = await resolveSessionCwd(
-          project,
-          inheritedWorkspace?.path,
-        );
+        const workingDir = await resolveSessionCwd(project);
         const session = await createSession({
           title,
           projectId: project?.id,
@@ -1011,28 +988,19 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           modelId: sessionModelPreference.modelId,
           modelName: sessionModelPreference.modelName,
         });
-        if (inheritedWorkspace) {
-          setActiveWorkspace(session.id, inheritedWorkspace);
-        }
         perfLog(
           `[perf:newtab] ${session.id.slice(0, 8)} created session in ${(performance.now() - tStart).toFixed(1)}ms`,
         );
         return session;
       }
 
-      const optimisticWorkingDir = getOptimisticSessionCwd(
-        project,
-        inheritedWorkspace?.path,
-      );
+      const optimisticWorkingDir = getOptimisticSessionCwd(project);
       const session = createDraftSession({
         title,
         projectId: project?.id,
         providerId,
         workingDir: optimisticWorkingDir,
       });
-      if (inheritedWorkspace) {
-        setActiveWorkspace(session.id, inheritedWorkspace);
-      }
       clearSettingsSectionUrl();
       setActiveSession(session.id);
       setActiveView("chat");
@@ -1043,7 +1011,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       startDraftSessionCreation({
         session,
         sessionModelPreference,
-        workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
+        workingDir: resolveSessionCwd(project),
         projectId: project?.id,
       });
       return session;
@@ -1052,8 +1020,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       selectedProvider,
       createSession,
       createDraftSession,
-      patchSession,
-      setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,
@@ -1169,12 +1135,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         "goose";
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
-      const inheritedWorkspace = resolveInheritedProjectWorkspace({
-        projectId: project.id,
-        sessions: sessionState.sessions,
-        activeSessionId: sessionState.activeSessionId,
-        activeWorkspaceBySession: sessionState.activeWorkspaceBySession,
-      });
+      // New chats always start at the project default folder; worktree
+      // selections in other chats are per-chat state and do not carry over.
       const existingDraft = findExistingDraft({
         sessions: sessionState.sessions,
         activeSessionId: sessionState.activeSessionId,
@@ -1187,12 +1149,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       });
 
       if (existingDraft) {
-        if (inheritedWorkspace) {
-          setActiveWorkspace(existingDraft.id, inheritedWorkspace);
-          patchSession(existingDraft.id, {
-            workingDir: inheritedWorkspace.path,
-          });
-        }
         clearSettingsSectionUrl();
         setActiveSession(existingDraft.id);
         setActiveView("chat");
@@ -1212,19 +1168,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           ? { ...preference, modelName: options.modelName }
           : preference,
       );
-      const optimisticWorkingDir = getOptimisticSessionCwd(
-        project,
-        inheritedWorkspace?.path,
-      );
+      const optimisticWorkingDir = getOptimisticSessionCwd(project);
       const session = createDraftSession({
         title,
         projectId: project.id,
         providerId,
         workingDir: optimisticWorkingDir,
       });
-      if (inheritedWorkspace) {
-        setActiveWorkspace(session.id, inheritedWorkspace);
-      }
       clearSettingsSectionUrl();
       setActiveSession(session.id);
       setActiveView("chat");
@@ -1235,7 +1185,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       startDraftSessionCreation({
         session,
         sessionModelPreference,
-        workingDir: resolveSessionCwd(project, inheritedWorkspace?.path),
+        workingDir: resolveSessionCwd(project),
         projectId: project.id,
       });
       return session;
@@ -1243,8 +1193,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [
       selectedProvider,
       createDraftSession,
-      patchSession,
-      setActiveWorkspace,
       setActiveSession,
       setChatActiveSession,
       startDraftSessionCreation,

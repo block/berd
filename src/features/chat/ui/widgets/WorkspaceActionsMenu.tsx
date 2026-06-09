@@ -68,7 +68,7 @@ export function WorkspaceActionsMenu({
     [currentPath, gitState.worktrees],
   );
   const activeBranch =
-    activeContext?.branch ?? activeWorktree?.branch ?? gitState.currentBranch;
+    activeWorktree?.branch ?? activeContext?.branch ?? gitState.currentBranch;
   const pullLabel =
     gitState.incomingCommitCount > 0
       ? t("contextPanel.git.pullWithCount", {

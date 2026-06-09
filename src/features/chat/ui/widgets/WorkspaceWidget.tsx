@@ -9,8 +9,8 @@ import {
 } from "@tabler/icons-react";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { Button } from "@/shared/ui/button";
+import { RowButton } from "@/shared/ui/row-button";
 import { Spinner } from "@/shared/ui/spinner";
-import { cn } from "@/shared/lib/cn";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { Widget } from "./Widget";
 import { WorkspaceActionsMenu } from "./WorkspaceActionsMenu";
@@ -32,7 +32,7 @@ interface WorkspaceWidgetProps {
   onInitRepo: (path: string) => Promise<void>;
   onFetch: (path: string) => Promise<void>;
   onPull: (path: string) => Promise<void>;
-  onChangeArtifactFolder?: () => Promise<void> | void;
+  onChangeFolder?: () => Promise<void> | void;
   onCreateBranch: (
     path: string,
     name: string,
@@ -46,7 +46,7 @@ interface WorkspaceWidgetProps {
     baseBranch?: string,
   ) => Promise<CreatedWorktree>;
   onRefresh: () => void;
-  isChangingArtifactFolder?: boolean;
+  isChangingFolder?: boolean;
   isOpen: boolean;
   onToggleOpen: () => void;
   terminalOpen?: boolean;
@@ -69,11 +69,11 @@ export function WorkspaceWidget({
   onInitRepo,
   onFetch,
   onPull,
-  onChangeArtifactFolder,
+  onChangeFolder,
   onCreateBranch,
   onCreateWorktree,
   onRefresh,
-  isChangingArtifactFolder = false,
+  isChangingFolder = false,
   isOpen,
   onToggleOpen,
   terminalOpen = false,
@@ -169,6 +169,8 @@ export function WorkspaceWidget({
               onSelect={onContextChange}
               onSwitchBranch={onSwitchBranch}
               onStashAndSwitch={onStashAndSwitch}
+              onChangeFolder={onChangeFolder}
+              isChangingFolder={isChangingFolder}
             />
             <WorkspaceActionsMenu
               currentProjectPath={primaryWorkspaceRoot}
@@ -182,51 +184,44 @@ export function WorkspaceWidget({
               onCreateWorktree={onCreateWorktree}
             />
           </div>
-        ) : isArtifactWorkspace ? (
-          <button
-            type="button"
-            onClick={() => void onChangeArtifactFolder?.()}
-            disabled={!onChangeArtifactFolder || isChangingArtifactFolder}
-            className={cn(
-              "flex w-full items-center gap-2 rounded-md border border-border px-2.5 py-2",
-              "text-sm text-foreground transition-colors",
-              "hover:bg-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
-              "disabled:cursor-not-allowed disabled:opacity-70 disabled:hover:bg-transparent",
-            )}
-            aria-label={t("contextPanel.artifacts.changeFolder")}
-          >
-            <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-            <span className="min-w-0 flex-1 text-left">
-              <span className="block truncate text-foreground">
-                {shortenPath(primaryWorkspaceRoot)}
-              </span>
-              <span className="block truncate text-xs text-muted-foreground">
-                {t("contextPanel.artifacts.folderLabel")}
-              </span>
-            </span>
-            {isChangingArtifactFolder ? (
-              <Spinner className="size-3 shrink-0" />
-            ) : onChangeArtifactFolder ? (
-              <IconReplace className="size-3.5 shrink-0 text-muted-foreground" />
-            ) : (
-              <IconFolderOpen className="size-4 shrink-0 text-muted-foreground" />
-            )}
-          </button>
         ) : (
           <div className="space-y-3">
-            <p className="truncate text-muted-foreground">
-              {shortenPath(primaryWorkspaceRoot)}
-            </p>
-            <Button
-              type="button"
-              variant="ghost"
-              size="xs"
-              onClick={() => void onInitRepo(primaryWorkspaceRoot)}
-              className="text-sm"
-            >
-              <IconGitBranch className="size-4" />
-              {t("contextPanel.git.initRepo")}
-            </Button>
+            <RowButton
+              variant="field"
+              onClick={() => void onChangeFolder?.()}
+              disabled={!onChangeFolder || isChangingFolder}
+              aria-label={t("contextPanel.folder.change")}
+              icon={
+                <IconFolder className="size-4 shrink-0 text-muted-foreground" />
+              }
+              label={shortenPath(primaryWorkspaceRoot)}
+              description={
+                isArtifactWorkspace
+                  ? t("contextPanel.artifacts.folderLabel")
+                  : t("contextPanel.folder.label")
+              }
+              trailing={
+                isChangingFolder ? (
+                  <Spinner className="size-3 shrink-0" />
+                ) : onChangeFolder ? (
+                  <IconReplace className="size-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <IconFolderOpen className="size-4 shrink-0 text-muted-foreground" />
+                )
+              }
+            />
+            {!isArtifactWorkspace ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => void onInitRepo(primaryWorkspaceRoot)}
+                className="text-sm"
+              >
+                <IconGitBranch className="size-4" />
+                {t("contextPanel.git.initRepo")}
+              </Button>
+            ) : null}
           </div>
         )}
       </div>
