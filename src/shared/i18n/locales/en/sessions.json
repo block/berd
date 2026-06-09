@@ -41,6 +41,12 @@
     "toggleArchived": "Archived",
     "title": "Session history"
   },
+  "quickSwitch": {
+    "description": "Type to fuzzy-search session titles, then press Enter to jump.",
+    "empty": "No matching sessions",
+    "placeholder": "Jump to session...",
+    "title": "Jump to session"
+  },
   "search": {
     "messageMatches_one": "{{displayCount}} message match",
     "messageMatches_other": "{{displayCount}} message matches"

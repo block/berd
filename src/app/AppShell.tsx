@@ -92,6 +92,7 @@ import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import { FocusRegionProvider } from "./focus/FocusRegionProvider";
+import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitcher";
 import {
   GlobalComposerPill,
   type GlobalComposeOptions,
@@ -261,6 +262,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
   const [activeConnectionsTab, setActiveConnectionsTab] =
     useState<ConnectionsTab>("companyManaged");
+  const [quickSwitcherOpen, setQuickSwitcherOpen] = useState(false);
   const [activeDesignSystemSection, setActiveDesignSystemSection] =
     useState<DesignSystemSection>(DEFAULT_DESIGN_SYSTEM_SECTION);
   const [designSystemInspectorVisible, setDesignSystemInspectorVisible] =
@@ -2290,6 +2292,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         e.preventDefault();
         handleNavigate("search");
       }
+      // Cmd+P opens the session quick switcher.
+      if (e.key === "p" && e.metaKey && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setQuickSwitcherOpen((open) => !open);
+      }
       // Cmd+W returns to home instead of closing the window
       if (e.key === "w" && e.metaKey) {
         e.preventDefault();
@@ -2508,6 +2515,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           </>
         )}
       </AppShellLayout>
+      <SessionQuickSwitcher
+        open={quickSwitcherOpen}
+        onOpenChange={setQuickSwitcherOpen}
+        onSelectSession={handleSelectSession}
+      />
       <AgentBuilderLeaveDraftDialog {...agentBuilder.leaveDraftDialogProps} />
       <AutomationBuilderLeaveDialog
         open={automationLeavePromptOpen}

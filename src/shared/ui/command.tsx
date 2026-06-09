@@ -31,10 +31,14 @@ function CommandDialog({
   title = "Command Palette",
   description = "Search for a command to run...",
   children,
+  commandProps,
+  positionerClassName,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string;
   description?: string;
+  commandProps?: React.ComponentProps<typeof CommandPrimitive>;
+  positionerClassName?: string;
 }) {
   return (
     <Dialog {...props}>
@@ -42,8 +46,17 @@ function CommandDialog({
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </DialogHeader>
-      <DialogContent className="overflow-hidden p-0 data-[state=open]:slide-in-from-bottom-4 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-4 data-[state=closed]:zoom-out-95">
-        <Command className="[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:[&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
+      <DialogContent
+        positionerClassName={positionerClassName}
+        className="overflow-hidden p-0 data-[state=open]:slide-in-from-bottom-4 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-bottom-4 data-[state=closed]:zoom-out-95"
+      >
+        <Command
+          {...commandProps}
+          className={cn(
+            "[&_[cmdk-group-heading]]:text-muted-foreground **:data-[slot=command-input-wrapper]:h-12 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:[&_[cmdk-group]]:px-2 [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5",
+            commandProps?.className,
+          )}
+        >
           {children}
         </Command>
       </DialogContent>

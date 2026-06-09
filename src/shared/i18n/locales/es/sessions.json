@@ -41,6 +41,12 @@
     "toggleArchived": "Archivadas",
     "title": "Historial de sesiones"
   },
+  "quickSwitch": {
+    "description": "Escribe para buscar títulos de sesiones y pulsa Intro para saltar.",
+    "empty": "No hay sesiones coincidentes",
+    "placeholder": "Saltar a sesión...",
+    "title": "Saltar a sesión"
+  },
   "search": {
     "messageMatches_one": "{{displayCount}} coincidencia en mensajes",
     "messageMatches_other": "{{displayCount}} coincidencias en mensajes"
