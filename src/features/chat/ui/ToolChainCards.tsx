@@ -1,8 +1,16 @@
-import { useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronRight, CircleIcon, ClockIcon } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
+import {
+  createVirtualLayoutStabilityAttributes,
+  useVirtualLayoutPendingForChange,
+} from "@/features/chat/transcript/measurement";
+import {
+  useTranscriptActiveToolProtection,
+  useTranscriptRowStateAdapter,
+} from "@/features/chat/transcript/row-state";
 import { ToolCallAdapter } from "./ToolCallAdapter";
 import {
   getChainAggregateStatus,
@@ -167,10 +175,32 @@ function partitionToolSteps(
   return { primaryItems, hiddenItems };
 }
 
-export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
+function getFallbackToolChainStateId(
+  toolItems: readonly ToolChainItem[],
+): string {
+  return toolItems.map((item) => item.key).join("|") || "tool-chain";
+}
+
+export function ToolChainCards({
+  chainId,
+  toolItems,
+}: {
+  chainId?: string;
+  toolItems: ToolChainItem[];
+}) {
   const { t } = useTranslation("chat");
-  const [showInternalSteps, setShowInternalSteps] = useState(false);
-  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(new Set());
+  const { rowState, updateRowState, markRowInteracted } =
+    useTranscriptRowStateAdapter();
+  const durableToolChainStateId =
+    chainId ?? getFallbackToolChainStateId(toolItems);
+  const durableToolChainState =
+    rowState?.toolChains?.[durableToolChainStateId] ?? rowState?.toolChain;
+  const [showInternalSteps, setShowInternalSteps] = useState(
+    () => durableToolChainState?.showInternalSteps ?? false,
+  );
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(
+    () => new Set(durableToolChainState?.expandedToolKeys ?? []),
+  );
   const { primaryItems, hiddenItems } = partitionToolSteps(
     toolItems,
     expandedKeys,
@@ -183,13 +213,59 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   // Chains that mount as already-complete (history replay) start collapsed;
   // untouched live chains mount mid-execution, stay open while running, and
   // auto-collapse once they finish so the chat keeps moving forward.
-  const [chainExpanded, setChainExpanded] = useState(() => isActiveChain);
+  const [chainExpanded, setChainExpanded] = useState(
+    () => durableToolChainState?.chainExpanded ?? isActiveChain,
+  );
   const wasActiveChainRef = useRef(isActiveChain);
   const wasGroupedRef = useRef(grouped);
-  const userInteractedRef = useRef(false);
+  const userInteractedRef = useRef(
+    durableToolChainState?.userInteracted ?? false,
+  );
   const hasExpandedToolItem = toolItems.some((item) =>
     expandedKeys.has(item.key),
   );
+  useTranscriptActiveToolProtection(isActiveChain);
+
+  const expandedToolKeys = useMemo(
+    () => [...expandedKeys].sort(),
+    [expandedKeys],
+  );
+  const layoutPendingKey = `${chainExpanded}:${showInternalSteps}:${expandedToolKeys.join("|")}`;
+  const isLayoutPending = useVirtualLayoutPendingForChange(layoutPendingKey);
+  const layoutPendingAttributes = createVirtualLayoutStabilityAttributes({
+    isPending: isLayoutPending,
+    reason: "tool-animation",
+  });
+
+  useEffect(() => {
+    updateRowState(
+      (current) => {
+        const currentChainState =
+          current.toolChains?.[durableToolChainStateId] ?? current.toolChain;
+        return {
+          ...current,
+          toolChains: {
+            ...current.toolChains,
+            [durableToolChainStateId]: {
+              ...currentChainState,
+              chainExpanded,
+              expandedToolKeys,
+              showInternalSteps,
+              userInteracted: userInteractedRef.current,
+            },
+          },
+        };
+      },
+      { markRecent: false },
+    );
+  }, [
+    chainExpanded,
+    durableToolChainStateId,
+    expandedToolKeys,
+    showInternalSteps,
+    updateRowState,
+  ]);
+
   if (
     wasActiveChainRef.current &&
     !isActiveChain &&
@@ -207,8 +283,13 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
   wasActiveChainRef.current = isActiveChain;
   wasGroupedRef.current = grouped;
 
-  const handleOpenChange = (key: string, open: boolean) => {
+  const markUserInteracted = () => {
     userInteractedRef.current = true;
+    markRowInteracted("tool-chain");
+  };
+
+  const handleOpenChange = (key: string, open: boolean) => {
+    markUserInteracted();
     setExpandedKeys((prev) => {
       const next = new Set(prev);
       if (open) {
@@ -305,7 +386,10 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
 
   if (!grouped) {
     return (
-      <div className="my-3 flex w-full min-w-0 max-w-full flex-col gap-3">
+      <div
+        className="my-3 flex w-full min-w-0 max-w-full flex-col gap-3"
+        {...layoutPendingAttributes}
+      >
         {primaryItems.map((item) => renderToolItem(item, { withRail: false }))}
       </div>
     );
@@ -338,11 +422,12 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
       className="my-3 flex w-full min-w-0 max-w-full flex-col gap-0"
       data-role="tool-chain-card"
       data-status={aggregateStatus}
+      {...layoutPendingAttributes}
     >
       <button
         type="button"
         onClick={() => {
-          userInteractedRef.current = true;
+          markUserInteracted();
           if (chainExpanded) {
             setExpandedKeys(new Set());
             setShowInternalSteps(false);
@@ -398,7 +483,7 @@ export function ToolChainCards({ toolItems }: { toolItems: ToolChainItem[] }) {
                 <button
                   type="button"
                   onClick={() => {
-                    userInteractedRef.current = true;
+                    markUserInteracted();
                     setShowInternalSteps((prev) => !prev);
                   }}
                   className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"

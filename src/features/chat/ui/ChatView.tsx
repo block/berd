@@ -18,7 +18,7 @@ import {
   IconX,
 } from "@tabler/icons-react";
 import { toast } from "sonner";
-import { MessageTimeline } from "./MessageTimeline";
+import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
@@ -853,7 +853,8 @@ export function ChatView({
     </div>
   );
   const messageTimeline = (
-    <MessageTimeline
+    <VirtualMessageTimelineGate
+      sessionId={effectiveSession?.id ?? sessionId}
       messages={controller.messages}
       streamingMessageId={controller.streamingMessageId}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}

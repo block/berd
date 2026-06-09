@@ -793,7 +793,7 @@ describe("MessageTimeline", () => {
     );
   });
 
-  it("uses a scoped subtle scrollbar for the transcript scroller", () => {
+  it("uses the shared transcript scroller chrome", () => {
     renderWithProviders(
       <MessageTimeline messages={[message("user-1", "user", "Question")]} />,
     );

@@ -1,4 +1,5 @@
 import { Button } from "@/shared/ui/button";
+import { createVirtualLayoutStabilityAttributes } from "@/features/chat/transcript/measurement";
 import {
   Select,
   SelectContent,
@@ -156,7 +157,13 @@ const highlighterCache = new Map<
 const tokensCache = new Map<string, TokenizedCode>();
 
 // Subscribers for async token updates
-const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();
+const subscribers = new Map<
+  string,
+  Set<{
+    onError?: (error: unknown) => void;
+    onResult: (result: TokenizedCode) => void;
+  }>
+>();
 
 const getTokensCacheKey = (code: string, language: BundledLanguage) => {
   const start = code.slice(0, 100);
@@ -203,6 +210,8 @@ export const highlightCode = (
   language: BundledLanguage,
   // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-callbacks)
   callback?: (result: TokenizedCode) => void,
+  // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-callbacks)
+  errorCallback?: (error: unknown) => void,
 ): TokenizedCode | null => {
   const tokensCacheKey = getTokensCacheKey(code, language);
 
@@ -217,7 +226,10 @@ export const highlightCode = (
     if (!subscribers.has(tokensCacheKey)) {
       subscribers.set(tokensCacheKey, new Set());
     }
-    subscribers.get(tokensCacheKey)?.add(callback);
+    subscribers.get(tokensCacheKey)?.add({
+      onError: errorCallback,
+      onResult: callback,
+    });
   }
 
   // Start highlighting in background - fire-and-forget async pattern
@@ -248,7 +260,7 @@ export const highlightCode = (
       const subs = subscribers.get(tokensCacheKey);
       if (subs) {
         for (const sub of subs) {
-          sub(tokenized);
+          sub.onResult(tokenized);
         }
         subscribers.delete(tokensCacheKey);
       }
@@ -256,6 +268,12 @@ export const highlightCode = (
     // oxlint-disable-next-line eslint-plugin-promise(prefer-await-to-then), eslint-plugin-promise(prefer-await-to-callbacks)
     .catch((error) => {
       console.error("Failed to highlight code:", error);
+      const subs = subscribers.get(tokensCacheKey);
+      if (subs) {
+        for (const sub of subs) {
+          sub.onError?.(error);
+        }
+      }
       subscribers.delete(tokensCacheKey);
     });
 
@@ -406,30 +424,40 @@ export const CodeBlockContent = ({
   // Async highlighting result (populated after shiki loads)
   const [highlightedTokens, setHighlightedTokens] =
     useState<TokenizedCode | null>(null);
+  const [isHighlighting, setIsHighlighting] = useState(true);
   const keyRef = useRef({ code, language });
 
   // Invalidate stale tokens synchronously during render
   if (keyRef.current.code !== code || keyRef.current.language !== language) {
     keyRef.current = { code, language };
     setHighlightedTokens(null);
+    setIsHighlighting(true);
   }
 
   useEffect(() => {
     let cancelled = false;
 
-    // Check cache synchronously first
-    const cached = highlightCode(code, language);
+    const cached = highlightCode(
+      code,
+      language,
+      (result) => {
+        if (!cancelled) {
+          setHighlightedTokens(result);
+          setIsHighlighting(false);
+        }
+      },
+      () => {
+        if (!cancelled) {
+          setIsHighlighting(false);
+        }
+      },
+    );
     if (cached) {
       setHighlightedTokens(cached);
+      setIsHighlighting(false);
       return;
     }
-
-    // Otherwise wait for async highlighting
-    highlightCode(code, language, (result) => {
-      if (!cancelled) {
-        setHighlightedTokens(result);
-      }
-    });
+    setIsHighlighting(true);
 
     return () => {
       cancelled = true;
@@ -445,6 +473,10 @@ export const CodeBlockContent = ({
         !transparentBackground && "border border-border/80 bg-background",
         viewportClassName,
       )}
+      {...createVirtualLayoutStabilityAttributes({
+        isPending: isHighlighting,
+        reason: "code-highlighting",
+      })}
     >
       <CodeBlockBody
         showLineNumbers={showLineNumbers}

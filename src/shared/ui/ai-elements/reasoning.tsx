@@ -5,6 +5,12 @@ import {
   CollapsibleTrigger,
 } from "@/shared/ui/collapsible";
 import { cn } from "@/shared/lib/cn";
+import {
+  createVirtualLayoutStabilityAttributes,
+  useVirtualLayoutPendingForChange,
+  useVirtualLayoutPendingForStreamdown,
+} from "@/features/chat/transcript/measurement";
+import { useTranscriptRowStateAdapter } from "@/features/chat/transcript/row-state";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -48,6 +54,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
   duration?: number;
+  stateKey?: string;
 };
 
 const AUTO_CLOSE_DELAY = 1000;
@@ -61,12 +68,23 @@ export const Reasoning = memo(
     defaultOpen,
     onOpenChange,
     duration: durationProp,
+    stateKey,
     children,
     ...props
   }: ReasoningProps) => {
-    const resolvedDefaultOpen = defaultOpen ?? isStreaming;
+    const { rowState, updateRowState, markRowInteracted } =
+      useTranscriptRowStateAdapter();
+    const durableReasoningStateKey = stateKey ?? "default";
+    const durableReasoningState =
+      rowState?.reasoningBlocks?.[durableReasoningStateKey] ??
+      (stateKey === undefined ? rowState?.reasoning : undefined);
+    const resolvedDefaultOpen =
+      open === undefined && durableReasoningState?.open !== undefined
+        ? durableReasoningState.open
+        : (defaultOpen ?? isStreaming);
     // Track if defaultOpen was explicitly set to false (to prevent auto-open)
-    const isExplicitlyClosed = defaultOpen === false;
+    const isExplicitlyClosed =
+      defaultOpen === false && durableReasoningState?.open === undefined;
 
     const [isOpen, setIsOpen] = useControllableState<boolean>({
       defaultProp: resolvedDefaultOpen,
@@ -74,12 +92,14 @@ export const Reasoning = memo(
       prop: open,
     });
     const [duration, setDuration] = useControllableState<number | undefined>({
-      defaultProp: undefined,
+      defaultProp: durableReasoningState?.durationMs,
       prop: durationProp,
     });
 
     const hasEverStreamedRef = useRef(isStreaming);
-    const [hasAutoClosed, setHasAutoClosed] = useState(false);
+    const [hasAutoClosed, setHasAutoClosed] = useState(
+      () => durableReasoningState?.autoCloseCompletedAtMs !== undefined,
+    );
     const startTimeRef = useRef<number | null>(null);
 
     // Track when streaming starts and compute duration
@@ -121,10 +141,76 @@ export const Reasoning = memo(
 
     const handleOpenChange = useCallback(
       (newOpen: boolean) => {
+        markRowInteracted(`reasoning:${durableReasoningStateKey}`);
+        updateRowState(
+          (current) => {
+            const currentReasoningState =
+              current.reasoningBlocks?.[durableReasoningStateKey] ??
+              (stateKey === undefined ? current.reasoning : undefined);
+            const nextReasoningState = {
+              ...currentReasoningState,
+              open: newOpen,
+              userControlled: true,
+            };
+
+            return {
+              ...current,
+              reasoning:
+                stateKey === undefined ? nextReasoningState : current.reasoning,
+              reasoningBlocks: {
+                ...current.reasoningBlocks,
+                [durableReasoningStateKey]: nextReasoningState,
+              },
+            };
+          },
+          { markRecent: true },
+        );
         setIsOpen(newOpen);
       },
-      [setIsOpen],
+      [
+        durableReasoningStateKey,
+        markRowInteracted,
+        setIsOpen,
+        stateKey,
+        updateRowState,
+      ],
     );
+
+    useEffect(() => {
+      updateRowState(
+        (current) => {
+          const currentReasoningState =
+            current.reasoningBlocks?.[durableReasoningStateKey] ??
+            (stateKey === undefined ? current.reasoning : undefined);
+          const nextReasoningState = {
+            ...currentReasoningState,
+            autoCloseCompletedAtMs: hasAutoClosed
+              ? (currentReasoningState?.autoCloseCompletedAtMs ?? Date.now())
+              : currentReasoningState?.autoCloseCompletedAtMs,
+            durationMs: duration,
+            open: isOpen,
+          };
+
+          return {
+            ...current,
+            reasoning:
+              stateKey === undefined ? nextReasoningState : current.reasoning,
+            reasoningBlocks: {
+              ...current.reasoningBlocks,
+              [durableReasoningStateKey]: nextReasoningState,
+            },
+          };
+        },
+        { markRecent: false },
+      );
+    }, [
+      durableReasoningStateKey,
+      duration,
+      hasAutoClosed,
+      isOpen,
+      stateKey,
+      updateRowState,
+    ]);
 
     const contextValue = useMemo(
       () => ({ duration, isOpen, isStreaming, setIsOpen }),
@@ -205,18 +291,43 @@ export type ReasoningContentProps = ComponentProps<
 const streamdownPlugins = { cjk, code, math, mermaid };
 
 export const ReasoningContent = memo(
-  ({ className, children, ...props }: ReasoningContentProps) => (
-    <CollapsibleContent
-      className={cn(
-        "mt-4 text-sm",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
-        className,
-      )}
-      {...props}
-    >
-      <Streamdown plugins={streamdownPlugins}>{children}</Streamdown>
-    </CollapsibleContent>
-  ),
+  ({ className, children, ...props }: ReasoningContentProps) => {
+    const { isOpen, isStreaming } = useReasoning();
+    const isLayoutPending = useVirtualLayoutPendingForChange(isOpen);
+    const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
+      contentKey: children,
+      isAnimating: isStreaming,
+    });
+
+    return (
+      <CollapsibleContent
+        className={cn(
+          "mt-4 text-sm",
+          "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+          className,
+        )}
+        {...createVirtualLayoutStabilityAttributes({
+          isPending: isLayoutPending,
+          reason: "reasoning-animation",
+        })}
+        {...props}
+      >
+        <div
+          className="contents"
+          {...streamdownLayoutPending.layoutPendingAttributes}
+        >
+          <Streamdown
+            isAnimating={isStreaming}
+            onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
+            onAnimationStart={streamdownLayoutPending.onAnimationStart}
+            plugins={streamdownPlugins}
+          >
+            {children}
+          </Streamdown>
+        </div>
+      </CollapsibleContent>
+    );
+  },
 );
 
 Reasoning.displayName = "Reasoning";

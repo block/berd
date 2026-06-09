@@ -240,6 +240,90 @@ describe("MessageBubble", () => {
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
   });
 
+  it("keeps whole assistant messages on the legacy outer spacing contract", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+      />,
+    );
+
+    const messageRoot = container.querySelector(
+      '[data-role="assistant-message"]',
+    );
+    expect(messageRoot).toHaveClass("py-1");
+    expect(messageRoot).not.toHaveAttribute("data-message-fragment-role");
+  });
+
+  it("stitches assistant text fragments without repeated row padding", () => {
+    const message = assistantMessage([{ type: "text", text: "full response" }]);
+    const { container } = render(
+      <>
+        <MessageBubble
+          message={message}
+          contentOverride={[{ type: "text", text: "first chunk" }]}
+          fragmentRole="start"
+        />
+        <MessageBubble
+          message={message}
+          contentOverride={[{ type: "text", text: "middle chunk" }]}
+          fragmentRole="middle"
+        />
+        <MessageBubble
+          message={message}
+          contentOverride={[{ type: "text", text: "final chunk" }]}
+          fragmentRole="end"
+        />
+      </>,
+    );
+
+    const start = container.querySelector(
+      '[data-message-fragment-role="start"]',
+    );
+    const middle = container.querySelector(
+      '[data-message-fragment-role="middle"]',
+    );
+    const end = container.querySelector('[data-message-fragment-role="end"]');
+
+    expect(start).toHaveClass("pt-1", "pb-0");
+    expect(start).not.toHaveClass("py-1");
+    expect(middle).toHaveClass("-mt-1", "py-0");
+    expect(end).toHaveClass("-mt-1", "pt-0", "pb-1");
+  });
+
+  it("reserves assistant action space only on terminal fragments", () => {
+    const message = assistantMessage([{ type: "text", text: "full response" }]);
+    const { container } = render(
+      <>
+        <MessageBubble
+          message={message}
+          contentOverride={[{ type: "text", text: "first chunk" }]}
+          fragmentRole="start"
+        />
+        <MessageBubble
+          message={message}
+          contentOverride={[{ type: "text", text: "final chunk" }]}
+          fragmentRole="end"
+        />
+      </>,
+    );
+
+    const startContent = container.querySelector(
+      '[data-message-fragment-role="start"] [data-role="assistant-message-content"]',
+    );
+    const endContent = container.querySelector(
+      '[data-message-fragment-role="end"] [data-role="assistant-message-content"]',
+    );
+
+    expect(startContent).not.toHaveClass("pb-8");
+    expect(startContent?.querySelector('[data-role="message-actions"]')).toBe(
+      null,
+    );
+    expect(endContent).toHaveClass("pb-8");
+    expect(
+      endContent?.querySelector('[data-role="message-actions"]'),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the action tray timestamp on one line", () => {
     const { container } = render(
       <MessageBubble
@@ -288,7 +372,10 @@ describe("MessageBubble", () => {
     vi.useFakeTimers();
     const { container } = render(
       <MessageBubble
-        message={assistantMessage([{ type: "text", text: "response" }])}
+        message={assistantMessage([
+          { type: "text", text: "response" },
+          { type: "text", text: "second response" },
+        ])}
       />,
     );
 
@@ -304,7 +391,7 @@ describe("MessageBubble", () => {
       await Promise.resolve();
     });
 
-    expect(mockWriteText).toHaveBeenCalledWith("response");
+    expect(mockWriteText).toHaveBeenCalledWith("response\nsecond response");
     expect(actions).toHaveAttribute("data-copy-confirmed", "true");
     expect(copyButton).toHaveClass("bg-accent");
 

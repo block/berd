@@ -14,6 +14,15 @@ steps:
     key: "rust"
     command: "scripts/buildkite/rust-checks.sh"
 
+  - label: ":playwright: Transcript virtualization"
+    key: "transcript-virtualization"
+    command: "scripts/buildkite/transcript-virtualization.sh"
+    depends_on:
+      - "js"
+    artifact_paths:
+      - "transcript-playwright-report/**/*"
+      - "test-results/**/*"
+
   - label: ":package: Frontend build smoke"
     key: "build"
     command: "scripts/buildkite/build-smoke.sh"

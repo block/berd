@@ -35,6 +35,7 @@ src/features/projects/artifact/assets/hdri/studio_soft.exr
 
 # Playwright artifacts
 playwright-report/
+transcript-playwright-report/
 test-results/
 
 # App E2E screenshots

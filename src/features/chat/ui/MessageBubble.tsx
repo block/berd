@@ -1,4 +1,4 @@
-import { memo, useMemo } from "react";
+import { memo, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, FileText, FolderClosed } from "lucide-react";
 import { IconRobot } from "@tabler/icons-react";
@@ -13,6 +13,11 @@ import {
   getProviderIcon,
   formatProviderLabel,
 } from "@/shared/ui/icons/ProviderIcons";
+import {
+  useTranscriptActiveStreamingProtection,
+  useTranscriptRowRootAdapter,
+  useTranscriptRowStateAdapter,
+} from "@/features/chat/transcript/row-state";
 import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { MessageResponse } from "@/shared/ui/ai-elements/message";
 import {
@@ -87,6 +92,8 @@ function MessageAttachmentRow({
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
+  contentOverride?: readonly MessageContent[];
+  fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
@@ -209,6 +216,7 @@ function renderContentBlock(
     runItCodeRenderers?: CustomRenderer[];
     onEditProject?: (projectId: string) => void;
     editProjectLabel?: string;
+    stateKey?: string;
   },
   isStreamingMsg?: boolean,
   isUserMessage?: boolean,
@@ -233,6 +241,7 @@ function renderContentBlock(
         <MessageResponse
           key={`text-${index}`}
           isAnimating={isStreamingMsg}
+          mode={isStreamingMsg ? "streaming" : "static"}
           codeRenderers={
             options.onRunShellCommand ? options.runItCodeRenderers : undefined
           }
@@ -288,6 +297,7 @@ function renderContentBlock(
           key={`${content.type}-${index}`}
           isStreaming={isStreamingMsg}
           defaultOpen={false}
+          stateKey={options.stateKey}
         >
           <ReasoningTrigger />
           <ReasoningContent>{text}</ReasoningContent>
@@ -350,6 +360,8 @@ function renderContentBlock(
 export const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  contentOverride,
+  fragmentRole,
   onRetryMessage,
   onEditMessage,
   onSendMcpAppMessage,
@@ -361,8 +373,11 @@ export const MessageBubble = memo(function MessageBubble({
   const { formatDate } = useLocaleFormatting();
   const { role, content: rawContent, created } = message;
   // Only user messages carry annotated blocks; skip the filter for others.
-  const content =
-    role === "user" ? filterUserVisibleContent(rawContent) : rawContent;
+  const content = contentOverride
+    ? [...contentOverride]
+    : role === "user"
+      ? filterUserVisibleContent(rawContent)
+      : rawContent;
   const { handleContentClick, pathNotice } = useArtifactLinkHandler();
   const persona = useAgentStore((state) =>
     message.metadata?.personaId
@@ -386,6 +401,42 @@ export const MessageBubble = memo(function MessageBubble({
         : [],
     [onRunShellCommand],
   );
+  const rowRootAttributes = useTranscriptRowRootAdapter();
+  const { updateRowState } = useTranscriptRowStateAdapter();
+  const hadPathNoticeRef = useRef(false);
+  const hadCopyConfirmationRef = useRef(false);
+
+  useTranscriptActiveStreamingProtection(Boolean(isStreaming));
+
+  useEffect(() => {
+    if (!pathNotice && !hadPathNoticeRef.current) {
+      return;
+    }
+
+    hadPathNoticeRef.current = Boolean(pathNotice);
+    updateRowState(
+      (current) => ({
+        ...current,
+        pathNoticeText: pathNotice || undefined,
+      }),
+      { markRecent: Boolean(pathNotice) },
+    );
+  }, [pathNotice, updateRowState]);
+
+  useEffect(() => {
+    if (!isCopyConfirmed && !hadCopyConfirmationRef.current) {
+      return;
+    }
+
+    hadCopyConfirmationRef.current = isCopyConfirmed;
+    updateRowState(
+      (current) => ({
+        ...current,
+        copyConfirmedUntilMs: isCopyConfirmed ? Date.now() + 2000 : undefined,
+      }),
+      { markRecent: isCopyConfirmed },
+    );
+  }, [isCopyConfirmed, updateRowState]);
 
   // Skip empty user bubbles (all blocks filtered as assistant-only).
   if (role === "user" && content.length === 0) return null;
@@ -394,9 +445,15 @@ export const MessageBubble = memo(function MessageBubble({
     .filter((c): c is TextContent => c.type === "text")
     .map((c) => c.text)
     .join("\n");
+  const actionTextContent = fragmentRole
+    ? rawContent
+        .filter((c): c is TextContent => c.type === "text")
+        .map((c) => c.text)
+        .join("\n")
+    : textContent;
   if (role === "system") {
     return (
-      <div className="flex justify-center px-4 py-2">
+      <div className="flex justify-center px-4 py-2" {...rowRootAttributes}>
         <div className="w-full max-w-md text-center text-xs text-muted-foreground">
           {content.map((c, i) =>
             renderContentBlock(c, i, {
@@ -405,6 +462,7 @@ export const MessageBubble = memo(function MessageBubble({
               contentBlocks: content,
               onEditProject,
               editProjectLabel: t("toolbar.editProjectFolders"),
+              stateKey: `${c.type}-${i}`,
             }),
           )}
         </div>
@@ -427,8 +485,23 @@ export const MessageBubble = memo(function MessageBubble({
   const showPersonaGutterAvatar = Boolean(
     !isUser && (message.metadata?.personaId || personaGutterImage),
   );
+  const isFragmentMiddleOrEnd =
+    fragmentRole === "middle" || fragmentRole === "end";
+  const showLeadingAssistantChrome =
+    !fragmentRole || fragmentRole === "start" || fragmentRole === "single";
+  const showMessageActions =
+    !fragmentRole || fragmentRole === "end" || fragmentRole === "single";
+  const outerSpacingClassName =
+    fragmentRole === "start"
+      ? "pt-1 pb-0"
+      : fragmentRole === "middle"
+        ? "-mt-1 py-0"
+        : fragmentRole === "end"
+          ? "-mt-1 pt-0 pb-1"
+          : "py-1";
   const showAssistantIdentity = Boolean(
     !isUser &&
+      showLeadingAssistantChrome &&
       !showPersonaGutterAvatar &&
       (assistantDisplayName || personaGutterImage || assistantProviderIcon),
   );
@@ -449,13 +522,16 @@ export const MessageBubble = memo(function MessageBubble({
   return (
     <div
       className={cn(
-        "flex py-1",
+        "flex",
+        outerSpacingClassName,
         "animate-in fade-in duration-200 motion-reduce:animate-none",
         isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
+      data-message-fragment-role={fragmentRole}
+      {...rowRootAttributes}
     >
-      {showPersonaGutterAvatar ? (
+      {showPersonaGutterAvatar && showLeadingAssistantChrome ? (
         <div
           className={cn(
             "mt-0.5 flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-md",
@@ -480,13 +556,20 @@ export const MessageBubble = memo(function MessageBubble({
             <IconRobot size={16} className="text-muted-foreground" />
           )}
         </div>
+      ) : showPersonaGutterAvatar && isFragmentMiddleOrEnd ? (
+        <div
+          aria-hidden="true"
+          data-role="assistant-persona-avatar-spacer"
+          className="size-9 shrink-0"
+        />
       ) : null}
       <div
         data-role={
           isUser ? "user-message-content" : "assistant-message-content"
         }
         className={cn(
-          "group relative min-w-0 flex flex-col gap-1 pb-8",
+          "group relative min-w-0 flex flex-col gap-1",
+          showMessageActions && "pb-8",
           isUser
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
             : "w-full items-start",
@@ -551,7 +634,13 @@ export const MessageBubble = memo(function MessageBubble({
           {groupContentSections(content).map((section, sectionIdx) => {
             if (section.type === "toolChain") {
               const toolItems = section.items as ToolChainItem[];
-              return <ToolChainCards key={section.key} toolItems={toolItems} />;
+              return (
+                <ToolChainCards
+                  key={section.key}
+                  chainId={section.key}
+                  toolItems={toolItems}
+                />
+              );
             }
             const block = section.items[0] as MessageContent;
             return (
@@ -567,6 +656,7 @@ export const MessageBubble = memo(function MessageBubble({
                     onMcpAppAutoScroll,
                     onRunShellCommand,
                     runItCodeRenderers,
+                    stateKey: section.key,
                   },
                   isStreaming,
                   isUser,
@@ -581,29 +671,31 @@ export const MessageBubble = memo(function MessageBubble({
           )}
         </div>
 
-        <div
-          data-role="message-actions"
-          data-copy-confirmed={isCopyConfirmed ? "true" : "false"}
-          className={cn(
-            "absolute bottom-0 transition-opacity duration-150 ease-out",
-            "opacity-0 pointer-events-none",
-            "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
-            "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
-            isCopyConfirmed && "opacity-100 pointer-events-auto",
-            isUser ? "right-0" : "-left-3",
-          )}
-        >
-          <MessageBubbleActions
-            isUser={isUser}
-            messageId={message.id}
-            timestamp={timestamp}
-            textContent={textContent}
-            copied={isCopyConfirmed}
-            onCopy={() => copyToClipboard(textContent)}
-            onRetryMessage={onRetryMessage}
-            onEditMessage={onEditMessage}
-          />
-        </div>
+        {showMessageActions ? (
+          <div
+            data-role="message-actions"
+            data-copy-confirmed={isCopyConfirmed ? "true" : "false"}
+            className={cn(
+              "absolute bottom-0 transition-opacity duration-150 ease-out",
+              "opacity-0 pointer-events-none",
+              "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
+              "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+              isCopyConfirmed && "opacity-100 pointer-events-auto",
+              isUser ? "right-0" : "-left-3",
+            )}
+          >
+            <MessageBubbleActions
+              isUser={isUser}
+              messageId={message.id}
+              timestamp={timestamp}
+              textContent={actionTextContent}
+              copied={isCopyConfirmed}
+              onCopy={() => copyToClipboard(actionTextContent)}
+              onRetryMessage={onRetryMessage}
+              onEditMessage={onEditMessage}
+            />
+          </div>
+        ) : null}
       </div>
     </div>
   );

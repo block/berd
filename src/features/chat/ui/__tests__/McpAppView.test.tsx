@@ -4,6 +4,10 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppView } from "../McpAppView";
 import packageJson from "../../../../../package.json";
+import {
+  TranscriptRowStateProvider,
+  createTranscriptRowStateRegistry,
+} from "@/features/chat/transcript/row-state";
 import type {
   McpAppPayload,
   ToolResponseContent,
@@ -216,6 +220,249 @@ describe("McpAppView nested tool calls", () => {
         }),
       }),
     );
+  });
+
+  it("reports nested tool calls as virtual row MCP activity while pending", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const nestedToolResult = {
+      content: [{ type: "text", text: "2026-04-22T18:29:06.433Z" }],
+      isError: false,
+      structuredContent: {
+        timestamp: "2026-04-22T18:29:06.433Z",
+      },
+    };
+    let resolveNestedTool: (value: typeof nestedToolResult) => void = () => {};
+    mocks.toolCall.mockReturnValue(
+      new Promise((resolve) => {
+        resolveNestedTool = resolve;
+      }),
+    );
+
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="virtual-session"
+        rowId="mcp-row"
+      >
+        <McpAppView
+          payload={createPayload()}
+          toolInput={{ inspector: "messaging" }}
+          toolResponse={createToolResponse()}
+        />
+      </TranscriptRowStateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("mock-app-renderer"));
+
+    await waitFor(() => {
+      expect(mocks.toolCall).toHaveBeenCalled();
+    });
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).diagnostics.rows[0]?.reasons,
+    ).toContain("active-mcp");
+
+    resolveNestedTool(nestedToolResult);
+    await waitFor(() => {
+      expect(mocks.nestedToolResultSpy).toHaveBeenCalled();
+    });
+
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).protectedRowIds,
+    ).not.toContain("mcp-row");
+  });
+
+  it("keeps overlapping same-name nested tool calls protected until all settle", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const firstResult = {
+      content: [{ type: "text", text: "first result" }],
+      isError: false,
+    };
+    const secondResult = {
+      content: [{ type: "text", text: "second result" }],
+      isError: false,
+    };
+    let resolveFirstTool: (value: typeof firstResult) => void = () => {};
+    let resolveSecondTool: (value: typeof secondResult) => void = () => {};
+    mocks.toolCall
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstTool = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecondTool = resolve;
+        }),
+      );
+
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="virtual-session"
+        rowId="mcp-row"
+      >
+        <McpAppView
+          payload={createPayload()}
+          toolInput={{ inspector: "messaging" }}
+          toolResponse={createToolResponse()}
+        />
+      </TranscriptRowStateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId("mock-app-renderer"));
+    fireEvent.click(screen.getByTestId("mock-app-renderer"));
+
+    await waitFor(() => {
+      expect(mocks.toolCall).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      registry.getRowState({
+        sessionId: "virtual-session",
+        rowId: "mcp-row",
+      })?.mcpApp?.activeNestedToolRequestIds,
+    ).toHaveLength(2);
+
+    resolveFirstTool(firstResult);
+    await waitFor(() => {
+      expect(
+        registry.getRowState({
+          sessionId: "virtual-session",
+          rowId: "mcp-row",
+        })?.mcpApp?.activeNestedToolRequestIds,
+      ).toHaveLength(1);
+    });
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).protectedRowIds,
+    ).toContain("mcp-row");
+
+    resolveSecondTool(secondResult);
+    await waitFor(() => {
+      expect(mocks.nestedToolResultSpy).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).protectedRowIds,
+    ).not.toContain("mcp-row");
+  });
+
+  it("keeps overlapping same-URI resource reads protected until all settle", async () => {
+    const registry = createTranscriptRowStateRegistry();
+    const firstRead = {
+      result: {
+        contents: [{ uri: "ui://shared", mimeType: "text/plain", text: "one" }],
+      },
+    };
+    const secondRead = {
+      result: {
+        contents: [{ uri: "ui://shared", mimeType: "text/plain", text: "two" }],
+      },
+    };
+    let resolveFirstRead: (value: typeof firstRead) => void = () => {};
+    let resolveSecondRead: (value: typeof secondRead) => void = () => {};
+    mocks.resourcesRead
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveFirstRead = resolve;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveSecondRead = resolve;
+        }),
+      );
+
+    render(
+      <TranscriptRowStateProvider
+        registry={registry}
+        sessionId="virtual-session"
+        rowId="mcp-row"
+      >
+        <McpAppView
+          payload={createPayload()}
+          toolInput={{ inspector: "messaging" }}
+          toolResponse={createToolResponse()}
+        />
+      </TranscriptRowStateProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("mock-app-renderer")).toBeInTheDocument();
+    });
+
+    const firstPromise = getLatestAppRendererProps().onReadResource?.(
+      {
+        uri: "ui://shared",
+      },
+      {} as RequestHandlerExtra,
+    );
+    const secondPromise = getLatestAppRendererProps().onReadResource?.(
+      {
+        uri: "ui://shared",
+      },
+      {} as RequestHandlerExtra,
+    );
+    if (!firstPromise || !secondPromise) {
+      throw new Error("Expected onReadResource to be registered");
+    }
+
+    await waitFor(() => {
+      expect(mocks.resourcesRead).toHaveBeenCalledTimes(2);
+    });
+    expect(
+      registry.getRowState({
+        sessionId: "virtual-session",
+        rowId: "mcp-row",
+      })?.mcpApp?.activeHostRequestIds,
+    ).toHaveLength(2);
+
+    resolveFirstRead(firstRead);
+    await expect(firstPromise).resolves.toEqual(firstRead.result);
+    expect(
+      registry.getRowState({
+        sessionId: "virtual-session",
+        rowId: "mcp-row",
+      })?.mcpApp?.activeHostRequestIds,
+    ).toHaveLength(1);
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).protectedRowIds,
+    ).toContain("mcp-row");
+
+    resolveSecondRead(secondRead);
+    await expect(secondPromise).resolves.toEqual(secondRead.result);
+    expect(
+      registry.evaluateKeepAlive({
+        sessionId: "virtual-session",
+        rows: [],
+        visibleRowIds: [],
+      }).protectedRowIds,
+    ).not.toContain("mcp-row");
   });
 
   it("only applies rounded border chrome when the app prefers a border", async () => {

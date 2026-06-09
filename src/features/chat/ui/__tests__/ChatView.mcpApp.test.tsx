@@ -83,6 +83,25 @@ vi.mock("../MessageTimeline", () => ({
   },
 }));
 
+vi.mock("../VirtualMessageTimelineGate", () => ({
+  VirtualMessageTimelineGate: (props: {
+    messages: unknown[];
+    footer?: ReactNode;
+    placeholder?: ReactNode;
+    showPlaceholder?: boolean;
+  }) => {
+    mocks.messageTimelineSpy(props);
+    const showPlaceholder =
+      props.showPlaceholder || props.messages.length === 0;
+    return (
+      <div data-testid="message-timeline">
+        {showPlaceholder ? props.placeholder : null}
+        {props.footer}
+      </div>
+    );
+  },
+}));
+
 vi.mock("../ChatInput", () => ({
   ChatInput: (props: unknown) => {
     mocks.chatInputSpy(props);

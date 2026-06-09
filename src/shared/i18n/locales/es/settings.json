@@ -202,6 +202,10 @@
     },
     "resetToAuto": "Restablecer a automático",
     "saveError": "No se pudo guardar el ajuste del experimento. Inténtalo de nuevo.",
+    "transcriptVirtualRenderer": {
+      "description": "Envía los chats por el puente del renderizador virtual de transcripciones para probar la implementación.",
+      "title": "Renderizador virtual de transcripciones"
+    },
     "title": "Experimentos"
   },
   "general": {

@@ -56,6 +56,9 @@ export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
 export const PANE_JUMP_NAVIGATION_EXPERIMENT_ID = "pane-jump-navigation";
 export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 
+export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
+  "transcript-virtual-renderer";
+
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
 - Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
 - For simple answers or small changes, use plain sentences or a short list instead of heavy structure.
@@ -95,5 +98,10 @@ export const EXPERIMENT_DEFINITIONS = [
         placeholderKey: "experiments.gooseStyleGuidelines.promptPlaceholder",
       },
     },
+  },
+  {
+    id: TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
+    titleKey: "experiments.transcriptVirtualRenderer.title",
+    descriptionKey: "experiments.transcriptVirtualRenderer.description",
   },
 ] as const satisfies readonly ExperimentDefinition[];

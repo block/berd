@@ -1,8 +1,13 @@
-import { render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToolChainCards } from "../ToolChainCards";
 import type { ToolChainItem } from "@/features/chat/lib/toolChainGrouping";
+import { VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE } from "@/features/chat/transcript/measurement";
+import {
+  TranscriptRowStateProvider,
+  createTranscriptRowStateRegistry,
+} from "@/features/chat/transcript/row-state";
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
   useArtifactPolicyContext: () => ({
@@ -71,6 +76,10 @@ function completeItem(item: ToolChainItem): ToolChainItem {
 }
 
 describe("ToolChainCards", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders without a parent header for a single tool item", () => {
     render(<ToolChainCards toolItems={[pair("Read · src/a.ts")]} />);
     expect(
@@ -577,5 +586,115 @@ describe("ToolChainCards", () => {
     expect(
       screen.queryByRole("button", { name: /applied dark mode polish/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("restores chain disclosure state from virtual row state", async () => {
+    const user = userEvent.setup();
+    const registry = createTranscriptRowStateRegistry();
+    const items = [pair("Edit · src/a.ts"), pair("Edit · src/b.ts")];
+    const renderChain = () =>
+      render(
+        <TranscriptRowStateProvider
+          registry={registry}
+          sessionId="session-1"
+          rowId="row-1"
+        >
+          <ToolChainCards toolItems={items} />
+        </TranscriptRowStateProvider>,
+      );
+
+    const firstRender = renderChain();
+    await user.click(
+      screen.getByRole("button", { name: /updating files.*2 steps/i }),
+    );
+    expect(
+      screen.getByRole("button", { name: /updating files.*2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "true");
+
+    firstRender.unmount();
+    renderChain();
+
+    expect(
+      screen.getByRole("button", { name: /updating files.*2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("keeps virtual row state isolated for multiple chains in one row", async () => {
+    const user = userEvent.setup();
+    const registry = createTranscriptRowStateRegistry();
+    const editItems = [pair("Edit · src/a.ts"), pair("Edit · src/b.ts")];
+    const commandItems = [
+      pair("Shell · pnpm test"),
+      pair("Shell · pnpm build"),
+    ];
+    const renderChains = () =>
+      render(
+        <TranscriptRowStateProvider
+          registry={registry}
+          sessionId="session-1"
+          rowId="row-1"
+        >
+          <ToolChainCards chainId="chain-edit" toolItems={editItems} />
+          <ToolChainCards chainId="chain-shell" toolItems={commandItems} />
+        </TranscriptRowStateProvider>,
+      );
+
+    const firstRender = renderChains();
+    const editHeader = screen.getByRole("button", {
+      name: /updating files.*2 steps/i,
+    });
+    const shellHeader = screen.getByRole("button", {
+      name: /running commands.*2 steps/i,
+    });
+
+    await user.click(editHeader);
+
+    expect(editHeader).toHaveAttribute("aria-expanded", "true");
+    expect(shellHeader).toHaveAttribute("aria-expanded", "false");
+
+    firstRender.unmount();
+    renderChains();
+
+    expect(
+      screen.getByRole("button", { name: /updating files.*2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "true");
+    expect(
+      screen.getByRole("button", { name: /running commands.*2 steps/i }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      registry.getRowState({ sessionId: "session-1", rowId: "row-1" })
+        ?.toolChains,
+    ).toEqual(
+      expect.objectContaining({
+        "chain-edit": expect.objectContaining({ chainExpanded: true }),
+        "chain-shell": expect.objectContaining({ chainExpanded: false }),
+      }),
+    );
+  });
+
+  it("marks tool disclosure layout pending during animation windows", () => {
+    vi.useFakeTimers();
+    const { container } = render(
+      <ToolChainCards
+        toolItems={[pair("Edit · src/a.ts"), pair("Edit · src/b.ts")]}
+      />,
+    );
+
+    const wrapper = container.querySelector('[data-role="tool-chain-card"]');
+    expect(wrapper).not.toHaveAttribute(VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /updating files.*2 steps/i }),
+    );
+
+    expect(wrapper).toHaveAttribute(
+      VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE,
+      "tool-animation",
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(220);
+    });
+    expect(wrapper).not.toHaveAttribute(VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE);
   });
 });

@@ -7,6 +7,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 
+import { TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT } from "@/features/chat/transcript/row-state";
 import {
   SelectedTextContextMenu,
   getSelectionMenuPosition,
@@ -162,6 +163,60 @@ describe("SelectedTextContextMenu helpers", () => {
     await waitFor(() => {
       expect(selection?.toString()).toBe("Keep this selected");
     });
+  });
+
+  it("dispatches row-state events while the selected text menu is open", async () => {
+    const events: Array<{ open: boolean; ranges: readonly Range[] }> = [];
+    const handleRowStateEvent = (event: Event) => {
+      events.push(
+        (
+          event as CustomEvent<{
+            open: boolean;
+            ranges: readonly Range[];
+          }>
+        ).detail,
+      );
+    };
+    window.addEventListener(
+      TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
+      handleRowStateEvent,
+    );
+    const { container, unmount } = render(
+      <>
+        <p>Keep this selected</p>
+        <SelectedTextContextMenu />
+      </>,
+    );
+    const paragraph = container.querySelector("p");
+    const selection = window.getSelection();
+    const range = document.createRange();
+
+    expect(paragraph).not.toBeNull();
+    expect(selection).not.toBeNull();
+
+    range.selectNodeContents(paragraph as HTMLParagraphElement);
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+
+    fireEvent.contextMenu(paragraph as HTMLParagraphElement, {
+      clientX: 100,
+      clientY: 80,
+    });
+
+    await waitFor(() => {
+      expect(events.some((event) => event.open)).toBe(true);
+      expect(events.find((event) => event.open)?.ranges.length).toBe(1);
+    });
+
+    unmount();
+
+    await waitFor(() => {
+      expect(events.some((event) => !event.open)).toBe(true);
+    });
+    window.removeEventListener(
+      TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
+      handleRowStateEvent,
+    );
   });
 
   it("restores selected text when a menu item takes hover focus", async () => {

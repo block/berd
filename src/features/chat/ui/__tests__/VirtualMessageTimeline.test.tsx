@@ -1,0 +1,1205 @@
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderWithProviders } from "@/test/render";
+import type { Message } from "@/shared/types/messages";
+import {
+  TRANSCRIPT_DIAGNOSTICS_EVENT,
+  validateTranscriptDiagnostics,
+  type TranscriptDiagnostics,
+} from "../../transcript/diagnostics";
+import type { TranscriptRowDescriptor } from "../../transcript/projection";
+import {
+  VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT,
+  VirtualMessageTimeline,
+  type VirtualMessageTimelineDiagnostics,
+} from "../VirtualMessageTimeline";
+import { getVirtualTranscriptRowSpacingBlockSize } from "../virtualTranscriptRowSpacing";
+
+const resizeObserverCallbacks: ResizeObserverCallback[] = [];
+
+class ResizeObserverMock {
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserverCallbacks.push(callback);
+  }
+
+  observe = vi.fn();
+  unobserve = vi.fn();
+  disconnect = vi.fn();
+}
+
+function triggerResizeObservers() {
+  act(() => {
+    for (const callback of resizeObserverCallbacks) {
+      callback([], {} as ResizeObserver);
+    }
+  });
+}
+
+vi.mock("../MessageBubble", async () => {
+  const rowState = await vi.importActual<
+    typeof import("@/features/chat/transcript/row-state")
+  >("@/features/chat/transcript/row-state");
+
+  return {
+    MessageBubble: ({
+      message,
+      isStreaming,
+      contentOverride,
+      fragmentRole,
+    }: {
+      message: Message;
+      isStreaming?: boolean;
+      contentOverride?: readonly Message["content"][number][];
+      fragmentRole?: string;
+    }) => {
+      const rowRootAttributes = rowState.useTranscriptRowRootAdapter();
+      const content = contentOverride ?? message.content;
+      const text = content
+        .filter((block) => block.type === "text")
+        .map((block) => block.text)
+        .join("\n");
+      const heightMatch = /\[height:(\d+)\]/.exec(text);
+      const isPending = text.includes("[pending]");
+
+      return (
+        <div
+          data-testid={`bubble-${message.id}`}
+          data-streaming={isStreaming ? "true" : "false"}
+          data-fragment-role={fragmentRole ?? "whole"}
+          data-mock-row-height={heightMatch?.[1] ?? "144"}
+          tabIndex={-1}
+          {...rowRootAttributes}
+          {...(isPending
+            ? {
+                "data-virtual-row-layout-pending": "image-loading",
+                "data-virtual-row-reserved-block-size": "320",
+              }
+            : {})}
+        >
+          {text}
+        </div>
+      );
+    },
+  };
+});
+
+beforeEach(() => {
+  resizeObserverCallbacks.length = 0;
+  Object.defineProperty(globalThis, "ResizeObserver", {
+    configurable: true,
+    writable: true,
+    value: ResizeObserverMock,
+  });
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function textMessage(
+  id: string,
+  role: Message["role"],
+  text: string,
+  metadata: Message["metadata"] = { userVisible: true },
+): Message {
+  return {
+    id,
+    role,
+    created: Date.UTC(2026, 5, 4, 12, 0, 0),
+    content: [{ type: "text", text }],
+    metadata,
+  };
+}
+
+function activeToolMessage(id: string): Message {
+  return {
+    id,
+    role: "assistant",
+    created: Date.UTC(2026, 5, 4, 12, 0, 0),
+    content: [
+      {
+        type: "toolRequest",
+        id: "tool-1",
+        name: "scan",
+        arguments: {},
+        status: "in_progress",
+        startedAt: 100,
+      },
+    ],
+    metadata: { userVisible: true },
+  };
+}
+
+function longText(label: string, lineCount: number): string {
+  return Array.from(
+    { length: lineCount },
+    (_, index) => `${label} line ${String(index).padStart(3, "0")}`,
+  ).join("\n");
+}
+
+function mockTranscriptElementMeasurements() {
+  return vi
+    .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+    .mockImplementation(function getMockRect(this: HTMLElement) {
+      if (this.hasAttribute("data-virtual-row-offscreen-shell-id")) {
+        return createDomRect(
+          readNumericAttribute(
+            this,
+            "data-virtual-row-shell-estimated-block-size",
+            144,
+          ) +
+            readNumericAttribute(
+              this,
+              "data-virtual-row-shell-spacing-block-size",
+              0,
+            ),
+        );
+      }
+
+      if (
+        this.getAttribute("data-testid")?.startsWith("virtual-transcript-row-")
+      ) {
+        const measuredDescendant = this.querySelector("[data-mock-row-height]");
+        return createDomRect(
+          readNumericAttribute(measuredDescendant, "data-mock-row-height", 144),
+        );
+      }
+
+      return createDomRect(0);
+    });
+}
+
+function readNumericAttribute(
+  element: Element | null,
+  attribute: string,
+  fallback: number,
+): number {
+  const value = element?.getAttribute(attribute);
+  if (!value) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function createDomRect(height: number): DOMRect {
+  return {
+    bottom: height,
+    height,
+    left: 0,
+    right: 800,
+    top: 0,
+    width: 800,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
+function setScrollMetrics(
+  element: HTMLElement,
+  {
+    scrollTop,
+    scrollHeight = 1000,
+    clientHeight = 500,
+    clientWidth = 800,
+  }: {
+    scrollTop: number;
+    scrollHeight?: number;
+    clientHeight?: number;
+    clientWidth?: number;
+  },
+) {
+  Object.defineProperty(element, "scrollTop", {
+    configurable: true,
+    writable: true,
+    value: scrollTop,
+  });
+  Object.defineProperty(element, "scrollHeight", {
+    configurable: true,
+    value: scrollHeight,
+  });
+  Object.defineProperty(element, "clientHeight", {
+    configurable: true,
+    value: clientHeight,
+  });
+  Object.defineProperty(element, "clientWidth", {
+    configurable: true,
+    value: clientWidth,
+  });
+}
+
+function attachScrollTo(element: HTMLElement) {
+  const scrollTo = vi.fn((options: ScrollToOptions) => {
+    if (typeof options.top === "number") {
+      element.scrollTop = options.top;
+    }
+  });
+  Object.defineProperty(element, "scrollTo", {
+    configurable: true,
+    value: scrollTo,
+  });
+  return scrollTo;
+}
+
+function mockRequestAnimationFrame() {
+  const callbacks = new Map<number, FrameRequestCallback>();
+  let nextFrameId = 1;
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    const frameId = nextFrameId;
+    nextFrameId += 1;
+    callbacks.set(frameId, callback);
+    return frameId;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((frameId) => {
+    callbacks.delete(frameId);
+  });
+
+  return {
+    run(now: number) {
+      const nextCallback = callbacks.entries().next().value;
+      if (!nextCallback) {
+        return false;
+      }
+      const [frameId, callback] = nextCallback;
+      callbacks.delete(frameId);
+      act(() => callback(now));
+      return true;
+    },
+    runAll(now: number) {
+      for (
+        let frameCount = 0;
+        frameCount < 20 && this.run(now);
+        frameCount += 1
+      ) {
+        // Flush all queued requestAnimationFrame work for resize tests.
+      }
+    },
+  };
+}
+
+function latestTimelineDiagnostics(
+  diagnosticsSpy: ReturnType<typeof vi.fn>,
+): VirtualMessageTimelineDiagnostics | undefined {
+  return diagnosticsSpy.mock.calls.at(-1)?.[0] as
+    | VirtualMessageTimelineDiagnostics
+    | undefined;
+}
+
+describe("VirtualMessageTimeline", () => {
+  it("uses the shared transcript scroller chrome", () => {
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[textMessage("user-1", "user", "Question")]}
+      />,
+    );
+
+    const scroller = screen.getByTestId("message-timeline-scroll");
+
+    expect(scroller).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(scroller).not.toHaveClass("scrollbar-none");
+  });
+
+  it("renders assistant fragment rows and keeps mixed content on whole-message fallback", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const fragmented = textMessage(
+      "fragmented",
+      "assistant",
+      longText("fragmented assistant", 92),
+    );
+    const mixed: Message = {
+      ...textMessage("mixed", "assistant", longText("mixed assistant", 92)),
+      content: [
+        { type: "text", text: longText("mixed assistant", 92) },
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "write_file",
+          arguments: { path: "README.md" },
+          status: "completed",
+        },
+      ],
+    };
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[fragmented, mixed]}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    const firstFragment = await screen.findByTestId(
+      "virtual-transcript-row-message:fragmented:block-0",
+    );
+    const middleFragment = screen.getByTestId(
+      "virtual-transcript-row-message:fragmented:block-1",
+    );
+    const lastFragment = screen.getByTestId(
+      "virtual-transcript-row-message:fragmented:block-2",
+    );
+    const fallbackRow = screen.getByTestId(
+      "virtual-transcript-row-message:mixed",
+    );
+
+    expect(firstFragment).toHaveAttribute(
+      "data-virtual-row-kind",
+      "assistant-content-fragment",
+    );
+    expect(firstFragment).toHaveAttribute(
+      "data-transcript-message-id",
+      "fragmented",
+    );
+    expect(middleFragment).not.toHaveAttribute("data-transcript-message-id");
+    expect(lastFragment).toHaveAttribute(
+      "data-virtual-row-fragment-role",
+      "end",
+    );
+    expect(middleFragment).toHaveClass("pt-0");
+    expect(lastFragment).toHaveClass("pt-0");
+    expect(fallbackRow).toHaveAttribute("data-virtual-row-kind", "message");
+    expect(fallbackRow).toHaveAttribute("data-transcript-message-id", "mixed");
+
+    expect(
+      screen
+        .getAllByTestId("bubble-fragmented")
+        .map((element) => element.getAttribute("data-fragment-role")),
+    ).toEqual(["start", "middle", "end"]);
+    expect(screen.getByTestId("bubble-mixed")).toHaveAttribute(
+      "data-fragment-role",
+      "whole",
+    );
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    expect(list).toHaveAttribute("data-virtual-fragment-rows", "3");
+    expect(list).toHaveAttribute(
+      "data-virtual-whole-message-fallback-rows",
+      "1",
+    );
+
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fragmentRowCount: 3,
+          completedFragmentRowCount: 3,
+          wholeMessageFallbackRowCount: 1,
+          pr928WholeRowSplitProofs: 1,
+        }),
+      ),
+    );
+  });
+
+  it("keeps standalone date rows from adding extra spacing before the first message", async () => {
+    const firstDayMessage = textMessage("first-day", "user", "First day");
+    const nextDayMessage = {
+      ...textMessage("next-day", "assistant", "Next day"),
+      created: Date.UTC(2026, 5, 5, 12, 0, 0),
+    };
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[firstDayMessage, nextDayMessage]}
+      />,
+    );
+
+    const firstDateRow = await screen.findByTestId(
+      "virtual-transcript-row-date:2026-06-04:before:first-day",
+    );
+    const firstMessageRow = screen.getByTestId(
+      "virtual-transcript-row-message:first-day",
+    );
+    const nextDateRow = screen.getByTestId(
+      "virtual-transcript-row-date:2026-06-05:before:next-day",
+    );
+    const nextMessageRow = screen.getByTestId(
+      "virtual-transcript-row-message:next-day",
+    );
+
+    expect(firstDateRow).toHaveClass("pt-0");
+    expect(firstMessageRow).toHaveClass("pt-0");
+    expect(nextDateRow).toHaveClass("pt-4");
+    expect(nextMessageRow).toHaveClass("pt-0");
+  });
+
+  it("uses visible row spacing rules for offscreen shell measurement spacing", () => {
+    const normalRow = {
+      kind: "message",
+    } as TranscriptRowDescriptor;
+    const fragmentContinuationRow = {
+      kind: "assistant-content-fragment",
+      fragment: {
+        role: "middle",
+      },
+    } as TranscriptRowDescriptor;
+
+    expect(
+      getVirtualTranscriptRowSpacingBlockSize({
+        row: normalRow,
+        index: 3,
+        previousRowKind: "date-separator",
+      }),
+    ).toBe(0);
+    expect(
+      getVirtualTranscriptRowSpacingBlockSize({
+        row: fragmentContinuationRow,
+        index: 3,
+        previousRowKind: "assistant-content-fragment",
+      }),
+    ).toBe(0);
+    expect(
+      getVirtualTranscriptRowSpacingBlockSize({
+        row: normalRow,
+        index: 3,
+        previousRowKind: "message",
+      }),
+    ).toBe(16);
+  });
+
+  it("applies footer clearance to the virtual list height without extra padding", async () => {
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[textMessage("assistant-1", "assistant", "Answer")]}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    const history = screen.getByTestId("virtual-message-timeline-history");
+    await waitFor(() => expect(history).toHaveStyle({ height: "214px" }));
+    expect(list).toHaveStyle({ paddingBottom: "0px" });
+  });
+
+  it("keeps long assistant fragment rows in bounded virtual mode", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const messages = [
+      ...Array.from({ length: 160 }, (_, index) =>
+        textMessage(
+          `message-${index}`,
+          index % 2 === 0 ? "user" : "assistant",
+          `Message ${index}`,
+        ),
+      ),
+      textMessage("fragmented", "assistant", longText("fragmented", 92)),
+    ];
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    expect(
+      await screen.findByTestId(
+        "virtual-transcript-row-message:fragmented:block-2",
+      ),
+    ).toHaveAttribute("data-virtual-row-kind", "assistant-content-fragment");
+    expect(screen.queryByTestId("bubble-message-0")).not.toBeInTheDocument();
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-render-mode",
+        "bounded-controller",
+      ),
+    );
+    expect(list).toHaveAttribute("data-virtual-unmounting", "enabled");
+    expect(list).toHaveAttribute("data-virtual-fallback-reasons", "");
+    expect(list).toHaveAttribute("data-virtual-fragment-rows", "3");
+    expect(Number(list.getAttribute("data-virtual-total-rows"))).toBe(164);
+    expect(
+      Number(list.getAttribute("data-virtual-range-mounted-rows")),
+    ).toBeLessThan(164);
+    expect(Number(list.getAttribute("data-virtual-mounted-rows"))).toBeLessThan(
+      164,
+    );
+
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "bounded-controller",
+          fragmentRowCount: 3,
+          virtualUnmountingEnabled: true,
+          fallbackReasons: [],
+        }),
+      ),
+    );
+  });
+
+  it("renders an over-tall streaming assistant message as a live flow tail", async () => {
+    mockTranscriptElementMeasurements();
+    const initialMessages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Short streaming answer"),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={initialMessages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          initialMessages[0],
+          textMessage(
+            "assistant-1",
+            "assistant",
+            longText("streaming fragment", 120),
+          ),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    const streamingRow = await screen.findByTestId(
+      "virtual-transcript-row-message:assistant-1",
+    );
+    expect(streamingRow).toHaveAttribute("data-virtual-row-kind", "message");
+    expect(streamingRow).toHaveAttribute(
+      "data-virtual-row-anchor-priority",
+      "streaming",
+    );
+    const liveTail = screen.getByTestId("virtual-message-timeline-live-tail");
+    expect(liveTail).toContainElement(streamingRow);
+    expect(streamingRow).not.toHaveAttribute("data-virtual-row-protected");
+    expect(screen.getByTestId("bubble-assistant-1")).toHaveAttribute(
+      "data-streaming",
+      "true",
+    );
+    expect(screen.getByTestId("virtual-message-timeline-list")).toHaveAttribute(
+      "data-virtual-fragment-rows",
+      "0",
+    );
+    expect(screen.getByTestId("virtual-message-timeline-list")).toHaveAttribute(
+      "data-virtual-live-tail-rows",
+      "3",
+    );
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps pinned users attached across virtual timeline resizes", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    const scrollTo = attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    triggerResizeObservers();
+    animationFrame.runAll(1000);
+
+    await waitFor(() => expect(scroller.scrollTop).toBeGreaterThanOrEqual(500));
+    expect(scrollTo).not.toHaveBeenCalledWith(
+      expect.objectContaining({ behavior: "smooth" }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId(
+        "virtual-transcript-row-date:2026-06-04:before:user-1",
+      ),
+    ).not.toHaveStyle({ transition: "height 1500ms linear" });
+  });
+
+  it("keeps detached users stable across virtual timeline resizes", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.wheel(scroller, { deltaY: -40 });
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    const scrollTo = attachScrollTo(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    triggerResizeObservers();
+    animationFrame.runAll(1000);
+
+    expect(scrollTo).not.toHaveBeenCalled();
+    expect(scroller.scrollTop).toBe(300);
+    expect(
+      screen.getByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders a bounded controller range for ordinary rows", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const transcriptDiagnosticsSpy = vi.fn();
+    const diagnosticEvents: VirtualMessageTimelineDiagnostics[] = [];
+    const transcriptDiagnosticEvents: TranscriptDiagnostics[] = [];
+    const handleDiagnosticsEvent = (event: Event) => {
+      diagnosticEvents.push(
+        (event as CustomEvent<VirtualMessageTimelineDiagnostics>).detail,
+      );
+    };
+    const handleTranscriptDiagnosticsEvent = (event: Event) => {
+      transcriptDiagnosticEvents.push(
+        (event as CustomEvent<TranscriptDiagnostics>).detail,
+      );
+    };
+    window.addEventListener(
+      VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT,
+      handleDiagnosticsEvent,
+    );
+    window.addEventListener(
+      TRANSCRIPT_DIAGNOSTICS_EVENT,
+      handleTranscriptDiagnosticsEvent,
+    );
+    const messages = Array.from({ length: 80 }, (_, index) => ({
+      ...textMessage(
+        `message-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        `Message ${index}`,
+      ),
+      created:
+        index < 40
+          ? Date.UTC(2026, 5, 4, 12, 0, 0)
+          : Date.UTC(2026, 5, 5, 12, 0, 0),
+    }));
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="message-79"
+        onDiagnostics={diagnosticsSpy}
+        onTranscriptDiagnostics={transcriptDiagnosticsSpy}
+      />,
+    );
+
+    expect(screen.getByTestId("virtual-message-timeline")).toBeInTheDocument();
+    expect(screen.getByTestId("bubble-message-79")).toHaveTextContent(
+      "Message 79",
+    );
+    expect(screen.getByTestId("bubble-message-79")).toHaveAttribute(
+      "data-streaming",
+      "true",
+    );
+    expect(screen.getByTestId("bubble-message-79")).toHaveAttribute(
+      "data-virtual-row-state",
+      "enabled",
+    );
+    expect(screen.queryByTestId("bubble-message-0")).not.toBeInTheDocument();
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute(
+        "data-virtual-render-mode",
+        "bounded-controller",
+      ),
+    );
+    expect(list).toHaveAttribute("data-virtual-engine", "tanstack");
+    expect(list).toHaveAttribute("data-virtual-unmounting", "enabled");
+    expect(list).toHaveAttribute("data-virtual-total-rows", "82");
+    const mountedRows = Number(list.getAttribute("data-virtual-mounted-rows"));
+    const virtualRangeMountedRows = Number(
+      list.getAttribute("data-virtual-range-mounted-rows"),
+    );
+    const offscreenShellMountedRows = Number(
+      list.getAttribute("data-virtual-offscreen-shell-mounted-rows"),
+    );
+    const liveTailRows = Number(
+      list.getAttribute("data-virtual-live-tail-rows"),
+    );
+    expect(mountedRows).toBeGreaterThan(0);
+    expect(mountedRows).toBeLessThan(82);
+    expect(mountedRows).toBe(
+      virtualRangeMountedRows + offscreenShellMountedRows + liveTailRows,
+    );
+
+    const assistantRow = screen.getByTestId(
+      "virtual-transcript-row-message:message-79",
+    );
+    expect(assistantRow).toHaveAttribute(
+      "data-virtual-row-measurement-policy",
+      "measure-shell",
+    );
+    expect(assistantRow).toHaveAttribute(
+      "data-virtual-row-shell-status",
+      "ready",
+    );
+    const postDateShellRow = await screen.findByTestId(
+      "virtual-transcript-shell-row-message:message-40",
+    );
+    expect(postDateShellRow).toHaveAttribute(
+      "data-virtual-row-shell-spacing-block-size",
+      "0",
+    );
+
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          renderer: "virtual-message-timeline",
+          engineKind: "tanstack",
+          mode: "bounded-controller",
+          sessionId: "session-1",
+          totalRows: 82,
+          offscreenShellMountedRows,
+          virtualUnmountingEnabled: true,
+        }),
+      ),
+    );
+    expect(diagnosticEvents.at(-1)).toMatchObject({
+      renderer: "virtual-message-timeline",
+      engineKind: "tanstack",
+      mode: "bounded-controller",
+      virtualUnmountingEnabled: true,
+    });
+    await waitFor(() =>
+      expect(
+        diagnosticEvents.at(-1)?.measurement.acceptedOffscreenShellMeasurements,
+      ).toBeGreaterThan(0),
+    );
+    expect(
+      diagnosticEvents.at(-1)?.measurement.acceptedOffscreenRealMeasurements,
+    ).toBe(0);
+    expect(
+      screen.getByTestId("virtual-offscreen-measurement-host"),
+    ).toHaveAttribute("aria-hidden", "true");
+    await waitFor(() =>
+      expect(transcriptDiagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeKind: "production-virtual-message-timeline",
+          rendererMode: "virtual",
+          sessionId: "session-1",
+          totalRows: 82,
+          virtualUnmountingEnabled: true,
+        }),
+      ),
+    );
+    expect(
+      validateTranscriptDiagnostics(transcriptDiagnosticEvents.at(-1)).errors,
+    ).toEqual([]);
+    const sharedWindowDiagnostics = window.__GOOSE_TRANSCRIPT_DIAGNOSTICS__;
+    expect(sharedWindowDiagnostics).toMatchObject({
+      bridgeKind: "production-virtual-message-timeline",
+      rendererMode: "virtual",
+      mountedRows: expect.any(Number),
+      totalRows: 82,
+      scrollCorrectionCount: expect.any(Number),
+    });
+    expect(sharedWindowDiagnostics?.mountedRows).toBeGreaterThan(0);
+    expect(sharedWindowDiagnostics?.mountedRows).toBeLessThan(82);
+
+    window.removeEventListener(
+      VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT,
+      handleDiagnosticsEvent,
+    );
+    window.removeEventListener(
+      TRANSCRIPT_DIAGNOSTICS_EVENT,
+      handleTranscriptDiagnosticsEvent,
+    );
+  });
+
+  it("keeps offscreen shell measurement out of visible search text and duplicate live logs", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+
+    expect(await screen.findByText("Message 79")).toBeInTheDocument();
+    expect(screen.queryByText("Message 0")).not.toBeInTheDocument();
+
+    const offscreenHost = await screen.findByTestId(
+      "virtual-offscreen-measurement-host",
+    );
+    expect(offscreenHost).toHaveAttribute("aria-hidden", "true");
+    expect(offscreenHost).not.toHaveTextContent("Message 0");
+    expect(offscreenHost.textContent).toBe("");
+    expect(screen.getAllByRole("log")).toHaveLength(1);
+  });
+
+  it("keeps estimate-only rows out of the offscreen shell measurement host", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const messages = [
+      activeToolMessage("active-tool"),
+      ...Array.from({ length: 80 }, (_, index) =>
+        textMessage(`message-${index}`, "assistant", `Message ${index}`),
+      ),
+    ];
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute("data-virtual-protected-rows", "1"),
+    );
+
+    const activeToolRow = await screen.findByTestId(
+      "virtual-transcript-row-message:active-tool",
+    );
+    expect(activeToolRow).toHaveAttribute(
+      "data-virtual-row-measurement-policy",
+      "estimate-only",
+    );
+    expect(activeToolRow).toHaveAttribute(
+      "data-virtual-row-shell-status",
+      "blocked",
+    );
+    expect(activeToolRow).toHaveAttribute("data-virtual-row-protected", "true");
+    expect(activeToolRow).toHaveAttribute("data-virtual-row-visible", "false");
+
+    const offscreenHost = await screen.findByTestId(
+      "virtual-offscreen-measurement-host",
+    );
+    expect(
+      offscreenHost.querySelector(
+        '[data-virtual-row-offscreen-shell-id="message:active-tool"]',
+      ),
+    ).toBeNull();
+    expect(
+      latestTimelineDiagnostics(diagnosticsSpy)?.measurement
+        .acceptedOffscreenRealMeasurements,
+    ).toBe(0);
+  });
+
+  it("unions row-state protected rows into the rendered range", async () => {
+    const diagnosticsSpy = vi.fn();
+    const messages = [
+      textMessage("protected", "assistant", "Protected stream", {
+        userVisible: true,
+        completionStatus: "inProgress",
+      }),
+      ...Array.from({ length: 80 }, (_, index) =>
+        textMessage(`message-${index}`, "user", `Message ${index}`),
+      ),
+    ];
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    const protectedRow = await screen.findByTestId(
+      "virtual-transcript-row-message:protected",
+    );
+    expect(protectedRow).toHaveAttribute("data-virtual-row-protected", "true");
+    expect(protectedRow).toHaveAttribute("data-virtual-row-visible", "false");
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    expect(list).toHaveAttribute(
+      "data-virtual-render-mode",
+      "bounded-controller",
+    );
+    expect(list).toHaveAttribute("data-virtual-protected-rows", "1");
+    expect(list).toHaveAttribute("data-virtual-protected-offscreen-rows", "1");
+
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "bounded-controller",
+          protectedRows: 1,
+          protectedOffscreenRows: 1,
+        }),
+      ),
+    );
+  });
+
+  it("updates keepalive diagnostics when a virtual row adapter reports focus", async () => {
+    const diagnosticsSpy = vi.fn();
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    const focusedBubble = await screen.findByTestId("bubble-message-79");
+    fireEvent.focus(focusedBubble);
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() => {
+      expect(list).toHaveAttribute("data-virtual-protected-rows", "1");
+    });
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          protectedRows: 1,
+        }),
+      ),
+    );
+  });
+
+  it("does not rescan measurement cache on scroll-only snapshots", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        latestTimelineDiagnostics(diagnosticsSpy)?.measurement.cacheWrites,
+      ).toBeGreaterThan(0),
+    );
+    const cacheMissesBefore =
+      latestTimelineDiagnostics(diagnosticsSpy)?.measurement.cacheMisses ?? 0;
+    const callCountBefore = diagnosticsSpy.mock.calls.length;
+    const scroller = screen.getByTestId("message-timeline-scroll");
+
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(diagnosticsSpy.mock.calls.length).toBeGreaterThan(callCountBefore),
+    );
+    expect(
+      latestTimelineDiagnostics(diagnosticsSpy)?.measurement.cacheMisses,
+    ).toBe(cacheMissesBefore);
+  });
+
+  it("classifies initial tail positioning outside delayed layout correction p95", async () => {
+    const diagnosticsSpy = vi.fn();
+    const messages = Array.from({ length: 80 }, (_, index) =>
+      textMessage(`message-${index}`, "assistant", `Message ${index}`),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        latestTimelineDiagnostics(diagnosticsSpy)?.controller
+          .lastCorrectionDeltaPx,
+      ).toBeGreaterThan(0),
+    );
+    expect(latestTimelineDiagnostics(diagnosticsSpy)).toMatchObject({
+      scrollCorrectionP95Px: 0,
+    });
+  });
+
+  it("classifies first projection after session switch outside descriptor churn", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const primaryMessages = Array.from({ length: 40 }, (_, index) =>
+      textMessage(`primary-${index}`, "assistant", `Primary ${index}`),
+    );
+    const secondaryMessages = Array.from({ length: 20 }, (_, index) =>
+      textMessage(`secondary-${index}`, "assistant", `Secondary ${index}`),
+    );
+
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-primary"
+        messages={primaryMessages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(latestTimelineDiagnostics(diagnosticsSpy)).toMatchObject({
+        sessionId: "session-primary",
+        descriptorChurnPercent: 0,
+      }),
+    );
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={secondaryMessages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(latestTimelineDiagnostics(diagnosticsSpy)).toMatchObject({
+        sessionId: "session-secondary",
+        descriptorChurnPercent: 0,
+      }),
+    );
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-secondary"
+        messages={[
+          {
+            ...secondaryMessages[0],
+            content: [{ type: "text", text: "Secondary changed" }],
+          },
+          ...secondaryMessages.slice(1),
+        ]}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        latestTimelineDiagnostics(diagnosticsSpy)?.descriptorChurnPercent,
+      ).toBeGreaterThan(0),
+    );
+  });
+
+  it("defers mounted row finalization while layout is pending and finalizes after markers clear", async () => {
+    mockTranscriptElementMeasurements();
+    const diagnosticsSpy = vi.fn();
+    const pendingMessage = textMessage(
+      "pending",
+      "assistant",
+      "[pending] [height:12] Pending image",
+    );
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[pendingMessage]}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        latestTimelineDiagnostics(diagnosticsSpy)?.measurement
+          .reservedMeasurementsDeferred,
+      ).toBeGreaterThan(0),
+    );
+    const acceptedBefore =
+      latestTimelineDiagnostics(diagnosticsSpy)?.measurement
+        .acceptedVisibleMeasurements ?? 0;
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          textMessage("pending", "assistant", "[height:360] Image ready"),
+        ]}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    await waitFor(() =>
+      expect(
+        latestTimelineDiagnostics(diagnosticsSpy)?.measurement
+          .acceptedVisibleMeasurements,
+      ).toBeGreaterThan(acceptedBefore),
+    );
+    expect(
+      latestTimelineDiagnostics(diagnosticsSpy)?.measurement
+        .pendingMeasurements,
+    ).toBe(0);
+  });
+
+  it("falls back to explicit safe degraded mode when protected rows exceed the fail threshold", async () => {
+    const diagnosticsSpy = vi.fn();
+    const messages = Array.from({ length: 82 }, (_, index) =>
+      textMessage(`protected-${index}`, "assistant", `Protected ${index}`, {
+        userVisible: true,
+        completionStatus: "inProgress",
+      }),
+    );
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        onDiagnostics={diagnosticsSpy}
+      />,
+    );
+
+    const list = screen.getByTestId("virtual-message-timeline-list");
+    await waitFor(() =>
+      expect(list).toHaveAttribute("data-virtual-render-mode", "safe-degraded"),
+    );
+    expect(list).toHaveAttribute("data-virtual-unmounting", "safe-degraded");
+    expect(list).toHaveAttribute("data-virtual-total-rows", "83");
+    expect(list).toHaveAttribute("data-virtual-mounted-rows", "83");
+    expect(list).toHaveAttribute(
+      "data-virtual-fallback-reasons",
+      "protected-row-fail-threshold",
+    );
+
+    await waitFor(() =>
+      expect(diagnosticsSpy).toHaveBeenCalledWith(
+        expect.objectContaining({
+          mode: "safe-degraded",
+          mountedRows: 83,
+          protectedRows: 82,
+          virtualUnmountingEnabled: false,
+          fallbackReasons: ["protected-row-fail-threshold"],
+        }),
+      ),
+    );
+  });
+});

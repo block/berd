@@ -1,0 +1,371 @@
+import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useRef,
+  type CSSProperties,
+  type ReactElement,
+} from "react";
+import { cn } from "@/shared/lib/cn";
+import type { Message } from "@/shared/types/messages";
+import {
+  VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE,
+  VIRTUAL_ROW_RESERVED_BLOCK_SIZE_ATTRIBUTE,
+  type TranscriptShellMeasurementPlan,
+} from "../transcript/measurement";
+import {
+  TranscriptRowStateProvider,
+  type TranscriptRowStateRegistry,
+} from "../transcript/row-state";
+import type { TranscriptRowDescriptor } from "../transcript/projection";
+import type { TranscriptVirtualItem } from "../transcript/virtual";
+import { MessageBubble } from "./MessageBubble";
+import type { McpAppMessageHandler } from "./mcpAppTypes";
+import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
+
+const VIRTUAL_ROW_INLINE_INSET = "var(--chat-transcript-inline-padding)";
+const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
+
+interface VirtualTranscriptRowStateProviderConfig {
+  registry: TranscriptRowStateRegistry;
+  sessionId: string;
+  sessionEpoch: number;
+  onRowStateChange: () => void;
+}
+
+interface VirtualTranscriptRowProps {
+  row: TranscriptRowDescriptor;
+  message?: Message;
+  index: number;
+  previousRowKind?: TranscriptRowDescriptor["kind"];
+  dateLabel?: string;
+  layoutMode?: "flow" | "virtual";
+  virtualItem?: Pick<
+    TranscriptVirtualItem,
+    "end" | "protected" | "size" | "start" | "visible"
+  >;
+  measurementPlan?: TranscriptShellMeasurementPlan;
+  isStreaming?: boolean;
+  isPulsing?: boolean;
+  rowStateProvider?: VirtualTranscriptRowStateProviderConfig;
+  onRetryMessage?: (messageId: string) => void;
+  onEditMessage?: (messageId: string) => void;
+  onSendMcpAppMessage?: McpAppMessageHandler;
+  onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
+  onRunShellCommand?: (command: string) => void;
+  registerRowElement?: (rowId: string, element: HTMLElement | null) => void;
+  measureRowElement?: (rowId: string, element: HTMLElement | null) => void;
+  registerMessageElement?: (
+    messageId: string,
+    element: HTMLDivElement | null,
+  ) => void;
+}
+
+export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
+  row,
+  message,
+  index,
+  previousRowKind,
+  dateLabel,
+  layoutMode = "flow",
+  virtualItem,
+  measurementPlan,
+  isStreaming,
+  isPulsing,
+  rowStateProvider,
+  onRetryMessage,
+  onEditMessage,
+  onSendMcpAppMessage,
+  onMcpAppAutoScroll,
+  onRunShellCommand,
+  registerRowElement,
+  measureRowElement,
+  registerMessageElement,
+}: VirtualTranscriptRowProps) {
+  const elementRef = useRef<HTMLDivElement | null>(null);
+  const isVirtualLayout = layoutMode === "virtual" && virtualItem;
+  const streamingActionGutter =
+    isVirtualLayout && isStreaming ? STREAMING_ROW_ACTION_GUTTER : undefined;
+  const rowStyle: CSSProperties | undefined = isVirtualLayout
+    ? {
+        ...(isStreaming
+          ? {
+              boxSizing: "border-box",
+              paddingLeft: STREAMING_ROW_ACTION_GUTTER,
+            }
+          : null),
+        left: streamingActionGutter
+          ? `calc(${VIRTUAL_ROW_INLINE_INSET} - ${streamingActionGutter})`
+          : VIRTUAL_ROW_INLINE_INSET,
+        position: "absolute",
+        right: VIRTUAL_ROW_INLINE_INSET,
+        top: 0,
+        transform: `translateY(${virtualItem.start}px)`,
+      }
+    : undefined;
+  const spacingClassName = getVirtualTranscriptRowSpacingClassName({
+    row,
+    index,
+    previousRowKind,
+    layoutMode,
+  });
+  const rowDiagnostics = {
+    "data-virtual-row-id": row.rowId,
+    "data-virtual-row-kind": row.kind,
+    "data-virtual-row-message-id": row.messageId,
+    "data-transcript-message-id": row.fragment
+      ? row.fragment.messageScrollTarget
+        ? row.messageId
+        : undefined
+      : row.messageId,
+    "data-virtual-row-fragment-id": row.fragment?.fragmentId,
+    "data-virtual-row-fragment-index": row.fragment?.fragmentIndex,
+    "data-virtual-row-fragment-count": row.fragment?.fragmentCount,
+    "data-virtual-row-fragment-role": row.fragment?.role,
+    "data-virtual-row-streaming-tail": row.fragment
+      ? String(row.fragment.isStreamingTail)
+      : undefined,
+    "data-virtual-row-render-revision": row.renderRevision,
+    "data-virtual-row-height-revision": row.heightRevision,
+    "data-virtual-row-estimated-height": row.estimatedHeight,
+    "data-virtual-row-measurement-policy": row.measurementPolicy,
+    "data-virtual-row-keepalive-priority": row.keepAlivePriority,
+    "data-virtual-row-layout-policy": row.layoutPendingPolicy,
+    "data-virtual-row-anchor-priority": row.anchorPriority,
+    "data-virtual-row-virtual-start": virtualItem?.start,
+    "data-virtual-row-virtual-size": virtualItem?.size,
+    "data-virtual-row-virtual-end": virtualItem?.end,
+    "data-virtual-row-visible": virtualItem
+      ? String(virtualItem.visible)
+      : undefined,
+    "data-virtual-row-protected": virtualItem
+      ? String(virtualItem.protected)
+      : undefined,
+    "data-virtual-row-shell-status": measurementPlan?.status,
+    "data-virtual-row-shell-block-count": measurementPlan?.blocks.length,
+    "data-virtual-row-shell-estimated-block-size":
+      measurementPlan?.estimatedBlockSize,
+    "data-virtual-row-shell-reserved-block-size":
+      measurementPlan?.reservedBlockSize ?? undefined,
+    "data-virtual-row-shell-reasons": measurementPlan?.reasons.join(","),
+  };
+  const registerElement = useCallback(
+    (element: HTMLDivElement | null) => {
+      elementRef.current = element;
+      registerRowElement?.(row.rowId, element);
+      if (
+        message &&
+        (row.kind === "message" || row.fragment?.messageScrollTarget)
+      ) {
+        registerMessageElement?.(message.id, element);
+      }
+    },
+    [
+      message,
+      registerMessageElement,
+      registerRowElement,
+      row.fragment?.messageScrollTarget,
+      row.kind,
+      row.rowId,
+    ],
+  );
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: row revisions and virtual size intentionally retrigger visible measurement.
+  useLayoutEffect(() => {
+    const element = elementRef.current;
+    if (!element) {
+      return;
+    }
+
+    const measure = () => {
+      measureRowElement?.(row.rowId, element);
+    };
+
+    measure();
+
+    const resizeObserver =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    resizeObserver?.observe(element);
+
+    const mutationObserver =
+      typeof MutationObserver === "undefined"
+        ? null
+        : new MutationObserver(measure);
+    mutationObserver?.observe(element, {
+      attributeFilter: [
+        VIRTUAL_ROW_LAYOUT_PENDING_ATTRIBUTE,
+        VIRTUAL_ROW_RESERVED_BLOCK_SIZE_ATTRIBUTE,
+        "class",
+        "style",
+      ],
+      attributes: true,
+      childList: true,
+      subtree: true,
+    });
+
+    return () => {
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
+  }, [
+    measureRowElement,
+    row.heightRevision,
+    row.renderRevision,
+    row.rowId,
+    virtualItem?.size,
+  ]);
+  let rowContent: ReactElement;
+  if (row.kind === "date-separator") {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(spacingClassName)}
+      >
+        <div className="my-4 px-4 text-center">
+          <span className="text-[11px] font-medium text-muted-foreground">
+            {dateLabel}
+          </span>
+        </div>
+      </div>
+    );
+  } else if (
+    row.kind === "assistant-content-fragment" &&
+    message &&
+    row.fragment
+  ) {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(
+          spacingClassName,
+          "rounded-lg transition-[background-color,box-shadow]",
+          isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+        )}
+      >
+        <MessageBubble
+          message={message}
+          contentOverride={row.fragment.content}
+          fragmentRole={row.fragment.role}
+          isStreaming={row.fragment.isStreamingTail && isStreaming}
+          onRetryMessage={
+            row.fragment.role === "end" || row.fragment.role === "single"
+              ? onRetryMessage
+              : undefined
+          }
+          onSendMcpAppMessage={onSendMcpAppMessage}
+          onMcpAppAutoScroll={onMcpAppAutoScroll}
+          onRunShellCommand={onRunShellCommand}
+        />
+      </div>
+    );
+  } else if (row.kind !== "message" || !message) {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        data-virtual-row-unsupported="true"
+        style={rowStyle}
+        hidden
+      />
+    );
+  } else {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(
+          spacingClassName,
+          "rounded-lg transition-[background-color,box-shadow]",
+          isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+        )}
+      >
+        <MessageBubble
+          message={message}
+          isStreaming={isStreaming}
+          onRetryMessage={
+            message.role === "assistant" ? onRetryMessage : undefined
+          }
+          onEditMessage={message.role === "user" ? onEditMessage : undefined}
+          onSendMcpAppMessage={onSendMcpAppMessage}
+          onMcpAppAutoScroll={onMcpAppAutoScroll}
+          onRunShellCommand={onRunShellCommand}
+        />
+      </div>
+    );
+  }
+
+  if (!rowStateProvider) {
+    return rowContent;
+  }
+
+  return (
+    <TranscriptRowStateProvider
+      registry={rowStateProvider.registry}
+      sessionId={rowStateProvider.sessionId}
+      sessionEpoch={rowStateProvider.sessionEpoch}
+      rowId={row.rowId}
+      onRowStateChange={rowStateProvider.onRowStateChange}
+    >
+      {rowContent}
+    </TranscriptRowStateProvider>
+  );
+}, areVirtualTranscriptRowPropsEqual);
+
+function areVirtualTranscriptRowPropsEqual(
+  previous: VirtualTranscriptRowProps,
+  next: VirtualTranscriptRowProps,
+): boolean {
+  return (
+    previous.row === next.row &&
+    previous.message === next.message &&
+    previous.index === next.index &&
+    previous.previousRowKind === next.previousRowKind &&
+    previous.dateLabel === next.dateLabel &&
+    previous.layoutMode === next.layoutMode &&
+    previous.measurementPlan === next.measurementPlan &&
+    previous.isStreaming === next.isStreaming &&
+    previous.isPulsing === next.isPulsing &&
+    previous.rowStateProvider === next.rowStateProvider &&
+    previous.onRetryMessage === next.onRetryMessage &&
+    previous.onEditMessage === next.onEditMessage &&
+    previous.onSendMcpAppMessage === next.onSendMcpAppMessage &&
+    previous.onMcpAppAutoScroll === next.onMcpAppAutoScroll &&
+    previous.onRunShellCommand === next.onRunShellCommand &&
+    previous.registerRowElement === next.registerRowElement &&
+    previous.measureRowElement === next.measureRowElement &&
+    previous.registerMessageElement === next.registerMessageElement &&
+    areVirtualItemsEqual(previous.virtualItem, next.virtualItem)
+  );
+}
+
+function areVirtualItemsEqual(
+  previous: VirtualTranscriptRowProps["virtualItem"],
+  next: VirtualTranscriptRowProps["virtualItem"],
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+
+  if (!previous || !next) {
+    return false;
+  }
+
+  return (
+    previous.start === next.start &&
+    previous.end === next.end &&
+    previous.size === next.size &&
+    previous.visible === next.visible &&
+    previous.protected === next.protected
+  );
+}

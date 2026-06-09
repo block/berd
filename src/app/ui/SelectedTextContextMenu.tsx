@@ -3,6 +3,10 @@ import { useTranslation } from "react-i18next";
 import { CopyIcon, FileCode2Icon } from "lucide-react";
 
 import {
+  TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
+  type TranscriptSelectedTextContextMenuEventDetail,
+} from "@/features/chat/transcript/row-state";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -432,6 +436,15 @@ export function SelectedTextContextMenu() {
     return keepSelectionVisible(menu.selection.ranges);
   }, [menu]);
 
+  useEffect(() => {
+    if (!menu) return;
+
+    dispatchSelectedTextContextMenuState(true, menu.selection.ranges);
+    return () => {
+      dispatchSelectedTextContextMenuState(false, menu.selection.ranges);
+    };
+  }, [menu]);
+
   return (
     <DropdownMenu open={menu !== null} onOpenChange={handleOpenChange}>
       <DropdownMenuTrigger asChild>
@@ -477,5 +490,19 @@ export function SelectedTextContextMenu() {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  );
+}
+
+function dispatchSelectedTextContextMenuState(
+  open: boolean,
+  ranges: readonly Range[],
+) {
+  window.dispatchEvent(
+    new CustomEvent<TranscriptSelectedTextContextMenuEventDetail>(
+      TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
+      {
+        detail: { open, ranges },
+      },
+    ),
   );
 }

@@ -34,6 +34,9 @@
     "test:e2e:personas": "pnpm build && playwright test --project=personas",
     "test:e2e:skills": "pnpm build && playwright test --project=skills",
     "test:e2e:drafts": "pnpm build && playwright test --project=drafts",
+    "test:transcript-virtualization:local": "playwright test --config tests/transcript-virtualization/playwright.config.ts",
+    "test:transcript-virtualization:real": "TRANSCRIPT_VIRTUALIZATION_START_SERVER=1 TRANSCRIPT_VIRTUALIZATION_RENDERER_URL=http://127.0.0.1:1520/tests/transcript-virtualization/real-renderer-bridge.html TRANSCRIPT_VIRTUALIZATION_RENDERERS=virtual playwright test --config tests/transcript-virtualization/playwright.config.ts --project=desktop tests/transcript-virtualization/transcript-parity.spec.ts",
+    "test:transcript-virtualization:ci": "TRANSCRIPT_VIRTUALIZATION_START_SERVER=1 TRANSCRIPT_VIRTUALIZATION_RENDERER_URL=http://127.0.0.1:1520/tests/transcript-virtualization/real-renderer-bridge.html TRANSCRIPT_VIRTUALIZATION_RENDERERS=virtual TRANSCRIPT_VIRTUALIZATION_SCENARIOS=pr928-fragment-tail playwright test --config tests/transcript-virtualization/playwright.config.ts --project=desktop tests/transcript-virtualization/transcript-parity.spec.ts",
     "test:app-e2e": "vitest run --config vitest.app-e2e.config.ts",
     "test-driver": "tsx tests/app-e2e/lib/test-driver-cli.ts",
     "tauri:release:config": "node scripts/build-tauri-release-config.mjs"
@@ -80,7 +83,7 @@
     "@tabler/icons-react": "^3.41.1",
     "@tailwindcss/typography": "^0.5.19",
     "@tanstack/react-query": "^5.90.21",
-    "@tanstack/react-virtual": "^3.13.24",
+    "@tanstack/react-virtual": "^3.14.2",
     "@tauri-apps/api": "^2.11.0",
     "@tauri-apps/plugin-deep-link": "^2",
     "@tauri-apps/plugin-dialog": "~2.7.0",

@@ -9,6 +9,11 @@ import packageJson from "../../../../package.json";
 import { getClient } from "@/shared/api/acpConnection";
 import { getGooseServeHostInfo } from "@/shared/api/gooseServeHost";
 import { useTheme } from "@/shared/theme/ThemeProvider";
+import { createVirtualLayoutStabilityAttributes } from "@/features/chat/transcript/measurement";
+import {
+  useTranscriptMcpActivityReporter,
+  useTranscriptOpenOverlayProtection,
+} from "@/features/chat/transcript/row-state";
 import type {
   McpAppPayload,
   ToolResponseContent,
@@ -125,8 +130,16 @@ export function McpAppView({
     Record<string, unknown> | undefined
   >();
   const [containerWidth, setContainerWidth] = useState<number | null>(null);
+  const [isIframeSizingPending, setIsIframeSizingPending] = useState(false);
   const autoScrollTimersRef = useRef<number[]>([]);
+  const iframeSizingRafRef = useRef<number[]>([]);
+  const mcpRequestSourceCounterRef = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
+  const {
+    enabled: rowStateEnabled,
+    setMcpActivity,
+    patchMcpAppState,
+  } = useTranscriptMcpActivityReporter();
   const {
     handleConfirmOpenLink,
     handleOpenLink,
@@ -145,6 +158,12 @@ export function McpAppView({
   );
   const currentToolInput = activeToolInput ?? toolInput;
   const currentToolResult = initialToolResult;
+
+  useTranscriptOpenOverlayProtection({
+    open: pendingOpenLinkUrl !== null,
+    overlayKind: "dialog",
+    overlayId: "mcp-link-safety",
+  });
 
   const requestAutoScroll = useCallback(() => {
     if (!onAutoScrollRequest) {
@@ -180,6 +199,10 @@ export function McpAppView({
         window.clearTimeout(timer);
       }
       autoScrollTimersRef.current = [];
+      for (const frame of iframeSizingRafRef.current) {
+        window.cancelAnimationFrame(frame);
+      }
+      iframeSizingRafRef.current = [];
     },
     [],
   );
@@ -234,6 +257,33 @@ export function McpAppView({
       cancelled = true;
     };
   }, [t]);
+
+  const isHostInfoRequestPending =
+    renderableDocument !== null && renderError === null && hostInfo === null;
+  useEffect(() => {
+    if (!rowStateEnabled || !isHostInfoRequestPending) {
+      return;
+    }
+
+    setMcpActivity("host-request", true, {
+      sourceId: "mcp-host-info",
+    });
+
+    return () => {
+      setMcpActivity("host-request", false, {
+        sourceId: "mcp-host-info",
+      });
+    };
+  }, [isHostInfoRequestPending, rowStateEnabled, setMcpActivity]);
+
+  useEffect(() => {
+    patchMcpAppState(
+      {
+        inlineHeightPx: inlineHeight,
+      },
+      { markRecent: false },
+    );
+  }, [inlineHeight, patchMcpAppState]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) {
@@ -307,10 +357,13 @@ export function McpAppView({
         return { isError: true };
       }
 
+      setMcpActivity("recent-message", true, {
+        sourceId: "mcp-message",
+      });
       const accepted = await onSendMessage(text);
       return accepted === false ? { isError: true } : {};
     },
-    [onSendMessage],
+    [onSendMessage, setMcpActivity],
   );
 
   const handleCallTool = useCallback(
@@ -322,49 +375,79 @@ export function McpAppView({
       arguments?: Record<string, unknown>;
     }) => {
       setActiveToolInput(args ?? {});
+      mcpRequestSourceCounterRef.current += 1;
+      const sourceId = `nested-tool:${name}:${mcpRequestSourceCounterRef.current}`;
+      setMcpActivity("nested-tool-request", true, { sourceId });
 
-      const client = await getClient();
-      const response = await client.goose.GooseUnstableToolsCall({
-        sessionId: payload.sessionId,
-        name: `${payload.tool.extensionName}__${name}`,
-        arguments: args ?? {},
-      });
+      try {
+        const client = await getClient();
+        const response = await client.goose.GooseUnstableToolsCall({
+          sessionId: payload.sessionId,
+          name: `${payload.tool.extensionName}__${name}`,
+          arguments: args ?? {},
+        });
 
-      const toolResult: CallToolResult = {
-        content: (response.content ?? []) as CallToolResult["content"],
-        isError: response.isError,
-        structuredContent:
-          response.structuredContent as CallToolResult["structuredContent"],
-        _meta: response._meta as CallToolResult["_meta"],
-      };
+        const toolResult: CallToolResult = {
+          content: (response.content ?? []) as CallToolResult["content"],
+          isError: response.isError,
+          structuredContent:
+            response.structuredContent as CallToolResult["structuredContent"],
+          _meta: response._meta as CallToolResult["_meta"],
+        };
 
-      return toolResult;
+        return toolResult;
+      } finally {
+        setMcpActivity("nested-tool-request", false, { sourceId });
+      }
     },
-    [payload.sessionId, payload.tool.extensionName],
+    [payload.sessionId, payload.tool.extensionName, setMcpActivity],
   );
 
   const handleReadResource = useCallback(
     async ({ uri }: { uri: string }) => {
-      const client = await getClient();
-      const response = await client.goose.GooseUnstableResourcesRead({
-        sessionId: payload.sessionId,
-        uri,
-        extensionName: payload.tool.extensionName,
-      });
+      mcpRequestSourceCounterRef.current += 1;
+      const sourceId = `resource:${uri}:${mcpRequestSourceCounterRef.current}`;
+      setMcpActivity("host-request", true, { sourceId });
+      try {
+        const client = await getClient();
+        const response = await client.goose.GooseUnstableResourcesRead({
+          sessionId: payload.sessionId,
+          uri,
+          extensionName: payload.tool.extensionName,
+        });
 
-      return (response.result ?? { contents: [] }) as ReadResourceResult;
+        return (response.result ?? { contents: [] }) as ReadResourceResult;
+      } finally {
+        setMcpActivity("host-request", false, { sourceId });
+      }
     },
-    [payload.sessionId, payload.tool.extensionName],
+    [payload.sessionId, payload.tool.extensionName, setMcpActivity],
   );
 
   const handleSizeChanged = useCallback(
     ({ height }: SizeChangedParams) => {
       if (typeof height === "number" && height > 0) {
+        setIsIframeSizingPending(true);
         setInlineHeight(height);
+        for (const frame of iframeSizingRafRef.current) {
+          window.cancelAnimationFrame(frame);
+        }
+        iframeSizingRafRef.current = [];
+        const firstFrame = window.requestAnimationFrame(() => {
+          const secondFrame = window.requestAnimationFrame(() => {
+            setIsIframeSizingPending(false);
+            iframeSizingRafRef.current = [];
+          });
+          iframeSizingRafRef.current = [secondFrame];
+        });
+        iframeSizingRafRef.current = [firstFrame];
+        setMcpActivity("recent-resize", true, {
+          sourceId: "mcp-size",
+        });
         requestAutoScroll();
       }
     },
-    [requestAutoScroll],
+    [requestAutoScroll, setMcpActivity],
   );
 
   const handleRenderError = useCallback(() => {
@@ -375,6 +458,10 @@ export function McpAppView({
     renderableDocument !== null && sandbox !== null && renderError === null;
   const shouldShowFallback =
     renderError !== null || renderableDocument === null;
+  const isMcpLayoutPending =
+    renderableDocument !== null &&
+    renderError === null &&
+    (!shouldRenderApp || isIframeSizingPending);
   const rootClassName = "my-3 w-full";
   const appChromeClassName = renderableDocument?.prefersBorder
     ? "w-full overflow-hidden rounded-md border border-primary bg-background/40 shadow-sm [&_iframe]:block"
@@ -409,7 +496,16 @@ export function McpAppView({
   }, [requestAutoScroll, shouldRenderApp]);
 
   return (
-    <div ref={rootRef} className={rootClassName} data-testid="mcp-app-view">
+    <div
+      ref={rootRef}
+      className={rootClassName}
+      data-testid="mcp-app-view"
+      {...createVirtualLayoutStabilityAttributes({
+        isPending: isMcpLayoutPending,
+        reason: "mcp-iframe-sizing",
+        reservedBlockSize: inlineHeight,
+      })}
+    >
       {shouldRenderApp ? (
         <div className={appChromeClassName} style={appChromeStyle}>
           <AppRenderer

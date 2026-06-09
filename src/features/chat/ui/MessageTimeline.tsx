@@ -16,6 +16,7 @@ import { useLocaleFormatting } from "@/shared/i18n";
 import { Button } from "@/shared/ui/button";
 import { MessageBubble } from "./MessageBubble";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
+import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { getTextContent, type Message } from "@/shared/types/messages";
 
@@ -891,17 +892,13 @@ export function MessageTimeline({
           className="pointer-events-none absolute inset-x-0 top-0 bottom-[calc(var(--chat-surface-bottom-gap)*2)] rounded-md bg-card"
         />
       ) : null}
-      <div
+      <MessageTimelineScrollContainer
         ref={containerRef}
+        hasFooter={hasFooter}
         onScroll={handleScroll}
         onWheel={handleWheel}
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
-        data-testid="message-timeline-scroll"
-        className={cn(
-          "scrollbar-subtle relative z-0 min-h-0 flex-1 overflow-y-auto overscroll-contain",
-          !hasFooter && "rounded-md bg-card",
-        )}
       >
         <div className="flex min-h-full flex-col">
           <div
@@ -913,7 +910,7 @@ export function MessageTimeline({
             {content}
           </div>
         </div>
-      </div>
+      </MessageTimelineScrollContainer>
       {footer ? (
         <div
           ref={footerRef}

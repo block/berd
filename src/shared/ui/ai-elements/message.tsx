@@ -9,6 +9,7 @@ import {
 import { isExternalHref } from "@/shared/lib/isExternalHref";
 import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
 import { cn } from "@/shared/lib/cn";
+import { useVirtualLayoutPendingForStreamdown } from "@/features/chat/transcript/measurement";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -433,9 +434,25 @@ const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
 };
 
 export const MessageResponse = memo(
-  ({ className, codeRenderers, ...props }: MessageResponseProps) => {
+  ({
+    children,
+    className,
+    codeRenderers,
+    isAnimating,
+    mode,
+    onAnimationEnd,
+    onAnimationStart,
+    ...props
+  }: MessageResponseProps) => {
     const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
+    const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
+      contentKey: children,
+      isAnimating,
+      mode,
+      onAnimationEnd,
+      onAnimationStart,
+    });
 
     const openModal = useCallback((url: string) => {
       setModalUrl(url);
@@ -477,21 +494,31 @@ export const MessageResponse = memo(
 
     return (
       <LinkSafetyContext.Provider value={openModal}>
-        <div className="contents" onClickCapture={handleClickCapture}>
+        <div
+          className="contents"
+          onClickCapture={handleClickCapture}
+          {...streamdownLayoutPending.layoutPendingAttributes}
+        >
           <Streamdown
             className={cn(
               "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
               className,
             )}
             components={streamdownComponents}
+            isAnimating={isAnimating}
             linkSafety={linkSafetyConfig}
+            mode={mode}
+            onAnimationEnd={streamdownLayoutPending.onAnimationEnd}
+            onAnimationStart={streamdownLayoutPending.onAnimationStart}
             plugins={
               codeRenderers
                 ? { ...streamdownPlugins, renderers: codeRenderers }
                 : streamdownPlugins
             }
             {...props}
-          />
+          >
+            {children}
+          </Streamdown>
         </div>
         <LinkSafetyModal
           isOpen={modalUrl !== null}
@@ -507,6 +534,7 @@ export const MessageResponse = memo(
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating &&
+    nextProps.mode === prevProps.mode &&
     nextProps.codeRenderers === prevProps.codeRenderers,
 );
 
