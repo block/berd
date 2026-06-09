@@ -1,10 +1,8 @@
+import { escapeRegExp } from "@/shared/lib/escapeRegExp";
+
 export const DEFAULT_AUTO_SUBMIT_PHRASES_RAW = "submit";
 
 const TRAILING_PUNCTUATION_REGEX = /[\s"'`.,!?;:)\]}]+$/u;
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 function normalizePhrase(value: string): string {
   return value

@@ -9,7 +9,7 @@ import {
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useTranslation } from "react-i18next";
-import { PinIcon } from "lucide-react";
+import { PinIcon, SearchIcon } from "lucide-react";
 import {
   IconChevronDown,
   IconChevronUp,
@@ -19,6 +19,7 @@ import {
 } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { VirtualMessageTimelineGate } from "./VirtualMessageTimelineGate";
+import { ChatSearchBar } from "./ChatSearchBar";
 import { ChatInput } from "./ChatInput";
 import { LoadingGoose } from "./LoadingGoose";
 import { ChatLoadingSkeleton } from "./ChatLoadingSkeleton";
@@ -52,6 +53,8 @@ import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { getTextContent } from "@/shared/types/messages";
+import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
+import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-composer bg-surface-chat-composer shadow-[var(--shadow-chat-composer)] [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -296,6 +299,14 @@ export function ChatView({
   const [closingTerminalTabId, setClosingTerminalTabId] = useState<
     string | null
   >(null);
+  const transcriptSearchRootRef = useRef<HTMLDivElement | null>(null);
+  const transcriptSearchBackendRef = useRef<TranscriptSearchBackend | null>(
+    null,
+  );
+  const search = useChatTranscriptSearch(transcriptSearchRootRef, {
+    backendRef: transcriptSearchBackendRef,
+  });
+  const { open: openSearch, close: closeSearch } = search;
   const setTopBarActions = useSetTopBarActions();
   const {
     isPinned: isPinnedToHome,
@@ -423,6 +434,14 @@ export function ChatView({
     perfLog(`[perf:chatview] ${sessionId.slice(0, 8)} mounted in ${ms}ms`);
   }, [sessionId]);
 
+  // ChatView remounts per session via its key upstream; this covers the one
+  // in-place id change (draft promotion) defensively. close() no-ops when
+  // the bar is not open.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the re-close trigger.
+  useEffect(() => {
+    closeSearch();
+  }, [closeSearch, sessionId]);
+
   const handleAddTerminalTab = useCallback(() => {
     if (!terminalCwd) {
       toast.message(t("terminal.noWorkspace"));
@@ -445,6 +464,7 @@ export function ChatView({
       }
 
       const key = event.key.toLowerCase();
+
       if (key === "j") {
         event.preventDefault();
         toggleTerminal();
@@ -651,24 +671,38 @@ export function ChatView({
         : t("pinToHome.action");
 
     setTopBarActions(
-      <Button
-        type="button"
-        variant="page-header"
-        size="xs"
-        onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
-        disabled={isPinningToHome}
-        aria-label={label}
-        title={label}
-        leftIcon={<PinIcon aria-hidden="true" />}
-      >
-        {label}
-      </Button>,
+      <>
+        <Button
+          type="button"
+          variant="page-header"
+          size="xs"
+          onClick={openSearch}
+          aria-label={t("search.action")}
+          title={t("search.action")}
+          leftIcon={<SearchIcon aria-hidden="true" />}
+        >
+          {t("search.action")}
+        </Button>
+        <Button
+          type="button"
+          variant="page-header"
+          size="xs"
+          onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
+          disabled={isPinningToHome}
+          aria-label={label}
+          title={label}
+          leftIcon={<PinIcon aria-hidden="true" />}
+        >
+          {label}
+        </Button>
+      </>,
     );
 
     return () => setTopBarActions(null);
   }, [
     isPinnedToHome,
     isPinningToHome,
+    openSearch,
     pinToHome,
     setTopBarActions,
     t,
@@ -860,6 +894,8 @@ export function ChatView({
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
       onScrollTargetHandled={controller.handleScrollTargetHandled}
+      searchContentRef={transcriptSearchRootRef}
+      searchBackendRef={transcriptSearchBackendRef}
       onSendMcpAppMessage={isReadOnly ? undefined : controller.handleSend}
       onRunShellCommand={
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
@@ -916,6 +952,24 @@ export function ChatView({
         >
           <div className="relative flex min-h-0 flex-1 flex-col overflow-visible">
             {messageTimeline}
+            {search.isOpen ? (
+              <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-4 sm:justify-end sm:px-[var(--chat-transcript-inline-padding)]">
+                <ChatSearchBar
+                  query={search.query}
+                  totalMatches={search.matchCount}
+                  activeMatchIndex={search.activeMatchIndex}
+                  isIndexing={search.isIndexing}
+                  announcedTotalMatches={search.announcedMatchCount}
+                  announcedActiveMatchIndex={search.announcedActiveMatchIndex}
+                  announcedIsIndexing={search.announcedIsIndexing}
+                  focusSignal={search.focusSignal}
+                  onQueryChange={search.setQuery}
+                  onNext={search.goToNext}
+                  onPrevious={search.goToPrevious}
+                  onClose={closeSearch}
+                />
+              </div>
+            ) : null}
           </div>
           {terminalVisible ? (
             <div ref={terminalRootRef} className="flex shrink-0 flex-col gap-2">

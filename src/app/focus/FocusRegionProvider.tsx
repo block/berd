@@ -44,7 +44,9 @@ type FocusRegionContextValue = {
 
 const FocusRegionContext = createContext<FocusRegionContextValue | null>(null);
 const PANE_JUMP_TIMEOUT_MS = 2500;
-const KEYBOARD_OWNING_LAYER_SELECTOR = [
+/** Layers (modals, radix poppers) that own the keyboard while open;
+    global shortcuts should not fire from inside them. */
+export const KEYBOARD_OWNING_LAYER_SELECTOR = [
   '[role="dialog"]',
   '[role="alertdialog"]',
   "[data-radix-popper-content-wrapper]",
@@ -58,7 +60,9 @@ export function normalizePaneJumpShortcut(shortcut: unknown): KeyboardShortcut {
   return normalizeKeyboardShortcut(shortcut, DEFAULT_PANE_JUMP_SHORTCUT);
 }
 
-function hasOpenKeyboardOwningLayer() {
+/** True while any modal/popper layer is mounted; global shortcuts should
+    stand down regardless of where focus currently sits. */
+export function hasOpenKeyboardOwningLayer() {
   return Boolean(document.querySelector(KEYBOARD_OWNING_LAYER_SELECTOR));
 }
 

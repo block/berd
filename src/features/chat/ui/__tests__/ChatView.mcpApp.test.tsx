@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, Ref } from "react";
 import {
   act,
   fireEvent,
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => ({
   chatInputSpy: vi.fn(),
   chatRightRailSpy: vi.fn(),
   handleSend: vi.fn(() => true),
+  handleDraftChange: vi.fn(),
   queueTerminalCommand: vi.fn(),
   restartTerminalSession: vi.fn(),
   runCommandInTerminalSession: vi.fn(),
@@ -38,7 +39,7 @@ const mocks = vi.hoisted(() => ({
   >(),
   pinToHome: vi.fn(),
   unpinFromHome: vi.fn(),
-  t: vi.fn((key: string) => key),
+  t: vi.fn((key: string, _options?: Record<string, unknown>) => key),
   useChatSessionController: vi.fn(),
   usePinToHomeWidget: vi.fn(),
   isContextPanelOpen: false,
@@ -64,28 +65,18 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: mocks.t }),
 }));
 
-vi.mock("../MessageTimeline", () => ({
-  MessageTimeline: (props: {
-    messages: unknown[];
-    footer?: ReactNode;
-    placeholder?: ReactNode;
-    showPlaceholder?: boolean;
-  }) => {
-    mocks.messageTimelineSpy(props);
-    const showPlaceholder =
-      props.showPlaceholder || props.messages.length === 0;
-    return (
-      <div data-testid="message-timeline">
-        {showPlaceholder ? props.placeholder : null}
-        {props.footer}
-      </div>
-    );
-  },
+// Deterministic find-shortcut modifier across dev machines and CI.
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: () => "linux",
 }));
 
 vi.mock("../VirtualMessageTimelineGate", () => ({
   VirtualMessageTimelineGate: (props: {
-    messages: unknown[];
+    messages: Array<{
+      id: string;
+      content: Array<{ type: string; text?: string }>;
+    }>;
+    searchContentRef?: Ref<HTMLDivElement>;
     footer?: ReactNode;
     placeholder?: ReactNode;
     showPlaceholder?: boolean;
@@ -95,6 +86,16 @@ vi.mock("../VirtualMessageTimelineGate", () => ({
       props.showPlaceholder || props.messages.length === 0;
     return (
       <div data-testid="message-timeline">
+        <div ref={props.searchContentRef}>
+          {props.messages.map((message) => (
+            <p key={message.id}>
+              {message.content
+                .filter((block) => block.type === "text")
+                .map((block) => block.text)
+                .join(" ")}
+            </p>
+          ))}
+        </div>
         {showPlaceholder ? props.placeholder : null}
         {props.footer}
       </div>
@@ -282,6 +283,7 @@ describe("ChatView MCP app messaging", () => {
     mocks.chatInputSpy.mockClear();
     mocks.chatRightRailSpy.mockClear();
     mocks.handleSend.mockClear();
+    mocks.handleDraftChange.mockClear();
     mocks.queueTerminalCommand.mockClear();
     mocks.restartTerminalSession.mockClear();
     mocks.runCommandInTerminalSession.mockClear();
@@ -325,7 +327,7 @@ describe("ChatView MCP app messaging", () => {
       isCompactingContext: false,
       queue: { queuedMessage: null, dismiss: vi.fn() },
       draftValue: "",
-      handleDraftChange: vi.fn(),
+      handleDraftChange: mocks.handleDraftChange,
       personas: [],
       selectedPersonaId: null,
       handlePersonaChange: vi.fn(),
@@ -490,6 +492,190 @@ describe("ChatView MCP app messaging", () => {
     await user.click(screen.getByRole("button", { name: "pinToHome.action" }));
 
     expect(mocks.pinToHome).toHaveBeenCalled();
+  });
+
+  it("opens and focuses chat search from the top-bar action", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TopBarActionsProvider>
+        <ChatView sessionId="session-1" />
+        <TopBarActionsHost />
+      </TopBarActionsProvider>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "search.action" }));
+
+    const input = screen.getByRole("searchbox", {
+      name: "search.inputLabel",
+    });
+    await waitFor(() => expect(input).toHaveFocus());
+  });
+
+  it("opens chat search with the platform find shortcut and the slash chord", async () => {
+    const { unmount } = render(<ChatView sessionId="session-1" />);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "search.inputLabel" }),
+      ).toHaveFocus(),
+    );
+
+    unmount();
+    render(<ChatView sessionId="session-1" />);
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash", ctrlKey: true });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("searchbox", { name: "search.inputLabel" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("ignores the find shortcut with the wrong platform modifier", () => {
+    render(<ChatView sessionId="session-1" />);
+
+    // Mocked platform is linux, so Meta+F must pass through untouched.
+    fireEvent.keyDown(window, { key: "f", metaKey: true });
+
+    expect(
+      screen.queryByRole("searchbox", { name: "search.inputLabel" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not open search while a dialog or alert dialog is open", () => {
+    render(
+      <>
+        <ChatView sessionId="session-1" />
+        <div role="dialog">
+          <button type="button">dialog button</button>
+        </div>
+        <div role="alertdialog">
+          <button type="button">alert button</button>
+        </div>
+      </>,
+    );
+
+    // fireEvent returns false when preventDefault was called — the event
+    // must pass through unprevented so the dialog keeps its own handling.
+    expect(
+      fireEvent.keyDown(screen.getByRole("button", { name: "dialog button" }), {
+        key: "f",
+        ctrlKey: true,
+      }),
+    ).toBe(true);
+    // The guard is presence-based: a mounted layer stands the shortcut down
+    // even when focus sits outside it.
+    expect(
+      fireEvent.keyDown(window, {
+        key: "f",
+        ctrlKey: true,
+      }),
+    ).toBe(true);
+
+    expect(
+      screen.queryByRole("searchbox", { name: "search.inputLabel" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("advances rendered search matches from the search input", async () => {
+    const lastMatchCount = () =>
+      mocks.t.mock.calls
+        .filter((call) => call[0] === "search.matchCount")
+        .at(-1)?.[1] as { current: number; total: number } | undefined;
+    const user = userEvent.setup();
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [
+        {
+          id: "user-1",
+          role: "user",
+          created: Date.now(),
+          content: [{ type: "text", text: "foo once" }],
+        },
+        {
+          id: "assistant-1",
+          role: "assistant",
+          created: Date.now(),
+          content: [{ type: "text", text: "foo twice foo" }],
+        },
+      ],
+    });
+
+    render(<ChatView sessionId="session-1" />);
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    const input = await screen.findByRole("searchbox", {
+      name: "search.inputLabel",
+    });
+    await user.type(input, "foo");
+
+    // Typing selects the first rendered match; Enter advances. The full
+    // navigation matrix (arrows, Ctrl+N/P, wrap-around) is covered with real
+    // status text in ChatSearch.integration.test.tsx.
+    await waitFor(() =>
+      expect(lastMatchCount()).toEqual({ current: 1, total: 3 }),
+    );
+    await user.keyboard("{Enter}");
+    await waitFor(() =>
+      expect(lastMatchCount()).toEqual({ current: 2, total: 3 }),
+    );
+  });
+
+  it("closes chat search with Escape and restores focus", async () => {
+    const user = userEvent.setup();
+    render(
+      <TopBarActionsProvider>
+        <ChatView sessionId="session-1" />
+        <TopBarActionsHost />
+      </TopBarActionsProvider>,
+    );
+
+    const openButton = screen.getByRole("button", { name: "search.action" });
+    await user.click(openButton);
+    const input = screen.getByRole("searchbox", {
+      name: "search.inputLabel",
+    });
+    await waitFor(() => expect(input).toHaveFocus());
+    await user.keyboard("{Escape}");
+
+    expect(input).not.toBeInTheDocument();
+    expect(openButton).toHaveFocus();
+  });
+
+  it("closes chat search when the session id changes in place", async () => {
+    const { rerender } = render(<ChatView sessionId="session-1" />);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await screen.findByRole("searchbox", { name: "search.inputLabel" });
+
+    rerender(<ChatView sessionId="session-2" />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("searchbox", { name: "search.inputLabel" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("leaves the composer draft unchanged when invoking chat search", async () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      draftValue: "draft stays put",
+    });
+
+    render(<ChatView sessionId="session-1" />);
+
+    fireEvent.keyDown(window, { key: "f", ctrlKey: true });
+    await screen.findByRole("searchbox", { name: "search.inputLabel" });
+    fireEvent.keyDown(window, { key: "n", ctrlKey: true });
+
+    expect(mocks.handleDraftChange).not.toHaveBeenCalled();
+    expect(mocks.handleSend).not.toHaveBeenCalled();
+    expect(
+      (mocks.chatInputSpy.mock.calls.at(-1)?.[0] as { initialValue?: string })
+        .initialValue,
+    ).toBe("draft stays put");
   });
 
   it("surfaces unpin-from-home as a chat top-bar action", async () => {

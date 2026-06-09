@@ -8,6 +8,8 @@ import {
   useState,
   type ProfilerOnRenderCallback,
   type ReactNode,
+  type Ref,
+  type RefObject,
   type SyntheticEvent,
   type WheelEvent,
 } from "react";
@@ -44,7 +46,10 @@ import {
   type TranscriptVirtualTimelineMeasurementStats,
   type TranscriptVirtualTimelineMode,
 } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
+import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
+import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
+import { useVirtualTranscriptSearch } from "./useVirtualTranscriptSearch";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
 import {
   MessageTimelineEmptyState,
@@ -176,6 +181,12 @@ interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
+  /** Receives the element wrapping the rendered transcript content, the
+      search root for find-in-transcript (useChatTranscriptSearch). */
+  searchContentRef?: Ref<HTMLDivElement>;
+  /** Filled with the indexed search backend so find-in-transcript can match
+      the full transcript without suspending row windowing. */
+  searchBackendRef?: RefObject<TranscriptSearchBackend | null>;
   onDiagnostics?: (diagnostics: VirtualMessageTimelineDiagnostics) => void;
   onTranscriptDiagnostics?: (diagnostics: TranscriptDiagnostics) => void;
   className?: string;
@@ -279,6 +290,7 @@ function TranscriptOffscreenShellMeasurementHost({
   return (
     <div
       aria-hidden="true"
+      data-transcript-search-skip=""
       data-testid="virtual-offscreen-measurement-host"
       data-virtual-offscreen-shell-row-count={rows.length}
       style={{
@@ -862,6 +874,8 @@ export function VirtualMessageTimeline({
   scrollTargetMessageId,
   scrollTargetQuery,
   onScrollTargetHandled,
+  searchContentRef,
+  searchBackendRef,
   onRetryMessage,
   onEditMessage,
   onSendMcpAppMessage,
@@ -1013,6 +1027,36 @@ export function VirtualMessageTimeline({
   } = virtualTimeline;
   const isBoundedVirtualMode =
     virtualTimelineSnapshot.mode === "bounded-controller";
+
+  // Indexed find-in-transcript: exact counts over the full transcript with
+  // windowing intact. The list-root ref is shared with the forwarded
+  // searchContentRef (the classic-path search root).
+  const searchListRootRef = useRef<HTMLDivElement | null>(null);
+  const setSearchListRoot = useCallback(
+    (element: HTMLDivElement | null) => {
+      searchListRootRef.current = element;
+      if (typeof searchContentRef === "function") {
+        searchContentRef(element);
+      } else if (searchContentRef) {
+        searchContentRef.current = element;
+      }
+    },
+    [searchContentRef],
+  );
+  const scrollRowForSearch = useCallback(
+    (rowId: string) => scrollVirtualToRow(rowId, "center"),
+    [scrollVirtualToRow],
+  );
+  const {
+    registerRowElement: registerSearchRowElement,
+    harvestHost: searchHarvestHost,
+  } = useVirtualTranscriptSearch({
+    rows: stableRows,
+    messageByRowId: stableMessageByRowId,
+    listRootRef: searchListRootRef,
+    scrollToRow: scrollRowForSearch,
+    backendRef: searchBackendRef,
+  });
   const virtualRangeMountedRows = isBoundedVirtualMode
     ? virtualTimelineSnapshot.range.virtualItems.length
     : virtualRows.length;
@@ -2158,6 +2202,7 @@ export function VirtualMessageTimeline({
       measureRowElement={
         virtualItem || !isBoundedVirtualMode ? measureRowElement : undefined
       }
+      registerRowElement={registerSearchRowElement}
       registerMessageElement={registerMessageElement}
     />
   );
@@ -2378,9 +2423,13 @@ export function VirtualMessageTimeline({
   );
 
   const showPlaceholderContent = showPlaceholder || !hasMessageRows;
-  const content = showPlaceholderContent
-    ? (placeholder ?? <MessageTimelineEmptyState />)
-    : messageList;
+  const content = showPlaceholderContent ? (
+    <TranscriptSearchSkip>
+      {placeholder ?? <MessageTimelineEmptyState />}
+    </TranscriptSearchSkip>
+  ) : (
+    messageList
+  );
 
   return (
     <Profiler id="VirtualMessageTimeline" onRender={handleReactCommit}>
@@ -2398,6 +2447,7 @@ export function VirtualMessageTimeline({
             className="pointer-events-none absolute inset-x-0 top-0 bottom-[calc(var(--chat-surface-bottom-gap)*2)] rounded-md bg-card"
           />
         ) : null}
+        {searchHarvestHost}
         <MessageTimelineScrollContainer
           ref={containerRef}
           hasFooter={hasFooter}
@@ -2409,6 +2459,7 @@ export function VirtualMessageTimeline({
         >
           <div className="flex min-h-full flex-col">
             <div
+              ref={setSearchListRoot}
               className="flex min-h-0 flex-1 flex-col"
               role="log"
               aria-label={t("timeline.ariaLabel")}

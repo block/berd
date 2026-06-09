@@ -9,7 +9,7 @@ const searchBarSizes = {
       "rounded-sm border border-border/80 px-2 py-1 text-xs text-muted-foreground hover:bg-transparent hover:text-foreground",
     icon: "left-2.5 size-3",
     input:
-      "h-auto border-none bg-transparent px-0 pl-5 pr-0 text-[11px] font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
+      "h-auto border-none bg-transparent px-0 pl-7 pr-0 text-[11px] font-normal shadow-none focus-visible:border-transparent focus-visible:ring-0 focus-visible:ring-offset-0",
     inputVariant: "ghost" as const,
     hideIcon: false,
   },

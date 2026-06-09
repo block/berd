@@ -1,4 +1,5 @@
 import type { SkillMentionItem } from "../ui/mentionDetection";
+import { escapeRegExp } from "@/shared/lib/escapeRegExp";
 
 export interface AgentToolsCapabilityTip {
   id: string;
@@ -105,8 +106,4 @@ function containsAlias(text: string, alias: string): boolean {
     `(^|[^a-z0-9])${normalizedAlias}${ALIAS_SUFFIX_PATTERN}($|[^a-z0-9])`,
     "i",
   ).test(text);
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type Ref,
   type SyntheticEvent,
   type WheelEvent,
 } from "react";
@@ -13,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { MessageBubble } from "./MessageBubble";
+import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import { getTextContent, type Message } from "@/shared/types/messages";
 import {
@@ -38,6 +40,9 @@ interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
+  /** Receives the element wrapping the rendered transcript content, the
+      search root for find-in-transcript (useChatTranscriptSearch). */
+  searchContentRef?: Ref<HTMLDivElement>;
   className?: string;
   tailPaddingPx?: number;
   /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
@@ -97,6 +102,7 @@ export function MessageTimeline({
   scrollTargetMessageId,
   scrollTargetQuery,
   onScrollTargetHandled,
+  searchContentRef,
   onRetryMessage,
   onEditMessage,
   onSendMcpAppMessage,
@@ -835,9 +841,13 @@ export function MessageTimeline({
 
   const showPlaceholderContent =
     showPlaceholder || visibleMessages.length === 0;
-  const content = showPlaceholderContent
-    ? (placeholder ?? <MessageTimelineEmptyState />)
-    : messageList;
+  const content = showPlaceholderContent ? (
+    <TranscriptSearchSkip>
+      {placeholder ?? <MessageTimelineEmptyState />}
+    </TranscriptSearchSkip>
+  ) : (
+    messageList
+  );
 
   return (
     <div
@@ -863,6 +873,7 @@ export function MessageTimeline({
       >
         <div className="flex min-h-full flex-col">
           <div
+            ref={searchContentRef}
             className="flex min-h-0 flex-1 flex-col"
             role="log"
             aria-label={t("timeline.ariaLabel")}

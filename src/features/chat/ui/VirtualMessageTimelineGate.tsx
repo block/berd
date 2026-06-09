@@ -1,6 +1,7 @@
-import type { ComponentProps } from "react";
+import type { ComponentProps, RefObject } from "react";
 import { TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { MessageTimeline } from "./MessageTimeline";
 import { VirtualMessageTimeline } from "./VirtualMessageTimeline";
 
@@ -8,10 +9,15 @@ type MessageTimelineProps = ComponentProps<typeof MessageTimeline>;
 
 interface VirtualMessageTimelineGateProps extends MessageTimelineProps {
   sessionId: string;
+  /** Filled by the virtual timeline with its indexed search backend. The
+      classic timeline mounts everything, so the search controller falls back
+      to direct DOM matching when this stays null. */
+  searchBackendRef?: RefObject<TranscriptSearchBackend | null>;
 }
 
 export function VirtualMessageTimelineGate({
   sessionId,
+  searchBackendRef,
   ...timelineProps
 }: VirtualMessageTimelineGateProps) {
   const virtualRendererExperiment = useExperiment(
@@ -22,5 +28,11 @@ export function VirtualMessageTimelineGate({
     return <MessageTimeline {...timelineProps} />;
   }
 
-  return <VirtualMessageTimeline sessionId={sessionId} {...timelineProps} />;
+  return (
+    <VirtualMessageTimeline
+      sessionId={sessionId}
+      searchBackendRef={searchBackendRef}
+      {...timelineProps}
+    />
+  );
 }

@@ -289,6 +289,14 @@
   --surface-composer-hover: rgba(255, 255, 255, 0.45);
   /* Floating chat composer — muted gray tint; keep translucent for backdrop blur. */
   --surface-chat-composer: color-mix(in srgb, var(--muted) 72%, transparent);
+  --chat-search-match-bg: color-mix(
+    in oklab,
+    var(--color-yellow-600) 35%,
+    transparent
+  );
+  --chat-search-match-fg: var(--foreground);
+  --chat-search-match-active-bg: var(--primary);
+  --chat-search-match-active-fg: var(--primary-foreground);
   --surface-chat-composer-hover: color-mix(
     in srgb,
     var(--muted) 80%,
@@ -678,6 +686,14 @@
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);
   --surface-chat-composer: color-mix(in srgb, var(--muted) 66%, transparent);
+  --chat-search-match-bg: color-mix(
+    in oklab,
+    var(--color-yellow-500) 35%,
+    transparent
+  );
+  --chat-search-match-fg: var(--foreground);
+  --chat-search-match-active-bg: var(--primary);
+  --chat-search-match-active-fg: var(--primary-foreground);
   --surface-chat-composer-hover: color-mix(
     in srgb,
     var(--muted) 70%,
@@ -1487,6 +1503,18 @@ body,
   ::selection {
     background: color-mix(in oklab, var(--primary) 60%, transparent);
     color: var(--primary-foreground);
+  }
+
+  /* Chat transcript find-in-page tints, painted via the CSS Custom
+     Highlight API (see src/features/chat/lib/transcriptSearch.ts). */
+  ::highlight(chat-search-match) {
+    background-color: var(--chat-search-match-bg);
+    color: var(--chat-search-match-fg);
+  }
+
+  ::highlight(chat-search-match-active) {
+    background-color: var(--chat-search-match-active-bg);
+    color: var(--chat-search-match-active-fg);
   }
 
   ::-webkit-scrollbar {

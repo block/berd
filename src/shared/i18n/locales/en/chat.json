@@ -251,6 +251,18 @@
   "skeleton": {
     "loadingConversation": "Loading conversation"
   },
+  "search": {
+    "action": "Search chat",
+    "close": "Close search",
+    "inputLabel": "Search chat messages",
+    "landmark": "Search current chat",
+    "matchCount": "{{current}} / {{total}}",
+    "next": "Next result",
+    "noResults": "No results",
+    "placeholder": "Search chat",
+    "previous": "Previous result",
+    "searching": "Searching…"
+  },
   "timeline": {
     "ariaLabel": "Chat messages",
     "emptyDescription": "Send a message to get started",

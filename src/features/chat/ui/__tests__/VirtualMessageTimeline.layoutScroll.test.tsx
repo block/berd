@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { Message } from "@/shared/types/messages";
 import { VirtualMessageTimeline } from "../VirtualMessageTimeline";
+import {
+  buildVirtualTimelineSnapshot,
+  textMessage,
+} from "@/features/chat/transcript/testing/virtualTimelineSnapshotFixture";
 
 const timelineMocks = vi.hoisted(() => ({
   scrollToBottom: vi.fn(() => true),
@@ -90,132 +94,6 @@ function mockRequestAnimationFrame() {
         act(() => callback(now));
       }
     },
-  };
-}
-
-function textMessage(id: string, role: Message["role"], text: string): Message {
-  return {
-    id,
-    role,
-    created: Date.UTC(2026, 5, 4, 12, 0, 0),
-    content: [{ type: "text", text }],
-    metadata: { userVisible: true },
-  };
-}
-
-function buildVirtualTimelineSnapshot({
-  footerHeight,
-  rows,
-  sessionEpoch,
-  sessionId,
-}: {
-  footerHeight: number;
-  rows: readonly {
-    rowId: string;
-  }[];
-  sessionEpoch: number;
-  sessionId: string;
-}) {
-  const virtualItems = rows.map((row, index) => ({
-    index,
-    key: row.rowId,
-    row,
-    start: index * 120,
-    size: 120,
-    end: (index + 1) * 120,
-    visible: true,
-    protected: false,
-  }));
-  const endIndex = rows.length - 1;
-  const scrollHeight = rows.length * 120 + footerHeight;
-
-  return {
-    engineKind: "test",
-    mode: "bounded-controller",
-    range: {
-      totalHeight: scrollHeight,
-      scrollHeight,
-      visibleRange: { startIndex: 0, endIndex },
-      renderRange: {
-        startIndex: 0,
-        endIndex,
-        visibleStartIndex: 0,
-        visibleEndIndex: endIndex,
-      },
-      virtualItems,
-      visibleRowIds: rows.map((row) => row.rowId),
-      renderedRowIds: rows.map((row) => row.rowId),
-      protectedRowIds: [],
-      paddingStart: 0,
-      paddingEnd: footerHeight,
-    },
-    controllerState: {
-      sessionId,
-      sessionEpoch,
-      widthScope: "w:800",
-      scrollTop: 0,
-      viewportHeight: 500,
-      footerHeight,
-      virtualScrollHeight: scrollHeight,
-      bottomScrollTop: Math.max(0, scrollHeight - 500),
-      distanceFromBottom: 0,
-      pinnedToBottom: true,
-      nearBottom: true,
-      anchor: { type: "bottom" },
-      rowCount: rows.length,
-    },
-    controllerDiagnostics: {
-      rowSetUpdates: 0,
-      viewportUpdates: 0,
-      rangeCalculations: 0,
-      measuredHeightUpdates: 0,
-      corrections: 0,
-      bottomCorrections: 0,
-      rowCorrections: 0,
-      scrollToRowCorrections: 0,
-      staleMeasurementsDropped: 0,
-      staleMeasurementSessionDrops: 0,
-      staleMeasurementEpochDrops: 0,
-      staleMeasurementWidthDrops: 0,
-      staleMeasurementRevisionDrops: 0,
-      staleMeasurementMissingRowDrops: 0,
-      staleAnchorsDropped: 0,
-      missingAnchorsDropped: 0,
-      recapturedAnchors: 0,
-      bottomFollowExits: 0,
-      protectedRowsRendered: 0,
-      lastCorrection: null,
-    },
-    keepAliveDecision: null,
-    measurementStats: {
-      visibleMeasurementAttempts: 0,
-      offscreenShellMeasurementAttempts: 0,
-      acceptedOffscreenShellMeasurements: 0,
-      acceptedOffscreenRealMeasurements: 0,
-      acceptedVisibleMeasurements: 0,
-      skippedPendingMeasurements: 0,
-      skippedZeroMeasurements: 0,
-      staleMeasurementsDropped: 0,
-      staleMeasurementSessionDrops: 0,
-      staleMeasurementEpochDrops: 0,
-      staleMeasurementWidthDrops: 0,
-      staleMeasurementRevisionDrops: 0,
-      staleMeasurementMissingRowDrops: 0,
-      reservedMeasurementsDeferred: 0,
-      pendingMeasurements: 0,
-      controllerUpdatesQueued: 0,
-      controllerUpdateBatches: 0,
-      controllerUpdateBatchMaxSize: 0,
-      controllerUpdatesFlushed: 0,
-      controllerUpdatesAccepted: 0,
-      controllerUpdatesRejected: 0,
-      cacheEntries: 0,
-      cacheHits: 0,
-      cacheMisses: 0,
-      cacheWrites: 0,
-      cacheEvictions: 0,
-    },
-    fallbackReasons: [],
   };
 }
 
