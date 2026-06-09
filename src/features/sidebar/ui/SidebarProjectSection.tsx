@@ -260,6 +260,7 @@ export function SidebarProjectSection({
             isPinnedToHome ? unpinFromHome() : void pinToHome()
           }
           pinToHomeDisabled={isPinningToHome}
+          isPinnedToHome={isPinnedToHome}
           pinToHomeLabel={
             isPinnedToHome
               ? t("common:actions.unpinFromHome")

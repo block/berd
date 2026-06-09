@@ -104,7 +104,10 @@ export const PersonaCard = memo(function PersonaCard({
           onSelect={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
           disabled={isPinningToHome}
         >
-          <PinIcon className="size-3.5" />
+          <PinIcon
+            className="size-3.5"
+            fill={isPinnedToHome ? "currentColor" : "none"}
+          />
           {isPinnedToHome
             ? t("common:actions.unpinFromHome")
             : isPinningToHome

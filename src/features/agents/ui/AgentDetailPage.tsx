@@ -310,7 +310,7 @@ export function AgentDetailPage({
         size="sm"
         onClick={() => (isPinnedToHome ? unpinFromHome() : void pinToHome())}
         disabled={isPinningToHome}
-        leftIcon={<PinIcon />}
+        leftIcon={<PinIcon fill={isPinnedToHome ? "currentColor" : "none"} />}
         className={SECONDARY_ACTION_CLASS}
       >
         {pinLabel}

@@ -86,6 +86,7 @@ export function AutomationDetailPage({
   isSaving: boolean;
   actions?: {
     pinLabel: string;
+    isPinned: boolean;
     isPinning: boolean;
     onTogglePin: () => void;
     onEditWithChat: () => void;
@@ -565,7 +566,10 @@ export function AutomationDetailPage({
                       disabled={actions.isPinning || !tile.id}
                       className={ACTION_BUTTON_CLASS}
                     >
-                      <PinIcon className={ACTION_ICON_CLASS} />
+                      <PinIcon
+                        className={ACTION_ICON_CLASS}
+                        fill={actions.isPinned ? "currentColor" : "none"}
+                      />
                     </Button>
                     <Button
                       type="button"

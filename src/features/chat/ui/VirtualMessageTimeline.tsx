@@ -52,9 +52,12 @@ import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { useVirtualTranscriptSearch } from "./useVirtualTranscriptSearch";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
 import {
+  easeOutCubic,
+  JUMP_TO_LATEST_SCROLL_MS,
   MessageTimelineEmptyState,
   MessageTimelineFooterControlRow,
   MessageTimelineJumpToLatestButton,
+  REDUCED_MOTION_QUERY,
   type MessageBubbleCallbacks,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
@@ -903,9 +906,11 @@ export function VirtualMessageTimeline({
   const userScrollIntentRef = useRef(false);
   const lastScrollTopRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
+  const messageListBottomPaddingPxRef = useRef(0);
   const followStreamingMessageIdRef = useRef<string | null>(null);
   const streamingBottomFollowFrameRef = useRef<number | null>(null);
   const bottomScrollFrameRef = useRef<number | null>(null);
+  const jumpToLatestFrameRef = useRef<number | null>(null);
   const scrollToBottomRef = useRef<(behavior: ScrollBehavior) => void>(
     () => undefined,
   );
@@ -954,6 +959,7 @@ export function VirtualMessageTimeline({
   const messageListBottomPaddingPx = hasFooter
     ? FOOTER_DOCK_OVERLAP_PX + FOOTER_DOCK_CLEARANCE_PX
     : (tailPaddingPx ?? 16);
+  messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
   const nowBucket = toDateBucket(Date.now());
   const localeKey = i18n.resolvedLanguage ?? i18n.language ?? "default";
   const snapshot = useMemo(
@@ -1420,22 +1426,42 @@ export function VirtualMessageTimeline({
     setPulsingMessageId(null);
   }, [sessionId]);
 
-  const setDetachedFromLatest = useCallback((detached: boolean) => {
-    if (detached) {
-      detachedScrollTopRef.current = containerRef.current?.scrollTop ?? null;
-    } else {
-      detachedScrollTopRef.current = null;
-      liveTailHandoffRef.current = null;
-      setLiveTailScrollHeightFloorPx(0);
-    }
-
-    if (userDetachedRef.current === detached) {
-      return;
-    }
-
-    userDetachedRef.current = detached;
-    setUserDetached(detached);
+  const hasRealScrollableOverflow = useCallback((container: HTMLDivElement) => {
+    return (
+      Math.max(
+        0,
+        container.scrollHeight - messageListBottomPaddingPxRef.current,
+      ) > container.clientHeight
+    );
   }, []);
+
+  const setDetachedFromLatest = useCallback(
+    (detached: boolean) => {
+      // The jump-to-latest button is driven by this detached state. Only allow
+      // the detached state when there is real content overflow to scroll to;
+      // otherwise the docked composer's bottom padding can inflate scrollHeight
+      // past clientHeight and surface the button with nothing to scroll to.
+      if (detached) {
+        const container = containerRef.current;
+        if (!container || !hasRealScrollableOverflow(container)) {
+          return;
+        }
+        detachedScrollTopRef.current = container.scrollTop;
+      } else {
+        detachedScrollTopRef.current = null;
+        liveTailHandoffRef.current = null;
+        setLiveTailScrollHeightFloorPx(0);
+      }
+
+      if (userDetachedRef.current === detached) {
+        return;
+      }
+
+      userDetachedRef.current = detached;
+      setUserDetached(detached);
+    },
+    [hasRealScrollableOverflow],
+  );
 
   const getBottomScrollTop = useCallback((container: HTMLDivElement) => {
     return Math.max(0, container.scrollHeight - container.clientHeight);
@@ -1481,6 +1507,15 @@ export function VirtualMessageTimeline({
     bottomScrollFrameRef.current = null;
   }, []);
 
+  const cancelJumpToLatestAnimation = useCallback(() => {
+    if (jumpToLatestFrameRef.current == null) {
+      return;
+    }
+
+    cancelAnimationFrame(jumpToLatestFrameRef.current);
+    jumpToLatestFrameRef.current = null;
+  }, []);
+
   const requestBottomScroll = useCallback(() => {
     if (bottomScrollFrameRef.current != null) {
       return;
@@ -1504,8 +1539,9 @@ export function VirtualMessageTimeline({
   useLayoutEffect(
     () => () => {
       cancelRequestedBottomScroll();
+      cancelJumpToLatestAnimation();
     },
-    [cancelRequestedBottomScroll],
+    [cancelRequestedBottomScroll, cancelJumpToLatestAnimation],
   );
 
   const captureLiveTailHandoff = useCallback(
@@ -2124,6 +2160,9 @@ export function VirtualMessageTimeline({
       return;
     }
     userScrollIntentRef.current = true;
+    // A real wheel/touch interrupts an in-flight jump-to-latest glide so the
+    // user keeps control of the scroll position.
+    cancelJumpToLatestAnimation();
   };
 
   const handleJumpToLatest = () => {
@@ -2132,7 +2171,57 @@ export function VirtualMessageTimeline({
     }
     setDetachedFromLatest(false);
     isNearBottomRef.current = true;
-    scrollToBottom(streamingMessageId ? "auto" : "smooth");
+
+    const container = containerRef.current;
+    cancelJumpToLatestAnimation();
+
+    // While streaming the bottom is a moving target (the follow logic owns it),
+    // and reduced-motion users want no glide — both take the instant path.
+    if (
+      streamingMessageId ||
+      !container ||
+      window.matchMedia(REDUCED_MOTION_QUERY).matches
+    ) {
+      scrollToBottom(streamingMessageId ? "auto" : "smooth");
+      return;
+    }
+
+    const startScrollTop = container.scrollTop;
+    const initialBottom = getBottomScrollTop(container);
+    if (Math.abs(initialBottom - startScrollTop) <= 1) {
+      scrollToBottom("auto");
+      return;
+    }
+
+    // Drive scrollTop directly with an eased rAF loop (mirrors the classic
+    // renderer). The native "smooth" path can't be used here because the
+    // virtual controller synchronously corrects scrollTop, snapping the glide.
+    let startTime: number | null = null;
+    const animate = (now: number) => {
+      const nextContainer = containerRef.current;
+      if (!nextContainer) {
+        jumpToLatestFrameRef.current = null;
+        return;
+      }
+      startTime ??= now;
+      const progress = Math.min(
+        1,
+        (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
+      );
+      const bottomScrollTop = getBottomScrollTop(nextContainer);
+      nextContainer.scrollTop =
+        startScrollTop +
+        (bottomScrollTop - startScrollTop) * easeOutCubic(progress);
+      if (progress < 1) {
+        jumpToLatestFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      jumpToLatestFrameRef.current = null;
+      // Final exact landing through the controller so virtual state, position,
+      // and detached flag all settle on the true bottom.
+      scrollToBottom("auto");
+    };
+    jumpToLatestFrameRef.current = requestAnimationFrame(animate);
   };
   const registerMessageElement = useCallback(
     (messageId: string, element: HTMLDivElement | null) => {

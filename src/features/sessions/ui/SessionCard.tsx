@@ -220,12 +220,12 @@ export function SessionCard({
       />
 
       {/* Title */}
-      <p className="relative z-0 line-clamp-1 break-words pr-6 text-sm text-foreground">
+      <p className="relative z-0 truncate pr-6 text-sm leading-normal text-foreground">
         {displayTitle}
       </p>
 
       {hasSubtitle && (
-        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-none text-foreground/40">
+        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-normal text-foreground/40">
           {projectName && (
             <span className="inline-flex shrink-0 items-center justify-center">
               {projectColor ? (
@@ -254,7 +254,7 @@ export function SessionCard({
       )}
 
       {workingDir && !hasSubtitle && (
-        <div className="relative z-0 truncate text-[10px] leading-none text-foreground/40">
+        <div className="relative z-0 truncate text-[10px] leading-normal text-foreground/40">
           {workingDir}
         </div>
       )}
@@ -383,7 +383,14 @@ export function SessionCard({
                     : isPinningToHome
                 }
               >
-                <PinIcon className="size-3.5" />
+                <PinIcon
+                  className="size-3.5"
+                  fill={
+                    !shouldApplyToSelection && isPinnedToHome
+                      ? "currentColor"
+                      : "none"
+                  }
+                />
                 {shouldApplyToSelection
                   ? isPinningSelectedToHome
                     ? t("common:actions.pinningToHome")

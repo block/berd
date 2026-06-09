@@ -39,10 +39,10 @@ export function ProjectIconPicker({
 
   return (
     <div className="group/field space-y-2">
-      <span className="block text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+      <span className="block text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
         {t("dialog.icon")}
       </span>
-      <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-muted/20 p-2">
+      <div className="max-h-36 overflow-y-auto">
         <div className="flex items-start">
           <div
             className="grid max-w-full grid-cols-[repeat(auto-fill,minmax(2.25rem,2.25rem))] auto-rows-[2.25rem] justify-between gap-x-2 gap-y-2 transition-[width] duration-500 ease-out motion-reduce:transition-none"

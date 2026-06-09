@@ -106,3 +106,13 @@ export function MessageTimelineFooterControlRow({
     </div>
   );
 }
+
+/** Duration of the jump-to-latest eased scroll glide, shared by both
+ * timeline renderers so their scroll feel stays in sync. */
+export const JUMP_TO_LATEST_SCROLL_MS = 180;
+
+export const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+export function easeOutCubic(progress: number): number {
+  return 1 - (1 - progress) ** 3;
+}

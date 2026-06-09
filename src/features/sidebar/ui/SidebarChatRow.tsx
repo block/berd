@@ -417,7 +417,14 @@ export function SidebarChatRow({
               shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
             }
           >
-            <PinIcon className="size-3.5" />
+            <PinIcon
+              className="size-3.5"
+              fill={
+                !shouldApplyToSelection && isPinnedToHome
+                  ? "currentColor"
+                  : "none"
+              }
+            />
             {shouldApplyToSelection
               ? isPinningSelectedToHome
                 ? t("common:actions.pinningToHome")

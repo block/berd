@@ -699,7 +699,12 @@ export function ChatView({
           disabled={isPinningToHome}
           aria-label={label}
           title={label}
-          leftIcon={<PinIcon aria-hidden="true" />}
+          leftIcon={
+            <PinIcon
+              aria-hidden="true"
+              fill={isPinnedToHome ? "currentColor" : "none"}
+            />
+          }
         >
           {label}
         </Button>

@@ -173,12 +173,12 @@ export function AutomationOutputWidget({
         }}
       >
         <span
-          className="truncate text-foreground"
+          className="truncate pb-px text-foreground"
           style={{
             fontSize:
               "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.625rem)",
             lineHeight:
-              "clamp(1rem, calc(0.9375rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.7rem)",
+              "clamp(1.25rem, calc(1.3 * var(--widget-text-scale, var(--widget-scale, 1)) * 0.875rem), 2.25rem)",
           }}
         >
           {title}

@@ -18,6 +18,7 @@ interface SidebarItemMenuProps {
   onPinToHome?: () => void;
   pinToHomeDisabled?: boolean;
   pinToHomeLabel?: string;
+  isPinnedToHome?: boolean;
   onEdit?: () => void;
   onArchive?: () => void;
 }
@@ -28,6 +29,7 @@ export function SidebarItemMenu({
   onPinToHome,
   pinToHomeDisabled = false,
   pinToHomeLabel,
+  isPinnedToHome = false,
   onEdit,
   onArchive,
 }: SidebarItemMenuProps) {
@@ -65,7 +67,10 @@ export function SidebarItemMenu({
       >
         {onPinToHome && (
           <DropdownMenuItem onClick={onPinToHome} disabled={pinToHomeDisabled}>
-            <PinIcon className="size-3.5" />
+            <PinIcon
+              className="size-3.5"
+              fill={isPinnedToHome ? "currentColor" : "none"}
+            />
             {pinToHomeLabel ?? t("common:actions.pinToHome")}
           </DropdownMenuItem>
         )}

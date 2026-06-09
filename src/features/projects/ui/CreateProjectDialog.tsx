@@ -307,7 +307,7 @@ export function CreateProjectDialog({
 
           {/* Hero stays transparent so the glass panel reveals whatever sits
  underneath instead of painting a fake backdrop. */}
-          <div className="relative h-[400px] shrink-0 overflow-hidden px-8 pb-4">
+          <div className="relative h-[300px] shrink-0 overflow-hidden px-8 pb-4">
             <ProjectArtifactPreview
               input={{
                 projectId: editingProject?.id ?? null,
@@ -340,7 +340,7 @@ export function CreateProjectDialog({
             />
 
             <div className="group/field space-y-2">
-              <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+              <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                 {t("dialog.nameLabel")}{" "}
                 <span className="text-destructive">*</span>
               </Label>
@@ -355,23 +355,10 @@ export function CreateProjectDialog({
               />
             </div>
 
-            <div className="group/field space-y-2">
-              <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
-                {t("dialog.describeLabel")}
-              </Label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder={t("dialog.describePlaceholder")}
-                rows={4}
-                className="h-[215px] min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
-              />
-            </div>
-
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="group/field space-y-2">
                 <div className="flex items-center gap-1.5">
-                  <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                  <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                     {t("dialog.folderLabel")}
                   </Label>
                   {missingDirs.length > 0 ? (
@@ -432,7 +419,7 @@ export function CreateProjectDialog({
               </div>
 
               <div className="group/field space-y-2">
-                <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
                   {t("dialog.modelLabel")}
                 </Label>
                 <Select
@@ -461,6 +448,19 @@ export function CreateProjectDialog({
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            <div className="group/field space-y-2">
+              <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                {t("dialog.describeLabel")}
+              </Label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder={t("dialog.describePlaceholder")}
+                rows={4}
+                className="h-[215px] min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
+              />
             </div>
 
             {error ? <p className="text-xs text-destructive">{error}</p> : null}

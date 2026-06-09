@@ -18,18 +18,19 @@ import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import { getTextContent, type Message } from "@/shared/types/messages";
 import {
+  easeOutCubic,
+  JUMP_TO_LATEST_SCROLL_MS,
   MessageDateSeparator,
   MessageTimelineEmptyState,
   MessageTimelineFooterControlRow,
   MessageTimelineJumpToLatestButton,
+  REDUCED_MOTION_QUERY,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
 
 const AUTO_SCROLL_THRESHOLD_PX = 180;
 const PINNED_BOTTOM_THRESHOLD_PX = 8;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
-const JUMP_TO_LATEST_SCROLL_MS = 180;
-const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 // Mirrors --chat-composer-surface-overlap for scroll math; CSS owns the token.
 const FOOTER_DOCK_OVERLAP_PX = 28;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
@@ -90,10 +91,6 @@ function formatDateSeparator(
     month: "short",
     day: "numeric",
   });
-}
-
-function easeOutCubic(progress: number): number {
-  return 1 - (1 - progress) ** 3;
 }
 
 export function MessageTimeline({
@@ -281,14 +278,28 @@ export function MessageTimeline({
     jumpToLatestAnimationFrameRef.current = requestAnimationFrame(animate);
   }, [cancelJumpToLatestAnimation, getBottomScrollTop, setTimelineScrollTop]);
 
-  const setDetachedFromLatest = useCallback((detached: boolean) => {
-    if (userDetachedRef.current === detached) {
-      return;
-    }
+  const setDetachedFromLatest = useCallback(
+    (detached: boolean) => {
+      // The jump-to-latest button is driven by this detached state. Only allow
+      // the detached state when there is real content overflow to scroll to;
+      // otherwise the docked composer's bottom padding can inflate scrollHeight
+      // past clientHeight and surface the button with nothing to scroll to.
+      if (detached) {
+        const container = containerRef.current;
+        if (!container || !hasRealScrollableOverflow(container)) {
+          return;
+        }
+      }
 
-    userDetachedRef.current = detached;
-    setUserDetached(detached);
-  }, []);
+      if (userDetachedRef.current === detached) {
+        return;
+      }
+
+      userDetachedRef.current = detached;
+      setUserDetached(detached);
+    },
+    [hasRealScrollableOverflow],
+  );
 
   const syncUnscrollableState = useCallback(
     (scrollTop: number) => {
@@ -705,6 +716,13 @@ export function MessageTimeline({
     }
 
     hadRealScrollableOverflowRef.current = hasRealScrollableOverflow(container);
+    // When only the composer's bottom padding makes the transcript scrollable
+    // (no real content overflow), there is nothing to jump to, so never keep
+    // the user marked as detached.
+    if (!hadRealScrollableOverflowRef.current) {
+      syncUnscrollableState(scrollTop);
+      return;
+    }
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
     isPinnedToBottomRef.current =

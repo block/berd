@@ -79,7 +79,7 @@ export function ChatPinWidget({
           fontSize:
             "clamp(0.875rem, calc(0.875rem * var(--widget-text-scale, var(--widget-scale, 1))), 1.625rem)",
           lineHeight:
-            "clamp(1.05rem, calc(1.125rem * var(--widget-text-scale, var(--widget-scale, 1))), 2rem)",
+            "clamp(1.25rem, calc(1.3 * var(--widget-text-scale, var(--widget-scale, 1)) * 0.875rem), 2.25rem)",
         }}
       >
         <IconMessageCircle
@@ -94,7 +94,7 @@ export function ChatPinWidget({
         />
         <InlineMarkdownText
           className={cn(
-            "min-w-0",
+            "min-w-0 pb-px",
             isCompact ? "truncate" : "break-words line-clamp-2",
           )}
         >

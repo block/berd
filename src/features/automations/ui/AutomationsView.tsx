@@ -561,6 +561,7 @@ export function AutomationsWorkbench({
                 isSaving={updateMutation.isPending}
                 actions={{
                   pinLabel,
+                  isPinned: isPinnedToHome,
                   isPinning: isPinningToHome,
                   onTogglePin: () =>
                     isPinnedToHome ? unpinFromHome() : void pinToHome(),

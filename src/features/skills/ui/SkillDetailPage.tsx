@@ -106,7 +106,10 @@ export function SkillDetailPage({
         disabled={isPinningToHome}
         className={ACTION_BUTTON_CLASS}
       >
-        <PinIcon className={ACTION_ICON_CLASS} />
+        <PinIcon
+          className={ACTION_ICON_CLASS}
+          fill={isPinnedToHome ? "currentColor" : "none"}
+        />
       </Button>
       {onStartChat ? (
         <Button
