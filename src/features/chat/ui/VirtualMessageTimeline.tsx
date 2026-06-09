@@ -881,6 +881,7 @@ export function VirtualMessageTimeline({
   onSendMcpAppMessage,
   onRunShellCommand,
   onEditProject,
+  onOpenContextPanel,
   onDiagnostics,
   onTranscriptDiagnostics,
   className,
@@ -2163,6 +2164,7 @@ export function VirtualMessageTimeline({
       onMcpAppAutoScroll: requestMcpAppAutoScroll,
       onRunShellCommand,
       onEditProject,
+      onOpenContextPanel,
     }),
     [
       onRetryMessage,
@@ -2171,6 +2173,7 @@ export function VirtualMessageTimeline({
       requestMcpAppAutoScroll,
       onRunShellCommand,
       onEditProject,
+      onOpenContextPanel,
     ],
   );
 

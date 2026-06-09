@@ -108,6 +108,7 @@ export function MessageTimeline({
   onSendMcpAppMessage,
   onRunShellCommand,
   onEditProject,
+  onOpenContextPanel,
   className,
   tailPaddingPx,
   footer,
@@ -832,6 +833,7 @@ export function MessageTimeline({
               onMcpAppAutoScroll={requestMcpAppAutoScroll}
               onRunShellCommand={onRunShellCommand}
               onEditProject={onEditProject}
+              onOpenContextPanel={onOpenContextPanel}
             />
           </div>
         );

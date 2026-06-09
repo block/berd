@@ -101,6 +101,7 @@ interface MessageBubbleProps {
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
   onEditProject?: (projectId: string) => void;
+  onOpenContextPanel?: () => void;
 }
 
 interface ContentSection {
@@ -203,6 +204,39 @@ function groupContentSections(content: MessageContent[]): ContentSection[] {
   return sections;
 }
 
+function resolveNotificationAction(
+  action: SystemNotificationContent["action"],
+  options: {
+    onEditProject?: (projectId: string) => void;
+    onOpenContextPanel?: () => void;
+    editProjectLabel?: string;
+    changeFolderLabel?: string;
+  },
+): { label?: string; onClick: () => void } | null {
+  if (!action) {
+    return null;
+  }
+  const { onEditProject, onOpenContextPanel } = options;
+  if (action.type === "editProject" && onEditProject) {
+    return {
+      label: options.editProjectLabel,
+      onClick: () => onEditProject(action.projectId),
+    };
+  }
+  // editProject falls back to the folder picker when no project-settings
+  // surface exists (popped-out session windows pass no onEditProject).
+  if (
+    (action.type === "openContextPanel" || action.type === "editProject") &&
+    onOpenContextPanel
+  ) {
+    return {
+      label: options.changeFolderLabel,
+      onClick: onOpenContextPanel,
+    };
+  }
+  return null;
+}
+
 function renderContentBlock(
   content: MessageContent,
   index: number,
@@ -215,7 +249,9 @@ function renderContentBlock(
     onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
     runItCodeRenderers?: CustomRenderer[];
     onEditProject?: (projectId: string) => void;
+    onOpenContextPanel?: () => void;
     editProjectLabel?: string;
+    changeFolderLabel?: string;
     stateKey?: string;
   },
   isStreamingMsg?: boolean,
@@ -317,10 +353,7 @@ function renderContentBlock(
       const sn = content as SystemNotificationContent;
       const isError = sn.notificationType === "error";
       const isCompaction = sn.notificationType === "compaction";
-      const editProjectAction =
-        sn.action?.type === "editProject" && options.onEditProject
-          ? sn.action
-          : null;
+      const notificationAction = resolveNotificationAction(sn.action, options);
       return (
         <div
           key={`notification-${index}`}
@@ -335,17 +368,15 @@ function renderContentBlock(
         >
           {isCompaction ? <Check className="size-3.5 shrink-0" /> : null}
           <span>{sn.text}</span>
-          {editProjectAction ? (
+          {notificationAction ? (
             <div className="mt-2">
               <Button
                 type="button"
                 variant="alert-action"
                 size="xs"
-                onClick={() =>
-                  options.onEditProject?.(editProjectAction.projectId)
-                }
+                onClick={notificationAction.onClick}
               >
-                {options.editProjectLabel}
+                {notificationAction.label}
               </Button>
             </div>
           ) : null}
@@ -368,6 +399,7 @@ export const MessageBubble = memo(function MessageBubble({
   onMcpAppAutoScroll,
   onRunShellCommand,
   onEditProject,
+  onOpenContextPanel,
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { formatDate } = useLocaleFormatting();
@@ -461,7 +493,9 @@ export const MessageBubble = memo(function MessageBubble({
               redactedThinking: t("message.redactedThinking"),
               contentBlocks: content,
               onEditProject,
+              onOpenContextPanel,
               editProjectLabel: t("toolbar.editProjectFolders"),
+              changeFolderLabel: t("toolbar.changeFolder"),
               stateKey: `${c.type}-${i}`,
             }),
           )}

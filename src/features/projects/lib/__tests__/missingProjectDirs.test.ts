@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "../../api/projects";
-import { findMissingProjectDirs } from "../missingProjectDirs";
+import { checkDirectory, findMissingProjectDirs } from "../missingProjectDirs";
 
 const resolvePath = vi.fn();
 const checkDirectoriesExist = vi.fn();
@@ -60,5 +60,49 @@ describe("findMissingProjectDirs", () => {
     checkDirectoriesExist.mockResolvedValue([]);
     const result = await findMissingProjectDirs(makeProject(["/a"]));
     expect(result).toEqual([]);
+  });
+});
+
+describe("checkDirectory", () => {
+  beforeEach(() => {
+    resolvePath.mockReset();
+    checkDirectoriesExist.mockReset();
+    resolvePath.mockImplementation(({ parts }: { parts: string[] }) =>
+      Promise.resolve({ path: `/resolved${parts[0]}` }),
+    );
+  });
+
+  it("returns null for empty input", async () => {
+    expect(await checkDirectory("  ")).toBeNull();
+    expect(resolvePath).not.toHaveBeenCalled();
+    expect(checkDirectoriesExist).not.toHaveBeenCalled();
+  });
+
+  it("resolves and checks a cwd", async () => {
+    checkDirectoriesExist.mockResolvedValue([]);
+
+    const result = await checkDirectory("/a");
+
+    expect(resolvePath).toHaveBeenCalledWith({ parts: ["/a"] });
+    expect(checkDirectoriesExist).toHaveBeenCalledWith(["/resolved/a"]);
+    expect(result).toEqual({ resolvedPath: "/resolved/a", missing: false });
+  });
+
+  it("reports a missing directory with its resolved path", async () => {
+    checkDirectoriesExist.mockResolvedValue(["/resolved/a"]);
+
+    await expect(checkDirectory("/a")).resolves.toEqual({
+      resolvedPath: "/resolved/a",
+      missing: true,
+    });
+  });
+
+  it("treats a failed check as present", async () => {
+    checkDirectoriesExist.mockRejectedValue(new Error("check failed"));
+
+    await expect(checkDirectory("/a")).resolves.toEqual({
+      resolvedPath: "/resolved/a",
+      missing: false,
+    });
   });
 });

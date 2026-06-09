@@ -175,10 +175,14 @@ export interface ActionRequiredContent {
  * notification (e.g. a session-creation error) carry the fix the user should
  * take, so the action lives with its message instead of floating elsewhere.
  */
-export type SystemNotificationAction = {
-  type: "editProject";
-  projectId: string;
-};
+export type SystemNotificationAction =
+  | {
+      type: "editProject";
+      projectId: string;
+    }
+  | {
+      type: "openContextPanel";
+    };
 
 export interface SystemNotificationContent {
   type: "systemNotification";

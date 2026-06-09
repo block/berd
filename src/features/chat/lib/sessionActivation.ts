@@ -8,11 +8,24 @@ import {
   type ChatSession,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
+import { checkDirectory } from "@/features/projects/lib/missingProjectDirs";
+import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
-import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
+import {
+  type ExplicitCwdSource,
+  getExplicitCwdSource,
+} from "@/features/projects/lib/sessionCwdSelection";
+import { resolveSessionArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import { perfLog } from "@/shared/lib/perfLog";
 import { isDefaultChatTitle } from "@/features/chat/lib/sessionTitle";
-import { getTextContent, type Message } from "@/shared/types/messages";
+import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { i18n } from "@/shared/i18n";
+import {
+  createSystemNotificationMessage,
+  getTextContent,
+  type Message,
+  type SystemNotificationAction,
+} from "@/shared/types/messages";
 
 function fallbackTitleFromReplay(messages: Message[]): string | null {
   for (const message of messages) {
@@ -35,13 +48,104 @@ interface LoadSessionMessagesOptions {
   force?: boolean;
 }
 
+interface SessionLoadWorkingDir {
+  workingDir: string;
+  missingCwdWarning?: {
+    source: ExplicitCwdSource;
+    missingPath: string;
+  };
+}
+
+async function resolveWorkingDirForSessionLoad(
+  session: ChatSession | undefined,
+  project: ProjectInfo | null,
+): Promise<SessionLoadWorkingDir> {
+  const activeWorkspace =
+    session?.id != null
+      ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
+      : undefined;
+  const explicitCwdSource = getExplicitCwdSource(
+    project,
+    activeWorkspace?.path,
+    session?.workingDir,
+  );
+  const explicitCwd = explicitCwdSource
+    ? await checkDirectory(explicitCwdSource.path)
+    : null;
+
+  if (!explicitCwdSource || !explicitCwd) {
+    return { workingDir: await resolveSessionArtifactCwd() };
+  }
+  if (!explicitCwd.missing) {
+    return { workingDir: explicitCwd.resolvedPath };
+  }
+
+  const fallbackPath = await resolveSessionArtifactCwd();
+  // resolveSessionArtifactCwd recreates the artifact directory, so a deleted
+  // artifact root is already repaired — warning about it would tell the
+  // user their folder was replaced by itself.
+  if (fallbackPath === explicitCwd.resolvedPath) {
+    return { workingDir: fallbackPath };
+  }
+
+  return {
+    workingDir: fallbackPath,
+    missingCwdWarning: {
+      source: explicitCwdSource,
+      missingPath: explicitCwd.resolvedPath,
+    },
+  };
+}
+
+function buildMissingCwdWarning(
+  source: ExplicitCwdSource,
+  missingPath: string,
+  fallbackPath: string,
+): Message {
+  const action: SystemNotificationAction =
+    source.type === "project"
+      ? { type: "editProject", projectId: source.projectId }
+      : { type: "openContextPanel" };
+  const key =
+    source.type === "project"
+      ? "chat:toolbar.sessionLoadMissingProjectDir"
+      : "chat:toolbar.sessionLoadMissingWorkingDir";
+
+  return createSystemNotificationMessage(
+    i18n.t(key, { missingPath, fallbackPath }),
+    "warning",
+    action,
+  );
+}
+
+// Deterministic ids so reloads replace the loader's own notifications
+// instead of stacking duplicates.
+function loaderNoticeMessageId(
+  sessionId: string,
+  kind: "warning" | "error",
+): string {
+  return `session-load-${kind}:${sessionId}`;
+}
+
+/**
+ * True when the session holds replayed conversation history. Loader-added
+ * system notifications don't count: treating them as "loaded" would make a
+ * single failed load (whose error notification is the only message)
+ * permanently block retries through the has-messages skip guard.
+ */
+export function hasConversationMessages(
+  messages: Message[] | undefined,
+): boolean {
+  return messages?.some((message) => message.role !== "system") ?? false;
+}
+
 export async function loadSessionMessages(
   sessionId: string,
   options: LoadSessionMessagesOptions = {},
 ): Promise<boolean> {
   const sid = sessionId.slice(0, 8);
   const existingMsgs = useChatStore.getState().messagesBySession[sessionId];
-  if (!options.force && (existingMsgs?.length ?? 0) > 0) {
+  if (!options.force && hasConversationMessages(existingMsgs)) {
     perfLog(`[perf:load] ${sid} skip — has messages`);
     useChatSessionStore
       .getState()
@@ -66,14 +170,8 @@ export async function loadSessionMessages(
           .getState()
           .projects.find((p) => p.id === session.projectId) ?? null)
       : null;
-    const activeWorkspace =
-      session?.id != null
-        ? useChatSessionStore.getState().activeWorkspaceBySession[session.id]
-        : undefined;
-    const workingDir = await resolveSessionCwd(
-      project,
-      activeWorkspace?.path ?? session?.workingDir,
-    );
+    const { workingDir, missingCwdWarning } =
+      await resolveWorkingDirForSessionLoad(session, project);
     await acpLoadSession(sessionId, workingDir);
     const tFlush = performance.now();
     useChatStore.getState().setSessionLoading(sessionId, false);
@@ -101,9 +199,37 @@ export async function loadSessionMessages(
       }
       useChatSessionStore.getState().patchSession(sessionId, sessionPatch);
     }
-    useChatSessionStore
-      .getState()
-      .patchSession(sessionId, { pinnedLoadState: undefined });
+    const chatStore = useChatStore.getState();
+    const sessionStore = useChatSessionStore.getState();
+    chatStore.removeMessage(
+      sessionId,
+      loaderNoticeMessageId(sessionId, "error"),
+    );
+    chatStore.removeMessage(
+      sessionId,
+      loaderNoticeMessageId(sessionId, "warning"),
+    );
+    if (missingCwdWarning) {
+      chatStore.addMessage(sessionId, {
+        ...buildMissingCwdWarning(
+          missingCwdWarning.source,
+          missingCwdWarning.missingPath,
+          workingDir,
+        ),
+        id: loaderNoticeMessageId(sessionId, "warning"),
+      });
+      if (missingCwdWarning.source.type === "workspace") {
+        // The dead workspace path would otherwise keep winning cwd
+        // resolution (loads, compaction, model changes) over the patched
+        // workingDir, re-triggering the same fallback on every pass.
+        sessionStore.clearActiveWorkspace(sessionId);
+      }
+    }
+    chatStore.setError(sessionId, null);
+    sessionStore.patchSession(sessionId, {
+      pinnedLoadState: undefined,
+      ...(missingCwdWarning ? { workingDir } : {}),
+    });
     const t2 = performance.now();
     perfLog(
       `[perf:load] ${sid} replay: notifs=${replayStats?.count ?? 0} span=${replayStats?.spanMs.toFixed(1) ?? "0"}ms msgs=${replayMessages?.length ?? 0} flush=${(t2 - tFlush).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`,
@@ -111,8 +237,25 @@ export async function loadSessionMessages(
     return true;
   } catch (err) {
     console.error("Failed to load session messages:", err);
+    const errorMessage = formatAcpErrorMessage(
+      err,
+      i18n.t("chat:toolbar.sessionLoadFailed"),
+    );
     clearReplayBuffer(sessionId);
-    useChatStore.getState().setSessionLoading(sessionId, false);
+    const chatStore = useChatStore.getState();
+    chatStore.setSessionLoading(sessionId, false);
+    chatStore.removeMessage(
+      sessionId,
+      loaderNoticeMessageId(sessionId, "error"),
+    );
+    chatStore.addMessage(sessionId, {
+      ...createSystemNotificationMessage(errorMessage, "error"),
+      id: loaderNoticeMessageId(sessionId, "error"),
+    });
+    // Deliberately no setError here: parking chatState at "error" would
+    // route the next send into a queue that never flushes, and the inline
+    // notification already reports the failure. Re-opening the session
+    // retries the load because the guard ignores system-only messages.
     return false;
   }
 }

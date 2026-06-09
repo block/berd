@@ -12,6 +12,7 @@ export interface MessageBubbleCallbacks {
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
   onEditProject?: (projectId: string) => void;
+  onOpenContextPanel?: () => void;
 }
 
 export type MessageTimelineBubbleCallbacks = Omit<

@@ -152,6 +152,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     onMcpAppAutoScroll,
     onRunShellCommand,
     onEditProject,
+    onOpenContextPanel,
   } = bubbleCallbacks ?? EMPTY_MESSAGE_BUBBLE_CALLBACKS;
   const registerElement = useCallback(
     (element: HTMLDivElement | null) => {
@@ -264,6 +265,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
           onEditProject={onEditProject}
+          onOpenContextPanel={onOpenContextPanel}
         />
       </div>
     );
@@ -302,6 +304,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
           onEditProject={onEditProject}
+          onOpenContextPanel={onOpenContextPanel}
         />
       </div>
     );

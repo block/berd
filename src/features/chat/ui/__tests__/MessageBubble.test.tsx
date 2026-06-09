@@ -4,7 +4,10 @@ import userEvent from "@testing-library/user-event";
 import { MessageBubble } from "../MessageBubble";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import type { Message } from "@/shared/types/messages";
+import type {
+  Message,
+  SystemNotificationContent,
+} from "@/shared/types/messages";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 import { openPath } from "@tauri-apps/plugin-opener";
 const mockWriteText = vi.fn().mockResolvedValue(undefined);
@@ -804,24 +807,40 @@ describe("MessageBubble", () => {
     expect(screen.getByText("ls -lh whales.pdf")).toBeInTheDocument();
   });
 
-  it("renders an edit-project action inside a system error notification", async () => {
-    const user = userEvent.setup();
-    const onEditProject = vi.fn();
-    const message: Message = {
-      id: "n1",
+  function notificationMessage(
+    action: SystemNotificationContent["action"],
+    id = "n1",
+  ): Message {
+    return {
+      id,
       role: "system",
       created: Date.now(),
       content: [
         {
           type: "systemNotification",
-          notificationType: "error",
-          text: "Project folder is missing",
-          action: { type: "editProject", projectId: "project-7" },
+          notificationType: "warning",
+          text: "Folder is missing",
+          action,
         },
       ],
     };
+  }
 
-    render(<MessageBubble message={message} onEditProject={onEditProject} />);
+  const editProjectAction = {
+    type: "editProject",
+    projectId: "project-7",
+  } as const;
+
+  it("renders an edit-project action inside a system notification", async () => {
+    const user = userEvent.setup();
+    const onEditProject = vi.fn();
+
+    render(
+      <MessageBubble
+        message={notificationMessage(editProjectAction)}
+        onEditProject={onEditProject}
+      />,
+    );
 
     await user.click(screen.getByRole("button", { name: "Edit project" }));
 
@@ -829,24 +848,51 @@ describe("MessageBubble", () => {
   });
 
   it("omits the edit-project action when no handler is provided", () => {
-    const message: Message = {
-      id: "n2",
-      role: "system",
-      created: Date.now(),
-      content: [
-        {
-          type: "systemNotification",
-          notificationType: "error",
-          text: "Project folder is missing",
-          action: { type: "editProject", projectId: "project-7" },
-        },
-      ],
-    };
+    render(<MessageBubble message={notificationMessage(editProjectAction)} />);
 
-    render(<MessageBubble message={message} />);
+    expect(screen.queryByRole("button")).toBeNull();
+  });
 
-    expect(
-      screen.queryByRole("button", { name: "toolbar.editProjectFolders" }),
-    ).toBeNull();
+  it("falls back to the change-folder action for edit-project notifications without a project-settings surface", async () => {
+    const user = userEvent.setup();
+    const onOpenContextPanel = vi.fn();
+
+    render(
+      <MessageBubble
+        message={notificationMessage(editProjectAction)}
+        onOpenContextPanel={onOpenContextPanel}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Edit project" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+
+    expect(onOpenContextPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders an open-context-panel action inside a system warning notification", async () => {
+    const user = userEvent.setup();
+    const onOpenContextPanel = vi.fn();
+
+    render(
+      <MessageBubble
+        message={notificationMessage({ type: "openContextPanel" })}
+        onOpenContextPanel={onOpenContextPanel}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Change folder" }));
+
+    expect(onOpenContextPanel).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the open-context-panel action when no handler is provided", () => {
+    render(
+      <MessageBubble
+        message={notificationMessage({ type: "openContextPanel" })}
+      />,
+    );
+
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

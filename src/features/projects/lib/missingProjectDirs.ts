@@ -1,4 +1,5 @@
 import type { ProjectInfo } from "../api/projects";
+import { trimValue } from "./sessionCwdSelection";
 import { checkDirectoriesExist, resolvePath } from "@/shared/api/pathResolver";
 
 /**
@@ -28,4 +29,32 @@ export async function findMissingProjectDirs(
   );
 
   return checkDirectoriesExist(resolved);
+}
+
+export interface DirectoryStatus {
+  resolvedPath: string;
+  missing: boolean;
+}
+
+/**
+ * Resolves a single directory and reports whether it exists on disk, or null
+ * for blank input. An inconclusive existence check counts as present: the
+ * caller's recovery is best-effort and must not block on a failed probe.
+ */
+export async function checkDirectory(
+  directory: string | null | undefined,
+): Promise<DirectoryStatus | null> {
+  const trimmed = trimValue(directory);
+  if (!trimmed) {
+    return null;
+  }
+
+  const resolvedPath = (await resolvePath({ parts: [trimmed] })).path;
+
+  try {
+    const missing = await checkDirectoriesExist([resolvedPath]);
+    return { resolvedPath, missing: missing.length > 0 };
+  } catch {
+    return { resolvedPath, missing: false };
+  }
 }

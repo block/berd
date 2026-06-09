@@ -74,6 +74,7 @@ import {
 } from "@/features/chat/stores/chatSessionOperations";
 import {
   activateSession as activateChatSession,
+  hasConversationMessages,
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
 import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
@@ -467,9 +468,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           continue;
         }
 
-        const hasMessages =
-          (useChatStore.getState().messagesBySession[sessionId]?.length ?? 0) >
-          0;
+        const hasMessages = hasConversationMessages(
+          useChatStore.getState().messagesBySession[sessionId],
+        );
         if (hasMessages) {
           continue;
         }

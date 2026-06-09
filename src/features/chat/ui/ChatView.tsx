@@ -565,6 +565,14 @@ export function ChatView({
     setContextPanelOpen(effectiveSession.id, false);
   }, [effectiveSession?.id, setContextPanelOpen]);
 
+  const handleOpenContextPanel = useCallback(() => {
+    if (!effectiveSession?.id) {
+      return;
+    }
+
+    setContextPanelOpen(effectiveSession.id, true);
+  }, [effectiveSession?.id, setContextPanelOpen]);
+
   const handleRunShellCommand = useCallback(
     (command: string, options?: { newTerminal?: boolean }) => {
       if (!terminalCwd) {
@@ -901,6 +909,11 @@ export function ChatView({
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }
       onEditProject={onOpenProjectSettings}
+      onOpenContextPanel={
+        // The builder rail replaces the context panel for fully-targeted
+        // agent-builder sessions, so opening it would silently no-op.
+        isAgentBuilderSession ? undefined : handleOpenContextPanel
+      }
       showPlaceholder={controller.isLoadingHistory}
       placeholder={conversationPlaceholder}
       footer={composerFooter}

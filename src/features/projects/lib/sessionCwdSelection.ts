@@ -2,28 +2,73 @@ import type { ProjectInfo } from "../api/projects";
 import { resolvePath } from "@/shared/api/pathResolver";
 import { resolveSessionArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 
-function trimValue(value: string | null | undefined): string | null {
+export function trimValue(value: string | null | undefined): string | null {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function firstProjectWorkingDir(
+  project: ProjectInfo | null | undefined,
+): string | null {
+  for (const directory of project?.workingDirs ?? []) {
+    const trimmed = trimValue(directory);
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+
+  return null;
+}
+
+export type ExplicitCwdSource =
+  | {
+      type: "workspace" | "session";
+      path: string;
+    }
+  | {
+      type: "project";
+      path: string;
+      projectId: string;
+    };
+
+/**
+ * Single owner of the session-cwd precedence (workspace > session working
+ * dir > project working dir). Both the missing-dir preflight and the final
+ * cwd resolution derive from this so they cannot disagree.
+ */
+export function getExplicitCwdSource(
+  project: ProjectInfo | null | undefined,
+  activeWorkspacePath?: string | null,
+  sessionWorkingDir?: string | null,
+): ExplicitCwdSource | null {
+  const workspacePath = trimValue(activeWorkspacePath);
+  if (workspacePath) {
+    return { type: "workspace", path: workspacePath };
+  }
+
+  const trimmedSessionWorkingDir = trimValue(sessionWorkingDir);
+  if (trimmedSessionWorkingDir) {
+    return { type: "session", path: trimmedSessionWorkingDir };
+  }
+
+  const projectWorkingDir = firstProjectWorkingDir(project);
+  if (project && projectWorkingDir) {
+    return {
+      type: "project",
+      path: projectWorkingDir,
+      projectId: project.id,
+    };
+  }
+
+  return null;
 }
 
 function buildSessionCwdParts(
   project: ProjectInfo | null | undefined,
   activeWorkspacePath?: string | null,
 ): string[] | null {
-  const trimmedWorkspacePath = trimValue(activeWorkspacePath);
-  if (trimmedWorkspacePath) {
-    return [trimmedWorkspacePath];
-  }
-
-  const workingDirs = (project?.workingDirs ?? [])
-    .map((directory) => trimValue(directory))
-    .filter((directory): directory is string => directory !== null);
-  if (workingDirs.length > 0) {
-    return [workingDirs[0]];
-  }
-
-  return null;
+  const source = getExplicitCwdSource(project, activeWorkspacePath);
+  return source ? [source.path] : null;
 }
 
 export async function resolveSessionCwd(

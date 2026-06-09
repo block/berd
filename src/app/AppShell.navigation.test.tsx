@@ -28,6 +28,8 @@ import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpLoadSession = vi.hoisted(() => vi.fn());
+const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
 const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
@@ -119,6 +121,7 @@ vi.mock("@/features/sidebar/ui/Sidebar", () => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mockAcpCreateSession(...args),
+  acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
 
@@ -134,6 +137,8 @@ vi.mock("@/shared/api/pathResolver", () => ({
   resolvePath: async ({ parts }: { parts: string[] }) => ({
     path: parts.join("/") || "/tmp",
   }),
+  checkDirectoriesExist: (...args: unknown[]) =>
+    mockCheckDirectoriesExist(...args),
 }));
 
 vi.mock("@/features/updates/ui/UpdateButton", () => ({
@@ -170,6 +175,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onCreatePersona,
     onExitSearch,
     onOpenAgent,
+    onSelectSession,
   }) => (
     <section>
       <div data-testid="active-view">{activeView}</div>
@@ -254,6 +260,12 @@ vi.mock("./ui/AppShellContent", () => ({
       <button type="button" onClick={() => onOpenAgent?.("persona-unresolved")}>
         Start chat with unresolved agent
       </button>
+      <button
+        type="button"
+        onClick={() => onSelectSession?.("missing-session")}
+      >
+        Open missing session
+      </button>
       {activeView === "agents" ? (
         <button type="button" onClick={onCreatePersona}>
           Create agent
@@ -276,6 +288,10 @@ describe("AppShell global navigation", () => {
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpLoadSession.mockReset();
+    mockAcpLoadSession.mockResolvedValue(undefined);
+    mockCheckDirectoriesExist.mockReset();
+    mockCheckDirectoriesExist.mockResolvedValue([]);
     mockCreatePersonaSource.mockReset();
     mockCreatePersonaSource.mockResolvedValue({
       type: "agent",
@@ -450,6 +466,47 @@ describe("AppShell global navigation", () => {
         .getSession(useChatSessionStore.getState().activeSessionId ?? ""),
     ).toMatchObject({
       workingDir: "/Users/test/goose artifacts test",
+    });
+  });
+
+  it("opens an existing session with a missing saved cwd using the artifact fallback warning", async () => {
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "missing-session",
+      title: "Missing cwd chat",
+      providerId: "goose",
+      workingDir: "/missing/session",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+    mockCheckDirectoriesExist.mockResolvedValue(["/missing/session"]);
+
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Open missing session" }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(mockAcpLoadSession).toHaveBeenCalledWith(
+        "missing-session",
+        "~/goose artifacts",
+      );
+    });
+
+    const messages =
+      useChatStore.getState().messagesBySession["missing-session"] ?? [];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content[0]).toMatchObject({
+      type: "systemNotification",
+      notificationType: "warning",
+      action: { type: "openContextPanel" },
     });
   });
 
