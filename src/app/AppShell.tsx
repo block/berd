@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
+import { KeyboardShortcutsDialog } from "@/features/shortcuts/ui/KeyboardShortcutsDialog";
+import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
 import { archiveProject } from "@/features/projects/api/projects";
@@ -91,7 +93,10 @@ import { useDefaultModelGate } from "@/features/migration/hooks/useDefaultModelG
 import { StartupDiagnosticView } from "./ui/StartupDiagnosticView";
 import { buildStartupDiagnosticIssue } from "./lib/startupDiagnostics";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
-import { FocusRegionProvider } from "./focus/FocusRegionProvider";
+import {
+  FocusRegionProvider,
+  hasOpenKeyboardOwningLayer,
+} from "./focus/FocusRegionProvider";
 import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitcher";
 import {
   GlobalComposerPill,
@@ -2097,6 +2102,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [activeSessionId, isContextPanelOpen, setContextPanelOpen]);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const shortcutsOpen = useShortcutsDialogStore((state) => state.open);
+  const setShortcutsOpen = useShortcutsDialogStore((state) => state.setOpen);
   const handleFeedbackClick = useCallback(() => {
     setFeedbackOpen(true);
   }, []);
@@ -2273,8 +2280,38 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      if (e.isComposing || e.repeat) {
+        return;
+      }
+      // Platform-primary accelerator: Cmd on macOS, Ctrl elsewhere
+      // (exclusively, matching the transcript search guard).
+      const mod =
+        getPlatform() === "mac"
+          ? e.metaKey && !e.ctrlKey
+          : e.ctrlKey && !e.metaKey;
+      if (!mod || e.altKey) {
+        return;
+      }
+      if (e.shiftKey) {
+        return;
+      }
+      // Cmd+/ / Ctrl+/ toggles the keyboard shortcuts reference. Handled
+      // before the layer guard so it can close its own (modal) dialog.
+      // Requires both the physical slash key and the "/" character so
+      // layouts that put other characters there are unaffected (matching
+      // the transcript search matcher).
+      if (e.code === "Slash" && e.key === "/") {
+        e.preventDefault();
+        useShortcutsDialogStore.getState().toggle();
+        return;
+      }
+      // Any mounted modal/popper owns the keyboard (matching the transcript
+      // search and pane-jump guards).
+      if (hasOpenKeyboardOwningLayer()) {
+        return;
+      }
       // Cmd+, for settings
-      if (e.key === "," && e.metaKey) {
+      if (e.key === ",") {
         e.preventDefault();
         if (activeView === "settings") {
           leaveSecondarySurface();
@@ -2283,12 +2320,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         handleNavigate("settings");
       }
       // Cmd+B for sidebar toggle
-      if (e.key === "b" && e.metaKey) {
+      if (e.key === "b") {
         e.preventDefault();
         toggleSidebar();
       }
       // Cmd+K opens universal search.
-      if (e.key === "k" && e.metaKey) {
+      if (e.key === "k") {
         e.preventDefault();
         handleNavigate("search");
       }
@@ -2298,7 +2335,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setQuickSwitcherOpen((open) => !open);
       }
       // Cmd+W returns to home instead of closing the window
-      if (e.key === "w" && e.metaKey) {
+      if (e.key === "w") {
         e.preventDefault();
         const { activeSessionId } = useChatSessionStore.getState();
         if (activeSessionId) {
@@ -2312,7 +2349,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         }
       }
       // Cmd+N opens new conversation screen
-      if (e.key === "n" && e.metaKey) {
+      if (e.key === "n") {
         e.preventDefault();
         guardAppNavigation(() => {
           setActiveSession(null);
@@ -2534,6 +2571,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onSave={() => void saveAutomationLeave()}
       />
       <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+      <KeyboardShortcutsDialog
+        open={shortcutsOpen}
+        onOpenChange={setShortcutsOpen}
+      />
     </FocusRegionProvider>
   );
 }

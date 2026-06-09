@@ -512,8 +512,8 @@ describe("ChatView MCP app messaging", () => {
     await waitFor(() => expect(input).toHaveFocus());
   });
 
-  it("opens chat search with the platform find shortcut and the slash chord", async () => {
-    const { unmount } = render(<ChatView sessionId="session-1" />);
+  it("opens chat search with the platform find shortcut", async () => {
+    render(<ChatView sessionId="session-1" />);
 
     fireEvent.keyDown(window, { key: "f", ctrlKey: true });
     await waitFor(() =>
@@ -521,16 +521,16 @@ describe("ChatView MCP app messaging", () => {
         screen.getByRole("searchbox", { name: "search.inputLabel" }),
       ).toHaveFocus(),
     );
+  });
 
-    unmount();
+  it("does not open chat search on the slash chord (reserved for the shortcuts reference)", () => {
     render(<ChatView sessionId="session-1" />);
 
     fireEvent.keyDown(window, { key: "/", code: "Slash", ctrlKey: true });
-    await waitFor(() =>
-      expect(
-        screen.getByRole("searchbox", { name: "search.inputLabel" }),
-      ).toHaveFocus(),
-    );
+
+    expect(
+      screen.queryByRole("searchbox", { name: "search.inputLabel" }),
+    ).not.toBeInTheDocument();
   });
 
   it("ignores the find shortcut with the wrong platform modifier", () => {

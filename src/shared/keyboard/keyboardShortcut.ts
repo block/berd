@@ -97,6 +97,48 @@ export function keyboardEventMatchesShortcut(
   return keyboardShortcutFromEvent(event) === shortcut;
 }
 
+const MAC_MODIFIER_SYMBOLS: Record<Modifier, string> = {
+  ctrl: "⌃",
+  meta: "⌘",
+  alt: "⌥",
+  shift: "⇧",
+};
+
+const DISPLAY_KEY_LABELS: Record<string, string> = {
+  arrowdown: "↓",
+  arrowleft: "←",
+  arrowright: "→",
+  arrowup: "↑",
+  backspace: "⌫",
+  enter: "↩",
+  escape: "Esc",
+  space: "Space",
+};
+
+function capitalizeKey(key: string): string {
+  if (key.length === 1) return key.toUpperCase();
+  return key.charAt(0).toUpperCase() + key.slice(1);
+}
+
+function formatDisplayKey(key: string): string {
+  return DISPLAY_KEY_LABELS[key] ?? capitalizeKey(key);
+}
+
+/** Formats a normalized shortcut into per-key display labels,
+ *  using mac symbols (⌘, ⌥, …) when `isMac` is true. */
+export function keyboardShortcutDisplayParts(
+  shortcut: string,
+  isMac: boolean,
+): string[] {
+  return shortcut.split("+").map((part) => {
+    const modifier = MODIFIER_ALIASES[part];
+    if (modifier) {
+      return isMac ? MAC_MODIFIER_SYMBOLS[modifier] : MODIFIER_LABELS[modifier];
+    }
+    return formatDisplayKey(part);
+  });
+}
+
 export function formatKeyboardShortcut(shortcut: string): string {
   return shortcut
     .split("+")
@@ -104,8 +146,7 @@ export function formatKeyboardShortcut(shortcut: string): string {
       const modifierLabel = MODIFIER_LABELS[part as Modifier];
       if (modifierLabel) return modifierLabel;
       if (part === "space") return "Space";
-      if (part.length === 1) return part.toUpperCase();
-      return part.charAt(0).toUpperCase() + part.slice(1);
+      return capitalizeKey(part);
     })
     .join("+");
 }

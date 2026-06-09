@@ -1760,6 +1760,20 @@ export const designSystemComponentManifest = [
     ],
   },
   {
+    name: "Kbd",
+    source: "src/shared/ui/kbd.tsx",
+    exports: ["Kbd"],
+    slots: ["kbd"],
+    cva: [],
+    tokenClasses: ["bg-background", "border-border", "text-muted-foreground"],
+    stateClasses: [],
+    sourceTokenClasses: [
+      "bg-background",
+      "border-border",
+      "text-muted-foreground",
+    ],
+  },
+  {
     name: "Label",
     source: "src/shared/ui/label.tsx",
     exports: ["Label"],

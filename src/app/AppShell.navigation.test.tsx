@@ -17,6 +17,7 @@ import {
   setExperimentEnabled,
 } from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
@@ -65,6 +66,11 @@ function mockVisibleRegionRects() {
     rect(),
   );
 }
+
+const mockGetPlatform = vi.hoisted(() => vi.fn(() => "mac"));
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: mockGetPlatform,
+}));
 
 vi.mock("./hooks/useAppStartup", () => ({
   useAppStartup: () => ({ ready: true }),
@@ -285,6 +291,8 @@ describe("AppShell global navigation", () => {
   beforeEach(() => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
+    mockGetPlatform.mockReturnValue("mac");
+    useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
@@ -1397,5 +1405,51 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("search");
     });
+  });
+
+  it("opens search with Ctrl+K off macOS", async () => {
+    mockGetPlatform.mockReturnValue("windows");
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.keyboard("{Control>}k{/Control}");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+    });
+  });
+
+  it("toggles the keyboard shortcuts reference with Cmd+/", async () => {
+    render(<AppShell />);
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
+    await waitFor(() => {
+      expect(useShortcutsDialogStore.getState().open).toBe(true);
+    });
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
+    await waitFor(() => {
+      expect(useShortcutsDialogStore.getState().open).toBe(false);
+    });
+  });
+
+  it("opens the shortcuts reference with Ctrl+/ off macOS", async () => {
+    mockGetPlatform.mockReturnValue("windows");
+    render(<AppShell />);
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash", ctrlKey: true });
+
+    await waitFor(() => {
+      expect(useShortcutsDialogStore.getState().open).toBe(true);
+    });
+  });
+
+  it("ignores Cmd on a non-Slash physical key that types '/'", async () => {
+    render(<AppShell />);
+
+    // QWERTZ layouts type "/" from Shift+7; the shortcut must not fire.
+    fireEvent.keyDown(window, { key: "/", code: "Digit7", metaKey: true });
+
+    expect(useShortcutsDialogStore.getState().open).toBe(false);
   });
 });

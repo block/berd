@@ -1,0 +1,34 @@
+{
+  "dialog": {
+    "title": "Keyboard shortcuts",
+    "dismissHint": "Press Esc to close"
+  },
+  "categories": {
+    "navigation": "Navigation",
+    "chat": "Chat",
+    "view": "View",
+    "help": "Help"
+  },
+  "actions": {
+    "search": "Open search",
+    "newConversation": "New conversation",
+    "closeSession": "Close current session",
+    "openSettings": "Open settings",
+    "paneJump": "Jump between panes",
+    "findInConversation": "Find in conversation",
+    "sendMessage": "Send message",
+    "insertNewline": "Insert newline",
+    "toggleSidebar": "Toggle sidebar",
+    "toggleTerminal": "Toggle terminal",
+    "newTerminalTab": "New terminal tab (terminal focused)",
+    "zoomIn": "Zoom in",
+    "zoomOut": "Zoom out",
+    "zoomReset": "Reset zoom",
+    "showShortcuts": "Show this reference"
+  },
+  "settings": {
+    "label": "Keyboard shortcuts",
+    "description": "View all available keyboard shortcuts",
+    "view": "View shortcuts"
+  }
+}

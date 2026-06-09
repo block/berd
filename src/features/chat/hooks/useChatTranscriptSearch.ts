@@ -82,8 +82,7 @@ export interface UseChatTranscriptSearchOptions {
 /**
  * Find-in-transcript controller. Without a backend it matches against the
  * rendered DOM under `rootRef`, so the count always equals what highlighting
- * can show. Owns the find keyboard shortcut (platform primary modifier + F,
- * or the physical slash key when it types "/").
+ * can show. Owns the find keyboard shortcut (platform primary modifier + F).
  *
  * Scrolling happens only on user intent (query edits and next/previous
  * navigation); content mutations from streaming re-match and re-paint but
@@ -211,11 +210,7 @@ export function useChatTranscriptSearch(
         return;
       }
 
-      // Cmd+/ requires both the physical slash key and the "/" character so
-      // layouts that put other characters there (QWERTZ "-", which would
-      // collide with the zoom-out chord) are unaffected.
-      const key = event.key.toLowerCase();
-      if (key !== "f" && !(event.code === "Slash" && key === "/")) {
+      if (event.key.toLowerCase() !== "f") {
         return;
       }
 

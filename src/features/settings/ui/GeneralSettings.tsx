@@ -13,6 +13,7 @@ import {
 } from "@/shared/ui/select";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
+import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
   Check,
@@ -97,7 +98,8 @@ function AboutInfoRow({ label, value }: { label: string; value: string }) {
 }
 
 export function GeneralSettings() {
-  const { t } = useTranslation("settings");
+  const { t } = useTranslation(["settings", "shortcuts"]);
+  const openShortcutsDialog = useShortcutsDialogStore((state) => state.setOpen);
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
@@ -360,6 +362,20 @@ export function GeneralSettings() {
             onCheckedChange={agentToolsTipsPreference.setEnabled}
             aria-label={t("general.agentToolsTips.label")}
           />
+        </SettingRow>
+
+        <SettingRow
+          label={t("shortcuts:settings.label")}
+          description={t("shortcuts:settings.description")}
+        >
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => openShortcutsDialog(true)}
+          >
+            {t("shortcuts:settings.view")}
+          </Button>
         </SettingRow>
       </SettingsSection>
 

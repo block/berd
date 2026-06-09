@@ -1,0 +1,34 @@
+{
+  "dialog": {
+    "title": "Atajos de teclado",
+    "dismissHint": "Pulsa Esc para cerrar"
+  },
+  "categories": {
+    "navigation": "Navegación",
+    "chat": "Chat",
+    "view": "Vista",
+    "help": "Ayuda"
+  },
+  "actions": {
+    "search": "Abrir búsqueda",
+    "newConversation": "Nueva conversación",
+    "closeSession": "Cerrar sesión actual",
+    "openSettings": "Abrir ajustes",
+    "paneJump": "Saltar entre paneles",
+    "findInConversation": "Buscar en la conversación",
+    "sendMessage": "Enviar mensaje",
+    "insertNewline": "Insertar salto de línea",
+    "toggleSidebar": "Mostrar u ocultar barra lateral",
+    "toggleTerminal": "Mostrar u ocultar terminal",
+    "newTerminalTab": "Nueva pestaña de terminal (con la terminal enfocada)",
+    "zoomIn": "Acercar",
+    "zoomOut": "Alejar",
+    "zoomReset": "Restablecer zoom",
+    "showShortcuts": "Mostrar esta referencia"
+  },
+  "settings": {
+    "label": "Atajos de teclado",
+    "description": "Ver todos los atajos de teclado disponibles",
+    "view": "Ver atajos"
+  }
+}
