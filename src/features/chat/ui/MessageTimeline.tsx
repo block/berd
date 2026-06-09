@@ -10,15 +10,18 @@ import {
   type WheelEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowDown } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { Button } from "@/shared/ui/button";
 import { MessageBubble } from "./MessageBubble";
-import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
-import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { getTextContent, type Message } from "@/shared/types/messages";
+import {
+  MessageDateSeparator,
+  MessageTimelineEmptyState,
+  MessageTimelineFooterControlRow,
+  MessageTimelineJumpToLatestButton,
+  type MessageTimelineBubbleCallbacks,
+} from "./messageTimelineShared";
 
 const AUTO_SCROLL_THRESHOLD_PX = 180;
 const PINNED_BOTTOM_THRESHOLD_PX = 8;
@@ -29,17 +32,12 @@ const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 const FOOTER_DOCK_OVERLAP_PX = 28;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
 
-interface MessageTimelineProps {
+interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
-  onRetryMessage?: (messageId: string) => void;
-  onEditMessage?: (messageId: string) => void;
-  onSendMcpAppMessage?: McpAppMessageHandler;
-  onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
-  onEditProject?: (projectId: string) => void;
   className?: string;
   tailPaddingPx?: number;
   /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
@@ -769,40 +767,18 @@ export function MessageTimeline({
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestLabel = t("timeline.jumpToLatest");
   const jumpToLatestButton = userDetached ? (
-    hasFooterStatus ? (
-      <Button
-        type="button"
-        variant="jump-to-latest"
-        size="icon-sm"
-        onClick={handleJumpToLatest}
-        aria-label={jumpToLatestLabel}
-        title={jumpToLatestLabel}
-      >
-        <IconArrowDown aria-hidden="true" />
-      </Button>
-    ) : (
-      <Button
-        type="button"
-        variant="jump-to-latest"
-        size="sm"
-        onClick={handleJumpToLatest}
-        leftIcon={<IconArrowDown />}
-      >
-        {jumpToLatestLabel}
-      </Button>
-    )
+    <MessageTimelineJumpToLatestButton
+      compact={hasFooterStatus}
+      label={jumpToLatestLabel}
+      onClick={handleJumpToLatest}
+    />
   ) : null;
-  const footerControlRow =
-    footer && (footerStatus || jumpToLatestButton) ? (
-      <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center gap-2 px-4 pb-2">
-        {footerStatus ? (
-          <div className="pointer-events-auto">{footerStatus}</div>
-        ) : null}
-        {jumpToLatestButton ? (
-          <div className="pointer-events-auto">{jumpToLatestButton}</div>
-        ) : null}
-      </div>
-    ) : null;
+  const footerControlRow = footer ? (
+    <MessageTimelineFooterControlRow
+      footerStatus={footerStatus}
+      jumpToLatestButton={jumpToLatestButton}
+    />
+  ) : null;
 
   const messageList = (
     <div
@@ -828,16 +804,14 @@ export function MessageTimeline({
             )}
           >
             {showDateSeparator && (
-              <div className="my-4 px-4 text-center">
-                <span className="text-[11px] font-medium text-muted-foreground">
-                  {formatDateSeparator(
-                    message.created,
-                    t("timeline.today"),
-                    t("timeline.yesterday"),
-                    formatDate,
-                  )}
-                </span>
-              </div>
+              <MessageDateSeparator
+                label={formatDateSeparator(
+                  message.created,
+                  t("timeline.today"),
+                  t("timeline.yesterday"),
+                  formatDate,
+                )}
+              />
             )}
             <MessageBubble
               message={message}
@@ -859,23 +833,10 @@ export function MessageTimeline({
     </div>
   );
 
-  const defaultEmptyState = (
-    <div className="flex flex-1 items-center justify-center">
-      <div className="text-center">
-        <p className="text-lg font-medium font-display tracking-tight text-muted-foreground">
-          {t("timeline.emptyTitle")}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("timeline.emptyDescription")}
-        </p>
-      </div>
-    </div>
-  );
-
   const showPlaceholderContent =
     showPlaceholder || visibleMessages.length === 0;
   const content = showPlaceholderContent
-    ? (placeholder ?? defaultEmptyState)
+    ? (placeholder ?? <MessageTimelineEmptyState />)
     : messageList;
 
   return (

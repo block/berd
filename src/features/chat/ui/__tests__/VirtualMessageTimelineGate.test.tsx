@@ -8,6 +8,7 @@ import {
 } from "@/features/experiments/experimentPreferences";
 import type { Message } from "@/shared/types/messages";
 import { VirtualMessageTimelineGate } from "../VirtualMessageTimelineGate";
+import type { MessageTimelineBubbleCallbacks } from "../messageTimelineShared";
 
 const mocks = vi.hoisted(() => ({
   legacyTimelineSpy: vi.fn(),
@@ -110,6 +111,52 @@ describe("VirtualMessageTimelineGate", () => {
         sessionId: "session-1",
         messages: [expect.objectContaining({ id: "user-1" })],
       }),
+    );
+    expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
+  });
+
+  it("passes shared message-bubble callbacks through both experiment states", () => {
+    const callbackProps = {
+      onRetryMessage: vi.fn(),
+      onEditMessage: vi.fn(),
+      onSendMcpAppMessage: vi.fn(),
+      onRunShellCommand: vi.fn(),
+      onEditProject: vi.fn(),
+    } satisfies MessageTimelineBubbleCallbacks;
+
+    expect(
+      setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, false),
+    ).toBe(true);
+
+    const legacyRender = render(
+      <VirtualMessageTimelineGate
+        sessionId="session-1"
+        messages={[message("user-1")]}
+        {...callbackProps}
+      />,
+    );
+
+    expect(mocks.legacyTimelineSpy).toHaveBeenCalledWith(
+      expect.objectContaining(callbackProps),
+    );
+    expect(mocks.virtualTimelineSpy).not.toHaveBeenCalled();
+    legacyRender.unmount();
+    mocks.legacyTimelineSpy.mockClear();
+
+    expect(
+      setExperimentEnabled(TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID, true),
+    ).toBe(true);
+
+    render(
+      <VirtualMessageTimelineGate
+        sessionId="session-1"
+        messages={[message("user-1")]}
+        {...callbackProps}
+      />,
+    );
+
+    expect(mocks.virtualTimelineSpy).toHaveBeenCalledWith(
+      expect.objectContaining(callbackProps),
     );
     expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
   });

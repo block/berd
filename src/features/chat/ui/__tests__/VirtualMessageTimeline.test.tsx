@@ -2,6 +2,7 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { Message } from "@/shared/types/messages";
+import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import {
   TRANSCRIPT_DIAGNOSTICS_EVENT,
   validateTranscriptDiagnostics,
@@ -46,11 +47,18 @@ vi.mock("../MessageBubble", async () => {
       isStreaming,
       contentOverride,
       fragmentRole,
+      onEditProject,
+      onRunShellCommand,
     }: {
       message: Message;
       isStreaming?: boolean;
       contentOverride?: readonly Message["content"][number][];
       fragmentRole?: string;
+      onEditProject?: (projectId: string) => void;
+      onRunShellCommand?: (
+        command: string,
+        options?: RunCommandOptions,
+      ) => void;
     }) => {
       const rowRootAttributes = rowState.useTranscriptRowRootAdapter();
       const content = contentOverride ?? message.content;
@@ -77,6 +85,21 @@ vi.mock("../MessageBubble", async () => {
             : {})}
         >
           {text}
+          {onEditProject ? (
+            <button type="button" onClick={() => onEditProject("project-7")}>
+              Edit project probe
+            </button>
+          ) : null}
+          {onRunShellCommand ? (
+            <button
+              type="button"
+              onClick={() =>
+                onRunShellCommand("pnpm test", { newTerminal: true })
+              }
+            >
+              Run command probe
+            </button>
+          ) : null}
         </div>
       );
     },
@@ -288,6 +311,56 @@ function latestTimelineDiagnostics(
 }
 
 describe("VirtualMessageTimeline", () => {
+  it("forwards edit-project actions to virtual row bubbles", async () => {
+    const onEditProject = vi.fn();
+    const message: Message = {
+      id: "system-1",
+      role: "system",
+      created: Date.UTC(2026, 5, 4, 12, 0, 0),
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: "Project folder is missing",
+          action: { type: "editProject", projectId: "project-7" },
+        },
+      ],
+      metadata: { userVisible: true },
+    };
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[message]}
+        onEditProject={onEditProject}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText("Edit project probe"));
+
+    expect(onEditProject).toHaveBeenCalledWith("project-7");
+  });
+
+  it("preserves runnable command options through virtual row bubbles", async () => {
+    const onRunShellCommand = vi.fn();
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          textMessage("assistant-1", "assistant", "```bash\npnpm test\n```"),
+        ]}
+        onRunShellCommand={onRunShellCommand}
+      />,
+    );
+
+    fireEvent.click(await screen.findByText("Run command probe"));
+
+    expect(onRunShellCommand).toHaveBeenCalledWith("pnpm test", {
+      newTerminal: true,
+    });
+  });
+
   it("uses the shared transcript scroller chrome", () => {
     renderWithProviders(
       <VirtualMessageTimeline

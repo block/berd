@@ -20,11 +20,15 @@ import {
 import type { TranscriptRowDescriptor } from "../transcript/projection";
 import type { TranscriptVirtualItem } from "../transcript/virtual";
 import { MessageBubble } from "./MessageBubble";
-import type { McpAppMessageHandler } from "./mcpAppTypes";
+import {
+  MessageDateSeparator,
+  type MessageBubbleCallbacks,
+} from "./messageTimelineShared";
 import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
 
 const VIRTUAL_ROW_INLINE_INSET = "var(--chat-transcript-inline-padding)";
 const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
+const EMPTY_MESSAGE_BUBBLE_CALLBACKS: MessageBubbleCallbacks = {};
 
 interface VirtualTranscriptRowStateProviderConfig {
   registry: TranscriptRowStateRegistry;
@@ -48,11 +52,7 @@ interface VirtualTranscriptRowProps {
   isStreaming?: boolean;
   isPulsing?: boolean;
   rowStateProvider?: VirtualTranscriptRowStateProviderConfig;
-  onRetryMessage?: (messageId: string) => void;
-  onEditMessage?: (messageId: string) => void;
-  onSendMcpAppMessage?: McpAppMessageHandler;
-  onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
-  onRunShellCommand?: (command: string) => void;
+  bubbleCallbacks?: MessageBubbleCallbacks;
   registerRowElement?: (rowId: string, element: HTMLElement | null) => void;
   measureRowElement?: (rowId: string, element: HTMLElement | null) => void;
   registerMessageElement?: (
@@ -73,11 +73,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   isStreaming,
   isPulsing,
   rowStateProvider,
-  onRetryMessage,
-  onEditMessage,
-  onSendMcpAppMessage,
-  onMcpAppAutoScroll,
-  onRunShellCommand,
+  bubbleCallbacks,
   registerRowElement,
   measureRowElement,
   registerMessageElement,
@@ -149,6 +145,14 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       measurementPlan?.reservedBlockSize ?? undefined,
     "data-virtual-row-shell-reasons": measurementPlan?.reasons.join(","),
   };
+  const {
+    onRetryMessage,
+    onEditMessage,
+    onSendMcpAppMessage,
+    onMcpAppAutoScroll,
+    onRunShellCommand,
+    onEditProject,
+  } = bubbleCallbacks ?? EMPTY_MESSAGE_BUBBLE_CALLBACKS;
   const registerElement = useCallback(
     (element: HTMLDivElement | null) => {
       elementRef.current = element;
@@ -226,11 +230,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         style={rowStyle}
         className={cn(spacingClassName)}
       >
-        <div className="my-4 px-4 text-center">
-          <span className="text-[11px] font-medium text-muted-foreground">
-            {dateLabel}
-          </span>
-        </div>
+        <MessageDateSeparator label={dateLabel} />
       </div>
     );
   } else if (
@@ -263,6 +263,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onSendMcpAppMessage={onSendMcpAppMessage}
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
+          onEditProject={onEditProject}
         />
       </div>
     );
@@ -300,6 +301,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           onSendMcpAppMessage={onSendMcpAppMessage}
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
+          onEditProject={onEditProject}
         />
       </div>
     );
@@ -337,11 +339,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.isStreaming === next.isStreaming &&
     previous.isPulsing === next.isPulsing &&
     previous.rowStateProvider === next.rowStateProvider &&
-    previous.onRetryMessage === next.onRetryMessage &&
-    previous.onEditMessage === next.onEditMessage &&
-    previous.onSendMcpAppMessage === next.onSendMcpAppMessage &&
-    previous.onMcpAppAutoScroll === next.onMcpAppAutoScroll &&
-    previous.onRunShellCommand === next.onRunShellCommand &&
+    previous.bubbleCallbacks === next.bubbleCallbacks &&
     previous.registerRowElement === next.registerRowElement &&
     previous.measureRowElement === next.measureRowElement &&
     previous.registerMessageElement === next.registerMessageElement &&

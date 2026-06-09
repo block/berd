@@ -12,8 +12,6 @@ import {
   type WheelEvent,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowDown } from "@tabler/icons-react";
-import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import type { Message } from "@/shared/types/messages";
@@ -46,9 +44,15 @@ import {
   type TranscriptVirtualTimelineMeasurementStats,
   type TranscriptVirtualTimelineMode,
 } from "../transcript/virtual/react/useTranscriptVirtualTimeline";
-import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import { VirtualTranscriptRow } from "./VirtualTranscriptRow";
+import {
+  MessageTimelineEmptyState,
+  MessageTimelineFooterControlRow,
+  MessageTimelineJumpToLatestButton,
+  type MessageBubbleCallbacks,
+  type MessageTimelineBubbleCallbacks,
+} from "./messageTimelineShared";
 import { getVirtualTranscriptRowSpacingBlockSize } from "./virtualTranscriptRowSpacing";
 
 const AUTO_SCROLL_THRESHOLD_PX = 180;
@@ -165,17 +169,13 @@ declare global {
   }
 }
 
-interface VirtualMessageTimelineProps {
+interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   sessionId: string;
   messages: Message[];
   streamingMessageId?: string | null;
   scrollTargetMessageId?: string | null;
   scrollTargetQuery?: string | null;
   onScrollTargetHandled?: (messageId: string) => void;
-  onRetryMessage?: (messageId: string) => void;
-  onEditMessage?: (messageId: string) => void;
-  onSendMcpAppMessage?: McpAppMessageHandler;
-  onRunShellCommand?: (command: string) => void;
   onDiagnostics?: (diagnostics: VirtualMessageTimelineDiagnostics) => void;
   onTranscriptDiagnostics?: (diagnostics: TranscriptDiagnostics) => void;
   className?: string;
@@ -866,6 +866,7 @@ export function VirtualMessageTimeline({
   onEditMessage,
   onSendMcpAppMessage,
   onRunShellCommand,
+  onEditProject,
   onDiagnostics,
   onTranscriptDiagnostics,
   className,
@@ -2098,40 +2099,36 @@ export function VirtualMessageTimeline({
   const jumpToLatestLabel = t("timeline.jumpToLatest");
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestButton = userDetached ? (
-    hasFooterStatus ? (
-      <Button
-        type="button"
-        variant="jump-to-latest"
-        size="icon-sm"
-        onClick={handleJumpToLatest}
-        aria-label={jumpToLatestLabel}
-        title={jumpToLatestLabel}
-      >
-        <IconArrowDown aria-hidden="true" />
-      </Button>
-    ) : (
-      <Button
-        type="button"
-        variant="jump-to-latest"
-        size="sm"
-        onClick={handleJumpToLatest}
-        leftIcon={<IconArrowDown />}
-      >
-        {jumpToLatestLabel}
-      </Button>
-    )
+    <MessageTimelineJumpToLatestButton
+      compact={hasFooterStatus}
+      label={jumpToLatestLabel}
+      onClick={handleJumpToLatest}
+    />
   ) : null;
-  const footerControlRow =
-    footer && (footerStatus || jumpToLatestButton) ? (
-      <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center gap-2 px-4 pb-2">
-        {footerStatus ? (
-          <div className="pointer-events-auto">{footerStatus}</div>
-        ) : null}
-        {jumpToLatestButton ? (
-          <div className="pointer-events-auto">{jumpToLatestButton}</div>
-        ) : null}
-      </div>
-    ) : null;
+  const footerControlRow = footer ? (
+    <MessageTimelineFooterControlRow
+      footerStatus={footerStatus}
+      jumpToLatestButton={jumpToLatestButton}
+    />
+  ) : null;
+  const bubbleCallbacks = useMemo<MessageBubbleCallbacks>(
+    () => ({
+      onRetryMessage,
+      onEditMessage,
+      onSendMcpAppMessage,
+      onMcpAppAutoScroll: requestMcpAppAutoScroll,
+      onRunShellCommand,
+      onEditProject,
+    }),
+    [
+      onRetryMessage,
+      onEditMessage,
+      onSendMcpAppMessage,
+      requestMcpAppAutoScroll,
+      onRunShellCommand,
+      onEditProject,
+    ],
+  );
 
   const renderRow = (
     row: TranscriptRowDescriptor,
@@ -2157,11 +2154,7 @@ export function VirtualMessageTimeline({
       }
       isPulsing={row.messageId === pulsingMessageId}
       rowStateProvider={virtualTimeline.rowStateProvider}
-      onRetryMessage={onRetryMessage}
-      onEditMessage={onEditMessage}
-      onSendMcpAppMessage={onSendMcpAppMessage}
-      onMcpAppAutoScroll={requestMcpAppAutoScroll}
-      onRunShellCommand={onRunShellCommand}
+      bubbleCallbacks={bubbleCallbacks}
       measureRowElement={
         virtualItem || !isBoundedVirtualMode ? measureRowElement : undefined
       }
@@ -2384,22 +2377,9 @@ export function VirtualMessageTimeline({
     </div>
   );
 
-  const defaultEmptyState = (
-    <div className="flex flex-1 items-center justify-center">
-      <div className="text-center">
-        <p className="text-lg font-medium font-display tracking-tight text-muted-foreground">
-          {t("timeline.emptyTitle")}
-        </p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t("timeline.emptyDescription")}
-        </p>
-      </div>
-    </div>
-  );
-
   const showPlaceholderContent = showPlaceholder || !hasMessageRows;
   const content = showPlaceholderContent
-    ? (placeholder ?? defaultEmptyState)
+    ? (placeholder ?? <MessageTimelineEmptyState />)
     : messageList;
 
   return (
