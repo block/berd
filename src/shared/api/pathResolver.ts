@@ -15,3 +15,21 @@ export async function resolvePath({
     request: { parts },
   });
 }
+
+interface CheckDirectoriesExistResponse {
+  missing: string[];
+}
+
+/**
+ * Returns the subset of `paths` that do not exist or are not directories.
+ * `~` prefixes are expanded to the user's home directory before checking.
+ */
+export async function checkDirectoriesExist(
+  paths: string[],
+): Promise<string[]> {
+  const { missing } = await invoke<CheckDirectoriesExistResponse>(
+    "check_directories_exist",
+    { request: { paths } },
+  );
+  return missing;
+}

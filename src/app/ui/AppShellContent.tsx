@@ -74,6 +74,7 @@ interface AppShellContentProps {
     initialWorkingDir?: string | null;
     onCreated?: (projectId: string) => void;
   }) => void;
+  onOpenProjectSettings: (projectId: string) => void;
   onActivateHomeSession: (sessionId: string) => void;
   onRenameChat: (sessionId: string, nextTitle: string) => void;
   onSelectSession: (sessionId: string) => void;
@@ -125,6 +126,7 @@ export function AppShellContent({
   onStartAgentBuilderSession,
   onArchiveChat,
   onCreateProject,
+  onOpenProjectSettings,
   onActivateHomeSession,
   onRenameChat,
   onSelectSession,
@@ -251,6 +253,7 @@ export function AppShellContent({
           onAgentBuilderSaved={onAgentBuilderSaved}
           onAgentBuilderClose={onAgentBuilderClose}
           onCreateProject={onCreateProject}
+          onOpenProjectSettings={onOpenProjectSettings}
         />
       ) : (
         <HomeScreen

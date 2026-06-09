@@ -44,6 +44,7 @@ import type {
   ReasoningContent as ReasoningContentType,
   SystemNotificationContent,
 } from "@/shared/types/messages";
+import { Button } from "@/shared/ui/button";
 import { MessageBubbleActions } from "./MessageBubbleActions";
 import { MessageMetadataChip } from "./MessageMetadataChip";
 
@@ -92,6 +93,7 @@ interface MessageBubbleProps {
   onSendMcpAppMessage?: McpAppMessageHandler;
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
+  onEditProject?: (projectId: string) => void;
 }
 
 interface ContentSection {
@@ -205,6 +207,8 @@ function renderContentBlock(
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
     onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
     runItCodeRenderers?: CustomRenderer[];
+    onEditProject?: (projectId: string) => void;
+    editProjectLabel?: string;
   },
   isStreamingMsg?: boolean,
   isUserMessage?: boolean,
@@ -303,6 +307,10 @@ function renderContentBlock(
       const sn = content as SystemNotificationContent;
       const isError = sn.notificationType === "error";
       const isCompaction = sn.notificationType === "compaction";
+      const editProjectAction =
+        sn.action?.type === "editProject" && options.onEditProject
+          ? sn.action
+          : null;
       return (
         <div
           key={`notification-${index}`}
@@ -317,6 +325,20 @@ function renderContentBlock(
         >
           {isCompaction ? <Check className="size-3.5 shrink-0" /> : null}
           <span>{sn.text}</span>
+          {editProjectAction ? (
+            <div className="mt-2">
+              <Button
+                type="button"
+                variant="alert-action"
+                size="xs"
+                onClick={() =>
+                  options.onEditProject?.(editProjectAction.projectId)
+                }
+              >
+                {options.editProjectLabel}
+              </Button>
+            </div>
+          ) : null}
         </div>
       );
     }
@@ -333,6 +355,7 @@ export const MessageBubble = memo(function MessageBubble({
   onSendMcpAppMessage,
   onMcpAppAutoScroll,
   onRunShellCommand,
+  onEditProject,
 }: MessageBubbleProps) {
   const { t } = useTranslation(["chat", "common"]);
   const { formatDate } = useLocaleFormatting();
@@ -380,6 +403,8 @@ export const MessageBubble = memo(function MessageBubble({
               defaultImageAlt: t("message.defaultImageAlt"),
               redactedThinking: t("message.redactedThinking"),
               contentBlocks: content,
+              onEditProject,
+              editProjectLabel: t("toolbar.editProjectFolders"),
             }),
           )}
         </div>

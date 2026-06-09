@@ -38,6 +38,7 @@ interface MessageTimelineProps {
   onEditMessage?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
+  onEditProject?: (projectId: string) => void;
   className?: string;
   tailPaddingPx?: number;
   /** Pinned to the bottom of the timeline while the conversation scrolls behind it. */
@@ -101,6 +102,7 @@ export function MessageTimeline({
   onEditMessage,
   onSendMcpAppMessage,
   onRunShellCommand,
+  onEditProject,
   className,
   tailPaddingPx,
   footer,
@@ -848,6 +850,7 @@ export function MessageTimeline({
               onSendMcpAppMessage={onSendMcpAppMessage}
               onMcpAppAutoScroll={requestMcpAppAutoScroll}
               onRunShellCommand={onRunShellCommand}
+              onEditProject={onEditProject}
             />
           </div>
         );

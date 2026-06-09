@@ -101,6 +101,28 @@ describe("chatStore", () => {
     expect(getRuntime("s2").error).toBeNull();
   });
 
+  it("returns a parked error session to idle when the error is cleared", () => {
+    const store = useChatStore.getState();
+
+    store.setError("s1", "boom");
+    expect(getRuntime("s1").chatState).toBe("error");
+
+    store.setError("s1", null);
+
+    expect(getRuntime("s1").chatState).toBe("idle");
+    expect(getRuntime("s1").error).toBeNull();
+  });
+
+  it("leaves a live chatState untouched when clearing the error", () => {
+    const store = useChatStore.getState();
+
+    store.setChatState("s1", "streaming");
+    store.setError("s1", null);
+
+    expect(getRuntime("s1").chatState).toBe("streaming");
+    expect(getRuntime("s1").error).toBeNull();
+  });
+
   it("promotes all local chat state to a real ACP session id", () => {
     const message = makeMessage({ id: "message-1" });
     const store = useChatStore.getState();

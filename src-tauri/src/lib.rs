@@ -293,6 +293,7 @@ pub fn run() {
             commands::agent_setup::authenticate_agent,
             commands::agent_setup::update_agent,
             commands::path_resolver::resolve_path,
+            commands::path_resolver::check_directories_exist,
             commands::diagnostics::probe_kgoose_connectivity,
             commands::diagnostics::write_diagnostic_event,
             commands::distro::get_distro_bundle,

@@ -470,7 +470,15 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           [sessionId]: {
             ...current,
             error,
-            chatState: error ? ("error" as const) : current.chatState,
+            // Setting an error parks the session in "error"; clearing it must
+            // return that parked state to "idle" so consumers that gate on
+            // idle (the message queue, send routing) come back to life.
+            // Clearing while in any other live state leaves it untouched.
+            chatState: error
+              ? ("error" as const)
+              : current.chatState === "error"
+                ? ("idle" as const)
+                : current.chatState,
           },
         },
       };

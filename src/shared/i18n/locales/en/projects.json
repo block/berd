@@ -47,6 +47,8 @@
       "terminal": "Terminal",
       "website": "Website"
     },
+    "invalidFolderTooltip_one": "This folder no longer exists or isn't accessible:",
+    "invalidFolderTooltip_other": "These folders no longer exist or aren't accessible:",
     "instructions": "Instructions",
     "instructionsPlaceholder": "System prompt or context for agents working in this project...",
     "name": "Name",

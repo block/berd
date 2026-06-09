@@ -1,12 +1,14 @@
 import { useState, useEffect, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { IconFolderPlus } from "@tabler/icons-react";
+import { IconAlertTriangle, IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { checkDirectoriesExist, resolvePath } from "@/shared/api/pathResolver";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/sheet";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
   Select,
   SelectContent,
@@ -82,6 +84,9 @@ export function CreateProjectDialog({
   // workingDirs list stays the source of truth, while prompt text remains
   // the user's project description.
   const [workingDir, setWorkingDir] = useState<string>("");
+  // Working directories that don't currently exist on disk, surfaced as a
+  // warning on the folder field so users can fix the paths before saving.
+  const [missingDirs, setMissingDirs] = useState<string[]>([]);
 
   const isEditing = !!editingProject;
 
@@ -90,6 +95,45 @@ export function CreateProjectDialog({
       .then(setAcpProviders)
       .catch(() => setAcpProviders([]));
   }, []);
+
+  // Re-check the configured folders against the filesystem whenever they
+  // change while the dialog is open. All workingDirs are validated, not just
+  // the first, so a missing secondary folder is still surfaced.
+  useEffect(() => {
+    if (!isOpen) {
+      setMissingDirs([]);
+      return;
+    }
+    const dirs = workingDirs
+      .map((directory) => directory?.trim())
+      .filter((directory): directory is string => Boolean(directory));
+    if (dirs.length === 0) {
+      setMissingDirs([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const resolved = await Promise.all(
+          dirs.map((directory) =>
+            resolvePath({ parts: [directory] }).then((result) => result.path),
+          ),
+        );
+        const missing = await checkDirectoriesExist(resolved);
+        if (cancelled) return;
+        // Report the user's original folder strings rather than the resolved
+        // absolute paths, since those are what they recognize.
+        setMissingDirs(
+          dirs.filter((_, index) => missing.includes(resolved[index])),
+        );
+      } catch {
+        if (!cancelled) setMissingDirs([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, workingDirs]);
 
   const handleAddDirectory = async () => {
     try {
@@ -326,9 +370,43 @@ export function CreateProjectDialog({
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="group/field space-y-2">
-                <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
-                  {t("dialog.folderLabel")}
-                </Label>
+                <div className="flex items-center gap-1.5">
+                  <Label className="text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                    {t("dialog.folderLabel")}
+                  </Label>
+                  {missingDirs.length > 0 ? (
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          className="inline-flex items-center rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-destructive"
+                          aria-label={t("dialog.invalidFolderTooltip", {
+                            count: missingDirs.length,
+                          })}
+                        >
+                          <IconAlertTriangle
+                            className="size-3.5 text-destructive"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent className="max-w-[260px]">
+                        <p>
+                          {t("dialog.invalidFolderTooltip", {
+                            count: missingDirs.length,
+                          })}
+                        </p>
+                        <ul className="mt-1 list-disc pl-4">
+                          {missingDirs.map((directory) => (
+                            <li key={directory} className="break-all">
+                              {directory}
+                            </li>
+                          ))}
+                        </ul>
+                      </TooltipContent>
+                    </Tooltip>
+                  ) : null}
+                </div>
                 <button
                   type="button"
                   onClick={handleAddDirectory}

@@ -47,6 +47,8 @@
       "terminal": "Terminal",
       "website": "Sitio web"
     },
+    "invalidFolderTooltip_one": "Esta carpeta ya no existe o no es accesible:",
+    "invalidFolderTooltip_other": "Estas carpetas ya no existen o no son accesibles:",
     "instructions": "Instrucciones",
     "instructionsPlaceholder": "Prompt del sistema o contexto para agentes que trabajan en este proyecto...",
     "name": "Nombre",

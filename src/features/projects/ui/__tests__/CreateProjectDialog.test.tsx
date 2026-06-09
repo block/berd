@@ -8,6 +8,7 @@ import {
   scanProjectIcons,
   updateProject,
 } from "../../api/projects";
+import { checkDirectoriesExist, resolvePath } from "@/shared/api/pathResolver";
 import { CreateProjectDialog } from "../CreateProjectDialog";
 
 // ── ResizeObserver polyfill (needed by Radix Select in jsdom) ────────
@@ -71,6 +72,15 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: vi.fn().mockResolvedValue(null),
 }));
 
+vi.mock("@/shared/api/pathResolver", () => ({
+  resolvePath: vi
+    .fn()
+    .mockImplementation(async ({ parts }: { parts: string[] }) => ({
+      path: parts[0],
+    })),
+  checkDirectoriesExist: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock("../../artifact/ProjectArtifactPreview", () => ({
   ProjectArtifactPreview: ({
     input,
@@ -120,6 +130,10 @@ describe("CreateProjectDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(open).mockResolvedValue(null);
+    vi.mocked(resolvePath).mockImplementation(async ({ parts }) => ({
+      path: parts[0],
+    }));
+    vi.mocked(checkDirectoriesExist).mockResolvedValue([]);
   });
 
   describe("form populates on open", () => {
@@ -435,6 +449,71 @@ describe("CreateProjectDialog", () => {
           prompt: "Updated prompt",
         }),
       );
+    });
+  });
+
+  describe("missing folder warning", () => {
+    it("does not show a warning when all folders exist", async () => {
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={makeEditingProject({
+            workingDirs: ["/home/user/code"],
+          })}
+        />,
+      );
+
+      await waitFor(() =>
+        expect(checkDirectoriesExist).toHaveBeenCalledWith(["/home/user/code"]),
+      );
+      expect(
+        screen.queryByRole("button", {
+          name: /no longer exists or isn't accessible/,
+        }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("shows a warning naming the missing folder", async () => {
+      vi.mocked(checkDirectoriesExist).mockResolvedValue(["/home/user/gone"]);
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={makeEditingProject({
+            workingDirs: ["/home/user/gone"],
+          })}
+        />,
+      );
+
+      const warning = await screen.findByRole("button", {
+        name: "This folder no longer exists or isn't accessible:",
+      });
+      expect(warning).toBeInTheDocument();
+    });
+
+    it("uses the plural message and lists every missing folder", async () => {
+      vi.mocked(checkDirectoriesExist).mockResolvedValue([
+        "/home/user/gone",
+        "/home/user/also-gone",
+      ]);
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={makeEditingProject({
+            workingDirs: ["/home/user/gone", "/home/user/also-gone"],
+          })}
+        />,
+      );
+
+      expect(
+        await screen.findByRole("button", {
+          name: "These folders no longer exist or aren't accessible:",
+        }),
+      ).toBeInTheDocument();
     });
   });
 

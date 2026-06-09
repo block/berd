@@ -716,4 +716,50 @@ describe("MessageBubble", () => {
     expect(screen.getByText("python3 create_whales.py")).toBeInTheDocument();
     expect(screen.getByText("ls -lh whales.pdf")).toBeInTheDocument();
   });
+
+  it("renders an edit-project action inside a system error notification", async () => {
+    const user = userEvent.setup();
+    const onEditProject = vi.fn();
+    const message: Message = {
+      id: "n1",
+      role: "system",
+      created: Date.now(),
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: "Project folder is missing",
+          action: { type: "editProject", projectId: "project-7" },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} onEditProject={onEditProject} />);
+
+    await user.click(screen.getByRole("button", { name: "Edit project" }));
+
+    expect(onEditProject).toHaveBeenCalledWith("project-7");
+  });
+
+  it("omits the edit-project action when no handler is provided", () => {
+    const message: Message = {
+      id: "n2",
+      role: "system",
+      created: Date.now(),
+      content: [
+        {
+          type: "systemNotification",
+          notificationType: "error",
+          text: "Project folder is missing",
+          action: { type: "editProject", projectId: "project-7" },
+        },
+      ],
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(
+      screen.queryByRole("button", { name: "toolbar.editProjectFolders" }),
+    ).toBeNull();
+  });
 });

@@ -807,6 +807,22 @@ const buttonVariantColorRows: Record<ButtonVariant, TokenColorRow[]> = {
       border: "--input",
     },
   ],
+  "alert-action": [
+    {
+      anatomy: "Button",
+      state: "Default",
+      background: "transparent",
+      textIcon: "currentColor",
+      border: "currentColor / 30%",
+    },
+    {
+      anatomy: "Button",
+      state: "Hover",
+      background: "currentColor / 10%",
+      textIcon: "currentColor",
+      border: "currentColor / 30%",
+    },
+  ],
   outline: [
     {
       anatomy: "Button",

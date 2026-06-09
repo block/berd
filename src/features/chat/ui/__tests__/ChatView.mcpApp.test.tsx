@@ -1019,6 +1019,36 @@ describe("ChatView MCP app messaging", () => {
     expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
   });
 
+  it("wires the edit-project handler through to the message timeline", () => {
+    const onOpenProjectSettings = vi.fn();
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+      creationState: "failed",
+      creationError: "missing folder",
+    } satisfies ChatSession;
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={activeSession}
+        onOpenProjectSettings={onOpenProjectSettings}
+      />,
+    );
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      onEditProject?: (projectId: string) => void;
+    };
+    expect(timelineProps.onEditProject).toBeTypeOf("function");
+
+    act(() => timelineProps.onEditProject?.("project-7"));
+    expect(onOpenProjectSettings).toHaveBeenCalledWith("project-7");
+  });
+
   it("removes the tab when the terminal shell exits", async () => {
     const user = userEvent.setup();
     const activeSession = chatSessionWithWorkingDir("/Users/test/repo-a");

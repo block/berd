@@ -261,6 +261,59 @@ describe("chatSessionStore", () => {
       });
     });
 
+    it("returns a failed draft session to pending when resetting creation", () => {
+      seedSession({
+        id: "local-session",
+        title: "New Chat",
+        creationState: "failed",
+        creationError: "folders missing",
+      });
+
+      useChatSessionStore.getState().resetSessionCreation("local-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("local-session"),
+      ).toMatchObject({
+        creationState: "pending",
+        creationError: undefined,
+      });
+    });
+
+    it("leaves a non-failed session untouched when resetting creation", () => {
+      seedSession({
+        id: "local-session",
+        title: "New Chat",
+        creationState: "pending",
+      });
+
+      useChatSessionStore.getState().resetSessionCreation("local-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("local-session")
+          ?.creationState,
+      ).toBe("pending");
+    });
+
+    it("clears creation failure state when promoting a draft session", () => {
+      seedSession({
+        id: "local-session",
+        title: "New Chat",
+        creationState: "failed",
+        creationError: "folders missing",
+      });
+
+      useChatSessionStore
+        .getState()
+        .promoteDraftSession("local-session", "acp-session");
+
+      expect(
+        useChatSessionStore.getState().getSession("acp-session"),
+      ).toMatchObject({
+        creationState: undefined,
+        creationError: undefined,
+      });
+    });
+
     it("keeps a stable client session id when promoting a draft session", () => {
       const draft = useChatSessionStore.getState().createDraftSession({
         title: "New Chat",

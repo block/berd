@@ -110,6 +110,7 @@ interface ChatSessionStoreActions {
     patch?: Partial<ChatSession>,
   ) => void;
   markSessionCreationFailed: (id: string, error: string) => void;
+  resetSessionCreation: (id: string) => void;
   ensurePinnedSessionPlaceholder: (id: string) => void;
   loadSessions: () => Promise<void>;
   loadMoreSessions: () => Promise<void>;
@@ -398,6 +399,21 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
               ...session,
               creationState: "failed" as const,
               creationError: error,
+              updatedAt: new Date().toISOString(),
+            }
+          : session,
+      ),
+    }));
+  },
+
+  resetSessionCreation: (id) => {
+    set((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.id === id && session.creationState === "failed"
+          ? {
+              ...session,
+              creationState: "pending" as const,
+              creationError: undefined,
               updatedAt: new Date().toISOString(),
             }
           : session,

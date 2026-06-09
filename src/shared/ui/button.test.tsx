@@ -176,6 +176,18 @@ describe("Button", () => {
     );
   });
 
+  it("renders the alert-action variant inheriting the surrounding alert color", () => {
+    render(<Button variant="alert-action">Edit project</Button>);
+
+    const button = screen.getByRole("button", { name: "Edit project" });
+    expect(button).toHaveClass(
+      "border-current/30",
+      "bg-transparent",
+      "text-current",
+      "hover:bg-current/10",
+    );
+  });
+
   it("renders the strong glass variant with strong glass tokens", () => {
     render(<Button variant="glass-strong">View</Button>);
 

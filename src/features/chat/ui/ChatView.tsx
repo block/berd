@@ -277,6 +277,7 @@ interface ChatViewProps {
   onCreateProject?: (options?: {
     onCreated?: (projectId: string) => void;
   }) => void;
+  onOpenProjectSettings?: (projectId: string) => void;
 }
 
 export function ChatView({
@@ -287,6 +288,7 @@ export function ChatView({
   onAgentBuilderSaved,
   onAgentBuilderClose,
   onCreateProject,
+  onOpenProjectSettings,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
@@ -861,6 +863,7 @@ export function ChatView({
       onRunShellCommand={
         !isReadOnly && terminalAvailable ? handleRunShellCommand : undefined
       }
+      onEditProject={onOpenProjectSettings}
       showPlaceholder={controller.isLoadingHistory}
       placeholder={conversationPlaceholder}
       footer={composerFooter}

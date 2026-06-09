@@ -170,10 +170,21 @@ export interface ActionRequiredContent {
   annotations?: Annotations;
 }
 
+/**
+ * An optional call-to-action rendered alongside a system notification. Lets a
+ * notification (e.g. a session-creation error) carry the fix the user should
+ * take, so the action lives with its message instead of floating elsewhere.
+ */
+export type SystemNotificationAction = {
+  type: "editProject";
+  projectId: string;
+};
+
 export interface SystemNotificationContent {
   type: "systemNotification";
   notificationType: "compaction" | "info" | "warning" | "error";
   text: string;
+  action?: SystemNotificationAction;
   annotations?: Annotations;
 }
 
@@ -287,12 +298,20 @@ export function createUserMessage(
 export function createSystemNotificationMessage(
   text: string,
   notificationType: SystemNotificationContent["notificationType"] = "info",
+  action?: SystemNotificationAction,
 ): Message {
   return {
     id: crypto.randomUUID(),
     role: "system",
     created: Date.now(),
-    content: [{ type: "systemNotification", notificationType, text }],
+    content: [
+      {
+        type: "systemNotification",
+        notificationType,
+        text,
+        ...(action && { action }),
+      },
+    ],
     metadata: {
       userVisible: true,
       agentVisible: false,

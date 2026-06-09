@@ -97,7 +97,11 @@ import {
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { createSystemNotificationMessage } from "@/shared/types/messages";
+import { findMissingProjectDirs } from "@/features/projects/lib/missingProjectDirs";
+import {
+  createSystemNotificationMessage,
+  isSystemNotification,
+} from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
@@ -381,6 +385,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const markSessionCreationFailed = useChatSessionStore(
     (s) => s.markSessionCreationFailed,
   );
+  const resetSessionCreation = useChatSessionStore(
+    (s) => s.resetSessionCreation,
+  );
   const patchSession = useChatSessionStore((s) => s.patchSession);
   const setActiveSession = useChatSessionStore((s) => s.setActiveSession);
   const handleNavigateToSession = useCallback(
@@ -400,9 +407,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const projects = useProjectStore(selectProjects);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
-  const refreshProjectsAfterDialogSave = useCallback(() => {
-    void fetchProjects();
-  }, [fetchProjects]);
+  const retryFailedSessionsForProjectRef = useRef<
+    (project: ProjectInfo) => void
+  >(() => {});
+  const refreshProjectsAfterDialogSave = useCallback(
+    (savedProject: ProjectInfo) => {
+      retryFailedSessionsForProjectRef.current(savedProject);
+    },
+    [],
+  );
   const {
     closeCreateProjectDialog,
     createProjectInitialWorkingDir,
@@ -891,12 +904,51 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             setChatActiveSession(sessionId);
           }
         })
-        .catch((error) => {
+        .catch(async (error) => {
+          const chatStore = useChatStore.getState();
+
+          // Before falling back to the opaque backend error, check whether the
+          // failure is actually a missing project folder. We confirm against
+          // the real filesystem rather than string-matching the error text, so
+          // unrelated failures keep their generic message.
+          const project = projectId
+            ? useProjectStore
+                .getState()
+                .projects.find((candidate) => candidate.id === projectId)
+            : undefined;
+          if (project) {
+            try {
+              const missing = await findMissingProjectDirs(project);
+              if (missing.length > 0) {
+                const message = t(
+                  missing.length === 1
+                    ? "toolbar.sessionMissingProjectDir"
+                    : "toolbar.sessionMissingProjectDirs",
+                  { paths: missing.join(", ") },
+                );
+                markSessionCreationFailed(session.id, message);
+                chatStore.addMessage(
+                  session.id,
+                  createSystemNotificationMessage(message, "error", {
+                    type: "editProject",
+                    projectId: project.id,
+                  }),
+                );
+                chatStore.setError(session.id, message);
+                return;
+              }
+            } catch (checkError) {
+              console.error(
+                "Failed to check project directories after session creation failure:",
+                checkError,
+              );
+            }
+          }
+
           const message = formatAcpErrorMessage(
             error,
             "Failed to create session.",
           );
-          const chatStore = useChatStore.getState();
           markSessionCreationFailed(session.id, message);
           chatStore.addMessage(
             session.id,
@@ -906,6 +958,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         });
     },
     [
+      t,
       markSessionCreationFailed,
       promoteChatSessionId,
       promoteDraftSession,
@@ -914,6 +967,103 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       setChatActiveSession,
     ],
   );
+
+  // When a project is edited and saved, any of its sessions that previously
+  // failed to create because their working folder was missing can be retried:
+  // the draft id is still valid, and editing the project may have fixed the
+  // path. We re-resolve the working dir from the *updated* project (the folder
+  // is what changed), clear the stale error notification + runtime error, and
+  // hand the draft back to startDraftSessionCreation. If the edit didn't
+  // actually fix the folders, we skip the retry so the existing error stands.
+  const retryFailedSessionsForProject = useCallback(
+    (savedProject: ProjectInfo) => {
+      void (async () => {
+        // Reload projects so the rest of the UI reflects the saved edit.
+        await fetchProjects();
+
+        // Prefer the freshest copy from the store; fall back to the saved arg.
+        const updatedProject =
+          useProjectStore
+            .getState()
+            .projects.find((candidate) => candidate.id === savedProject.id) ??
+          savedProject;
+
+        const sessionStore = useChatSessionStore.getState();
+        const failedSessions = sessionStore.sessions.filter(
+          (candidate) =>
+            candidate.creationState === "failed" &&
+            candidate.projectId === updatedProject.id &&
+            !candidate.archivedAt,
+        );
+        if (failedSessions.length === 0) {
+          return;
+        }
+
+        // Only retry if the edit actually fixed the missing folders; otherwise
+        // the same error would immediately reappear.
+        try {
+          const missing = await findMissingProjectDirs(updatedProject);
+          if (missing.length > 0) {
+            return;
+          }
+        } catch (error) {
+          console.error(
+            "Failed to re-check project directories before retrying session creation:",
+            error,
+          );
+          return;
+        }
+
+        const chatStore = useChatStore.getState();
+        for (const session of failedSessions) {
+          // Drop the stale missing-folder error notification so the retry
+          // doesn't stack a duplicate, then clear the runtime + creation error.
+          const messages = chatStore.messagesBySession[session.id] ?? [];
+          for (const message of messages) {
+            const isMissingFolderNotice = message.content.some(
+              (content) =>
+                isSystemNotification(content) &&
+                content.action?.type === "editProject" &&
+                content.action.projectId === updatedProject.id,
+            );
+            if (isMissingFolderNotice) {
+              chatStore.removeMessage(session.id, message.id);
+            }
+          }
+          chatStore.setError(session.id, null);
+          resetSessionCreation(session.id);
+
+          const providerId =
+            session.providerId ??
+            updatedProject.preferredProvider ??
+            selectedProvider ??
+            "goose";
+          const sessionModelPreference = resolveSupportedSessionModelPreference(
+            providerId,
+            undefined,
+            session.modelId ?? updatedProject.preferredModel ?? undefined,
+          ).then((preference) =>
+            session.modelName && preference.modelId === session.modelId
+              ? { ...preference, modelName: session.modelName }
+              : preference,
+          );
+          startDraftSessionCreation({
+            session,
+            sessionModelPreference,
+            workingDir: resolveSessionCwd(updatedProject),
+            projectId: updatedProject.id,
+          });
+        }
+      })();
+    },
+    [
+      fetchProjects,
+      resetSessionCreation,
+      selectedProvider,
+      startDraftSessionCreation,
+    ],
+  );
+  retryFailedSessionsForProjectRef.current = retryFailedSessionsForProject;
 
   const createNewTab = useCallback(
     async (
@@ -2321,6 +2471,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               onStartAgentBuilderSession={agentBuilder.start}
               onArchiveChat={handleArchiveChat}
               onCreateProject={openCreateProjectDialog}
+              onOpenProjectSettings={handleEditProject}
               onActivateHomeSession={activateHomeSession}
               onRenameChat={handleRenameChat}
               onSelectSession={handleSelectSession}
