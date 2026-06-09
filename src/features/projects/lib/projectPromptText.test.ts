@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildEditorText,
-  hasEquivalentWorkingDir,
   insertWorkingDir,
   parseEditorText,
 } from "./projectPromptText";
@@ -63,35 +62,5 @@ describe("projectPromptText", () => {
     expect(insertWorkingDir("include: /tmp/one\nPrompt body", "/tmp/two")).toBe(
       "include: /tmp/one\nPrompt body\n\ninclude: /tmp/two",
     );
-  });
-
-  it("treats tilde and absolute paths as equivalent when checking duplicates", () => {
-    expect(
-      hasEquivalentWorkingDir(
-        "Prompt body\ninclude: ~/dev/goose2",
-        "/Users/mtoohey/dev/goose2",
-        "/Users/mtoohey",
-      ),
-    ).toBe(true);
-  });
-
-  it("does not match different directories when checking duplicates", () => {
-    expect(
-      hasEquivalentWorkingDir(
-        "Prompt body\ninclude: ~/dev/goose2",
-        "/Users/mtoohey/dev/other",
-        "/Users/mtoohey",
-      ),
-    ).toBe(false);
-  });
-
-  it("treats trailing slashes as equivalent when checking duplicates", () => {
-    expect(
-      hasEquivalentWorkingDir(
-        "Prompt body\ninclude: /Users/mtoohey/dev/goose2/",
-        "/Users/mtoohey/dev/goose2",
-        "/Users/mtoohey",
-      ),
-    ).toBe(true);
   });
 });

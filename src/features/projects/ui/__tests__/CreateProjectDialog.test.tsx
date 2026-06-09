@@ -380,6 +380,31 @@ describe("CreateProjectDialog", () => {
       expect(preview).toHaveAttribute("data-artifact-seed", "");
     });
 
+    it("replaces the working directory when a new folder is picked", async () => {
+      const user = userEvent.setup();
+      const editingProject = makeEditingProject({
+        workingDirs: ["/home/user/code"],
+      });
+      vi.mocked(open).mockResolvedValue("/home/user/newcode");
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={editingProject}
+        />,
+      );
+
+      await user.click(screen.getByRole("button", { name: "code" }));
+      await user.click(screen.getByRole("button", { name: "Save changes" }));
+
+      await waitFor(() => expect(updateProject).toHaveBeenCalledOnce());
+      const savedWorkingDirs =
+        vi.mocked(updateProject).mock.calls[0][1].workingDirs ?? [];
+      expect(savedWorkingDirs[0]).toBe("/home/user/newcode");
+      expect(savedWorkingDirs).not.toContain("/home/user/code");
+    });
+
     it("preserves description metadata while saving prompt changes", async () => {
       const user = userEvent.setup();
       const editingProject = makeEditingProject({

@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import { IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
-import { getHomeDir } from "@/shared/api/system";
 import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
@@ -21,11 +20,7 @@ import {
   type ProjectInfo,
 } from "../api/projects";
 import { discoverAcpProviders, type AcpProvider } from "@/shared/api/acp";
-import {
-  buildEditorText,
-  hasEquivalentWorkingDir,
-  parseEditorText,
-} from "../lib/projectPromptText";
+import { buildEditorText, parseEditorText } from "../lib/projectPromptText";
 import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
 import { DEFAULT_PROJECT_COLOR } from "../lib/projectDefaults";
@@ -105,21 +100,11 @@ export function CreateProjectDialog({
         title: t("dialog.addDirectoryDialogTitle"),
       });
       if (selected && typeof selected === "string") {
-        const homeDir = await getHomeDir().catch(() => null);
-
+        // The picker is a single "change the folder" control, so replace the
+        // working-dir list rather than appending. This swaps workingDirs[0],
+        // which drives both the form display and new conversations.
         setWorkingDir(selected);
-        setWorkingDirs((prev) => {
-          if (
-            hasEquivalentWorkingDir(
-              buildEditorText(prev, prompt),
-              selected,
-              homeDir,
-            )
-          ) {
-            return prev;
-          }
-          return [...prev, selected];
-        });
+        setWorkingDirs([selected]);
       }
     } catch {
       // Dialog plugin not available
