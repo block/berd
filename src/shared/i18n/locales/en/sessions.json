@@ -1,22 +1,15 @@
 {
   "card": {
-    "deselect": "Deselect",
     "focusWindowFailed": "Failed to focus session window",
     "open": "Open {{title}}",
     "openInNewWindow": "Open in new window",
     "openWindow": "Open window",
     "openWindowFailed": "Failed to open session window",
-    "optionsFor": "Options for {{title}}",
-    "select": "Select"
+    "optionsFor": "Options for {{title}}"
   },
   "dateGroups": {
     "today": "Today",
     "yesterday": "Yesterday"
-  },
-  "duplicate": {
-    "failed": "Failed to duplicate session",
-    "missingWorkingDir": "This session has no working directory and can't be duplicated.",
-    "title": "Copy of {{title}}"
   },
   "history": {
     "archivedSubtitle": "Sessions you've archived",

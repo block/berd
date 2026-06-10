@@ -22,7 +22,6 @@ import { saveExportedSessionFile } from "@/shared/api/system";
 import { SessionHistoryView } from "../SessionHistoryView";
 
 const mocks = vi.hoisted(() => ({
-  acpDuplicateSession: vi.fn(),
   acpExportSession: vi.fn(),
   acpImportSession: vi.fn(),
   acpSearchSessions: vi.fn(),
@@ -31,8 +30,6 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("@/shared/api/acp", () => ({
-  acpDuplicateSession: (...args: unknown[]) =>
-    mocks.acpDuplicateSession(...args),
   acpExportSession: (...args: unknown[]) => mocks.acpExportSession(...args),
   acpImportSession: (...args: unknown[]) => mocks.acpImportSession(...args),
   acpSearchSessions: (...args: unknown[]) => mocks.acpSearchSessions(...args),
@@ -100,23 +97,18 @@ vi.mock("../SessionCard", () => ({
   SessionCard: ({
     id,
     title,
-    onDuplicate,
     onExport,
     onOpenInWindow,
     isOpenInWindow,
   }: {
     id: string;
     title: string;
-    onDuplicate?: (id: string) => void;
     onExport?: (id: string) => void;
     onOpenInWindow?: (id: string) => void;
     isOpenInWindow?: boolean;
   }) => (
     <div data-testid="session-card">
       <span>{title}</span>
-      <button type="button" onClick={() => onDuplicate?.(id)}>
-        Duplicate
-      </button>
       <button type="button" onClick={() => onExport?.(id)}>
         Export
       </button>
@@ -388,76 +380,6 @@ describe("SessionHistoryView", () => {
       ]);
       expect(screen.getByText("Second Needle Session")).toBeInTheDocument();
     });
-  });
-
-  it("duplicates a session with its stored working dir and reloads sessions", async () => {
-    const loadSessions = vi.fn().mockResolvedValue(undefined);
-    mocks.acpDuplicateSession.mockResolvedValue({ sessionId: "session-2" });
-    setSessionStoreState({
-      sessions: [session({ workingDir: "/tmp/project" })],
-      loadSessions,
-    });
-
-    renderHistory();
-
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate" }));
-
-    await waitFor(() => {
-      expect(mocks.acpDuplicateSession).toHaveBeenCalledWith(
-        "session-1",
-        "/tmp/project",
-        "Copy of Chat One",
-      );
-      expect(loadSessions).toHaveBeenCalledOnce();
-    });
-  });
-
-  it("ignores duplicate requests while the same session is already duplicating", async () => {
-    const loadSessions = vi.fn().mockResolvedValue(undefined);
-    let resolveDuplicate: (value: { sessionId: string }) => void = () => {};
-    mocks.acpDuplicateSession.mockReturnValue(
-      new Promise((resolve) => {
-        resolveDuplicate = resolve;
-      }),
-    );
-    setSessionStoreState({
-      sessions: [session({ workingDir: "/tmp/project" })],
-      loadSessions,
-    });
-
-    renderHistory();
-
-    const duplicateButton = screen.getByRole("button", { name: "Duplicate" });
-    await userEvent.click(duplicateButton);
-    await userEvent.click(duplicateButton);
-
-    expect(mocks.acpDuplicateSession).toHaveBeenCalledOnce();
-
-    act(() => {
-      resolveDuplicate({ sessionId: "session-2" });
-    });
-
-    await waitFor(() => {
-      expect(loadSessions).toHaveBeenCalledOnce();
-    });
-  });
-
-  it("does not duplicate a session without a working dir", async () => {
-    const loadSessions = vi.fn().mockResolvedValue(undefined);
-    setSessionStoreState({
-      sessions: [session({ workingDir: null })],
-      loadSessions,
-    });
-
-    renderHistory();
-
-    await userEvent.click(screen.getByRole("button", { name: "Duplicate" }));
-
-    expect(mocks.acpDuplicateSession).not.toHaveBeenCalled();
-    expect(loadSessions).not.toHaveBeenCalled();
-    expect(mocks.toastError).toHaveBeenCalledWith(
-      "This session has no working directory and can't be duplicated.",
-    );
   });
 
   it("reports the renamed file from the native export save path", async () => {

@@ -3,8 +3,6 @@ import { useTranslation } from "react-i18next";
 import {
   Archive,
   ArchiveRestore,
-  CheckSquare,
-  Copy,
   Download,
   ExternalLink,
   MoreHorizontal,
@@ -57,7 +55,6 @@ interface SessionCardProps {
   onUnarchive?: (id: string) => void;
   onExport?: (id: string) => void;
   onExportSelected?: () => void;
-  onDuplicate?: (id: string) => void;
   onOpenInWindow?: (id: string) => void;
   isOpenInWindow?: boolean;
   onPinSelectedToHome?: () => void;
@@ -88,7 +85,6 @@ export function SessionCard({
   onUnarchive,
   onExport,
   onExportSelected,
-  onDuplicate,
   onOpenInWindow,
   isOpenInWindow = false,
   onPinSelectedToHome,
@@ -311,15 +307,6 @@ export function SessionCard({
               <DropdownMenuSeparator />
             </>
           )}
-          <DropdownMenuItem
-            onClick={() => {
-              setMenuOpen(false);
-              onSelectionChange?.(id, !selected);
-            }}
-          >
-            <CheckSquare className="size-3.5" />
-            {selected ? t("card.deselect") : t("card.select")}
-          </DropdownMenuItem>
           {archivedAt ? (
             <>
               <DropdownMenuItem
@@ -415,17 +402,6 @@ export function SessionCard({
                 <Download className="size-3.5" />
                 {t("common:actions.export")}
               </DropdownMenuItem>
-              {!shouldApplyToSelection && (
-                <DropdownMenuItem
-                  onClick={() => {
-                    setMenuOpen(false);
-                    onDuplicate?.(id);
-                  }}
-                >
-                  <Copy className="size-3.5" />
-                  {t("common:actions.duplicate")}
-                </DropdownMenuItem>
-              )}
               <DropdownMenuItem
                 onClick={() => {
                   setMenuOpen(false);

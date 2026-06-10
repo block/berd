@@ -30,11 +30,7 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
-import {
-  acpDuplicateSession,
-  acpExportSession,
-  acpImportSession,
-} from "@/shared/api/acp";
+import { acpExportSession, acpImportSession } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   saveExportedSessionFile,
@@ -113,7 +109,6 @@ export function SessionHistoryView({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const duplicatingSessionIdsRef = useRef<Set<string>>(new Set());
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
@@ -520,53 +515,6 @@ export function SessionHistoryView({
     ],
   );
 
-  const handleDuplicate = useCallback(
-    async (sessionId: string) => {
-      if (duplicatingSessionIdsRef.current.has(sessionId)) {
-        return;
-      }
-
-      const session = activeSessions.find(
-        (candidate) => candidate.id === sessionId,
-      );
-      const workingDir = session?.workingDir?.trim();
-      if (!session) {
-        toast.error(t("duplicate.failed"));
-        return;
-      }
-      if (!workingDir) {
-        toast.error(t("duplicate.missingWorkingDir"));
-        return;
-      }
-      const baseTitle = getDisplayTitle(session).trim() || defaultSessionTitle;
-      const duplicateTitle = t("duplicate.title", { title: baseTitle });
-      duplicatingSessionIdsRef.current.add(sessionId);
-
-      try {
-        await acpDuplicateSession(sessionId, workingDir, duplicateTitle);
-        await loadSessions();
-      } catch (error) {
-        console.error("Duplicate failed:", error);
-        if (isSessionNotFoundError(error)) {
-          removeSession(sessionId);
-          return;
-        }
-        toast.error(formatAcpErrorMessage(error, t("duplicate.failed")));
-      } finally {
-        duplicatingSessionIdsRef.current.delete(sessionId);
-      }
-    },
-    [
-      activeSessions,
-      defaultSessionTitle,
-      getDisplayTitle,
-      isSessionNotFoundError,
-      loadSessions,
-      removeSession,
-      t,
-    ],
-  );
-
   const handleOpenInWindow = useCallback(
     (sessionId: string) => {
       const isOpenInWindow =
@@ -735,7 +683,6 @@ export function SessionHistoryView({
         onArchiveSelected={requestArchiveSelected}
         onExport={handleExport}
         onExportSelected={handleExportSelected}
-        onDuplicate={handleDuplicate}
         onOpenInWindow={
           isMultiWindowEnabled && !session.archivedAt
             ? handleOpenInWindow
@@ -754,7 +701,6 @@ export function SessionHistoryView({
       handleArchive,
       requestArchiveSelected,
       clearSelection,
-      handleDuplicate,
       handleExport,
       handleExportSelected,
       handleOpenInWindow,

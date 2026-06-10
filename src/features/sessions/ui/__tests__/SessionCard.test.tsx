@@ -108,6 +108,12 @@ describe("SessionCard", () => {
     expect(
       screen.getByRole("menuitem", { name: /archive/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /^select$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /^duplicate$/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("opens a session window from the active session menu", async () => {
