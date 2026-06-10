@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { toast } from "sonner";
-import { IconExternalLink } from "@tabler/icons-react";
+import { IconCheck, IconExternalLink } from "@tabler/icons-react";
 import {
   type Connection,
   listConnections,
@@ -128,6 +128,7 @@ function ConnectionRow({
         : status.kind === "expired"
           ? t("connections.reconnect")
           : null;
+  const isActive = status.kind === "active";
 
   return (
     <div className="flex items-start justify-between gap-4 px-4 py-4">
@@ -141,6 +142,16 @@ function ConnectionRow({
           <StatusBadge status={status} />
         </div>
       </div>
+      {isActive && (
+        <div
+          className="flex h-8 w-8 shrink-0 items-center justify-center text-success"
+          role="img"
+          aria-label={t("connections.status.active")}
+          title={t("connections.status.active")}
+        >
+          <IconCheck className="size-4" aria-hidden="true" />
+        </div>
+      )}
       {buttonLabel !== null && (
         <Button
           type="button"
