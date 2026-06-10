@@ -158,11 +158,20 @@ export function ChatInput({
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
 
-  // Cap how tall the textarea grows before it scrolls internally. The chat
-  // composer caps shorter so the floating island tops out ~260px tall (textarea
-  // + ~76px of surrounding chrome) instead of growing unbounded; the Home pill
-  // keeps the taller cap. Keep this in sync with the textarea's max-h-* class.
-  const textareaMaxHeightPx = surface === "bare" ? 184 : 200;
+  // Cap how tall the textarea grows before it scrolls internally. The docked
+  // chat composer can consume most of the chat panel; the floating Home pill
+  // stays compact. Keep this in sync with the textarea's max-h-* class.
+  const getTextareaMaxHeightPx = useCallback(() => {
+    if (surface !== "bare") {
+      return 200;
+    }
+
+    if (typeof window === "undefined") {
+      return 480;
+    }
+
+    return Math.max(184, window.innerHeight - 260);
+  }, [surface]);
 
   const resizeTextarea = useCallback(() => {
     const textarea = textareaRef.current;
@@ -170,8 +179,8 @@ export function ChatInput({
       return;
     }
     textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, textareaMaxHeightPx)}px`;
-  }, [textareaMaxHeightPx]);
+    textarea.style.height = `${Math.min(textarea.scrollHeight, getTextareaMaxHeightPx())}px`;
+  }, [getTextareaMaxHeightPx]);
 
   const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
@@ -192,6 +201,15 @@ export function ChatInput({
       textarea.selectionEnd = cursorOffset;
     }
   });
+
+  useEffect(() => {
+    if (surface !== "bare") {
+      return;
+    }
+
+    window.addEventListener("resize", resizeTextarea);
+    return () => window.removeEventListener("resize", resizeTextarea);
+  }, [resizeTextarea, surface]);
 
   const hasQueuedMessage = queuedMessage !== null;
   const canInterruptAndSendNow = isStreaming && Boolean(onSendNow);
@@ -617,9 +635,9 @@ export function ChatInput({
     [selectedSkills, setSelectedSkills],
   );
 
-  // Bare composer matches the conversation panel's chat radius so the two read
-  // as one family; the floating Home pill keeps its softer composer radius.
-  const composerRadius = surface === "bare" ? "rounded-md" : "rounded-composer";
+  // Bare composer nests inside the chat panel inset, so it uses the next inner
+  // radius step; the floating Home pill keeps its softer composer radius.
+  const composerRadius = surface === "bare" ? "rounded-sm" : "rounded-composer";
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -634,7 +652,13 @@ export function ChatInput({
       >
         {showAgentToolsTip && agentToolsTip ? (
           <div className="pointer-events-none absolute inset-x-0 bottom-full z-20 flex justify-center px-2 pb-3 sm:px-4">
-            <div className="max-w-[var(--chat-composer-max-width)]">
+            <div
+              className={cn(
+                surface === "bare"
+                  ? "w-full"
+                  : "max-w-[var(--chat-composer-max-width)]",
+              )}
+            >
               <ContextualTip
                 className="pointer-events-auto"
                 actionLabel={t("agentToolsTip.turnOff")}
@@ -649,13 +673,20 @@ export function ChatInput({
             </div>
           </div>
         ) : null}
-        <div className="mx-auto max-w-[var(--chat-composer-max-width)]">
+        <div
+          className={cn(
+            surface === "bare"
+              ? "w-full"
+              : "mx-auto max-w-[var(--chat-composer-max-width)]",
+          )}
+        >
           <Popover open={mentionOpen}>
             {/* biome-ignore lint/a11y/noStaticElementInteractions: drop zone for file attachments */}
             <div
               ref={containerRef}
               className={cn(
-                "relative px-5 pb-3 pt-4 transition-colors",
+                "relative transition-colors",
+                surface === "bare" ? "px-4 pb-2.5 pt-3" : "px-5 pb-3 pt-4",
                 composerRadius,
                 surface === "pill" && "bg-surface-composer backdrop-blur-md",
                 isAttachmentDragOver && "bg-surface-composer/60",
@@ -752,9 +783,13 @@ export function ChatInput({
                   rows={1}
                   className={cn(
                     "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
-                    // Backstop for the JS auto-resize cap (textareaMaxHeightPx).
-                    surface === "bare" ? "max-h-[184px]" : "max-h-[200px]",
-                    "scrollbar-subtle overscroll-contain",
+                    // Backstop for the JS auto-resize cap.
+                    surface === "bare"
+                      ? "max-h-[calc(100dvh-16rem)]"
+                      : "max-h-[200px]",
+                    // The composer text scrolls with the cursor, but never shows
+                    // its own scrollbar.
+                    "scrollbar-none overscroll-contain",
                   )}
                   aria-label={t("input.ariaLabel")}
                   aria-controls={mentionOpen ? mentionListboxId : undefined}

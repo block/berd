@@ -6,6 +6,8 @@ import {
   FileTreeFile,
   FileTreeFolder,
 } from "@/shared/ui/ai-elements/file-tree";
+import { SIDEBAR_ROW_ICON_TEXT_GAP_CLASS } from "@/shared/ui/sidebar-tokens";
+import { cn } from "@/shared/lib/cn";
 import { listDirectoryEntries, type FileTreeEntry } from "@/shared/api/system";
 
 interface FilesListProps {
@@ -19,6 +21,7 @@ interface DirectoryState {
 }
 
 const EMPTY_ROOTS: string[] = [];
+const FILES_TREE_ROW_CLASS = "py-2";
 
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
@@ -40,9 +43,12 @@ function TreeStatusRow({
 }) {
   return (
     <div
-      className={`px-2 py-1 text-xs ${
-        destructive ? "text-destructive" : "text-muted-foreground"
-      }`}
+      className={cn(
+        "flex items-center rounded-sm px-3.5 text-sm",
+        FILES_TREE_ROW_CLASS,
+        SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+        destructive ? "text-destructive" : "text-muted-foreground",
+      )}
     >
       {text}
     </div>
@@ -67,6 +73,7 @@ function DirectoryNode({
       <FileTreeFile
         path={entry.path}
         name={entry.name}
+        className={FILES_TREE_ROW_CLASS}
         contextMenuPath={entry.path}
         title={entry.path}
       />
@@ -77,6 +84,7 @@ function DirectoryNode({
     <FileTreeFolder
       path={entry.path}
       name={entry.name}
+      rowClassName={FILES_TREE_ROW_CLASS}
       contextMenuPath={entry.path}
       title={entry.path}
       toggleOnSelect
@@ -251,10 +259,10 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
   }
 
   return (
-    <div className="min-w-0 px-1 pb-1 pt-1">
+    <div className="min-w-0 px-4 pb-4 pt-4">
       <FileTree
         className="border-0 bg-transparent font-normal"
-        contentClassName="p-1"
+        contentClassName="p-0"
         expanded={expandedPaths}
         onExpandedChange={handleExpandedChange}
         onSelect={handleOpenFile}
@@ -267,6 +275,7 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
               key={root}
               path={root}
               name={basename(root)}
+              rowClassName={FILES_TREE_ROW_CLASS}
               contextMenuPath={root}
               title={root}
               toggleOnSelect

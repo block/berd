@@ -544,7 +544,7 @@ export const MessageBubble = memo(function MessageBubble({
   const timestamp = (
     <span
       data-role="message-timestamp"
-      className="shrink-0 whitespace-nowrap px-1 text-[10px] text-muted-foreground"
+      className="shrink-0 whitespace-nowrap px-1 text-[13px] leading-relaxed text-muted-foreground"
     >
       {formatDate(created, {
         hour: "2-digit",

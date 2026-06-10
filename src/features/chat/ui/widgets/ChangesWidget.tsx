@@ -1,12 +1,10 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { IconGitBranch } from "@tabler/icons-react";
+import { IconExternalLink, IconFile, IconGitBranch } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { FileContextMenu } from "@/shared/ui/file-context-menu";
 import { Skeleton } from "@/shared/ui/skeleton";
-import { Spinner } from "@/shared/ui/spinner";
 import type { ChangedFile } from "@/shared/types/git";
-import { Widget } from "./Widget";
 
 function splitPath(relativePath: string) {
   const lastSlash = relativePath.lastIndexOf("/");
@@ -15,6 +13,21 @@ function splitPath(relativePath: string) {
     dir: relativePath.slice(0, lastSlash + 1),
     name: relativePath.slice(lastSlash + 1),
   };
+}
+
+function renderChangeSummary(summary: string, count: number) {
+  const countText = String(count);
+  const countIndex = summary.indexOf(countText);
+
+  if (countIndex === -1) return summary;
+
+  return (
+    <>
+      {summary.slice(0, countIndex)}
+      <span className="text-foreground">{countText}</span>
+      {summary.slice(countIndex + countText.length)}
+    </>
+  );
 }
 
 function ChangedFileRow({
@@ -34,30 +47,29 @@ function ChangedFileRow({
       type="button"
       disabled={isDeleted}
       className={cn(
-        "relative flex w-full select-none items-center gap-2 px-4 py-1.5 text-left",
-        "before:pointer-events-none before:absolute before:inset-x-4 before:top-0 before:h-px before:bg-border/70 before:content-['']",
+        "group flex w-full select-none items-center gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5 text-left",
         "transition-colors duration-100",
         isDeleted
           ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:bg-muted/80",
+          : "cursor-pointer hover:bg-muted",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >
+      <IconFile className="size-4 shrink-0 text-foreground" />
       <div
-        className={cn(
-          "flex min-w-0 flex-1 items-center overflow-hidden",
-          isDeleted && "line-through",
-        )}
+        className={cn("min-w-0 flex-1 truncate", isDeleted && "line-through")}
       >
-        {dir && (
-          <span className="shrink truncate text-sm text-muted-foreground">
-            {dir}
-          </span>
-        )}
-        <span className="shrink-0 whitespace-nowrap text-sm font-normal text-foreground">
+        <span className="truncate text-sm font-normal text-foreground">
+          {dir}
           {name}
         </span>
       </div>
+      {!isDeleted ? (
+        <IconExternalLink
+          aria-hidden="true"
+          className="size-4 shrink-0 text-muted-foreground opacity-0 transition-opacity duration-100 group-hover:opacity-100 group-focus-visible:opacity-100"
+        />
+      ) : null}
     </button>
   );
 
@@ -72,6 +84,7 @@ interface ChangesWidgetProps {
   error: Error | null;
   isLoadingError: boolean;
   currentBranch: string | null;
+  dirtyFileCount: number;
   repoPath: string;
   onOpenFile: (path: string) => void;
   isOpen: boolean;
@@ -84,10 +97,9 @@ export function ChangesWidget({
   error,
   isLoadingError,
   currentBranch,
+  dirtyFileCount,
   repoPath,
   onOpenFile,
-  isOpen,
-  onToggleOpen,
 }: ChangesWidgetProps) {
   const { t } = useTranslation("chat");
 
@@ -102,74 +114,73 @@ export function ChangesWidget({
     );
   }, [files]);
 
-  const hasChanges = (files?.length ?? 0) > 0;
+  const changeCount = Math.max(files?.length ?? 0, dirtyFileCount);
+  const hasChanges = changeCount > 0;
   const errorMessage =
     error instanceof Error
       ? error.message
       : t("contextPanel.errors.gitChangesRead");
 
-  const titleContent = (
-    <div className="flex min-w-0 items-center gap-1">
-      <span>{t("contextPanel.widgets.changes")}</span>
-      {currentBranch && (
-        <span className="flex min-w-0 items-center gap-1 font-normal normal-case tracking-normal text-muted-foreground">
-          <span className="shrink-0">
-            {t("contextPanel.widgets.changesOnBranch")}
-          </span>
-          <span className="min-w-0 truncate text-foreground">
-            {currentBranch}
-          </span>
-        </span>
-      )}
-    </div>
-  );
-
-  const headerAction = (
-    <div className="flex items-center gap-2">
-      {isLoading && <Spinner className="size-3" />}
-      {hasChanges && (
-        <span className="shrink-0 font-mono text-xxs tabular-nums">
-          <span className="text-success">+{totals.additions}</span>{" "}
-          {/* i18n-check-ignore — mathematical symbol, not translatable */}
-          <span className="text-destructive">&minus;{totals.deletions}</span>
-        </span>
-      )}
-    </div>
-  );
-
   return (
-    <Widget
-      title={titleContent}
-      icon={<IconGitBranch className="size-3.5 shrink-0" />}
-      action={headerAction}
-      flush={hasChanges}
-      isOpen={isOpen}
-      onToggleOpen={onToggleOpen}
-    >
+    <section className="w-full px-4 pt-4 text-sm font-normal">
       {isLoading && !files ? (
-        <div className="space-y-2 px-3 pb-3">
+        <div className="space-y-2">
           <Skeleton className="h-3 w-3/4" />
           <Skeleton className="h-3 w-1/2" />
           <Skeleton className="h-3 w-2/3" />
         </div>
       ) : error && isLoadingError ? (
-        <p className="px-3 text-sm text-destructive">{errorMessage}</p>
+        <p className="text-sm text-destructive">{errorMessage}</p>
       ) : hasChanges ? (
-        <div className="max-h-[300px] overflow-y-auto">
-          {files?.map((file) => (
-            <ChangedFileRow
-              key={file.path}
-              file={file}
-              fullPath={`${repoPath}/${file.path}`}
-              onOpen={onOpenFile}
-            />
-          ))}
+        <div className="space-y-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <IconGitBranch className="size-4 shrink-0 text-foreground" />
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {renderChangeSummary(
+                t("contextPanel.summary.changes", { count: changeCount }),
+                changeCount,
+              )}
+              {currentBranch ? (
+                <>
+                  {" "}
+                  {t("contextPanel.widgets.changesOnBranch")}{" "}
+                  <span className="text-foreground">{currentBranch}</span>
+                </>
+              ) : null}
+            </span>
+            {(totals.additions > 0 || totals.deletions > 0) && (
+              <span className="shrink-0 font-mono text-sm tabular-nums">
+                {totals.additions > 0 ? (
+                  <span className="text-success">+{totals.additions}</span>
+                ) : null}
+                {totals.additions > 0 && totals.deletions > 0 ? " " : null}
+                {totals.deletions > 0 ? (
+                  <span className="text-destructive">
+                    {/* i18n-check-ignore — mathematical symbol, not translatable */}
+                    &minus;{totals.deletions}
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </div>
+          {files?.length ? (
+            <div className="max-h-[300px] space-y-2 overflow-y-auto">
+              {files.map((file) => (
+                <ChangedFileRow
+                  key={file.path}
+                  file={file}
+                  fullPath={`${repoPath}/${file.path}`}
+                  onOpen={onOpenFile}
+                />
+              ))}
+            </div>
+          ) : null}
         </div>
       ) : (
-        <p className="px-3 text-sm text-muted-foreground">
+        <p className="text-sm text-muted-foreground">
           {t("contextPanel.empty.noChanges")}
         </p>
       )}
-    </Widget>
+    </section>
   );
 }

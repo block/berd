@@ -1,9 +1,32 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import {
+  IconDots,
+  IconDownload,
+  IconFolderOpen,
+  IconGitFork,
+  IconGitPullRequest,
+  IconTerminal2,
+} from "@tabler/icons-react";
 import type { CreatedWorktree, GitState } from "@/shared/types/git";
 import { Button } from "@/shared/ui/button";
-import { SplitButton } from "@/shared/ui/split-button";
+import { cn } from "@/shared/lib/cn";
+import {
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+  SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_HEIGHT_CLASS,
+  SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+} from "@/shared/ui/sidebar-tokens";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/shared/ui/dropdown-menu";
 import { Spinner } from "@/shared/ui/spinner";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { formatErrorMessage } from "./formatError";
@@ -18,13 +41,11 @@ interface WorkspaceActionsMenuProps {
   activeContext: ActiveWorkspace | undefined;
   disabled?: boolean;
   onContextChange: (context: ActiveWorkspace) => void;
+  onToggleTerminal?: () => void;
+  onChangeFolder?: () => Promise<void> | void;
+  isChangingFolder?: boolean;
   onFetch: (path: string) => Promise<void>;
   onPull: (path: string) => Promise<void>;
-  onCreateBranch: (
-    path: string,
-    name: string,
-    baseBranch: string,
-  ) => Promise<void>;
   onCreateWorktree: (
     path: string,
     name: string,
@@ -40,17 +61,17 @@ export function WorkspaceActionsMenu({
   activeContext,
   disabled = false,
   onContextChange,
+  onToggleTerminal,
+  onChangeFolder,
+  isChangingFolder = false,
   onFetch,
   onPull,
-  onCreateBranch,
   onCreateWorktree,
 }: WorkspaceActionsMenuProps) {
   const { t } = useTranslation("chat");
   const [dialogMode, setDialogMode] = useState<WorkspaceCreateMode | null>(
     null,
   );
-  const [activeCreateAction, setActiveCreateAction] =
-    useState<WorkspaceCreateMode>("branch");
   const [runningAction, setRunningAction] = useState<"fetch" | "pull" | null>(
     null,
   );
@@ -61,33 +82,12 @@ export function WorkspaceActionsMenu({
     gitState.worktrees[0]?.path ??
     currentProjectPath;
   const currentPath = activeContext?.path ?? defaultWorktreePath;
-  const activeWorktree = useMemo(
-    () =>
-      gitState.worktrees.find((worktree) => worktree.path === currentPath) ??
-      null,
-    [currentPath, gitState.worktrees],
-  );
-  const activeBranch =
-    activeWorktree?.branch ?? activeContext?.branch ?? gitState.currentBranch;
   const pullLabel =
     gitState.incomingCommitCount > 0
-      ? t("contextPanel.git.pullWithCount", {
+      ? t("contextPanel.git.pullCommitCount", {
           count: gitState.incomingCommitCount,
         })
       : t("contextPanel.git.pull");
-  const createActions = useMemo(
-    () => [
-      {
-        id: "branch" as const,
-        label: t("contextPanel.createDialog.createBranch"),
-      },
-      {
-        id: "worktree" as const,
-        label: t("contextPanel.createDialog.createWorktree"),
-      },
-    ],
-    [t],
-  );
 
   const runAction = async (
     action: "fetch" | "pull",
@@ -110,27 +110,84 @@ export function WorkspaceActionsMenu({
     return null;
   }
 
+  const menuItemClassName = cn(
+    SIDEBAR_ROW_HEIGHT_CLASS,
+    SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+    SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+    SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+    SIDEBAR_NAV_TEXT_CLASS,
+    SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+    "rounded-xs text-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus:bg-sidebar-accent focus:text-sidebar-foreground data-[highlighted]:bg-sidebar-accent data-[highlighted]:text-sidebar-foreground",
+  );
+  const menuLabelClassName =
+    "px-3 pb-1 text-sm font-normal text-muted-foreground";
+
   return (
     <>
-      <div className="flex w-full flex-wrap items-center gap-1.5">
-        <SplitButton
-          actions={createActions}
-          activeActionId={activeCreateAction}
-          onActionSelect={setActiveCreateAction}
-          onPrimaryClick={(actionId) => {
-            setActiveCreateAction(actionId);
-            setDialogMode(actionId);
-          }}
-          disabled={disabled || runningAction !== null}
-          menuTriggerLabel={t("contextPanel.actions.chooseCreateAction")}
-        />
-        <div className="ml-auto flex items-center gap-1.5">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
           <Button
             type="button"
-            variant="quiet"
-            size="xs"
+            variant="ghost"
+            size="icon-xs"
+            className="rounded-full text-muted-foreground hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground"
+            aria-label={t("contextPanel.actions.openWorkspaceMenu")}
+          >
+            <IconDots className="size-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          sideOffset={8}
+          className="chat-context-dropdown-surface w-64 rounded-sm px-3 pb-[6px] pt-3"
+        >
+          {onToggleTerminal ? (
+            <DropdownMenuItem
+              className={menuItemClassName}
+              onSelect={() => onToggleTerminal()}
+            >
+              <IconTerminal2 className="size-4" />
+              {t("terminal.open")}
+            </DropdownMenuItem>
+          ) : null}
+
+          <DropdownMenuLabel
+            className={cn(
+              menuLabelClassName,
+              onToggleTerminal ? "pt-4" : "pt-1",
+            )}
+          >
+            {t("contextPanel.labels.workspace")}
+          </DropdownMenuLabel>
+          {onChangeFolder ? (
+            <DropdownMenuItem
+              className={menuItemClassName}
+              disabled={disabled || isChangingFolder || runningAction !== null}
+              onSelect={() => void onChangeFolder()}
+            >
+              {isChangingFolder ? (
+                <Spinner className="size-4" />
+              ) : (
+                <IconFolderOpen className="size-4" />
+              )}
+              {t("contextPanel.picker.changeFolder")}
+            </DropdownMenuItem>
+          ) : null}
+          <DropdownMenuItem
+            className={menuItemClassName}
             disabled={disabled || runningAction !== null}
-            onClick={() =>
+            onSelect={() => setDialogMode("worktree")}
+          >
+            <IconGitFork className="size-4" />
+            {t("contextPanel.createDialog.createWorktree")}
+          </DropdownMenuItem>
+          <DropdownMenuLabel className={cn(menuLabelClassName, "pt-4")}>
+            {t("contextPanel.labels.remote")}
+          </DropdownMenuLabel>
+          <DropdownMenuItem
+            className={menuItemClassName}
+            disabled={disabled || runningAction !== null}
+            onSelect={() =>
               void runAction(
                 "fetch",
                 () => onFetch(currentPath),
@@ -139,15 +196,17 @@ export function WorkspaceActionsMenu({
               )
             }
           >
-            {runningAction === "fetch" ? <Spinner className="size-3" /> : null}
-            {t("contextPanel.git.fetch")}
-          </Button>
-          <Button
-            type="button"
-            variant="quiet"
-            size="xs"
+            {runningAction === "fetch" ? (
+              <Spinner className="size-4" />
+            ) : (
+              <IconDownload className="size-4" />
+            )}
+            {t("contextPanel.actions.fetchRemoteStatus")}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className={menuItemClassName}
             disabled={disabled || runningAction !== null}
-            onClick={() =>
+            onSelect={() =>
               void runAction(
                 "pull",
                 () => onPull(currentPath),
@@ -156,20 +215,22 @@ export function WorkspaceActionsMenu({
               )
             }
           >
-            {runningAction === "pull" ? <Spinner className="size-3" /> : null}
+            {runningAction === "pull" ? (
+              <Spinner className="size-4" />
+            ) : (
+              <IconGitPullRequest className="size-4" />
+            )}
             {pullLabel}
-          </Button>
-        </div>
-      </div>
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <WorkspaceCreateDialog
         mode={dialogMode}
         gitState={gitState}
         currentPath={currentPath}
-        activeBranch={activeBranch}
         onClose={() => setDialogMode(null)}
         onContextChange={onContextChange}
-        onCreateBranch={onCreateBranch}
         onCreateWorktree={onCreateWorktree}
       />
     </>

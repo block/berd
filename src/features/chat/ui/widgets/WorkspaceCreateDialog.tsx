@@ -26,6 +26,7 @@ import { formatErrorMessage } from "./formatError";
 import { shortenPath } from "./WorkingContextPicker";
 
 const UNSET_SELECT_VALUE = "__unset__";
+const WORKTREE_SELECT_CONTENT_CLASS = "z-[80] max-h-64";
 
 export type WorkspaceCreateMode = "branch" | "worktree";
 
@@ -33,15 +34,14 @@ interface WorkspaceCreateDialogProps {
   mode: WorkspaceCreateMode | null;
   gitState: GitState;
   currentPath: string;
-  activeBranch: string | null;
   onClose: () => void;
   onContextChange: (context: ActiveWorkspace) => void;
-  onCreateBranch: (
+  onCreateBranch?: (
     path: string,
     name: string,
     baseBranch: string,
   ) => Promise<void>;
-  onCreateWorktree: (
+  onCreateWorktree?: (
     path: string,
     name: string,
     branch: string,
@@ -62,7 +62,6 @@ export function WorkspaceCreateDialog({
   mode,
   gitState,
   currentPath,
-  activeBranch,
   onClose,
   onContextChange,
   onCreateBranch,
@@ -93,8 +92,29 @@ export function WorkspaceCreateDialog({
       gitState.localBranches.filter((branch) => !occupiedBranches.has(branch)),
     [gitState.localBranches, occupiedBranches],
   );
+  const baseBranchOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          gitState.localBranches.filter((branch) => branch.trim().length > 0),
+        ),
+      ),
+    [gitState.localBranches],
+  );
+  const hasBaseBranchOptions = baseBranchOptions.length > 0;
+  const activeBranch =
+    gitState.worktrees.find((worktree) => worktree.path === currentPath)
+      ?.branch ?? null;
+  const activeBranchOption =
+    activeBranch && baseBranchOptions.includes(activeBranch)
+      ? activeBranch
+      : null;
+  const currentBranchOption =
+    gitState.currentBranch && baseBranchOptions.includes(gitState.currentBranch)
+      ? gitState.currentBranch
+      : null;
   const defaultBaseBranch =
-    activeBranch ?? gitState.currentBranch ?? gitState.localBranches[0] ?? "";
+    activeBranchOption ?? currentBranchOption ?? baseBranchOptions[0] ?? "";
   const previewRootPath = gitState.mainWorktreePath ?? currentPath;
   const trimmedBranchName = branchName.trim();
   const trimmedWorktreeName = worktreeName.trim();
@@ -149,6 +169,9 @@ export function WorkspaceCreateDialog({
 
     try {
       if (mode === "branch") {
+        if (!onCreateBranch) {
+          return;
+        }
         await onCreateBranch(currentPath, trimmedBranchName, baseBranch);
         onContextChange({ path: currentPath, branch: trimmedBranchName });
         toast.success(
@@ -160,6 +183,9 @@ export function WorkspaceCreateDialog({
         return;
       }
 
+      if (!onCreateWorktree) {
+        return;
+      }
       const targetBranch = useNewBranch ? trimmedBranchName : existingBranch;
       const createdWorktree = await onCreateWorktree(
         currentPath,
@@ -197,7 +223,7 @@ export function WorkspaceCreateDialog({
 
   return (
     <Dialog open={mode !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-md gap-0 p-0">
+      <DialogContent className="max-w-md gap-0 overflow-visible p-0">
         <DialogHeader className="px-5 py-4">
           <DialogTitle className="text-sm">
             {mode === "branch"
@@ -228,6 +254,9 @@ export function WorkspaceCreateDialog({
                 <Input
                   id="workspace-branch-name"
                   value={branchName}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   onChange={(event) => {
                     setBranchName(event.target.value);
                     setError(null);
@@ -242,20 +271,33 @@ export function WorkspaceCreateDialog({
                 <Label className="text-xs font-medium text-muted-foreground">
                   {t("contextPanel.createDialog.baseBranch")}
                 </Label>
-                <Select value={baseBranch} onValueChange={setBaseBranch}>
+                <Select
+                  value={baseBranch}
+                  onValueChange={setBaseBranch}
+                  disabled={!hasBaseBranchOptions}
+                >
                   <SelectTrigger className="w-full">
                     <SelectValue
-                      placeholder={t("contextPanel.createDialog.baseBranch")}
+                      placeholder={
+                        hasBaseBranchOptions
+                          ? t("contextPanel.createDialog.baseBranch")
+                          : t("contextPanel.createDialog.noAvailableBranches")
+                      }
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {gitState.localBranches.map((branch) => (
+                    {baseBranchOptions.map((branch) => (
                       <SelectItem key={branch} value={branch}>
                         {branch}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {!hasBaseBranchOptions ? (
+                  <p className="text-xs text-muted-foreground">
+                    {t("contextPanel.createDialog.noAvailableBranches")}
+                  </p>
+                ) : null}
               </div>
             </>
           ) : null}
@@ -272,6 +314,9 @@ export function WorkspaceCreateDialog({
                 <Input
                   id="workspace-worktree-name"
                   value={worktreeName}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  spellCheck={false}
                   onChange={(event) => {
                     const nextWorktreeName = event.target.value;
                     setWorktreeName(nextWorktreeName);
@@ -328,6 +373,9 @@ export function WorkspaceCreateDialog({
                     <Input
                       id="workspace-worktree-branch-name"
                       value={branchName}
+                      autoComplete="off"
+                      autoCorrect="off"
+                      spellCheck={false}
                       onChange={(event) => {
                         setBranchNameManuallyEdited(true);
                         setBranchName(event.target.value);
@@ -343,22 +391,39 @@ export function WorkspaceCreateDialog({
                     <Label className="text-xs font-medium text-muted-foreground">
                       {t("contextPanel.createDialog.baseBranch")}
                     </Label>
-                    <Select value={baseBranch} onValueChange={setBaseBranch}>
+                    <Select
+                      value={baseBranch}
+                      onValueChange={setBaseBranch}
+                      disabled={!hasBaseBranchOptions}
+                    >
                       <SelectTrigger className="w-full">
                         <SelectValue
-                          placeholder={t(
-                            "contextPanel.createDialog.baseBranch",
-                          )}
+                          placeholder={
+                            hasBaseBranchOptions
+                              ? t("contextPanel.createDialog.baseBranch")
+                              : t(
+                                  "contextPanel.createDialog.noAvailableBranches",
+                                )
+                          }
                         />
                       </SelectTrigger>
-                      <SelectContent>
-                        {gitState.localBranches.map((branch) => (
+                      <SelectContent
+                        className={WORKTREE_SELECT_CONTENT_CLASS}
+                        side="top"
+                        sideOffset={6}
+                      >
+                        {baseBranchOptions.map((branch) => (
                           <SelectItem key={branch} value={branch}>
                             {branch}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
+                    {!hasBaseBranchOptions ? (
+                      <p className="text-xs text-muted-foreground">
+                        {t("contextPanel.createDialog.noAvailableBranches")}
+                      </p>
+                    ) : null}
                   </div>
                 </>
               ) : (
@@ -381,7 +446,11 @@ export function WorkspaceCreateDialog({
                         )}
                       />
                     </SelectTrigger>
-                    <SelectContent>
+                    <SelectContent
+                      className={WORKTREE_SELECT_CONTENT_CLASS}
+                      side="top"
+                      sideOffset={6}
+                    >
                       {availableExistingBranches.length > 0 ? (
                         availableExistingBranches.map((branch) => (
                           <SelectItem key={branch} value={branch}>

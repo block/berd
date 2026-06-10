@@ -44,7 +44,7 @@ describe("FilesList", () => {
   });
 
   it("renders separate top-level roots for each working directory", async () => {
-    render(
+    const { container } = render(
       <FilesList
         projectWorkingDirs={["/Users/test/goose2", "/Users/test/sprout"]}
       />,
@@ -61,6 +61,17 @@ describe("FilesList", () => {
 
     expect(screen.getByText("goose2")).toBeInTheDocument();
     expect(screen.getByText("sprout")).toBeInTheDocument();
+    const rootRow = screen.getByText("goose2").closest("button")?.parentElement;
+    expect(rootRow).toHaveClass("gap-3", "rounded-sm", "px-3.5", "py-2");
+    expect(rootRow).not.toHaveClass("py-2.5");
+    expect(rootRow).not.toHaveClass("rounded");
+    expect(container.firstElementChild).toHaveClass("px-4");
+    expect(container.firstElementChild).toHaveClass("pb-4");
+    expect(container.firstElementChild).toHaveClass("pt-4");
+    expect(container.firstElementChild).not.toHaveClass("px-1");
+    expect(container.firstElementChild).not.toHaveClass("pb-1");
+    expect(container.firstElementChild).not.toHaveClass("pb-6");
+    expect(container.firstElementChild).not.toHaveClass("pt-1");
   });
 
   it("expands folders in place without opening them externally", async () => {
@@ -113,7 +124,17 @@ describe("FilesList", () => {
 
     render(<FilesList projectWorkingDirs={["/Users/test/project"]} />);
 
-    await user.click(await screen.findByText("README.md"));
+    const fileName = await screen.findByText("README.md");
+    expect(fileName.closest('[role="treeitem"]')).toHaveClass(
+      "gap-3",
+      "rounded-sm",
+      "px-3.5",
+      "py-2",
+    );
+    expect(fileName.closest('[role="treeitem"]')).not.toHaveClass("py-2.5");
+    expect(fileName.closest('[role="treeitem"]')).not.toHaveClass("rounded");
+
+    await user.click(fileName);
 
     expect(vi.mocked(openPath)).toHaveBeenCalledWith(
       "/Users/test/project/README.md",

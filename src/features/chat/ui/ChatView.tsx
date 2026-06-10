@@ -57,7 +57,7 @@ import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscript
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 
 const CHAT_COMPOSER_SHELL_CLASS =
-  "rounded-composer bg-surface-chat-composer shadow-[var(--shadow-chat-composer)] [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
+  "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
 const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]";
 const CHAT_RESPONDING_GOOSE_CLASS =
@@ -320,6 +320,7 @@ export function ChatView({
     onCreatePersonaRequested: onCreatePersona,
   });
   const effectiveSession = controller.session ?? activeSession ?? null;
+  const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
@@ -329,7 +330,6 @@ export function ChatView({
   );
   const { fallbackCwd: terminalFallbackCwd } =
     useTerminalFallbackCwdPreference();
-  const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
   const [terminalRegionElement, setTerminalRegionElement] =
     useState<HTMLDivElement | null>(null);
   const [terminalWorkspaceState, setTerminalWorkspaceState] =
@@ -772,12 +772,9 @@ export function ChatView({
   }, [controller.messages]);
 
   const composerFooter = (
-    <div className="px-4">
+    <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
-        className={cn(
-          "pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)]",
-          CHAT_COMPOSER_SHELL_CLASS,
-        )}
+        className={cn("pointer-events-auto w-full", CHAT_COMPOSER_SHELL_CLASS)}
       >
         <ChatInput
           surface="bare"
@@ -892,7 +889,7 @@ export function ChatView({
           </motion.div>
         ) : null}
       </AnimatePresence>
-      <p className="text-3xl font-normal text-foreground">
+      <p className="text-sm font-normal text-foreground">
         {isAgentBuilderSession
           ? agentBuilderEmptyPrompt
           : t("emptyState.startAConversation")}
@@ -968,7 +965,12 @@ export function ChatView({
           )}
           style={agentBuilderChatColumnStyle}
         >
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-visible">
+          <div
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-visible rounded-md bg-card",
+              terminalVisible && "min-h-[280px]",
+            )}
+          >
             {messageTimeline}
             {search.isOpen ? (
               <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-4 sm:justify-end sm:px-[var(--chat-transcript-inline-padding)]">
@@ -990,7 +992,10 @@ export function ChatView({
             ) : null}
           </div>
           {terminalVisible ? (
-            <div ref={terminalRootRef} className="flex shrink-0 flex-col gap-2">
+            <div
+              ref={terminalRootRef}
+              className="mt-[var(--spacing-app-panel-gutter-inline)] flex shrink-0 flex-col gap-2"
+            >
               <div
                 ref={terminalExpanded ? setTerminalRegionElement : undefined}
                 onTransitionEnd={(event) => {

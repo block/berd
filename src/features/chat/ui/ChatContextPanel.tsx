@@ -45,7 +45,9 @@ interface ChatContextPanelProps {
   activeSessionId: string;
   isOpen: boolean;
   project?: {
+    id?: string;
     name?: string;
+    icon?: string;
     color?: string;
     workingDirs?: string[];
   } | null;
@@ -124,10 +126,13 @@ export function ChatContextPanel({
         "shrink-0",
         isCompactViewport ? "overflow-visible" : "overflow-hidden",
       )}
-      style={{
-        width: isOpen && !isCompactViewport ? CP_TOTAL_W : 0,
-        transition: `width ${reflowDuration}ms ease`,
-      }}
+      style={
+        {
+          width: isOpen && !isCompactViewport ? CP_TOTAL_W : 0,
+          transition: `width ${reflowDuration}ms ease`,
+          "--context-panel-width": `${CP_PANEL_W}px`,
+        } as CSSProperties
+      }
     >
       <AnimatePresence initial={false}>
         {isOpen ? (
@@ -154,14 +159,17 @@ export function ChatContextPanel({
           >
             <aside
               className={cn(
-                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground backdrop-blur-md",
+                "chat-context-panel-surface flex min-w-0 flex-1 overflow-hidden rounded-md bg-background text-foreground",
+                "[backdrop-filter:var(--backdrop-chat-context-panel)] [-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
                 "h-auto max-h-full overflow-y-auto",
                 isCompactViewport && "shadow-popover",
               )}
             >
               <ContextPanel
                 sessionId={activeSessionId}
+                projectId={project?.id}
                 projectName={project?.name}
+                projectIcon={project?.icon}
                 projectColor={project?.color}
                 projectWorkingDirs={project?.workingDirs ?? []}
                 sessionWorkingDir={sessionWorkingDir}

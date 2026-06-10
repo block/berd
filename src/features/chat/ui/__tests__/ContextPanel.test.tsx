@@ -94,8 +94,24 @@ describe("ContextPanel", () => {
     screen
       .getAllByRole("button")
       .find((button) => button.textContent?.startsWith(branch));
-  const getCreateActionMenuButton = () =>
-    screen.getByRole("button", { name: /choose create action/i });
+  const getButtonFromText = (text: string) => {
+    const button =
+      screen
+        .getAllByText(text)
+        .map((element) => element.closest("button"))
+        .find(
+          (candidate) => candidate && !candidate.getAttribute("aria-label"),
+        ) ?? null;
+    if (!button) throw new Error(`Missing button for ${text}`);
+    return button;
+  };
+  const getWorkspaceActionsButton = () =>
+    screen.getByRole("button", { name: /open workspace actions/i });
+  const openWorkspaceActions = async (
+    user: ReturnType<typeof userEvent.setup>,
+  ) => {
+    await user.click(getWorkspaceActionsButton());
+  };
   const renderContextPanel = (
     props: Partial<Parameters<typeof ContextPanel>[0]> = {},
   ) =>
@@ -152,7 +168,7 @@ describe("ContextPanel", () => {
     });
   });
 
-  it("renders workspace details and supports switching to files tab", async () => {
+  it("renders workspace context and supports switching to files tab", async () => {
     const user = userEvent.setup();
 
     renderContextPanel({
@@ -161,46 +177,133 @@ describe("ContextPanel", () => {
       projectColor: "#22c55e",
     });
 
-    expect(screen.getByRole("tab", { name: /details/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /context/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /files/i })).toBeInTheDocument();
+    expect(screen.getByText("Project")).toBeInTheDocument();
     expect(screen.getByText("Workspace")).toBeInTheDocument();
     expect(screen.getByText("Desktop UX")).toBeInTheDocument();
+    expect(screen.getAllByText("main").length).toBeGreaterThan(0);
+    const changesSummary = screen.getAllByText((_, element) =>
+      Boolean(element?.textContent?.includes("3 changes on main")),
+    )[0];
+    const changesCount = within(changesSummary).getByText("3");
+    expect(changesSummary).toBeInTheDocument();
+    expect(changesCount).toHaveClass("text-foreground");
+    expect(changesCount.closest("section")).toHaveClass("pt-4");
+    expect(changesCount.closest("section")).not.toHaveClass("pt-5");
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select worktree/i }),
     ).toHaveTextContent("~/goose2");
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select branch/i }),
     ).toHaveTextContent("main");
-    expect(screen.queryByText("3 uncommitted changes")).not.toBeInTheDocument();
+
+    await openWorkspaceActions(user);
+
+    expect(
+      screen.queryByRole("menuitem", { name: /refresh local status/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("menuitem", { name: /^create branch$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /^fetch remote status$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /^pull$/i }),
+    ).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
     expect(
       screen.getByRole("button", { name: /^create branch$/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /^fetch$/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^pull$/i })).toBeInTheDocument();
-
     await user.click(screen.getByRole("tab", { name: /files/i }));
 
     expect(screen.getByText("goose2")).toBeInTheDocument();
   });
 
-  it("collapses and expands context panel sections", async () => {
-    const user = userEvent.setup();
+  it("matches chat composer horizontal padding in panel chrome", () => {
+    renderContextPanel({
+      sessionId: "test-session-padding",
+      projectName: "Desktop UX",
+    });
 
+    const tabListFrame = screen.getByRole("tablist").parentElement;
+    const contextTab = screen.getByRole("tab", { name: /context/i });
+    const filesTab = screen.getByRole("tab", { name: /files/i });
+    const divider = tabListFrame?.nextElementSibling;
+    const workspaceSection = screen.getByText("Workspace").closest("section");
+    const projectName = screen.getByText("Desktop UX");
+    const workspaceSelector = screen.getByRole("button", {
+      name: /select worktree/i,
+    });
+    const branchSelector = screen.getByRole("button", {
+      name: /select branch/i,
+    });
+    const contextPadding = screen.getByRole("tabpanel", {
+      name: /context/i,
+    }).firstElementChild;
+
+    expect(tabListFrame).toHaveClass("px-4");
+    expect(tabListFrame).not.toHaveClass("px-5");
+    expect(contextTab).toHaveClass("text-sm", "font-normal", "leading-normal");
+    expect(filesTab).toHaveClass("text-sm", "font-normal", "leading-normal");
+    expect(divider).toHaveClass("mx-4");
+    expect(divider).not.toHaveClass("mx-5");
+    expect(workspaceSection).toHaveClass("px-4");
+    expect(workspaceSection).toHaveClass("pb-2", "pt-4");
+    expect(workspaceSection).not.toHaveClass("pb-3", "pt-5");
+    expect(workspaceSection).not.toHaveClass("px-5");
+    expect(projectName.nextElementSibling).toBeNull();
+    expect(workspaceSelector).toHaveTextContent("~/goose2");
+    expect(branchSelector).toHaveTextContent("main");
+    expect(contextPadding).toHaveClass("pb-4");
+    expect(contextPadding).not.toHaveClass("pb-3");
+  });
+
+  it("uses the selected workspace as the files tab root", async () => {
+    const user = userEvent.setup();
+    useChatSessionStore
+      .getState()
+      .setActiveWorkspace("test-session-files-workspace", {
+        path: "/Users/test/goose2-feature",
+        branch: "feat/context-panel",
+      });
+
+    renderContextPanel({
+      sessionId: "test-session-files-workspace",
+      projectWorkingDirs: ["/Users/test/goose2"],
+      sessionWorkingDir: "/Users/test/goose2",
+    });
+
+    await user.click(screen.getByRole("tab", { name: /files/i }));
+
+    await waitFor(() => {
+      expect(mockListDirectoryEntries).toHaveBeenCalledWith(
+        "/Users/test/goose2-feature",
+      );
+    });
+    expect(mockListDirectoryEntries).not.toHaveBeenCalledWith(
+      "/Users/test/goose2",
+    );
+  });
+
+  it("renders workspace controls in a flat non-collapsible layout", () => {
     renderContextPanel({
       sessionId: "test-session-collapse",
       projectName: "Desktop UX",
       projectColor: "#22c55e",
     });
 
-    await user.click(screen.getByRole("button", { name: /workspace/i }));
-
-    expect(screen.queryByText("Desktop UX")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /workspace/i }));
-
-    expect(screen.getByText("Desktop UX")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /^workspace$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /select worktree/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /select branch/i }),
+    ).toBeInTheDocument();
   });
 
   it("shows path and init button for non-git directory", async () => {
@@ -277,9 +380,6 @@ describe("ContextPanel", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /change folder/i }),
-    ).toHaveTextContent("Artifact folder");
-    expect(
-      screen.getByRole("button", { name: /change folder/i }),
     ).toHaveTextContent("goose artifacts");
 
     await user.click(screen.getByRole("button", { name: /change folder/i }));
@@ -305,7 +405,7 @@ describe("ContextPanel", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("changes the working folder from the git picker dropdown", async () => {
+  it("changes the working folder from the workspace actions menu", async () => {
     const user = userEvent.setup();
     mockOpenDialog.mockResolvedValue("/Users/test/another-folder");
 
@@ -314,10 +414,8 @@ describe("ContextPanel", () => {
       projectName: "Desktop UX",
     });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
-    await user.click(screen.getByRole("button", { name: /change folder/i }));
+    await openWorkspaceActions(user);
+    await user.click(screen.getByRole("menuitem", { name: /change folder/i }));
 
     expect(mockOpenDialog).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -408,7 +506,7 @@ describe("ContextPanel", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select worktree/i }),
     ).toBeInTheDocument();
   });
 
@@ -447,10 +545,10 @@ describe("ContextPanel", () => {
     });
 
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select worktree/i }),
     ).toHaveTextContent("~/goose2-feature");
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select branch/i }),
     ).toHaveTextContent("feat/context-panel");
   });
 
@@ -467,45 +565,51 @@ describe("ContextPanel", () => {
       projectName: "Desktop UX",
     });
 
-    const picker = screen.getByRole("button", {
-      name: /select worktree or branch/i,
-    });
-    expect(picker).toHaveTextContent("~/goose2");
-    expect(picker).toHaveTextContent("main");
-    expect(picker).not.toHaveTextContent("dev");
+    expect(
+      screen.getByRole("button", { name: /select worktree/i }),
+    ).toHaveTextContent("~/goose2");
+    expect(
+      screen.getByRole("button", { name: /select branch/i }),
+    ).toHaveTextContent("main");
+    expect(
+      screen.getByRole("button", { name: /select branch/i }),
+    ).not.toHaveTextContent("dev");
   });
 
-  it("shows all branches on the main worktree and uses folder subtext for branch targets", async () => {
+  it("separates worktrees from available branch targets", async () => {
     const user = userEvent.setup();
 
     renderContextPanel({ sessionId: "test-session-4b" });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /select worktree/i }));
 
-    expect(screen.getByText("All branches")).toBeInTheDocument();
-    expect(screen.getByText("Current branch").closest("button")).toBeDisabled();
-    expect(getBranchButton("feat/context-panel")).toHaveTextContent(
+    expect(screen.getByPlaceholderText("Search")).toBeInTheDocument();
+    expect(getButtonFromText("goose2")).toHaveTextContent("~/goose2");
+    expect(getButtonFromText("goose2-feature")).toHaveTextContent(
       "~/goose2-feature",
     );
-    expect(getBranchButton("dev")).toHaveTextContent("~/goose2");
+    expect(getBranchButton("dev")).toBeUndefined();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
+
+    expect(getBranchButton("feat/context-panel")).toBeDisabled();
     expect(getBranchButton("dev")).not.toBeDisabled();
 
-    const featureBranchButton = getBranchButton("feat/context-panel");
-    if (!featureBranchButton) throw new Error("Missing feature branch button");
-    await user.click(featureBranchButton);
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /select worktree/i }));
+    await user.click(getButtonFromText("goose2-feature"));
 
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select worktree/i }),
     ).toHaveTextContent("~/goose2-feature");
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select branch/i }),
     ).toHaveTextContent("feat/context-panel");
     expect(vi.mocked(gitApi.switchBranch)).not.toHaveBeenCalled();
   });
 
-  it("shows all branches on non-main worktrees and routes untied branches through main", async () => {
+  it("routes available branch targets through the selected worktree", async () => {
     const user = userEvent.setup();
 
     let gitState: GitState = {
@@ -555,26 +659,21 @@ describe("ContextPanel", () => {
       projectWorkingDirs: ["/Users/test/goose2-feature"],
     });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
 
-    expect(screen.getByText("All branches")).toBeInTheDocument();
-    expect(getBranchButton("main")).toHaveTextContent("~/goose2");
-    expect(getBranchButton("dev")).toHaveTextContent("~/goose2");
+    expect(screen.getByPlaceholderText("Search")).toBeInTheDocument();
+    expect(getBranchButton("main")).toBeDisabled();
+    expect(getBranchButton("dev")).not.toBeDisabled();
 
     await user.click(screen.getByText("dev"));
 
     expect(vi.mocked(gitApi.switchBranch)).toHaveBeenCalledWith(
-      "/Users/test/goose2",
+      "/Users/test/goose2-feature",
       "dev",
     );
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("~/goose2");
-    expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("dev");
+      screen.getByRole("button", { name: /select worktree/i }),
+    ).toHaveTextContent("~/goose2-feature");
   });
 
   it("surfaces the real git error when a branch switch fails", async () => {
@@ -617,9 +716,12 @@ describe("ContextPanel", () => {
       projectWorkingDirs: ["/Users/test/goose2-feature"],
     });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
+
+    expect(screen.getByPlaceholderText("Search")).toBeInTheDocument();
+    expect(getBranchButton("main")).toBeDisabled();
+    expect(getBranchButton("dev")).not.toBeDisabled();
+
     await user.click(screen.getByText("dev"));
 
     await waitFor(() => {
@@ -630,7 +732,7 @@ describe("ContextPanel", () => {
     // The picker stays on the real current context instead of pretending
     // the switch happened.
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select branch/i }),
     ).toHaveTextContent("feat/context-panel");
   });
 
@@ -644,9 +746,7 @@ describe("ContextPanel", () => {
     // untied branch routes through the stash-and-switch confirmation.
     renderContextPanel({ sessionId: "test-session-stash-fail" });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
     await user.click(screen.getByText("dev"));
     await user.click(screen.getByRole("button", { name: /stash & switch/i }));
 
@@ -689,39 +789,58 @@ describe("ContextPanel", () => {
 
     renderContextPanel({ sessionId: "test-session-5" });
 
-    await user.click(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    );
+    await user.click(screen.getByRole("button", { name: /select branch/i }));
 
-    expect(screen.getByText("Worktrees")).toBeInTheDocument();
-    expect(screen.getByText("goose2")).toBeInTheDocument();
-    expect(screen.getAllByText("main")[0]).toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Search")).toBeInTheDocument();
+    const currentBranchRow = screen
+      .getAllByRole("button")
+      .find(
+        (button): button is HTMLButtonElement =>
+          button instanceof HTMLButtonElement &&
+          Boolean(button.textContent?.includes("main")) &&
+          button.disabled,
+      );
+    if (!currentBranchRow) throw new Error("Missing current branch row");
+    expect(currentBranchRow).toHaveTextContent("main");
+    expect(currentBranchRow).toBeDisabled();
   });
 
-  it("shows inline workspace actions and create options", async () => {
+  it("shows grouped workspace actions and create options", async () => {
     const user = userEvent.setup();
 
-    renderContextPanel({ sessionId: "test-session-6" });
+    renderContextPanel({
+      sessionId: "test-session-6",
+      onToggleTerminal: vi.fn(),
+    });
 
+    await openWorkspaceActions(user);
+
+    expect(screen.queryByText("Local")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Workspace")).toHaveLength(2);
+    expect(screen.getByText("Remote")).toBeInTheDocument();
+    expect(screen.queryByText("Git")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /^create branch$/i }),
+      screen.queryByRole("menuitem", { name: /^refresh local status$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /^open terminal$/i }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /^fetch$/i }),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /^pull$/i })).toBeInTheDocument();
-
-    await user.click(getCreateActionMenuButton());
-
-    expect(
-      screen.getByRole("menuitem", { name: /^create branch$/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("menuitem", { name: /^create branch$/i }),
+    ).not.toBeInTheDocument();
     expect(
       screen.getByRole("menuitem", { name: /^create worktree$/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /^fetch remote status$/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("menuitem", { name: /^pull$/i }),
+    ).toBeInTheDocument();
   });
 
-  it("shows the incoming commit count on pull when available", () => {
+  it("shows the incoming commit count on pull when available", async () => {
+    const user = userEvent.setup();
     mockUseGitState.mockReturnValue({
       data: {
         isGitRepo: true,
@@ -747,12 +866,34 @@ describe("ContextPanel", () => {
 
     renderContextPanel({ sessionId: "test-session-6b" });
 
+    expect(screen.getByText("main")).toBeInTheDocument();
+
+    await openWorkspaceActions(user);
+
     expect(
-      screen.getByRole("button", { name: /^pull \(3\)$/i }),
+      screen.getByRole("menuitem", { name: /^pull 3 commits$/i }),
     ).toBeInTheDocument();
   });
 
-  it("creates a branch from the workspace actions dialog", async () => {
+  it("refreshes local status from the workspace header", async () => {
+    const user = userEvent.setup();
+    const invalidateSpy = vi.spyOn(QueryClient.prototype, "invalidateQueries");
+
+    renderContextPanel({ sessionId: "test-session-refresh-git-status" });
+
+    await user.click(
+      screen.getByRole("button", { name: /refresh local status/i }),
+    );
+
+    await waitFor(() => {
+      expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["git-state"] });
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: ["changed-files"],
+      });
+    });
+  });
+
+  it("creates a branch from the branch selector dialog", async () => {
     const user = userEvent.setup();
 
     let gitState: GitState = {
@@ -813,9 +954,7 @@ describe("ContextPanel", () => {
       "feature/new-branch",
       "main",
     );
-    expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("feature/new-branch");
+    expect(screen.getAllByText("feature/new-branch").length).toBeGreaterThan(0);
   });
 
   it("creates a worktree from the workspace actions dialog", async () => {
@@ -828,7 +967,7 @@ describe("ContextPanel", () => {
 
     renderContextPanel({ sessionId: "test-session-8" });
 
-    await user.click(getCreateActionMenuButton());
+    await openWorkspaceActions(user);
     await user.click(
       screen.getByRole("menuitem", { name: /^create worktree$/i }),
     );
@@ -852,19 +991,66 @@ describe("ContextPanel", () => {
       "main",
     );
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
+      screen.getByRole("button", { name: /select worktree/i }),
     ).toHaveTextContent("~/goose2-worktrees/new-worktree");
     expect(
-      screen.getByRole("button", { name: /select worktree or branch/i }),
-    ).toHaveTextContent("new-worktree");
+      screen.getByRole("button", { name: /select branch/i }),
+    ).toHaveTextContent("feature/new-worktree");
   });
 
-  it("remembers the last selected create action on the primary button", async () => {
+  it("does not create a worktree from an unborn branch ref", async () => {
+    const user = userEvent.setup();
+    mockUseGitState.mockReturnValue({
+      data: {
+        isGitRepo: true,
+        currentBranch: "main",
+        dirtyFileCount: 0,
+        incomingCommitCount: 0,
+        worktrees: [
+          {
+            path: "/Users/test/goose-artifacts",
+            branch: null,
+            isMain: true,
+          },
+        ],
+        isWorktree: false,
+        mainWorktreePath: "/Users/test/goose-artifacts",
+        localBranches: [],
+      },
+      error: null,
+      isLoading: false,
+      isFetching: false,
+      refetch: mockRefetch,
+    });
+
+    renderContextPanel({
+      sessionId: "test-session-unborn-worktree",
+      projectWorkingDirs: ["/Users/test/goose-artifacts"],
+    });
+
+    await openWorkspaceActions(user);
+    await user.click(
+      screen.getByRole("menuitem", { name: /^create worktree$/i }),
+    );
+    await user.type(screen.getByLabelText("Worktree name"), "new-worktree");
+
+    expect(screen.getAllByText("No branches available").length).toBeGreaterThan(
+      0,
+    );
+    expect(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: /^create worktree$/i,
+      }),
+    ).toBeDisabled();
+    expect(vi.mocked(gitApi.createWorktree)).not.toHaveBeenCalled();
+  });
+
+  it("opens create worktree from the workspace actions menu", async () => {
     const user = userEvent.setup();
 
     renderContextPanel({ sessionId: "test-session-8b" });
 
-    await user.click(getCreateActionMenuButton());
+    await openWorkspaceActions(user);
     await user.click(
       screen.getByRole("menuitem", { name: /^create worktree$/i }),
     );
@@ -881,12 +1067,9 @@ describe("ContextPanel", () => {
       }),
     );
 
-    expect(
-      screen.getByRole("button", { name: /^create worktree$/i }),
-    ).toBeInTheDocument();
-
+    await openWorkspaceActions(user);
     await user.click(
-      screen.getByRole("button", { name: /^create worktree$/i }),
+      screen.getByRole("menuitem", { name: /^create worktree$/i }),
     );
 
     expect(
@@ -901,7 +1084,7 @@ describe("ContextPanel", () => {
 
     renderContextPanel({ sessionId: "test-session-9" });
 
-    await user.click(getCreateActionMenuButton());
+    await openWorkspaceActions(user);
     await user.click(
       screen.getByRole("menuitem", { name: /^create worktree$/i }),
     );

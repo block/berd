@@ -72,6 +72,9 @@
   "contextPanel": {
     "actions": {
       "chooseCreateAction": "Elegir acción de creación",
+      "fetchRemoteStatus": "Actualizar estado remoto",
+      "openWorkspaceMenu": "Abrir acciones del espacio de trabajo",
+      "refreshLocalStatus": "Actualizar estado local",
       "refreshGitStatus": "Actualizar estado de git"
     },
     "createDialog": {
@@ -120,12 +123,21 @@
     },
     "picker": {
       "selectContext": "Seleccionar árbol de trabajo o rama",
+      "selectWorktree": "Seleccionar árbol de trabajo",
+      "selectBranch": "Seleccionar rama",
+      "search": "Buscar",
+      "noResults": "No hay árboles de trabajo ni ramas que coincidan",
       "worktrees": "Árboles de trabajo",
       "allBranches": "Todas las ramas",
+      "availableBranches": "Ramas disponibles",
+      "branchLabel": "Rama",
+      "switchIn": "Cambiar en {{worktree}}",
+      "checkedOutIn": "En uso en {{worktree}}",
       "changeFolder": "Cambiar carpeta…",
       "changesStashed": "Tus cambios se guardaron primero en el stash — restáuralos con \"git stash pop\".",
       "checkedOutBranch": "{{branch}}",
       "currentBranch": "Rama actual",
+      "noBranch": "Sin rama",
       "dirtyTitle": "Cambios sin confirmar",
       "dirtyDescription_one": "Tienes {{count}} cambio sin confirmar. ¿Cómo deseas proceder?",
       "dirtyDescription_other": "Tienes {{count}} cambios sin confirmar. ¿Cómo deseas proceder?",
@@ -143,17 +155,33 @@
       "initRepo": "Inicializar Git",
       "initError": "Error al inicializar el repositorio git.",
       "pull": "Pull",
+      "pullCommitCount_one": "Pull {{count}} commit",
+      "pullCommitCount_other": "Pull {{count}} commits",
       "pullWithCount": "Pull ({{count}})",
       "pullError": "No se pudieron bajar los cambios.",
       "pullSuccess": "Se bajaron los cambios más recientes."
+    },
+    "labels": {
+      "git": "Git",
+      "local": "Local",
+      "project": "Proyecto",
+      "remote": "Remoto",
+      "workspace": "Espacio de trabajo"
     },
     "states": {
       "detached": "detached",
       "gitLoading": "Cargando estado de git..."
     },
     "tabs": {
-      "details": "Detalles",
+      "details": "Contexto",
       "files": "Archivos"
+    },
+    "summary": {
+      "behind_one": "{{count}} pendiente",
+      "behind_other": "{{count}} pendientes",
+      "changes_one": "{{count}} cambio",
+      "changes_other": "{{count}} cambios",
+      "refreshStatus": "Actualizar estado"
     },
     "widgets": {
       "artifacts": "Artefactos",

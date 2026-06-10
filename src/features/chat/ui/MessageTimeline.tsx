@@ -31,8 +31,6 @@ import {
 const AUTO_SCROLL_THRESHOLD_PX = 180;
 const PINNED_BOTTOM_THRESHOLD_PX = 8;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
-// Mirrors --chat-composer-surface-overlap for scroll math; CSS owns the token.
-const FOOTER_DOCK_OVERLAP_PX = 28;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
 
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
@@ -116,9 +114,9 @@ export function MessageTimeline({
   const { t } = useTranslation("chat");
   const { formatDate } = useLocaleFormatting();
   const containerRef = useRef<HTMLDivElement>(null);
-  // The composer is docked in flow and visually overlaps the transcript; its
-  // measured height changes the scrollable viewport while overlap padding keeps
-  // the last message above the glass surface.
+  // The composer is docked in flow at the bottom of the chat panel; its
+  // measured height changes the scrollable viewport while clearance padding
+  // keeps the last message from pressing into the composer.
   const footerRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const isNearBottomRef = useRef(true);
@@ -138,7 +136,7 @@ export function MessageTimeline({
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const hasFooter = footer != null;
   const messageListBottomPaddingPx = hasFooter
-    ? FOOTER_DOCK_OVERLAP_PX + FOOTER_DOCK_CLEARANCE_PX
+    ? FOOTER_DOCK_CLEARANCE_PX
     : (tailPaddingPx ?? 16);
   messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
   const visibleMessages = messages.filter(
@@ -891,16 +889,14 @@ export function MessageTimeline({
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
       >
-        <div className="flex min-h-full flex-col">
-          <div
-            ref={searchContentRef}
-            className="flex min-h-0 flex-1 flex-col"
-            role="log"
-            aria-label={t("timeline.ariaLabel")}
-            aria-live="polite"
-          >
-            {content}
-          </div>
+        <div
+          ref={searchContentRef}
+          className="flex min-h-0 flex-1 flex-col"
+          role="log"
+          aria-label={t("timeline.ariaLabel")}
+          aria-live="polite"
+        >
+          {content}
         </div>
       </MessageTimelineScrollContainer>
       {footer ? (

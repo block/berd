@@ -17,6 +17,7 @@ import {
 } from "@/shared/api/git";
 import type { CreatedWorktree } from "@/shared/types/git";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
+import { SIDEBAR_NAV_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
 import { useChatSessionStore } from "../stores/chatSessionStore";
 import type { ActiveWorkspace } from "../stores/chatSessionStore";
 import { WorkspaceWidget } from "./widgets/WorkspaceWidget";
@@ -29,7 +30,9 @@ import { toast } from "sonner";
 
 interface ContextPanelProps {
   sessionId: string;
+  projectId?: string;
   projectName?: string;
+  projectIcon?: string;
   projectColor?: string;
   projectWorkingDirs?: string[];
   sessionWorkingDir?: string | null;
@@ -68,9 +71,17 @@ function validateSectionVisibility(
   };
 }
 
+function uniquePaths(paths: Array<string | null | undefined>): string[] {
+  return Array.from(
+    new Set(paths.filter((path): path is string => Boolean(path))),
+  );
+}
+
 export function ContextPanel({
   sessionId,
+  projectId,
   projectName,
+  projectIcon,
   projectColor,
   projectWorkingDirs = [],
   sessionWorkingDir,
@@ -98,12 +109,7 @@ export function ContextPanel({
     sessionWorkingDir ??
     projectDefaultWorkspaceRoot ??
     null;
-  const fileBrowserRoots =
-    projectWorkingDirs.length > 0
-      ? projectWorkingDirs
-      : sessionWorkingDir
-        ? [sessionWorkingDir]
-        : [];
+  const fileBrowserRoots = uniquePaths([gitTargetPath]);
   const queryClient = useQueryClient();
   const {
     data: gitState,
@@ -299,25 +305,35 @@ export function ContextPanel({
       onValueChange={(value) => setActiveTab(value as ContextPanelTab)}
       className="flex w-full min-w-0 flex-col gap-0"
     >
-      <div className="shrink-0 px-5 pb-2 pt-2.5">
+      <div className="shrink-0 px-4 pb-2 pt-2.5">
         <TabsList variant="weight">
-          <TabsTrigger value="details" variant="weight">
+          <TabsTrigger
+            value="details"
+            variant="weight"
+            className={SIDEBAR_NAV_TEXT_CLASS}
+          >
             {t("contextPanel.tabs.details")}
           </TabsTrigger>
-          <TabsTrigger value="files" variant="weight">
+          <TabsTrigger
+            value="files"
+            variant="weight"
+            className={SIDEBAR_NAV_TEXT_CLASS}
+          >
             {t("contextPanel.tabs.files")}
           </TabsTrigger>
         </TabsList>
       </div>
-      <div className="mx-5 shrink-0 border-b border-border/80" aria-hidden />
+      <div className="mx-4 shrink-0 border-b border-border/80" aria-hidden />
 
       <TabsContent
         value="details"
         className="w-full min-h-0 flex-1 overflow-y-auto"
       >
-        <div className="w-full pb-3">
+        <div className="w-full pb-4">
           <WorkspaceWidget
+            projectId={projectId}
             projectName={projectName}
+            projectIcon={projectIcon}
             projectColor={projectColor}
             projectWorkingDirs={projectWorkingDirs}
             sessionWorkingDir={sessionWorkingDir}
@@ -349,6 +365,7 @@ export function ContextPanel({
               error={changedFilesError}
               isLoadingError={isChangedFilesLoadingError}
               currentBranch={gitState?.currentBranch ?? null}
+              dirtyFileCount={gitState?.dirtyFileCount ?? 0}
               repoPath={gitTargetPath ?? ""}
               onOpenFile={handleOpenChangedFile}
               isOpen={sectionVisibility.changes}

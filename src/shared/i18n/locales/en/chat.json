@@ -72,6 +72,9 @@
   "contextPanel": {
     "actions": {
       "chooseCreateAction": "Choose create action",
+      "fetchRemoteStatus": "Fetch remote status",
+      "openWorkspaceMenu": "Open workspace actions",
+      "refreshLocalStatus": "Refresh local status",
       "refreshGitStatus": "Refresh git status"
     },
     "createDialog": {
@@ -120,12 +123,21 @@
     },
     "picker": {
       "selectContext": "Select worktree or branch",
+      "selectWorktree": "Select worktree",
+      "selectBranch": "Select branch",
+      "search": "Search",
+      "noResults": "No matching worktrees or branches",
       "worktrees": "Worktrees",
       "allBranches": "All branches",
+      "availableBranches": "Available branches",
+      "branchLabel": "Branch",
+      "switchIn": "Switch in {{worktree}}",
+      "checkedOutIn": "Checked out in {{worktree}}",
       "changeFolder": "Change folder…",
       "changesStashed": "Your changes were stashed first — restore them with \"git stash pop\".",
       "checkedOutBranch": "{{branch}}",
       "currentBranch": "Current branch",
+      "noBranch": "No branch",
       "dirtyTitle": "Uncommitted changes",
       "dirtyDescription_one": "You have {{count}} uncommitted change. How would you like to proceed?",
       "dirtyDescription_other": "You have {{count}} uncommitted changes. How would you like to proceed?",
@@ -143,17 +155,33 @@
       "initRepo": "Initialize Git",
       "initError": "Failed to initialize git repository.",
       "pull": "Pull",
+      "pullCommitCount_one": "Pull {{count}} commit",
+      "pullCommitCount_other": "Pull {{count}} commits",
       "pullWithCount": "Pull ({{count}})",
       "pullError": "Failed to pull changes.",
       "pullSuccess": "Pulled latest changes."
+    },
+    "labels": {
+      "git": "Git",
+      "local": "Local",
+      "project": "Project",
+      "remote": "Remote",
+      "workspace": "Workspace"
     },
     "states": {
       "detached": "detached",
       "gitLoading": "Loading git status..."
     },
     "tabs": {
-      "details": "Details",
+      "details": "Context",
       "files": "Files"
+    },
+    "summary": {
+      "behind_one": "{{count}} behind",
+      "behind_other": "{{count}} behind",
+      "changes_one": "{{count}} change",
+      "changes_other": "{{count}} changes",
+      "refreshStatus": "Refresh status"
     },
     "widgets": {
       "artifacts": "Artifacts",

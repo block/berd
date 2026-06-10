@@ -44,7 +44,7 @@ export function Widget({
 
   return (
     <section className="w-full pb-3 pt-4 first:pt-3 last:pb-0">
-      <div className="px-5">
+      <div className="px-4">
         <div className="flex min-h-6 items-center justify-between gap-2">
           {onToggleOpen ? (
             <button
@@ -52,7 +52,7 @@ export function Widget({
               onClick={onToggleOpen}
               aria-expanded={isOpen}
               className={cn(
-                "flex min-w-0 flex-1 items-center gap-0.5 rounded-md py-1 text-left transition-colors hover:text-foreground",
+                "flex min-w-0 flex-1 items-center gap-0.5 rounded-sm py-1 text-left transition-colors hover:text-foreground",
                 SECTION_HEADER_TEXT_CLASS,
               )}
             >

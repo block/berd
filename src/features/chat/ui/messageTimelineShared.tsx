@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { IconArrowDown } from "@tabler/icons-react";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
+import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
 
 export interface MessageBubbleCallbacks {
@@ -23,7 +25,9 @@ export type MessageTimelineBubbleCallbacks = Omit<
 export function MessageDateSeparator({ label }: { label?: string }) {
   return (
     <div className="my-4 px-4 text-center">
-      <span className="text-[11px] font-medium text-muted-foreground">
+      <span
+        className={cn(SIDEBAR_GROUP_LABEL_TEXT_CLASS, "text-muted-foreground")}
+      >
         {label}
       </span>
     </div>

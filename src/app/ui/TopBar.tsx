@@ -1,10 +1,9 @@
 import {
   IconArrowLeft,
   IconArrowRight,
+  IconInfoCircle,
   IconLayoutSidebar,
   IconLayoutSidebarFilled,
-  IconLayoutSidebarRight,
-  IconLayoutSidebarRightFilled,
   IconMessageReport,
   IconSearch,
 } from "@tabler/icons-react";
@@ -122,9 +121,6 @@ export function TopBar({
   const SidebarIcon = sidebarCollapsed
     ? IconLayoutSidebar
     : IconLayoutSidebarFilled;
-  const ContextPanelIcon = contextPanelOpen
-    ? IconLayoutSidebarRightFilled
-    : IconLayoutSidebarRight;
   const leadingSpaceClassName =
     chromeInsets.leading === "trafficLights"
       ? "w-[var(--spacing-app-top-bar-leading)]"
@@ -237,10 +233,11 @@ export function TopBar({
             variant="top-bar-icon"
             size="icon-top-bar"
             onClick={onToggleContextPanel}
+            aria-pressed={contextPanelOpen}
             aria-label={contextPanelLabel}
             title={contextPanelLabel}
           >
-            <ContextPanelIcon aria-hidden="true" />
+            <IconInfoCircle aria-hidden="true" />
           </Button>
         )}
       </div>

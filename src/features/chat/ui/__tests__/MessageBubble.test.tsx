@@ -339,6 +339,10 @@ describe("MessageBubble", () => {
     );
     expect(timestamp).toHaveClass("whitespace-nowrap");
     expect(timestamp).toHaveClass("shrink-0");
+    expect(timestamp).toHaveClass("text-[13px]");
+    expect(timestamp).toHaveClass("leading-relaxed");
+    expect(timestamp).not.toHaveClass("text-sm");
+    expect(timestamp).not.toHaveClass("text-[10px]");
   });
 
   it("anchors assistant and user actions on opposite sides of the timestamp", () => {

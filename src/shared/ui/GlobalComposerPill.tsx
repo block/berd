@@ -37,7 +37,6 @@ import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { resolveAgentProviderCatalogIdStrict } from "@/features/providers/providerCatalog";
 import { getClient } from "@/shared/api/acpConnection";
 import { cn } from "@/shared/lib/cn";
-import { SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS } from "@/shared/ui/sidebar-tokens";
 import { Button } from "@/shared/ui/button";
 import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
@@ -726,8 +725,7 @@ export function GlobalComposerPill({
         }
       }}
       className={cn(
-        "group relative fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-shadow duration-300 ease-out",
-        SIDEBAR_PANEL_ELEVATED_HOVER_SHADOW_CLASS,
+        "group relative fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-shadow duration-300 ease-out hover:shadow-global-composer-pill-hover",
       )}
     >
       {isAttachmentDragOver ? (
@@ -848,7 +846,7 @@ export function GlobalComposerPill({
                 aria-controls={mentionOpen ? mentionListboxId : undefined}
                 aria-describedby={mentionOpen ? mentionStatusId : undefined}
                 className={cn(
-                  "focus-override scrollbar-subtle max-h-[200px] w-full resize-none appearance-none overflow-y-auto overscroll-contain border-0 bg-transparent text-[16px] leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-opacity placeholder:duration-300 placeholder:ease-in-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
+                  "focus-override max-h-[200px] w-full resize-none appearance-none overflow-y-auto overscroll-contain scrollbar-none border-0 bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-colors placeholder:duration-200 placeholder:ease-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
                   expanded
                     ? "min-h-10 py-2.5 pr-2"
                     : "h-8 min-h-0 py-0 pr-[5.75rem]",

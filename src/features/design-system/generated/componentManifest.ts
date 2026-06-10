@@ -1534,6 +1534,7 @@ export const designSystemComponentManifest = [
       "focus:ring-0",
       "hover:bg-accent",
       "hover:bg-destructive/16",
+      "hover:shadow-global-composer-pill-hover",
       "hover:text-destructive",
     ],
     sourceTokenClasses: [

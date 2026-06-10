@@ -53,6 +53,15 @@ describe("ChatContextPanel", () => {
     );
     expect(panel).toHaveClass("h-auto");
     expect(panel).toHaveClass("max-h-full");
+    expect(panel).toHaveClass("rounded-md");
+    expect(panel).not.toHaveClass("rounded-sm");
+    expect(panel).toHaveClass(
+      "[backdrop-filter:var(--backdrop-chat-context-panel)]",
+    );
+    expect(panel).toHaveClass(
+      "[-webkit-backdrop-filter:var(--backdrop-chat-context-panel)]",
+    );
+    expect(panel).not.toHaveClass("backdrop-blur-md");
     expect(panel).not.toHaveClass("h-full");
     expect(panel).not.toHaveClass("shadow-popover");
   });

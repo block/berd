@@ -744,7 +744,7 @@ describe("MessageTimeline", () => {
     expect(scroller.scrollTop).toBe(500);
   });
 
-  it("keeps the floating footer outside the live message log", () => {
+  it("keeps the docked footer outside the live message log", () => {
     renderWithProviders(
       <MessageTimeline
         messages={[message("user-1", "user", "Question")]}
@@ -757,7 +757,7 @@ describe("MessageTimeline", () => {
     expect(log).not.toContainElement(screen.getByTestId("composer-footer"));
   });
 
-  it("docks the floating footer in layout flow while overlapping the message surface", () => {
+  it("docks the footer in layout flow at the bottom of the message surface", () => {
     renderWithProviders(
       <MessageTimeline
         messages={[message("user-1", "user", "Question")]}
@@ -771,20 +771,16 @@ describe("MessageTimeline", () => {
     const footerFrame = screen.getByTestId("message-timeline-footer");
     const footerStatus = screen.getByTestId("footer-status").parentElement;
 
-    expect(surface).toHaveClass(
-      "absolute",
-      "bottom-[calc(var(--chat-surface-bottom-gap)*2)]",
-      "rounded-md",
-      "bg-card",
-    );
+    expect(surface).toHaveClass("absolute", "rounded-md", "bg-card");
+    expect(surface).not.toContainElement(scroller);
     expect(scroller).toHaveClass("flex-1");
     expect(scroller).not.toHaveClass("bg-card");
     expect(footerFrame).toHaveClass(
       "relative",
-      "mt-[calc(-1*var(--chat-composer-surface-overlap))]",
       "shrink-0",
       "pb-[var(--chat-surface-bottom-gap)]",
     );
+    expect(footerFrame).not.toHaveClass("bg-card");
     expect(footerFrame).not.toHaveClass("absolute", "bottom-4");
     expect(footerStatus?.parentElement).toHaveClass(
       "absolute",

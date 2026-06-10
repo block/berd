@@ -129,10 +129,14 @@ vi.mock("../ConversationEmptyAvatar", () => ({
 
 vi.mock("../ChatRightRail", () => ({
   ChatRightRail: (props: {
+    session?: ChatSession | null;
     onToggleTerminal?: () => void;
     terminalOpen?: boolean;
   }) => {
     mocks.chatRightRailSpy(props);
+    if (!props.session) {
+      return null;
+    }
     return (
       <div data-testid="chat-right-rail">
         <button
@@ -731,7 +735,7 @@ describe("ChatView MCP app messaging", () => {
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
   });
 
-  it("uses an inline rail gap only while the context panel takes layout space", () => {
+  it("uses an inline rail gap while the desktop context panel takes layout space", () => {
     mocks.isContextPanelOpen = true;
     mockMatchMedia(false);
     const activeSession = {
@@ -743,21 +747,39 @@ describe("ChatView MCP app messaging", () => {
       intent: null,
     } satisfies ChatSession;
 
-    const { unmount } = render(
-      <ChatView sessionId="session-1" activeSession={activeSession} />,
-    );
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
     expect(document.querySelector(".page-transition")).toHaveClass(
       "gap-[var(--spacing-app-panel-gutter-inline)]",
     );
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      sidePanel?: ReactNode;
+    };
+    expect(timelineProps.sidePanel).toBeUndefined();
+    expect(screen.getByTestId("chat-right-rail")).toBeInTheDocument();
+    expect(screen.getByTestId("message-timeline")).not.toContainElement(
+      screen.getByTestId("chat-right-rail"),
+    );
+  });
 
-    unmount();
+  it("keeps the context panel mounted without a rail gap in compact overlay mode", () => {
+    mocks.isContextPanelOpen = true;
     mockMatchMedia(true);
+    const activeSession = {
+      id: "session-1",
+      title: "Chat",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: null,
+    } satisfies ChatSession;
+
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
     expect(document.querySelector(".page-transition")).not.toHaveClass(
       "gap-[var(--spacing-app-panel-gutter-inline)]",
     );
+    expect(screen.getByTestId("chat-right-rail")).toBeInTheDocument();
   });
 
   it("uses agent-building copy for empty builder sessions", () => {

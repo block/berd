@@ -232,7 +232,7 @@
   --secondary: var(--color-gray-400);
   --secondary-foreground: var(--foreground);
   --muted: var(--color-gray-100);
-  --muted-foreground: #7f7f7f;
+  --muted-foreground: var(--color-gray-600);
   --accent: var(--color-gray-50);
   --accent-foreground: var(--foreground);
   --destructive: var(--color-red-600);
@@ -310,13 +310,13 @@
   --filter-chat-responding-goose: invert(1);
   --chat-context-panel-bg: color-mix(
     in srgb,
-    var(--color-gray-900) 60%,
+    var(--color-gray-900) 66%,
     transparent
   );
   --chat-context-panel-fg: var(--color-gray-50);
   --chat-context-panel-muted-fg: color-mix(
     in srgb,
-    var(--color-gray-50) 62%,
+    var(--color-gray-50) 68%,
     transparent
   );
   --chat-context-panel-border: color-mix(
@@ -326,10 +326,33 @@
   );
   --chat-context-panel-accent: color-mix(
     in srgb,
-    var(--color-gray-50) 10%,
+    var(--color-gray-50) 12%,
     transparent
   );
   --chat-context-panel-accent-fg: var(--color-gray-50);
+  --chat-context-panel-hover: color-mix(
+    in srgb,
+    var(--color-gray-50) 26%,
+    transparent
+  );
+  --chat-context-dropdown-bg: color-mix(
+    in srgb,
+    var(--color-gray-800) 88%,
+    transparent
+  );
+  --chat-context-dropdown-hover: color-mix(
+    in srgb,
+    var(--color-gray-50) 12%,
+    transparent
+  );
+  --chat-context-dropdown-fg: var(--color-gray-50);
+  --chat-context-dropdown-muted-fg: color-mix(
+    in srgb,
+    var(--color-gray-50) 52%,
+    transparent
+  );
+  --backdrop-chat-context-dropdown: blur(18px) saturate(170%) brightness(1.02);
+  --backdrop-chat-context-panel: blur(28px) saturate(180%) brightness(1.02);
   --surface-editor-panel-neutral: color-mix(
     in srgb,
     var(--color-gray-300) 52%,
@@ -511,8 +534,11 @@
     0 16px 32px rgba(0, 0, 0, 0.03);
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.09);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.2);
-  /* Floating panel hover (sidebar, global composer pill). */
+  /* Floating panel hover (sidebar). */
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.05);
+  /* Composer pill hover — same soft sideways cast as the sidebar panel, lifted
+     closer to the pill so it remains visible at the bottom edge. */
+  --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.07);
   /* Chat composer: soft drop straight down. */
   --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.09);
   --shadow-kbd: 0 2px 8px rgba(76, 76, 76, 0.15);
@@ -600,12 +626,9 @@
   );
   --chat-user-message-max-width: 640px;
   --chat-composer-max-width: 768px;
-  /* Space below the white chat column (composer overlaps this gap). */
+  /* Space below the chat column and the amount the docked composer tucks into it. */
   --chat-surface-bottom-gap: 24px;
-  /* How far the composer overlaps the bottom of the white chat column. */
   --chat-composer-surface-overlap: 28px;
-  /* Distance from the viewport bottom edge to the chat composer. */
-  --chat-composer-bottom-inset: 42px;
 
   /* App top bar chrome — deep charcoal controls beside the breadcrumb trail. */
   --app-top-bar-control-fg: #242424;
@@ -707,22 +730,48 @@
   --filter-chat-responding-goose: none;
   --chat-context-panel-bg: color-mix(
     in srgb,
-    var(--color-gray-50) 60%,
+    var(--color-gray-900) 72%,
     transparent
   );
-  --chat-context-panel-fg: var(--color-gray-900);
-  --chat-context-panel-muted-fg: var(--color-gray-600);
+  --chat-context-panel-fg: var(--color-gray-50);
+  --chat-context-panel-muted-fg: color-mix(
+    in srgb,
+    var(--color-gray-50) 68%,
+    transparent
+  );
   --chat-context-panel-border: color-mix(
     in srgb,
-    var(--color-gray-900) 18%,
+    var(--color-gray-50) 16%,
     transparent
   );
   --chat-context-panel-accent: color-mix(
     in srgb,
-    var(--color-gray-900) 8%,
+    var(--color-gray-50) 12%,
     transparent
   );
-  --chat-context-panel-accent-fg: var(--color-gray-900);
+  --chat-context-panel-accent-fg: var(--color-gray-50);
+  --chat-context-panel-hover: color-mix(
+    in srgb,
+    var(--color-gray-50) 26%,
+    transparent
+  );
+  --chat-context-dropdown-bg: color-mix(
+    in srgb,
+    var(--color-gray-800) 92%,
+    transparent
+  );
+  --chat-context-dropdown-hover: color-mix(
+    in srgb,
+    var(--color-gray-50) 12%,
+    transparent
+  );
+  --chat-context-dropdown-fg: var(--color-gray-50);
+  --chat-context-dropdown-muted-fg: color-mix(
+    in srgb,
+    var(--color-gray-50) 52%,
+    transparent
+  );
+  --backdrop-chat-context-dropdown: blur(18px) saturate(170%) brightness(1.02);
   --surface-editor-panel-neutral: var(--color-gray-800);
   --surface-editor-panel: color-mix(
     in oklab,
@@ -897,6 +946,7 @@
   --shadow-popover-inverse: 22px 25px 24px rgba(0, 0, 0, 0.45);
   --shadow-modal: 0 20px 60px rgba(0, 0, 0, 0.6);
   --shadow-sidebar-panel-elevated: 30px 42px 60px rgba(0, 0, 0, 0.15);
+  --shadow-global-composer-pill-hover: 30px 24px 52px rgba(0, 0, 0, 0.2);
   --shadow-chat-composer: 0 36px 60px rgba(0, 0, 0, 0.28);
   --shadow-kbd: 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-date-field-focus: 0 0 0 3px rgba(244, 244, 245, 0.1);
@@ -1117,6 +1167,7 @@
   --shadow-popover-inverse: var(--shadow-popover-inverse);
   --shadow-modal: var(--shadow-modal);
   --shadow-sidebar-panel-elevated: var(--shadow-sidebar-panel-elevated);
+  --shadow-global-composer-pill-hover: var(--shadow-global-composer-pill-hover);
   --shadow-kbd: var(--shadow-kbd);
   --shadow-date-field-focus: var(--shadow-date-field-focus);
   --shadow-agent-profile-avatar: var(--shadow-agent-profile-avatar);
@@ -1577,10 +1628,67 @@ body,
   .chat-context-panel-surface {
     --background: var(--chat-context-panel-bg);
     --foreground: var(--chat-context-panel-fg);
+    --muted: var(--chat-context-panel-hover);
     --muted-foreground: var(--chat-context-panel-muted-fg);
     --border: var(--chat-context-panel-border);
     --accent: var(--chat-context-panel-accent);
     --accent-foreground: var(--chat-context-panel-accent-fg);
+    --sidebar-accent: var(--chat-context-panel-hover);
+    --sidebar-foreground: var(--chat-context-panel-fg);
+    --sidebar-accent-foreground: var(--chat-context-panel-fg);
+  }
+
+  .chat-context-dropdown-surface {
+    --background: var(--chat-context-dropdown-bg);
+    --foreground: var(--chat-context-dropdown-fg);
+    --popover: var(--chat-context-dropdown-bg);
+    --popover-foreground: var(--chat-context-dropdown-fg);
+    --muted: var(--chat-context-dropdown-hover);
+    --muted-foreground: var(--chat-context-dropdown-muted-fg);
+    --accent: var(--chat-context-dropdown-hover);
+    --accent-foreground: var(--chat-context-dropdown-fg);
+    --sidebar-accent: var(--chat-context-dropdown-hover);
+    --sidebar-foreground: var(--chat-context-dropdown-fg);
+    --sidebar-accent-foreground: var(--chat-context-dropdown-fg);
+    color: var(--chat-context-dropdown-fg);
+    background: var(--chat-context-dropdown-bg);
+    backdrop-filter: var(--backdrop-chat-context-dropdown);
+    -webkit-backdrop-filter: var(--backdrop-chat-context-dropdown);
+  }
+
+  .chat-context-dropdown-results {
+    position: relative;
+    min-height: 0;
+    max-height: calc(
+      min(28rem, var(--radix-popover-content-available-height)) -
+      3.5rem
+    );
+  }
+
+  .chat-context-dropdown-results-scroll {
+    max-height: inherit;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .chat-context-dropdown-row-list {
+    width: 100%;
+  }
+
+  .chat-context-dropdown-results-scroll[data-scrolled="true"] {
+    -webkit-mask-image: linear-gradient(to bottom, transparent, black 1.25rem);
+    mask-image: linear-gradient(to bottom, transparent, black 1.25rem);
+  }
+
+  .chat-context-dropdown-surface .chat-context-search-input,
+  .chat-context-dropdown-surface .chat-context-search-input:focus,
+  .chat-context-dropdown-surface .chat-context-search-input:focus-visible {
+    border: 0 !important;
+    outline: 0 !important;
+    box-shadow: none !important;
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   *:not(body):not(.focus-override) {

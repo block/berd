@@ -18,7 +18,9 @@ const AGENT_BUILDER_RAIL_W = Math.round(CP_TOTAL_W * 1.5);
 interface ChatRightRailProps {
   session: ChatSession | null | undefined;
   project?: {
+    id?: string;
     name?: string;
+    icon?: string;
     color?: string;
     workingDirs?: string[];
   } | null;

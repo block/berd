@@ -1,11 +1,12 @@
-import { useCallback, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
   IconChevronDown,
   IconFolder,
-  IconFolderOpen,
   IconGitBranch,
+  IconPlus,
+  IconSearch,
 } from "@tabler/icons-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import {
@@ -18,10 +19,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/shared/ui/alert-dialog";
-import { buttonVariants } from "@/shared/ui/button";
-import { RowButton } from "@/shared/ui/row-button";
+import { Button, buttonVariants } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
+import { SIDEBAR_MENU_HOVER_TRANSITION_CLASS } from "@/shared/ui/sidebar-tokens";
 import type { GitState } from "@/shared/types/git";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
+import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
 import { formatErrorMessage } from "./formatError";
 
 interface WorkingContextPickerProps {
@@ -31,8 +34,11 @@ interface WorkingContextPickerProps {
   onSelect: (context: ActiveWorkspace) => void;
   onSwitchBranch: (path: string, branch: string) => Promise<void>;
   onStashAndSwitch: (path: string, branch: string) => Promise<void>;
-  onChangeFolder?: () => Promise<void> | void;
-  isChangingFolder?: boolean;
+  onCreateBranch: (
+    path: string,
+    name: string,
+    baseBranch: string,
+  ) => Promise<void>;
 }
 
 export function shortenPath(fullPath: string): string {
@@ -65,6 +71,29 @@ function isSamePath(
   return normalizeComparablePath(a) === normalizeComparablePath(b);
 }
 
+function includesSearch(value: string | null | undefined, query: string) {
+  return Boolean(value?.toLowerCase().includes(query));
+}
+
+function IconWithActiveDot({
+  active,
+  children,
+  className,
+}: {
+  active: boolean;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <span className={cn("relative inline-flex size-4 shrink-0", className)}>
+      {children}
+      {active ? (
+        <span className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-1 ring-background" />
+      ) : null}
+    </span>
+  );
+}
+
 export function WorkingContextPicker({
   currentProjectPath,
   gitState,
@@ -72,25 +101,27 @@ export function WorkingContextPicker({
   onSelect,
   onSwitchBranch,
   onStashAndSwitch,
-  onChangeFolder,
-  isChangingFolder = false,
+  onCreateBranch,
 }: WorkingContextPickerProps) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
+  const [worktreeOpen, setWorktreeOpen] = useState(false);
+  const [branchOpen, setBranchOpen] = useState(false);
+  const [worktreeSearchQuery, setWorktreeSearchQuery] = useState("");
+  const [branchSearchQuery, setBranchSearchQuery] = useState("");
+  const [worktreeResultsScrolled, setWorktreeResultsScrolled] = useState(false);
+  const [branchResultsScrolled, setBranchResultsScrolled] = useState(false);
   const [pendingSwitch, setPendingSwitch] = useState<ActiveWorkspace | null>(
     null,
   );
+  const [branchCreateOpen, setBranchCreateOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
 
   const worktrees = gitState?.worktrees ?? [];
   const localBranches = gitState?.localBranches ?? [];
   const dirtyFileCount = gitState?.dirtyFileCount ?? 0;
   const defaultWorktreePath =
-    worktrees.find(
-      (worktree) =>
-        normalizeComparablePath(worktree.path) ===
-        normalizeComparablePath(currentProjectPath ?? ""),
-    )?.path ?? worktrees[0]?.path;
+    worktrees.find((worktree) => isSamePath(worktree.path, currentProjectPath))
+      ?.path ?? worktrees[0]?.path;
   const currentPath = activeContext?.path ?? defaultWorktreePath;
   const activeWorktree =
     worktrees.find((worktree) => isSamePath(worktree.path, currentPath)) ??
@@ -104,11 +135,11 @@ export function WorkingContextPicker({
       : currentProjectPath
         ? shortenPath(currentProjectPath)
         : undefined;
-  const activeBranchLabel = activeBranch ?? t("contextPanel.states.detached");
-  const mainWorktreePath =
-    gitState?.mainWorktreePath ??
-    worktrees.find((worktree) => worktree.isMain)?.path ??
-    null;
+  const pickerPrimaryLabel =
+    activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet");
+  const pickerSecondaryLabel = currentPath
+    ? shortenPath(currentPath)
+    : undefined;
   const worktreeByBranch = useMemo(
     () =>
       new Map(
@@ -118,11 +149,50 @@ export function WorkingContextPicker({
       ),
     [worktrees],
   );
+  const normalizedWorktreeSearchQuery = worktreeSearchQuery
+    .trim()
+    .toLowerCase();
+  const normalizedBranchSearchQuery = branchSearchQuery.trim().toLowerCase();
+  const visibleWorktrees = useMemo(
+    () =>
+      worktrees.filter((worktree) => {
+        if (!normalizedWorktreeSearchQuery) return true;
+        return (
+          includesSearch(
+            worktreeName(worktree.path),
+            normalizedWorktreeSearchQuery,
+          ) ||
+          includesSearch(worktree.path, normalizedWorktreeSearchQuery) ||
+          includesSearch(worktree.branch, normalizedWorktreeSearchQuery)
+        );
+      }),
+    [normalizedWorktreeSearchQuery, worktrees],
+  );
+  const visibleBranches = useMemo(() => {
+    const branches = [...localBranches];
+    if (activeBranch && !branches.includes(activeBranch)) {
+      branches.unshift(activeBranch);
+    }
+
+    return branches.filter((branch) => {
+      const owningWorktree = worktreeByBranch.get(branch);
+      if (!normalizedBranchSearchQuery) return true;
+      return (
+        includesSearch(branch, normalizedBranchSearchQuery) ||
+        includesSearch(owningWorktree?.path, normalizedBranchSearchQuery)
+      );
+    });
+  }, [
+    activeBranch,
+    localBranches,
+    normalizedBranchSearchQuery,
+    worktreeByBranch,
+  ]);
 
   const handleWorktreeSelect = useCallback(
     (path: string, branch: string | null) => {
       onSelect({ path, branch });
-      setOpen(false);
+      setWorktreeOpen(false);
     },
     [onSelect],
   );
@@ -130,7 +200,7 @@ export function WorkingContextPicker({
   const finishSwitch = useCallback(
     (path: string, branch: string) => {
       onSelect({ path, branch });
-      setOpen(false);
+      setBranchOpen(false);
       setPendingSwitch(null);
     },
     [onSelect],
@@ -164,8 +234,12 @@ export function WorkingContextPicker({
         finishSwitch(path, branch);
         toast.success(t("contextPanel.picker.stashSuccess", { branch }));
       } catch (error) {
+        const errorMessage = formatErrorMessage(
+          error,
+          t("contextPanel.picker.stashError"),
+        );
         toast.error(
-          formatErrorMessage(error, t("contextPanel.picker.stashError")),
+          `${t("contextPanel.picker.changesStashed")} ${errorMessage}`,
         );
       } finally {
         setSwitching(false);
@@ -174,31 +248,15 @@ export function WorkingContextPicker({
     [onStashAndSwitch, finishSwitch, t],
   );
 
-  const getBranchTargetPath = useCallback(
-    (branch: string) => {
-      const worktreeForBranch = worktreeByBranch.get(branch);
-      if (worktreeForBranch) {
-        return worktreeForBranch.path;
-      }
-      if (activeWorktree?.isMain) {
-        return currentPath ?? mainWorktreePath;
-      }
-      return mainWorktreePath ?? currentPath;
-    },
-    [activeWorktree?.isMain, currentPath, mainWorktreePath, worktreeByBranch],
-  );
-
   const handleBranchSelect = useCallback(
-    (branch: string) => {
+    (branch: string, targetPath: string | null) => {
       const worktreeForBranch = worktreeByBranch.get(branch);
       if (
         worktreeForBranch &&
         !isSamePath(worktreeForBranch.path, currentPath)
       ) {
-        handleWorktreeSelect(worktreeForBranch.path, worktreeForBranch.branch);
         return;
       }
-      const targetPath = getBranchTargetPath(branch);
       if (!targetPath) return;
       if (isSamePath(targetPath, currentPath) && dirtyFileCount > 0) {
         setPendingSwitch({ path: targetPath, branch });
@@ -206,15 +264,29 @@ export function WorkingContextPicker({
         void performCarrySwitch(targetPath, branch);
       }
     },
-    [
-      currentPath,
-      dirtyFileCount,
-      getBranchTargetPath,
-      handleWorktreeSelect,
-      performCarrySwitch,
-      worktreeByBranch,
-    ],
+    [currentPath, dirtyFileCount, performCarrySwitch, worktreeByBranch],
   );
+
+  const handleWorktreeOpenChange = useCallback((isOpen: boolean) => {
+    setWorktreeOpen(isOpen);
+    if (!isOpen) {
+      setWorktreeSearchQuery("");
+      setWorktreeResultsScrolled(false);
+    }
+  }, []);
+
+  const handleBranchOpenChange = useCallback((isOpen: boolean) => {
+    setBranchOpen(isOpen);
+    if (!isOpen) {
+      setBranchSearchQuery("");
+      setBranchResultsScrolled(false);
+    }
+  }, []);
+
+  const handleCreateBranchClick = useCallback(() => {
+    setBranchOpen(false);
+    setBranchCreateOpen(true);
+  }, []);
 
   const isWorktreeSelected = (path: string) => {
     return isSamePath(currentPath, path);
@@ -223,110 +295,239 @@ export function WorkingContextPicker({
   if (!gitState?.isGitRepo) return null;
 
   const hasWorktrees = worktrees.length > 0;
-  const hasBranches = localBranches.length > 0;
+  const hasVisibleWorktrees = visibleWorktrees.length > 0;
+  const hasVisibleBranches = visibleBranches.length > 0 && Boolean(currentPath);
+  const pickerRowClassName = cn(
+    "group flex w-full items-start gap-3 rounded-xs px-2 py-2.5 text-left",
+    SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none",
+  );
+  const branchRowClassName = cn(
+    "group flex w-full items-center gap-3 rounded-xs px-2 py-2.5 text-left",
+    SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none",
+  );
 
   return (
     <>
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <RowButton
-            variant="field"
-            aria-label={t("contextPanel.picker.selectContext")}
-            icon={
-              <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-            }
-            label={activeWorktreeLabel ?? t("contextPanel.empty.folderNotSet")}
-            description={t("contextPanel.picker.checkedOutBranch", {
-              branch: activeBranchLabel,
-            })}
-            trailing={
-              <IconChevronDown className="size-3 shrink-0 text-muted-foreground" />
-            }
-          />
-        </PopoverTrigger>
-
-        <PopoverContent
-          align="start"
-          sideOffset={6}
-          className="max-h-80 w-[var(--radix-popover-trigger-width)] min-w-56 overflow-y-auto p-1.5 font-normal"
-        >
-          {hasWorktrees ? (
-            <div>
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-normal text-sidebar-foreground/55">
-                {t("contextPanel.picker.worktrees")}
-              </p>
-              {worktrees.map((wt) => (
-                <RowButton
-                  key={wt.path}
-                  selected={isWorktreeSelected(wt.path)}
-                  onClick={() => handleWorktreeSelect(wt.path, wt.branch)}
-                  icon={
-                    <IconFolder className="size-4 shrink-0 text-muted-foreground" />
-                  }
-                  label={worktreeName(wt.path)}
-                  description={t("contextPanel.picker.checkedOutBranch", {
-                    branch: wt.branch ?? t("contextPanel.states.detached"),
-                  })}
-                />
-              ))}
-            </div>
-          ) : null}
-
-          {hasBranches ? (
-            <div
-              className={hasWorktrees ? "mt-1 border-t border-border pt-1" : ""}
+      <div className="space-y-2">
+        <Popover open={worktreeOpen} onOpenChange={handleWorktreeOpenChange}>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "flex w-full items-start gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5",
+                "text-sm text-foreground",
+                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+                "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+              aria-label={t("contextPanel.picker.selectWorktree")}
             >
-              <p className="px-2 pb-1.5 pt-1 text-xxs font-normal text-sidebar-foreground/55">
-                {t("contextPanel.picker.allBranches")}
-              </p>
-              {localBranches.map((branch) => {
-                const branchTargetPath = getBranchTargetPath(branch);
-                const isCurrentBranch = branch === activeBranch;
-                const branchMeta = isCurrentBranch
-                  ? t("contextPanel.picker.currentBranch")
-                  : branchTargetPath
-                    ? shortenPath(branchTargetPath)
-                    : null;
+              <IconFolder className="mt-0.5 size-4 shrink-0 text-foreground" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                <span className="block truncate text-foreground">
+                  {pickerPrimaryLabel}
+                </span>
+                {pickerSecondaryLabel ? (
+                  <span className="block truncate text-sm text-muted-foreground">
+                    {pickerSecondaryLabel}
+                  </span>
+                ) : null}
+              </span>
+              <IconChevronDown className="mt-0.5 size-4 shrink-0 text-foreground" />
+            </button>
+          </PopoverTrigger>
 
-                return (
-                  <RowButton
-                    key={branch}
-                    disabled={switching || isCurrentBranch}
-                    onClick={() => handleBranchSelect(branch)}
-                    icon={
-                      <IconGitBranch className="size-4 shrink-0 text-muted-foreground" />
-                    }
-                    label={branch}
-                    description={branchMeta}
-                  />
-                );
-              })}
-            </div>
-          ) : null}
-
-          {onChangeFolder ? (
-            <div
-              className={
-                hasWorktrees || hasBranches
-                  ? "mt-1 border-t border-border pt-1"
-                  : ""
-              }
-            >
-              <RowButton
-                disabled={isChangingFolder}
-                onClick={() => {
-                  setOpen(false);
-                  void onChangeFolder();
+          <PopoverContent
+            align="start"
+            sideOffset={8}
+            className="chat-context-dropdown-surface flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+          >
+            <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
+              <IconSearch className="size-4 shrink-0" />
+              <input
+                type="search"
+                value={worktreeSearchQuery}
+                onChange={(event) => {
+                  setWorktreeSearchQuery(event.target.value);
+                  setWorktreeResultsScrolled(false);
                 }}
-                icon={
-                  <IconFolderOpen className="size-4 shrink-0 text-muted-foreground" />
-                }
-                label={t("contextPanel.picker.changeFolder")}
+                placeholder={t("contextPanel.picker.search")}
+                className="chat-context-search-input min-w-0 flex-1 appearance-none border-0 bg-transparent text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
               />
             </div>
-          ) : null}
-        </PopoverContent>
-      </Popover>
+
+            <div className="chat-context-dropdown-results">
+              <div
+                className="chat-context-dropdown-results-scroll pb-[2px]"
+                data-scrolled={worktreeResultsScrolled ? "true" : "false"}
+                onScroll={(event) =>
+                  setWorktreeResultsScrolled(event.currentTarget.scrollTop > 0)
+                }
+              >
+                {hasWorktrees && hasVisibleWorktrees ? (
+                  <div className="chat-context-dropdown-row-list space-y-0.5">
+                    {visibleWorktrees.map((worktree) => {
+                      const isCurrentWorktree = isWorktreeSelected(
+                        worktree.path,
+                      );
+                      return (
+                        <button
+                          key={worktree.path}
+                          type="button"
+                          aria-current={isCurrentWorktree ? "true" : undefined}
+                          className={pickerRowClassName}
+                          onClick={() =>
+                            handleWorktreeSelect(worktree.path, worktree.branch)
+                          }
+                        >
+                          <IconWithActiveDot
+                            active={isCurrentWorktree}
+                            className="mt-0.5"
+                          >
+                            <IconFolder className="size-4 text-foreground" />
+                          </IconWithActiveDot>
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate font-normal text-foreground">
+                              {worktreeName(worktree.path)}
+                            </span>
+                            <span className="block truncate text-sm text-muted-foreground">
+                              {shortenPath(worktree.path)}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {!hasVisibleWorktrees ? (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    {t("contextPanel.picker.noResults")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+
+        <Popover open={branchOpen} onOpenChange={handleBranchOpenChange}>
+          <div className="flex items-center justify-between gap-2 pt-2">
+            <p className="text-sm font-normal text-muted-foreground">
+              {t("contextPanel.picker.branchLabel")}
+            </p>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              onClick={handleCreateBranchClick}
+              className="rounded-full text-muted-foreground hover:text-foreground"
+              aria-label={t("contextPanel.createDialog.createBranch")}
+              title={t("contextPanel.createDialog.createBranch")}
+            >
+              <IconPlus className="size-4" />
+            </Button>
+          </div>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className={cn(
+                "flex w-full items-start gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5",
+                "text-sm text-foreground",
+                SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+                "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+              )}
+              aria-label={t("contextPanel.picker.selectBranch")}
+            >
+              <IconGitBranch className="mt-0.5 size-4 shrink-0 text-foreground" />
+              <span className="min-w-0 flex-1 truncate text-left">
+                <span className="block truncate text-foreground">
+                  {activeBranch ?? t("contextPanel.picker.noBranch")}
+                </span>
+              </span>
+              <IconChevronDown className="mt-0.5 size-4 shrink-0 text-foreground" />
+            </button>
+          </PopoverTrigger>
+
+          <PopoverContent
+            align="start"
+            sideOffset={8}
+            className="chat-context-dropdown-surface flex max-h-[min(28rem,var(--radix-popover-content-available-height))] w-[var(--radix-popover-trigger-width)] min-w-72 flex-col overflow-hidden rounded-sm p-2 text-sm font-normal"
+          >
+            <div className="mb-2 flex h-10 items-center gap-2 rounded-xs border border-transparent bg-muted/60 px-3 text-muted-foreground focus-within:border-transparent focus-within:ring-0">
+              <IconSearch className="size-4 shrink-0" />
+              <input
+                type="search"
+                value={branchSearchQuery}
+                onChange={(event) => {
+                  setBranchSearchQuery(event.target.value);
+                  setBranchResultsScrolled(false);
+                }}
+                placeholder={t("contextPanel.picker.search")}
+                className="chat-context-search-input min-w-0 flex-1 appearance-none border-0 bg-transparent text-sm text-foreground shadow-none outline-none placeholder:text-muted-foreground focus:border-transparent focus:outline-none focus:ring-0 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-0"
+              />
+            </div>
+            <div className="chat-context-dropdown-results">
+              <div
+                className="chat-context-dropdown-results-scroll pb-[2px]"
+                data-scrolled={branchResultsScrolled ? "true" : "false"}
+                onScroll={(event) =>
+                  setBranchResultsScrolled(event.currentTarget.scrollTop > 0)
+                }
+              >
+                {hasVisibleBranches ? (
+                  <div className="chat-context-dropdown-row-list space-y-0.5">
+                    {visibleBranches.map((branch) => {
+                      const owningWorktree = worktreeByBranch.get(branch);
+                      const isCurrentBranch = branch === activeBranch;
+                      const isCheckedOutElsewhere =
+                        Boolean(owningWorktree) &&
+                        !isSamePath(owningWorktree?.path, currentPath);
+                      const isDisabled =
+                        switching ||
+                        isCurrentBranch ||
+                        isCheckedOutElsewhere ||
+                        !currentPath;
+
+                      return (
+                        <button
+                          key={branch}
+                          type="button"
+                          disabled={isDisabled}
+                          className={cn(
+                            branchRowClassName,
+                            "disabled:cursor-default disabled:opacity-100",
+                            isCheckedOutElsewhere &&
+                              "text-muted-foreground [&_svg]:text-muted-foreground [&_span]:text-muted-foreground",
+                          )}
+                          onClick={() =>
+                            handleBranchSelect(branch, currentPath ?? null)
+                          }
+                        >
+                          <IconWithActiveDot active={isCurrentBranch}>
+                            <IconGitBranch className="size-4 text-foreground" />
+                          </IconWithActiveDot>
+                          <div className="min-w-0 flex-1">
+                            <span className="block truncate text-foreground">
+                              {branch}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+
+                {!hasVisibleBranches ? (
+                  <p className="px-2 py-3 text-sm text-muted-foreground">
+                    {t("contextPanel.picker.noResults")}
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+      </div>
 
       <AlertDialog
         open={pendingSwitch !== null}
@@ -379,6 +580,15 @@ export function WorkingContextPicker({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <WorkspaceCreateDialog
+        mode={branchCreateOpen ? "branch" : null}
+        gitState={gitState}
+        currentPath={currentPath ?? currentProjectPath ?? ""}
+        onClose={() => setBranchCreateOpen(false)}
+        onContextChange={onSelect}
+        onCreateBranch={onCreateBranch}
+      />
     </>
   );
 }

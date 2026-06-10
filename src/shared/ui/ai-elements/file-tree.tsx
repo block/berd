@@ -11,6 +11,7 @@ import {
   IconFolder,
   IconFolderOpen,
 } from "@tabler/icons-react";
+import { SIDEBAR_MENU_HOVER_TRANSITION_CLASS } from "@/shared/ui/sidebar-tokens";
 import type { HTMLAttributes, ReactNode } from "react";
 import {
   createContext,
@@ -36,6 +37,16 @@ const FileTreeContext = createContext<FileTreeContextType>({
   expandedPaths: new Set(),
   togglePath: noop,
 });
+
+const fileTreeRowClassName = cn(
+  "flex w-full items-center gap-3 rounded-sm px-3.5 py-2.5 text-left hover:bg-muted/50",
+  SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
+);
+
+const fileTreeButtonClassName = cn(
+  "flex min-w-0 flex-1 cursor-pointer items-center border-none bg-transparent p-0 text-left",
+  "gap-3",
+);
 
 export type FileTreeProps = Omit<HTMLAttributes<HTMLDivElement>, "onSelect"> & {
   contentClassName?: string;
@@ -135,6 +146,7 @@ export type FileTreeFolderProps = HTMLAttributes<HTMLDivElement> & {
   contextMenuPath?: string;
   path: string;
   name: string;
+  rowClassName?: string;
   toggleOnSelect?: boolean;
 };
 
@@ -142,6 +154,7 @@ export const FileTreeFolder = ({
   contextMenuPath,
   path,
   name,
+  rowClassName,
   toggleOnSelect = false,
   className,
   children,
@@ -182,7 +195,8 @@ export const FileTreeFolder = ({
             <FileContextMenu path={contextMenuPath}>
               <div
                 className={cn(
-                  "flex w-full items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
+                  fileTreeRowClassName,
+                  rowClassName,
                   isSelected && "bg-muted",
                 )}
               >
@@ -200,7 +214,7 @@ export const FileTreeFolder = ({
                   </button>
                 </CollapsibleTrigger>
                 <button
-                  className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left"
+                  className={fileTreeButtonClassName}
                   onClick={handleSelect}
                   type="button"
                 >
@@ -218,7 +232,8 @@ export const FileTreeFolder = ({
           ) : (
             <div
               className={cn(
-                "flex w-full items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
+                fileTreeRowClassName,
+                rowClassName,
                 isSelected && "bg-muted",
               )}
             >
@@ -236,7 +251,7 @@ export const FileTreeFolder = ({
                 </button>
               </CollapsibleTrigger>
               <button
-                className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 border-none bg-transparent p-0 text-left"
+                className={fileTreeButtonClassName}
                 onClick={handleSelect}
                 type="button"
               >
@@ -310,7 +325,8 @@ export const FileTreeFile = ({
         <FileContextMenu path={contextMenuPath}>
           <div
             className={cn(
-              "flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
+              fileTreeRowClassName,
+              "cursor-pointer",
               isSelected && "bg-muted",
               className,
             )}
@@ -337,7 +353,8 @@ export const FileTreeFile = ({
       ) : (
         <div
           className={cn(
-            "flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
+            fileTreeRowClassName,
+            "cursor-pointer",
             isSelected && "bg-muted",
             className,
           )}
