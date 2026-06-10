@@ -220,6 +220,10 @@ bump-goose ref="main":
     ./scripts/update-goose-backend-lock.sh "{{ ref }}"
     just sync-schema
 
+# Generate release notes from commits since the previous release tag (formatting guidelines: scripts/release-notes-prompt.md).
+release-notes from="" to="HEAD":
+    FROM_REF="{{ from }}" TO_REF="{{ to }}" ./scripts/generate-release-notes.sh
+
 # ── Utilities ────────────────────────────────────────────────
 
 clean:
