@@ -29,7 +29,7 @@
     "unsupportedType": "This automation type cannot be duplicated."
   },
   "builder": {
-    "blockedBody": "kgoose returned a tile-shaped preview that is not an automation. This builder will not approve it.",
+    "blockedBody": "The last response wasn't a valid automation. Try rephrasing what you want.",
     "blockedTitle": "Automation rejected",
     "chatAriaLabel": "Automation builder chat",
     "close": "Close builder",
@@ -37,11 +37,11 @@
     "created": "Created",
     "creating": "Creating",
     "draft": "Draft",
-    "editEmptyBody": "Tell Goose what to change about this automation — the schedule, the steps, anything.",
+    "editEmptyBody": "Describe what to change about this automation — the schedule, the steps, anything.",
     "editEmptyTitle": "Edit this automation",
     "editPlaceholder": "What should change about this automation?",
     "editingEyebrow": "Editing",
-    "emptyBody": "Describe the automation you want kgoose to build. The builder will only approve automation-shaped tool output.",
+    "emptyBody": "Describe what you want to automate.",
     "emptyTitle": "Make an automation",
     "failed": "Failed",
     "copySessionId": "Copy session id",
@@ -52,7 +52,7 @@
     "leaveTitle": "Unsaved automation changes",
     "saveChanges": "Save changes",
     "saving": "Saving",
-    "previewEmptyBody": "A draft appears here after kgoose proposes an automation.",
+    "previewEmptyBody": "Your draft appears here.",
     "previewEmptyTitle": "No draft yet",
     "previewEyebrow": "Automation draft",
     "processing": "Processing",
@@ -67,7 +67,7 @@
       "processing": "Thinking",
       "ready": "Ready"
     },
-    "subtitle": "Text-only kgoose automation creation",
+    "subtitle": "Create an automation by chatting.",
     "thinking": "Building automation",
     "title": "Add automation"
   },
@@ -80,7 +80,7 @@
     "lastSuccessfulRun": "Last successful run",
     "latestResult": "Latest result",
     "latestRun": "Latest run",
-    "noInstructions": "No instructions returned by kgoose.",
+    "noInstructions": "This automation has no instructions yet.",
     "noLatestResult": "No latest result was returned for this automation.",
     "notifications": "Notifications",
     "notificationsDisabled": "Disabled",
@@ -95,7 +95,7 @@
     "tools": "Tools"
   },
   "edit": {
-    "description": "Update the generic automation settings stored in kgoose.",
+    "description": "Update this automation's settings.",
     "fields": {
       "instructions": "Instructions",
       "notifications": "Slack notifications",
@@ -146,7 +146,7 @@
   },
   "history": {
     "automations": "Automations",
-    "emptyBody": "kgoose returned no historical runs for this automation.",
+    "emptyBody": "This automation hasn't run yet.",
     "emptyTitle": "No runs yet",
     "goToAutomation": "Go to automation",
     "loadErrorTitle": "History failed to load",
@@ -159,7 +159,7 @@
     "sessionHistory": "Session history",
     "sessionLoadErrorTitle": "Session history failed to load",
     "sessionUnavailable": "This run does not have a chat session id.",
-    "unavailableBody": "kgoose did not return an automation id.",
+    "unavailableBody": "We couldn't load this automation.",
     "unavailableTitle": "History unavailable"
   },
   "run": {
@@ -169,7 +169,7 @@
   },
   "list": {
     "ariaLabel": "Automation list",
-    "emptyBody": "kgoose returned no current-user automations.",
+    "emptyBody": "Create your first automation to schedule recurring work.",
     "emptyTitle": "No automations",
     "loadErrorTitle": "Automations failed to load"
   },
@@ -202,7 +202,7 @@
     "paused": "Paused",
     "pausedWithReason": "Paused: {{reason}}"
   },
-  "subtitle": "Create, edit, and manage your G2 automations",
+  "subtitle": "Create, edit, and manage your automations.",
   "tabs": {
     "details": "Details",
     "history": "History",

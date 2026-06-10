@@ -29,7 +29,7 @@
     "unsupportedType": "Este tipo de automatizacion no se puede duplicar."
   },
   "builder": {
-    "blockedBody": "kgoose devolvio una vista previa de mosaico que no es una automatizacion. Este creador no la aprobara.",
+    "blockedBody": "La última respuesta no fue una automatización válida. Intenta reformular lo que quieres.",
     "blockedTitle": "Automatizacion rechazada",
     "chatAriaLabel": "Chat del creador de automatizaciones",
     "close": "Cerrar creador",
@@ -37,11 +37,11 @@
     "created": "Creada",
     "creating": "Creando",
     "draft": "Borrador",
-    "editEmptyBody": "Dile a Goose que cambiar de esta automatizacion: el horario, los pasos, lo que sea.",
+    "editEmptyBody": "Describe qué cambiar en esta automatización: el horario, los pasos, lo que sea.",
     "editEmptyTitle": "Editar esta automatizacion",
     "editPlaceholder": "Que deberia cambiar de esta automatizacion?",
     "editingEyebrow": "Editando",
-    "emptyBody": "Describe la automatizacion que quieres que kgoose cree. El creador solo aprobara resultados con forma de automatizacion.",
+    "emptyBody": "Describe lo que quieres automatizar.",
     "emptyTitle": "Crear una automatizacion",
     "failed": "Fallida",
     "copySessionId": "Copiar id de sesion",
@@ -53,7 +53,7 @@
     "previewAriaLabel": "Vista previa del borrador de automatizacion",
     "saveChanges": "Guardar cambios",
     "saving": "Guardando",
-    "previewEmptyBody": "Aparecera un borrador aqui cuando kgoose proponga una automatizacion.",
+    "previewEmptyBody": "Tu borrador aparece aquí.",
     "previewEmptyTitle": "Aun no hay borrador",
     "previewEyebrow": "Borrador de automatizacion",
     "processing": "Procesando",
@@ -67,7 +67,7 @@
       "ready": "Lista"
     },
     "subscriptionStatuses": "Estados de suscripcion",
-    "subtitle": "Creacion de automatizaciones con kgoose solo por texto",
+    "subtitle": "Crea una automatización chateando.",
     "thinking": "Creando automatizacion",
     "title": "Agregar automatizacion"
   },
@@ -80,7 +80,7 @@
     "lastSuccessfulRun": "Ultima ejecucion exitosa",
     "latestResult": "Resultado mas reciente",
     "latestRun": "Ejecucion mas reciente",
-    "noInstructions": "kgoose no devolvio instrucciones.",
+    "noInstructions": "Esta automatización aún no tiene instrucciones.",
     "noLatestResult": "No se devolvio un resultado reciente para esta automatizacion.",
     "notifications": "Notificaciones",
     "notificationsDisabled": "Desactivadas",
@@ -95,7 +95,7 @@
     "tools": "Herramientas"
   },
   "edit": {
-    "description": "Actualiza la configuracion de la automatizacion generica almacenada en kgoose.",
+    "description": "Actualiza la configuración de esta automatización.",
     "fields": {
       "instructions": "Instrucciones",
       "notifications": "Notificaciones de Slack",
@@ -146,7 +146,7 @@
   },
   "history": {
     "automations": "Automatizaciones",
-    "emptyBody": "kgoose no devolvio ejecuciones historicas para esta automatizacion.",
+    "emptyBody": "Esta automatización aún no se ha ejecutado.",
     "emptyTitle": "Aun no hay ejecuciones",
     "goToAutomation": "Ir a la automatizacion",
     "loadErrorTitle": "No se pudo cargar el historial",
@@ -159,7 +159,7 @@
     "sessionHistory": "Historial de sesion",
     "sessionLoadErrorTitle": "No se pudo cargar el historial de sesion",
     "sessionUnavailable": "Esta ejecucion no tiene id de sesion de chat.",
-    "unavailableBody": "kgoose no devolvio un id de automatizacion.",
+    "unavailableBody": "No pudimos cargar esta automatización.",
     "unavailableTitle": "Historial no disponible"
   },
   "run": {
@@ -169,7 +169,7 @@
   },
   "list": {
     "ariaLabel": "Lista de automatizaciones",
-    "emptyBody": "kgoose no devolvio automatizaciones para el usuario actual.",
+    "emptyBody": "Crea tu primera automatización para programar trabajo recurrente.",
     "emptyTitle": "No hay automatizaciones",
     "loadErrorTitle": "No se pudieron cargar las automatizaciones"
   },
@@ -202,7 +202,7 @@
     "paused": "Pausada",
     "pausedWithReason": "Pausada: {{reason}}"
   },
-  "subtitle": "Crea, edita y gestiona tus automatizaciones G2",
+  "subtitle": "Crea, edita y gestiona tus automatizaciones.",
   "tabs": {
     "details": "Detalles",
     "history": "Historial",

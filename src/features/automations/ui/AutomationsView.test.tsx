@@ -990,7 +990,9 @@ describe("AutomationsView", () => {
 
     expect(await screen.findByText("No automations")).toBeInTheDocument();
     expect(
-      screen.getByText("kgoose returned no current-user automations."),
+      screen.getByText(
+        "Create your first automation to schedule recurring work.",
+      ),
     ).toBeInTheDocument();
   });
 
