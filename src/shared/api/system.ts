@@ -13,12 +13,22 @@ export interface AttachmentPathInfo {
   mimeType?: string | null;
 }
 
+export interface FileMentionMatchHighlight {
+  /** Which rendered string the indices apply to. */
+  target: "filename" | "path";
+  /** Char indices (not UTF-16 code units) of matched characters. */
+  indices: number[];
+}
+
 export interface FileMentionPathEntry {
   resolvedPath: string;
   displayPath: string;
   filename: string;
   kind: "file" | "folder" | "path";
   source: "project" | "session" | "home" | "filesystem";
+  /** Match tier assigned by the native matcher (lower is better). */
+  matchRank?: number;
+  matchHighlight?: FileMentionMatchHighlight;
 }
 
 export interface ImageAttachmentPayload {

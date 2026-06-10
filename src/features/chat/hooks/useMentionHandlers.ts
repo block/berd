@@ -91,6 +91,40 @@ function shouldSearchPathMentions(
   return true;
 }
 
+/**
+ * Drop per-query match metadata from entries that are about to be re-scored
+ * against a different query. Backend ranks are only trusted for the query
+ * they were computed for; while a new search is debounced or in flight (or
+ * after it fails), stale entries must fall back to local re-scoring so
+ * entries that no longer match the live query get filtered out.
+ */
+function stripStaleMatchMetadata(
+  entries: FileMentionPathEntry[],
+): FileMentionPathEntry[] {
+  if (
+    !entries.some(
+      (entry) => entry.matchRank != null || entry.matchHighlight != null,
+    )
+  ) {
+    return entries;
+  }
+  return entries.map(
+    ({ matchRank: _rank, matchHighlight: _highlight, ...rest }) => rest,
+  );
+}
+
+function sameFileMentionHighlight(
+  a: FileMentionPathEntry["matchHighlight"],
+  b: FileMentionPathEntry["matchHighlight"],
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.target === b.target &&
+    a.indices.length === b.indices.length &&
+    a.indices.every((index, i) => index === b.indices[i])
+  );
+}
+
 function sameFileMentionArray(
   a: FileMentionPathEntry[],
   b: FileMentionPathEntry[],
@@ -104,7 +138,9 @@ function sameFileMentionArray(
       left.displayPath !== right.displayPath ||
       left.filename !== right.filename ||
       left.kind !== right.kind ||
-      left.source !== right.source
+      left.source !== right.source ||
+      left.matchRank !== right.matchRank ||
+      !sameFileMentionHighlight(left.matchHighlight, right.matchHighlight)
     ) {
       return false;
     }
@@ -131,8 +167,29 @@ function addFileMentionItem(
   item: FileMentionItem,
 ) {
   const key = item.resolvedPath.trim().toLowerCase();
-  if (!key || dedup.has(key)) return;
-  dedup.set(key, item);
+  if (!key) return;
+  const existing = dedup.get(key);
+  if (!existing) {
+    dedup.set(key, item);
+    return;
+  }
+  // Keep the first copy (session/static items carry shortcut and source
+  // semantics) but adopt the backend's match metadata, so files already in
+  // the chat rank and highlight like any other backend match. Highlight
+  // indices only transfer when they index the string this copy renders
+  // (a session artifact's displayPath can differ from the backend's).
+  if (existing.matchRank == null && item.matchRank != null) {
+    const highlight = item.matchHighlight;
+    const highlightApplies =
+      highlight?.target === "filename"
+        ? existing.filename === item.filename
+        : existing.displayPath === item.displayPath;
+    dedup.set(key, {
+      ...existing,
+      matchRank: item.matchRank,
+      matchHighlight: highlight && highlightApplies ? highlight : undefined,
+    });
+  }
 }
 
 function toFileMentionItem(entry: FileMentionPathEntry): FileMentionItem {
@@ -142,6 +199,8 @@ function toFileMentionItem(entry: FileMentionPathEntry): FileMentionItem {
     filename: entry.filename,
     kind: entry.kind,
     source: entry.source,
+    matchRank: entry.matchRank,
+    matchHighlight: entry.matchHighlight,
   };
 }
 
@@ -377,6 +436,7 @@ export function useMentionHandlers({
     closeMention,
     navigateMention,
     confirmMention,
+    registerCompletedMention,
   } = useMentionDetection(personas, skillMentionItems, fileMentionItems);
 
   const pathMentionQuery = mentionQuery.trim();
@@ -415,6 +475,7 @@ export function useMentionHandlers({
       setFileMentionsLoading(false);
       setFileMentionsError(null);
     } else {
+      setProjectFileEntries(stripStaleMatchMetadata);
       setFileMentionsLoading(true);
       setFileMentionsError(null);
     }
@@ -458,6 +519,7 @@ export function useMentionHandlers({
         .catch((error) => {
           if (cancelled || pathSearchRequestIdRef.current !== requestId) return;
           console.error("Failed to search project files for mentions:", error);
+          setProjectFileEntries(stripStaleMatchMetadata);
           setFileMentionsError("load-error");
           setFileMentionsLoading(false);
         });
@@ -525,10 +587,18 @@ export function useMentionHandlers({
       const inserted = `@${file.resolvedPath.trim()}`;
       const newText = `${before}${inserted} ${after}`;
       pendingCursorRef.current = before.length + inserted.length + 1;
+      registerCompletedMention(file.resolvedPath);
       setText(newText);
       closeMention();
     },
-    [text, mentionStartIndex, mentionQuery, closeMention, setText],
+    [
+      text,
+      mentionStartIndex,
+      mentionQuery,
+      closeMention,
+      registerCompletedMention,
+      setText,
+    ],
   );
 
   const handleFileMentionComplete = useCallback(

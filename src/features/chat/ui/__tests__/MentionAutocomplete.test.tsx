@@ -95,6 +95,48 @@ describe("MentionAutocomplete", () => {
     expect(screen.getByText("file0.ts")).toBeInTheDocument();
   });
 
+  it("highlights matched characters from the backend matcher", () => {
+    renderAutocomplete({
+      filteredFiles: [
+        {
+          resolvedPath: "/project/readme.md",
+          displayPath: "project/readme.md",
+          filename: "readme.md",
+          kind: "file" as const,
+          source: "project" as const,
+          matchHighlight: { target: "filename", indices: [0, 3, 4, 5] },
+        },
+      ],
+    });
+
+    const option = screen.getByRole("option", { name: /readme\.md/ });
+    const highlighted = option.querySelectorAll("span.text-primary");
+    expect(
+      Array.from(highlighted)
+        .map((span) => span.textContent)
+        .join(""),
+    ).toBe("rdme");
+  });
+
+  it("does not highlight shortcut entries with substituted labels", () => {
+    renderAutocomplete({
+      filteredFiles: [
+        {
+          resolvedPath: "/Users/me",
+          displayPath: "/Users/me",
+          filename: "me",
+          kind: "path" as const,
+          source: "home" as const,
+          shortcut: "home" as const,
+          matchHighlight: { target: "filename", indices: [0, 1] },
+        },
+      ],
+    });
+
+    const option = screen.getByRole("option", { name: /home/i });
+    expect(option.querySelectorAll("span.text-primary")).toHaveLength(0);
+  });
+
   it("renders skill items", () => {
     renderAutocomplete({ filteredSkills: SKILLS, filteredFiles: [] });
     expect(screen.getByText("Skills")).toBeInTheDocument();

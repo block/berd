@@ -1,4 +1,6 @@
 use base64::Engine;
+use nucleo_matcher::pattern::{Atom, AtomKind, CaseMatching, Normalization};
+use nucleo_matcher::{Config, Matcher, Utf32Str};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Window};
 use tauri_plugin_dialog::DialogExt;
@@ -20,6 +22,9 @@ const MAX_FILESYSTEM_PATH_LOOKUP_ENTRIES: usize = 5000;
 const FILE_MENTION_INDEX_CACHE_LIMIT: usize = 8;
 const FILE_MENTION_INDEX_CACHE_TTL: Duration = Duration::from_secs(60);
 const MIN_FILE_MENTION_FUZZY_QUERY_CHARS: usize = 3;
+/// IPC guard: the renderer caps mention queries at 256 chars; reject
+/// anything materially larger before scanning the index.
+const MAX_FILE_MENTION_QUERY_BYTES: usize = 1024;
 const MAX_IMAGE_ATTACHMENT_BYTES: u64 = 20 * 1024 * 1024;
 
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
@@ -40,6 +45,22 @@ pub struct AttachmentPathInfo {
     pub mime_type: Option<String>,
 }
 
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum FileMentionHighlightTarget {
+    Filename,
+    Path,
+}
+
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FileMentionMatchHighlight {
+    /// Which rendered string the indices apply to.
+    pub target: FileMentionHighlightTarget,
+    /// Char indices (not bytes) of matched characters in the target string.
+    pub indices: Vec<u32>,
+}
+
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct FileMentionPathEntry {
@@ -48,6 +69,11 @@ pub struct FileMentionPathEntry {
     pub filename: String,
     pub kind: String,
     pub source: String,
+    /// Match tier assigned by the native matcher (lower is better).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_rank: Option<u8>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub match_highlight: Option<FileMentionMatchHighlight>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,9 +131,8 @@ struct FileMentionIndexCache {
 struct FileMentionScore {
     rank: u8,
     match_position: usize,
-    boundary_penalty: u8,
-    fuzzy_span: usize,
-    fuzzy_gaps: usize,
+    /// Nucleo fuzzy score; higher is better, 0 for non-fuzzy ranks.
+    fuzzy_score: u16,
     directory_penalty: u8,
     depth: usize,
     path_len: usize,
@@ -125,6 +150,7 @@ struct FileMentionCandidate {
 struct IndexedFileMentionCandidate<'a> {
     entry: &'a IndexedFileMentionEntry,
     score: FileMentionScore,
+    match_kind: FileMentionMatchKind,
 }
 
 static FILE_MENTION_INDEX_CACHE: OnceLock<Mutex<FileMentionIndexCache>> = OnceLock::new();
@@ -596,6 +622,8 @@ fn build_file_mention_entry(path: &Path, root: &Path, is_directory: bool) -> Fil
         filename: file_name_for_path(path),
         kind: if is_directory { "folder" } else { "file" }.to_owned(),
         source: "project".to_owned(),
+        match_rank: None,
+        match_highlight: None,
     }
 }
 
@@ -625,6 +653,8 @@ fn build_filesystem_file_mention_entry(
         filename: file_name_for_path(path),
         kind: if is_directory { "folder" } else { "file" }.to_owned(),
         source: "filesystem".to_owned(),
+        match_rank: None,
+        match_highlight: None,
     }
 }
 
@@ -986,141 +1016,197 @@ fn find_file_mention_segment_prefix(path: &str, query: &str) -> Option<usize> {
     None
 }
 
+/// Reusable nucleo matcher state for one query across all index entries.
+struct FileMentionQueryMatcher {
+    matcher: Matcher,
+    haystack_buf: Vec<char>,
+    /// Present only when the query qualifies for fuzzy matching.
+    fuzzy_atom: Option<Atom>,
+}
+
+fn file_mention_atom(query: &str, kind: AtomKind) -> Atom {
+    Atom::new(
+        query,
+        CaseMatching::Ignore,
+        Normalization::Smart,
+        kind,
+        false,
+    )
+}
+
+impl FileMentionQueryMatcher {
+    fn new(normalized_query: &str) -> Self {
+        let mut config = Config::DEFAULT.match_paths();
+        config.prefer_prefix = true;
+        let fuzzy_enabled = !normalized_query.contains('/')
+            && normalized_query.chars().count() >= MIN_FILE_MENTION_FUZZY_QUERY_CHARS;
+        Self {
+            matcher: Matcher::new(config),
+            haystack_buf: Vec::new(),
+            fuzzy_atom: fuzzy_enabled.then(|| file_mention_atom(normalized_query, AtomKind::Fuzzy)),
+        }
+    }
+
+    fn fuzzy_score(&mut self, haystack: &str) -> Option<u16> {
+        let atom = self.fuzzy_atom.as_ref()?;
+        let haystack = Utf32Str::new(haystack, &mut self.haystack_buf);
+        atom.score(haystack, &mut self.matcher)
+    }
+
+    /// Char indices of the matched characters in `haystack`, for UI highlighting.
+    ///
+    /// Restricted to ASCII haystacks: nucleo's index space only equals
+    /// codepoint indices for pure-ASCII strings — for others it can be UTF-8
+    /// byte offsets (NFD text) or grapheme positions (emoji), which would
+    /// highlight the wrong characters. Non-ASCII names still match and rank;
+    /// they just render without the cosmetic highlight.
+    fn match_indices(&mut self, haystack: &str, query: &str, kind: AtomKind) -> Option<Vec<u32>> {
+        if !haystack.is_ascii() {
+            return None;
+        }
+        let rebuilt;
+        let atom = match (kind, &self.fuzzy_atom) {
+            (AtomKind::Fuzzy, Some(fuzzy_atom)) => fuzzy_atom,
+            _ => {
+                rebuilt = file_mention_atom(query, kind);
+                &rebuilt
+            }
+        };
+        let haystack = Utf32Str::new(haystack, &mut self.haystack_buf);
+        let mut indices = Vec::new();
+        atom.indices(haystack, &mut self.matcher, &mut indices)?;
+        indices.sort_unstable();
+        indices.dedup();
+        Some(indices)
+    }
+}
+
+/// How an entry matched: which rendered string to highlight and with what
+/// nucleo atom. Produced by scoring so highlighting never re-derives it.
 #[derive(Clone, Copy)]
-struct FuzzyFileMentionScore {
-    match_position: usize,
-    boundary_penalty: u8,
-    span: usize,
-    gaps: usize,
+struct FileMentionMatchKind {
+    target: FileMentionHighlightTarget,
+    atom_kind: AtomKind,
 }
 
-fn is_file_mention_fuzzy_boundary(previous: Option<char>) -> bool {
-    match previous {
-        None => true,
-        Some(character) => {
-            !character.is_alphanumeric() || matches!(character, '/' | '-' | '_' | '.')
-        }
-    }
-}
+const MATCH_FILENAME_PREFIX: FileMentionMatchKind = FileMentionMatchKind {
+    target: FileMentionHighlightTarget::Filename,
+    atom_kind: AtomKind::Prefix,
+};
+const MATCH_FILENAME_FUZZY: FileMentionMatchKind = FileMentionMatchKind {
+    target: FileMentionHighlightTarget::Filename,
+    atom_kind: AtomKind::Fuzzy,
+};
+const MATCH_PATH_SUBSTRING: FileMentionMatchKind = FileMentionMatchKind {
+    target: FileMentionHighlightTarget::Path,
+    atom_kind: AtomKind::Substring,
+};
+const MATCH_PATH_FUZZY: FileMentionMatchKind = FileMentionMatchKind {
+    target: FileMentionHighlightTarget::Path,
+    atom_kind: AtomKind::Fuzzy,
+};
 
-fn find_file_mention_fuzzy_match(haystack: &str, query: &str) -> Option<FuzzyFileMentionScore> {
-    let mut query_chars = query.chars();
-    let mut next_query_char = query_chars.next()?;
-    let mut matched_chars = 0usize;
-    let mut first_match_position = None;
-    let mut boundary_penalty = 1u8;
-    let mut previous = None;
-
-    for (position, character) in haystack.chars().enumerate() {
-        if character != next_query_char {
-            previous = Some(character);
-            continue;
-        }
-
-        if first_match_position.is_none() {
-            first_match_position = Some(position);
-            boundary_penalty = u8::from(!is_file_mention_fuzzy_boundary(previous));
-        }
-
-        matched_chars += 1;
-        if let Some(query_character) = query_chars.next() {
-            next_query_char = query_character;
-            previous = Some(character);
-            continue;
-        }
-
-        let first_match_position = first_match_position?;
-        let span = position.saturating_sub(first_match_position);
-        let gaps = span.saturating_sub(matched_chars.saturating_sub(1));
-        return Some(FuzzyFileMentionScore {
-            match_position: first_match_position,
-            boundary_penalty,
-            span,
-            gaps,
-        });
-    }
-
-    None
-}
-
-fn can_use_file_mention_fuzzy_search(query: &str) -> bool {
-    !query.contains('/') && query.chars().count() >= MIN_FILE_MENTION_FUZZY_QUERY_CHARS
+/// The root-relative portion of a project entry's display path
+/// (`display_path` is `<root name>/<relative path>`).
+fn relative_display_path(entry: &FileMentionPathEntry) -> &str {
+    entry
+        .display_path
+        .split_once('/')
+        .map_or(entry.display_path.as_str(), |(_, relative)| relative)
 }
 
 fn score_file_mention_entry(
     entry: &IndexedFileMentionEntry,
     normalized_query: &str,
-) -> Option<FileMentionScore> {
+    query_matcher: &mut FileMentionQueryMatcher,
+) -> Option<(FileMentionScore, FileMentionMatchKind)> {
     if normalized_query.contains('/') {
         if entry.normalized_relative_path == normalized_query {
-            return Some(file_mention_score(entry, 0, 0, 0, 0, 0));
+            return Some((file_mention_score(entry, 0, 0, 0), MATCH_PATH_SUBSTRING));
         }
         if entry.normalized_relative_path.starts_with(normalized_query) {
-            return Some(file_mention_score(entry, 1, 0, 0, 0, 0));
+            return Some((file_mention_score(entry, 1, 0, 0), MATCH_PATH_SUBSTRING));
         }
         let match_position = entry.normalized_relative_path.find(normalized_query)?;
-        return Some(file_mention_score(entry, 3, match_position, 0, 0, 0));
+        return Some((
+            file_mention_score(entry, 3, match_position, 0),
+            MATCH_PATH_SUBSTRING,
+        ));
     }
 
     if entry.normalized_filename == normalized_query {
-        return Some(file_mention_score(entry, 0, 0, 0, 0, 0));
+        return Some((file_mention_score(entry, 0, 0, 0), MATCH_FILENAME_PREFIX));
     }
     if entry.normalized_filename.starts_with(normalized_query) {
-        return Some(file_mention_score(entry, 1, 0, 0, 0, 0));
+        return Some((file_mention_score(entry, 1, 0, 0), MATCH_FILENAME_PREFIX));
     }
     if let Some(match_position) =
         find_file_mention_segment_prefix(&entry.normalized_relative_path, normalized_query)
     {
-        return Some(file_mention_score(entry, 2, match_position, 0, 0, 0));
+        return Some((
+            file_mention_score(entry, 2, match_position, 0),
+            MATCH_PATH_SUBSTRING,
+        ));
     }
     if let Some(match_position) = entry.normalized_relative_path.find(normalized_query) {
-        return Some(file_mention_score(entry, 3, match_position, 0, 0, 0));
+        return Some((
+            file_mention_score(entry, 3, match_position, 0),
+            MATCH_PATH_SUBSTRING,
+        ));
     }
 
-    if can_use_file_mention_fuzzy_search(normalized_query) {
-        if let Some(fuzzy_match) =
-            find_file_mention_fuzzy_match(&entry.normalized_filename, normalized_query)
-        {
-            return Some(file_mention_score(
-                entry,
-                4,
-                fuzzy_match.match_position,
-                fuzzy_match.boundary_penalty,
-                fuzzy_match.span,
-                fuzzy_match.gaps,
-            ));
-        }
-        if let Some(fuzzy_match) =
-            find_file_mention_fuzzy_match(&entry.normalized_relative_path, normalized_query)
-        {
-            return Some(file_mention_score(
-                entry,
-                5,
-                fuzzy_match.match_position,
-                fuzzy_match.boundary_penalty,
-                fuzzy_match.span,
-                fuzzy_match.gaps,
-            ));
-        }
+    // Fuzzy tiers score against original-case strings so nucleo's
+    // word-boundary bonuses see camelCase humps.
+    if let Some(score) = query_matcher.fuzzy_score(&entry.entry.filename) {
+        return Some((file_mention_score(entry, 4, 0, score), MATCH_FILENAME_FUZZY));
+    }
+    if let Some(score) = query_matcher.fuzzy_score(relative_display_path(&entry.entry)) {
+        return Some((file_mention_score(entry, 5, 0, score), MATCH_PATH_FUZZY));
     }
 
     None
+}
+
+/// Compute where the match landed in the rendered string, for dropdown
+/// highlighting. Path matches are located in the root-relative portion —
+/// the same string scoring matched, so the root name can't shadow the real
+/// match — then offset to indices into the rendered `display_path`.
+fn file_mention_match_highlight(
+    query_matcher: &mut FileMentionQueryMatcher,
+    entry: &FileMentionPathEntry,
+    kind: FileMentionMatchKind,
+    normalized_query: &str,
+) -> Option<FileMentionMatchHighlight> {
+    let (haystack, char_offset) = match kind.target {
+        FileMentionHighlightTarget::Filename => (entry.filename.as_str(), 0),
+        FileMentionHighlightTarget::Path => {
+            let relative = relative_display_path(entry);
+            let prefix = &entry.display_path[..entry.display_path.len() - relative.len()];
+            (relative, prefix.chars().count() as u32)
+        }
+    };
+    let mut indices = query_matcher.match_indices(haystack, normalized_query, kind.atom_kind)?;
+    if char_offset > 0 {
+        for index in &mut indices {
+            *index += char_offset;
+        }
+    }
+    Some(FileMentionMatchHighlight {
+        target: kind.target,
+        indices,
+    })
 }
 
 fn file_mention_score(
     entry: &IndexedFileMentionEntry,
     rank: u8,
     match_position: usize,
-    boundary_penalty: u8,
-    fuzzy_span: usize,
-    fuzzy_gaps: usize,
+    fuzzy_score: u16,
 ) -> FileMentionScore {
     FileMentionScore {
         rank,
         match_position,
-        boundary_penalty,
-        fuzzy_span,
-        fuzzy_gaps,
+        fuzzy_score,
         directory_penalty: if entry.is_directory { 0 } else { 1 },
         depth: entry.depth,
         path_len: entry.normalized_relative_path.len(),
@@ -1152,9 +1238,7 @@ fn compare_file_mention_scores(left: FileMentionScore, right: FileMentionScore) 
     left.rank
         .cmp(&right.rank)
         .then_with(|| left.match_position.cmp(&right.match_position))
-        .then_with(|| left.boundary_penalty.cmp(&right.boundary_penalty))
-        .then_with(|| left.fuzzy_span.cmp(&right.fuzzy_span))
-        .then_with(|| left.fuzzy_gaps.cmp(&right.fuzzy_gaps))
+        .then_with(|| right.fuzzy_score.cmp(&left.fuzzy_score))
         .then_with(|| left.directory_penalty.cmp(&right.directory_penalty))
         .then_with(|| left.depth.cmp(&right.depth))
         .then_with(|| left.path_len.cmp(&right.path_len))
@@ -1239,12 +1323,20 @@ fn search_file_mention_index(
         return Vec::new();
     }
 
+    let mut query_matcher = FileMentionQueryMatcher::new(&normalized_query);
+
     let mut matches: Vec<IndexedFileMentionCandidate<'_>> = Vec::new();
     for entry in &index.entries {
-        let Some(score) = score_file_mention_entry(entry, &normalized_query) else {
+        let Some((score, match_kind)) =
+            score_file_mention_entry(entry, &normalized_query, &mut query_matcher)
+        else {
             continue;
         };
-        let candidate = IndexedFileMentionCandidate { entry, score };
+        let candidate = IndexedFileMentionCandidate {
+            entry,
+            score,
+            match_kind,
+        };
         let insert_at = matches
             .iter()
             .position(|existing| {
@@ -1262,13 +1354,21 @@ fn search_file_mention_index(
 
     matches
         .into_iter()
-        .map(|candidate| FileMentionCandidate {
-            entry: candidate.entry.entry.clone(),
-            normalized_resolved_path: normalized_path_key(Path::new(
-                &candidate.entry.entry.resolved_path,
-            )),
-            normalized_relative_path: candidate.entry.normalized_relative_path.clone(),
-            score: candidate.score,
+        .map(|candidate| {
+            let mut entry = candidate.entry.entry.clone();
+            entry.match_rank = Some(candidate.score.rank);
+            entry.match_highlight = file_mention_match_highlight(
+                &mut query_matcher,
+                &entry,
+                candidate.match_kind,
+                &normalized_query,
+            );
+            FileMentionCandidate {
+                normalized_resolved_path: normalized_path_key(Path::new(&entry.resolved_path)),
+                normalized_relative_path: candidate.entry.normalized_relative_path.clone(),
+                entry,
+                score: candidate.score,
+            }
         })
         .collect()
 }
@@ -1294,11 +1394,16 @@ fn insert_ranked_file_mention_candidate(
     candidate: FileMentionCandidate,
     max_results: usize,
 ) {
-    if matches
-        .iter()
-        .any(|existing| existing.normalized_resolved_path == candidate.normalized_resolved_path)
-    {
-        return;
+    if let Some(existing_index) = matches.iter().position(|existing| {
+        existing.normalized_resolved_path == candidate.normalized_resolved_path
+    }) {
+        // The same path can match under multiple roots (e.g. nested roots)
+        // with different scores; keep whichever scored better.
+        if compare_file_mention_candidates(&candidate, &matches[existing_index]).is_lt() {
+            matches.remove(existing_index);
+        } else {
+            return;
+        }
     }
 
     let insert_at = matches
@@ -1372,12 +1477,38 @@ fn filesystem_file_mention_candidate_score(
     Some(FileMentionScore {
         rank,
         match_position,
-        boundary_penalty: 0,
-        fuzzy_span: 0,
-        fuzzy_gaps: 0,
+        fuzzy_score: 0,
         directory_penalty: if is_directory { 0 } else { 1 },
         depth: path.components().count(),
-        path_len: path.to_string_lossy().len(),
+        // Use the parent directory's length so entries from the same listing
+        // tie here and fall through to the lexicographic comparison —
+        // directory listings should read alphabetically, not shortest-first.
+        path_len: path.parent().map_or(0, |dir| dir.to_string_lossy().len()),
+    })
+}
+
+/// Filesystem-mode matches are exact/prefix/substring on the filename, so the
+/// highlight is the contiguous run the scorer already located — no second
+/// matching pass needed. ASCII-only for the same reason as `match_indices`:
+/// `match_position` is a byte offset into the lowercased name, which only
+/// equals a char index in the original-case name when both are ASCII.
+fn filesystem_file_mention_highlight(
+    name: &str,
+    partial: &str,
+    score: FileMentionScore,
+) -> Option<FileMentionMatchHighlight> {
+    if partial.is_empty() || !name.is_ascii() || !partial.is_ascii() {
+        return None;
+    }
+    let start = match score.rank {
+        0 | 1 => 0,
+        3 => score.match_position,
+        _ => return None,
+    } as u32;
+    let len = partial.chars().count() as u32;
+    Some(FileMentionMatchHighlight {
+        target: FileMentionHighlightTarget::Filename,
+        indices: (start..start + len).collect(),
     })
 }
 
@@ -1437,6 +1568,12 @@ fn search_filesystem_path_mentions(query: &str, max_results: usize) -> Vec<FileM
         insert_ranked_file_mention_candidate(&mut matches, candidate, max_results);
     }
 
+    for candidate in &mut matches {
+        candidate.entry.match_rank = Some(candidate.score.rank);
+        candidate.entry.match_highlight =
+            filesystem_file_mention_highlight(&candidate.entry.filename, &partial, candidate.score);
+    }
+
     matches
 }
 
@@ -1447,7 +1584,7 @@ fn search_file_mentions_blocking(
 ) -> Vec<FileMentionPathEntry> {
     let roots = normalize_roots(roots);
     let query = query.trim();
-    if query.is_empty() {
+    if query.is_empty() || query.len() > MAX_FILE_MENTION_QUERY_BYTES {
         return Vec::new();
     }
 
@@ -1818,6 +1955,211 @@ mod tests {
             entries.iter().any(|entry| entry.filename == "readme.md"),
             "expected fuzzy basename match"
         );
+    }
+
+    #[test]
+    fn ranks_camel_case_boundary_fuzzy_matches_first() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        fs::write(root.join("useChatSession.ts"), "").expect("camel file");
+        fs::write(root.join("music-store.ts"), "").expect("kebab file");
+
+        let entries = search_mentions(root, "ucs", 10);
+        assert_eq!(
+            entries.first().map(|entry| entry.filename.as_str()),
+            Some("useChatSession.ts"),
+            "camelCase boundary match should outrank mid-word match: {entries:?}"
+        );
+    }
+
+    #[test]
+    fn fuzzy_matches_normalize_unicode_accents() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        fs::write(root.join("café.md"), "").expect("accented file");
+
+        let entries = search_mentions(root, "cafe", 10);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.filename == "café.md")
+            .expect("expected unaccented query to match accented filename");
+        // nucleo's indices are not codepoint-aligned for non-ASCII strings,
+        // so non-ASCII names match but don't get a highlight.
+        assert!(entry.match_highlight.is_none());
+    }
+
+    #[test]
+    fn rejects_oversized_queries() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        fs::write(root.join("main.ts"), "").expect("source file");
+
+        let oversized = "a".repeat(super::MAX_FILE_MENTION_QUERY_BYTES + 1);
+        let entries = search_file_mentions_blocking(
+            vec![root.to_string_lossy().to_string()],
+            oversized,
+            Some(10),
+        );
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn path_highlights_skip_query_matches_in_the_root_name() {
+        let dir = git_tempdir();
+        let search_root = dir.path().join("api-root");
+        let nested = search_root.join("src").join("api");
+
+        fs::create_dir_all(&nested).expect("nested dirs");
+        fs::write(nested.join("client.ts"), "").expect("client file");
+
+        let entries = search_mentions(&search_root, "api", 50);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.filename == "client.ts")
+            .expect("client entry");
+        let highlight = entry.match_highlight.as_ref().expect("highlight");
+        assert_eq!(highlight.target, super::FileMentionHighlightTarget::Path);
+        // display_path is "api-root/src/api/client.ts"; the highlight must
+        // land on the real path match, not the "api" inside the root name.
+        let chars: Vec<char> = entry.display_path.chars().collect();
+        let matched: String = highlight
+            .indices
+            .iter()
+            .map(|&index| chars[index as usize])
+            .collect();
+        assert_eq!(matched, "api");
+        assert!(
+            highlight.indices.iter().all(|&index| index >= 9),
+            "indices should be past the root-name prefix: {highlight:?}"
+        );
+    }
+
+    #[test]
+    fn keeps_better_scored_duplicate_across_nested_roots() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let sub = root.join("sub");
+
+        fs::create_dir_all(sub.join("components")).expect("sub components dir");
+        fs::create_dir_all(root.join("components")).expect("root components dir");
+        fs::write(root.join("components").join("button.tsx"), "").expect("outer file");
+        fs::write(sub.join("components").join("button.ts"), "").expect("inner file");
+
+        // The inner file matches exactly under the `sub` root (rank 0) but
+        // only as a substring under the outer root; the exact rank must win
+        // regardless of root order.
+        for roots in [
+            vec![
+                root.to_string_lossy().to_string(),
+                sub.to_string_lossy().to_string(),
+            ],
+            vec![
+                sub.to_string_lossy().to_string(),
+                root.to_string_lossy().to_string(),
+            ],
+        ] {
+            let entries =
+                search_file_mentions_blocking(roots, "components/button.ts".to_string(), Some(10));
+            let entry = entries
+                .iter()
+                .find(|entry| entry.filename == "button.ts")
+                .expect("inner file present");
+            assert_eq!(
+                entry.match_rank,
+                Some(0),
+                "exact match rank should survive dedup: {entries:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn lists_filesystem_directories_alphabetically() {
+        let dir = tempdir().expect("tempdir");
+        let root = dir.path();
+
+        for name in ["zebra", "alpha", "mango"] {
+            fs::create_dir_all(root.join(name)).expect("dir");
+        }
+        fs::write(root.join("b-file"), "").expect("file");
+
+        let entries =
+            search_file_mentions_blocking(vec![], format!("{}/", root.to_string_lossy()), Some(10));
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.filename.as_str())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["alpha", "mango", "zebra", "b-file"],
+            "directories first, alphabetical within each group"
+        );
+    }
+
+    #[test]
+    fn returns_filename_highlight_indices_for_prefix_matches() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        fs::write(root.join("main.ts"), "").expect("source file");
+
+        let entries = search_mentions(root, "mai", 10);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.filename == "main.ts")
+            .expect("main entry");
+        let highlight = entry.match_highlight.as_ref().expect("highlight");
+        assert_eq!(
+            highlight.target,
+            super::FileMentionHighlightTarget::Filename
+        );
+        assert_eq!(highlight.indices, vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn returns_fuzzy_highlight_indices_for_scattered_matches() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        fs::write(root.join("readme.md"), "").expect("readme file");
+
+        let entries = search_mentions(root, "rdme", 10);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.filename == "readme.md")
+            .expect("readme entry");
+        let highlight = entry.match_highlight.as_ref().expect("highlight");
+        assert_eq!(
+            highlight.target,
+            super::FileMentionHighlightTarget::Filename
+        );
+        assert_eq!(highlight.indices, vec![0, 3, 4, 5]);
+    }
+
+    #[test]
+    fn returns_path_highlight_for_slash_queries() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let api = root.join("Src").join("API");
+
+        fs::create_dir_all(&api).expect("api dir");
+        fs::write(api.join("Client.ts"), "").expect("client file");
+
+        let entries = search_mentions(root, "src/api", 50);
+        let entry = entries
+            .iter()
+            .find(|entry| entry.filename == "Client.ts")
+            .expect("client entry");
+        let highlight = entry.match_highlight.as_ref().expect("highlight");
+        assert_eq!(highlight.target, super::FileMentionHighlightTarget::Path);
+        let chars: Vec<char> = entry.display_path.chars().collect();
+        let matched: String = highlight
+            .indices
+            .iter()
+            .map(|&index| chars[index as usize])
+            .collect();
+        assert_eq!(matched.to_lowercase(), "src/api");
     }
 
     #[test]

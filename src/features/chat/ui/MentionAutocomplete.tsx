@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Sparkles, User } from "lucide-react";
 import { IconFile, IconFolder } from "@tabler/icons-react";
@@ -94,18 +95,39 @@ export function MentionAutocomplete({
 
   const hasResults = items.length > 0;
   const showEmpty = !pathsLoading && !pathsError && !hasResults;
-  const getFileLabel = (file: FileMentionItem) => {
-    if (file.shortcut === "home") return t("mention.homeFolder");
+  // Both helpers return the rendered text together with its highlight
+  // indices, so substituted (translated) strings can never carry indices
+  // that were computed against the original filename/path.
+  const getFileLabel = (
+    file: FileMentionItem,
+  ): { text: string; indices?: number[] } => {
+    if (file.shortcut === "home") {
+      return { text: t("mention.homeFolder") };
+    }
     if (file.shortcut === "filesystemRoot") {
-      return t("mention.filesystemRoot");
+      return { text: t("mention.filesystemRoot") };
     }
-    return file.filename;
+    return {
+      text: file.filename,
+      indices:
+        file.matchHighlight?.target === "filename"
+          ? file.matchHighlight.indices
+          : undefined,
+    };
   };
-  const getFileDescription = (file: FileMentionItem) => {
+  const getFileDescription = (
+    file: FileMentionItem,
+  ): { text: string; indices?: number[] } => {
     if (file.shortcut === "projectRoot") {
-      return t("mention.projectRoot");
+      return { text: t("mention.projectRoot") };
     }
-    return file.displayPath;
+    return {
+      text: file.displayPath,
+      indices:
+        file.matchHighlight?.target === "path"
+          ? file.matchHighlight.indices
+          : undefined,
+    };
   };
 
   return (
@@ -162,10 +184,10 @@ export function MentionAutocomplete({
                 )}
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-sm font-medium">
-                    {getFileLabel(file)}
+                    <HighlightedMatchText {...getFileLabel(file)} />
                   </span>
                   <span className="truncate text-[10px] text-muted-foreground">
-                    {getFileDescription(file)}
+                    <HighlightedMatchText {...getFileDescription(file)} />
                   </span>
                 </div>
               </button>
@@ -301,6 +323,47 @@ export function MentionAutocomplete({
       </div>
     </PopoverContent>
   );
+}
+
+// ---------------------------------------------------------------------------
+// Match highlighting
+// ---------------------------------------------------------------------------
+
+/**
+ * Renders `text` with the characters at `indices` (char positions, as
+ * reported by the backend matcher) emphasized, fzf-style. Indices are
+ * char-based rather than UTF-16 code units, hence `Array.from`. Consecutive
+ * matched characters render as one span so the accessible name stays intact.
+ */
+function HighlightedMatchText({
+  text,
+  indices,
+}: {
+  text: string;
+  indices?: number[];
+}) {
+  if (!indices?.length) return <>{text}</>;
+  const matched = new Set(indices);
+  const chars = Array.from(text);
+  const parts: ReactNode[] = [];
+  let runStart = 0;
+  for (let i = 1; i <= chars.length; i++) {
+    if (i < chars.length && matched.has(i) === matched.has(runStart)) {
+      continue;
+    }
+    const run = chars.slice(runStart, i).join("");
+    parts.push(
+      matched.has(runStart) ? (
+        <span key={runStart} className="text-primary">
+          {run}
+        </span>
+      ) : (
+        run
+      ),
+    );
+    runStart = i;
+  }
+  return <>{parts}</>;
 }
 
 // ---------------------------------------------------------------------------
