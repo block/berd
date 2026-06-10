@@ -6,6 +6,8 @@ interface SearchHeadingInputProps {
   onChange: (value: string) => void;
   placeholder: string;
   ariaLabel: string;
+  activeDescendant?: string | null;
+  controlsId?: string;
   isRaised: boolean;
   onKeyDown?: (event: KeyboardEvent<HTMLInputElement>) => void;
 }
@@ -14,7 +16,16 @@ export const SearchHeadingInput = forwardRef<
   HTMLInputElement,
   SearchHeadingInputProps
 >(function SearchHeadingInput(
-  { value, onChange, placeholder, ariaLabel, isRaised, onKeyDown },
+  {
+    value,
+    onChange,
+    placeholder,
+    ariaLabel,
+    activeDescendant,
+    controlsId,
+    isRaised,
+    onKeyDown,
+  },
   ref,
 ) {
   return (
@@ -22,6 +33,8 @@ export const SearchHeadingInput = forwardRef<
       ref={ref}
       type="text"
       aria-label={ariaLabel}
+      aria-activedescendant={activeDescendant ?? undefined}
+      aria-controls={controlsId}
       value={value}
       onChange={(event) => onChange(event.target.value)}
       onKeyDown={onKeyDown}

@@ -1,5 +1,16 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  CSSProperties,
+  KeyboardEvent as ReactKeyboardEvent,
+  ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import type { ExtensionEntry } from "@/features/extensions/types";
@@ -51,6 +62,32 @@ const searchViewStyle = {
     "min(512px, max(220px, calc(100% - var(--search-results-top) - 132px)))",
 } as CSSProperties;
 
+function searchResultId(kind: string, key: string): string {
+  return `search-result-${kind}-${key.replace(/[^A-Za-z0-9_-]/g, "_")}`;
+}
+
+function findResultPosition(
+  resultColumns: string[][],
+  resultId: string | null,
+): { columnIndex: number; rowIndex: number } | null {
+  if (!resultId) {
+    return null;
+  }
+
+  for (
+    let columnIndex = 0;
+    columnIndex < resultColumns.length;
+    columnIndex += 1
+  ) {
+    const rowIndex = resultColumns[columnIndex].indexOf(resultId);
+    if (rowIndex >= 0) {
+      return { columnIndex, rowIndex };
+    }
+  }
+
+  return null;
+}
+
 export function SearchView({
   onExit,
   onSelectSearchResult,
@@ -61,11 +98,13 @@ export function SearchView({
 }: SearchViewProps) {
   const { t, i18n } = useTranslation(["search", "sessions", "common"]);
   const { formatRelativeTimeToNow } = useLocaleFormatting();
+  const resultsId = useId();
   const inputRef = useRef<HTMLInputElement>(null);
   const [railEl, setRailEl] = useState<HTMLDivElement | null>(null);
   const [leftFadeAmount, setLeftFadeAmount] = useState(0);
   const [rightFadeAmount, setRightFadeAmount] = useState(0);
   const [query, setQuery] = useState("");
+  const [activeResultId, setActiveResultId] = useState<string | null>(null);
   const debouncedQuery = useDebouncedValue(query, DEBOUNCE_MS);
   const trimmedQuery = query.trim();
   const trimmedDebouncedQuery = debouncedQuery.trim();
@@ -201,6 +240,115 @@ export function SearchView({
   const showNoMatches =
     trimmedDebouncedQuery.length > 0 && !hasAnyResults && !isChatSearching;
 
+  const resultColumns = useMemo(
+    () =>
+      [
+        chatResults.map((result) =>
+          searchResultId(
+            "chat",
+            `${result.session.id}:${result.messageId ?? "session"}`,
+          ),
+        ),
+        extensionResults.map(({ entry }) =>
+          searchResultId("extension", entry.config_key),
+        ),
+        agentResults.map((agent) => searchResultId("agent", agent.id)),
+        skillResults.map((skill) => searchResultId("skill", skill.name)),
+        automationResults.flatMap((automation) =>
+          automation.id ? [searchResultId("automation", automation.id)] : [],
+        ),
+      ].filter((column) => column.length > 0),
+    [
+      agentResults,
+      automationResults,
+      chatResults,
+      extensionResults,
+      skillResults,
+    ],
+  );
+  const resultIds = useMemo(() => resultColumns.flat(), [resultColumns]);
+
+  useEffect(() => {
+    if (!showResults) {
+      setActiveResultId(null);
+      return;
+    }
+
+    setActiveResultId((current) =>
+      current && resultIds.includes(current) ? current : null,
+    );
+  }, [resultIds, showResults]);
+
+  useEffect(() => {
+    if (!activeResultId) {
+      return;
+    }
+
+    const element = document.getElementById(activeResultId);
+    if (typeof element?.scrollIntoView === "function") {
+      element.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+  }, [activeResultId]);
+
+  const handleSearchKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLInputElement>) => {
+      if (
+        (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+        showResults &&
+        resultIds.length > 0
+      ) {
+        event.preventDefault();
+        setActiveResultId((current) => {
+          const currentIndex = current ? resultIds.indexOf(current) : -1;
+          if (event.key === "ArrowDown") {
+            return resultIds[(currentIndex + 1) % resultIds.length] ?? null;
+          }
+          const previousIndex =
+            currentIndex <= 0 ? resultIds.length - 1 : currentIndex - 1;
+          return resultIds[previousIndex] ?? null;
+        });
+        return;
+      }
+
+      if (
+        (event.key === "ArrowRight" || event.key === "ArrowLeft") &&
+        showResults &&
+        resultColumns.length > 0
+      ) {
+        event.preventDefault();
+        setActiveResultId((current) => {
+          const position = findResultPosition(resultColumns, current);
+          const direction = event.key === "ArrowRight" ? 1 : -1;
+
+          if (!position) {
+            const column =
+              direction > 0
+                ? resultColumns[0]
+                : resultColumns[resultColumns.length - 1];
+            return column?.[0] ?? null;
+          }
+
+          const columnIndex =
+            (position.columnIndex + direction + resultColumns.length) %
+            resultColumns.length;
+          const column = resultColumns[columnIndex];
+          const rowIndex = Math.min(position.rowIndex, column.length - 1);
+          return column[rowIndex] ?? null;
+        });
+        return;
+      }
+
+      if (event.key === "Enter" && activeResultId) {
+        const activeElement = document.getElementById(activeResultId);
+        if (activeElement instanceof HTMLButtonElement) {
+          event.preventDefault();
+          activeElement.click();
+        }
+      }
+    },
+    [activeResultId, resultColumns, resultIds, showResults],
+  );
+
   const resultSections: Array<{
     key: string;
     label: string;
@@ -218,14 +366,21 @@ export function SearchView({
           result.session.title,
           defaultTitle,
         );
+        const resultId = searchResultId(
+          "chat",
+          `${result.session.id}:${result.messageId ?? "session"}`,
+        );
         return (
           <ChatResultRow
+            id={resultId}
             key={result.session.id}
             result={result}
             defaultTitle={defaultTitle}
             ariaLabel={t("actions.openSession", { name: title })}
             formatRelativeTimeToNow={formatRelativeTimeToNow}
             t={t}
+            isActive={activeResultId === resultId}
+            onActive={() => setActiveResultId(resultId)}
             onSelect={(sessionId, messageId) =>
               onSelectSearchResult(
                 sessionId,
@@ -246,10 +401,17 @@ export function SearchView({
       tone: "automation",
       children: extensionResults.map(({ entry, state }) => (
         <ExtensionResultRow
+          id={searchResultId("extension", entry.config_key)}
           key={entry.config_key}
           entry={entry}
           stateLabel={t(`states.${state}`)}
           ariaLabel={t("actions.openExtension", { name: entry.name })}
+          isActive={
+            activeResultId === searchResultId("extension", entry.config_key)
+          }
+          onActive={() =>
+            setActiveResultId(searchResultId("extension", entry.config_key))
+          }
           onSelect={onOpenExtension}
         />
       )),
@@ -263,11 +425,14 @@ export function SearchView({
       tone: "agent",
       children: agentResults.map((agent) => (
         <AgentResultRow
+          id={searchResultId("agent", agent.id)}
           key={agent.id}
           agent={agent}
           ariaLabel={t("actions.openAgent", {
             name: agent.displayName,
           })}
+          isActive={activeResultId === searchResultId("agent", agent.id)}
+          onActive={() => setActiveResultId(searchResultId("agent", agent.id))}
           onSelect={onOpenAgent}
         />
       )),
@@ -281,9 +446,14 @@ export function SearchView({
       tone: "skill",
       children: skillResults.map((skill) => (
         <SkillResultRow
+          id={searchResultId("skill", skill.name)}
           key={skill.name}
           skill={skill}
           ariaLabel={t("actions.openSkill", { name: skill.name })}
+          isActive={activeResultId === searchResultId("skill", skill.name)}
+          onActive={() =>
+            setActiveResultId(searchResultId("skill", skill.name))
+          }
           onSelect={onOpenSkill}
         />
       )),
@@ -298,12 +468,18 @@ export function SearchView({
       tone: "automation",
       children: automationResults.map((automation) => {
         const displayName = automation.title?.trim() || automationFallback;
+        const resultId = automation.id
+          ? searchResultId("automation", automation.id)
+          : undefined;
         return (
           <AutomationResultRow
+            id={resultId}
             key={automation.id ?? displayName}
             automation={automation}
             fallbackTitle={automationFallback}
             ariaLabel={t("actions.openAutomation", { name: displayName })}
+            isActive={activeResultId === resultId}
+            onActive={resultId ? () => setActiveResultId(resultId) : undefined}
             onSelect={onOpenAutomation}
           />
         );
@@ -320,9 +496,12 @@ export function SearchView({
         ref={inputRef}
         value={query}
         onChange={setQuery}
+        activeDescendant={showResults ? activeResultId : null}
+        controlsId={resultsId}
         isRaised={trimmedQuery.length > 0}
         placeholder={t("heading.placeholder")}
         ariaLabel={t("heading.ariaLabel")}
+        onKeyDown={handleSearchKeyDown}
       />
 
       {showResults && (
@@ -336,6 +515,7 @@ export function SearchView({
           }}
         >
           <div
+            id={resultsId}
             ref={setRailEl}
             data-testid="search-results-rail"
             className="flex h-full gap-9 overflow-x-auto pb-4 scrollbar-none"
