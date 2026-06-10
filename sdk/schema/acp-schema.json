@@ -7,15 +7,11 @@
           "default": false,
           "type": "boolean"
         },
-        "extensionConfig": {
-          "default": null,
-          "description": "Extension configuration. Must be a JSON object matching one of the\n`ExtensionConfig` variants (e.g. `stdio`, `streamable_http`, `builtin`).\n`name` and `enabled` are injected server-side."
-        },
-        "name": {
-          "type": "string"
+        "extension": {
+          "$ref": "#/$defs/GooseExtension"
         }
       },
-      "required": ["name"],
+      "required": ["extension"],
       "type": "object",
       "x-method": "_goose/unstable/config/extensions/add",
       "x-side": "agent"
@@ -730,6 +726,26 @@
       "type": "object",
       "x-side": "agent"
     },
+    "EnvVariable": {
+      "description": "An environment variable to set when launching an MCP server.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "name": {
+          "description": "The name of the environment variable.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value to set for the environment variable.",
+          "type": "string"
+        }
+      },
+      "required": ["name", "value"],
+      "type": "object"
+    },
     "ExportSessionRequest_unstable": {
       "description": "Export a session as a JSON string.",
       "properties": {
@@ -901,11 +917,20 @@
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/GetExtensionsRequest_unstable"
+                      "$ref": "#/$defs/GetConfigExtensionsRequest_unstable"
                     }
                   ],
                   "description": "Params for _goose/unstable/config/extensions/list",
-                  "title": "GetExtensionsRequest_unstable"
+                  "title": "GetConfigExtensionsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/GetAvailableExtensionsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/extensions/available",
+                  "title": "GetAvailableExtensionsRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -928,11 +953,11 @@
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/ToggleConfigExtensionRequest_unstable"
+                      "$ref": "#/$defs/SetConfigExtensionEnabledRequest_unstable"
                     }
                   ],
-                  "description": "Params for _goose/unstable/config/extensions/toggle",
-                  "title": "ToggleConfigExtensionRequest_unstable"
+                  "description": "Params for _goose/unstable/config/extensions/set-enabled",
+                  "title": "SetConfigExtensionEnabledRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1407,10 +1432,18 @@
                     {
                       "allOf": [
                         {
-                          "$ref": "#/$defs/GetExtensionsResponse_unstable"
+                          "$ref": "#/$defs/GetConfigExtensionsResponse_unstable"
                         }
                       ],
-                      "title": "GetExtensionsResponse_unstable"
+                      "title": "GetConfigExtensionsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/GetAvailableExtensionsResponse_unstable"
+                        }
+                      ],
+                      "title": "GetAvailableExtensionsResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -1682,28 +1715,50 @@
       ],
       "x-docs-ignore": true
     },
-    "GetExtensionsRequest_unstable": {
+    "GetAvailableExtensionsRequest_unstable": {
+      "description": "List Goose-owned extension definitions available to configure or enable.",
+      "type": "object",
+      "x-method": "_goose/unstable/extensions/available",
+      "x-side": "agent"
+    },
+    "GetAvailableExtensionsResponse_unstable": {
+      "properties": {
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/GooseExtension"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["extensions"],
+      "type": "object",
+      "x-method": "_goose/unstable/extensions/available",
+      "x-side": "agent"
+    },
+    "GetConfigExtensionsRequest_unstable": {
       "description": "List configured extensions and any warnings.",
       "type": "object",
       "x-method": "_goose/unstable/config/extensions/list",
       "x-side": "agent"
     },
-    "GetExtensionsResponse_unstable": {
+    "GetConfigExtensionsResponse_unstable": {
       "description": "List configured extensions and any warnings.",
       "properties": {
         "extensions": {
-          "description": "Array of ExtensionEntry objects with `enabled` flag, `configKey`, and flattened config details.",
-          "items": {},
+          "items": {
+            "$ref": "#/$defs/GooseExtensionEntry"
+          },
           "type": "array"
         },
         "warnings": {
+          "default": [],
           "items": {
             "type": "string"
           },
           "type": "array"
         }
       },
-      "required": ["extensions", "warnings"],
+      "required": ["extensions"],
       "type": "object",
       "x-method": "_goose/unstable/config/extensions/list",
       "x-side": "agent"
@@ -1756,6 +1811,105 @@
       "type": "object",
       "x-method": "_goose/unstable/tools/list",
       "x-side": "agent"
+    },
+    "GooseExtension": {
+      "oneOf": [
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "display_name": {
+              "type": ["string", "null"]
+            },
+            "name": {
+              "type": "string"
+            },
+            "timeout": {
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            "type": {
+              "const": "builtin",
+              "type": "string"
+            }
+          },
+          "required": ["type", "name"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "display_name": {
+              "type": ["string", "null"]
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "platform",
+              "type": "string"
+            }
+          },
+          "required": ["type", "name"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "envKeys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "server": {
+              "$ref": "#/$defs/McpServer"
+            },
+            "socket": {
+              "type": ["string", "null"]
+            },
+            "timeout": {
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            "type": {
+              "const": "mcp",
+              "type": "string"
+            }
+          },
+          "required": ["type", "server"],
+          "type": "object"
+        }
+      ]
+    },
+    "GooseExtensionEntry": {
+      "properties": {
+        "configKey": {
+          "type": ["string", "null"]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "extension": {
+          "$ref": "#/$defs/GooseExtension"
+        }
+      },
+      "required": ["extension", "enabled"],
+      "type": "object"
     },
     "GooseSessionNotification_unstable": {
       "description": "Goose-custom session update notification — a parallel to ACP's\n`session/update` carrying goose-specific update variants.",
@@ -1854,6 +2008,26 @@
       "type": "object",
       "x-method": "_goose/unstable/tools/call",
       "x-side": "agent"
+    },
+    "HttpHeader": {
+      "description": "An HTTP header to set when making requests to the MCP server.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "name": {
+          "description": "The name of the HTTP header.",
+          "type": "string"
+        },
+        "value": {
+          "description": "The value to set for the HTTP header.",
+          "type": "string"
+        }
+      },
+      "required": ["name", "value"],
+      "type": "object"
     },
     "ImportSessionRequest_unstable": {
       "description": "Import a session from a JSON string.",
@@ -2026,6 +2200,135 @@
       "type": "object",
       "x-method": "_goose/unstable/sources/list",
       "x-side": "agent"
+    },
+    "McpServer": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/McpServerHttp",
+          "description": "HTTP transport configuration\n\nOnly available when the Agent capabilities indicate `mcp_capabilities.http` is `true`.",
+          "properties": {
+            "type": {
+              "const": "http",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/McpServerSse",
+          "description": "SSE transport configuration\n\nOnly available when the Agent capabilities indicate `mcp_capabilities.sse` is `true`.",
+          "properties": {
+            "type": {
+              "const": "sse",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/McpServerStdio",
+          "description": "Stdio transport configuration\n\nAll Agents MUST support this transport."
+        }
+      ],
+      "description": "Configuration for connecting to an MCP (Model Context Protocol) server.\n\nMCP servers provide tools and context that the agent can use when\nprocessing prompts.\n\nSee protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)"
+    },
+    "McpServerHttp": {
+      "description": "HTTP transport configuration for MCP.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "headers": {
+          "description": "HTTP headers to set when making requests to the MCP server.",
+          "items": {
+            "$ref": "#/$defs/HttpHeader"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Human-readable name identifying this MCP server.",
+          "type": "string"
+        },
+        "type": {
+          "const": "http",
+          "type": "string"
+        },
+        "url": {
+          "description": "URL to the MCP server.",
+          "type": "string"
+        }
+      },
+      "required": ["type", "name", "url", "headers"],
+      "type": "object"
+    },
+    "McpServerSse": {
+      "description": "SSE transport configuration for MCP.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "headers": {
+          "description": "HTTP headers to set when making requests to the MCP server.",
+          "items": {
+            "$ref": "#/$defs/HttpHeader"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Human-readable name identifying this MCP server.",
+          "type": "string"
+        },
+        "type": {
+          "const": "sse",
+          "type": "string"
+        },
+        "url": {
+          "description": "URL to the MCP server.",
+          "type": "string"
+        }
+      },
+      "required": ["type", "name", "url", "headers"],
+      "type": "object"
+    },
+    "McpServerStdio": {
+      "description": "Stdio transport configuration for MCP.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "args": {
+          "description": "Command-line arguments to pass to the MCP server.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "description": "Path to the MCP server executable.",
+          "type": "string"
+        },
+        "env": {
+          "description": "Environment variables to set when launching the MCP server.",
+          "items": {
+            "$ref": "#/$defs/EnvVariable"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "Human-readable name identifying this MCP server.",
+          "type": "string"
+        }
+      },
+      "required": ["name", "command", "args", "env"],
+      "type": "object"
     },
     "OnboardingImportApplyRequest_unstable": {
       "description": "Import selected onboarding candidates.",
@@ -2595,7 +2898,6 @@
       "properties": {
         "contextLimit": {
           "description": "Context window size in tokens.",
-          "format": "uint",
           "minimum": 0,
           "type": ["integer", "null"]
         },
@@ -3087,6 +3389,21 @@
       ],
       "type": "object"
     },
+    "SetConfigExtensionEnabledRequest_unstable": {
+      "description": "Set the `enabled` flag for a persisted extension in the user's global goose config.",
+      "properties": {
+        "configKey": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "required": ["configKey", "enabled"],
+      "type": "object",
+      "x-method": "_goose/unstable/config/extensions/set-enabled",
+      "x-side": "agent"
+    },
     "SetSessionSystemPromptRequest_unstable": {
       "description": "Set, append, or clear system prompt text for a session.\n\n`mode: \"set\"` replaces Goose's base system prompt. `mode: \"append\"` adds an\ninstruction under \"Additional Instructions\". Reusing a key replaces the\nprevious value for that mode/key; sending empty text clears it.",
       "properties": {
@@ -3245,21 +3562,6 @@
       },
       "required": ["status"],
       "type": "object"
-    },
-    "ToggleConfigExtensionRequest_unstable": {
-      "description": "Toggle the `enabled` flag for a persisted extension in the user's global goose config.",
-      "properties": {
-        "configKey": {
-          "type": "string"
-        },
-        "enabled": {
-          "type": "boolean"
-        }
-      },
-      "required": ["configKey", "enabled"],
-      "type": "object",
-      "x-method": "_goose/unstable/config/extensions/toggle",
-      "x-side": "agent"
     },
     "UnarchiveSessionRequest_unstable": {
       "description": "Unarchive a previously archived session.",

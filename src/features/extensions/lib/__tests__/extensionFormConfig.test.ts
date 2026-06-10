@@ -17,7 +17,7 @@ describe("extensionFormConfig", () => {
     ).toEqual([
       { key: "LEGACY_TOKEN", value: "plain" },
       { key: "SHARED_TOKEN", value: "plain-shared" },
-      { key: "GITHUB_TOKEN", value: "" },
+      { key: "GITHUB_TOKEN", value: "", secret: true },
     ]);
   });
 

@@ -113,12 +113,37 @@ describe("useExtensionModalForm", () => {
 
     expect(result.current.envVars).toMatchObject([
       { key: "LEGACY_TOKEN", value: "plain" },
-      { key: "GITHUB_TOKEN", value: "" },
+      { key: "GITHUB_TOKEN", value: "", secret: true },
     ]);
     expect(result.current.buildSubmitPayload()?.config).toMatchObject({
       envs: { LEGACY_TOKEN: "plain" },
       env_keys: ["GITHUB_TOKEN"],
     });
+  });
+
+  it("replaces a stored secret with a freshly typed inline value", () => {
+    const extension: ExtensionEntry = {
+      type: "stdio",
+      name: "github",
+      description: "Issue tools",
+      cmd: "npx",
+      args: [],
+      env_keys: ["GITHUB_TOKEN"],
+      config_key: "github",
+      enabled: false,
+    };
+    const { result } = renderHook(() => useExtensionModalForm(extension));
+
+    act(() => {
+      result.current.updateEnvVar(0, "value", "new-secret");
+    });
+
+    expect(result.current.buildSubmitPayload()?.config).toMatchObject({
+      envs: { GITHUB_TOKEN: "new-secret" },
+    });
+    expect(result.current.buildSubmitPayload()?.config).not.toHaveProperty(
+      "env_keys",
+    );
   });
 
   it("rejects non-HTTP streamable HTTP URIs", () => {

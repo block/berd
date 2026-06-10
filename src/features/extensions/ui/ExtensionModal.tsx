@@ -26,6 +26,8 @@ import {
 } from "../hooks/useExtensionModalForm";
 import type { ExtensionConfig, ExtensionEntry } from "../types";
 
+const MASKED_ENV_VALUE = "****";
+
 interface ExtensionModalProps {
   extension?: ExtensionEntry;
   onSubmit: (name: string, config: ExtensionConfig) => Promise<void>;
@@ -195,11 +197,16 @@ export function ExtensionModal({
                       className="flex-1"
                     />
                     <Input
+                      type={env.secret ? "password" : "text"}
                       value={env.value}
                       onChange={(e) =>
                         form.updateEnvVar(i, "value", e.target.value)
                       }
-                      placeholder={t("extensions.fields.envValuePlaceholder")}
+                      placeholder={
+                        env.secret
+                          ? MASKED_ENV_VALUE
+                          : t("extensions.fields.envValuePlaceholder")
+                      }
                       className="flex-1"
                     />
                     <Button

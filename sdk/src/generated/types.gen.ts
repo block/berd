@@ -6,13 +6,7 @@
  */
 export type AddConfigExtensionRequestUnstable = {
     enabled?: boolean;
-    /**
-     * Extension configuration. Must be a JSON object matching one of the
-     * `ExtensionConfig` variants (e.g. `stdio`, `streamable_http`, `builtin`).
-     * `name` and `enabled` are injected server-side.
-     */
-    extensionConfig?: unknown;
-    name: string;
+    extension: GooseExtension;
 };
 
 /**
@@ -352,6 +346,30 @@ export type EmptyResponse = {
 };
 
 /**
+ * An environment variable to set when launching an MCP server.
+ */
+export type EnvVariable = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * The name of the environment variable.
+     */
+    name: string;
+    /**
+     * The value to set for the environment variable.
+     */
+    value: string;
+};
+
+/**
  * Export a session as a JSON string.
  */
 export type ExportSessionRequestUnstable = {
@@ -388,14 +406,14 @@ export type ExtNotification = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | DeleteSessionRequest | GetExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | ToggleConfigExtensionRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ElicitationRespondRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
+    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ElicitationRespondRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | GetExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
+    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
 } | {
     error: {
         code: number;
@@ -406,21 +424,29 @@ export type ExtResponse = {
 };
 
 /**
+ * List Goose-owned extension definitions available to configure or enable.
+ */
+export type GetAvailableExtensionsRequestUnstable = {
+    [key: string]: unknown;
+};
+
+export type GetAvailableExtensionsResponseUnstable = {
+    extensions: Array<GooseExtension>;
+};
+
+/**
  * List configured extensions and any warnings.
  */
-export type GetExtensionsRequestUnstable = {
+export type GetConfigExtensionsRequestUnstable = {
     [key: string]: unknown;
 };
 
 /**
  * List configured extensions and any warnings.
  */
-export type GetExtensionsResponseUnstable = {
-    /**
-     * Array of ExtensionEntry objects with `enabled` flag, `configKey`, and flattened config details.
-     */
-    extensions: Array<unknown>;
-    warnings: Array<string>;
+export type GetConfigExtensionsResponseUnstable = {
+    extensions: Array<GooseExtensionEntry>;
+    warnings?: Array<string>;
 };
 
 export type GetSessionExtensionsRequestUnstable = {
@@ -446,6 +472,35 @@ export type GetToolsResponseUnstable = {
      * Array of tool info objects with `name`, `description`, `parameters`, and optional `permission`.
      */
     tools: Array<unknown>;
+};
+
+export type GooseExtension = {
+    bundled?: boolean | null;
+    description?: string | null;
+    display_name?: string | null;
+    name: string;
+    timeout?: number | null;
+    type: 'builtin';
+} | {
+    bundled?: boolean | null;
+    description?: string | null;
+    display_name?: string | null;
+    name: string;
+    type: 'platform';
+} | {
+    bundled?: boolean | null;
+    description?: string | null;
+    envKeys?: Array<string>;
+    server: McpServer;
+    socket?: string | null;
+    timeout?: number | null;
+    type: 'mcp';
+};
+
+export type GooseExtensionEntry = {
+    configKey?: string | null;
+    enabled: boolean;
+    extension: GooseExtension;
 };
 
 /**
@@ -490,6 +545,30 @@ export type GooseToolCallResponseUnstable = {
     content?: Array<unknown>;
     isError: boolean;
     structuredContent?: unknown;
+};
+
+/**
+ * An HTTP header to set when making requests to the MCP server.
+ */
+export type HttpHeader = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * The name of the HTTP header.
+     */
+    name: string;
+    /**
+     * The value to set for the HTTP header.
+     */
+    value: string;
 };
 
 /**
@@ -575,6 +654,106 @@ export type ListSourcesRequestUnstable = {
 
 export type ListSourcesResponseUnstable = {
     sources: Array<SourceEntry>;
+};
+
+/**
+ * Configuration for connecting to an MCP (Model Context Protocol) server.
+ *
+ * MCP servers provide tools and context that the agent can use when
+ * processing prompts.
+ *
+ * See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
+ */
+export type McpServer = McpServerHttp | McpServerSse | McpServerStdio;
+
+/**
+ * HTTP transport configuration for MCP.
+ */
+export type McpServerHttp = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * HTTP headers to set when making requests to the MCP server.
+     */
+    headers: Array<HttpHeader>;
+    /**
+     * Human-readable name identifying this MCP server.
+     */
+    name: string;
+    type: 'http';
+    /**
+     * URL to the MCP server.
+     */
+    url: string;
+};
+
+/**
+ * SSE transport configuration for MCP.
+ */
+export type McpServerSse = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * HTTP headers to set when making requests to the MCP server.
+     */
+    headers: Array<HttpHeader>;
+    /**
+     * Human-readable name identifying this MCP server.
+     */
+    name: string;
+    type: 'sse';
+    /**
+     * URL to the MCP server.
+     */
+    url: string;
+};
+
+/**
+ * Stdio transport configuration for MCP.
+ */
+export type McpServerStdio = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Command-line arguments to pass to the MCP server.
+     */
+    args: Array<string>;
+    /**
+     * Path to the MCP server executable.
+     */
+    command: string;
+    /**
+     * Environment variables to set when launching the MCP server.
+     */
+    env: Array<EnvVariable>;
+    /**
+     * Human-readable name identifying this MCP server.
+     */
+    name: string;
 };
 
 /**
@@ -1046,6 +1225,14 @@ export type SessionUsageUpdate = {
 };
 
 /**
+ * Set the `enabled` flag for a persisted extension in the user's global goose config.
+ */
+export type SetConfigExtensionEnabledRequestUnstable = {
+    configKey: string;
+    enabled: boolean;
+};
+
+/**
  * Set, append, or clear system prompt text for a session.
  *
  * `mode: "set"` replaces Goose's base system prompt. `mode: "append"` adds an
@@ -1132,14 +1319,6 @@ export type StatusMessage = {
  */
 export type StatusMessageUpdate = {
     status: StatusMessage;
-};
-
-/**
- * Toggle the `enabled` flag for a persisted extension in the user's global goose config.
- */
-export type ToggleConfigExtensionRequestUnstable = {
-    configKey: string;
-    enabled: boolean;
 };
 
 /**

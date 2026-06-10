@@ -15,6 +15,21 @@ const extension: ExtensionEntry = {
 };
 
 describe("ExtensionModal", () => {
+  it("masks stored secret env values", () => {
+    render(
+      <ExtensionModal
+        extension={{ ...extension, env_keys: ["GITHUB_TOKEN"] }}
+        onSubmit={vi.fn()}
+        onDelete={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const secretInput = screen.getByPlaceholderText("****");
+    expect(secretInput).toHaveAttribute("type", "password");
+    expect(secretInput).toHaveValue("");
+  });
+
   it("confirms before deleting an extension", async () => {
     const user = userEvent.setup();
     const handleDelete = vi.fn().mockResolvedValue(undefined);

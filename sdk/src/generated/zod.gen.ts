@@ -3,15 +3,6 @@
 import { z } from 'zod';
 
 /**
- * Persist a new extension to the user's global goose config.
- */
-export const zAddConfigExtensionRequestUnstable = z.object({
-    enabled: z.boolean().optional().default(false),
-    extensionConfig: z.unknown().optional().default(null),
-    name: z.string()
-});
-
-/**
  * Add an extension to an active session.
  */
 export const zAddExtensionRequestUnstable = z.object({
@@ -337,6 +328,18 @@ export const zElicitationRespondRequestUnstable = z.object({
 export const zEmptyResponse = z.record(z.unknown());
 
 /**
+ * An environment variable to set when launching an MCP server.
+ */
+export const zEnvVariable = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    name: z.string(),
+    value: z.string()
+});
+
+/**
  * Export a session as a JSON string.
  */
 export const zExportSessionRequestUnstable = z.object({
@@ -356,17 +359,14 @@ export const zExportSourceResponseUnstable = z.object({
 });
 
 /**
- * List configured extensions and any warnings.
+ * List Goose-owned extension definitions available to configure or enable.
  */
-export const zGetExtensionsRequestUnstable = z.record(z.unknown());
+export const zGetAvailableExtensionsRequestUnstable = z.record(z.unknown());
 
 /**
  * List configured extensions and any warnings.
  */
-export const zGetExtensionsResponseUnstable = z.object({
-    extensions: z.array(z.unknown()),
-    warnings: z.array(z.string())
-});
+export const zGetConfigExtensionsRequestUnstable = z.record(z.unknown());
 
 export const zGetSessionExtensionsRequestUnstable = z.object({
     sessionId: z.string()
@@ -407,6 +407,18 @@ export const zGooseToolCallResponseUnstable = z.object({
     content: z.array(z.unknown()).optional().default([]),
     isError: z.boolean(),
     structuredContent: z.unknown().optional()
+});
+
+/**
+ * An HTTP header to set when making requests to the MCP server.
+ */
+export const zHttpHeader = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    name: z.string(),
+    value: z.string()
 });
 
 /**
@@ -455,6 +467,151 @@ export const zInteractionUpdate = z.object({
  */
 export const zListProvidersRequestUnstable = z.object({
     providerIds: z.array(z.string()).optional().default([])
+});
+
+/**
+ * HTTP transport configuration for MCP.
+ */
+export const zMcpServerHttp = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    headers: z.array(zHttpHeader),
+    name: z.string(),
+    type: z.literal('http'),
+    url: z.string()
+});
+
+/**
+ * SSE transport configuration for MCP.
+ */
+export const zMcpServerSse = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    headers: z.array(zHttpHeader),
+    name: z.string(),
+    type: z.literal('sse'),
+    url: z.string()
+});
+
+/**
+ * Stdio transport configuration for MCP.
+ */
+export const zMcpServerStdio = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    args: z.array(z.string()),
+    command: z.string(),
+    env: z.array(zEnvVariable),
+    name: z.string()
+});
+
+/**
+ * Configuration for connecting to an MCP (Model Context Protocol) server.
+ *
+ * MCP servers provide tools and context that the agent can use when
+ * processing prompts.
+ *
+ * See protocol docs: [MCP Servers](https://agentclientprotocol.com/protocol/session-setup#mcp-servers)
+ */
+export const zMcpServer = z.union([
+    zMcpServerHttp,
+    zMcpServerSse,
+    zMcpServerStdio
+]);
+
+export const zGooseExtension = z.union([
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        display_name: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        name: z.string(),
+        timeout: z.union([
+            z.number().int().gte(0),
+            z.null()
+        ]).optional(),
+        type: z.literal('builtin')
+    }),
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        display_name: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        name: z.string(),
+        type: z.literal('platform')
+    }),
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        envKeys: z.array(z.string()).optional(),
+        server: zMcpServer,
+        socket: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        timeout: z.union([
+            z.number().int().gte(0),
+            z.null()
+        ]).optional(),
+        type: z.literal('mcp')
+    })
+]);
+
+/**
+ * Persist a new extension to the user's global goose config.
+ */
+export const zAddConfigExtensionRequestUnstable = z.object({
+    enabled: z.boolean().optional().default(false),
+    extension: zGooseExtension
+});
+
+export const zGetAvailableExtensionsResponseUnstable = z.object({
+    extensions: z.array(zGooseExtension)
+});
+
+export const zGooseExtensionEntry = z.object({
+    configKey: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    enabled: z.boolean(),
+    extension: zGooseExtension
+});
+
+/**
+ * List configured extensions and any warnings.
+ */
+export const zGetConfigExtensionsResponseUnstable = z.object({
+    extensions: z.array(zGooseExtensionEntry),
+    warnings: z.array(z.string()).optional().default([])
 });
 
 /**
@@ -944,6 +1101,14 @@ export const zSessionUsageUpdate = z.object({
 });
 
 /**
+ * Set the `enabled` flag for a persisted extension in the user's global goose config.
+ */
+export const zSetConfigExtensionEnabledRequestUnstable = z.object({
+    configKey: z.string(),
+    enabled: z.boolean()
+});
+
+/**
  * Set, append, or clear system prompt text for a session.
  *
  * `mode: "set"` replaces Goose's base system prompt. `mode: "append"` adds an
@@ -1136,14 +1301,6 @@ export const zExtNotification = z.object({
 });
 
 /**
- * Toggle the `enabled` flag for a persisted extension in the user's global goose config.
- */
-export const zToggleConfigExtensionRequestUnstable = z.object({
-    configKey: z.string(),
-    enabled: z.boolean()
-});
-
-/**
  * Unarchive a previously archived session.
  */
 export const zUnarchiveSessionRequestUnstable = z.object({
@@ -1189,7 +1346,8 @@ export const zExtResponse = z.union([
                 zGetToolsResponseUnstable,
                 zGooseToolCallResponseUnstable,
                 zReadResourceResponseUnstable,
-                zGetExtensionsResponseUnstable,
+                zGetConfigExtensionsResponseUnstable,
+                zGetAvailableExtensionsResponseUnstable,
                 zGetSessionExtensionsResponseUnstable,
                 zListProvidersResponseUnstable,
                 zProviderSupportedModelsListResponseUnstable,
@@ -1254,10 +1412,11 @@ export const zExtRequest = z.object({
             zUpdateWorkingDirRequestUnstable,
             zSetSessionSystemPromptRequestUnstable,
             zDeleteSessionRequest,
-            zGetExtensionsRequestUnstable,
+            zGetConfigExtensionsRequestUnstable,
+            zGetAvailableExtensionsRequestUnstable,
             zAddConfigExtensionRequestUnstable,
             zRemoveConfigExtensionRequestUnstable,
-            zToggleConfigExtensionRequestUnstable,
+            zSetConfigExtensionEnabledRequestUnstable,
             zGetSessionExtensionsRequestUnstable,
             zListProvidersRequestUnstable,
             zProviderSupportedModelsListRequestUnstable,

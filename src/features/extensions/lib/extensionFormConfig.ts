@@ -10,6 +10,7 @@ export type ExtensionModalType = "stdio" | "streamable_http" | "unsupported";
 export interface ExtensionEnvRow {
   key: string;
   value: string;
+  secret?: boolean;
 }
 
 interface ExtensionSubmitConfigInput {
@@ -43,7 +44,7 @@ export function parseExtensionEnvRows(
 
   for (const key of envKeys ?? []) {
     if (seenKeys.has(key)) continue;
-    rows.push({ key, value: "" });
+    rows.push({ key, value: "", secret: true });
   }
 
   return rows;
