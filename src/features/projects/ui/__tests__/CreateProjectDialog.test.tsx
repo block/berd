@@ -9,6 +9,7 @@ import {
   updateProject,
 } from "../../api/projects";
 import { checkDirectoriesExist, resolvePath } from "@/shared/api/pathResolver";
+import { discoverAcpProviders } from "@/shared/api/acp";
 import { CreateProjectDialog } from "../CreateProjectDialog";
 
 // ── ResizeObserver polyfill (needed by Radix Select in jsdom) ────────
@@ -21,10 +22,31 @@ class ResizeObserverStub {
 globalThis.ResizeObserver ??=
   ResizeObserverStub as unknown as typeof ResizeObserver;
 
+if (!HTMLElement.prototype.hasPointerCapture) {
+  HTMLElement.prototype.hasPointerCapture = () => false;
+}
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = () => {};
+}
+
 // ── Mocks ────────────────────────────────────────────────────────────
 
 vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
+}));
+
+const providerStatusMocks = vi.hoisted(() => ({
+  readyAgentIds: new Set<string>(),
+}));
+
+vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
+  useAgentProviderStatus: () => ({
+    readyAgentIds: providerStatusMocks.readyAgentIds,
+    agentReadiness: new Map(),
+    agentChecks: new Map(),
+    loading: false,
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/shared/api/system", () => ({
@@ -129,6 +151,7 @@ const defaultProps = {
 describe("CreateProjectDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    providerStatusMocks.readyAgentIds = new Set<string>();
     vi.mocked(open).mockResolvedValue(null);
     vi.mocked(resolvePath).mockImplementation(async ({ parts }) => ({
       path: parts[0],
@@ -513,6 +536,67 @@ describe("CreateProjectDialog", () => {
         await screen.findByRole("button", {
           name: "These folders no longer exist or aren't accessible:",
         }),
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe("provider selection", () => {
+    it("only shows ready ACP providers in the project default dropdown", async () => {
+      const user = userEvent.setup();
+      vi.mocked(discoverAcpProviders).mockResolvedValue([
+        { id: "goose", label: "Goose" },
+        { id: "claude-acp", label: "Claude Code" },
+        { id: "copilot-acp", label: "Copilot" },
+        { id: "cursor-agent", label: "Cursor Agent" },
+      ]);
+      providerStatusMocks.readyAgentIds = new Set<string>([
+        "goose",
+        "claude-acp",
+      ]);
+
+      render(<CreateProjectDialog {...defaultProps} isOpen={true} />);
+
+      await user.click(screen.getByRole("combobox"));
+
+      expect(
+        await screen.findByRole("option", { name: "Goose" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("option", { name: "Claude Code" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.queryByRole("option", { name: "Copilot" }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("option", { name: "Cursor Agent" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("keeps a saved preferred provider visible even if it is not currently ready", async () => {
+      const user = userEvent.setup();
+      vi.mocked(discoverAcpProviders).mockResolvedValue([
+        { id: "goose", label: "Goose" },
+        { id: "cursor-agent", label: "Cursor Agent" },
+      ]);
+      providerStatusMocks.readyAgentIds = new Set<string>(["goose"]);
+
+      render(
+        <CreateProjectDialog
+          {...defaultProps}
+          isOpen={true}
+          editingProject={makeEditingProject({
+            preferredProvider: "cursor-agent",
+          })}
+        />,
+      );
+
+      await user.click(screen.getByRole("combobox"));
+
+      expect(
+        await screen.findByRole("option", { name: "Goose" }),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByRole("option", { name: "Cursor Agent" }),
       ).toBeInTheDocument();
     });
   });

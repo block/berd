@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from "react";
+import { useState, useEffect, useMemo, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle, IconFolderPlus } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
@@ -22,6 +22,7 @@ import {
   type ProjectInfo,
 } from "../api/projects";
 import { discoverAcpProviders, type AcpProvider } from "@/shared/api/acp";
+import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { buildEditorText, parseEditorText } from "../lib/projectPromptText";
 import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
@@ -69,6 +70,15 @@ export function CreateProjectDialog({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [acpProviders, setAcpProviders] = useState<AcpProvider[]>([]);
+  const { readyAgentIds } = useAgentProviderStatus();
+  const selectableAcpProviders = useMemo(
+    () =>
+      acpProviders.filter(
+        (provider) =>
+          readyAgentIds.has(provider.id) || provider.id === preferredProvider,
+      ),
+    [acpProviders, preferredProvider, readyAgentIds],
+  );
   const {
     icon,
     iconCandidates,
@@ -440,7 +450,7 @@ export function CreateProjectDialog({
                     <SelectItem value="__none__">
                       {t("dialog.noneUseDefault")}
                     </SelectItem>
-                    {acpProviders.map((p) => (
+                    {selectableAcpProviders.map((p) => (
                       <SelectItem key={p.id} value={p.id}>
                         {p.label}
                       </SelectItem>
