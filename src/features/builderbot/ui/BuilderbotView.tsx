@@ -3,7 +3,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { IconCheck, IconLoader2, IconPencil, IconX } from "@tabler/icons-react";
+import {
+  IconCheck,
+  IconInfoCircle,
+  IconLoader2,
+  IconPencil,
+  IconX,
+} from "@tabler/icons-react";
 import { ExternalLinkIcon } from "lucide-react";
 import { PageShell } from "@/shared/ui/page-shell";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
@@ -12,10 +18,8 @@ import { Button } from "@/shared/ui/button";
 import { DetailField as SharedDetailField } from "@/shared/ui/detail-field";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
-import { FORM_FIELD_CLASS } from "@/shared/ui/form-field-tokens";
 import { Input } from "@/shared/ui/input";
 import { SearchableSelect } from "@/shared/ui/searchable-select";
-import { Separator } from "@/shared/ui/separator";
 import {
   Select,
   SelectContent,
@@ -39,7 +43,6 @@ import {
   getBuilderbotTaskLinks,
   getBuilderbotAutomations,
   getBuilderbotTasks,
-  summarizeBuilderbotCondition,
   updateBuilderbotRoutingRule,
   updateBuilderbotScheduledTrigger,
 } from "@/features/builderbot/api/builderbot";
@@ -52,7 +55,7 @@ import {
 } from "@/features/builderbot/lib/builderbotSchedule";
 
 const REFETCH_INTERVAL_MS = 15_000;
-const FIELD_CLASS = FORM_FIELD_CLASS;
+const FIELD_CLASS = "rounded-sm border-transparent bg-card";
 
 const WEEKDAY_OPTIONS = [
   { value: "0", labelKey: "edit.weekdays.sunday" },
@@ -187,6 +190,21 @@ function taskStatusIcon(value: string | undefined) {
   return null;
 }
 
+function runStatusIcon(value: string | undefined) {
+  const status = compactStatus(value);
+  if (!status) return null;
+
+  if (/\b(completed|complete|success|succeeded|done|ok)\b/.test(status)) {
+    return { Icon: IconCheck, label: status, className: "text-success" };
+  }
+
+  if (/\b(failed|failure|error|errored|cancelled|canceled)\b/.test(status)) {
+    return { Icon: IconX, label: status, className: "text-destructive" };
+  }
+
+  return null;
+}
+
 function formatTimestamp(
   value: number | undefined,
   formatRelativeTimeToNow: (value: number) => string,
@@ -257,7 +275,11 @@ function formatDetailTimestamp(
   });
 }
 
-function actionType(routine: BuilderbotRoutineConfig | undefined) {
+type AutomationActionType = "agent" | "script" | "routine" | "task";
+
+function actionType(
+  routine: BuilderbotRoutineConfig | undefined,
+): AutomationActionType {
   switch (routine?.routine_identifier) {
     case "blox-vanilla":
       return "agent";
@@ -537,7 +559,7 @@ function readOnlyFieldValue(value: React.ReactNode) {
   return (
     <div
       className={cn(
-        "flex min-h-9 items-center rounded-sm px-3 py-1 text-sm text-foreground",
+        "flex min-h-9 items-center rounded-sm px-3 py-1 text-sm text-muted-foreground",
         FIELD_CLASS,
       )}
     >
@@ -549,49 +571,62 @@ function readOnlyFieldValue(value: React.ReactNode) {
 function FieldLabel({
   htmlFor,
   label,
+  tooltip,
+  tooltipLabel,
   children,
 }: {
   htmlFor?: string;
   label: string;
+  tooltip?: React.ReactNode;
+  tooltipLabel?: string;
   children: React.ReactNode;
 }) {
+  const labelContent = (
+    <div className="mb-2 flex h-4 items-center gap-1 text-xs text-muted-foreground">
+      {htmlFor ? (
+        <label htmlFor={htmlFor}>{label}</label>
+      ) : (
+        <span>{label}</span>
+      )}
+      {tooltip ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-xs"
+              className="-my-1.5 -ml-1"
+              aria-label={tooltipLabel ?? label}
+            >
+              <IconInfoCircle aria-hidden="true" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent
+            sideOffset={6}
+            className="w-64 max-w-[calc(100vw-2rem)] text-left leading-snug ![text-wrap:wrap]"
+          >
+            {tooltip}
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
+    </div>
+  );
+
+  if (tooltip) {
+    return (
+      <div className="block text-sm">
+        {labelContent}
+        {children}
+      </div>
+    );
+  }
+
   return (
     <label className="block text-sm" htmlFor={htmlFor}>
       <span className="mb-2 block text-xs text-muted-foreground">{label}</span>
       {children}
     </label>
   );
-}
-
-function DisplayField({
-  label,
-  children,
-  wide = false,
-}: {
-  label: string;
-  children: React.ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <div className={cn("block text-sm", wide && "md:col-span-2")}>
-      <span className="mb-2 block text-xs text-muted-foreground">{label}</span>
-      <div
-        className={cn(
-          "min-h-9 rounded-sm px-3 py-2 text-sm text-foreground",
-          FIELD_CLASS,
-        )}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function automationConditionSummaries(automation: BuilderbotAutomation) {
-  if (automation.kind !== "routing") return [];
-  return (automation.source.conditions ?? [])
-    .map(summarizeBuilderbotCondition)
-    .filter((summary): summary is string => Boolean(summary));
 }
 
 function taskRouteKey(task: BuilderbotTask, index: number) {
@@ -694,7 +729,7 @@ function TaskRow({
   const statusLabel = compactStatus(task.status);
   const StatusIcon = taskStatusIcon(task.status);
 
-  const row = (
+  return (
     <button
       type="button"
       className="group grid min-h-[84px] w-full gap-3 rounded-md bg-card px-6 py-4 text-left transition-[background-color,box-shadow,border-color] duration-200 hover:shadow-card hover:ring-1 hover:ring-inset hover:ring-border/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring md:grid-cols-[minmax(0,1fr)_auto] md:items-center"
@@ -725,15 +760,6 @@ function TaskRow({
         </span>
       ) : null}
     </button>
-  );
-
-  if (!StatusIcon || !statusLabel) return row;
-
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{row}</TooltipTrigger>
-      <TooltipContent>{statusLabel}</TooltipContent>
-    </Tooltip>
   );
 }
 
@@ -930,95 +956,86 @@ function TaskDetailPage({
 
   return (
     <PageShell contentClassName="gap-6" contentWidth="default">
-      <Tabs value="details">
-        <TabsList variant="weight">
-          <TabsTrigger value="details" variant="weight">
-            {t("tabs.details")}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="details" className="mt-6">
-          <div className="grid min-h-0 gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
-            <aside className="space-y-6">
-              <DetailField label={t("details.key")}>
-                {task.key ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.status")}>
-                {task.status
-                  ? compactStatus(task.status)
-                  : t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.author")}>
-                {task.author ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.assignee")}>
-                {task.assignee ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.latestActor")}>
-                {task.latest_actor ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.created")}>
-                {createdAtDetail ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.updated")}>
-                {updatedAtDetail ?? t("details.notAvailable")}
-              </DetailField>
-              <DetailField label={t("details.labels")}>
-                <BadgeList
-                  values={task.labels}
-                  fallback={t("details.notAvailable")}
-                />
-              </DetailField>
-            </aside>
+      <div className="grid min-h-0 gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
+        <aside className="space-y-6">
+          <DetailField label={t("details.key")}>
+            {task.key ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.status")}>
+            {task.status
+              ? compactStatus(task.status)
+              : t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.author")}>
+            {task.author ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.assignee")}>
+            {task.assignee ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.latestActor")}>
+            {task.latest_actor ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.created")}>
+            {createdAtDetail ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.updated")}>
+            {updatedAtDetail ?? t("details.notAvailable")}
+          </DetailField>
+          <DetailField label={t("details.labels")}>
+            <BadgeList
+              values={task.labels}
+              fallback={t("details.notAvailable")}
+            />
+          </DetailField>
+        </aside>
 
-            <div className="min-w-0 space-y-4">
-              <DetailPanel title={t("details.description")}>
-                {task.description ? (
-                  <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                    {task.description}
-                  </div>
+        <div className="min-w-0 space-y-4">
+          <DetailPanel title={t("details.description")}>
+            {task.description ? (
+              <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                {task.description}
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground">
+                {t("details.notAvailable")}
+              </div>
+            )}
+          </DetailPanel>
+
+          <DetailPanel title={t("details.links")}>
+            <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+              <DetailField label={t("details.artifacts")}>
+                {taskLinks?.artifactsUrl ? (
+                  <DetailLink href={taskLinks.artifactsUrl}>
+                    {taskLinks.artifactCount !== undefined
+                      ? t("tasks.artifactsLink", {
+                          count: taskLinks.artifactCount,
+                          displayCount: taskLinks.artifactCount,
+                        })
+                      : t("tasks.artifactsLinkUnknown")}
+                  </DetailLink>
+                ) : taskLinks?.artifactCount !== undefined ? (
+                  t("tasks.artifactsCount", {
+                    count: taskLinks.artifactCount,
+                    displayCount: taskLinks.artifactCount,
+                  })
                 ) : (
-                  <div className="text-sm text-muted-foreground">
-                    {t("details.notAvailable")}
-                  </div>
+                  t("details.notAvailable")
                 )}
-              </DetailPanel>
-
-              <DetailPanel title={t("details.links")}>
-                <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
-                  <DetailField label={t("details.artifacts")}>
-                    {taskLinks?.artifactsUrl ? (
-                      <DetailLink href={taskLinks.artifactsUrl}>
-                        {taskLinks.artifactCount !== undefined
-                          ? t("tasks.artifactsLink", {
-                              count: taskLinks.artifactCount,
-                              displayCount: taskLinks.artifactCount,
-                            })
-                          : t("tasks.artifactsLinkUnknown")}
-                      </DetailLink>
-                    ) : taskLinks?.artifactCount !== undefined ? (
-                      t("tasks.artifactsCount", {
-                        count: taskLinks.artifactCount,
-                        displayCount: taskLinks.artifactCount,
-                      })
-                    ) : (
-                      t("details.notAvailable")
-                    )}
-                  </DetailField>
-                  <DetailField label={t("details.thread")}>
-                    {taskLinks?.threadUrl ? (
-                      <DetailLink href={taskLinks.threadUrl}>
-                        {t("tasks.threadLink")}
-                      </DetailLink>
-                    ) : (
-                      t("details.notAvailable")
-                    )}
-                  </DetailField>
-                </div>
-              </DetailPanel>
+              </DetailField>
+              <DetailField label={t("details.thread")}>
+                {taskLinks?.threadUrl ? (
+                  <DetailLink href={taskLinks.threadUrl}>
+                    {t("tasks.threadLink")}
+                  </DetailLink>
+                ) : (
+                  t("details.notAvailable")
+                )}
+              </DetailField>
             </div>
-          </div>
-        </TabsContent>
-      </Tabs>
+          </DetailPanel>
+        </div>
+      </div>
     </PageShell>
   );
 }
@@ -1051,9 +1068,6 @@ function AutomationDetailPage({
   const type = actionType(automation?.routine);
   const runAs = runAsLabel(automation?.routine);
   const triggerLabel = automation ? automationTriggerLabel(automation, t) : "";
-  const conditionSummaries = automation
-    ? automationConditionSummaries(automation)
-    : [];
   const editablePayload = editableAutomationPayload(automation);
   const [enabledDraft, setEnabledDraft] = useState(
     automation?.enabled ?? false,
@@ -1169,6 +1183,7 @@ function AutomationDetailPage({
           formatting,
         )
       : null;
+  const lastRunStatus = runStatusIcon(scheduledAutomation?.lastStatus);
   const isSaving = updateMutation.isPending;
   const currentError = localError;
   const payloadChanged = payloadDraft.trim() !== editablePayload.text.trim();
@@ -1337,378 +1352,370 @@ function AutomationDetailPage({
 
   return (
     <PageShell contentClassName="gap-6" contentWidth="default">
-      <Tabs value="details">
-        <TabsList variant="weight">
-          <TabsTrigger value="details" variant="weight">
-            {t("tabs.details")}
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="details" className="mt-6">
-          <div className="grid min-h-0 gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
-            <aside className="space-y-6">
-              <section className="space-y-6">
-                <FieldLabel label={t("details.reference")}>
-                  {readOnlyFieldValue(automation.reference)}
-                </FieldLabel>
+      <div className="grid min-h-0 gap-10 lg:grid-cols-[230px_minmax(0,1fr)]">
+        <aside className="space-y-6">
+          <section className={scheduledAutomation ? "space-y-10" : "space-y-4"}>
+            <div className="space-y-4">
+              <FieldLabel
+                label={t("details.reference")}
+                tooltip={t("details.tooltips.reference")}
+                tooltipLabel={t("details.tooltips.referenceLabel")}
+              >
+                {readOnlyFieldValue(automation.reference)}
+              </FieldLabel>
 
-                <FieldLabel
-                  label={t("details.enabled")}
-                  htmlFor="builderbot-enabled"
+              <FieldLabel
+                label={t("details.enabled")}
+                htmlFor="builderbot-enabled"
+              >
+                <div
+                  className={cn(
+                    "flex min-h-9 items-center justify-between gap-3 rounded-sm px-3 py-1",
+                    FIELD_CLASS,
+                  )}
                 >
-                  <div
-                    className={cn(
-                      "flex min-h-9 items-center justify-between gap-3 rounded-sm px-3 py-1",
-                      FIELD_CLASS,
-                    )}
+                  <span className="text-sm text-foreground">
+                    {enabledDraft
+                      ? t("automations.listening")
+                      : t("automations.paused")}
+                  </span>
+                  <Switch
+                    id="builderbot-enabled"
+                    checked={enabledDraft}
+                    onCheckedChange={saveEnabled}
+                    disabled={isSaving}
+                    aria-label={t("details.enabled")}
+                  />
+                </div>
+              </FieldLabel>
+
+              <FieldLabel
+                label={t("details.triggerType")}
+                tooltip={t(`details.tooltips.triggerType.${automation.kind}`)}
+                tooltipLabel={t("details.tooltips.triggerType.label")}
+              >
+                {readOnlyFieldValue(t(`automations.kind.${automation.kind}`))}
+              </FieldLabel>
+            </div>
+
+            {scheduledAutomation ? (
+              <div className="space-y-4">
+                <FieldLabel
+                  label={t("edit.fields.scheduleRepeats")}
+                  htmlFor="builderbot-schedule-preset"
+                >
+                  <Select
+                    value={scheduleDraft.preset}
+                    onValueChange={(value) =>
+                      saveSchedule({
+                        preset: value as BuilderbotScheduleForm["preset"],
+                      })
+                    }
+                    disabled={isSaving}
                   >
-                    <span className="text-sm text-foreground">
-                      {enabledDraft
-                        ? t("automations.enabled")
-                        : t("automations.disabled")}
-                    </span>
-                    <Switch
-                      id="builderbot-enabled"
-                      checked={enabledDraft}
-                      onCheckedChange={saveEnabled}
-                      disabled={isSaving}
-                      aria-label={t("details.enabled")}
-                    />
-                  </div>
-                </FieldLabel>
-
-                <FieldLabel label={t("details.triggerType")}>
-                  {readOnlyFieldValue(t(`automations.kind.${automation.kind}`))}
-                </FieldLabel>
-
-                {scheduledAutomation ? (
-                  <div className="space-y-6">
-                    <Separator />
-                    <FieldLabel
-                      label={t("edit.fields.scheduleRepeats")}
-                      htmlFor="builderbot-schedule-preset"
+                    <SelectTrigger
+                      id="builderbot-schedule-preset"
+                      className={cn("w-full", FIELD_CLASS)}
                     >
-                      <Select
-                        value={scheduleDraft.preset}
-                        onValueChange={(value) =>
-                          saveSchedule({
-                            preset: value as BuilderbotScheduleForm["preset"],
-                          })
-                        }
-                        disabled={isSaving}
-                      >
-                        <SelectTrigger
-                          id="builderbot-schedule-preset"
-                          className={cn("w-full", FIELD_CLASS)}
-                        >
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="hourly">
-                            {t("edit.schedulePresets.hourly")}
-                          </SelectItem>
-                          <SelectItem value="daily">
-                            {t("edit.schedulePresets.daily")}
-                          </SelectItem>
-                          <SelectItem value="weekdays">
-                            {t("edit.schedulePresets.weekdays")}
-                          </SelectItem>
-                          <SelectItem value="weekly">
-                            {t("edit.schedulePresets.weekly")}
-                          </SelectItem>
-                          <SelectItem value="custom">
-                            {t("edit.schedulePresets.custom")}
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FieldLabel>
-
-                    {scheduleDraft.preset === "weekly" ? (
-                      <FieldLabel
-                        label={t("edit.fields.scheduleDay")}
-                        htmlFor="builderbot-schedule-day"
-                      >
-                        <Select
-                          value={scheduleDraft.weekday}
-                          onValueChange={(weekday) => saveSchedule({ weekday })}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger
-                            id="builderbot-schedule-day"
-                            className={cn("w-full", FIELD_CLASS)}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {WEEKDAY_OPTIONS.map((option) => (
-                              <SelectItem
-                                key={option.value}
-                                value={option.value}
-                              >
-                                {t(option.labelKey)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FieldLabel>
-                    ) : null}
-
-                    {scheduleDraft.preset !== "none" &&
-                    scheduleDraft.preset !== "hourly" &&
-                    scheduleDraft.preset !== "custom" ? (
-                      <FieldLabel
-                        label={t("edit.fields.scheduleTime")}
-                        htmlFor="builderbot-schedule-time"
-                      >
-                        <Select
-                          value={scheduleDraft.time}
-                          onValueChange={(time) => saveSchedule({ time })}
-                          disabled={isSaving}
-                        >
-                          <SelectTrigger
-                            id="builderbot-schedule-time"
-                            className={cn("w-full", FIELD_CLASS)}
-                          >
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {timeOptions.map((option) => (
-                              <SelectItem
-                                key={option.value}
-                                value={option.value}
-                              >
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </FieldLabel>
-                    ) : null}
-
-                    {scheduleDraft.preset === "custom" ? (
-                      <FieldLabel
-                        label={t("edit.fields.scheduleCustom")}
-                        htmlFor="builderbot-schedule-custom"
-                      >
-                        <Input
-                          id="builderbot-schedule-custom"
-                          value={scheduleDraft.customSchedule}
-                          onChange={(event) =>
-                            setScheduleDraft((current) => ({
-                              ...current,
-                              customSchedule: event.target.value,
-                            }))
-                          }
-                          onBlur={() =>
-                            saveSchedule({
-                              customSchedule: scheduleDraft.customSchedule,
-                            })
-                          }
-                          placeholder={t("edit.fields.schedulePlaceholder")}
-                          disabled={isSaving}
-                          className={FIELD_CLASS}
-                        />
-                      </FieldLabel>
-                    ) : null}
-
-                    <FieldLabel
-                      label={t("details.timeZone")}
-                      htmlFor="builderbot-timezone"
-                    >
-                      <SearchableSelect
-                        id="builderbot-timezone"
-                        value={timeZoneDraft}
-                        options={timeZoneOptions}
-                        onValueChange={saveTimeZone}
-                        disabled={isSaving}
-                        searchPlaceholder={t("edit.fields.timeZoneSearch")}
-                        emptyLabel={t("edit.fields.timeZoneEmpty")}
-                        className={FIELD_CLASS}
-                      />
-                    </FieldLabel>
-                    <Separator />
-                  </div>
-                ) : (
-                  <FieldLabel label={t("details.source")}>
-                    {readOnlyFieldValue(
-                      triggerLabel || t("details.notAvailable"),
-                    )}
-                  </FieldLabel>
-                )}
-
-                <FieldLabel label={t("details.actionType")}>
-                  {readOnlyFieldValue(t(`automations.action.${type}`))}
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="hourly">
+                        {t("edit.schedulePresets.hourly")}
+                      </SelectItem>
+                      <SelectItem value="daily">
+                        {t("edit.schedulePresets.daily")}
+                      </SelectItem>
+                      <SelectItem value="weekdays">
+                        {t("edit.schedulePresets.weekdays")}
+                      </SelectItem>
+                      <SelectItem value="weekly">
+                        {t("edit.schedulePresets.weekly")}
+                      </SelectItem>
+                      <SelectItem value="custom">
+                        {t("edit.schedulePresets.custom")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
                 </FieldLabel>
 
-                {automation.routine ? (
+                {scheduleDraft.preset === "weekly" ? (
                   <FieldLabel
-                    label={t("details.runAs")}
-                    htmlFor="builderbot-run-as"
+                    label={t("edit.fields.scheduleDay")}
+                    htmlFor="builderbot-schedule-day"
                   >
                     <Select
-                      value={runAsDraft}
-                      onValueChange={(value) =>
-                        saveRunAs(value as "me" | "builderbot")
-                      }
+                      value={scheduleDraft.weekday}
+                      onValueChange={(weekday) => saveSchedule({ weekday })}
                       disabled={isSaving}
                     >
                       <SelectTrigger
-                        id="builderbot-run-as"
+                        id="builderbot-schedule-day"
                         className={cn("w-full", FIELD_CLASS)}
                       >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="me">
-                          {t("automations.runAs.me")}
-                        </SelectItem>
-                        <SelectItem value="builderbot">
-                          {t("automations.runAs.builderbot")}
-                        </SelectItem>
+                        {WEEKDAY_OPTIONS.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {t(option.labelKey)}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </FieldLabel>
-                ) : (
-                  <FieldLabel label={t("details.runAs")}>
-                    {readOnlyFieldValue(t(`automations.runAs.${runAs}`))}
-                  </FieldLabel>
-                )}
-              </section>
-            </aside>
+                ) : null}
 
-            <div className="min-w-0 space-y-4">
-              {currentError ? (
-                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-                  {currentError}
-                </div>
-              ) : null}
-
-              <DetailPanel title={t("details.trigger")}>
-                <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
-                  <DisplayField
-                    label={
-                      automation.kind === "scheduled"
-                        ? t("details.schedule")
-                        : t("details.source")
-                    }
+                {scheduleDraft.preset !== "none" &&
+                scheduleDraft.preset !== "hourly" &&
+                scheduleDraft.preset !== "custom" ? (
+                  <FieldLabel
+                    label={t("edit.fields.scheduleTime")}
+                    htmlFor="builderbot-schedule-time"
                   >
-                    {triggerLabel || t("details.notAvailable")}
-                  </DisplayField>
-                  <DisplayField label={t("details.conditionCount")}>
-                    {automation.kind === "routing"
-                      ? t("automations.conditions", {
-                          count: automation.conditionCount,
-                          displayCount: automation.conditionCount,
-                        })
-                      : t("automations.conditions", {
-                          count: 0,
-                          displayCount: 0,
-                        })}
-                  </DisplayField>
-                  {conditionSummaries.length ? (
-                    <DisplayField label={t("details.conditions")} wide>
-                      <ul className="space-y-1">
-                        {conditionSummaries.map((condition) => (
-                          <li key={condition}>{condition}</li>
-                        ))}
-                      </ul>
-                    </DisplayField>
-                  ) : null}
-                </div>
-              </DetailPanel>
-
-              <DetailPanel title={t("details.runMetadata")}>
-                <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
-                  <DisplayField label={t("details.lastRun")}>
-                    {lastRunAt ?? t("details.notAvailable")}
-                  </DisplayField>
-                  <DisplayField label={t("details.nextRun")}>
-                    {nextRunAt ?? t("details.notAvailable")}
-                  </DisplayField>
-                  {automation.kind === "scheduled" && automation.lastStatus ? (
-                    <DisplayField label={t("details.lastStatus")}>
-                      {compactStatus(automation.lastStatus)}
-                    </DisplayField>
-                  ) : null}
-                </div>
-              </DetailPanel>
-
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h2 className="text-xs leading-4 font-medium text-muted-foreground">
-                    {editablePayload.kind === "prompt"
-                      ? t("details.prompt")
-                      : t("details.payload")}
-                  </h2>
-                  {scheduledAutomation || routingAutomation?.routine ? (
-                    isEditingPayload ? (
-                      <div className="flex items-center gap-2">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="xs"
-                          onClick={cancelEditingPayload}
-                          disabled={isSaving}
-                        >
-                          {t("actions.cancel")}
-                        </Button>
-                        <Button
-                          type="button"
-                          size="xs"
-                          onClick={savePayload}
-                          disabled={
-                            isSaving || !payloadChanged || !payloadDraft.trim()
-                          }
-                        >
-                          {isSaving
-                            ? t("actions.saving")
-                            : t("actions.saveChanges")}
-                        </Button>
-                      </div>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline-flat"
-                        size="xs"
-                        onClick={startEditingPayload}
-                        disabled={isSaving}
-                        aria-label={t("details.editPayload")}
-                        leftIcon={<IconPencil aria-hidden="true" />}
-                      >
-                        {t("actions.edit")}
-                      </Button>
-                    )
-                  ) : null}
-                </div>
-                <section className="rounded-md bg-card p-4">
-                  {isEditingPayload ? (
-                    <Textarea
-                      aria-label={
-                        editablePayload.kind === "prompt"
-                          ? t("details.prompt")
-                          : t("details.payload")
-                      }
-                      value={payloadDraft}
-                      onChange={(event) => setPayloadDraft(event.target.value)}
+                    <Select
+                      value={scheduleDraft.time}
+                      onValueChange={(time) => saveSchedule({ time })}
                       disabled={isSaving}
-                      placeholder={t("details.noPayload")}
-                      rows={12}
-                      className="min-h-[360px] resize-y rounded-sm text-[14px] leading-relaxed"
+                    >
+                      <SelectTrigger
+                        id="builderbot-schedule-time"
+                        className={cn("w-full", FIELD_CLASS)}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {timeOptions.map((option) => (
+                          <SelectItem key={option.value} value={option.value}>
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FieldLabel>
+                ) : null}
+
+                {scheduleDraft.preset === "custom" ? (
+                  <FieldLabel
+                    label={t("edit.fields.scheduleCustom")}
+                    htmlFor="builderbot-schedule-custom"
+                  >
+                    <Input
+                      id="builderbot-schedule-custom"
+                      value={scheduleDraft.customSchedule}
+                      onChange={(event) =>
+                        setScheduleDraft((current) => ({
+                          ...current,
+                          customSchedule: event.target.value,
+                        }))
+                      }
+                      onBlur={() =>
+                        saveSchedule({
+                          customSchedule: scheduleDraft.customSchedule,
+                        })
+                      }
+                      placeholder={t("edit.fields.schedulePlaceholder")}
+                      disabled={isSaving}
+                      className={FIELD_CLASS}
                     />
-                  ) : editablePayload.text.trim() ? (
-                    <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
-                      {editablePayload.text}
-                    </div>
-                  ) : (
-                    <div className="text-sm text-muted-foreground">
-                      {t("details.noPayload")}
-                    </div>
-                  )}
-                </section>
+                  </FieldLabel>
+                ) : null}
+
+                <FieldLabel
+                  label={t("details.timeZone")}
+                  htmlFor="builderbot-timezone"
+                >
+                  <SearchableSelect
+                    id="builderbot-timezone"
+                    value={timeZoneDraft}
+                    options={timeZoneOptions}
+                    onValueChange={saveTimeZone}
+                    disabled={isSaving}
+                    searchPlaceholder={t("edit.fields.timeZoneSearch")}
+                    emptyLabel={t("edit.fields.timeZoneEmpty")}
+                    className={FIELD_CLASS}
+                  />
+                </FieldLabel>
               </div>
+            ) : (
+              <FieldLabel
+                label={t("details.source")}
+                tooltip={t("details.tooltips.source")}
+                tooltipLabel={t("details.tooltips.sourceLabel")}
+              >
+                {readOnlyFieldValue(triggerLabel || t("details.notAvailable"))}
+              </FieldLabel>
+            )}
+
+            <div className="space-y-4">
+              <FieldLabel
+                label={t("details.actionType")}
+                tooltip={t(`details.tooltips.actionType.${type}`)}
+                tooltipLabel={t("details.tooltips.actionType.label")}
+              >
+                {readOnlyFieldValue(t(`automations.action.${type}`))}
+              </FieldLabel>
+
+              {automation.routine ? (
+                <FieldLabel
+                  label={t("details.runAs")}
+                  htmlFor="builderbot-run-as"
+                >
+                  <Select
+                    value={runAsDraft}
+                    onValueChange={(value) =>
+                      saveRunAs(value as "me" | "builderbot")
+                    }
+                    disabled={isSaving}
+                  >
+                    <SelectTrigger
+                      id="builderbot-run-as"
+                      className={cn("w-full", FIELD_CLASS)}
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="me">
+                        {t("automations.runAs.me")}
+                      </SelectItem>
+                      <SelectItem value="builderbot">
+                        {t("automations.runAs.builderbot")}
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FieldLabel>
+              ) : (
+                <FieldLabel label={t("details.runAs")}>
+                  {readOnlyFieldValue(t(`automations.runAs.${runAs}`))}
+                </FieldLabel>
+              )}
             </div>
+          </section>
+        </aside>
+
+        <div className="min-w-0 space-y-4">
+          {currentError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {currentError}
+            </div>
+          ) : null}
+
+          {scheduledAutomation ? (
+            <section>
+              <span
+                aria-hidden="true"
+                className="mb-2 block text-xs text-transparent"
+              >
+                {t("details.lastRun")}
+              </span>
+              <div className="rounded-md bg-card p-4">
+                <div className="grid gap-x-6 gap-y-4 md:grid-cols-2">
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("details.lastRun")}
+                    </p>
+                    <div className="flex items-center gap-2 text-sm text-foreground">
+                      {lastRunStatus ? (
+                        <lastRunStatus.Icon
+                          aria-label={lastRunStatus.label}
+                          role="img"
+                          className={cn(
+                            "size-4 shrink-0",
+                            lastRunStatus.className,
+                          )}
+                        />
+                      ) : null}
+                      <span>{lastRunAt ?? t("details.notAvailable")}</span>
+                    </div>
+                  </div>
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      {t("details.nextRun")}
+                    </p>
+                    <div className="text-sm text-foreground">
+                      {nextRunAt ?? t("details.notAvailable")}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-end justify-between gap-2">
+              <h2 className="text-xs font-normal text-muted-foreground">
+                {editablePayload.kind === "prompt"
+                  ? t("details.prompt")
+                  : t("details.payload")}
+              </h2>
+              {scheduledAutomation || routingAutomation?.routine ? (
+                isEditingPayload ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="xs"
+                      onClick={cancelEditingPayload}
+                      disabled={isSaving}
+                    >
+                      {t("actions.cancel")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="xs"
+                      onClick={savePayload}
+                      disabled={
+                        isSaving || !payloadChanged || !payloadDraft.trim()
+                      }
+                    >
+                      {isSaving
+                        ? t("actions.saving")
+                        : t("actions.saveChanges")}
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline-flat"
+                    size="xs"
+                    onClick={startEditingPayload}
+                    disabled={isSaving}
+                    aria-label={t("details.editPayload")}
+                    leftIcon={<IconPencil aria-hidden="true" />}
+                  >
+                    {t("actions.edit")}
+                  </Button>
+                )
+              ) : null}
+            </div>
+            <section className="rounded-md bg-card p-4">
+              {isEditingPayload ? (
+                <Textarea
+                  aria-label={
+                    editablePayload.kind === "prompt"
+                      ? t("details.prompt")
+                      : t("details.payload")
+                  }
+                  value={payloadDraft}
+                  onChange={(event) => setPayloadDraft(event.target.value)}
+                  disabled={isSaving}
+                  placeholder={t("details.noPayload")}
+                  rows={12}
+                  className="min-h-[360px] resize-y rounded-sm text-[14px] leading-relaxed"
+                />
+              ) : editablePayload.text.trim() ? (
+                <div className="min-h-40 whitespace-pre-wrap text-sm leading-relaxed text-foreground">
+                  {editablePayload.text}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">
+                  {t("details.noPayload")}
+                </div>
+              )}
+            </section>
           </div>
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
     </PageShell>
   );
 }
@@ -1783,19 +1790,11 @@ export function BuilderbotView({
           })
         }
       >
-        <TabsList variant="weight" className="gap-8">
-          <TabsTrigger
-            value="tasks"
-            variant="weight"
-            className="py-2 text-base"
-          >
+        <TabsList variant="weight" className="gap-5">
+          <TabsTrigger value="tasks" variant="weight">
             {t("tabs.tasks")}
           </TabsTrigger>
-          <TabsTrigger
-            value="automations"
-            variant="weight"
-            className="py-2 text-base"
-          >
+          <TabsTrigger value="automations" variant="weight">
             {t("tabs.automations")}
           </TabsTrigger>
         </TabsList>

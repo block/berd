@@ -2199,14 +2199,32 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             ]
           : [current("automations", "Automations")];
       case "builderbot":
-        return builderbotBreadcrumbLabel
-          ? [
-              parent("builderbot", "Builderbot", () =>
-                handleNavigate("builderbot"),
-              ),
-              current("builderbot-detail", builderbotBreadcrumbLabel),
-            ]
-          : [current("builderbot", "Builderbot")];
+        if (!builderbotBreadcrumbLabel) {
+          return [current("builderbot", "Builderbot")];
+        }
+        if (builderbotRoute.surface === "task") {
+          return [
+            parent("builderbot", "Builderbot", () =>
+              navigateBuilderbot({ surface: "overview" }),
+            ),
+            parent("builderbot-tasks", "Tasks", () =>
+              navigateBuilderbot({ surface: "overview", tab: "tasks" }),
+            ),
+            current("builderbot-detail", builderbotBreadcrumbLabel),
+          ];
+        }
+        if (builderbotRoute.surface === "automation") {
+          return [
+            parent("builderbot", "Builderbot", () =>
+              navigateBuilderbot({ surface: "overview" }),
+            ),
+            parent("builderbot-automations", "Automations", () =>
+              navigateBuilderbot({ surface: "overview", tab: "automations" }),
+            ),
+            current("builderbot-detail", builderbotBreadcrumbLabel),
+          ];
+        }
+        return [current("builderbot", "Builderbot")];
       case "design-system": {
         const designSystemSectionLabel = DESIGN_SYSTEM_SECTIONS.find(
           (section) => section.id === activeDesignSystemSection,
@@ -2268,7 +2286,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     agentsPersonaId,
     automationsBreadcrumbLabel,
     builderbotBreadcrumbLabel,
+    builderbotRoute.surface,
     handleNavigate,
+    navigateBuilderbot,
     openDesignSystem,
     openSettings,
     projects,

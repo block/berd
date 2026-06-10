@@ -4,6 +4,9 @@ import { beforeEach, vi } from "vitest";
 
 import { DEFAULT_LOCALE, TRANSLATION_NAMESPACES, i18n } from "@/shared/i18n";
 
+globalThis.Event = window.Event;
+globalThis.CustomEvent = window.CustomEvent;
+
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
   openUrl: vi.fn(),

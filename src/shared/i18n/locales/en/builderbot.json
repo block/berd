@@ -44,7 +44,25 @@
     "timeZone": "Time zone",
     "links": "Links",
     "trigger": "Trigger",
-    "runMetadata": "Run metadata"
+    "runMetadata": "Run metadata",
+    "tooltips": {
+      "referenceLabel": "Explain name",
+      "reference": "This is the automation's unique name. It can't be renamed here; ask your agent to recreate it with a new name or use BuilderBot web.",
+      "sourceLabel": "Explain source",
+      "source": "Source is the tool that sends events to this automation. It can't be changed in place; create a new triggered automation to use a different source.",
+      "triggerType": {
+        "label": "Explain trigger type",
+        "scheduled": "Scheduled automations run at a time you choose. To make this event-based instead, ask your agent to recreate it or use BuilderBot web.",
+        "routing": "Triggered automations run when something happens in another tool. To make this schedule-based instead, ask your agent to recreate it or use BuilderBot web."
+      },
+      "actionType": {
+        "label": "Explain action type",
+        "agent": "Agent automations run non-deterministically through an agent. The other option is Script. To change this, ask your agent or use BuilderBot web.",
+        "script": "Script automations run a defined command. The other option is Agent, which runs non-deterministically through an agent. To change this, ask your agent or use BuilderBot web.",
+        "routine": "This automation runs a custom routine. To change it to Agent or Script, ask your agent or use BuilderBot web.",
+        "task": "This automation creates a BuilderBot task instead of running Agent or Script. To change this, ask your agent or use BuilderBot web."
+      }
+    }
   },
   "edit": {
     "payloadRequired": "Add a prompt or payload before saving.",

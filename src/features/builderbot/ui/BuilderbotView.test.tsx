@@ -104,6 +104,24 @@ function mockBuilderbotResponses({
                 run_as_service: "builderbot",
               },
             },
+            {
+              reference: "quiet-docs",
+              enabled: true,
+              cron_expression: "0 11 * * 1-5",
+              next_run_at_sec: Math.floor(
+                (Date.now() + 9 * 60 * 60 * 1000) / 1000,
+              ),
+              last_run_at_sec: 1714560000,
+              last_status: "TRIGGER_RUN_STATUS_UNSPECIFIED",
+              updated_at_ms: 1714568500000,
+              created_by: "morgan",
+              owners: ["morgan"],
+              routine: {
+                routine_identifier: "blox-vanilla",
+                input_payload: '{"prompt":"Stay quiet"}',
+                run_as_service: "builderbot",
+              },
+            },
           ],
         });
       case "get_builderbot_routing_rules":
@@ -222,10 +240,10 @@ describe("BuilderbotView", () => {
     expect(row).not.toHaveTextContent("builderbot");
     expect(row).not.toHaveTextContent("ux");
     expect(row).not.toHaveTextContent("in progress");
-    expect(screen.getByLabelText("in progress")).toBeInTheDocument();
-    expect(screen.getByLabelText("completed")).toBeInTheDocument();
-    expect(screen.getByLabelText("cancelled")).toBeInTheDocument();
-    expect(screen.getByLabelText("pending")).toBeInTheDocument();
+    expect(screen.queryByText("in progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("completed")).not.toBeInTheDocument();
+    expect(screen.queryByText("cancelled")).not.toBeInTheDocument();
+    expect(screen.queryByText("pending")).not.toBeInTheDocument();
   });
 
   it("reveals scheduled automation run metadata and payload", async () => {
@@ -240,11 +258,66 @@ describe("BuilderbotView", () => {
 
     expect(screen.getByText("Repeats")).toBeInTheDocument();
     expect(screen.getByText("Time zone")).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
     expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Run as Builderbot").length).toBeGreaterThan(0);
     expect(screen.queryByText("blox-vanilla")).not.toBeInTheDocument();
-    expect(screen.getByText("success")).toBeInTheDocument();
+    expect(screen.getByLabelText("success")).toBeInTheDocument();
+    expect(screen.queryByText("success")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run metadata")).not.toBeInTheDocument();
     expect(screen.getByText("Summarize docs")).toBeInTheDocument();
+  });
+
+  it("does not render a failure icon for unspecified scheduled run status", async () => {
+    const user = userEvent.setup();
+
+    renderBuilderbotView();
+
+    await user.click(screen.getByRole("tab", { name: "Automations" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Quiet docs/i }),
+    );
+
+    expect(screen.getByText("Stay quiet")).toBeInTheDocument();
+    expect(screen.queryByLabelText("unspecified")).not.toBeInTheDocument();
+  });
+
+  it("explains read-only scheduled automation fields with value-specific tooltips", async () => {
+    const user = userEvent.setup();
+
+    renderBuilderbotView();
+
+    await user.click(screen.getByRole("tab", { name: "Automations" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Daily docs/i }),
+    );
+
+    await user.hover(screen.getByRole("button", { name: "Explain name" }));
+    expect(
+      (await screen.findAllByText(/automation's unique name/i)).length,
+    ).toBeGreaterThan(0);
+
+    await user.hover(
+      screen.getByRole("button", { name: "Explain trigger type" }),
+    );
+    expect(
+      (
+        await screen.findAllByText(
+          /Scheduled automations run at a time you choose/i,
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+
+    await user.hover(
+      screen.getByRole("button", { name: "Explain action type" }),
+    );
+    expect(
+      (
+        await screen.findAllByText(
+          /Agent automations run non-deterministically through an agent/i,
+        )
+      ).length,
+    ).toBeGreaterThan(0);
   });
 
   it("keeps automation overview cards focused on status and trigger", async () => {
@@ -383,7 +456,7 @@ describe("BuilderbotView", () => {
     );
   });
 
-  it("reveals routing automation source, conditions, and script payload", async () => {
+  it("reveals routing automation config and script payload without run metadata", async () => {
     const user = userEvent.setup();
 
     renderBuilderbotView();
@@ -394,12 +467,55 @@ describe("BuilderbotView", () => {
     );
 
     expect(screen.getAllByText("GitHub").length).toBeGreaterThan(0);
-    expect(screen.getByText("payload.branch equals main")).toBeInTheDocument();
+    expect(
+      screen.queryByText("payload.branch equals main"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Last run")).not.toBeInTheDocument();
+    expect(screen.queryByText("Next run")).not.toBeInTheDocument();
     expect(screen.getAllByText("Script").length).toBeGreaterThan(0);
     expect(screen.queryByText("blox-repo-command")).not.toBeInTheDocument();
     expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
     expect(screen.queryByText("Owners")).not.toBeInTheDocument();
     expect(screen.queryByText("Created by")).not.toBeInTheDocument();
+  });
+
+  it("explains triggered script automation fields with value-specific tooltips", async () => {
+    const user = userEvent.setup();
+
+    renderBuilderbotView();
+
+    await user.click(screen.getByRole("tab", { name: "Automations" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Repo failure/i }),
+    );
+
+    await user.hover(
+      screen.getByRole("button", { name: "Explain trigger type" }),
+    );
+    expect(
+      (
+        await screen.findAllByText(
+          /Triggered automations run when something happens in another tool/i,
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+
+    await user.hover(screen.getByRole("button", { name: "Explain source" }));
+    expect(
+      (
+        await screen.findAllByText(
+          /Source is the tool that sends events to this automation/i,
+        )
+      ).length,
+    ).toBeGreaterThan(0);
+
+    await user.hover(
+      screen.getByRole("button", { name: "Explain action type" }),
+    );
+    expect(
+      (await screen.findAllByText(/Script automations run a defined command/i))
+        .length,
+    ).toBeGreaterThan(0);
   });
 
   it("sends the full routing rule payload when changing run-as identity", async () => {

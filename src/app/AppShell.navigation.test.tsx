@@ -242,6 +242,18 @@ vi.mock("./ui/AppShellContent", () => ({
       >
         Open builderbot task
       </button>
+      <button
+        type="button"
+        onClick={() => {
+          onBuilderbotBreadcrumbLabelChange?.("Daily docs");
+          onNavigateBuilderbot({
+            surface: "automation",
+            automationId: "daily-docs",
+          });
+        }}
+      >
+        Open builderbot automation
+      </button>
       {activeView === "automations" &&
       activeAutomationsRoute.surface === "builder" ? (
         <button
@@ -286,6 +298,18 @@ vi.mock("./ui/AppShellContent", () => ({
     </section>
   )) satisfies typeof AppShellContentType,
 }));
+
+function enableBuilderbotExperiment() {
+  window.localStorage.setItem(
+    EXPERIMENT_PREFERENCES_STORAGE_KEY,
+    JSON.stringify({
+      version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
+      experiments: {
+        [BUILDERBOT_SURFACE_EXPERIMENT_ID]: { enabled: true },
+      },
+    }),
+  );
+}
 
 describe("AppShell global navigation", () => {
   beforeEach(() => {
@@ -727,15 +751,7 @@ describe("AppShell global navigation", () => {
   });
 
   it("goes back and forward through Builderbot detail subroutes", async () => {
-    window.localStorage.setItem(
-      EXPERIMENT_PREFERENCES_STORAGE_KEY,
-      JSON.stringify({
-        version: EXPERIMENT_PREFERENCES_STORAGE_VERSION,
-        experiments: {
-          [BUILDERBOT_SURFACE_EXPERIMENT_ID]: { enabled: true },
-        },
-      }),
-    );
+    enableBuilderbotExperiment();
     const user = userEvent.setup();
     render(<AppShell />);
 
@@ -1268,6 +1284,74 @@ describe("AppShell global navigation", () => {
     expect(screen.getByRole("link", { name: "History" })).toHaveAttribute(
       "aria-current",
       "page",
+    );
+  });
+
+  it("shows and navigates from Builderbot task breadcrumbs", async () => {
+    enableBuilderbotExperiment();
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar builderbot" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open builderbot task" }),
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Builderbot" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Tasks" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "TASK-1" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await user.click(screen.getByRole("link", { name: "Tasks" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+        '"surface":"overview"',
+      );
+    });
+    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+      '"tab":"tasks"',
+    );
+  });
+
+  it("shows and navigates from Builderbot automation breadcrumbs", async () => {
+    enableBuilderbotExperiment();
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar builderbot" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open builderbot automation" }),
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Builderbot" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Automations" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Daily docs" })).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+
+    await user.click(screen.getByRole("link", { name: "Automations" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+        '"surface":"overview"',
+      );
+    });
+    expect(screen.getByTestId("builderbot-route")).toHaveTextContent(
+      '"tab":"automations"',
     );
   });
 
