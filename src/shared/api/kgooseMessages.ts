@@ -5,6 +5,7 @@ import type {
   ToolCallStatus,
 } from "@/shared/types/messages";
 import { normalizeKgooseJson } from "./kgooseJson";
+import { getToolLabel } from "./toolLabels";
 
 export type KgooseSessionStatus =
   | "initialized"
@@ -223,10 +224,13 @@ export function mapKgooseMessageContent(
           : "tool request";
     const args = parseArguments(tool.arguments ?? request.arguments);
 
+    // Display the human-readable label for known tools while keeping `toolName`
+    // and `extensionName` set to the raw `namespace__tool` id — downstream
+    // automation logic keys off those raw fields, not the display `name`.
     return {
       type: "toolRequest",
       id: request.id ?? `tool-request-${index}`,
-      name: toolName,
+      name: getToolLabel(toolName),
       toolName,
       extensionName: toolName.split("__")[0],
       arguments: args,
@@ -242,7 +246,7 @@ export function mapKgooseMessageContent(
     return {
       type: "toolResponse",
       id: response.id ?? `tool-response-${index}`,
-      name: response.extensionName ?? "tool response",
+      name: getToolLabel(response.extensionName ?? "tool response"),
       result,
       structuredContent: toolResponsePayload(response),
       isError,

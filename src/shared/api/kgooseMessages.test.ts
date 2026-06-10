@@ -107,6 +107,60 @@ describe("kgoose message helpers", () => {
     });
   });
 
+  it("renders known tool names with their human-readable label", () => {
+    const response = asKgooseMessagesResponse({
+      status: "CHAT_SESSION_STATUS_IDLE",
+      messages: [
+        {
+          id: "message-1",
+          role: "ROLE_ASSISTANT",
+          created: "1714568400000",
+          content: [
+            {
+              type: "MESSAGE_TYPE_TOOL_REQUEST",
+              tool_request: {
+                id: "tool-known",
+                status: "running",
+                value: {
+                  name: "slack__post_message",
+                  arguments: JSON.stringify({ channel: "revenue" }),
+                },
+              },
+            },
+            {
+              type: "MESSAGE_TYPE_TOOL_REQUEST",
+              tool_request: {
+                id: "tool-unknown",
+                status: "running",
+                value: { name: "mystery__do_thing", arguments: "{}" },
+              },
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(response.messages[0].content).toMatchObject([
+      {
+        type: "toolRequest",
+        id: "tool-known",
+        // Displayed name resolves to the friendly label...
+        name: "Post to Slack",
+        // ...while the raw identifier is preserved for downstream logic.
+        toolName: "slack__post_message",
+        extensionName: "slack",
+      },
+      {
+        type: "toolRequest",
+        id: "tool-unknown",
+        // Unknown tools fall back to the raw `namespace__tool` name.
+        name: "mystery__do_thing",
+        toolName: "mystery__do_thing",
+        extensionName: "mystery",
+      },
+    ]);
+  });
+
   it("normalizes stream snapshots and deltas", () => {
     const messages = asKgooseStreamResponse({
       get_messages_response: {
