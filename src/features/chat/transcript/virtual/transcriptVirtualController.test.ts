@@ -40,6 +40,105 @@ describe("transcript virtual controller", () => {
     });
   });
 
+  it("keeps the bottom anchored when the viewport shrinks while following", () => {
+    const controller = createController({ viewportHeight: 500 });
+    controller.setRows(makeRows(20, 100));
+
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 1500,
+      anchor: { type: "bottom" },
+    });
+
+    // A window/rail resize shrinks the viewport. The browser keeps scrollTop
+    // where it was, which now sits 200px above the new bottom. The clamp-
+    // induced scroll event carries no user intent, so bottom follow must not
+    // exit.
+    const resized = controller.syncViewport(
+      {
+        scrollTop: 1500,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser" },
+    );
+
+    expect(resized.correction).toMatchObject({
+      reason: "bottom-anchor",
+      nextScrollTop: 1700,
+    });
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 1700,
+      anchor: { type: "bottom" },
+      pinnedToBottom: true,
+    });
+    expect(controller.getDiagnostics().bottomFollowExits).toBe(0);
+  });
+
+  it("keeps the captured row anchored while a width change rewraps row heights", () => {
+    const controller = createController({ viewportHeight: 300 });
+    controller.setRows(makeRows(10, 100));
+    controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-2"),
+      height: 200,
+    });
+
+    controller.syncViewport(
+      {
+        scrollTop: 620,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 20,
+    });
+
+    // A rail animation changes the transcript width. Width-stale measurements
+    // stay in effect as interim heights, so the layout must not collapse back
+    // to estimates and the viewport must not move.
+    const resized = controller.syncViewport(
+      {
+        scrollTop: 620,
+        viewportHeight: 300,
+        widthScope: "w:600",
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+
+    expect(resized.correction).toBeNull();
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 620,
+      anchor: {
+        type: "row",
+        rowId: "row-5",
+        offsetWithinRow: 20,
+      },
+    });
+
+    // Remeasurement at the new width lands: row-2 rewraps from 200px to
+    // 320px, shifting everything after it down. The anchored row must stay
+    // pinned at the same viewport offset.
+    const remeasured = controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-2"),
+      height: 320,
+    });
+
+    expect(remeasured.accepted).toBe(true);
+    expect(remeasured.correction).toMatchObject({
+      reason: "row-anchor",
+      nextScrollTop: 740,
+    });
+    expect(controller.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 20,
+    });
+  });
+
   it("pauses bottom follow on upward scroll before idle measurements flush", () => {
     const controller = createController({ viewportHeight: 300 });
     const rows = makeRows(10, 100);

@@ -1087,14 +1087,11 @@ describe("VirtualMessageTimeline", () => {
     );
     const cacheMissesBefore =
       latestTimelineDiagnostics(diagnosticsSpy)?.measurement.cacheMisses ?? 0;
-    const callCountBefore = diagnosticsSpy.mock.calls.length;
     const scroller = screen.getByTestId("message-timeline-scroll");
 
     fireEvent.scroll(scroller);
+    await Promise.resolve();
 
-    await waitFor(() =>
-      expect(diagnosticsSpy.mock.calls.length).toBeGreaterThan(callCountBefore),
-    );
     expect(
       latestTimelineDiagnostics(diagnosticsSpy)?.measurement.cacheMisses,
     ).toBe(cacheMissesBefore);

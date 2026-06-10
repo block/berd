@@ -6,6 +6,7 @@ import {
   useState,
   type RefObject,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   getMeasurementFinalizationDecision,
   parseVirtualReservedBlockSize,
@@ -202,10 +203,21 @@ export function useTranscriptVirtualTimeline({
   const deferredMeasurementByTokenRef = useRef(new Set<string>());
   const measurementFlushScheduledRef = useRef(false);
   const visibleMeasurementFrameRef = useRef<number | null>(null);
+  // While a rAF measurement flush is running, scroll corrections are recorded
+  // here instead of being written to the DOM, then applied after the snapshot
+  // commits so scrollTop and row layout change in the same paint.
+  const deferDomCorrectionsRef = useRef(false);
+  const deferredCorrectionRef = useRef<TranscriptScrollCorrection | null>(null);
   const pendingVisibleMeasurementElementsRef = useRef(
     new Map<string, HTMLElement>(),
   );
   const pendingOffscreenShellMeasurementElementsRef = useRef(
+    new Map<string, HTMLElement>(),
+  );
+  // All currently mounted visible row elements, kept so a width change can
+  // remeasure every visible row before the next paint instead of only the
+  // rows whose ResizeObserver happened to fire first.
+  const registeredVisibleRowElementsRef = useRef(
     new Map<string, HTMLElement>(),
   );
 
@@ -257,6 +269,11 @@ export function useTranscriptVirtualTimeline({
         return;
       }
 
+      if (deferDomCorrectionsRef.current) {
+        deferredCorrectionRef.current = correction;
+        return;
+      }
+
       const container = containerRef.current;
       if (!container) {
         return;
@@ -276,6 +293,15 @@ export function useTranscriptVirtualTimeline({
     },
     [containerRef, footerHeight],
   );
+
+  const invalidateWidthScopedMeasurementReplay = useCallback(() => {
+    // Controller heights are row-keyed while scheduler/cache entries are
+    // width-scoped. Whenever the controller width changes, previously-applied
+    // token records may no longer reflect the controller's current row height
+    // (for visible or offscreen rows), so cached replay must be allowed to
+    // restore the current width's measurement.
+    cachedHeightAppliedByTokenRef.current.clear();
+  }, []);
 
   const syncMeasurementScheduler = useCallback(
     (controller: TranscriptVirtualEngine) => {
@@ -307,13 +333,27 @@ export function useTranscriptVirtualTimeline({
         return;
       }
 
+      // This is an internal coherence sync (controller vs live DOM), not a
+      // user scroll: real user scrolls always arrive through scroll events
+      // and syncViewportFromDom before this runs. Treat drift here (clamped
+      // corrections, in-flight layout changes) as programmatic so the
+      // controller reconciles its existing anchor instead of exiting bottom
+      // follow or recapturing a row anchor at a transient position.
+      const previousWidthScope = controllerState.widthScope;
       const viewportResult = controller.syncViewport(liveViewport, {
-        source: "browser",
-        userScrollIntent: true,
+        source: "programmatic",
       });
+      if (controller.getState().widthScope !== previousWidthScope) {
+        invalidateWidthScopedMeasurementReplay();
+      }
       applyCorrection(viewportResult.correction);
     },
-    [applyCorrection, containerRef, footerHeight],
+    [
+      applyCorrection,
+      containerRef,
+      footerHeight,
+      invalidateWidthScopedMeasurementReplay,
+    ],
   );
 
   const flushMeasurementBatch = useCallback(
@@ -537,11 +577,21 @@ export function useTranscriptVirtualTimeline({
         return controller.getState();
       }
 
+      const previousWidthScope = controller.getState().widthScope;
       const result = controller.syncViewport(liveViewport, options);
+      if (controller.getState().widthScope !== previousWidthScope) {
+        invalidateWidthScopedMeasurementReplay();
+      }
       applyCorrection(result.correction);
       return commitSnapshot();
     },
-    [applyCorrection, commitSnapshot, containerRef, footerHeight],
+    [
+      applyCorrection,
+      commitSnapshot,
+      containerRef,
+      footerHeight,
+      invalidateWidthScopedMeasurementReplay,
+    ],
   );
 
   useLayoutEffect(() => {
@@ -631,7 +681,7 @@ export function useTranscriptVirtualTimeline({
     [sessionId],
   );
 
-  const flushPendingMeasurements = useCallback(() => {
+  const flushPendingMeasurementsInner = useCallback(() => {
     measurementFlushScheduledRef.current = false;
     visibleMeasurementFrameRef.current = null;
 
@@ -827,6 +877,28 @@ export function useTranscriptVirtualTimeline({
     }
   }, [commitSnapshot, flushMeasurementBatch, syncMeasurementScheduler]);
 
+  const flushPendingMeasurements = useCallback(() => {
+    // Measurement-driven scroll corrections must hit the DOM in the same
+    // paint as the re-rendered row positions. Defer the scrollTop writes
+    // while the controller updates run, commit the snapshot synchronously,
+    // then apply the final correction against the new layout.
+    deferDomCorrectionsRef.current = true;
+    deferredCorrectionRef.current = null;
+    try {
+      flushSync(() => {
+        flushPendingMeasurementsInner();
+      });
+    } finally {
+      deferDomCorrectionsRef.current = false;
+    }
+
+    const deferredCorrection = deferredCorrectionRef.current;
+    deferredCorrectionRef.current = null;
+    if (deferredCorrection) {
+      applyCorrection(deferredCorrection);
+    }
+  }, [applyCorrection, flushPendingMeasurementsInner]);
+
   const scheduleMeasurementFlush = useCallback(() => {
     if (measurementFlushScheduledRef.current) {
       return;
@@ -842,14 +914,51 @@ export function useTranscriptVirtualTimeline({
     (rowId: string, element: HTMLElement | null) => {
       if (!element) {
         pendingVisibleMeasurementElementsRef.current.delete(rowId);
+        registeredVisibleRowElementsRef.current.delete(rowId);
         return;
       }
 
+      registeredVisibleRowElementsRef.current.set(rowId, element);
       pendingVisibleMeasurementElementsRef.current.set(rowId, element);
       scheduleMeasurementFlush();
     },
     [scheduleMeasurementFlush],
   );
+
+  // Synchronously remeasures every mounted visible row and applies the
+  // resulting controller corrections and snapshot before the next paint.
+  // Used when the transcript width changes: waiting for per-row
+  // ResizeObserver callbacks lets partially remeasured layouts paint, which
+  // reads as content jumping during rail/window resizes.
+  const remeasureVisibleRowsSync = useCallback(() => {
+    for (const [rowId, element] of registeredVisibleRowElementsRef.current) {
+      if (!element.isConnected) {
+        registeredVisibleRowElementsRef.current.delete(rowId);
+        continue;
+      }
+      const token = measurementSchedulerRef.current?.getMeasurementToken(rowId);
+      if (token) {
+        // Force the current-width visible measurement through even if this
+        // exact token height was observed before. Controller measurements are
+        // row-keyed, so an intervening width can overwrite the current row
+        // height; on A → B → A resize, token A must be allowed to restore its
+        // height even when the DOM height equals the previous A measurement.
+        measuredHeightByTokenRef.current.delete(getMeasurementTokenKey(token));
+      }
+      pendingVisibleMeasurementElementsRef.current.set(rowId, element);
+    }
+
+    if (pendingVisibleMeasurementElementsRef.current.size === 0) {
+      return;
+    }
+
+    if (visibleMeasurementFrameRef.current !== null) {
+      cancelAnimationFrame(visibleMeasurementFrameRef.current);
+      visibleMeasurementFrameRef.current = null;
+    }
+    measurementFlushScheduledRef.current = false;
+    flushPendingMeasurements();
+  }, [flushPendingMeasurements]);
 
   const measureOffscreenShellElement = useCallback(
     (rowId: string, element: HTMLElement | null) => {
@@ -978,6 +1087,7 @@ export function useTranscriptVirtualTimeline({
     rowStateProvider,
     measureRowElement,
     measureOffscreenShellElement,
+    remeasureVisibleRowsSync,
     syncViewportFromDom,
     scrollToRow,
     scrollToBottom,

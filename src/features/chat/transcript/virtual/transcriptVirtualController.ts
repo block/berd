@@ -59,6 +59,8 @@ interface ReconcileOptions {
   updateAnchorOnStale?: boolean;
 }
 
+const TRANSCRIPT_VIEWPORT_GEOMETRY_EPSILON_PX = 1;
+
 const EMPTY_DIAGNOSTICS: TranscriptVirtualDiagnostics = {
   rowSetUpdates: 0,
   viewportUpdates: 0,
@@ -184,8 +186,21 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     } = {},
   ): TranscriptViewportUpdateResult {
     const previousScrollTop = this.scrollTop;
-    this.viewportHeight = Math.max(0, geometry.viewportHeight);
-    this.footerHeight = Math.max(0, geometry.footerHeight ?? 0);
+    const nextViewportHeight = Math.max(0, geometry.viewportHeight);
+    const nextFooterHeight = Math.max(0, geometry.footerHeight ?? 0);
+    // Viewport geometry changes (window resize, side-rail animation, footer
+    // growth) move scrollTop through browser clamping and invalidate width-
+    // scoped measurements. Those scrollTop drifts are not user scrolls, so the
+    // existing anchor must be reconciled rather than recaptured at the drifted
+    // position.
+    const geometryChanged =
+      Math.abs(nextViewportHeight - this.viewportHeight) >
+        TRANSCRIPT_VIEWPORT_GEOMETRY_EPSILON_PX ||
+      Math.abs(nextFooterHeight - this.footerHeight) >
+        TRANSCRIPT_VIEWPORT_GEOMETRY_EPSILON_PX ||
+      geometry.widthScope !== this.widthScope;
+    this.viewportHeight = nextViewportHeight;
+    this.footerHeight = nextFooterHeight;
     this.widthScope = geometry.widthScope;
     this.browserScrollHeight =
       geometry.browserScrollHeight === undefined
@@ -198,9 +213,14 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     const direction = getScrollDirection(previousScrollTop, this.scrollTop);
     const source = options.source ?? "browser";
     const distanceFromBottom = this.getDistanceFromBottom(this.scrollTop);
+    // Explicit user intent (wheel/touch) wins even mid-resize so a user can
+    // still scroll away while a rail animation is changing geometry.
+    const treatAsUserScroll =
+      source === "browser" &&
+      (options.userScrollIntent === true || !geometryChanged);
 
     if (
-      source === "browser" &&
+      treatAsUserScroll &&
       this.anchor.type === "bottom" &&
       direction === "up" &&
       distanceFromBottom > this.pinnedBottomThresholdPx
@@ -211,7 +231,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     }
 
     if (
-      source === "browser" &&
+      treatAsUserScroll &&
       (options.userScrollIntent || direction !== "none")
     ) {
       if (distanceFromBottom <= this.pinnedBottomThresholdPx) {
@@ -761,26 +781,23 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private getRowHeight(row: TranscriptRowDescriptor): number {
     const measured = this.measurements.get(this.measurementKey(row.rowId));
     const estimatedHeight = Math.max(0, row.estimatedHeight);
-    if (
-      measured?.widthScope === this.widthScope &&
-      measured.heightRevision === row.heightRevision
-    ) {
-      if (row.anchorPriority === "streaming") {
-        return Math.max(
-          measured.height,
-          this.streamingHeightFloors.get(this.measurementKey(row.rowId)) ?? 0,
-        );
-      }
-      return measured.height;
-    }
+    // A width-stale measurement (same content, different transcript width) is
+    // an interim height: rewrap shifts it slightly, but it is far closer than
+    // the estimate. Snapping back to estimates during a continuous resize
+    // (window drag, rail animation) collapses the scroll height every frame
+    // and makes the transcript jump while remeasurement is in flight.
+    const measuredHeight =
+      measured && measured.heightRevision === row.heightRevision
+        ? measured.height
+        : null;
     if (row.anchorPriority === "streaming") {
       return Math.max(
-        estimatedHeight,
-        measured?.widthScope === this.widthScope ? measured.height : 0,
+        measuredHeight ?? estimatedHeight,
+        measured?.height ?? 0,
         this.streamingHeightFloors.get(this.measurementKey(row.rowId)) ?? 0,
       );
     }
-    return estimatedHeight;
+    return measuredHeight ?? estimatedHeight;
   }
 
   private updateStreamingHeightFloor(
@@ -820,8 +837,11 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     return Math.min(Math.max(0, scrollTop), this.getBottomScrollTop());
   }
 
+  // Measurements are keyed by row only. Each entry records the widthScope it
+  // was measured at; width-stale entries still serve as interim heights so a
+  // continuous resize never collapses the layout back to estimates.
   private measurementKey(rowId: string): string {
-    return `${this.widthScope}\u0000${rowId}`;
+    return rowId;
   }
 }
 

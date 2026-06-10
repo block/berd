@@ -10,6 +10,7 @@ import {
   type ReactNode,
   type Ref,
   type RefObject,
+  type KeyboardEvent,
   type SyntheticEvent,
   type WheelEvent,
 } from "react";
@@ -65,6 +66,7 @@ import { getVirtualTranscriptRowSpacingBlockSize } from "./virtualTranscriptRowS
 
 const AUTO_SCROLL_THRESHOLD_PX = 180;
 const MCP_APP_STICKY_SCROLL_MS = 1500;
+const RESIZE_SCROLL_SUPPRESSION_MS = 250;
 const FOOTER_DOCK_OVERLAP_PX = 28;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
 const STREAMING_MESSAGE_TOP_OFFSET_PX = 16;
@@ -905,6 +907,7 @@ export function VirtualMessageTimeline({
   const userDetachedRef = useRef(false);
   const userScrollIntentRef = useRef(false);
   const lastScrollTopRef = useRef(0);
+  const suppressScrollDeltaDetachUntilRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
   const messageListBottomPaddingPxRef = useRef(0);
   const followStreamingMessageIdRef = useRef<string | null>(null);
@@ -1028,6 +1031,7 @@ export function VirtualMessageTimeline({
     snapshot: virtualTimelineSnapshot,
     measureRowElement,
     measureOffscreenShellElement,
+    remeasureVisibleRowsSync,
     scrollToBottom: scrollVirtualToBottom,
     scrollToRow: scrollVirtualToRow,
     syncViewportFromDom,
@@ -1581,15 +1585,18 @@ export function VirtualMessageTimeline({
       const { scrollTop } = virtualState;
       isNearBottomRef.current = virtualState.nearBottom;
 
+      const scrollDeltaDetached =
+        scrollTop < lastScrollTopRef.current - 1 &&
+        performance.now() > suppressScrollDeltaDetachUntilRef.current;
       if (
         virtualState.nearBottom &&
         (!userDetachedRef.current || scrollTop > lastScrollTopRef.current)
       ) {
         setDetachedFromLatest(false);
-      } else if (
-        userScrollIntentRef.current ||
-        scrollTop < lastScrollTopRef.current
-      ) {
+      } else if (userScrollIntentRef.current || scrollDeltaDetached) {
+        // Explicit wheel/touch/pointer/keyboard intent detaches. Raw scrollTop
+        // decreases also come from resize clamps and anchor corrections, so
+        // the resize handler suppresses this fallback around geometry syncs.
         setDetachedFromLatest(true);
         stickyScrollUntilRef.current = 0;
       }
@@ -1612,15 +1619,16 @@ export function VirtualMessageTimeline({
     const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
     isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
 
+    const scrollDeltaDetached =
+      scrollTop < lastScrollTopRef.current - 1 &&
+      performance.now() > suppressScrollDeltaDetachUntilRef.current;
     if (
       isNearBottomRef.current &&
       (!userDetachedRef.current || scrollTop > lastScrollTopRef.current)
     ) {
       setDetachedFromLatest(false);
-    } else if (
-      userScrollIntentRef.current ||
-      scrollTop < lastScrollTopRef.current
-    ) {
+    } else if (userScrollIntentRef.current || scrollDeltaDetached) {
+      // Mirrors the virtual path above.
       setDetachedFromLatest(true);
       stickyScrollUntilRef.current = 0;
     }
@@ -1850,31 +1858,39 @@ export function VirtualMessageTimeline({
       return;
     }
 
-    let resizeFrame: number | null = null;
-
     const syncAfterResize = () => {
+      suppressScrollDeltaDetachUntilRef.current =
+        performance.now() + RESIZE_SCROLL_SUPPRESSION_MS;
       const wasPinnedToLatest =
         !userDetachedRef.current &&
         (isNearBottomRef.current ||
           stickyScrollUntilRef.current > performance.now());
 
+      // Remeasure every visible row at the new width and let the controller
+      // reconcile the anchor against the rewrapped layout, all before this
+      // frame paints. Partially remeasured layouts are what read as content
+      // "jumping around" during continuous resizes.
+      const scrollTopBeforeResize =
+        detachedScrollTopRef.current ?? container.scrollTop;
+      syncViewportFromDom({ source: "programmatic" });
+      remeasureVisibleRowsSync();
+
       if (wasPinnedToLatest) {
-        syncViewportFromDom({ source: "programmatic" });
         scrollToBottom("auto");
         syncScrollState();
         return;
       }
 
-      const scrollTopBeforeResize =
-        detachedScrollTopRef.current ?? container.scrollTop;
-      let virtualState = syncViewportFromDom({
-        source: "browser",
-        userScrollIntent: true,
-      });
+      let virtualState = syncViewportFromDom({ source: "programmatic" });
       if (
+        virtualState &&
         userDetachedRef.current &&
+        virtualState.anchor.type === "bottom" &&
         Math.abs(container.scrollTop - scrollTopBeforeResize) > 1
       ) {
+        // The user detached through wheel intent before the controller
+        // captured a row anchor, so bottom reconciliation dragged them along.
+        // Restore the detached position and capture a row anchor there.
         container.scrollTop = scrollTopBeforeResize;
         virtualState =
           syncViewportFromDom({
@@ -1889,42 +1905,30 @@ export function VirtualMessageTimeline({
 
       isNearBottomRef.current = virtualState.nearBottom;
       if (userDetachedRef.current) {
+        detachedScrollTopRef.current = container.scrollTop;
         if (virtualState.pinnedToBottom) {
           setDetachedFromLatest(false);
         }
-      } else if (virtualState.distanceFromBottom >= AUTO_SCROLL_THRESHOLD_PX) {
-        setDetachedFromLatest(true);
-        stickyScrollUntilRef.current = 0;
       }
       lastScrollTopRef.current = virtualState.scrollTop;
       userScrollIntentRef.current = false;
     };
 
-    const scheduleSyncAfterResize = () => {
-      if (resizeFrame != null) {
-        cancelAnimationFrame(resizeFrame);
-      }
-      resizeFrame = requestAnimationFrame(() => {
-        resizeFrame = null;
-        syncAfterResize();
-      });
-    };
-
+    // ResizeObserver callbacks run after layout and before paint, so the
+    // anchor reconciliation lands in the same frame as the resize itself.
     const resizeObserver =
       typeof ResizeObserver === "undefined"
         ? null
-        : new ResizeObserver(scheduleSyncAfterResize);
+        : new ResizeObserver(syncAfterResize);
 
     resizeObserver?.observe(container);
-    window.addEventListener("resize", scheduleSyncAfterResize);
+    window.addEventListener("resize", syncAfterResize);
     return () => {
       resizeObserver?.disconnect();
-      window.removeEventListener("resize", scheduleSyncAfterResize);
-      if (resizeFrame != null) {
-        cancelAnimationFrame(resizeFrame);
-      }
+      window.removeEventListener("resize", syncAfterResize);
     };
   }, [
+    remeasureVisibleRowsSync,
     scrollToBottom,
     setDetachedFromLatest,
     syncScrollState,
@@ -1942,9 +1946,30 @@ export function VirtualMessageTimeline({
     requestBottomScroll();
   }, [footerHeightPx, hasFooter, requestBottomScroll, tailPaddingPx]);
 
+  const latestMessage = useMemo(() => {
+    for (let index = stableRows.length - 1; index >= 0; index -= 1) {
+      const row = stableRows[index];
+      if (
+        (row.kind === "message" || row.kind === "assistant-content-fragment") &&
+        row.messageId
+      ) {
+        return stableMessageByRowId.get(row.rowId) ?? null;
+      }
+    }
+    return null;
+  }, [stableMessageByRowId, stableRows]);
+  const latestMessageId = latestMessage?.id;
+
   useEffect(() => {
     if (!resolvedScrollTargetMessageId) {
       return;
+    }
+
+    if (resolvedScrollTargetMessageId === latestMessageId) {
+      setDetachedFromLatest(false);
+    } else {
+      setDetachedFromLatest(true);
+      stickyScrollUntilRef.current = 0;
     }
 
     const currentTarget = messageRefs.current[resolvedScrollTargetMessageId];
@@ -1972,9 +1997,11 @@ export function VirtualMessageTimeline({
 
     return () => cancelAnimationFrame(frame);
   }, [
+    latestMessageId,
     onScrollTargetHandled,
     resolvedScrollTargetMessageId,
     scrollVirtualToRow,
+    setDetachedFromLatest,
     snapshot.rowByMessageId,
   ]);
 
@@ -1991,20 +2018,6 @@ export function VirtualMessageTimeline({
 
     return () => window.clearTimeout(timer);
   }, [pulsingMessageId]);
-
-  const latestMessage = useMemo(() => {
-    for (let index = stableRows.length - 1; index >= 0; index -= 1) {
-      const row = stableRows[index];
-      if (
-        (row.kind === "message" || row.kind === "assistant-content-fragment") &&
-        row.messageId
-      ) {
-        return stableMessageByRowId.get(row.rowId) ?? null;
-      }
-    }
-    return null;
-  }, [stableMessageByRowId, stableRows]);
-  const latestMessageId = latestMessage?.id;
 
   useEffect(() => {
     if (!latestMessageId || latestMessage?.role !== "user") {
@@ -2152,6 +2165,12 @@ export function VirtualMessageTimeline({
     if (event.deltaY < 0) {
       setDetachedFromLatest(true);
       stickyScrollUntilRef.current = 0;
+      // Push the detach into the controller immediately so it captures a row
+      // anchor at the current position. Otherwise the controller can keep a
+      // stale bottom anchor (the scroll event may not change scrollTop), and
+      // the next geometry reconciliation would drag the user back to the
+      // bottom they just scrolled away from.
+      syncViewportFromDom({ source: "browser", userScrollIntent: true });
     }
   };
 
@@ -2163,6 +2182,28 @@ export function VirtualMessageTimeline({
     // A real wheel/touch interrupts an in-flight jump-to-latest glide so the
     // user keeps control of the scroll position.
     cancelJumpToLatestAnimation();
+  };
+
+  const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (footerRef.current?.contains(event.target as Node)) {
+      return;
+    }
+
+    switch (event.key) {
+      case "ArrowDown":
+      case "ArrowUp":
+      case "End":
+      case "Home":
+      case "PageDown":
+      case "PageUp":
+      case " ":
+      case "Spacebar":
+        userScrollIntentRef.current = true;
+        cancelJumpToLatestAnimation();
+        break;
+      default:
+        break;
+    }
   };
 
   const handleJumpToLatest = () => {
@@ -2547,6 +2588,7 @@ export function VirtualMessageTimeline({
           onWheel={handleWheel}
           onTouchMove={handleUserScrollIntent}
           onPointerDown={handleUserScrollIntent}
+          onKeyDown={handleKeyDown}
           style={{ overflowAnchor: "none" }}
         >
           <div className="flex min-h-full flex-col">

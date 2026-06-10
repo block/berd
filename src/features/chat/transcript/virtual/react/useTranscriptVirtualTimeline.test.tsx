@@ -150,6 +150,67 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(effectSnapshots).toHaveLength(1);
   });
 
+  it("forces visible remeasurement when returning to a previously measured width", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("assistant-tail", 100)];
+    const measuredHeight = { current: 240 };
+    const measuredElement = createMeasuredElementFromRef(measuredHeight);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      result.current.measureRowElement("assistant-tail", measuredElement);
+      runPendingFrames();
+    });
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      340,
+    );
+
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 600,
+    });
+    measuredHeight.current = 360;
+    await act(async () => {
+      result.current.syncViewportFromDom({ source: "programmatic" });
+      result.current.remeasureVisibleRowsSync();
+    });
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      460,
+    );
+
+    Object.defineProperty(container, "clientWidth", {
+      configurable: true,
+      value: 720,
+    });
+    measuredHeight.current = 240;
+    await act(async () => {
+      result.current.syncViewportFromDom({ source: "programmatic" });
+      result.current.remeasureVisibleRowsSync();
+    });
+
+    // Regression proof for A → B → A resize: even though token A's 240px
+    // height was observed earlier, the row-keyed controller measurement was
+    // overwritten at width B and must be restored when width A returns.
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      340,
+    );
+    expect(
+      result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
+    ).toBe(3);
+  });
+
   it("ignores tiny mounted measurement jitter for an unchanged row token", async () => {
     const container = createContainer();
     const containerRef = {
@@ -221,11 +282,17 @@ function createContainer(): HTMLDivElement {
 }
 
 function createMeasuredElement(height: number): HTMLElement {
+  return createMeasuredElementFromRef({ current: height });
+}
+
+function createMeasuredElementFromRef(heightRef: {
+  current: number;
+}): HTMLElement {
   const element = document.createElement("div");
   element.getBoundingClientRect = () =>
     ({
-      bottom: height,
-      height,
+      bottom: heightRef.current,
+      height: heightRef.current,
       left: 0,
       right: 720,
       top: 0,

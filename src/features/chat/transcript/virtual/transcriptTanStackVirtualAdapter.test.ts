@@ -35,6 +35,90 @@ describe("TranscriptTanStackVirtualAdapter", () => {
     expect(adapter.isAtEnd()).toBe(true);
   });
 
+  it("keeps the bottom anchored through a viewport resize while following", () => {
+    const adapter = createAdapter({ viewportHeight: 500 });
+    adapter.setRows(makeRows(20, 100));
+
+    expect(adapter.getScrollTop()).toBe(1500);
+    expect(adapter.getState().anchor).toEqual({ type: "bottom" });
+
+    // Shrinking the viewport leaves the browser scrollTop above the new
+    // bottom; the intent-less geometry sync must restore bottom follow
+    // instead of treating the drift as a user scroll away from the end.
+    adapter.syncViewport(
+      {
+        scrollTop: 1500,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser" },
+    );
+
+    expect(adapter.getScrollTop()).toBe(1700);
+    expect(adapter.getState()).toMatchObject({
+      anchor: { type: "bottom" },
+      pinnedToBottom: true,
+    });
+    expect(adapter.getDiagnostics().bottomFollowExits).toBe(0);
+  });
+
+  it("keeps the captured row anchored through a width-scope change", () => {
+    const adapter = createAdapter({ viewportHeight: 300 });
+    adapter.setRows(makeRows(10, 100));
+    adapter.applyMeasuredHeight({
+      token: tokenFor(adapter, "row-2"),
+      height: 200,
+    });
+
+    adapter.syncViewport(
+      {
+        scrollTop: 620,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+
+    expect(adapter.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 20,
+    });
+
+    // The width change keeps the width-stale row-2 measurement as an interim
+    // height, so nothing moves until remeasurement lands at the new width.
+    adapter.syncViewport(
+      {
+        scrollTop: 620,
+        viewportHeight: 300,
+        widthScope: "w:600",
+      },
+      { source: "browser", userScrollIntent: true },
+    );
+
+    expect(adapter.getScrollTop()).toBe(620);
+    expect(adapter.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 20,
+    });
+
+    // Remeasurement at the new width rewraps row-2 to 320px; the anchored row
+    // stays pinned at the same viewport offset.
+    const remeasured = adapter.applyMeasuredHeight({
+      token: tokenFor(adapter, "row-2"),
+      height: 320,
+    });
+
+    expect(remeasured.accepted).toBe(true);
+    expect(adapter.getScrollTop()).toBe(740);
+    expect(adapter.getState().anchor).toMatchObject({
+      type: "row",
+      rowId: "row-5",
+      offsetWithinRow: 20,
+    });
+  });
+
   it("keeps detached users detached when updated TanStack follow-on-append is enabled", () => {
     const adapter = createAdapter({ viewportHeight: 500 });
     const rows = makeRows(20, 100);

@@ -213,6 +213,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     return () => {
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
+      measureRowElement?.(row.rowId, null);
     };
   }, [
     measureRowElement,

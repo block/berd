@@ -163,6 +163,12 @@ export class TranscriptTanStackVirtualAdapter
       userScrollIntent?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
+    // Any viewport sync supersedes a pending TanStack scroll reconcile.
+    // TanStack arms a multi-frame loop (via scrollToEnd/scrollToIndex and its
+    // internal followOnAppend path) that re-asserts a stale bottom/row target
+    // for seconds; with Goose's controller owning scroll truth, that loop
+    // yanks detached users back to the bottom after resizes.
+    this.disarmVirtualizerScrollReconcile();
     const previousState = this.controller.getState();
     this.setScrollOffset(geometry.scrollTop, false);
     this.lastRangeSelection = null;
@@ -289,6 +295,7 @@ export class TranscriptTanStackVirtualAdapter
         align,
         behavior: "auto",
       });
+      this.disarmVirtualizerScrollReconcile();
     }
 
     const result = this.controller.scrollToRow(rowId, align);
@@ -300,6 +307,7 @@ export class TranscriptTanStackVirtualAdapter
 
   scrollToEnd(options: { behavior?: ScrollBehavior } = {}): void {
     this.virtualizer.scrollToEnd({ behavior: options.behavior ?? "auto" });
+    this.disarmVirtualizerScrollReconcile();
     const state = this.controller.getState();
     const result = this.controller.syncViewport(
       {
@@ -539,6 +547,17 @@ export class TranscriptTanStackVirtualAdapter
     this.setScrollOffset(correction.nextScrollTop, false);
   }
 
+  // TanStack's scrollToIndex/scrollToEnd arm a multi-frame "scroll reconcile"
+  // loop that keeps re-asserting the original target offset on later frames.
+  // Goose's controller owns scroll-position truth (anchors + corrections), so
+  // a stale reconcile target fights user detaches and resize corrections —
+  // e.g. yanking a freshly detached user back to the bottom. Use TanStack for
+  // the immediate jump only and disarm its follow-up loop.
+  private disarmVirtualizerScrollReconcile(): void {
+    (this.virtualizer as unknown as { scrollState: unknown }).scrollState =
+      null;
+  }
+
   private syncScrollElementToController(): void {
     const state = this.controller.getState();
     this.setScrollOffset(state.scrollTop, false);
@@ -574,30 +593,23 @@ export class TranscriptTanStackVirtualAdapter
       this.measurementKey(row.rowId, widthScope),
     );
     const estimatedHeight = Math.max(0, row.estimatedHeight);
-    if (
-      measured?.widthScope === widthScope &&
-      measured.heightRevision === row.heightRevision
-    ) {
-      if (row.anchorPriority === "streaming") {
-        return Math.max(
-          measured.height,
-          this.streamingHeightFloors.get(
-            this.measurementKey(row.rowId, widthScope),
-          ) ?? 0,
-        );
-      }
-      return measured.height;
-    }
+    // Width-stale measurements remain interim heights so a continuous resize
+    // never snaps row heights back to estimates (see
+    // TranscriptVirtualController.getRowHeight).
+    const measuredHeight =
+      measured && measured.heightRevision === row.heightRevision
+        ? measured.height
+        : null;
     if (row.anchorPriority === "streaming") {
       return Math.max(
-        estimatedHeight,
-        measured?.widthScope === widthScope ? measured.height : 0,
+        measuredHeight ?? estimatedHeight,
+        measured?.height ?? 0,
         this.streamingHeightFloors.get(
           this.measurementKey(row.rowId, widthScope),
         ) ?? 0,
       );
     }
-    return estimatedHeight;
+    return measuredHeight ?? estimatedHeight;
   }
 
   private updateStreamingHeightFloor(
@@ -628,8 +640,7 @@ export class TranscriptTanStackVirtualAdapter
         continue;
       }
 
-      const rowId = key.slice(key.indexOf("\u0000") + 1);
-      const index = this.rowIndexById.get(rowId);
+      const index = this.rowIndexById.get(key);
       if (index !== undefined) {
         releasedIndexes.push(index);
       }
@@ -682,8 +693,10 @@ export class TranscriptTanStackVirtualAdapter
       : top + this.getRowHeight(row, widthScope);
   }
 
-  private measurementKey(rowId: string, widthScope?: string): string {
-    return `${widthScope ?? this.controller.getState().widthScope}\u0000${rowId}`;
+  // Measurements are keyed by row only; entries record their widthScope and
+  // width-stale heights stay usable as interim values during resizes.
+  private measurementKey(rowId: string, _widthScope?: string): string {
+    return rowId;
   }
 }
 
