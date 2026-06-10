@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -38,6 +38,7 @@ import {
   MAX_PERSONA_IMPORT_BYTES,
   validatePersonaImportFile,
 } from "@/features/agents/lib/personaImport";
+import { isEmptyAgentsGallerySimulated } from "@/features/agents/lib/emptyGallerySimulation";
 import { canDeletePersona } from "@/features/agents/lib/personaPresentation";
 import { runAgentViewTransition } from "@/features/agents/lib/agentViewTransitions";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
@@ -89,8 +90,14 @@ export function AgentsView({
     string | null
   >(null);
 
-  const personas = useAgentStore(selectPersonas);
+  const storedPersonas = useAgentStore(selectPersonas);
   const personasLoading = useAgentStore(selectPersonasLoading);
+  // Dev-only simulation of the empty gallery onboarding state. See
+  // emptyGallerySimulation.ts for how to toggle it from the console.
+  const personas = useMemo(
+    () => (isEmptyAgentsGallerySimulated() ? [] : storedPersonas),
+    [storedPersonas],
+  );
   const shouldReduceMotion = useReducedMotion();
   // Four or fewer agents fit in a single screen, so we float the grid in the
   // vertical center; the fifth makes the grid taller, so it returns to the top

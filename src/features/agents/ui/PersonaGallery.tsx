@@ -1,12 +1,18 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconPlus } from "@tabler/icons-react";
+import { selectAvatarImageUrl } from "@/shared/api/artifacts";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Skeleton } from "@/shared/ui/skeleton";
 import type { Persona } from "@/shared/types/agents";
 import { PersonaCard } from "@/features/agents/ui/PersonaCard";
+import { useArtifacts } from "@/shared/hooks/useArtifacts";
 import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
+
+// Blue jello gloopy shown oversized in the gallery empty state, per the
+// onboarding Figma. Resolved from the startup artifacts catalog.
+const EMPTY_STATE_GLOOPY_AVATAR_ID = "gloopies-14";
 
 const GALLERY_CARD_STAGGER_MS = 55;
 
@@ -61,6 +67,12 @@ export function PersonaGallery({
   isLoading = false,
 }: PersonaGalleryProps) {
   const { t } = useTranslation("agents");
+  const emptyGloopyQuery = useArtifacts({
+    enabled: !isLoading && personas.length === 0,
+    select: (artifacts) =>
+      selectAvatarImageUrl(artifacts, EMPTY_STATE_GLOOPY_AVATAR_ID),
+  });
+  const emptyGloopyUrl = emptyGloopyQuery.data;
   const { fileInputRef, isDragOver, dropHandlers, handleFileChange } =
     useFileImportZone({
       onImportFile: onImportFile ?? (() => {}),
@@ -108,40 +120,54 @@ export function PersonaGallery({
       <div
         {...dropHandlers}
         className={cn(
-          "flex min-h-[calc(100dvh-12rem)] flex-col items-center px-6 pt-10 pb-12",
+          "@container min-h-[calc(100dvh-12rem)]",
           isDragOver && "bg-muted/30",
         )}
       >
-        <div className="flex w-full max-w-[359px] flex-col items-start text-left">
-          <div className="space-y-1">
-            <h2
-              id="personas-heading"
-              className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg"
+        <div className="flex h-full min-h-[inherit] flex-col items-center justify-center gap-x-10 gap-y-8 px-6 py-12 @2xl:flex-row">
+          {emptyGloopyUrl ? (
+            // Stacked above the copy at a fixed h-64 on narrow panels; beside
+            // it on @2xl+, growing fluidly between 240px and 760px wide.
+            <img
+              src={emptyGloopyUrl}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+              className="pointer-events-none h-64 w-auto self-center select-none @2xl:h-auto @2xl:min-w-[240px] @2xl:max-w-[760px] @2xl:flex-1 @2xl:basis-0"
+            />
+          ) : null}
+          <div className="flex w-full max-w-[359px] shrink-0 flex-col items-start text-left">
+            <div className="space-y-1">
+              <h2
+                id="personas-heading"
+                className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg"
+              >
+                {t("gallery.empty.aboutTitle")}
+              </h2>
+              <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
+                {t("gallery.empty.aboutDescription")}
+              </p>
+            </div>
+
+            <div className="mt-[29px] space-y-1">
+              <h3 className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg">
+                {t("gallery.empty.valueTitle")}
+              </h3>
+              <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
+                {t("gallery.empty.valueDescription")}
+              </p>
+            </div>
+
+            <Button
+              type="button"
+              aria-label={t("gallery.createAria")}
+              onClick={onCreatePersona}
+              size="sm"
+              className="mt-[35px] bg-surface-agent-profile-fg text-sm leading-[15px] text-surface-agent-profile-action-fg hover:bg-surface-agent-profile-action-bg-hover"
             >
-              {t("gallery.empty.aboutTitle")}
-            </h2>
-            <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
-              {t("gallery.empty.aboutDescription")}
-            </p>
+              {t("gallery.empty.createFirst")}
+            </Button>
           </div>
-
-          <div className="mt-[29px] space-y-1">
-            <h3 className="font-display text-base font-normal leading-5 text-surface-agent-profile-fg">
-              {t("gallery.empty.valueTitle")}
-            </h3>
-            <p className="text-base leading-5 text-surface-agent-profile-fg-subtle">
-              {t("gallery.empty.valueDescription")}
-            </p>
-          </div>
-
-          <Button
-            type="button"
-            aria-label={t("gallery.createAria")}
-            onClick={onCreatePersona}
-            className="mt-[35px] bg-surface-agent-profile-fg text-sm leading-[15px] text-surface-agent-profile-action-fg hover:bg-surface-agent-profile-action-bg-hover"
-          >
-            {t("gallery.empty.createFirst")}
-          </Button>
         </div>
         {onImportFile && (
           <input
