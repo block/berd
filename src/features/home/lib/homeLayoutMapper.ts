@@ -132,9 +132,32 @@ function persistedClockStateFromItem(
     : undefined;
 }
 
+function persistedStickyNoteStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  if (typeof item.widgetState !== "object" || item.widgetState === null) {
+    return undefined;
+  }
+
+  const state: Record<string, unknown> = {};
+  if (typeof item.widgetState.text === "string") {
+    state.text = item.widgetState.text;
+  }
+  if (typeof item.widgetState.html === "string") {
+    state.html = item.widgetState.html;
+  }
+  if (typeof item.widgetState.tone === "string") {
+    state.tone = item.widgetState.tone;
+  }
+
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
 function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
   if (item.kind !== "clock" && isSyntheticTarget(item.targetId)) {
-    return undefined;
+    return item.kind === "stickyNote"
+      ? persistedStickyNoteStateFromItem(item)
+      : undefined;
   }
 
   switch (item.kind) {
@@ -152,7 +175,10 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
         persistedClockStateFromItem(item),
       );
     case "stickyNote":
-      return { noteId: item.targetId };
+      return mergeState(
+        { noteId: item.targetId },
+        persistedStickyNoteStateFromItem(item),
+      );
     case "skill":
       return { skillId: item.targetId };
     default: {
@@ -166,14 +192,37 @@ function widgetStateForLayoutItem(
   instance: WidgetInstance,
   kind: HomeLayoutKind,
 ): Record<string, unknown> | undefined {
-  if (kind !== "clock") {
-    return undefined;
+  switch (kind) {
+    case "clock": {
+      const sizeByProfile = readSizeByProfile(instance.state);
+      return sizeByProfile
+        ? { [SIZE_BY_PROFILE_STATE_KEY]: sizeByProfile }
+        : undefined;
+    }
+    case "stickyNote": {
+      const state: Record<string, unknown> = {};
+      if (typeof instance.state?.text === "string") {
+        state.text = instance.state.text;
+      }
+      if (typeof instance.state?.html === "string") {
+        state.html = instance.state.html;
+      }
+      if (typeof instance.state?.tone === "string") {
+        state.tone = instance.state.tone;
+      }
+      return Object.keys(state).length > 0 ? state : undefined;
+    }
+    case "persona":
+    case "session":
+    case "project":
+    case "automation":
+    case "skill":
+      return undefined;
+    default: {
+      const exhaustive: never = kind;
+      return exhaustive;
+    }
   }
-
-  const sizeByProfile = readSizeByProfile(instance.state);
-  return sizeByProfile
-    ? { [SIZE_BY_PROFILE_STATE_KEY]: sizeByProfile }
-    : undefined;
 }
 
 function nonEmptyStateString(value: unknown): string | null {

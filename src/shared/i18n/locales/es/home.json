@@ -75,7 +75,26 @@
       "label": "Nota adhesiva",
       "description": "Una nota fijada en inicio",
       "dismiss": "Descartar nota adhesiva",
+      "toolbar": "Herramientas de nota adhesiva",
+      "bold": "Negrita",
+      "italic": "Cursiva",
+      "strikethrough": "Tachado",
+      "editAria": "Editar nota adhesiva",
+      "placeholder": "Escribe una nota...",
       "starterStickies": "Notas iniciales",
+      "fontSizes": {
+        "small": "Texto pequeño",
+        "medium": "Texto mediano",
+        "large": "Texto grande"
+      },
+      "tones": {
+        "warm": "Cálido",
+        "cool": "Frío",
+        "rose": "Rosa",
+        "blue": "Azul",
+        "lavender": "Lavanda",
+        "peach": "Durazno"
+      },
       "notes": {
         "welcome": {
           "title": "Te damos la bienvenida a Goose para Block",

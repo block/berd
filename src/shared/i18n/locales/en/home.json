@@ -75,7 +75,26 @@
       "label": "Sticky note",
       "description": "A note pinned to home",
       "dismiss": "Dismiss sticky note",
+      "toolbar": "Sticky note tools",
+      "bold": "Bold",
+      "italic": "Italic",
+      "strikethrough": "Strikethrough",
+      "editAria": "Edit sticky note",
+      "placeholder": "Write a note...",
       "starterStickies": "Starter stickies",
+      "fontSizes": {
+        "small": "Small text",
+        "medium": "Medium text",
+        "large": "Large text"
+      },
+      "tones": {
+        "warm": "Warm",
+        "cool": "Cool",
+        "rose": "Rose",
+        "blue": "Blue",
+        "lavender": "Lavender",
+        "peach": "Peach"
+      },
       "notes": {
         "welcome": {
           "title": "Welcome to Goose for Block",

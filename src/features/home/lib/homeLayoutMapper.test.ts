@@ -153,6 +153,51 @@ describe("homeLayoutMapper", () => {
     ]);
   });
 
+  it("round-trips editable sticky note content through widget state", () => {
+    const [item] = homeWidgetsToLayoutItems([
+      {
+        id: "note-1",
+        type: "stickyNote",
+        x: 32,
+        y: 64,
+        z: 2,
+        width: 280,
+        height: 220,
+        state: {
+          text: "Follow up on release notes",
+          html: "Follow up on <strong>release</strong> notes",
+          tone: "cool",
+        },
+      },
+    ]);
+
+    expect(item).toMatchObject({
+      kind: "stickyNote",
+      targetId: "widget:note-1",
+      widgetState: {
+        text: "Follow up on release notes",
+        html: "Follow up on <strong>release</strong> notes",
+        tone: "cool",
+      },
+    });
+
+    const [restored] = layoutItemsToHomeWidgets([item]);
+    expect(restored).toMatchObject({
+      id: "note-1",
+      type: "stickyNote",
+      x: 32,
+      y: 64,
+      z: 2,
+      width: 280,
+      height: 220,
+      state: {
+        text: "Follow up on release notes",
+        html: "Follow up on <strong>release</strong> notes",
+        tone: "cool",
+      },
+    });
+  });
+
   it("round-trips project artifact pins through project layout items", () => {
     const [item] = homeWidgetsToLayoutItems([
       {

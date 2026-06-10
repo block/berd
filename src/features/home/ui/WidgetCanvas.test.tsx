@@ -957,6 +957,25 @@ describe("WidgetCanvas", () => {
     );
   });
 
+  it("offers the Widgets > Sticky note path for repeatable user notes", async () => {
+    const user = userEvent.setup();
+    const addWidget = vi.fn();
+    mocks.homeWidgetState.constraints = CANVAS_CONSTRAINTS;
+
+    const { container } = renderCanvas({ mutations: { addWidget } });
+
+    await openPickerPanel(user, container, "widgets");
+    await user.click(screen.getByRole("button", { name: /^sticky note$/i }));
+
+    expect(addWidget).toHaveBeenCalledWith(
+      "stickyNote",
+      expect.any(Number),
+      expect.any(Number),
+      undefined,
+      CANVAS_CONSTRAINTS,
+    );
+  });
+
   it("offers Starter stickies and restores only missing onboarding notes", async () => {
     const user = userEvent.setup();
     const addWidget = vi.fn();
