@@ -116,6 +116,8 @@ export function AgentModelPicker({
         selectedAgentLabel,
       })
     : selectedAgentLabel;
+  const triggerTitle =
+    triggerLabel ?? (loading ? t("toolbar.loading") : undefined);
 
   const handleAgentSelect = (agent: AgentPickerOption) => {
     if (agent.readiness && agent.readiness !== "ready") {
@@ -160,13 +162,19 @@ export function AgentModelPicker({
           variant="composer-action"
           size="sm"
           aria-label={t("toolbar.chooseAgentModel")}
+          title={triggerTitle}
           tabIndex={triggerTabIndex}
           disabled={loading && !selectedAgentLabel}
-          leftIcon={getProviderIcon(selectedAgentId, "size-3.5")}
+          leftIcon={getProviderIcon(selectedAgentId, "size-4")}
           rightIcon={<IconChevronDown className="opacity-50" />}
-          className="min-w-0 max-w-full"
+          className="chat-composer-selector-trigger min-w-0 max-w-full"
         >
-          <span className={cn("truncate", isCompact ? "max-w-32" : "max-w-56")}>
+          <span
+            className={cn(
+              "chat-composer-selector-label truncate",
+              isCompact ? "max-w-32" : "max-w-56",
+            )}
+          >
             {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
           </span>
         </Button>

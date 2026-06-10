@@ -686,6 +686,7 @@ export function ChatInput({
               ref={containerRef}
               className={cn(
                 "relative transition-colors",
+                "chat-composer-shell",
                 surface === "bare" ? "px-4 pb-2.5 pt-3" : "px-5 pb-3 pt-4",
                 composerRadius,
                 surface === "pill" && "bg-surface-composer backdrop-blur-md",

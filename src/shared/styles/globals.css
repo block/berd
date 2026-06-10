@@ -626,9 +626,8 @@
   );
   --chat-user-message-max-width: 640px;
   --chat-composer-max-width: 768px;
-  /* Space below the chat column and the amount the docked composer tucks into it. */
-  --chat-surface-bottom-gap: 24px;
-  --chat-composer-surface-overlap: 28px;
+  /* The composer wrapper owns the bottom inset. */
+  --chat-surface-bottom-gap: 0px;
 
   /* App top bar chrome — deep charcoal controls beside the breadcrumb trail. */
   --app-top-bar-control-fg: #242424;
@@ -1624,6 +1623,23 @@ body,
 }
 
 @layer components {
+  .chat-composer-shell {
+    container: chat-composer / inline-size;
+  }
+
+  @container chat-composer (max-width: 520px) {
+    .chat-composer-selector-trigger {
+      inline-size: 2.5rem;
+      min-inline-size: 2.5rem;
+      padding-inline: 0;
+    }
+
+    .chat-composer-selector-label,
+    .chat-composer-selector-trigger [data-slot="button-right-icon"] {
+      display: none;
+    }
+  }
+
   /* Chat context panel — scoped palette for glass aside over the transcript. */
   .chat-context-panel-surface {
     --background: var(--chat-context-panel-bg);

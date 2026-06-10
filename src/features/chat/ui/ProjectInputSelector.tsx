@@ -45,6 +45,11 @@ export function ProjectInputSelector({
   const projectTitle = selectedProject?.workingDirs.length
     ? selectedProject.workingDirs.join(", ")
     : undefined;
+  const triggerTitle = selectedProject
+    ? projectTitle
+      ? `${selectedProject.name} - ${projectTitle}`
+      : selectedProject.name
+    : t("toolbar.noProject");
 
   const handleValueChange = (value: string) => {
     if (value === CREATE_PROJECT_VALUE) {
@@ -60,12 +65,13 @@ export function ProjectInputSelector({
       ariaLabel={t("toolbar.selectProject")}
       value={selectedProjectId ?? NO_PROJECT_VALUE}
       triggerLabel={selectedProject?.name ?? t("toolbar.noProject")}
-      triggerTitle={projectTitle}
+      triggerTitle={triggerTitle}
       icon={
         <ProjectSelectorIcon
           icon={selectedProject?.icon}
           color={selectedProject?.color}
           projectId={selectedProject?.id}
+          size="lg"
         />
       }
       open={open}

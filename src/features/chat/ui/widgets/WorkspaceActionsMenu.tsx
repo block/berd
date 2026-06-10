@@ -17,7 +17,6 @@ import {
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
-  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import {
@@ -113,14 +112,13 @@ export function WorkspaceActionsMenu({
   const menuItemClassName = cn(
     SIDEBAR_ROW_HEIGHT_CLASS,
     SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
-    SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
     SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "rounded-xs text-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus:bg-sidebar-accent focus:text-sidebar-foreground data-[highlighted]:bg-sidebar-accent data-[highlighted]:text-sidebar-foreground",
+    "rounded-xs pl-2 pr-3 text-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground focus:bg-sidebar-accent focus:text-sidebar-foreground data-[highlighted]:bg-sidebar-accent data-[highlighted]:text-sidebar-foreground",
   );
   const menuLabelClassName =
-    "px-3 pb-1 text-sm font-normal text-muted-foreground";
+    "px-2 pb-1 text-sm font-normal text-muted-foreground";
 
   return (
     <>
@@ -139,7 +137,7 @@ export function WorkspaceActionsMenu({
         <DropdownMenuContent
           align="end"
           sideOffset={8}
-          className="chat-context-dropdown-surface w-64 rounded-sm px-3 pb-[6px] pt-3"
+          className="chat-context-dropdown-surface w-64 rounded-sm px-1 pb-[6px] pt-3"
         >
           {onToggleTerminal ? (
             <DropdownMenuItem

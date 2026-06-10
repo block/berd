@@ -2565,7 +2565,7 @@ export function VirtualMessageTimeline({
           <div
             ref={footerRef}
             data-testid="message-timeline-footer"
-            className="pointer-events-none relative z-10 mt-[calc(-1*var(--chat-composer-surface-overlap))] flex shrink-0 flex-col pb-[var(--chat-surface-bottom-gap)]"
+            className="pointer-events-none relative z-10 flex shrink-0 flex-col pb-[var(--chat-surface-bottom-gap)]"
           >
             {footerControlRow}
             {footer}

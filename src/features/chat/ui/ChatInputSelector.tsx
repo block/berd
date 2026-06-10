@@ -81,11 +81,14 @@ export function ChatInputSelector({
           rightIcon={<ChevronDown />}
           className={cn(
             "min-w-0",
+            "chat-composer-selector-trigger",
             triggerVariant === "default" && "justify-between",
             triggerVariant === "toolbar" && "max-w-40",
           )}
         >
-          <span className="truncate">{triggerLabel}</span>
+          <span className="chat-composer-selector-label truncate">
+            {triggerLabel}
+          </span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

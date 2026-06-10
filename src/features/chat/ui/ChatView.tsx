@@ -62,6 +62,8 @@ const CHAT_RESPONDING_PILL_CLASS =
   "rounded-full bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)]";
 const CHAT_RESPONDING_GOOSE_CLASS =
   "[filter:var(--filter-chat-responding-goose)]";
+const TERMINAL_HEADER_ICON_BUTTON_CLASS =
+  "rounded-md text-muted-foreground opacity-70 hover:text-foreground hover:opacity-100 data-[state=open]:text-foreground data-[state=open]:opacity-100 aria-expanded:text-muted-foreground";
 
 interface TerminalWorkspaceTab {
   id: string;
@@ -1017,12 +1019,13 @@ export function ChatView({
                 }}
                 className={cn(
                   "flex shrink-0 flex-col overflow-hidden rounded-md bg-card text-foreground transition-[height] duration-200 ease-out will-change-[height] motion-reduce:transition-none",
-                  terminalExpanded ? "h-[clamp(220px,34vh,320px)]" : "h-10",
+                  terminalExpanded ? "h-[clamp(220px,34vh,320px)]" : "h-11",
                 )}
               >
                 <div
                   className={cn(
-                    "flex h-10 shrink-0 items-center gap-2 px-2",
+                    "flex shrink-0 items-center gap-1 px-2",
+                    "h-11",
                     terminalExpanded && "border-b border-border/80",
                   )}
                 >
@@ -1047,7 +1050,8 @@ export function ChatView({
                         <div
                           key={tab.id}
                           className={cn(
-                            "group flex h-7 min-w-0 max-w-48 shrink-0 items-center rounded-md border border-transparent",
+                            "group flex min-w-0 max-w-48 shrink-0 items-center rounded-sm border border-transparent",
+                            "h-[30px]",
                             selected
                               ? "[background:color-mix(in_srgb,var(--foreground)_8%,var(--card))] text-foreground"
                               : "text-muted-foreground hover:[background:color-mix(in_srgb,var(--foreground)_5%,var(--card))] hover:text-foreground",
@@ -1085,9 +1089,12 @@ export function ChatView({
                                     variant="ghost"
                                     size="icon-xs"
                                     aria-label={stopAndCloseLabel}
-                                    className="mr-0.5 size-6 rounded-md opacity-70 hover:opacity-100"
+                                    className={cn(
+                                      "mr-0.5 size-6",
+                                      TERMINAL_HEADER_ICON_BUTTON_CLASS,
+                                    )}
                                   >
-                                    <IconX className="size-3" />
+                                    <IconX className="size-4" />
                                   </Button>
                                 </PopoverTrigger>
                               </TooltipTrigger>
@@ -1146,9 +1153,9 @@ export function ChatView({
                         onClick={handleRestartTerminal}
                         disabled={!activeTerminalTab}
                         aria-label={t("terminal.restart")}
-                        className="rounded-md"
+                        className={TERMINAL_HEADER_ICON_BUTTON_CLASS}
                       >
-                        <IconRotateClockwise className="size-3" />
+                        <IconRotateClockwise className="size-4" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>{t("terminal.restart")}</TooltipContent>
@@ -1162,9 +1169,9 @@ export function ChatView({
                         onClick={handleAddTerminalTab}
                         disabled={!terminalCwd}
                         aria-label={t("terminal.newTab")}
-                        className="rounded-md"
+                        className={TERMINAL_HEADER_ICON_BUTTON_CLASS}
                       >
-                        <IconPlus className="size-3" />
+                        <IconPlus className="size-4" />
                       </Button>
                     </TooltipTrigger>
                     <TooltipContent>{t("terminal.newTab")}</TooltipContent>
@@ -1186,12 +1193,12 @@ export function ChatView({
                             ? t("terminal.collapse")
                             : t("terminal.expand")
                         }
-                        className="rounded-md"
+                        className={TERMINAL_HEADER_ICON_BUTTON_CLASS}
                       >
                         {terminalExpanded ? (
-                          <IconChevronDown className="size-3" />
+                          <IconChevronDown className="size-4" />
                         ) : (
-                          <IconChevronUp className="size-3" />
+                          <IconChevronUp className="size-4" />
                         )}
                       </Button>
                     </TooltipTrigger>
