@@ -208,7 +208,21 @@ fn read_project_icon_data_url(path: &Path) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn scan_project_icons(working_dirs: Vec<String>) -> Result<Vec<ProjectIconCandidate>, String> {
+pub async fn scan_project_icons(
+    working_dirs: Vec<String>,
+) -> Result<Vec<ProjectIconCandidate>, String> {
+    // The walk, per-file metadata reads, and base64 encoding of up to
+    // `MAX_ICON_CANDIDATES` images can take several seconds on a
+    // parent-of-repos directory. Run it off the main thread so a slow scan does
+    // not freeze the window, matching the `get_changed_files` convention.
+    tokio::task::spawn_blocking(move || scan_project_icons_inner(working_dirs))
+        .await
+        .map_err(|err| format!("Failed to scan project icons: {err}"))?
+}
+
+fn scan_project_icons_inner(
+    working_dirs: Vec<String>,
+) -> Result<Vec<ProjectIconCandidate>, String> {
     let mut candidates: Vec<ScoredProjectIconPath> = Vec::new();
     let mut seen = HashSet::new();
 
@@ -224,8 +238,14 @@ pub fn scan_project_icons(working_dirs: Vec<String>) -> Result<Vec<ProjectIconCa
             .unwrap_or("project")
             .to_string();
 
+        // Favicons/logos live near the repo root (`public/`, `static/`,
+        // `assets/`, `src/assets/`, `src/images/`). `max_depth` counts from the
+        // *selected* folder, which is often a parent-of-repos directory — that
+        // pushes each repo down a level, so a repo's near-root icon dir sits at
+        // depth 4 from the selected root. Depth 4 reaches those while still
+        // bounding the walk on large parent trees.
         let walker = ignore::WalkBuilder::new(&root)
-            .max_depth(Some(6))
+            .max_depth(Some(4))
             .standard_filters(true)
             .build();
 
@@ -263,6 +283,7 @@ pub fn scan_project_icons(working_dirs: Vec<String>) -> Result<Vec<ProjectIconCa
     candidates.sort_by(|a, b| a.score.cmp(&b.score).then_with(|| a.label.cmp(&b.label)));
 
     let mut seen_groups = HashSet::new();
+    let mut seen_icons = HashSet::new();
     let mut icons = Vec::new();
     for candidate in candidates {
         if icons.len() >= MAX_ICON_CANDIDATES {
@@ -275,6 +296,15 @@ pub fn scan_project_icons(working_dirs: Vec<String>) -> Result<Vec<ProjectIconCa
             Ok(icon) => icon,
             Err(_) => continue,
         };
+        // Drop byte-identical files (e.g. `apple-touch-icon.png` and its
+        // `apple-touch-icon-precomposed.png` alias, which fall into separate
+        // group keys). The picker keys selection on the icon's data URL, so a
+        // duplicate would make selecting one candidate highlight both, and the
+        // persisted icon is the same either way. Candidates are sorted by score
+        // then label, so the higher-quality/earlier name wins.
+        if !seen_icons.insert(icon.clone()) {
+            continue;
+        }
         seen_groups.insert(candidate.group_key);
         icons.push(ProjectIconCandidate {
             id: candidate.path_string.clone(),
@@ -327,6 +357,49 @@ mod tests {
         assert_ne!(
             project_icon_candidate_group_key(first_root, &first_icon),
             project_icon_candidate_group_key(second_root, &second_icon)
+        );
+    }
+
+    #[test]
+    fn scan_dedupes_byte_identical_icon_candidates() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let public = dir.path().join("public");
+        fs::create_dir_all(&public).expect("create public dir");
+
+        // `apple-touch-icon-precomposed.png` is the legacy alias of
+        // `apple-touch-icon.png` and is almost always a byte-for-byte copy.
+        // They fall into distinct group keys, so only content dedup catches
+        // them.
+        let shared_bytes = b"\x89PNG\r\n\x1a\n shared apple-touch bytes";
+        fs::write(public.join("apple-touch-icon.png"), shared_bytes).expect("write touch icon");
+        fs::write(
+            public.join("apple-touch-icon-precomposed.png"),
+            shared_bytes,
+        )
+        .expect("write precomposed icon");
+        // A distinct icon must still survive alongside the deduped pair.
+        fs::write(public.join("logo.svg"), b"<svg>distinct</svg>").expect("write logo");
+
+        let candidates = scan_project_icons_inner(vec![dir.path().to_string_lossy().into_owned()])
+            .expect("scan succeeds");
+
+        let unique_icons: HashSet<&str> = candidates.iter().map(|c| c.icon.as_str()).collect();
+        assert_eq!(
+            unique_icons.len(),
+            candidates.len(),
+            "scan should not return byte-identical icon candidates"
+        );
+        let apple_touch = candidates
+            .iter()
+            .filter(|c| c.label.contains("apple-touch-icon"))
+            .count();
+        assert_eq!(
+            apple_touch, 1,
+            "byte-identical apple-touch icons should collapse to one candidate"
+        );
+        assert!(
+            candidates.iter().any(|c| c.label.contains("logo.svg")),
+            "distinct icons should still be returned"
         );
     }
 }

@@ -41,8 +41,24 @@ export function useProjectIconSelection({
   const [previousScanKey, setPreviousScanKey] = useState(scanKey);
   if (previousScanKey !== scanKey) {
     setPreviousScanKey(scanKey);
-    setIconCandidates([]);
-    setIconScanPending(Boolean(scanKey));
+    if (scanKey) {
+      // The working dirs changed and a fresh scan is queued by the effect
+      // below. Keep the current candidates on screen until that scan resolves
+      // so the picker row swaps its contents in one atomic update (via the
+      // setIconCandidates on resolve) instead of clearing to [] now and
+      // collapsing to the empty layout before re-expanding — the "icons
+      // disappear then re-animate / resize" churn. On resolve the new
+      // candidates replace these; on failure or empty results it still clears,
+      // the same as before, so a selected candidate that no longer exists
+      // falls back to the custom/upload slot exactly as it does today.
+      setIconScanPending(true);
+    } else {
+      // No working dirs left to scan, so the effect will not run and nothing
+      // would replace the candidates — clear them now to avoid showing stale
+      // icons from the previous working dirs.
+      setIconCandidates([]);
+      setIconScanPending(false);
+    }
   }
 
   useEffect(() => {

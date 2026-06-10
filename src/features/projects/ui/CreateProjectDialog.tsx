@@ -292,6 +292,22 @@ export function CreateProjectDialog({
     pillCssColor(DEFAULT_PROJECT_COLOR) ??
     "#c4e2f6";
 
+  // Keep a stable `input` reference so the hero renderer only reconciles when a
+  // field it actually derives from changes. A fresh object literal here would
+  // bust the renderer's input-keyed memo on every keystroke and icon change,
+  // re-rendering the heavy three.js scene and freezing the dialog.
+  const previewInput = useMemo(
+    () => ({
+      projectId: editingProject?.id ?? null,
+      name,
+      prompt,
+      color,
+      workingDirs,
+      artifact: previewArtifact,
+    }),
+    [editingProject?.id, name, prompt, color, workingDirs, previewArtifact],
+  );
+
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
@@ -319,14 +335,7 @@ export function CreateProjectDialog({
  underneath instead of painting a fake backdrop. */}
           <div className="relative h-[300px] shrink-0 overflow-hidden px-8 pb-4">
             <ProjectArtifactPreview
-              input={{
-                projectId: editingProject?.id ?? null,
-                name,
-                prompt,
-                color,
-                workingDirs,
-                artifact: previewArtifact,
-              }}
+              input={previewInput}
               className="h-full w-full"
             />
             <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">

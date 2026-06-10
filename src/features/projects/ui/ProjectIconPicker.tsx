@@ -1,4 +1,5 @@
 import { IconUpload } from "@tabler/icons-react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import type { ProjectIconCandidate } from "../api/projects";
@@ -37,6 +38,19 @@ export function ProjectIconPicker({
     iconButtonCount * ICON_GRID_CELL_REM +
     Math.max(iconButtonCount - 1, 0) * ICON_GRID_GAP_REM;
 
+  // Play the per-candidate entrance animation only on the first populate for
+  // this picker. Candidates are keyed by id, so a scan that clears the row and
+  // repopulates it remounts every button and replays the animation; latching
+  // it keeps later re-renders/pending toggles from re-triggering the churn.
+  const hasAnimatedEntranceRef = useRef(false);
+  const animateEntrance =
+    iconCandidates.length > 0 && !hasAnimatedEntranceRef.current;
+  useEffect(() => {
+    if (iconCandidates.length > 0) {
+      hasAnimatedEntranceRef.current = true;
+    }
+  }, [iconCandidates.length]);
+
   return (
     <div className="group/field space-y-2">
       <span className="block text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
@@ -45,7 +59,7 @@ export function ProjectIconPicker({
       <div className="max-h-36 overflow-y-auto">
         <div className="flex items-start">
           <div
-            className="grid max-w-full grid-cols-[repeat(auto-fill,minmax(2.25rem,2.25rem))] auto-rows-[2.25rem] justify-between gap-x-2 gap-y-2 transition-[width] duration-500 ease-out motion-reduce:transition-none"
+            className="grid max-w-full grid-cols-[repeat(auto-fill,minmax(2.25rem,2.25rem))] auto-rows-[2.25rem] justify-between gap-x-2 gap-y-2"
             style={{ width: `min(100%, ${iconGridWidthRem}rem)` }}
           >
             <button
@@ -68,12 +82,18 @@ export function ProjectIconPicker({
                 type="button"
                 onClick={() => onChooseIcon(candidate.icon)}
                 className={cn(
-                  "flex size-9 items-center justify-center rounded-sm border bg-background transition-colors hover:bg-muted motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
+                  "flex size-9 items-center justify-center rounded-sm border bg-background transition-colors hover:bg-muted",
+                  animateEntrance &&
+                    "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-1 motion-safe:zoom-in-95 motion-safe:duration-300 motion-safe:ease-out",
                   icon === candidate.icon
                     ? "border-foreground"
                     : "border-border/80",
                 )}
-                style={{ animationDelay: `${Math.min(index * 35, 140)}ms` }}
+                style={
+                  animateEntrance
+                    ? { animationDelay: `${Math.min(index * 35, 140)}ms` }
+                    : undefined
+                }
                 title={t("dialog.iconCandidateTitle", {
                   sourceDir: candidate.sourceDir,
                   label: candidate.label,
