@@ -14,6 +14,7 @@ import type {
   DownloadEvent,
   Update as TauriUpdate,
 } from "@tauri-apps/plugin-updater";
+import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 
 export type UpdateStatus =
   | "unavailable"
@@ -265,7 +266,17 @@ export function UpdaterProvider({
             return;
           }
 
-          recordError(error, t("updates.errors.networkAccess"));
+          // The updater manifest sits behind Cloudflare WARP, but not every
+          // check failure is a connectivity problem. Probe the shared
+          // behind-WARP endpoint so we only steer the user to WARP when the
+          // failure actually looks like a VPN/access issue.
+          const probe = await probeKgooseConnectivity();
+          recordError(
+            error,
+            probe?.likelyWarpFailure
+              ? t("updates.errors.networkAccess")
+              : t("updates.errors.generic"),
+          );
         }
       })();
 

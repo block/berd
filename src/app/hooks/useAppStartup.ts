@@ -1,40 +1,12 @@
-import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
+import {
+  type KgooseProbeReport,
+  probeKgooseConnectivity,
+} from "@/shared/api/connectivity";
 import { perfLog } from "@/shared/lib/perfLog";
 import { runChatRuntimeStartup } from "../lib/chatRuntimeStartup";
-import type { KgooseProbeReport } from "../lib/startupDiagnostics";
 
 export { filterStartupProvidersForDistro } from "../lib/chatRuntimeStartup";
-
-const STARTUP_PROBE_TIMEOUT_MS = 5_000;
-
-async function runStartupConnectivityProbe(): Promise<KgooseProbeReport | null> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const probePromise = invoke<KgooseProbeReport>("probe_kgoose_connectivity");
-    const timeout = new Promise<KgooseProbeReport>((resolve) => {
-      timeoutId = setTimeout(() => {
-        // A hung probe is itself evidence the network path is broken;
-        // surface that as a likely WARP failure so the UI can suggest the
-        // right next step instead of waiting forever.
-        resolve({
-          likelyWarpFailure: true,
-          status: null,
-          kind: "request",
-          message: "kgoose probe timed out",
-        });
-      }, STARTUP_PROBE_TIMEOUT_MS);
-    });
-    return await Promise.race([probePromise, timeout]);
-  } catch (probeError) {
-    console.error("Failed to probe kgoose connectivity:", probeError);
-    return null;
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
-  }
-}
 
 export function useAppStartup() {
   const [ready, setReady] = useState(false);
@@ -59,7 +31,7 @@ export function useAppStartup() {
     })()
       .catch(async (err) => {
         console.error("Failed to complete app startup:", err);
-        const probeResult = await runStartupConnectivityProbe();
+        const probeResult = await probeKgooseConnectivity();
         if (!cancelled) {
           setProbe(probeResult);
           setError(err);

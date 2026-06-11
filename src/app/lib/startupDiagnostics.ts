@@ -1,3 +1,10 @@
+import type { KgooseProbeReport } from "@/shared/api/connectivity";
+
+// Re-exported for back-compat: the probe report type now lives alongside the
+// shared `probeKgooseConnectivity` helper, but startup consumers still import
+// it from here.
+export type { KgooseProbeReport };
+
 export type StartupErrorKind = "goose-serve" | "network-warp" | "unknown";
 
 export interface StartupDiagnosticIssue {
@@ -6,13 +13,6 @@ export interface StartupDiagnosticIssue {
   descriptionKey: string;
   rawError: string;
   connectivityProbe: string | null;
-}
-
-export interface KgooseProbeReport {
-  likelyWarpFailure: boolean;
-  status: number | null;
-  kind: string;
-  message: string;
 }
 
 const ERROR_COPY_KEYS = {

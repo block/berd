@@ -8,6 +8,7 @@ import type {
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch as tauriRelaunch } from "@tauri-apps/plugin-process";
 import { toast } from "sonner";
+import { probeKgooseConnectivity } from "@/shared/api/connectivity";
 import { I18nProvider } from "@/shared/i18n";
 import { UpdaterProvider, useUpdaterContext } from "../useUpdater";
 
@@ -17,6 +18,10 @@ vi.mock("@tauri-apps/plugin-updater", () => ({
 
 vi.mock("@tauri-apps/plugin-process", () => ({
   relaunch: vi.fn(),
+}));
+
+vi.mock("@/shared/api/connectivity", () => ({
+  probeKgooseConnectivity: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({
@@ -93,8 +98,14 @@ describe("UpdaterProvider", () => {
     expect(result.current.status).toBe("up-to-date");
   });
 
-  it("shows WARP guidance for update check failures", async () => {
+  it("shows WARP guidance when a check failure looks like a WARP problem", async () => {
     enableUpdaterRuntime();
+    vi.mocked(probeKgooseConnectivity).mockResolvedValue({
+      likelyWarpFailure: true,
+      status: 403,
+      kind: "status",
+      message: "forbidden",
+    });
     vi.mocked(check)
       .mockRejectedValueOnce(
         new Error(
@@ -139,6 +150,40 @@ describe("UpdaterProvider", () => {
       "Update failed",
       expect.objectContaining({
         description: networkMessage,
+      }),
+    );
+  });
+
+  it("shows generic guidance when a check failure is not a WARP problem", async () => {
+    enableUpdaterRuntime();
+    vi.mocked(probeKgooseConnectivity).mockResolvedValue({
+      likelyWarpFailure: false,
+      status: 500,
+      kind: "status",
+      message: "internal server error",
+    });
+    vi.mocked(check).mockRejectedValue(
+      new Error("invalid manifest: unexpected end of JSON input"),
+    );
+
+    const { result } = renderHook(() => useUpdaterContext(), { wrapper });
+
+    await act(async () => {
+      await result.current.checkForUpdate();
+    });
+
+    expect(result.current.status).toBe("error");
+    expect(result.current.errorMessage).toBe("Update failed. Try again.");
+    expect(toast.error).toHaveBeenCalledWith(
+      "Update failed",
+      expect.objectContaining({
+        description: "Update failed. Try again.",
+      }),
+    );
+    expect(toast.error).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        description: expect.stringContaining("WARP"),
       }),
     );
   });
