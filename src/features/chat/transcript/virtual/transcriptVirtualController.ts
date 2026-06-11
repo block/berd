@@ -48,6 +48,7 @@ interface RowPosition {
 
 type PendingScrollAnchor =
   | { type: "bottom" }
+  | { type: "scroll-position"; scrollTop: number }
   | {
       type: "row";
       rowId: string;
@@ -183,6 +184,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     options: {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
+      preserveScrollPosition?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
     const previousScrollTop = this.scrollTop;
@@ -218,6 +220,11 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     const treatAsUserScroll =
       source === "browser" &&
       (options.userScrollIntent === true || !geometryChanged);
+
+    if (treatAsUserScroll && options.preserveScrollPosition === true) {
+      this.captureViewportAnchor({ fallback: "scroll-position" });
+      return { correction: null };
+    }
 
     if (
       treatAsUserScroll &&
@@ -512,6 +519,13 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       });
     }
 
+    if (resolution.anchor.type === "scroll-position") {
+      return this.applyScrollCorrection({
+        reason: "row-anchor",
+        nextScrollTop: resolution.anchor.scrollTop,
+      });
+    }
+
     if (resolution.stale || resolution.missing) {
       if (resolution.stale) {
         this.diagnostics.staleAnchorsDropped += 1;
@@ -552,6 +566,14 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       };
     }
 
+    if (this.anchor.type === "scroll-position") {
+      return {
+        anchor: this.anchor,
+        stale: false,
+        missing: false,
+      };
+    }
+
     const row = this.getRow(this.anchor.rowId);
     if (!row) {
       return {
@@ -576,7 +598,9 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     };
   }
 
-  private captureViewportAnchor(): void {
+  private captureViewportAnchor(
+    options: { fallback?: "bottom" | "scroll-position" } = {},
+  ): void {
     const viewportEnd = this.scrollTop + this.viewportHeight;
     const stable = this.findAnchorableRow("stable", viewportEnd);
     const streaming = this.findAnchorableRow("streaming", viewportEnd);
@@ -588,7 +612,11 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     const selected = stable ?? streaming ?? nearestStable ?? nearestStreaming;
 
     if (!selected) {
-      this.setScrollAnchor({ type: "bottom" });
+      this.setScrollAnchor(
+        options.fallback === "scroll-position"
+          ? { type: "scroll-position", scrollTop: this.scrollTop }
+          : { type: "bottom" },
+      );
       return;
     }
 
@@ -669,6 +697,14 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
   private setScrollAnchor(anchor: PendingScrollAnchor): void {
     if (anchor.type === "bottom") {
       this.anchor = { type: "bottom" };
+      return;
+    }
+
+    if (anchor.type === "scroll-position") {
+      this.anchor = {
+        type: "scroll-position",
+        scrollTop: this.clampScrollTop(anchor.scrollTop),
+      };
       return;
     }
 

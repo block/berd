@@ -43,6 +43,7 @@ export interface TranscriptVirtualEngine {
     options?: {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
+      preserveScrollPosition?: boolean;
     },
   ): TranscriptViewportUpdateResult;
   applyMeasuredHeight(input: {

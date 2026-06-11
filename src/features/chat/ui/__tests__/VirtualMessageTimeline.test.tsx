@@ -679,7 +679,7 @@ describe("VirtualMessageTimeline", () => {
           textMessage(
             "assistant-1",
             "assistant",
-            longText("streaming fragment", 120),
+            `${longText("streaming fragment", 120)}\n[height:650]`,
           ),
         ]}
         streamingMessageId="assistant-1"
@@ -709,9 +709,96 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-live-tail-rows",
       "3",
     );
+    await waitFor(() => expect(scroller.scrollTop).toBe(0));
     expect(
       screen.getByRole("button", { name: "Jump to latest" }),
     ).toBeInTheDocument();
+
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    setScrollMetrics(scroller, {
+      scrollTop: 120,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          initialMessages[0],
+          textMessage(
+            "assistant-1",
+            "assistant",
+            `${longText("streaming fragment", 125)}\n[height:700]`,
+          ),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    expect(scroller.scrollTop).toBe(120);
+
+    fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
+
+    expect(scroller.scrollTop).toBe(4700);
+  });
+
+  it("does not auto-scroll again for the same latest user message after detaching", async () => {
+    mockTranscriptElementMeasurements();
+    const latestUser = textMessage("user-latest", "user", "Follow up");
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          textMessage(
+            "assistant-1",
+            "assistant",
+            `${longText("history", 80)}\n[height:900]`,
+          ),
+          latestUser,
+        ]}
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 700,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+
+    fireEvent.wheel(scroller, { deltaY: -300 });
+    setScrollMetrics(scroller, {
+      scrollTop: 200,
+      scrollHeight: 1000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Jump to latest" }),
+      ).toBeInTheDocument(),
+    );
+    const detachedScrollTop = scroller.scrollTop;
+    expect(detachedScrollTop).toBeLessThan(700);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          textMessage(
+            "assistant-1",
+            "assistant",
+            `${longText("history", 82)}\n[height:920]`,
+          ),
+          latestUser,
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(detachedScrollTop));
   });
 
   it("keeps pinned users attached across virtual timeline resizes", async () => {

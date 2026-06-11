@@ -567,7 +567,19 @@ test.describe("transcript streaming scrollback proof", () => {
     await applyHarnessOperation(page, fixture.operations[0]);
     await applyHarnessOperation(page, startOperation);
     await waitForActiveStreamScrollRange(page, assistantId);
-    await scrollToActiveResponseTop(page);
+
+    const pinnedSnapshot = await collectTranscriptScrollSnapshot(page);
+    const firstActiveRow = pinnedSnapshot.visibleRows.find(
+      (row) => row.messageId === assistantId,
+    );
+    expect(
+      firstActiveRow?.topPx,
+      "untouched over-tall active response should pin near the top before the user scrolls",
+    ).toBeLessThanOrEqual(64);
+    expect(
+      firstActiveRow?.topPx,
+      "active response top pin should keep the row inside the viewport",
+    ).toBeGreaterThanOrEqual(-2);
 
     const wheelScroll = await wheelInsideActiveResponse(page, 900);
     expect(

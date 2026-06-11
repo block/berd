@@ -10,6 +10,7 @@ export const TRANSCRIPT_DEFAULT_OVERSCAN_AFTER_ROWS = 4;
 
 export type TranscriptScrollAnchor =
   | { type: "bottom" }
+  | { type: "scroll-position"; scrollTop: number }
   | {
       type: "row";
       rowId: string;

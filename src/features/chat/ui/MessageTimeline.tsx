@@ -443,9 +443,13 @@ export function MessageTimeline({
     const messageHeight = messageEl.getBoundingClientRect().height;
     const viewportHeight = container.clientHeight;
 
-    if (messageHeight <= viewportHeight) {
+    if (messageHeight <= viewportHeight || viewportHeight <= 0) {
       return;
     }
+
+    // Mark this streaming message as handled so the effect does not re-fire on
+    // every streaming token if the user scrolls back near the latest message.
+    followStreamingMessageIdRef.current = activeStreamingMessage.id;
 
     const targetScrollTop = Math.max(0, messageEl.offsetTop - 16);
     isNearBottomRef.current = false;

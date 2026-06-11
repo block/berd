@@ -101,11 +101,13 @@ interface UseTranscriptVirtualTimelineInput {
   protectedRowIds?: readonly string[];
   containerRef: RefObject<HTMLDivElement | null>;
   footerHeight: number;
+  preserveScrollPosition?: boolean;
 }
 
 interface SyncViewportOptions {
   source?: "browser" | "programmatic" | "correction";
   userScrollIntent?: boolean;
+  preserveScrollPosition?: boolean;
 }
 
 const SUPPORTED_ROW_KINDS = new Set<TranscriptRowDescriptor["kind"]>([
@@ -176,6 +178,7 @@ export function useTranscriptVirtualTimeline({
   protectedRowIds = EMPTY_PROTECTED_ROW_IDS,
   containerRef,
   footerHeight,
+  preserveScrollPosition = false,
 }: UseTranscriptVirtualTimelineInput) {
   const normalizedProtectedRowIds = useMemo(
     () => normalizeProtectedRowIds(rows, protectedRowIds),
@@ -343,7 +346,9 @@ export function useTranscriptVirtualTimeline({
       // follow or recapturing a row anchor at a transient position.
       const previousWidthScope = controllerState.widthScope;
       const viewportResult = controller.syncViewport(liveViewport, {
-        source: "programmatic",
+        source: preserveScrollPosition ? "browser" : "programmatic",
+        userScrollIntent: preserveScrollPosition,
+        preserveScrollPosition,
       });
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
@@ -355,6 +360,7 @@ export function useTranscriptVirtualTimeline({
       containerRef,
       footerHeight,
       invalidateWidthScopedMeasurementReplay,
+      preserveScrollPosition,
     ],
   );
 
@@ -517,8 +523,16 @@ export function useTranscriptVirtualTimeline({
         0,
         liveBottomScrollTop - liveViewportBeforeRows.scrollTop,
       );
+      if (preserveScrollPosition) {
+        replacement.syncViewport(liveViewportBeforeRows, {
+          source: "browser",
+          userScrollIntent: true,
+          preserveScrollPosition,
+        });
+      }
       const rowsResult = replacement.setRows(rowsRef.current);
       if (
+        preserveScrollPosition ||
         state.anchor.type === "row" ||
         !state.nearBottom ||
         liveDistanceFromBottom > 1
@@ -526,6 +540,7 @@ export function useTranscriptVirtualTimeline({
         replacement.syncViewport(liveViewportBeforeRows, {
           source: "browser",
           userScrollIntent: true,
+          preserveScrollPosition,
         });
       } else {
         applyCorrection(rowsResult.correction);
@@ -562,6 +577,7 @@ export function useTranscriptVirtualTimeline({
     sessionId,
     syncControllerFromLiveViewport,
     syncMeasurementScheduler,
+    preserveScrollPosition,
   ]);
 
   const syncViewportFromDom = useCallback(
@@ -657,7 +673,11 @@ export function useTranscriptVirtualTimeline({
     applyCorrection(
       currentController.syncViewport(
         readViewportGeometry(containerRef.current, footerHeight),
-        { source: "programmatic" },
+        {
+          source: preserveScrollPosition ? "browser" : "programmatic",
+          userScrollIntent: preserveScrollPosition,
+          preserveScrollPosition,
+        },
       ).correction,
     );
     applyCorrection(currentController.setRows(rows).correction);
@@ -669,6 +689,7 @@ export function useTranscriptVirtualTimeline({
     containerRef,
     footerHeight,
     normalizedProtectedRowIds,
+    preserveScrollPosition,
     rows,
     sessionEpoch,
     sessionId,
@@ -1449,6 +1470,14 @@ function areScrollAnchorsEquivalent(
 
   if (left.type === "bottom" || right.type === "bottom") {
     return true;
+  }
+
+  if (left.type === "scroll-position" || right.type === "scroll-position") {
+    return (
+      left.type === "scroll-position" &&
+      right.type === "scroll-position" &&
+      areNumbersClose(left.scrollTop, right.scrollTop)
+    );
   }
 
   return (
