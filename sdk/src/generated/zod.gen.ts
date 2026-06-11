@@ -17,6 +17,22 @@ export const zArchiveSessionRequestUnstable = z.object({
     sessionId: z.string()
 });
 
+/**
+ * Binary resource contents.
+ */
+export const zBlobResourceContents = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    blob: z.string(),
+    mimeType: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    uri: z.string()
+});
+
 export const zCustomProviderConfigDto = z.object({
     apiKeyEnv: z.union([
         z.string(),
@@ -668,6 +684,7 @@ export const zOnboardingImportScanResponseUnstable = z.object({
 
 export const zPreferenceKey = z.enum([
     'autoCompactThreshold',
+    'gooseThinkingEffort',
     'voiceAutoSubmitPhrases',
     'voiceDictationProvider',
     'voiceDictationPreferredMic'
@@ -1079,6 +1096,101 @@ export const zRenameSessionRequestUnstable = z.object({
 });
 
 /**
+ * The sender or recipient of messages and data in a conversation.
+ */
+export const zRole = z.enum(['assistant', 'user']);
+
+/**
+ * Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
+ */
+export const zAnnotations = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    audience: z.union([
+        z.array(zRole),
+        z.null()
+    ]).optional(),
+    lastModified: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    priority: z.union([
+        z.number(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * Audio provided to or from an LLM.
+ */
+export const zAudioContent = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    annotations: z.union([
+        zAnnotations,
+        z.null()
+    ]).optional(),
+    data: z.string(),
+    mimeType: z.string()
+});
+
+/**
+ * An image provided to or from an LLM.
+ */
+export const zImageContent = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    annotations: z.union([
+        zAnnotations,
+        z.null()
+    ]).optional(),
+    data: z.string(),
+    mimeType: z.string(),
+    uri: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
+ * A resource that the server is capable of reading, included in a prompt or tool call result.
+ */
+export const zResourceLink = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    annotations: z.union([
+        zAnnotations,
+        z.null()
+    ]).optional(),
+    description: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    mimeType: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    name: z.string(),
+    size: z.union([
+        z.number().int(),
+        z.null()
+    ]).optional(),
+    title: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    uri: z.string()
+});
+
+/**
  * How a session system prompt update should be applied.
  */
 export const zSessionSystemPromptMode = z.union([
@@ -1300,6 +1412,108 @@ export const zExtNotification = z.object({
     ]).optional()
 });
 
+export const zSteerSessionResponseUnstable = z.object({
+    messageId: z.string(),
+    runId: z.string()
+});
+
+/**
+ * Text provided to or from an LLM.
+ */
+export const zTextContent = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    annotations: z.union([
+        zAnnotations,
+        z.null()
+    ]).optional(),
+    text: z.string()
+});
+
+/**
+ * Text-based resource contents.
+ */
+export const zTextResourceContents = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    mimeType: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    text: z.string(),
+    uri: z.string()
+});
+
+/**
+ * Resource content that can be embedded in a message.
+ */
+export const zEmbeddedResourceResource = z.union([
+    zTextResourceContents,
+    zBlobResourceContents
+]);
+
+/**
+ * The contents of a resource, embedded into a prompt or tool call result.
+ */
+export const zEmbeddedResource = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    annotations: z.union([
+        zAnnotations,
+        z.null()
+    ]).optional(),
+    resource: zEmbeddedResourceResource
+});
+
+/**
+ * Content blocks represent displayable information in the Agent Client Protocol.
+ *
+ * They provide a structured way to handle various types of user-facing content—whether
+ * it's text from language models, images for analysis, or embedded resources for context.
+ *
+ * Content blocks appear in:
+ * - User prompts sent via `session/prompt`
+ * - Language model output streamed through `session/update` notifications
+ * - Progress updates and results from tool calls
+ *
+ * This structure is compatible with the Model Context Protocol (MCP), enabling
+ * agents to seamlessly forward content from MCP tool outputs without transformation.
+ *
+ * See protocol docs: [Content](https://agentclientprotocol.com/protocol/content)
+ */
+export const zContentBlock = z.union([
+    z.object({
+        type: z.literal('text')
+    }).and(zTextContent),
+    z.object({
+        type: z.literal('image')
+    }).and(zImageContent),
+    z.object({
+        type: z.literal('audio')
+    }).and(zAudioContent),
+    z.object({
+        type: z.literal('resource_link')
+    }).and(zResourceLink),
+    z.object({
+        type: z.literal('resource')
+    }).and(zEmbeddedResource)
+]);
+
+/**
+ * Add user input to the currently active prompt without starting a new prompt.
+ */
+export const zSteerSessionRequestUnstable = z.object({
+    expectedRunId: z.string(),
+    prompt: z.array(zContentBlock).optional().default([]),
+    sessionId: z.string()
+});
+
 /**
  * Unarchive a previously archived session.
  */
@@ -1346,6 +1560,7 @@ export const zExtResponse = z.union([
                 zGetToolsResponseUnstable,
                 zGooseToolCallResponseUnstable,
                 zReadResourceResponseUnstable,
+                zSteerSessionResponseUnstable,
                 zGetConfigExtensionsResponseUnstable,
                 zGetAvailableExtensionsResponseUnstable,
                 zGetSessionExtensionsResponseUnstable,
@@ -1411,6 +1626,7 @@ export const zExtRequest = z.object({
             zReadResourceRequestUnstable,
             zUpdateWorkingDirRequestUnstable,
             zSetSessionSystemPromptRequestUnstable,
+            zSteerSessionRequestUnstable,
             zDeleteSessionRequest,
             zGetConfigExtensionsRequestUnstable,
             zGetAvailableExtensionsRequestUnstable,

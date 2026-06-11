@@ -36,6 +36,11 @@
       "responseType": "EmptyResponse"
     },
     {
+      "method": "_goose/unstable/session/steer",
+      "requestType": "SteerSessionRequest_unstable",
+      "responseType": "SteerSessionResponse_unstable"
+    },
+    {
       "method": "session/delete",
       "requestType": "DeleteSessionRequest",
       "responseType": "EmptyResponse"

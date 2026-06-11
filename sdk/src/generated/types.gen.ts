@@ -21,11 +21,96 @@ export type AddExtensionRequestUnstable = {
 };
 
 /**
+ * Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
+ */
+export type Annotations = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    audience?: Array<Role> | null;
+    lastModified?: string | null;
+    priority?: number | null;
+};
+
+/**
  * Archive a session (soft delete).
  */
 export type ArchiveSessionRequestUnstable = {
     sessionId: string;
 };
+
+/**
+ * Audio provided to or from an LLM.
+ */
+export type AudioContent = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    annotations?: Annotations | null;
+    data: string;
+    mimeType: string;
+};
+
+/**
+ * Binary resource contents.
+ */
+export type BlobResourceContents = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    blob: string;
+    mimeType?: string | null;
+    uri: string;
+};
+
+/**
+ * Content blocks represent displayable information in the Agent Client Protocol.
+ *
+ * They provide a structured way to handle various types of user-facing content—whether
+ * it's text from language models, images for analysis, or embedded resources for context.
+ *
+ * Content blocks appear in:
+ * - User prompts sent via `session/prompt`
+ * - Language model output streamed through `session/update` notifications
+ * - Progress updates and results from tool calls
+ *
+ * This structure is compatible with the Model Context Protocol (MCP), enabling
+ * agents to seamlessly forward content from MCP tool outputs without transformation.
+ *
+ * See protocol docs: [Content](https://agentclientprotocol.com/protocol/content)
+ */
+export type ContentBlock = ({
+    type: 'text';
+} & TextContent) | ({
+    type: 'image';
+} & ImageContent) | ({
+    type: 'audio';
+} & AudioContent) | ({
+    type: 'resource_link';
+} & ResourceLink) | ({
+    type: 'resource';
+} & EmbeddedResource);
 
 /**
  * Create a new source in an explicit target scope (global or project-scoped).
@@ -339,6 +424,29 @@ export type ElicitationRespondRequestUnstable = {
 };
 
 /**
+ * The contents of a resource, embedded into a prompt or tool call result.
+ */
+export type EmbeddedResource = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    annotations?: Annotations | null;
+    resource: EmbeddedResourceResource;
+};
+
+/**
+ * Resource content that can be embedded in a message.
+ */
+export type EmbeddedResourceResource = TextResourceContents | BlobResourceContents;
+
+/**
  * Empty success response for operations that return no data.
  */
 export type EmptyResponse = {
@@ -406,14 +514,14 @@ export type ExtNotification = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ElicitationRespondRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
+    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | ElicitationRespondRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
+    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | SteerSessionResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
 } | {
     error: {
         code: number;
@@ -569,6 +677,26 @@ export type HttpHeader = {
      * The value to set for the HTTP header.
      */
     value: string;
+};
+
+/**
+ * An image provided to or from an LLM.
+ */
+export type ImageContent = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    annotations?: Annotations | null;
+    data: string;
+    mimeType: string;
+    uri?: string | null;
 };
 
 /**
@@ -808,7 +936,7 @@ export type OnboardingImportScanResponseUnstable = {
  */
 export type OnboardingImportSourceKind = 'goose_config' | 'claude_desktop';
 
-export type PreferenceKey = 'autoCompactThreshold' | 'voiceAutoSubmitPhrases' | 'voiceDictationProvider' | 'voiceDictationPreferredMic';
+export type PreferenceKey = 'autoCompactThreshold' | 'gooseThinkingEffort' | 'voiceAutoSubmitPhrases' | 'voiceDictationProvider' | 'voiceDictationPreferredMic';
 
 export type PreferenceValue = {
     key: PreferenceKey;
@@ -1209,6 +1337,34 @@ export type RenameSessionRequestUnstable = {
 };
 
 /**
+ * A resource that the server is capable of reading, included in a prompt or tool call result.
+ */
+export type ResourceLink = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    annotations?: Annotations | null;
+    description?: string | null;
+    mimeType?: string | null;
+    name: string;
+    size?: number | null;
+    title?: string | null;
+    uri: string;
+};
+
+/**
+ * The sender or recipient of messages and data in a conversation.
+ */
+export type Role = 'assistant' | 'user';
+
+/**
  * How a session system prompt update should be applied.
  */
 export type SessionSystemPromptMode = 'set' | 'append';
@@ -1319,6 +1475,62 @@ export type StatusMessage = {
  */
 export type StatusMessageUpdate = {
     status: StatusMessage;
+};
+
+/**
+ * Add user input to the currently active prompt without starting a new prompt.
+ */
+export type SteerSessionRequestUnstable = {
+    expectedRunId: string;
+    prompt?: Array<ContentBlock>;
+    sessionId: string;
+};
+
+export type SteerSessionResponseUnstable = {
+    /**
+     * Stable id of the queued steer message. The same id later appears as
+     * `messageId` on the streamed `UserMessageChunk` (with `_meta.goose.steer`),
+     * letting clients correlate a queued steer with its pickup.
+     */
+    messageId: string;
+    runId: string;
+};
+
+/**
+ * Text provided to or from an LLM.
+ */
+export type TextContent = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    annotations?: Annotations | null;
+    text: string;
+};
+
+/**
+ * Text-based resource contents.
+ */
+export type TextResourceContents = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    mimeType?: string | null;
+    text: string;
+    uri: string;
 };
 
 /**

@@ -24,6 +24,7 @@ export default async function main() {
   const jsonSchema = JSON.parse(
     schemaSrc.replaceAll("#/$defs/", "#/components/schemas/"),
   );
+  addContentBlockDiscriminatorMapping(jsonSchema);
 
   const metaSrc = await fs.readFile(META_PATH, "utf8");
   const meta = JSON.parse(metaSrc);
@@ -51,6 +52,28 @@ export default async function main() {
   await generateClient(meta);
 
   console.log(`\nGenerated Goose extension schema in ${OUTPUT_DIR}`);
+}
+
+function addContentBlockDiscriminatorMapping(jsonSchema: {
+  $defs?: Record<string, unknown>;
+}) {
+  const contentBlock = jsonSchema.$defs?.ContentBlock;
+  if (!contentBlock || typeof contentBlock !== "object") {
+    return;
+  }
+
+  Object.assign(contentBlock, {
+    discriminator: {
+      mapping: {
+        audio: "#/components/schemas/AudioContent",
+        image: "#/components/schemas/ImageContent",
+        resource: "#/components/schemas/EmbeddedResource",
+        resource_link: "#/components/schemas/ResourceLink",
+        text: "#/components/schemas/TextContent",
+      },
+      propertyName: "type",
+    },
+  });
 }
 
 async function postProcessTypes() {

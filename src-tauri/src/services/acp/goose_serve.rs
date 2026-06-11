@@ -49,7 +49,7 @@ static GOOSE_SERVE: OnceCell<GooseServeProcess> = OnceCell::const_new();
 impl GooseServeProcess {
     /// Return the WebSocket URL for connecting to this server.
     pub fn ws_url(&self) -> String {
-        format!("ws://{LOCALHOST}:{}/acp", self.port)
+        acp_websocket_url(self.port, &self.secret_key)
     }
 
     /// Return the HTTP base URL for authenticated Goose server routes.
@@ -246,6 +246,13 @@ impl GooseServeProcess {
             _child: child,
         })
     }
+}
+
+fn acp_websocket_url(port: u16, secret_key: &str) -> String {
+    let mut url = reqwest::Url::parse(&format!("ws://{LOCALHOST}:{port}/acp"))
+        .expect("local ACP WebSocket URL should be valid");
+    url.query_pairs_mut().append_pair("token", secret_key);
+    url.to_string()
 }
 
 fn spawn_log_reader<R>(stream: Option<R>, stream_name: &'static str)
@@ -697,7 +704,7 @@ fn reserve_free_port() -> Result<u16, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::apply_shell_env_with_extended_path;
+    use super::{acp_websocket_url, apply_shell_env_with_extended_path};
     use std::collections::HashMap;
     use std::ffi::OsString;
     use std::path::{Path, PathBuf};
@@ -711,6 +718,14 @@ mod tests {
                 None
             }
         })
+    }
+
+    #[test]
+    fn acp_websocket_url_includes_secret_key_token() {
+        assert_eq!(
+            acp_websocket_url(12345, "goose internal/secret"),
+            "ws://127.0.0.1:12345/acp?token=goose+internal%2Fsecret"
+        );
     }
 
     // Verifies the two pieces of behavior that are unique to

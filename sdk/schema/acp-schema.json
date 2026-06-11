@@ -32,6 +32,30 @@
       "x-method": "_goose/unstable/session/extensions/add",
       "x-side": "agent"
     },
+    "Annotations": {
+      "description": "Optional annotations for the client. The client can use annotations to inform how objects are used or displayed",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "audience": {
+          "items": {
+            "$ref": "#/$defs/Role"
+          },
+          "type": ["array", "null"]
+        },
+        "lastModified": {
+          "type": ["string", "null"]
+        },
+        "priority": {
+          "format": "double",
+          "type": ["number", "null"]
+        }
+      },
+      "type": "object"
+    },
     "ArchiveSessionRequest_unstable": {
       "description": "Archive a session (soft delete).",
       "properties": {
@@ -43,6 +67,123 @@
       "type": "object",
       "x-method": "_goose/unstable/session/archive",
       "x-side": "agent"
+    },
+    "AudioContent": {
+      "description": "Audio provided to or from an LLM.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        }
+      },
+      "required": ["data", "mimeType"],
+      "type": "object"
+    },
+    "BlobResourceContents": {
+      "description": "Binary resource contents.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "blob": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": ["string", "null"]
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": ["blob", "uri"],
+      "type": "object"
+    },
+    "ContentBlock": {
+      "description": "Content blocks represent displayable information in the Agent Client Protocol.\n\nThey provide a structured way to handle various types of user-facing content—whether\nit's text from language models, images for analysis, or embedded resources for context.\n\nContent blocks appear in:\n- User prompts sent via `session/prompt`\n- Language model output streamed through `session/update` notifications\n- Progress updates and results from tool calls\n\nThis structure is compatible with the Model Context Protocol (MCP), enabling\nagents to seamlessly forward content from MCP tool outputs without transformation.\n\nSee protocol docs: [Content](https://agentclientprotocol.com/protocol/content)",
+      "discriminator": {
+        "propertyName": "type"
+      },
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TextContent",
+          "description": "Text content. May be plain text or formatted with Markdown.\n\nAll agents MUST support text content blocks in prompts.\nClients SHOULD render this text as Markdown.",
+          "properties": {
+            "type": {
+              "const": "text",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ImageContent",
+          "description": "Images for visual context or analysis.\n\nRequires the `image` prompt capability when included in prompts.",
+          "properties": {
+            "type": {
+              "const": "image",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/AudioContent",
+          "description": "Audio data for transcription or analysis.\n\nRequires the `audio` prompt capability when included in prompts.",
+          "properties": {
+            "type": {
+              "const": "audio",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/ResourceLink",
+          "description": "References to resources that the agent can access.\n\nAll agents MUST support resource links in prompts.",
+          "properties": {
+            "type": {
+              "const": "resource_link",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        },
+        {
+          "$ref": "#/$defs/EmbeddedResource",
+          "description": "Complete resource contents embedded directly in the message.\n\nPreferred for including context as it avoids extra round-trips.\n\nRequires the `embeddedContext` prompt capability when included in prompts.",
+          "properties": {
+            "type": {
+              "const": "resource",
+              "type": "string"
+            }
+          },
+          "required": ["type"],
+          "type": "object"
+        }
+      ]
     },
     "CreateSourceRequest_unstable": {
       "description": "Create a new source in an explicit target scope (global or project-scoped).",
@@ -721,6 +862,42 @@
       "x-method": "_goose/unstable/elicitation/respond",
       "x-side": "agent"
     },
+    "EmbeddedResource": {
+      "description": "The contents of a resource, embedded into a prompt or tool call result.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "resource": {
+          "$ref": "#/$defs/EmbeddedResourceResource"
+        }
+      },
+      "required": ["resource"],
+      "type": "object"
+    },
+    "EmbeddedResourceResource": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TextResourceContents"
+        },
+        {
+          "$ref": "#/$defs/BlobResourceContents"
+        }
+      ],
+      "description": "Resource content that can be embedded in a message."
+    },
     "EmptyResponse": {
       "description": "Empty success response for operations that return no data.",
       "type": "object",
@@ -904,6 +1081,15 @@
                   ],
                   "description": "Params for _goose/unstable/session/system-prompt/set",
                   "title": "SetSessionSystemPromptRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/SteerSessionRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/session/steer",
+                  "title": "SteerSessionRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1428,6 +1614,14 @@
                         }
                       ],
                       "title": "ReadResourceResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/SteerSessionResponse_unstable"
+                        }
+                      ],
+                      "title": "SteerSessionResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -2029,6 +2223,37 @@
       "required": ["name", "value"],
       "type": "object"
     },
+    "ImageContent": {
+      "description": "An image provided to or from an LLM.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "data": {
+          "type": "string"
+        },
+        "mimeType": {
+          "type": "string"
+        },
+        "uri": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["data", "mimeType"],
+      "type": "object"
+    },
     "ImportSessionRequest_unstable": {
       "description": "Import a session from a JSON string.",
       "properties": {
@@ -2483,6 +2708,7 @@
     "PreferenceKey": {
       "enum": [
         "autoCompactThreshold",
+        "gooseThinkingEffort",
         "voiceAutoSubmitPhrases",
         "voiceDictationProvider",
         "voiceDictationPreferredMic"
@@ -3342,6 +3568,51 @@
       "x-method": "_goose/unstable/session/rename",
       "x-side": "agent"
     },
+    "ResourceLink": {
+      "description": "A resource that the server is capable of reading, included in a prompt or tool call result.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": ["string", "null"]
+        },
+        "mimeType": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "size": {
+          "type": ["integer", "null"]
+        },
+        "title": {
+          "type": ["string", "null"]
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": ["name", "uri"],
+      "type": "object"
+    },
+    "Role": {
+      "description": "The sender or recipient of messages and data in a conversation.",
+      "enum": ["assistant", "user"],
+      "type": "string"
+    },
     "SessionSystemPromptMode": {
       "description": "How a session system prompt update should be applied.",
       "oneOf": [
@@ -3561,6 +3832,89 @@
         }
       },
       "required": ["status"],
+      "type": "object"
+    },
+    "SteerSessionRequest_unstable": {
+      "description": "Add user input to the currently active prompt without starting a new prompt.",
+      "properties": {
+        "expectedRunId": {
+          "type": "string"
+        },
+        "prompt": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionId", "expectedRunId"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/steer",
+      "x-side": "agent"
+    },
+    "SteerSessionResponse_unstable": {
+      "properties": {
+        "messageId": {
+          "description": "Stable id of the queued steer message. The same id later appears as\n`messageId` on the streamed `UserMessageChunk` (with `_meta.goose.steer`),\nletting clients correlate a queued steer with its pickup.",
+          "type": "string"
+        },
+        "runId": {
+          "type": "string"
+        }
+      },
+      "required": ["runId", "messageId"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/steer",
+      "x-side": "agent"
+    },
+    "TextContent": {
+      "description": "Text provided to or from an LLM.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "annotations": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Annotations"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": ["text"],
+      "type": "object"
+    },
+    "TextResourceContents": {
+      "description": "Text-based resource contents.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "mimeType": {
+          "type": ["string", "null"]
+        },
+        "text": {
+          "type": "string"
+        },
+        "uri": {
+          "type": "string"
+        }
+      },
+      "required": ["text", "uri"],
       "type": "object"
     },
     "UnarchiveSessionRequest_unstable": {
