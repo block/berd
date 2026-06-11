@@ -284,6 +284,7 @@ export class TranscriptRowStateRegistry {
     TranscriptKeepAliveDiagnostics
   >();
   private readonly policy: TranscriptKeepAlivePolicyOptions;
+  private readonly stateChangeListeners = new Set<() => void>();
 
   constructor(policy: Partial<TranscriptKeepAlivePolicyOptions> = {}) {
     this.policy = {
@@ -347,7 +348,21 @@ export class TranscriptRowStateRegistry {
       });
     }
 
+    this.notifyStateChange();
     return record.state;
+  }
+
+  subscribeToStateChanges(callback: () => void): () => void {
+    this.stateChangeListeners.add(callback);
+    return () => {
+      this.stateChangeListeners.delete(callback);
+    };
+  }
+
+  private notifyStateChange(): void {
+    for (const cb of this.stateChangeListeners) {
+      cb();
+    }
   }
 
   patchRowState(

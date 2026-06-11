@@ -24,6 +24,10 @@ import {
   MessageDateSeparator,
   type MessageBubbleCallbacks,
 } from "./messageTimelineShared";
+import {
+  ToolChainSummaryMessageBubble,
+  ToolChainDetailMessage,
+} from "./ToolChainVirtualRows";
 import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
 
 const VIRTUAL_ROW_INLINE_INSET = "var(--chat-transcript-inline-padding)";
@@ -270,6 +274,34 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
         />
       </div>
     );
+  } else if (row.kind === "tool-chain" && row.toolChainSummary) {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(
+          spacingClassName,
+          "rounded-lg transition-[background-color,box-shadow]",
+          isPulsing && "bg-accent/25 ring-2 ring-accent/35 ring-inset",
+        )}
+      >
+        <ToolChainSummaryMessageBubble payload={row.toolChainSummary} />
+      </div>
+    );
+  } else if (row.kind === "tool-chain-detail" && row.toolChainDetail) {
+    rowContent = (
+      <div
+        ref={registerElement}
+        data-testid={`virtual-transcript-row-${row.rowId}`}
+        {...rowDiagnostics}
+        style={rowStyle}
+        className={cn(spacingClassName)}
+      >
+        <ToolChainDetailMessage payload={row.toolChainDetail} />
+      </div>
+    );
   } else if (row.kind !== "message" || !message) {
     rowContent = (
       <div
@@ -315,12 +347,19 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     return rowContent;
   }
 
+  // tool-chain-detail rows share the state slot of their paired summary row so
+  // both components read from the same registry entry.
+  const stateRowId =
+    row.kind === "tool-chain-detail" && row.toolChainDetail
+      ? row.toolChainDetail.summaryRowId
+      : row.rowId;
+
   return (
     <TranscriptRowStateProvider
       registry={rowStateProvider.registry}
       sessionId={rowStateProvider.sessionId}
       sessionEpoch={rowStateProvider.sessionEpoch}
-      rowId={row.rowId}
+      rowId={stateRowId}
       onRowStateChange={rowStateProvider.onRowStateChange}
     >
       {rowContent}

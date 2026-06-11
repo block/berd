@@ -112,6 +112,8 @@ const SUPPORTED_ROW_KINDS = new Set<TranscriptRowDescriptor["kind"]>([
   "assistant-content-fragment",
   "date-separator",
   "message",
+  "tool-chain",
+  "tool-chain-detail",
 ]);
 
 const EMPTY_MEASUREMENT_STATS: TranscriptVirtualTimelineMeasurementStats = {

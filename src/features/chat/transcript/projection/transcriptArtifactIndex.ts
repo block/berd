@@ -35,11 +35,14 @@ export function buildTranscriptArtifactIndex({
   const changedArtifactKeys = new Set<string>();
 
   for (const item of items) {
-    if (item.kind !== "message") {
+    if (item.kind !== "message" && item.kind !== "tool-chain") {
       continue;
     }
 
-    item.visibleContent.forEach((content, contentIndex) => {
+    const visibleContent =
+      item.kind === "tool-chain" ? item.message.content : item.visibleContent;
+
+    visibleContent.forEach((content, contentIndex) => {
       if (content.type !== "toolRequest") {
         return;
       }
@@ -65,7 +68,10 @@ export function buildTranscriptArtifactIndex({
           sessionId,
           rowId: item.rowId,
           messageId: item.messageId,
-          blockId: item.blockIds[contentIndex] ?? `toolRequest:${content.id}`,
+          blockId:
+            "blockIds" in item
+              ? (item.blockIds[contentIndex] ?? `toolRequest:${content.id}`)
+              : `toolRequest:${content.id}`,
           toolRequestId: content.id,
           toolName: getToolName(content),
           toolKind: content.toolKind,

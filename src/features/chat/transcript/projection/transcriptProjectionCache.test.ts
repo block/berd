@@ -602,7 +602,9 @@ describe("transcript projection cache", () => {
       first.artifactIndex.artifactKeysByToolRequestId.get("tool-1"),
     ).toEqual(artifactKeys);
     expect(
-      first.artifactIndex.artifactKeysByRowId.get("message:assistant-1"),
+      first.artifactIndex.artifactKeysByRowId.get(
+        "message:assistant-1:tool-chain",
+      ),
     ).toEqual(artifactKeys);
     expect(first.artifactIndex.artifacts[0]?.artifactKey).toMatch(
       /^artifact:session-1:assistant-1:tool-1:/,
@@ -649,7 +651,10 @@ describe("transcript projection cache", () => {
     expect(messageRow(second, "assistant-2")).toBe(
       messageRow(first, "assistant-2"),
     );
-    expect([...second.changedRowIds]).toEqual(["message:assistant-1"]);
+    expect([...second.changedRowIds]).toEqual([
+      "message:assistant-1:tool-chain",
+      "message:assistant-1:tool-chain-detail",
+    ]);
     expect(second.artifactIndex.artifacts).toHaveLength(1);
     expect(second.artifactIndex.artifacts[0]?.line).toBe(9);
     expect(second.artifactIndex.changedArtifactKeys.size).toBe(2);

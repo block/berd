@@ -19,6 +19,8 @@ export type TranscriptRowKind =
   | "assistant-message-chrome"
   | "assistant-content-fragment"
   | "assistant-message-actions"
+  | "tool-chain"
+  | "tool-chain-detail"
   | "top-loading-sentinel";
 
 export type TranscriptKeepAlivePriority =

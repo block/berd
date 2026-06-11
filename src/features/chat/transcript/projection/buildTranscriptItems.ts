@@ -20,6 +20,8 @@ import type {
   TranscriptDateLabelKey,
   TranscriptItemDescriptor,
   TranscriptMessageItem,
+  TranscriptToolChainDetailItem,
+  TranscriptToolChainItem,
 } from "./transcriptItemTypes";
 
 interface BuildTranscriptItemsInput {
@@ -159,6 +161,13 @@ export function buildTranscriptItems({
 
     const isStreaming = message.id === streamingMessageId;
     const visibleContent = getUserVisibleMessageContent(message.content);
+
+    const toolChainItems = buildToolChainItems({ message, visibleContent });
+    if (toolChainItems) {
+      items.push(...toolChainItems);
+      continue;
+    }
+
     const fragmentItems = buildAssistantTextFragmentItems({
       message,
       visibleContent,
@@ -563,6 +572,133 @@ function shouldUseStreamingFragmentIds({
 
   const completionStatus = message.metadata?.completionStatus;
   return completionStatus === "inProgress" || completionStatus === "stopped";
+}
+
+function canProjectToolChainRows(
+  message: Message,
+  visibleContent: readonly MessageContent[],
+): boolean {
+  if (message.role !== "assistant" || visibleContent.length === 0) {
+    return false;
+  }
+  return visibleContent.every(
+    (block) => block.type === "toolRequest" || block.type === "toolResponse",
+  );
+}
+
+function isActiveToolChain(visibleContent: readonly MessageContent[]): boolean {
+  return visibleContent.some(
+    (block) =>
+      block.type === "toolRequest" &&
+      (block.status === "pending" || block.status === "in_progress"),
+  );
+}
+
+function buildToolChainItems({
+  message,
+  visibleContent,
+}: {
+  message: Message;
+  visibleContent: readonly MessageContent[];
+}): readonly [TranscriptToolChainItem, TranscriptToolChainDetailItem] | null {
+  if (!canProjectToolChainRows(message, visibleContent)) {
+    return null;
+  }
+
+  const chainId = message.id;
+  const summaryRowId = `message:${message.id}:tool-chain`;
+  const detailRowId = `message:${message.id}:tool-chain-detail`;
+  const isActive = isActiveToolChain(visibleContent);
+  const revisions = buildMessageRevisions(message, visibleContent);
+
+  const summaryMeasurement = classifyTranscriptMeasurementPolicy({
+    rowKind: "tool-chain",
+    message,
+    content: visibleContent,
+    capabilities: {
+      stateful: true,
+      hasToolContent: true,
+      hasActiveToolWork: isActive,
+      hasActiveTimer: isActive,
+    },
+  });
+
+  const detailMeasurement = classifyTranscriptMeasurementPolicy({
+    rowKind: "tool-chain-detail",
+    message,
+    content: visibleContent,
+    capabilities: {
+      stateful: true,
+      hasToolContent: true,
+      hasActiveToolWork: isActive,
+      hasDynamicAsyncLayout: true,
+    },
+  });
+
+  const summaryItem: TranscriptToolChainItem = {
+    itemId: summaryRowId,
+    kind: "tool-chain",
+    rowId: summaryRowId,
+    messageId: message.id,
+    message,
+    chainId,
+    detailRowId,
+    isActiveChain: isActive,
+    renderRevision: ["tool-chain", message.id, revisions.renderRevision].join(
+      ":",
+    ),
+    heightRevision: [
+      "tool-chain-height",
+      message.id,
+      revisions.heightRevision,
+    ].join(":"),
+    estimatedHeight: estimateToolChainSummaryHeight(visibleContent),
+    capabilities: summaryMeasurement.capabilities,
+    measurementPolicy: summaryMeasurement.policy,
+    layoutPendingPolicy: summaryMeasurement.layoutPendingPolicy,
+    measurementSafetyReasons: summaryMeasurement.reasons,
+    anchorPriority: "stable",
+    keepAlivePriority: isActive ? "active-stream" : "none",
+  };
+
+  const detailItem: TranscriptToolChainDetailItem = {
+    itemId: detailRowId,
+    kind: "tool-chain-detail",
+    rowId: detailRowId,
+    messageId: message.id,
+    message,
+    chainId,
+    summaryRowId,
+    isActiveChain: isActive,
+    renderRevision: [
+      "tool-chain-detail",
+      message.id,
+      revisions.renderRevision,
+    ].join(":"),
+    heightRevision: [
+      "tool-chain-detail-height",
+      message.id,
+      revisions.heightRevision,
+    ].join(":"),
+    estimatedHeight: 0,
+    capabilities: detailMeasurement.capabilities,
+    measurementPolicy: detailMeasurement.policy,
+    layoutPendingPolicy: detailMeasurement.layoutPendingPolicy,
+    measurementSafetyReasons: detailMeasurement.reasons,
+    anchorPriority: "none",
+    keepAlivePriority: "none",
+  };
+
+  return [summaryItem, detailItem];
+}
+
+function estimateToolChainSummaryHeight(
+  visibleContent: readonly MessageContent[],
+): number {
+  const requestCount = visibleContent.filter(
+    (b) => b.type === "toolRequest",
+  ).length;
+  return Math.max(60, requestCount * 56);
 }
 
 function canProjectAssistantTextFragments(

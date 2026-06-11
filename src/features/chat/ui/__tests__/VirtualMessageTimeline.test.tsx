@@ -1007,7 +1007,7 @@ describe("VirtualMessageTimeline", () => {
     );
 
     const activeToolRow = await screen.findByTestId(
-      "virtual-transcript-row-message:active-tool",
+      "virtual-transcript-row-message:active-tool:tool-chain",
     );
     expect(activeToolRow).toHaveAttribute(
       "data-virtual-row-measurement-policy",
@@ -1025,7 +1025,7 @@ describe("VirtualMessageTimeline", () => {
     );
     expect(
       offscreenHost.querySelector(
-        '[data-virtual-row-offscreen-shell-id="message:active-tool"]',
+        '[data-virtual-row-offscreen-shell-id="message:active-tool:tool-chain"]',
       ),
     ).toBeNull();
     expect(

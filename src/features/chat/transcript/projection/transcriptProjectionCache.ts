@@ -68,6 +68,8 @@ export class DefaultTranscriptProjectionCache
         if (!searchableTextByMessageId.has(item.messageId)) {
           searchableTextByMessageId.set(item.messageId, item.searchableText);
         }
+      } else if (item.kind === "tool-chain") {
+        messageById.set(item.messageId, item.message);
       }
     }
 
@@ -123,6 +125,7 @@ export class DefaultTranscriptProjectionCache
         snapshot.completedStreamingFragmentRowCount,
       streamingTailRowCount: snapshot.streamingTailRowCount,
       wholeMessageFallbackRowCount: snapshot.wholeMessageFallbackRowCount,
+      toolChainRowCount: snapshot.toolChainRowCount,
     });
   }
 
@@ -153,14 +156,23 @@ function countFragmentRows(rows: readonly TranscriptRowDescriptor[]): {
   completedStreamingFragmentRowCount: number;
   streamingTailRowCount: number;
   wholeMessageFallbackRowCount: number;
+  toolChainRowCount: number;
 } {
   let fragmentRowCount = 0;
   let completedFragmentRowCount = 0;
   let completedStreamingFragmentRowCount = 0;
   let streamingTailRowCount = 0;
   let wholeMessageFallbackRowCount = 0;
+  let toolChainRowCount = 0;
 
   for (const row of rows) {
+    if (row.kind === "tool-chain") {
+      toolChainRowCount += 1;
+      continue;
+    }
+    if (row.kind === "tool-chain-detail") {
+      continue;
+    }
     if (row.kind !== "assistant-content-fragment") {
       if (row.kind === "message") {
         wholeMessageFallbackRowCount += 1;
@@ -185,6 +197,7 @@ function countFragmentRows(rows: readonly TranscriptRowDescriptor[]): {
     completedStreamingFragmentRowCount,
     streamingTailRowCount,
     wholeMessageFallbackRowCount,
+    toolChainRowCount,
   };
 }
 

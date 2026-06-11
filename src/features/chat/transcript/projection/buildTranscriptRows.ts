@@ -4,6 +4,8 @@ import type {
   TranscriptItemDescriptor,
   TranscriptRowCapabilities,
   TranscriptRowDescriptor,
+  TranscriptToolChainDetailPayload,
+  TranscriptToolChainPayload,
 } from "./transcriptItemTypes";
 
 const rowDescriptorByItem = new WeakMap<
@@ -89,6 +91,52 @@ export function buildTranscriptRows(
           keepAlivePriority: item.keepAlivePriority,
         };
         break;
+      case "tool-chain":
+        row = {
+          rowId: item.rowId,
+          reactKey: item.rowId,
+          kind: "tool-chain",
+          messageId: item.messageId,
+          toolChainSummary: {
+            chainId: item.chainId,
+            message: item.message,
+            detailRowId: item.detailRowId,
+            isActiveChain: item.isActiveChain,
+          },
+          renderRevision: item.renderRevision,
+          heightRevision: item.heightRevision,
+          estimatedHeight: item.estimatedHeight,
+          anchorPriority: item.anchorPriority,
+          measurementPolicy: item.measurementPolicy,
+          layoutPendingPolicy: item.layoutPendingPolicy,
+          capabilities: item.capabilities,
+          measurementSafetyReasons: item.measurementSafetyReasons,
+          keepAlivePriority: item.keepAlivePriority,
+        };
+        break;
+      case "tool-chain-detail":
+        row = {
+          rowId: item.rowId,
+          reactKey: item.rowId,
+          kind: "tool-chain-detail",
+          messageId: item.messageId,
+          toolChainDetail: {
+            chainId: item.chainId,
+            message: item.message,
+            summaryRowId: item.summaryRowId,
+            isActiveChain: item.isActiveChain,
+          },
+          renderRevision: item.renderRevision,
+          heightRevision: item.heightRevision,
+          estimatedHeight: item.estimatedHeight,
+          anchorPriority: item.anchorPriority,
+          measurementPolicy: item.measurementPolicy,
+          layoutPendingPolicy: item.layoutPendingPolicy,
+          capabilities: item.capabilities,
+          measurementSafetyReasons: item.measurementSafetyReasons,
+          keepAlivePriority: item.keepAlivePriority,
+        };
+        break;
       default:
         return assertNever(item);
     }
@@ -124,6 +172,8 @@ export function canReuseTranscriptRowDescriptor(
     previous.blockIds === next.blockIds &&
     previous.fragment === next.fragment &&
     previous.date === next.date &&
+    previous.toolChainSummary === next.toolChainSummary &&
+    previous.toolChainDetail === next.toolChainDetail &&
     previous.capabilities === next.capabilities &&
     previous.measurementSafetyReasons === next.measurementSafetyReasons
   ) {
@@ -138,6 +188,8 @@ export function canReuseTranscriptRowDescriptor(
     stringArraysEqual(previous.blockIds, next.blockIds) &&
     fragmentsEqual(previous.fragment, next.fragment) &&
     datePayloadsEqual(previous.date, next.date) &&
+    toolChainPayloadsEqual(previous.toolChainSummary, next.toolChainSummary) &&
+    toolChainPayloadsEqual(previous.toolChainDetail, next.toolChainDetail) &&
     previous.renderRevision === next.renderRevision &&
     previous.heightRevision === next.heightRevision &&
     previous.estimatedHeight === next.estimatedHeight &&
@@ -151,6 +203,38 @@ export function canReuseTranscriptRowDescriptor(
     ) &&
     previous.keepAlivePriority === next.keepAlivePriority
   );
+}
+
+function toolChainPayloadsEqual(
+  left:
+    | TranscriptToolChainPayload
+    | TranscriptToolChainDetailPayload
+    | undefined,
+  right:
+    | TranscriptToolChainPayload
+    | TranscriptToolChainDetailPayload
+    | undefined,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right) {
+    return false;
+  }
+  if (
+    left.chainId !== right.chainId ||
+    left.message !== right.message ||
+    left.isActiveChain !== right.isActiveChain
+  ) {
+    return false;
+  }
+  if ("detailRowId" in left && "detailRowId" in right) {
+    return left.detailRowId === right.detailRowId;
+  }
+  if ("summaryRowId" in left && "summaryRowId" in right) {
+    return left.summaryRowId === right.summaryRowId;
+  }
+  return true;
 }
 
 function fragmentsEqual(

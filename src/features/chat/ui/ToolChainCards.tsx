@@ -184,9 +184,15 @@ function getFallbackToolChainStateId(
 export function ToolChainCards({
   chainId,
   toolItems,
+  hasDetailRow = false,
+  detailOnly = false,
+  externalChainExpanded,
 }: {
   chainId?: string;
   toolItems: ToolChainItem[];
+  hasDetailRow?: boolean;
+  detailOnly?: boolean;
+  externalChainExpanded?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const { rowState, updateRowState, markRowInteracted } =
@@ -213,9 +219,13 @@ export function ToolChainCards({
   // Chains that mount as already-complete (history replay) start collapsed;
   // untouched live chains mount mid-execution, stay open while running, and
   // auto-collapse once they finish so the chat keeps moving forward.
-  const [chainExpanded, setChainExpanded] = useState(
+  const [chainExpandedLocal, setChainExpanded] = useState(
     () => durableToolChainState?.chainExpanded ?? isActiveChain,
   );
+  const chainExpanded =
+    externalChainExpanded !== undefined
+      ? externalChainExpanded
+      : chainExpandedLocal;
   const wasActiveChainRef = useRef(isActiveChain);
   const wasGroupedRef = useRef(grouped);
   const userInteractedRef = useRef(
@@ -299,16 +309,25 @@ export function ToolChainCards({
       }
       return next;
     });
+    // For ungrouped single tools with a paired detail row, the per-item open
+    // state drives the detail row's visibility via chainExpanded.
+    if (hasDetailRow && !grouped) {
+      setChainExpanded(open);
+    }
   };
 
   const renderToolItem = (
     item: ToolChainItem,
-    options: { withRail: boolean; isLastInChain?: boolean },
+    options: {
+      withRail: boolean;
+      isLastInChain?: boolean;
+      forceClose?: boolean;
+    },
   ) => {
     const name = getToolItemName(item);
     const status = getToolItemStatus(item);
     const { request, response } = item;
-    const isOpen = expandedKeys.has(item.key);
+    const isOpen = !options.forceClose && expandedKeys.has(item.key);
 
     if (!options.withRail) {
       return (
@@ -384,13 +403,99 @@ export function ToolChainCards({
     );
   };
 
+  // Detail-only mode: render only the expanded step list, no header.
+  if (detailOnly) {
+    if (!chainExpanded) {
+      return null;
+    }
+    // Single-tool items use ungrouped rendering (no rail) in the detail row.
+    if (!grouped) {
+      return (
+        <div
+          className="my-3 flex w-full min-w-0 max-w-full flex-col gap-3"
+          {...layoutPendingAttributes}
+        >
+          {primaryItems.map((item) =>
+            renderToolItem(item, { withRail: false }),
+          )}
+        </div>
+      );
+    }
+    return (
+      <div
+        className="relative flex flex-col gap-1 pt-1.5"
+        {...layoutPendingAttributes}
+      >
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute top-0 bottom-0 left-2 z-0 w-px -translate-x-1/2 bg-border"
+        />
+        {primaryItems.map((item, index) => {
+          const isLastPrimary = index === primaryItems.length - 1;
+          const hasHiddenDisclosure = hiddenItems.length > 0;
+          const isLastInChain =
+            isLastPrimary &&
+            !hasHiddenDisclosure &&
+            !(showInternalSteps && hiddenItems.length > 0);
+          return renderToolItem(item, { withRail: true, isLastInChain });
+        })}
+        {hiddenItems.length > 0 && (
+          <div
+            data-role="tool-chain-internal-disclosure"
+            className="relative z-1 flex max-w-full items-stretch gap-2.5"
+          >
+            <ChainStepRail
+              status="completed"
+              isLast={!showInternalSteps}
+              lineTailVisible={showInternalSteps}
+            />
+            <div className="min-w-0 flex-1 pb-1">
+              <button
+                type="button"
+                onClick={() => {
+                  markUserInteracted();
+                  setShowInternalSteps((prev) => !prev);
+                }}
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+              >
+                <ChevronRight
+                  aria-hidden="true"
+                  className={cn(
+                    "h-3 w-3 transition-transform",
+                    showInternalSteps && "rotate-90",
+                  )}
+                />
+                {showInternalSteps
+                  ? t("tool_chain.internalSteps.hide", {
+                      count: hiddenItems.length,
+                    })
+                  : t("tool_chain.internalSteps.show", {
+                      count: hiddenItems.length,
+                    })}
+              </button>
+            </div>
+          </div>
+        )}
+        {showInternalSteps &&
+          hiddenItems.map((item, index) =>
+            renderToolItem(item, {
+              withRail: true,
+              isLastInChain: index === hiddenItems.length - 1,
+            }),
+          )}
+      </div>
+    );
+  }
+
   if (!grouped) {
     return (
       <div
         className="my-3 flex w-full min-w-0 max-w-full flex-col gap-3"
         {...layoutPendingAttributes}
       >
-        {primaryItems.map((item) => renderToolItem(item, { withRail: false }))}
+        {primaryItems.map((item) =>
+          renderToolItem(item, { withRail: false, forceClose: hasDetailRow }),
+        )}
       </div>
     );
   }
@@ -451,7 +556,7 @@ export function ToolChainCards({
         <span className="min-w-0 flex-1 truncate">{headerText}</span>
       </button>
 
-      {chainExpanded && (
+      {chainExpanded && !hasDetailRow && (
         <div className="relative flex flex-col gap-1 pt-1.5">
           <div
             aria-hidden="true"
