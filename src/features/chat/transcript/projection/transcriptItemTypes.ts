@@ -117,6 +117,8 @@ export interface TranscriptAssistantContentFragmentPayload {
   content: readonly MessageContent[];
   isStreamingTail: boolean;
   messageScrollTarget: boolean;
+  isCodeContinuationChunk: boolean;
+  startsWithHeading: boolean;
 }
 
 export interface TranscriptAssistantContentFragmentItem {

@@ -933,11 +933,10 @@ function validationMetadata(
 }
 
 function pr928TallText(label: string, lineCount: number): string {
-  return Array.from(
-    { length: lineCount },
-    (_, index) =>
-      `${label} production-height line ${numericId(index, 3)} keeps the real renderer scrollable.`,
-  ).join("\n");
+  return Array.from({ length: lineCount }, (_, index) => {
+    const line = `${label} production-height line ${numericId(index, 3)} keeps the real renderer scrollable.`;
+    return index > 0 && index % 10 === 0 ? `\n${line}` : line;
+  }).join("\n");
 }
 
 function buildPr928FragmentTailFixture(): TranscriptFixture {

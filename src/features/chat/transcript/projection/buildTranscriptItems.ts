@@ -31,6 +31,7 @@ interface BuildTranscriptItemsInput {
 }
 
 const ASSISTANT_FRAGMENT_MIN_LINE_COUNT = 60;
+const ASSISTANT_FRAGMENT_CODE_MIN_LINE_COUNT = 20;
 const ASSISTANT_FRAGMENT_TARGET_LINE_COUNT = 40;
 const ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS = 8;
 const ASSISTANT_FRAGMENT_CHROME_ESTIMATE = 32;
@@ -74,11 +75,6 @@ interface DateBucketRange {
   dateBucket: string;
   startMs: number;
   endMs: number;
-}
-
-interface MarkdownUnsafeSplitRange {
-  startIndex: number;
-  endIndex: number;
 }
 
 interface CachedStaticTextMessageItem {
@@ -470,7 +466,8 @@ function buildAssistantTextFragmentItems({
     isStreaming,
   });
 
-  return textChunks.map((text, fragmentIndex) => {
+  return textChunks.map((chunk, fragmentIndex) => {
+    const { text, isCodeContinuationChunk, startsWithHeading } = chunk;
     const isStreamingTail = isStreaming && fragmentIndex === lastIndex;
     const fragmentId = useStreamingFragmentIds
       ? fragmentIndex === lastIndex
@@ -525,6 +522,8 @@ function buildAssistantTextFragmentItems({
         messageScrollTarget: isStreaming
           ? isStreamingTail
           : fragmentIndex === 0,
+        isCodeContinuationChunk,
+        startsWithHeading,
       },
       renderRevision: [
         "assistant-fragment",
@@ -585,165 +584,70 @@ function canProjectAssistantTextFragments(
   return true;
 }
 
-function splitAssistantTextIntoChunks(text: string): readonly string[] | null {
-  if (text.includes("```") || text.includes("~~~")) {
-    return null;
-  }
+type ParsedBlock =
+  | { kind: "text"; text: string; isHeading: boolean }
+  | {
+      kind: "code";
+      fenceOpener: string;
+      codeLines: readonly string[];
+      closingFence: string;
+      language: string | null;
+    };
 
-  const lines = text.split(/\n/);
-  if (lines.length < ASSISTANT_FRAGMENT_MIN_LINE_COUNT) {
-    return null;
-  }
+type AssistantFragmentChunk = {
+  text: string;
+  isCodeContinuationChunk: boolean;
+  startsWithHeading: boolean;
+};
 
-  const unsafeSplitRanges = findMarkdownTableRanges(lines);
-  const chunks: string[] = [];
-  let startIndex = 0;
-  while (startIndex < lines.length) {
-    const remainingLineCount = lines.length - startIndex;
-    if (remainingLineCount <= ASSISTANT_FRAGMENT_TARGET_LINE_COUNT) {
-      chunks.push(lines.slice(startIndex).join("\n"));
-      break;
-    }
-
-    const splitIndex = findAssistantFragmentSplitIndex(
-      lines,
-      startIndex,
-      unsafeSplitRanges,
-    );
-    if (splitIndex == null || splitIndex <= startIndex) {
-      return null;
-    }
-
-    chunks.push(lines.slice(startIndex, splitIndex).join("\n"));
-    startIndex = splitIndex;
-  }
-
-  return chunks.length > 1 ? chunks : null;
-}
-
-function findAssistantFragmentSplitIndex(
-  lines: readonly string[],
-  startIndex: number,
-  unsafeSplitRanges: readonly MarkdownUnsafeSplitRange[],
-): number | null {
-  const targetIndex = Math.min(
-    lines.length,
-    startIndex + ASSISTANT_FRAGMENT_TARGET_LINE_COUNT,
-  );
-  const minIndex = Math.max(
-    startIndex + 1,
-    targetIndex - ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS,
-  );
-  const maxIndex = Math.min(
-    lines.length - 1,
-    targetIndex + ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS,
-  );
-
-  for (let index = targetIndex; index <= maxIndex; index += 1) {
-    if (lines[index]?.trim() === "") {
-      const splitIndex = index + 1;
-      if (isSafeMarkdownSplitIndex(splitIndex, unsafeSplitRanges)) {
-        return splitIndex;
-      }
-    }
-  }
-  for (let index = targetIndex - 1; index >= minIndex; index -= 1) {
-    if (lines[index]?.trim() === "") {
-      const splitIndex = index + 1;
-      if (isSafeMarkdownSplitIndex(splitIndex, unsafeSplitRanges)) {
-        return splitIndex;
-      }
-    }
-  }
-
-  if (isSafeMarkdownSplitIndex(targetIndex, unsafeSplitRanges)) {
-    return targetIndex;
-  }
-
-  return findNearestSafeMarkdownSplitIndex(
-    targetIndex,
-    startIndex,
-    lines.length,
-    unsafeSplitRanges,
-  );
-}
-
-function findNearestSafeMarkdownSplitIndex(
-  targetIndex: number,
-  startIndex: number,
-  lineCount: number,
-  unsafeSplitRanges: readonly MarkdownUnsafeSplitRange[],
-): number | null {
-  const unsafeRange = findUnsafeMarkdownSplitRange(
-    targetIndex,
-    unsafeSplitRanges,
-  );
-  if (!unsafeRange) {
-    return targetIndex;
-  }
-
-  const before =
-    unsafeRange.startIndex > startIndex ? unsafeRange.startIndex : null;
-  const after =
-    unsafeRange.endIndex > startIndex
-      ? Math.min(unsafeRange.endIndex, lineCount)
-      : null;
-
-  if (before == null) {
-    return after;
-  }
-  if (after == null) {
-    return before;
-  }
-
-  return targetIndex - before <= after - targetIndex ? before : after;
-}
-
-function isSafeMarkdownSplitIndex(
-  splitIndex: number,
-  unsafeSplitRanges: readonly MarkdownUnsafeSplitRange[],
+function isCodeFenceEnd(
+  line: string,
+  fenceChar: string,
+  minFenceLength: number,
 ): boolean {
-  return !findUnsafeMarkdownSplitRange(splitIndex, unsafeSplitRanges);
-}
-
-function findUnsafeMarkdownSplitRange(
-  splitIndex: number,
-  unsafeSplitRanges: readonly MarkdownUnsafeSplitRange[],
-): MarkdownUnsafeSplitRange | null {
-  return (
-    unsafeSplitRanges.find(
-      (range) => range.startIndex < splitIndex && splitIndex < range.endIndex,
-    ) ?? null
-  );
-}
-
-function findMarkdownTableRanges(
-  lines: readonly string[],
-): readonly MarkdownUnsafeSplitRange[] {
-  const ranges: MarkdownUnsafeSplitRange[] = [];
-  let index = 0;
-  while (index < lines.length - 1) {
-    if (
-      isPotentialMarkdownTableRow(lines[index] ?? "") &&
-      isMarkdownTableDelimiterLine(lines[index + 1] ?? "")
-    ) {
-      const startIndex = index;
-      let endIndex = index + 2;
-      while (
-        endIndex < lines.length &&
-        isPotentialMarkdownTableRow(lines[endIndex] ?? "")
-      ) {
-        endIndex += 1;
-      }
-      ranges.push({ startIndex, endIndex });
-      index = endIndex;
-      continue;
-    }
-
-    index += 1;
+  let i = 0;
+  while (i < line.length && (line[i] === " " || line[i] === "\t")) {
+    i += 1;
   }
+  let fenceLength = 0;
+  while (i < line.length && line[i] === fenceChar) {
+    fenceLength += 1;
+    i += 1;
+  }
+  if (fenceLength < minFenceLength) {
+    return false;
+  }
+  while (i < line.length) {
+    if (line[i] !== " " && line[i] !== "\t") {
+      return false;
+    }
+    i += 1;
+  }
+  return true;
+}
 
-  return ranges;
+function isMarkdownHeading(line: string): boolean {
+  return /^\s{0,3}#{1,6}\s+\S/.test(line);
+}
+
+function isMarkdownListLine(line: string): boolean {
+  return /^\s{0,3}(?:[-*+]\s+|\d+[.)]\s+)/.test(line);
+}
+
+function isMarkdownBlockquote(line: string): boolean {
+  return /^\s{0,3}>\s?/.test(line);
+}
+
+function isMarkdownThematicBreak(line: string): boolean {
+  return /^\s{0,3}(?:-{3,}|\*{3,}|_{3,})\s*$/.test(line);
+}
+
+function isMarkdownSetextUnderline(line: string): boolean {
+  return /^\s{0,3}(?:=+|-+)\s*$/.test(line);
+}
+
+function isMarkdownHtmlBlock(line: string): boolean {
+  return /^\s{0,3}<\/?[A-Za-z][^>]*>\s*$/.test(line);
 }
 
 function isPotentialMarkdownTableRow(line: string): boolean {
@@ -755,13 +659,11 @@ function isMarkdownTableDelimiterLine(line: string): boolean {
   if (!hasUnescapedPipe(trimmed)) {
     return false;
   }
-
   const cells = trimmed
     .replace(/^\|/, "")
     .replace(/\|$/, "")
     .split("|")
     .map((cell) => cell.trim());
-
   return cells.length > 0 && cells.every((cell) => /^:?-{3,}:?$/.test(cell));
 }
 
@@ -772,15 +674,310 @@ function hasUnescapedPipe(line: string): boolean {
       slashCount += 1;
       continue;
     }
-
     if (character === "|" && slashCount % 2 === 0) {
       return true;
     }
-
     slashCount = 0;
   }
-
   return false;
+}
+
+function isMarkdownTableStart(
+  lines: readonly string[],
+  index: number,
+): boolean {
+  return Boolean(
+    isPotentialMarkdownTableRow(lines[index] ?? "") &&
+      isPotentialMarkdownTableRow(lines[index + 1] ?? "") &&
+      isMarkdownTableDelimiterLine(lines[index + 1] ?? ""),
+  );
+}
+
+const FENCE_START_PATTERN = /^[ \t]*(`{3,}|~{3,})/;
+
+function isMarkdownSpecialBlockStart(
+  lines: readonly string[],
+  index: number,
+): boolean {
+  const line = lines[index] ?? "";
+  return Boolean(
+    FENCE_START_PATTERN.test(line) ||
+      isMarkdownHeading(line) ||
+      isMarkdownListLine(line) ||
+      isMarkdownBlockquote(line) ||
+      isMarkdownThematicBreak(line) ||
+      isMarkdownHtmlBlock(line) ||
+      isMarkdownTableStart(lines, index),
+  );
+}
+
+function parseMarkdownBlocks(lines: readonly string[]): ParsedBlock[] {
+  const blocks: ParsedBlock[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index] ?? "";
+
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    // Fenced code block
+    const fenceMatch = FENCE_START_PATTERN.exec(line);
+    if (fenceMatch) {
+      const fenceMarker = fenceMatch[1] ?? "```";
+      const fenceChar = fenceMarker[0] ?? "`";
+      const minFenceLength = fenceMarker.length;
+      const infoString = line
+        .slice(line.indexOf(fenceMarker) + fenceMarker.length)
+        .trim();
+      const language = infoString.split(/\s+/)[0] || null;
+      const fenceOpener = line;
+      const codeLines: string[] = [];
+      index += 1;
+      let closingFence = fenceMarker;
+      while (index < lines.length) {
+        const nextLine = lines[index] ?? "";
+        if (isCodeFenceEnd(nextLine, fenceChar, minFenceLength)) {
+          closingFence = nextLine;
+          index += 1;
+          break;
+        }
+        codeLines.push(nextLine);
+        index += 1;
+      }
+      blocks.push({
+        kind: "code",
+        fenceOpener,
+        codeLines,
+        closingFence,
+        language,
+      });
+      continue;
+    }
+
+    // Table
+    if (isMarkdownTableStart(lines, index)) {
+      const tableLines = [line, lines[index + 1] ?? ""];
+      index += 2;
+      while (
+        index < lines.length &&
+        isPotentialMarkdownTableRow(lines[index] ?? "")
+      ) {
+        tableLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      blocks.push({
+        kind: "text",
+        text: tableLines.join("\n"),
+        isHeading: false,
+      });
+      continue;
+    }
+
+    // ATX heading
+    if (isMarkdownHeading(line)) {
+      blocks.push({ kind: "text", text: line, isHeading: true });
+      index += 1;
+      continue;
+    }
+
+    // Thematic break
+    if (isMarkdownThematicBreak(line)) {
+      blocks.push({ kind: "text", text: line, isHeading: false });
+      index += 1;
+      continue;
+    }
+
+    // List
+    if (isMarkdownListLine(line)) {
+      const listLines = [line];
+      index += 1;
+      while (index < lines.length) {
+        const nextLine = lines[index] ?? "";
+        if (
+          isMarkdownListLine(nextLine) ||
+          /^\s{2,}\S/.test(nextLine) ||
+          !nextLine.trim()
+        ) {
+          listLines.push(nextLine);
+          index += 1;
+        } else {
+          break;
+        }
+      }
+      while (listLines.length > 0 && !listLines[listLines.length - 1]?.trim()) {
+        listLines.pop();
+      }
+      if (listLines.length > 0) {
+        blocks.push({
+          kind: "text",
+          text: listLines.join("\n"),
+          isHeading: false,
+        });
+      }
+      continue;
+    }
+
+    // Blockquote
+    if (isMarkdownBlockquote(line)) {
+      const bqLines = [line];
+      index += 1;
+      while (index < lines.length && isMarkdownBlockquote(lines[index] ?? "")) {
+        bqLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      blocks.push({ kind: "text", text: bqLines.join("\n"), isHeading: false });
+      continue;
+    }
+
+    // HTML block
+    if (isMarkdownHtmlBlock(line)) {
+      const htmlLines = [line];
+      index += 1;
+      while (index < lines.length && (lines[index] ?? "").trim()) {
+        htmlLines.push(lines[index] ?? "");
+        index += 1;
+      }
+      blocks.push({
+        kind: "text",
+        text: htmlLines.join("\n"),
+        isHeading: false,
+      });
+      continue;
+    }
+
+    // Paragraph (may become setext heading)
+    const paraLines = [line];
+    index += 1;
+    while (
+      index < lines.length &&
+      (lines[index] ?? "").trim() &&
+      !isMarkdownSetextUnderline(lines[index] ?? "") &&
+      !isMarkdownSpecialBlockStart(lines, index)
+    ) {
+      paraLines.push(lines[index] ?? "");
+      index += 1;
+    }
+    const isSetextHeading =
+      index < lines.length && isMarkdownSetextUnderline(lines[index] ?? "");
+    if (isSetextHeading) {
+      paraLines.push(lines[index] ?? "");
+      index += 1;
+    }
+    blocks.push({
+      kind: "text",
+      text: paraLines.join("\n"),
+      isHeading: isSetextHeading,
+    });
+  }
+
+  return blocks;
+}
+
+function expandCodeBlockChunks(
+  block: Extract<ParsedBlock, { kind: "code" }>,
+): AssistantFragmentChunk {
+  const { fenceOpener, codeLines, closingFence } = block;
+  return {
+    text: [fenceOpener, ...codeLines, closingFence].join("\n"),
+    isCodeContinuationChunk: false,
+    startsWithHeading: false,
+  };
+}
+
+function findBlankLineSplitIndex(
+  lines: readonly string[],
+  startIndex: number,
+  targetIndex: number,
+): number {
+  const maxIndex = Math.min(
+    lines.length - 1,
+    targetIndex + ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS,
+  );
+  const minIndex = Math.max(
+    startIndex + 1,
+    targetIndex - ASSISTANT_FRAGMENT_BLANK_LINE_SEARCH_RADIUS,
+  );
+  for (let i = targetIndex; i <= maxIndex; i += 1) {
+    if (!lines[i]?.trim()) {
+      return i + 1;
+    }
+  }
+  for (let i = targetIndex - 1; i >= minIndex; i -= 1) {
+    if (!lines[i]?.trim()) {
+      return i + 1;
+    }
+  }
+  return targetIndex;
+}
+
+function splitTextBlockIntoChunks(
+  block: Extract<ParsedBlock, { kind: "text" }>,
+): AssistantFragmentChunk[] {
+  const { text, isHeading } = block;
+  const lines = text.split(/\n/);
+  const isTable =
+    lines.length >= 2 &&
+    isPotentialMarkdownTableRow(lines[0] ?? "") &&
+    isMarkdownTableDelimiterLine(lines[1] ?? "");
+  if (lines.length <= ASSISTANT_FRAGMENT_TARGET_LINE_COUNT || isTable) {
+    return [
+      { text, isCodeContinuationChunk: false, startsWithHeading: isHeading },
+    ];
+  }
+  const chunks: AssistantFragmentChunk[] = [];
+  let startIndex = 0;
+  while (startIndex < lines.length) {
+    const remaining = lines.length - startIndex;
+    if (remaining <= ASSISTANT_FRAGMENT_TARGET_LINE_COUNT) {
+      chunks.push({
+        text: lines.slice(startIndex).join("\n"),
+        isCodeContinuationChunk: false,
+        startsWithHeading: isHeading && startIndex === 0,
+      });
+      break;
+    }
+    const splitIndex = findBlankLineSplitIndex(
+      lines,
+      startIndex,
+      startIndex + ASSISTANT_FRAGMENT_TARGET_LINE_COUNT,
+    );
+    chunks.push({
+      text: lines.slice(startIndex, splitIndex).join("\n"),
+      isCodeContinuationChunk: false,
+      startsWithHeading: isHeading && startIndex === 0,
+    });
+    startIndex = splitIndex;
+  }
+  return chunks;
+}
+
+function splitAssistantTextIntoChunks(
+  text: string,
+): readonly AssistantFragmentChunk[] | null {
+  const lines = text.split(/\n/);
+  const blocks = parseMarkdownBlocks(lines);
+  const hasCodeBlocks = blocks.some((b) => b.kind === "code");
+
+  if (!hasCodeBlocks && lines.length < ASSISTANT_FRAGMENT_MIN_LINE_COUNT) {
+    return null;
+  }
+  if (hasCodeBlocks && lines.length < ASSISTANT_FRAGMENT_CODE_MIN_LINE_COUNT) {
+    return null;
+  }
+
+  const chunks: AssistantFragmentChunk[] = [];
+  for (const block of blocks) {
+    if (block.kind === "code") {
+      chunks.push(expandCodeBlockChunks(block));
+    } else {
+      chunks.push(...splitTextBlockIntoChunks(block));
+    }
+  }
+
+  return chunks.length > 1 ? chunks : null;
 }
 
 function createFragmentRevisionMessage({

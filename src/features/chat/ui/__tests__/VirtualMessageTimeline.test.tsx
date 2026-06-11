@@ -160,6 +160,20 @@ function longText(label: string, lineCount: number): string {
   ).join("\n");
 }
 
+function multiParagraphText(
+  label: string,
+  paragraphCount: number,
+  linesPerParagraph: number,
+): string {
+  return Array.from({ length: paragraphCount }, (_, pIndex) =>
+    Array.from(
+      { length: linesPerParagraph },
+      (_, lIndex) =>
+        `${label} p${pIndex} line ${String(lIndex).padStart(3, "0")}`,
+    ).join("\n"),
+  ).join("\n\n");
+}
+
 function mockTranscriptElementMeasurements() {
   return vi
     .spyOn(HTMLElement.prototype, "getBoundingClientRect")
@@ -378,15 +392,21 @@ describe("VirtualMessageTimeline", () => {
   it("renders assistant fragment rows and keeps mixed content on whole-message fallback", async () => {
     mockTranscriptElementMeasurements();
     const diagnosticsSpy = vi.fn();
+    // Three paragraphs of 22 lines each (66 content lines + 2 blank separators = 68 lines)
+    // satisfies ASSISTANT_FRAGMENT_MIN_LINE_COUNT (60) and produces 3 block-level fragments.
     const fragmented = textMessage(
       "fragmented",
       "assistant",
-      longText("fragmented assistant", 92),
+      multiParagraphText("fragmented assistant", 3, 22),
     );
     const mixed: Message = {
-      ...textMessage("mixed", "assistant", longText("mixed assistant", 92)),
+      ...textMessage(
+        "mixed",
+        "assistant",
+        multiParagraphText("mixed assistant", 3, 22),
+      ),
       content: [
-        { type: "text", text: longText("mixed assistant", 92) },
+        { type: "text", text: multiParagraphText("mixed assistant", 3, 22) },
         {
           type: "toolRequest",
           id: "tool-1",
@@ -431,8 +451,9 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-row-fragment-role",
       "end",
     );
-    expect(middleFragment).toHaveClass("pt-0");
-    expect(lastFragment).toHaveClass("pt-0");
+    // Non-code-continuation fragments are spaced blocks, not zero-spaced continuations.
+    expect(middleFragment).toHaveClass("pt-4");
+    expect(lastFragment).toHaveClass("pt-4");
     expect(fallbackRow).toHaveAttribute("data-virtual-row-kind", "message");
     expect(fallbackRow).toHaveAttribute("data-transcript-message-id", "mixed");
 
@@ -502,10 +523,22 @@ describe("VirtualMessageTimeline", () => {
     const normalRow = {
       kind: "message",
     } as TranscriptRowDescriptor;
-    const fragmentContinuationRow = {
+    // Only code-continuation chunks (isCodeContinuationChunk === true) are
+    // zero-spaced. Regular fragment middle/end rows get standard block spacing.
+    const codeFragmentContinuationRow = {
       kind: "assistant-content-fragment",
       fragment: {
         role: "middle",
+        isCodeContinuationChunk: true,
+        startsWithHeading: false,
+      },
+    } as TranscriptRowDescriptor;
+    const textFragmentMiddleRow = {
+      kind: "assistant-content-fragment",
+      fragment: {
+        role: "middle",
+        isCodeContinuationChunk: false,
+        startsWithHeading: false,
       },
     } as TranscriptRowDescriptor;
 
@@ -518,11 +551,18 @@ describe("VirtualMessageTimeline", () => {
     ).toBe(0);
     expect(
       getVirtualTranscriptRowSpacingBlockSize({
-        row: fragmentContinuationRow,
+        row: codeFragmentContinuationRow,
         index: 3,
         previousRowKind: "assistant-content-fragment",
       }),
     ).toBe(0);
+    expect(
+      getVirtualTranscriptRowSpacingBlockSize({
+        row: textFragmentMiddleRow,
+        index: 3,
+        previousRowKind: "assistant-content-fragment",
+      }),
+    ).toBe(16);
     expect(
       getVirtualTranscriptRowSpacingBlockSize({
         row: normalRow,
@@ -558,7 +598,11 @@ describe("VirtualMessageTimeline", () => {
           `Message ${index}`,
         ),
       ),
-      textMessage("fragmented", "assistant", longText("fragmented", 92)),
+      textMessage(
+        "fragmented",
+        "assistant",
+        multiParagraphText("fragmented", 3, 22),
+      ),
     ];
 
     renderWithProviders(

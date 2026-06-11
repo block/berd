@@ -160,6 +160,8 @@ function row(
       content: [],
       isStreamingTail: overrides.anchorPriority === "streaming",
       messageScrollTarget: true,
+      isCodeContinuationChunk: false,
+      startsWithHeading: false,
     },
     ...overrides,
   };

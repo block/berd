@@ -89,7 +89,7 @@ describe("transcript projection cache", () => {
     const assistant = message(
       "assistant-fragmented",
       "assistant",
-      longText("completed fragment", 92),
+      multiParagraphText("completed fragment", 3, 20),
       utc(2026, 6, 4, 10),
     );
 
@@ -140,7 +140,7 @@ describe("transcript projection cache", () => {
     expect(snapshot.wholeMessageFallbackRowCount).toBe(1);
   });
 
-  it("keeps long tilde fenced code blocks on whole-message rows", () => {
+  it("keeps a standalone code block as a single fragment row", () => {
     const cache = createTranscriptProjectionCache();
     const assistant = message(
       "assistant-tilde-fence",
@@ -153,9 +153,48 @@ describe("transcript projection cache", () => {
     const row = messageRow(snapshot, "assistant-tilde-fence");
 
     expect(row.kind).toBe("message");
-    expect(row.rowId).toBe("message:assistant-tilde-fence");
     expect(snapshot.fragmentRowCount).toBe(0);
     expect(snapshot.wholeMessageFallbackRowCount).toBe(1);
+  });
+
+  it("fragments a message with a code block and surrounding text", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = message(
+      "assistant-with-code",
+      "assistant",
+      textWithCodeBlock(20),
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const fragmentRows = snapshot.rows.filter(
+      (row) => row.kind === "assistant-content-fragment",
+    );
+
+    expect(fragmentRows.length).toBeGreaterThanOrEqual(2);
+    expect(snapshot.fragmentRowCount).toBeGreaterThanOrEqual(2);
+    expect(snapshot.wholeMessageFallbackRowCount).toBe(0);
+    expect(fragmentRows[0]?.fragment?.role).toBe("start");
+    expect(fragmentRows[fragmentRows.length - 1]?.fragment?.role).toBe("end");
+    expect(snapshot.rowByMessageId.get("assistant-with-code")).toBe(
+      "message:assistant-with-code:block-0",
+    );
+  });
+
+  it("keeps short messages with code blocks on whole-message rows", () => {
+    const cache = createTranscriptProjectionCache();
+    const assistant = message(
+      "assistant-short-code",
+      "assistant",
+      "intro\n```typescript\nconst x = 1;\n```\noutro",
+      utc(2026, 6, 4, 10),
+    );
+
+    const snapshot = update(cache, [assistant]);
+    const row = messageRow(snapshot, "assistant-short-code");
+
+    expect(row.kind).toBe("message");
+    expect(snapshot.fragmentRowCount).toBe(0);
   });
 
   it("keeps long active streaming assistant text on one mutable row", () => {
@@ -236,7 +275,7 @@ describe("transcript projection cache", () => {
     const assistant = message(
       "assistant-cancelled",
       "assistant",
-      longText("cancelled streaming fragment", 88),
+      multiParagraphText("cancelled streaming fragment", 3, 20),
       utc(2026, 6, 4, 10),
       { completionStatus: "inProgress" },
     );
@@ -314,7 +353,7 @@ describe("transcript projection cache", () => {
     const assistant = message(
       "assistant-completed",
       "assistant",
-      longText("completed fragment", 92),
+      multiParagraphText("completed fragment", 3, 20),
       utc(2026, 6, 4, 10),
       { completionStatus: "completed" },
     );
@@ -853,6 +892,20 @@ function longMarkdownTable(label: string, rowCount: number): string {
   ].join("\n");
 }
 
+function multiParagraphText(
+  label: string,
+  paragraphCount: number,
+  linesPerParagraph: number,
+): string {
+  return Array.from({ length: paragraphCount }, (_, pIndex) =>
+    Array.from(
+      { length: linesPerParagraph },
+      (_, lIndex) =>
+        `${label} p${pIndex} line ${String(lIndex).padStart(3, "0")}`,
+    ).join("\n"),
+  ).join("\n\n");
+}
+
 function longTildeCodeBlock(lineCount: number): string {
   return [
     "~~~ts",
@@ -862,6 +915,26 @@ function longTildeCodeBlock(lineCount: number): string {
     ),
     "~~~",
   ].join("\n");
+}
+
+function textWithCodeBlock(codeLineCount: number): string {
+  const intro = Array.from(
+    { length: 10 },
+    (_, index) => `intro line ${String(index).padStart(3, "0")}`,
+  ).join("\n");
+  const code = [
+    "```typescript",
+    ...Array.from(
+      { length: codeLineCount },
+      (_, index) => `const x${index} = ${index};`,
+    ),
+    "```",
+  ].join("\n");
+  const outro = Array.from(
+    { length: 10 },
+    (_, index) => `outro line ${String(index).padStart(3, "0")}`,
+  ).join("\n");
+  return `${intro}\n${code}\n${outro}`;
 }
 
 function utc(
