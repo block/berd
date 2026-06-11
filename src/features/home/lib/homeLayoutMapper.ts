@@ -149,6 +149,9 @@ function persistedStickyNoteStateFromItem(
   if (typeof item.widgetState.tone === "string") {
     state.tone = item.widgetState.tone;
   }
+  if (typeof item.widgetState.fontSize === "string") {
+    state.fontSize = item.widgetState.fontSize;
+  }
 
   return Object.keys(state).length > 0 ? state : undefined;
 }
@@ -209,6 +212,9 @@ function widgetStateForLayoutItem(
       }
       if (typeof instance.state?.tone === "string") {
         state.tone = instance.state.tone;
+      }
+      if (typeof instance.state?.fontSize === "string") {
+        state.fontSize = instance.state.fontSize;
       }
       return Object.keys(state).length > 0 ? state : undefined;
     }

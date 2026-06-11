@@ -15,6 +15,8 @@ vi.mock("react-i18next", () => ({
         "widgets.stickyNote.strikethrough": "Strikethrough",
         "widgets.stickyNote.editAria": "Edit sticky note",
         "widgets.stickyNote.placeholder": "Write a note...",
+        "widgets.stickyNote.preview": "Preview",
+        "widgets.stickyNote.edit": "Edit",
         "widgets.stickyNote.fontSizes.small": "Small text",
         "widgets.stickyNote.fontSizes.medium": "Medium text",
         "widgets.stickyNote.fontSizes.large": "Large text",
@@ -39,13 +41,27 @@ const baseProps: WidgetRenderProps = {
   onUpdateState: vi.fn(),
 };
 
+function getEditor() {
+  return screen.getByRole("textbox", {
+    name: "Edit sticky note",
+  }) as HTMLTextAreaElement;
+}
+
 describe("StickyNoteWidget", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
   });
 
-  it("renders a user-editable note when no onboarding note id is present", () => {
+  it("opens an empty note in the editor with a placeholder", () => {
+    render(<StickyNoteWidget {...baseProps} />);
+
+    const editor = getEditor();
+    expect(editor).toHaveValue("");
+    expect(editor).toHaveAttribute("placeholder", "Write a note...");
+  });
+
+  it("opens a note that already has content in rendered preview", () => {
     render(
       <StickyNoteWidget
         {...baseProps}
@@ -56,28 +72,46 @@ describe("StickyNoteWidget", () => {
       />,
     );
 
+    expect(screen.getByText("Remember launch notes")).toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", { name: "Edit sticky note" }),
-    ).toHaveTextContent("Remember launch notes");
+      screen.queryByRole("textbox", { name: "Edit sticky note" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("toggles from preview into the editor", () => {
+    render(
+      <StickyNoteWidget
+        {...baseProps}
+        instance={{
+          ...baseProps.instance,
+          state: { text: "Remember launch notes" },
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+
+    expect(getEditor()).toHaveValue("Remember launch notes");
+  });
+
+  it("toggles from the editor into rendered preview", () => {
+    render(<StickyNoteWidget {...baseProps} />);
+
+    fireEvent.change(getEditor(), { target: { value: "Drafted note" } });
+    fireEvent.click(screen.getByRole("button", { name: "Preview" }));
+
+    expect(screen.getByText("Drafted note")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("textbox", { name: "Edit sticky note" }),
+    ).not.toBeInTheDocument();
   });
 
   it("debounces editable note content into widget state", async () => {
     vi.useFakeTimers();
     const onUpdateState = vi.fn();
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        onUpdateState={onUpdateState}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
-    );
+    render(<StickyNoteWidget {...baseProps} onUpdateState={onUpdateState} />);
 
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    note.textContent = "New note";
-    fireEvent.input(note);
+    fireEvent.change(getEditor(), { target: { value: "New note" } });
     expect(onUpdateState).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -90,107 +124,16 @@ describe("StickyNoteWidget", () => {
   });
 
   it("flushes editable note content on blur", () => {
-    vi.useFakeTimers();
     const onUpdateState = vi.fn();
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        onUpdateState={onUpdateState}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
-    );
+    render(<StickyNoteWidget {...baseProps} onUpdateState={onUpdateState} />);
 
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    note.textContent = "Blurred note";
-    fireEvent.input(note);
-    fireEvent.blur(note);
+    const editor = getEditor();
+    fireEvent.change(editor, { target: { value: "Blurred note" } });
+    fireEvent.blur(editor);
 
     expect(onUpdateState).toHaveBeenCalledWith(
       expect.objectContaining({ text: "Blurred note" }),
     );
-  });
-
-  it("sanitizes persisted editable note html before rendering", () => {
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: {
-            html: [
-              '<img src="x" onerror="alert(1)">',
-              '<strong onclick="alert(1)">safe</strong>',
-              '<font size="5" style="color:red">big</font>',
-              '<font size="99">plain</font>',
-              "<script>alert(1)</script>",
-            ].join(""),
-          },
-        }}
-      />,
-    );
-
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    expect(note.innerHTML).not.toContain("img");
-    expect(note.innerHTML).not.toContain("script");
-    expect(note.innerHTML).not.toContain("onclick");
-    expect(note.innerHTML).not.toContain("style");
-    expect(note.innerHTML).toContain("<strong>safe</strong>");
-    expect(note.innerHTML).toContain('<font size="5">big</font>');
-    expect(note.innerHTML).toContain("<font>plain</font>");
-  });
-
-  it("pastes clipboard html as plain text", () => {
-    const execCommand = vi.fn();
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
-    render(<StickyNoteWidget {...baseProps} />);
-
-    fireEvent.paste(screen.getByRole("textbox", { name: "Edit sticky note" }), {
-      clipboardData: {
-        getData: vi.fn((type: string) =>
-          type === "text/plain" ? "<b>plain text</b>" : "<b>html</b>",
-        ),
-      },
-    });
-
-    expect(execCommand).toHaveBeenCalledWith(
-      "insertText",
-      false,
-      "<b>plain text</b>",
-    );
-  });
-
-  it("does not bubble pointer down from the editable text surface", () => {
-    const onPointerDown = vi.fn();
-    render(
-      <div onPointerDown={onPointerDown}>
-        <StickyNoteWidget {...baseProps} />
-      </div>,
-    );
-
-    fireEvent.pointerDown(
-      screen.getByRole("textbox", { name: "Edit sticky note" }),
-    );
-
-    expect(onPointerDown).not.toHaveBeenCalled();
-  });
-
-  it("does not bubble wheel events from the editable text surface", () => {
-    const onWheel = vi.fn();
-    render(
-      <div onWheel={onWheel}>
-        <StickyNoteWidget {...baseProps} />
-      </div>,
-    );
-
-    fireEvent.wheel(screen.getByRole("textbox", { name: "Edit sticky note" }));
-
-    expect(onWheel).not.toHaveBeenCalled();
   });
 
   it("updates the note tone from the floating toolbar", () => {
@@ -201,7 +144,7 @@ describe("StickyNoteWidget", () => {
         onUpdateState={onUpdateState}
         instance={{
           ...baseProps.instance,
-          state: { text: "Old note", tone: "warm" },
+          state: { tone: "warm" },
         }}
       />,
     );
@@ -214,240 +157,79 @@ describe("StickyNoteWidget", () => {
     expect(onUpdateState).toHaveBeenCalledWith({ tone: "blue" });
   });
 
-  it("updates note formatting from the floating toolbar", () => {
-    const execCommand = vi.fn(() => true);
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
+  it("updates the note font size from the floating toolbar", () => {
+    const onUpdateState = vi.fn();
+    render(<StickyNoteWidget {...baseProps} onUpdateState={onUpdateState} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Large text" }));
+
+    expect(onUpdateState).toHaveBeenCalledWith({ fontSize: "large" });
+  });
+
+  it("wraps the selection in markdown syntax from the toolbar", () => {
+    render(<StickyNoteWidget {...baseProps} />);
+
+    const editor = getEditor();
+    fireEvent.change(editor, { target: { value: "Old note" } });
+
+    editor.setSelectionRange(0, 3);
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Bold" }));
+    expect(editor).toHaveValue("**Old** note");
+
+    editor.setSelectionRange(2, 5);
+    fireEvent.mouseDown(screen.getByRole("button", { name: "Italic" }));
+    expect(editor).toHaveValue("***Old*** note");
+  });
+
+  it("hides inline formatting buttons in preview mode", () => {
     render(
       <StickyNoteWidget
         {...baseProps}
         instance={{
           ...baseProps.instance,
-          state: { text: "Old note" },
+          state: { text: "Remember launch notes" },
         }}
       />,
     );
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Large text" }));
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Bold" }));
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Italic" }));
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Strikethrough" }));
-
-    expect(execCommand).toHaveBeenCalledWith("fontSize", false, "5");
-    expect(execCommand).toHaveBeenCalledWith("bold", false, undefined);
-    expect(execCommand).toHaveBeenCalledWith("italic", false, undefined);
-    expect(execCommand).toHaveBeenCalledWith("strikeThrough", false, undefined);
     expect(
-      screen.queryByRole("button", { name: "Bullet list" }),
+      screen.queryByRole("button", { name: "Bold" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Italic" }),
     ).not.toBeInTheDocument();
   });
 
-  it("reflects active formatting states in the floating toolbar", () => {
-    Object.defineProperty(document, "queryCommandValue", {
-      configurable: true,
-      value: vi.fn((command: string) => (command === "fontSize" ? "5" : "")),
-    });
-    Object.defineProperty(document, "queryCommandState", {
-      configurable: true,
-      value: vi.fn((command: string) => command === "strikeThrough"),
-    });
+  it("does not bubble pointer down from the editor surface", () => {
+    const onPointerDown = vi.fn();
     render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
+      <div onPointerDown={onPointerDown}>
+        <StickyNoteWidget {...baseProps} />
+      </div>,
     );
 
-    fireEvent.focus(screen.getByRole("textbox", { name: "Edit sticky note" }));
+    fireEvent.pointerDown(getEditor());
 
-    expect(screen.getByRole("button", { name: "Large text" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(
-      screen.getByRole("button", { name: "Strikethrough" }),
-    ).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Bold" })).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
+    expect(onPointerDown).not.toHaveBeenCalled();
   });
 
-  it("preserves selected text across consecutive toolbar formatting commands", () => {
-    const selectionCollapsedAtCommand: boolean[] = [];
-    const execCommand = vi.fn((command: string) => {
-      const selection = window.getSelection();
-      selectionCollapsedAtCommand.push(
-        selection?.rangeCount ? selection.getRangeAt(0).collapsed : true,
-      );
-
-      if (command === "bold" && selection?.rangeCount) {
-        const range = selection.getRangeAt(0).cloneRange();
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-
-      return true;
-    });
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
+  it("does not bubble wheel events from the editor surface", () => {
+    const onWheel = vi.fn();
     render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Selected text" },
-        }}
-      />,
+      <div onWheel={onWheel}>
+        <StickyNoteWidget {...baseProps} />
+      </div>,
     );
 
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    const textNode = note.firstChild;
-    expect(textNode).not.toBeNull();
-    const range = document.createRange();
-    range.setStart(textNode as ChildNode, 0);
-    range.setEnd(textNode as ChildNode, "Selected".length);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-    fireEvent.mouseUp(note);
+    fireEvent.wheel(getEditor());
 
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Bold" }));
-    fireEvent.mouseDown(screen.getByRole("button", { name: "Italic" }));
-
-    expect(execCommand).toHaveBeenCalledWith("bold", false, undefined);
-    expect(execCommand).toHaveBeenCalledWith("italic", false, undefined);
-    expect(selectionCollapsedAtCommand).toEqual([false, false]);
+    expect(onWheel).not.toHaveBeenCalled();
   });
 
-  it("turns a leading dash and space into a bullet list", () => {
-    const execCommand = vi.fn(() => true);
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
-    );
-
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    note.textContent = "-";
-    const marker = note.firstChild;
-    expect(marker).not.toBeNull();
-    const range = document.createRange();
-    range.setStart(marker as ChildNode, 1);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-
-    expect(fireEvent.keyDown(note, { key: " " })).toBe(false);
-    expect(execCommand).toHaveBeenCalledWith("delete", false, undefined);
-    expect(execCommand).toHaveBeenCalledWith(
-      "insertUnorderedList",
-      false,
-      undefined,
-    );
-  });
-
-  it("turns a leading dash and space into a bullet list after existing content", () => {
-    const execCommand = vi.fn(() => true);
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
-    );
-
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    note.innerHTML = "<div>Existing content</div><div>-</div>";
-    const marker = note.querySelector("div:last-child")?.firstChild;
-    expect(marker).not.toBeNull();
-    const range = document.createRange();
-    range.setStart(marker as ChildNode, 1);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-
-    expect(fireEvent.keyDown(note, { key: " " })).toBe(false);
-    expect(execCommand).toHaveBeenCalledWith("delete", false, undefined);
-    expect(execCommand).toHaveBeenCalledWith(
-      "insertUnorderedList",
-      false,
-      undefined,
-    );
-  });
-
-  it("does not convert a dash at the end of regular text into a bullet list", () => {
-    const execCommand = vi.fn(() => true);
-    Object.defineProperty(document, "execCommand", {
-      configurable: true,
-      value: execCommand,
-    });
-    render(
-      <StickyNoteWidget
-        {...baseProps}
-        instance={{
-          ...baseProps.instance,
-          state: { text: "Old note" },
-        }}
-      />,
-    );
-
-    const note = screen.getByRole("textbox", { name: "Edit sticky note" });
-    note.textContent = "Existing-";
-    const marker = note.firstChild;
-    expect(marker).not.toBeNull();
-    const range = document.createRange();
-    range.setStart(marker as ChildNode, "Existing-".length);
-    range.collapse(true);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
-
-    expect(fireEvent.keyDown(note, { key: " " })).toBe(true);
-    expect(execCommand).not.toHaveBeenCalled();
-  });
-
-  it("keeps enter from moving the caret below the empty-note placeholder", () => {
+  it("uses a text cursor over the editor surface", () => {
     render(<StickyNoteWidget {...baseProps} />);
 
-    expect(
-      fireEvent.keyDown(
-        screen.getByRole("textbox", { name: "Edit sticky note" }),
-        { key: "Enter" },
-      ),
-    ).toBe(false);
-  });
-
-  it("uses a text cursor over the editable note surface", () => {
-    render(<StickyNoteWidget {...baseProps} />);
-
-    expect(
-      screen.getByRole("textbox", { name: "Edit sticky note" }),
-    ).toHaveClass("cursor-text");
+    expect(getEditor()).toHaveClass("cursor-text");
   });
 
   it("keeps onboarding notes in the starter-card presentation", () => {

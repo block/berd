@@ -81,6 +81,8 @@
       "strikethrough": "Tachado",
       "editAria": "Editar nota adhesiva",
       "placeholder": "Escribe una nota...",
+      "preview": "Vista previa",
+      "edit": "Editar",
       "starterStickies": "Notas iniciales",
       "fontSizes": {
         "small": "Texto pequeño",

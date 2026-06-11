@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClipboardEvent, KeyboardEvent } from "react";
 import {
   ArrowRight,
   Bold,
   Check,
+  Eye,
   Italic,
+  Pencil,
   Strikethrough,
   X,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown, { type Components } from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import type { WidgetRenderProps } from "./types";
@@ -57,12 +61,7 @@ const ONBOARDING_NOTE_CONTENT = {
 type OnboardingNoteId = keyof typeof ONBOARDING_NOTE_CONTENT;
 type StickyNoteTone = "warm" | "cool" | "rose" | "blue" | "lavender" | "peach";
 type StickyNoteFontSize = "small" | "medium" | "large";
-type ToolbarFormattingState = {
-  fontSize: StickyNoteFontSize | null;
-  bold: boolean;
-  italic: boolean;
-  strikeThrough: boolean;
-};
+type NoteEditorMode = "edit" | "preview";
 
 const EDIT_SAVE_DELAY_MS = 400;
 const EDITABLE_NOTE_TONES = [
@@ -78,12 +77,6 @@ const EDITABLE_NOTE_FONT_SIZES = [
   "medium",
   "large",
 ] as const satisfies StickyNoteFontSize[];
-const DEFAULT_TOOLBAR_FORMATTING_STATE: ToolbarFormattingState = {
-  fontSize: null,
-  bold: false,
-  italic: false,
-  strikeThrough: false,
-};
 
 function getNoteId(state: Record<string, unknown> | undefined) {
   return typeof state?.noteId === "string" ? state.noteId : null;
@@ -95,99 +88,6 @@ function isOnboardingNoteId(noteId: string | null): noteId is OnboardingNoteId {
 
 function getEditableText(state: Record<string, unknown> | undefined): string {
   return typeof state?.text === "string" ? state.text : "";
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-function textToHtml(value: string): string {
-  return escapeHtml(value).replaceAll("\n", "<br>");
-}
-
-const ALLOWED_EDITABLE_TAGS = new Set([
-  "b",
-  "br",
-  "div",
-  "em",
-  "font",
-  "i",
-  "li",
-  "ol",
-  "p",
-  "s",
-  "strike",
-  "strong",
-  "ul",
-]);
-
-const ALLOWED_FONT_SIZES = new Set(["1", "2", "3", "4", "5", "6", "7"]);
-
-function sanitizeEditableNode(node: Node): Node {
-  if (node.nodeType === Node.TEXT_NODE) {
-    return document.createTextNode(node.textContent ?? "");
-  }
-
-  if (node.nodeType !== Node.ELEMENT_NODE) {
-    return document.createDocumentFragment();
-  }
-
-  const element = node as HTMLElement;
-  const tagName = element.tagName.toLowerCase();
-  if (tagName === "script" || tagName === "style") {
-    return document.createDocumentFragment();
-  }
-
-  const sanitizedChildren = document.createDocumentFragment();
-  for (const child of Array.from(element.childNodes)) {
-    sanitizedChildren.appendChild(sanitizeEditableNode(child));
-  }
-
-  if (!ALLOWED_EDITABLE_TAGS.has(tagName)) {
-    return sanitizedChildren;
-  }
-
-  const next = document.createElement(tagName);
-  if (tagName === "font") {
-    const size = element.getAttribute("size");
-    if (size && ALLOWED_FONT_SIZES.has(size)) {
-      next.setAttribute("size", size);
-    }
-  }
-  next.appendChild(sanitizedChildren);
-  return next;
-}
-
-function sanitizeEditableHtml(value: string): string {
-  const template = document.createElement("template");
-  template.innerHTML = value;
-  const sanitized = document.createElement("template");
-  for (const child of Array.from(template.content.childNodes)) {
-    sanitized.content.appendChild(sanitizeEditableNode(child));
-  }
-  return sanitized.innerHTML;
-}
-
-function getEditableHtml(state: Record<string, unknown> | undefined): string {
-  return typeof state?.html === "string"
-    ? sanitizeEditableHtml(state.html)
-    : textToHtml(getEditableText(state));
-}
-
-function isEditableContentEmpty(text: string, html: string): boolean {
-  return (
-    text.trim().length === 0 &&
-    html
-      .replace(/<br\s*\/?>/gi, "")
-      .replace(/&nbsp;/gi, "")
-      .replace(/<\/?(div|p|span)[^>]*>/gi, "")
-      .trim().length === 0
-  );
 }
 
 function getEditableTone(
@@ -203,6 +103,19 @@ function getEditableTone(
       return state.tone;
     default:
       return "warm";
+  }
+}
+
+function getEditableFontSize(
+  state: Record<string, unknown> | undefined,
+): StickyNoteFontSize {
+  switch (state?.fontSize) {
+    case "small":
+    case "medium":
+    case "large":
+      return state.fontSize;
+    default:
+      return "medium";
   }
 }
 
@@ -235,38 +148,6 @@ function fontSizeLabelKey(size: StickyNoteFontSize): string {
   return `widgets.stickyNote.fontSizes.${size}`;
 }
 
-function fontSizeCommandValue(size: StickyNoteFontSize): string {
-  switch (size) {
-    case "small":
-      return "1";
-    case "medium":
-      return "3";
-    case "large":
-      return "5";
-    default: {
-      const exhaustive: never = size;
-      return exhaustive;
-    }
-  }
-}
-
-function fontSizeFromCommandValue(value: string): StickyNoteFontSize | null {
-  switch (value) {
-    case "1":
-    case "2":
-      return "small";
-    case "3":
-    case "4":
-      return "medium";
-    case "5":
-    case "6":
-    case "7":
-      return "large";
-    default:
-      return null;
-  }
-}
-
 function fontSizeGlyphClassName(size: StickyNoteFontSize): string {
   // Size only. Vertical centering is handled by text-box trimming on the glyph
   // span (see render), so all three sizes stay aligned with no per-size offset.
@@ -277,6 +158,24 @@ function fontSizeGlyphClassName(size: StickyNoteFontSize): string {
       return "text-[14px]";
     case "large":
       return "text-[17px]";
+    default: {
+      const exhaustive: never = size;
+      return exhaustive;
+    }
+  }
+}
+
+function fontSizeBodyClassName(size: StickyNoteFontSize): string {
+  // Base font size for the note body. Markdown block elements (headings,
+  // lists, code) size relative to this with em units, so the whole note
+  // scales together.
+  switch (size) {
+    case "small":
+      return "text-[13px] leading-5";
+    case "medium":
+      return "text-[15px] leading-6";
+    case "large":
+      return "text-[18px] leading-7";
     default: {
       const exhaustive: never = size;
       return exhaustive;
@@ -296,69 +195,99 @@ function toolbarButtonClassName(active = false): string {
   );
 }
 
-function queryToolbarFormattingState(): ToolbarFormattingState {
-  try {
-    const rawFontSize =
-      typeof document.queryCommandValue === "function"
-        ? String(document.queryCommandValue("fontSize"))
-        : "";
+// Links are rendered as inert styled text — a note lives on the canvas and
+// should not navigate the webview when previewed.
+const noteMarkdownComponents = {
+  a: ({ children }) => (
+    <span className="font-medium underline decoration-current/40">
+      {children}
+    </span>
+  ),
+} satisfies Components;
 
-    return {
-      fontSize: fontSizeFromCommandValue(rawFontSize),
-      bold:
-        typeof document.queryCommandState === "function"
-          ? document.queryCommandState("bold")
-          : false,
-      italic:
-        typeof document.queryCommandState === "function"
-          ? document.queryCommandState("italic")
-          : false,
-      strikeThrough:
-        typeof document.queryCommandState === "function"
-          ? document.queryCommandState("strikeThrough")
-          : false,
-    };
-  } catch {
-    return DEFAULT_TOOLBAR_FORMATTING_STATE;
-  }
+const NOTE_MARKDOWN_PROSE = cn(
+  "[&_p]:my-1.5 first:[&_p]:mt-0",
+  "[&_h1]:mb-1 [&_h1]:mt-2 [&_h1]:text-[1.45em] [&_h1]:font-semibold [&_h1]:leading-tight",
+  "[&_h2]:mb-1 [&_h2]:mt-2 [&_h2]:text-[1.2em] [&_h2]:font-semibold [&_h2]:leading-tight",
+  "[&_h3]:mb-0.5 [&_h3]:mt-2 [&_h3]:text-[1.05em] [&_h3]:font-semibold",
+  "[&_ul]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:my-1.5 [&_ol]:list-decimal [&_ol]:pl-5",
+  "[&_li]:my-0.5 [&_li>ul]:my-0 [&_li>ol]:my-0",
+  "[&_code]:rounded [&_code]:bg-foreground/10 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[0.9em]",
+  "[&_pre]:my-1.5 [&_pre]:overflow-x-auto [&_pre]:rounded [&_pre]:bg-foreground/10 [&_pre]:p-2 [&_pre>code]:bg-transparent [&_pre>code]:p-0",
+  "[&_blockquote]:my-1.5 [&_blockquote]:border-l-2 [&_blockquote]:border-current/30 [&_blockquote]:pl-3 [&_blockquote]:text-sticky-note-muted",
+  "[&_hr]:my-2 [&_hr]:border-current/20",
+  "[&_a]:decoration-current/40",
+  "[&_table]:my-1.5 [&_table]:w-full [&_th]:border [&_th]:border-current/20 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:text-left [&_td]:border [&_td]:border-current/20 [&_td]:px-1.5 [&_td]:py-0.5",
+);
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
-function textBeforeCaretInCurrentBlock(editor: HTMLElement, range: Range) {
-  const container =
-    range.startContainer.nodeType === Node.ELEMENT_NODE
-      ? (range.startContainer as Element)
-      : range.startContainer.parentElement;
-  const block = container?.closest("li, div, p");
-  const textRange = document.createRange();
-
-  if (block && block !== editor && editor.contains(block)) {
-    textRange.setStart(block, 0);
-    textRange.setEnd(range.startContainer, range.startOffset);
-    return textRange.toString();
+// Decorate one line of markdown into HTML for the edit overlay. Markers are
+// always kept; only weight/style/decoration change, which preserves the
+// monospace advance width so the transparent textarea's caret stays aligned.
+function decorateInlineMarkdown(text: string): string {
+  let out = "";
+  let i = 0;
+  while (i < text.length) {
+    if (text.startsWith("**", i)) {
+      const end = text.indexOf("**", i + 2);
+      if (end !== -1) {
+        out += `<span class="font-bold">**${escapeHtml(text.slice(i + 2, end))}**</span>`;
+        i = end + 2;
+        continue;
+      }
+    }
+    if (text.startsWith("~~", i)) {
+      const end = text.indexOf("~~", i + 2);
+      if (end !== -1) {
+        out += `<span class="line-through">~~${escapeHtml(text.slice(i + 2, end))}~~</span>`;
+        i = end + 2;
+        continue;
+      }
+    }
+    if (text[i] === "*") {
+      const end = text.indexOf("*", i + 1);
+      if (end !== -1) {
+        out += `<span class="italic">*${escapeHtml(text.slice(i + 1, end))}*</span>`;
+        i = end + 1;
+        continue;
+      }
+    }
+    if (text[i] === "~") {
+      const end = text.indexOf("~", i + 1);
+      if (end !== -1) {
+        out += `<span class="line-through">~${escapeHtml(text.slice(i + 1, end))}~</span>`;
+        i = end + 1;
+        continue;
+      }
+    }
+    out += escapeHtml(text[i]);
+    i += 1;
   }
-
-  textRange.setStart(editor, 0);
-  textRange.setEnd(range.startContainer, range.startOffset);
-  return textRange.toString().split("\n").at(-1) ?? "";
+  return out;
 }
 
-function dashMarkerRangeAtCaret(range: Range): Range | null {
-  if (
-    range.startContainer.nodeType !== Node.TEXT_NODE ||
-    range.startOffset < 1
-  ) {
-    return null;
+function decorateLineMarkdown(line: string): string {
+  // H1–H4: a run of 1–4 "#" followed by whitespace. Keep the markers, render
+  // the whole line bold + uppercase at the body size.
+  if (/^#{1,4}\s/.test(line)) {
+    return `<span class="font-bold uppercase">${escapeHtml(line)}</span>`;
   }
+  return decorateInlineMarkdown(line);
+}
 
-  const textNode = range.startContainer;
-  if (textNode.textContent?.charAt(range.startOffset - 1) !== "-") {
-    return null;
+function decorateMarkdownToHtml(text: string): string {
+  if (text.length === 0) {
+    return "";
   }
-
-  const markerRange = range.cloneRange();
-  markerRange.setStart(textNode, range.startOffset - 1);
-  markerRange.setEnd(textNode, range.startOffset);
-  return markerRange;
+  return text.split("\n").map(decorateLineMarkdown).join("\n");
 }
 
 export function StickyNoteWidget({
@@ -373,30 +302,22 @@ export function StickyNoteWidget({
   const { t } = useTranslation("home");
   const noteId = getNoteId(instance.state);
   const editableText = getEditableText(instance.state);
-  const editableHtml = getEditableHtml(instance.state);
-  const editorRef = useRef<HTMLDivElement | null>(null);
-  const selectionRef = useRef<Range | null>(null);
-  const [isEditorEmpty, setIsEditorEmpty] = useState(
-    isEditableContentEmpty(getEditableText(instance.state), editableHtml),
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
+  const isFocusedRef = useRef(false);
+  const [draft, setDraft] = useState(editableText);
+  const [mode, setMode] = useState<NoteEditorMode>(
+    editableText.trim() ? "preview" : "edit",
   );
-  const [toolbarFormatting, setToolbarFormatting] = useState(
-    DEFAULT_TOOLBAR_FORMATTING_STATE,
-  );
-  const pendingTextRef = useRef(editableText);
-  const pendingHtmlRef = useRef(editableHtml);
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Adopt external state changes (e.g. layout reload) while the user is not
+  // actively typing, so we never clobber an in-progress edit.
   useEffect(() => {
-    pendingHtmlRef.current = editableHtml;
-    pendingTextRef.current = editableText;
-    const editor = editorRef.current;
-    if (editor && document.activeElement !== editor) {
-      editor.innerHTML = editableHtml;
-      setIsEditorEmpty(
-        isEditableContentEmpty(editor.textContent ?? "", editor.innerHTML),
-      );
+    if (!isFocusedRef.current) {
+      setDraft(editableText);
     }
-  }, [editableHtml, editableText]);
+  }, [editableText]);
 
   useEffect(
     () => () => {
@@ -407,172 +328,55 @@ export function StickyNoteWidget({
     [],
   );
 
-  const flushEditableText = () => {
+  const commitText = (value: string) => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
     }
-    if (pendingHtmlRef.current !== editableHtml) {
-      onUpdateState({
-        html: pendingHtmlRef.current,
-        text: pendingTextRef.current,
-      });
+    if (value !== editableText) {
+      onUpdateState({ text: value });
     }
   };
 
-  const readEditorState = () => {
-    const editor = editorRef.current;
-    if (!editor) {
-      return { html: pendingHtmlRef.current, text: pendingTextRef.current };
-    }
-
-    return {
-      html: sanitizeEditableHtml(editor.innerHTML),
-      text: editor.innerText ?? editor.textContent ?? "",
-    };
-  };
-
-  const scheduleEditableTextSave = () => {
-    const next = readEditorState();
-    pendingHtmlRef.current = next.html;
-    pendingTextRef.current = next.text;
-    setIsEditorEmpty(isEditableContentEmpty(next.text, next.html));
+  const scheduleTextSave = (value: string) => {
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
     saveTimeoutRef.current = setTimeout(() => {
       saveTimeoutRef.current = null;
-      if (pendingHtmlRef.current !== editableHtml) {
-        onUpdateState({
-          html: pendingHtmlRef.current,
-          text: pendingTextRef.current,
-        });
+      if (value !== editableText) {
+        onUpdateState({ text: value });
       }
     }, EDIT_SAVE_DELAY_MS);
   };
 
-  const saveSelection = () => {
-    const editor = editorRef.current;
-    const selection = window.getSelection();
-    if (!editor || !selection || selection.rangeCount === 0) {
+  const handleDraftChange = (value: string) => {
+    setDraft(value);
+    scheduleTextSave(value);
+  };
+
+  const wrapSelectionWith = (marker: string) => {
+    const textarea = textareaRef.current;
+    if (!textarea) {
       return;
     }
-    const range = selection.getRangeAt(0);
-    if (
-      editor.contains(range.commonAncestorContainer) ||
-      editor === range.commonAncestorContainer
-    ) {
-      selectionRef.current = range.cloneRange();
-    }
-  };
-
-  const restoreSelection = () => {
-    const editor = editorRef.current;
-    const range = selectionRef.current;
-    const selection = window.getSelection();
-    if (!editor || !range || !selection) {
-      editor?.focus();
-      return;
-    }
-    editor.focus();
-    selection.removeAllRanges();
-    selection.addRange(range);
-  };
-
-  const preserveSelectionAfterCommand = (range: Range | null) => {
-    const editor = editorRef.current;
-    const selection = window.getSelection();
-    if (!editor || !selection || !range || range.collapsed) {
-      saveSelection();
-      return;
-    }
-
-    try {
-      editor.focus();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      selectionRef.current = range.cloneRange();
-    } catch {
-      saveSelection();
-    }
-  };
-
-  const applyRichTextCommand = (command: string, value?: string) => {
-    const commandRange = selectionRef.current?.cloneRange() ?? null;
-    restoreSelection();
-    document.execCommand?.(command, false, value);
-    scheduleEditableTextSave();
-    preserveSelectionAfterCommand(commandRange);
-    setToolbarFormatting(queryToolbarFormattingState());
-  };
-
-  const applyMarkdownBulletShortcut = () => {
-    const editor = editorRef.current;
-    const selection = window.getSelection();
-    if (!editor || !selection || selection.rangeCount === 0) {
-      return false;
-    }
-
-    const range = selection.getRangeAt(0);
-    if (!range.collapsed || !editor.contains(range.commonAncestorContainer)) {
-      return false;
-    }
-
-    if (textBeforeCaretInCurrentBlock(editor, range).trim() !== "-") {
-      return false;
-    }
-
-    const markerRange = dashMarkerRangeAtCaret(range);
-    if (!markerRange) {
-      return false;
-    }
-
-    selection.removeAllRanges();
-    selection.addRange(markerRange);
-    document.execCommand?.("delete", false, undefined);
-    const didApply = document.execCommand?.(
-      "insertUnorderedList",
-      false,
-      undefined,
-    );
-    if (!didApply) {
-      document.execCommand?.("insertHTML", false, "<ul><li><br></li></ul>");
-    }
-    scheduleEditableTextSave();
-    saveSelection();
-    setToolbarFormatting(queryToolbarFormattingState());
-    return true;
-  };
-
-  const handleEditorKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Enter" && isEditorEmpty) {
-      event.preventDefault();
-      return;
-    }
-
-    if (event.key === " " && applyMarkdownBulletShortcut()) {
-      event.preventDefault();
-    }
-  };
-
-  const syncToolbarFormatting = () => {
-    setToolbarFormatting(queryToolbarFormattingState());
-  };
-
-  const handleEditorPaste = (event: ClipboardEvent<HTMLDivElement>) => {
-    event.preventDefault();
-    event.stopPropagation();
-    document.execCommand?.(
-      "insertText",
-      false,
-      event.clipboardData.getData("text/plain"),
-    );
-    scheduleEditableTextSave();
-    syncToolbarFormatting();
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = draft.slice(0, start);
+    const selected = draft.slice(start, end);
+    const after = draft.slice(end);
+    const next = `${before}${marker}${selected}${marker}${after}`;
+    handleDraftChange(next);
+    requestAnimationFrame(() => {
+      textarea.focus();
+      textarea.setSelectionRange(start + marker.length, end + marker.length);
+    });
   };
 
   if (!isOnboardingNoteId(noteId)) {
     const tone = getEditableTone(instance.state);
+    const fontSize = getEditableFontSize(instance.state);
+    const isEmpty = draft.trim().length === 0;
 
     return (
       <section
@@ -600,46 +404,86 @@ export function StickyNoteWidget({
           >
             <X aria-hidden="true" />
           </Button>
-          {/* biome-ignore lint/a11y/useSemanticElements: contentEditable is needed so toolbar actions can format selected note text. */}
-          <div
-            ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            tabIndex={0}
-            role="textbox"
-            aria-label={t("widgets.stickyNote.editAria")}
-            aria-multiline="true"
-            data-empty={isEditorEmpty}
-            data-placeholder={t("widgets.stickyNote.placeholder")}
-            spellCheck={true}
-            draggable={false}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={(event) => event.stopPropagation()}
-            onDoubleClick={(event) => event.stopPropagation()}
-            onWheel={(event) => event.stopPropagation()}
-            onPaste={handleEditorPaste}
-            onInput={() => {
-              scheduleEditableTextSave();
-              syncToolbarFormatting();
-            }}
-            onKeyDown={handleEditorKeyDown}
-            onKeyUp={() => {
-              saveSelection();
-              syncToolbarFormatting();
-            }}
-            onMouseUp={() => {
-              saveSelection();
-              syncToolbarFormatting();
-            }}
-            onFocus={syncToolbarFormatting}
-            onBlur={flushEditableText}
-            className={cn(
-              "scrollbar-subtle overscroll-contain relative min-h-0 flex-1 cursor-text overflow-y-scroll border-0 bg-transparent p-0 pr-6 text-[15px] leading-5 text-sticky-note-foreground caret-foreground outline-none select-text [box-shadow:none] [outline:0] [scrollbar-gutter:stable]",
-              "before:pointer-events-none before:text-sticky-note-muted/75 data-[empty=true]:before:content-[attr(data-placeholder)]",
-              "focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:[box-shadow:none]",
-              "[&_li]:pl-1 [&_ol]:my-0 [&_ol]:list-decimal [&_ol]:pl-5 [&_ul]:my-0 [&_ul]:list-disc [&_ul]:pl-5",
-            )}
-          />
+          {mode === "edit" ? (
+            <div className="relative min-h-0 flex-1">
+              {/* Backdrop renders the decorated markdown behind the transparent
+                  textarea. Both share font + metrics so the caret aligns. */}
+              <div
+                ref={backdropRef}
+                aria-hidden="true"
+                className={cn(
+                  "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-sticky-note-foreground",
+                  fontSizeBodyClassName(fontSize),
+                )}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: every text segment is escaped in decorateMarkdownToHtml; only fixed style spans are injected.
+                dangerouslySetInnerHTML={{
+                  __html: decorateMarkdownToHtml(draft),
+                }}
+              />
+              <textarea
+                ref={textareaRef}
+                value={draft}
+                aria-label={t("widgets.stickyNote.editAria")}
+                placeholder={t("widgets.stickyNote.placeholder")}
+                spellCheck={true}
+                draggable={false}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onDoubleClick={(event) => event.stopPropagation()}
+                onWheel={(event) => event.stopPropagation()}
+                onScroll={(event) => {
+                  if (backdropRef.current) {
+                    backdropRef.current.scrollTop =
+                      event.currentTarget.scrollTop;
+                  }
+                }}
+                onFocus={() => {
+                  isFocusedRef.current = true;
+                }}
+                onBlur={() => {
+                  isFocusedRef.current = false;
+                  commitText(draft);
+                }}
+                onChange={(event) => handleDraftChange(event.target.value)}
+                className={cn(
+                  "scrollbar-none overscroll-contain absolute inset-0 h-full w-full resize-none cursor-text overflow-x-hidden overflow-y-auto whitespace-pre-wrap break-words border-0 bg-transparent p-0 font-mono text-transparent caret-foreground outline-none select-text [box-shadow:none] [outline:0]",
+                  "placeholder:text-sticky-note-muted/75",
+                  "focus:border-0 focus:outline-none focus:ring-0 focus-visible:border-0 focus-visible:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:[box-shadow:none]",
+                  fontSizeBodyClassName(fontSize),
+                )}
+              />
+            </div>
+          ) : (
+            // biome-ignore lint/a11y/noStaticElementInteractions: double-click is a convenience shortcut into edit mode; the toolbar toggle is the primary control.
+            <div
+              role="presentation"
+              onPointerDown={(event) => event.stopPropagation()}
+              onWheel={(event) => event.stopPropagation()}
+              onDoubleClick={(event) => {
+                event.stopPropagation();
+                setMode("edit");
+              }}
+              className={cn(
+                "scrollbar-subtle overscroll-contain relative min-h-0 flex-1 cursor-text overflow-x-hidden overflow-y-auto break-words pr-6 text-sticky-note-foreground [scrollbar-gutter:stable]",
+                fontSizeBodyClassName(fontSize),
+              )}
+            >
+              {isEmpty ? (
+                <p className="text-sticky-note-muted/75">
+                  {t("widgets.stickyNote.placeholder")}
+                </p>
+              ) : (
+                <div className={NOTE_MARKDOWN_PROSE}>
+                  <ReactMarkdown
+                    components={noteMarkdownComponents}
+                    remarkPlugins={[remarkGfm, remarkBreaks]}
+                  >
+                    {draft}
+                  </ReactMarkdown>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div
           role="toolbar"
@@ -689,15 +533,15 @@ export function StickyNoteWidget({
                 key={size}
                 type="button"
                 aria-label={t(fontSizeLabelKey(size))}
-                aria-pressed={toolbarFormatting.fontSize === size}
-                onMouseDown={(event) => {
+                aria-pressed={fontSize === size}
+                onClick={(event) => {
                   event.preventDefault();
                   event.stopPropagation();
-                  applyRichTextCommand("fontSize", fontSizeCommandValue(size));
+                  if (size !== fontSize) {
+                    onUpdateState({ fontSize: size });
+                  }
                 }}
-                className={toolbarButtonClassName(
-                  toolbarFormatting.fontSize === size,
-                )}
+                className={toolbarButtonClassName(fontSize === size)}
               >
                 <span
                   aria-hidden="true"
@@ -714,56 +558,91 @@ export function StickyNoteWidget({
               </button>
             ))}
           </div>
+          {mode === "edit" ? (
+            <>
+              <div
+                className="mx-0.5 h-5 w-px bg-border/70"
+                aria-hidden="true"
+              />
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("widgets.stickyNote.bold")}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    wrapSelectionWith("**");
+                  }}
+                  className={toolbarButtonClassName()}
+                >
+                  <Bold aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("widgets.stickyNote.italic")}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    wrapSelectionWith("*");
+                  }}
+                  className={toolbarButtonClassName()}
+                >
+                  <Italic aria-hidden="true" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  aria-label={t("widgets.stickyNote.strikethrough")}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    wrapSelectionWith("~~");
+                  }}
+                  className={toolbarButtonClassName()}
+                >
+                  <Strikethrough aria-hidden="true" />
+                </Button>
+              </div>
+            </>
+          ) : null}
           <div className="mx-0.5 h-5 w-px bg-border/70" aria-hidden="true" />
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("widgets.stickyNote.bold")}
-              aria-pressed={toolbarFormatting.bold}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                applyRichTextCommand("bold");
-              }}
-              className={toolbarButtonClassName(toolbarFormatting.bold)}
-            >
-              <Bold aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("widgets.stickyNote.italic")}
-              aria-pressed={toolbarFormatting.italic}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                applyRichTextCommand("italic");
-              }}
-              className={toolbarButtonClassName(toolbarFormatting.italic)}
-            >
-              <Italic aria-hidden="true" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-xs"
-              aria-label={t("widgets.stickyNote.strikethrough")}
-              aria-pressed={toolbarFormatting.strikeThrough}
-              onMouseDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                applyRichTextCommand("strikeThrough");
-              }}
-              className={toolbarButtonClassName(
-                toolbarFormatting.strikeThrough,
-              )}
-            >
-              <Strikethrough aria-hidden="true" />
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={
+              mode === "edit"
+                ? t("widgets.stickyNote.preview")
+                : t("widgets.stickyNote.edit")
+            }
+            aria-pressed={mode === "preview"}
+            onMouseDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (mode === "edit") {
+                commitText(draft);
+                setMode("preview");
+              } else {
+                setMode("edit");
+              }
+            }}
+            className={toolbarButtonClassName(mode === "preview")}
+          >
+            {mode === "edit" ? (
+              <Eye aria-hidden="true" />
+            ) : (
+              <Pencil aria-hidden="true" />
+            )}
+          </Button>
         </div>
       </section>
     );

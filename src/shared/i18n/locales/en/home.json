@@ -81,6 +81,8 @@
       "strikethrough": "Strikethrough",
       "editAria": "Edit sticky note",
       "placeholder": "Write a note...",
+      "preview": "Preview",
+      "edit": "Edit",
       "starterStickies": "Starter stickies",
       "fontSizes": {
         "small": "Small text",
