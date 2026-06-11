@@ -18,6 +18,7 @@ import {
 import { UpdateButton } from "@/features/updates/ui/UpdateButton";
 import { TopBar } from "./TopBar";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
+import { useSessionListRefresh } from "@/features/sessions/hooks/useSessionListRefresh";
 
 interface AppShellLayoutProps {
   children: ReactNode;
@@ -86,6 +87,11 @@ export function AppShellLayout({
   showDesignSystemInspector,
   topBar,
 }: AppShellLayoutProps) {
+  // Externally-spawned ACP sessions (e.g. automation calling `session/new`
+  // directly) are invisible in the sidebar until the session store is
+  // re-hydrated. Refresh on focus + interval so they show up promptly.
+  useSessionListRefresh();
+
   const [sidebarHovered, setSidebarHovered] = useState(false);
   const [sidebarElement, setSidebarElement] = useState<HTMLDivElement | null>(
     null,
