@@ -90,6 +90,7 @@
         "large": "Large text"
       },
       "tones": {
+        "neutral": "Neutral",
         "warm": "Warm",
         "cool": "Cool",
         "rose": "Rose",
@@ -126,6 +127,30 @@
           "body": "G2 automations live in Goose now. View, create, and manage scheduled work here.",
           "action": "Open automations"
         }
+      }
+    },
+    "checklist": {
+      "label": "Checklist",
+      "description": "A checklist pinned to home",
+      "dismiss": "Dismiss checklist",
+      "toolbar": "Checklist tools",
+      "titlePlaceholder": "Checklist",
+      "itemPlaceholder": "List item",
+      "addItem": "Add item",
+      "removeItem": "Remove item",
+      "toggleItem": "Toggle item",
+      "fontSizes": {
+        "small": "Small text",
+        "medium": "Medium text",
+        "large": "Large text"
+      },
+      "tones": {
+        "warm": "Warm",
+        "cool": "Cool",
+        "rose": "Rose",
+        "blue": "Blue",
+        "lavender": "Lavender",
+        "peach": "Peach"
       }
     },
     "unpin": {

@@ -5,6 +5,7 @@ import type { SkillInfo } from "@/features/skills/api/skills";
 export type WidgetCategory =
   | "clock"
   | "note"
+  | "checklist"
   | "agent"
   | "chat"
   | "project"
@@ -140,3 +141,15 @@ export type ProjectArtifactPinState = { projectId: string };
 export type AutomationOutputPinState = { automationId: string };
 export type SkillPinState = { skillId: string };
 export type StickyNoteState = { noteId: string };
+
+export interface ChecklistItemState {
+  id: string;
+  text: string;
+  done: boolean;
+}
+export type ChecklistState = {
+  title?: string;
+  tone?: string;
+  fontSize?: string;
+  items?: ChecklistItemState[];
+};

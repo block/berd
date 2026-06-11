@@ -52,6 +52,7 @@ describe("homeLayoutMapper", () => {
     expect(HOME_LAYOUT_REPLACE_KINDS).toEqual([
       "clock",
       "stickyNote",
+      "checklist",
       "persona",
       "session",
       "project",

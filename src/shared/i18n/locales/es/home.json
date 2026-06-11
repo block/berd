@@ -90,6 +90,7 @@
         "large": "Texto grande"
       },
       "tones": {
+        "neutral": "Neutro",
         "warm": "Cálido",
         "cool": "Frío",
         "rose": "Rosa",
@@ -126,6 +127,30 @@
           "body": "Las automatizaciones de G2 ahora viven en Goose. Puedes ver, crear y gestionar trabajo programado aquí.",
           "action": "Abrir automatizaciones"
         }
+      }
+    },
+    "checklist": {
+      "label": "Lista de tareas",
+      "description": "Una lista de tareas fijada en inicio",
+      "dismiss": "Descartar lista de tareas",
+      "toolbar": "Herramientas de lista de tareas",
+      "titlePlaceholder": "Lista de tareas",
+      "itemPlaceholder": "Elemento de la lista",
+      "addItem": "Agregar elemento",
+      "removeItem": "Eliminar elemento",
+      "toggleItem": "Alternar elemento",
+      "fontSizes": {
+        "small": "Texto pequeño",
+        "medium": "Texto mediano",
+        "large": "Texto grande"
+      },
+      "tones": {
+        "warm": "Cálido",
+        "cool": "Frío",
+        "rose": "Rosa",
+        "blue": "Azul",
+        "lavender": "Lavanda",
+        "peach": "Durazno"
       }
     },
     "unpin": {

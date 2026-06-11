@@ -12,6 +12,7 @@ import { clampToBounds, snapPoint } from "./snapToGrid";
 export const HOME_LAYOUT_REPLACE_KINDS = [
   "clock",
   "stickyNote",
+  "checklist",
   "persona",
   "session",
   "project",
@@ -27,6 +28,7 @@ const DEFAULT_CLOCK_ANCHOR = { x: 0.83, y: 0.18 };
 const KIND_TO_WIDGET_TYPE = {
   clock: "clock",
   stickyNote: "stickyNote",
+  checklist: "checklist",
   persona: "agentPin",
   session: "chatPin",
   project: "projectArtifactPin",
@@ -37,6 +39,7 @@ const KIND_TO_WIDGET_TYPE = {
 const WIDGET_TYPE_TO_KIND: Partial<Record<string, HomeLayoutKind>> = {
   clock: "clock",
   stickyNote: "stickyNote",
+  checklist: "checklist",
   agentPin: "persona",
   chatPin: "session",
   projectArtifactPin: "project",
@@ -48,6 +51,7 @@ function isHomeLayoutKind(kind: LayoutItemKind): kind is HomeLayoutKind {
   switch (kind) {
     case "clock":
     case "stickyNote":
+    case "checklist":
     case "persona":
     case "session":
     case "project":
@@ -156,11 +160,63 @@ function persistedStickyNoteStateFromItem(
   return Object.keys(state).length > 0 ? state : undefined;
 }
 
+function sanitizeChecklistItems(
+  value: unknown,
+): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const items: Array<Record<string, unknown>> = [];
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (typeof record.id === "string" && typeof record.text === "string") {
+      items.push({
+        id: record.id,
+        text: record.text,
+        done: record.done === true,
+      });
+    }
+  }
+  return items;
+}
+
+function persistedChecklistStateFromItem(
+  item: LayoutItem,
+): Record<string, unknown> | undefined {
+  if (typeof item.widgetState !== "object" || item.widgetState === null) {
+    return undefined;
+  }
+
+  const state: Record<string, unknown> = {};
+  if (typeof item.widgetState.title === "string") {
+    state.title = item.widgetState.title;
+  }
+  if (typeof item.widgetState.tone === "string") {
+    state.tone = item.widgetState.tone;
+  }
+  if (typeof item.widgetState.fontSize === "string") {
+    state.fontSize = item.widgetState.fontSize;
+  }
+  const items = sanitizeChecklistItems(item.widgetState.items);
+  if (items.length > 0) {
+    state.items = items;
+  }
+
+  return Object.keys(state).length > 0 ? state : undefined;
+}
+
 function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
   if (item.kind !== "clock" && isSyntheticTarget(item.targetId)) {
-    return item.kind === "stickyNote"
-      ? persistedStickyNoteStateFromItem(item)
-      : undefined;
+    if (item.kind === "stickyNote") {
+      return persistedStickyNoteStateFromItem(item);
+    }
+    if (item.kind === "checklist") {
+      return persistedChecklistStateFromItem(item);
+    }
+    return undefined;
   }
 
   switch (item.kind) {
@@ -182,6 +238,8 @@ function stateForItem(item: LayoutItem): Record<string, unknown> | undefined {
         { noteId: item.targetId },
         persistedStickyNoteStateFromItem(item),
       );
+    case "checklist":
+      return persistedChecklistStateFromItem(item);
     case "skill":
       return { skillId: item.targetId };
     default: {
@@ -218,6 +276,23 @@ function widgetStateForLayoutItem(
       }
       return Object.keys(state).length > 0 ? state : undefined;
     }
+    case "checklist": {
+      const state: Record<string, unknown> = {};
+      if (typeof instance.state?.title === "string") {
+        state.title = instance.state.title;
+      }
+      if (typeof instance.state?.tone === "string") {
+        state.tone = instance.state.tone;
+      }
+      if (typeof instance.state?.fontSize === "string") {
+        state.fontSize = instance.state.fontSize;
+      }
+      const items = sanitizeChecklistItems(instance.state?.items);
+      if (items.length > 0) {
+        state.items = items;
+      }
+      return Object.keys(state).length > 0 ? state : undefined;
+    }
     case "persona":
     case "session":
     case "project":
@@ -247,6 +322,8 @@ function targetIdForWidget(
         : syntheticTarget(instance.id);
     case "stickyNote":
       return nonEmptyStateString(state.noteId) ?? syntheticTarget(instance.id);
+    case "checklist":
+      return syntheticTarget(instance.id);
     case "persona":
       return nonEmptyStateString(state.agentId) ?? syntheticTarget(instance.id);
     case "session":

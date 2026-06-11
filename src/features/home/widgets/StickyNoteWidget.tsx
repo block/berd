@@ -59,12 +59,20 @@ const ONBOARDING_NOTE_CONTENT = {
 } as const;
 
 type OnboardingNoteId = keyof typeof ONBOARDING_NOTE_CONTENT;
-type StickyNoteTone = "warm" | "cool" | "rose" | "blue" | "lavender" | "peach";
+type StickyNoteTone =
+  | "neutral"
+  | "warm"
+  | "cool"
+  | "rose"
+  | "blue"
+  | "lavender"
+  | "peach";
 type StickyNoteFontSize = "small" | "medium" | "large";
 type NoteEditorMode = "edit" | "preview";
 
 const EDIT_SAVE_DELAY_MS = 400;
 const EDITABLE_NOTE_TONES = [
+  "neutral",
   "peach",
   "warm",
   "cool",
@@ -94,6 +102,7 @@ function getEditableTone(
   state: Record<string, unknown> | undefined,
 ): StickyNoteTone {
   switch (state?.tone) {
+    case "neutral":
     case "warm":
     case "cool":
     case "rose":
@@ -121,6 +130,10 @@ function getEditableFontSize(
 
 function toneClassName(tone: StickyNoteTone): string {
   switch (tone) {
+    case "neutral":
+      // Plain card surface — white in light mode, dark in dark mode, matching
+      // the automation output cards.
+      return "bg-card";
     case "warm":
       return "bg-sticky-note-warm";
     case "cool":
@@ -515,7 +528,13 @@ export function StickyNoteWidget({
               >
                 <span
                   aria-hidden="true"
-                  className={cn("size-5 rounded-full", toneClassName(option))}
+                  className={cn(
+                    "size-5 rounded-full",
+                    toneClassName(option),
+                    // The neutral swatch is the card color, so it needs an
+                    // outline to read against the translucent toolbar.
+                    option === "neutral" && "border border-border",
+                  )}
                 />
                 {option === tone ? (
                   <Check

@@ -1,6 +1,7 @@
 import { AgentPinWidget } from "./AgentPinWidget";
 import { AutomationOutputWidget } from "./AutomationOutputWidget";
 import { ChatPinWidget } from "./ChatPinWidget";
+import { ChecklistWidget } from "./ChecklistWidget";
 import { ClockWidget } from "./ClockWidget";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 import { SkillPinWidget } from "./SkillPinWidget";
@@ -74,6 +75,20 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       maxHeight: 320,
     },
     Component: StickyNoteWidget,
+  },
+  {
+    id: "checklist",
+    category: "checklist",
+    labelKey: "widgets.checklist.label",
+    descriptionKey: "widgets.checklist.description",
+    defaultSize: { width: 240, height: 248 },
+    sizeBounds: {
+      minWidth: 200,
+      maxWidth: 420,
+      minHeight: 160,
+      maxHeight: 560,
+    },
+    Component: ChecklistWidget,
   },
   {
     id: "agentPin",
