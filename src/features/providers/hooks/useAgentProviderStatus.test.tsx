@@ -409,4 +409,50 @@ describe("useAgentProviderStatus", () => {
     );
     expect(result.current.readyAgentIds.has("claude-acp")).toBe(false);
   });
+
+  it("marks codex-acp not_installed when its ACP bridge is missing", async () => {
+    // Main CLI (Homebrew codex) is installed and even has an update available,
+    // but the codex-acp bridge binary is absent: the crate flags status="warn"
+    // with fixType="bridge", keeps `path` on the main CLI, and leaves
+    // bridge/bridgePath null. The bridge is what makes Codex usable over ACP,
+    // so the agent must read as not_installed (offering the bridge Install),
+    // not ready.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          authStatus: null,
+          installSource: "brew",
+          installedVersion: "0.137.0",
+          latestVersion: "0.139.0",
+          updateAvailable: true,
+          main: {
+            installSource: "brew",
+            installedVersion: "0.137.0",
+            latestVersion: "0.139.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "brew upgrade codex",
+            updateFixType: "updateMain",
+          },
+          bridge: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("codex-acp")).toBe(
+      "not_installed",
+    );
+    expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
+  });
 });

@@ -38,6 +38,17 @@ function readinessFromReport(
     // is still surfaced via `checksByProviderId` for the version readout.
     if (providerId === "goose") continue;
 
+    // A two-binary ACP agent whose main CLI is present but whose ACP bridge
+    // binary is missing: the doctor crate flags it status="warn" with
+    // fixType="bridge", leaves bridge/bridgePath null, and keeps `path`
+    // pointed at the main CLI. The bridge is what makes the agent usable over
+    // ACP, so surface the bridge Install action instead of treating the agent
+    // as installed/ready.
+    if (check.fixType === "bridge") {
+      readiness.set(providerId, "not_installed");
+      continue;
+    }
+
     const installed =
       (check.status === "pass" || check.status === "warn") &&
       (check.path != null || check.bridgePath != null);

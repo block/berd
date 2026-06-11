@@ -16,6 +16,7 @@ const installAgent = vi.fn();
 const authenticateAgent = vi.fn();
 const updateAgent = vi.fn();
 const onAgentSetupOutput = vi.fn();
+const nextAgentInstallFix = vi.fn();
 
 vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) => checkAgentInstalled(...args),
@@ -23,6 +24,7 @@ vi.mock("@/features/providers/api/agentSetup", () => ({
   authenticateAgent: (...args: unknown[]) => authenticateAgent(...args),
   updateAgent: (...args: unknown[]) => updateAgent(...args),
   onAgentSetupOutput: (...args: unknown[]) => onAgentSetupOutput(...args),
+  nextAgentInstallFix: (...args: unknown[]) => nextAgentInstallFix(...args),
 }));
 
 const rerunDoctorReport = vi.fn();
@@ -102,6 +104,9 @@ describe("AgentProviderCard", () => {
     onAgentSetupOutput.mockResolvedValue(vi.fn());
     rerunDoctorReport.mockResolvedValue(undefined);
     invalidateDoctorReport.mockResolvedValue(undefined);
+    // Default: nothing further to install after the seeded recipe, so every
+    // existing single-install assertion stays a one-pass install.
+    nextAgentInstallFix.mockResolvedValue(null);
   });
 
   it("shows the checking indicator only during the shared report's first load", async () => {
@@ -214,6 +219,10 @@ describe("AgentProviderCard", () => {
       await screen.findByRole("button", { name: /install claude/i }),
     );
 
+    // A plain install (no bridge-missing check) dispatches the main-CLI recipe.
+    await waitFor(() => {
+      expect(installAgent).toHaveBeenCalledWith("claude-acp", "command");
+    });
     await waitFor(() => {
       expect(checkAgentInstalled).toHaveBeenCalledWith("claude-acp");
     });
@@ -304,7 +313,7 @@ describe("AgentProviderCard", () => {
     ).toBeInTheDocument();
   });
 
-  it("wires the bottom Update button to the per-readout update command", async () => {
+  it("wires the top-right Update button to the per-readout update command", async () => {
     const user = userEvent.setup();
     updateAgent.mockResolvedValue(undefined);
 
@@ -337,7 +346,7 @@ describe("AgentProviderCard", () => {
 
     expect(screen.getByText("Update available → v1.3.0")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: /^update$/i }));
+    await user.click(screen.getByRole("button", { name: /update claude/i }));
 
     await waitFor(() => {
       expect(updateAgent).toHaveBeenCalledWith(
@@ -354,6 +363,324 @@ describe("AgentProviderCard", () => {
       expect(rerunDoctorReport).toHaveBeenCalled();
     });
     expect(invalidateDoctorReport).not.toHaveBeenCalled();
+  });
+
+  it("offers Fix (no tick, no plain Update) when the ACP bridge is missing and the main CLI is out of date", () => {
+    // Codex's main CLI is installed via Homebrew with an update available, but
+    // the codex-acp bridge is absent. The shared report resolves this to
+    // not_installed (fixType="bridge") *and* an update is pending, so the
+    // single top-right action becomes "Fix" — not a ready tick, and not the
+    // plain "Update" affordance (one click both installs the bridge and brings
+    // the CLI current).
+    const { container } = renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          installSource: "brew",
+          installedVersion: "0.137.0",
+          latestVersion: "0.139.0",
+          updateAvailable: true,
+          main: {
+            installSource: "brew",
+            installedVersion: "0.137.0",
+            latestVersion: "0.139.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "brew upgrade codex",
+            updateFixType: "updateMain",
+          },
+          bridge: null,
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /fix codex/i }),
+    ).toBeInTheDocument();
+    // The success/ready tick (the only `.text-success` element) is absent.
+    expect(container.querySelector(".text-success")).toBeNull();
+    // No bare "Update" affordance — the combined action is "Fix", not Update.
+    expect(
+      screen.queryByRole("button", { name: /^update$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Fix installs the missing component and applies pending updates in one pass", async () => {
+    const user = userEvent.setup();
+    installAgent.mockResolvedValue(undefined);
+    updateAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          installSource: "brew",
+          installedVersion: "0.137.0",
+          latestVersion: "0.139.0",
+          updateAvailable: true,
+          main: {
+            installSource: "brew",
+            installedVersion: "0.137.0",
+            latestVersion: "0.139.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "brew upgrade codex",
+            updateFixType: "updateMain",
+          },
+          bridge: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /fix codex/i }));
+
+    // One click installs the missing bridge and brings the stale CLI current.
+    // The install step must dispatch the *bridge* recipe (the check's
+    // fixType="bridge"), not the static main-CLI recipe — otherwise codex-acp
+    // is silently skipped while the already-present CLI is reinstalled.
+    await waitFor(() => {
+      expect(installAgent).toHaveBeenCalledWith("codex-acp", "bridge");
+    });
+    await waitFor(() => {
+      expect(updateAgent).toHaveBeenCalledWith(
+        "codex-acp",
+        "updateMain",
+        "brew upgrade codex",
+      );
+    });
+  });
+
+  it("installs both binaries of a from-scratch two-binary agent in one click", async () => {
+    const user = userEvent.setup();
+    installAgent.mockResolvedValue(undefined);
+    authenticateAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+    // From scratch the crate reports the main CLI first (fixType="command");
+    // once it lands the now-visible bridge surfaces, then nothing remains.
+    nextAgentInstallFix.mockResolvedValueOnce("bridge").mockResolvedValue(null);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "fail",
+          path: null,
+          bridgePath: null,
+          fixType: "command",
+          main: null,
+          bridge: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /install codex/i }));
+
+    // One click installs the main CLI then the now-visible bridge, in order.
+    await waitFor(() => {
+      expect(installAgent).toHaveBeenCalledTimes(2);
+    });
+    expect(installAgent).toHaveBeenNthCalledWith(1, "codex-acp", "command");
+    expect(installAgent).toHaveBeenNthCalledWith(2, "codex-acp", "bridge");
+    // The chain then proceeds into auth as before.
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("codex-acp");
+    });
+  });
+
+  it("installs a single-binary agent in one pass without a spurious bridge call", async () => {
+    const user = userEvent.setup();
+    installAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+    // Single-binary agents (Copilot/Cursor) resolve their only binary; the
+    // re-probe reports nothing further to install.
+    nextAgentInstallFix.mockResolvedValue(null);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "copilot-acp",
+          displayName: "Copilot",
+          binaryName: "copilot",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-copilot",
+          label: "Copilot",
+          status: "fail",
+          path: null,
+          bridgePath: null,
+          fixType: "command",
+          main: null,
+          bridge: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /install copilot/i }));
+
+    await waitFor(() => {
+      expect(checkAgentInstalled).toHaveBeenCalledWith("copilot-acp");
+    });
+    expect(installAgent).toHaveBeenCalledTimes(1);
+    expect(installAgent).toHaveBeenCalledWith("copilot-acp", "command");
+    expect(installAgent).not.toHaveBeenCalledWith("copilot-acp", "bridge");
+  });
+
+  it("stops the install loop when the re-probe makes no progress", async () => {
+    const user = userEvent.setup();
+    installAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+    // An install that didn't take leaves the same fix pending; the ranFixTypes
+    // guard must short-circuit so the loop terminates instead of spinning.
+    nextAgentInstallFix.mockResolvedValue("command");
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: false,
+          supportsAuthStatus: false,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "fail",
+          path: null,
+          bridgePath: null,
+          fixType: "command",
+          main: null,
+          bridge: null,
+        })}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: /install codex/i }));
+
+    // The loop runs the seeded recipe once and stops; the chain then reaches
+    // the post-install verification rather than hanging on a repeating fix.
+    await waitFor(() => {
+      expect(checkAgentInstalled).toHaveBeenCalledWith("codex-acp");
+    });
+    expect(installAgent).toHaveBeenCalledTimes(1);
+    expect(installAgent).toHaveBeenCalledWith("codex-acp", "command");
+  });
+
+  it("flags the missing ACP bridge in danger text when only the main CLI is installed", () => {
+    // Same partial-install scenario as above: Codex's CLI is on PATH but the
+    // codex-acp bridge is absent. The card body must name the missing bridge in
+    // danger-colored text so it isn't mistaken for a healthy install, while
+    // keeping the accurate "Installed via Homebrew" version line.
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          id: "codex-acp",
+          displayName: "Codex",
+          binaryName: "codex-acp",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          id: "ai-agent-codex",
+          label: "Codex",
+          status: "warn",
+          path: "/opt/homebrew/bin/codex",
+          bridgePath: null,
+          fixType: "bridge",
+          installSource: "brew",
+          installedVersion: "0.137.0",
+          latestVersion: "0.139.0",
+          updateAvailable: true,
+          main: {
+            installSource: "brew",
+            installedVersion: "0.137.0",
+            latestVersion: "0.139.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "brew upgrade codex",
+            updateFixType: "updateMain",
+          },
+          bridge: null,
+        })}
+      />,
+    );
+
+    const missing = screen.getByText(/codex-acp not installed/i);
+    expect(missing).toBeInTheDocument();
+    expect(missing).toHaveClass("text-destructive");
+    // The accurate install/version line stays alongside the warning.
+    expect(
+      screen.getByText("Installed via Homebrew · v0.137.0"),
+    ).toBeInTheDocument();
+  });
+
+  it("does not flag a missing component for a fully installed provider", () => {
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({ supportsAuth: false })}
+        statusLoading={false}
+        readiness={"ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "brew",
+          installedVersion: "1.2.3",
+        })}
+      />,
+    );
+
+    expect(screen.queryByText(/not installed/i)).not.toBeInTheDocument();
   });
 
   it("runs every actionable readout sequentially when both main and bridge are out of date", async () => {
@@ -392,7 +719,7 @@ describe("AgentProviderCard", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /^update$/i }));
+    await user.click(screen.getByRole("button", { name: /update claude/i }));
 
     await waitFor(() => {
       expect(updateAgent).toHaveBeenCalledTimes(2);

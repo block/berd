@@ -292,6 +292,7 @@ pub fn run() {
             commands::agent_setup::install_agent,
             commands::agent_setup::authenticate_agent,
             commands::agent_setup::update_agent,
+            commands::agent_setup::next_agent_install_fix,
             commands::path_resolver::resolve_path,
             commands::path_resolver::check_directories_exist,
             commands::diagnostics::probe_kgoose_connectivity,

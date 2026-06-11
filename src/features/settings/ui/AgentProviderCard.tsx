@@ -1,4 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/shared/lib/cn";
@@ -10,6 +16,7 @@ import {
   IconAlertTriangle,
   IconMessageCircle,
   IconPlus,
+  IconTool,
 } from "@tabler/icons-react";
 import { ArrowUpCircle } from "lucide-react";
 import {
@@ -18,14 +25,16 @@ import {
   authenticateAgent,
   onAgentSetupOutput,
   updateAgent,
+  nextAgentInstallFix,
 } from "@/features/providers/api/agentSetup";
 import {
   describeAgentVersion,
+  missingAgentComponents,
   type AgentBinaryReadout,
 } from "../lib/agentVersionDisplay";
 import { rerunDoctorReport } from "@/shared/api/useDoctorReport";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
-import type { DoctorCheck } from "@/shared/api/doctor";
+import type { DoctorCheck, FixType } from "@/shared/api/doctor";
 import { ProviderSetupOutput } from "./ProviderSetupOutput";
 import { AgentVersionInfo } from "./AgentVersionInfo";
 import {
@@ -110,6 +119,33 @@ export function AgentProviderCard({
   const isInstalled =
     resolvedReadiness === "ready" || resolvedReadiness === "not_ready";
 
+  // Version / update / partial-install readout from the shared report. Derived
+  // here (above the setup handlers) so the handlers and the single top-right
+  // indicator share one source of truth.
+  const versionDisplay = versionCheck
+    ? describeAgentVersion(versionCheck)
+    : null;
+  // Per-readout updates the crate can actually run (a newer version *and* a
+  // runnable source-aware command). Drives both the Update/Fix label and the
+  // commands runUpdates / runInstall apply.
+  const actionableReadouts =
+    versionDisplay?.readouts.filter(
+      (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
+    ) ?? [];
+  const hasActionableUpdate = actionableReadouts.length > 0;
+  // Required binaries the report says are missing while others are present
+  // (e.g. Codex's CLI is on PATH but the codex-acp bridge isn't). Surfaced in
+  // danger text so a partial install isn't mistaken for a healthy one.
+  const missingComponents = versionCheck
+    ? missingAgentComponents(versionCheck, provider.binaryName)
+    : [];
+  // Which install recipe the serial fix chain's install step should run. The
+  // crate flags a missing ACP bridge (main CLI present) with fixType="bridge",
+  // so dispatch that recipe instead of the static main-CLI one; anything else
+  // (an absent check, or the update/auth fix types) falls back to "command".
+  const installFixType: FixType =
+    versionCheck?.fixType === "bridge" ? "bridge" : "command";
+
   const clearListener = useCallback(() => {
     unlistenRef.current?.();
     unlistenRef.current = null;
@@ -161,13 +197,16 @@ export function AgentProviderCard({
     lineCounterRef.current = 0;
 
     if (supportsInstall && resolvedReadiness === "not_installed") {
-      await runInstall();
+      // Pass the pending updates so a partial install with stale binaries
+      // (the "Fix" state) is brought fully current in one pass; for a plain
+      // "Install" this list is empty and the loop is a no-op.
+      await runInstall(actionableReadouts);
     } else if (supportsAuth) {
       await runAuth();
     }
   }
 
-  async function runInstall() {
+  async function runInstall(updateReadouts: AgentBinaryReadout[] = []) {
     if (!supportsInstall) return;
     setSetupPhase("installing");
 
@@ -190,7 +229,42 @@ export function AgentProviderCard({
         throw new Error("Command exited with code 1");
       }
 
-      await installAgent(provider.id);
+      // Install every missing component the report surfaces, one recipe per
+      // pass. A two-binary agent installed from scratch reports its main CLI
+      // first (fixType="command"); once it lands, the now-visible bridge
+      // surfaces as fixType="bridge". Re-probe after each install and run the
+      // next install fix the crate reports, so a from-scratch Codex installs
+      // codex + codex-acp under one click. The bridge-only "Fix" path is
+      // unchanged: it seeds "bridge", and the re-probe then returns null (or
+      // auth) so the loop runs exactly once. A `ranFixTypes` guard runs each
+      // recipe at most once, bounding the loop to ≤2 passes and terminating a
+      // stuck install (re-probe returning the same type) instead of spinning;
+      // refreshInstallStatus below then surfaces the verification error.
+      let pendingFix: FixType | null = installFixType;
+      const ranFixTypes = new Set<FixType>();
+      while (pendingFix && !ranFixTypes.has(pendingFix)) {
+        ranFixTypes.add(pendingFix);
+        await installAgent(provider.id, pendingFix);
+        if (!isMountedRef.current) return;
+        pendingFix = await nextAgentInstallFix(provider.id);
+        if (!isMountedRef.current) return;
+      }
+
+      // "Fix": when the agent is partially installed *and* has updates pending
+      // (e.g. Codex's main CLI is on PATH with a newer release available but
+      // the codex-acp bridge isn't installed), bring the already-present
+      // binaries up to date in the same click so nothing is left stale. The
+      // listener stays attached so this output streams too.
+      for (const readout of updateReadouts) {
+        if (!readout.updateFixType || !readout.updateCommand) continue;
+        await updateAgent(
+          provider.id,
+          readout.updateFixType,
+          readout.updateCommand,
+        );
+        if (!isMountedRef.current) return;
+      }
+
       clearListener();
       if (!isMountedRef.current) return;
 
@@ -375,6 +449,31 @@ export function AgentProviderCard({
 
   if (provider.showOnlyWhenInstalled && !isInstalled) return null;
 
+  // The single top-right call-to-action shared by the Install / Update / Fix
+  // states: an attention-colored outline button that resolves every
+  // outstanding install/update issue for the agent in one click. The green
+  // ready tick takes this slot once nothing is left to do.
+  function renderActionButton(
+    label: string,
+    ariaLabel: string,
+    icon: ReactNode,
+    onClick: () => void,
+  ) {
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        leftIcon={icon}
+        onClick={onClick}
+        aria-label={ariaLabel}
+        className="flex-shrink-0 text-warning"
+      >
+        {label}
+      </Button>
+    );
+  }
+
   function renderStatusIndicator() {
     if (setupError) {
       return (
@@ -409,7 +508,18 @@ export function AgentProviderCard({
       );
     }
 
-    if (isBuiltIn || isReady) {
+    // Installed and usable: a green tick when nothing is pending, otherwise the
+    // amber Update button takes the tick's slot (one click runs every
+    // actionable per-readout update command).
+    if (isReady) {
+      if (hasActionableUpdate) {
+        return renderActionButton(
+          t("providers.agents.applyUpdates"),
+          t("providers.agents.updateLabel", { name: provider.displayName }),
+          <ArrowUpCircle aria-hidden="true" />,
+          () => void runUpdates(actionableReadouts),
+        );
+      }
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
           <IconCheck className="size-4 text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
@@ -434,21 +544,25 @@ export function AgentProviderCard({
       );
     }
 
+    // Missing one or more required tools: "Install" when only an install is
+    // needed, or "Fix" when the agent is *also* out of date (e.g. Codex's main
+    // CLI is on PATH with a pending update but the codex-acp bridge isn't
+    // installed). Both run the install and apply any pending updates in one
+    // pass via handleConnect -> runInstall.
     if (needsInstall && !isActive) {
-      return (
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon-xs"
-          onClick={() => void handleConnect()}
-          className="flex-shrink-0 text-muted-foreground"
-          aria-label={t("providers.agents.installLabel", {
-            name: provider.displayName,
-          })}
-        >
-          <IconPlus className="size-4" />
-        </Button>
-      );
+      return hasActionableUpdate
+        ? renderActionButton(
+            t("providers.agents.fix"),
+            t("providers.agents.fixLabel", { name: provider.displayName }),
+            <IconTool aria-hidden="true" />,
+            () => void handleConnect(),
+          )
+        : renderActionButton(
+            t("providers.agents.install"),
+            t("providers.agents.installLabel", { name: provider.displayName }),
+            <IconPlus aria-hidden="true" />,
+            () => void handleConnect(),
+          );
     }
 
     return null;
@@ -505,16 +619,6 @@ export function AgentProviderCard({
 
   const setupFailureMessage = getSetupFailureMessage();
 
-  const versionDisplay = versionCheck
-    ? describeAgentVersion(versionCheck)
-    : null;
-  const actionableReadouts =
-    versionDisplay?.readouts.filter(
-      (r) => r.updateAvailable && r.updateFixType && r.updateCommand,
-    ) ?? [];
-  const showUpdateButton =
-    !isActive && !setupError && actionableReadouts.length > 0;
-
   return (
     <div
       className={cn(
@@ -538,26 +642,23 @@ export function AgentProviderCard({
           {versionCheck && !isActive ? (
             <AgentVersionInfo check={versionCheck} className="mt-1" />
           ) : null}
+          {!isActive && missingComponents.length > 0 ? (
+            <div className="mt-1 flex flex-col gap-1">
+              {missingComponents.map((name) => (
+                <span
+                  key={name}
+                  className="break-words text-xs text-destructive"
+                >
+                  {t("providers.agents.missingComponent", { name })}
+                </span>
+              ))}
+            </div>
+          ) : null}
         </div>
         {renderStatusIndicator()}
       </div>
 
       {renderSetupProgress()}
-
-      {showUpdateButton && (
-        <div className="mt-3 flex justify-end">
-          <Button
-            type="button"
-            variant="outline"
-            size="xs"
-            leftIcon={<ArrowUpCircle aria-hidden="true" />}
-            onClick={() => void runUpdates(actionableReadouts)}
-            className="text-warning"
-          >
-            {t("providers.agents.applyUpdates")}
-          </Button>
-        </div>
-      )}
 
       {setupError && !isActive && (
         <div className="mt-3 space-y-2 border-t pt-3">

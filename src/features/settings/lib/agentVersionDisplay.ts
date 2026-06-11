@@ -134,3 +134,31 @@ export function describeAgentVersion(
     hasActionableUpdate: readouts.some((readout) => readout.updateAvailable),
   };
 }
+
+// Names of required binaries the doctor report shows missing *while another
+// binary for the same agent is present* — i.e. a partial install (the agent's
+// CLI is on PATH but its ACP bridge isn't). Returned as a list so a card can
+// flag each gap in danger text instead of letting a half-installed agent read
+// like a healthy one. A fully-uninstalled agent returns `[]`: its missing-ness
+// is already obvious from the Install action and the absent version line, so we
+// only call out *partial* gaps here.
+export function missingAgentComponents(
+  check: DoctorCheck,
+  binaryName: string | null | undefined,
+): string[] {
+  // The crate flags "main CLI present, ACP bridge missing" with
+  // fixType="bridge": `path` stays on the main CLI while `bridge`/`bridgePath`
+  // are left null. The provider catalog tracks that bridge binary as
+  // `binaryName`, so name it from there rather than parsing the human message.
+  // This is provider-agnostic — it fires for any two-binary ACP agent in this
+  // state, not just Codex.
+  if (
+    check.fixType === "bridge" &&
+    check.bridge == null &&
+    check.bridgePath == null &&
+    binaryName
+  ) {
+    return [binaryName];
+  }
+  return [];
+}

@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   useCredentials: vi.fn(),
   checkAgentInstalled: vi.fn(),
   installAgent: vi.fn(),
+  nextAgentInstallFix: vi.fn(),
   useAgentProviderStatus: vi.fn(),
 }));
 
@@ -28,6 +29,8 @@ vi.mock("@/features/providers/api/agentSetup", () => ({
   checkAgentInstalled: (...args: unknown[]) =>
     mocks.checkAgentInstalled(...args),
   installAgent: (...args: unknown[]) => mocks.installAgent(...args),
+  nextAgentInstallFix: (...args: unknown[]) =>
+    mocks.nextAgentInstallFix(...args),
   authenticateAgent: vi.fn(),
   onAgentSetupOutput: vi.fn(async () => vi.fn()),
 }));
@@ -120,6 +123,7 @@ describe("ProvidersSettings", () => {
     useDistroStore.setState({ loaded: false, manifest: { present: false } });
     mocks.checkAgentInstalled.mockResolvedValue(true);
     mocks.installAgent.mockResolvedValue(undefined);
+    mocks.nextAgentInstallFix.mockResolvedValue(null);
     mocks.useAgentProviderStatus.mockReturnValue({
       readyAgentIds: new Set<string>(["goose"]),
       agentReadiness: new Map<string, AgentProviderReadiness>([

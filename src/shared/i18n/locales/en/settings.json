@@ -406,7 +406,11 @@
         "unknownPath": "that path",
         "unknownPlatform": "another platform"
       },
+      "fix": "Fix",
+      "fixLabel": "Fix {{name}}",
+      "install": "Install",
       "installLabel": "Install {{name}}",
+      "missingComponent": "{{name}} not installed",
       "progress": {
         "installing": "Installing {{name}}...",
         "step": "Step {{step}} of {{total}}",
@@ -420,7 +424,8 @@
         "setupFailed": "Setup failed"
       },
       "title": "Agent harnesses",
-      "troubleshootInChat": "Troubleshoot in chat"
+      "troubleshootInChat": "Troubleshoot in chat",
+      "updateLabel": "Update {{name}}"
     },
     "custom": {
       "actions": {

@@ -50,9 +50,47 @@ pub async fn check_agent_installed(provider_id: String) -> Result<bool, String> 
     Ok(check.path.is_some() || check.bridge_path.is_some())
 }
 
+/// The install recipe a check still needs, if any. Only the two *install* fix
+/// types qualify — `Auth` (installed-but-signed-out) and the per-readout update
+/// types are handled by later chain steps, not the install loop.
+fn install_fix_for_check(check: &doctor::DoctorCheck) -> Option<FixType> {
+    match check.fix_type {
+        Some(FixType::Command) => Some(FixType::Command),
+        Some(FixType::Bridge) => Some(FixType::Bridge),
+        _ => None,
+    }
+}
+
+/// Which install recipe (if any) the agent still needs after the last install.
+/// A from-scratch two-binary agent (e.g. Codex's `codex` + `codex-acp`) reports
+/// its main CLI first (`fixType="command"`); once it lands the now-visible
+/// bridge surfaces as `fixType="bridge"`. The frontend's install loop calls
+/// this after each install so a from-scratch agent installs its CLI *and* its
+/// ACP bridge under one click instead of needing a second press.
 #[tauri::command]
-pub async fn install_agent(app_handle: AppHandle, provider_id: String) -> Result<(), String> {
-    run_fix(app_handle, provider_id, FixType::Command, None).await
+pub async fn next_agent_install_fix(provider_id: String) -> Result<Option<FixType>, String> {
+    let check = find_check(&provider_id).await?;
+    Ok(install_fix_for_check(&check))
+}
+
+/// Install a missing agent component. `fix_type` selects the recipe: the
+/// default [`FixType::Command`] installs the agent's own CLI, while
+/// [`FixType::Bridge`] installs its ACP adapter. A bridge-missing check reports
+/// `fixType="bridge"`, and the frontend's serial fix chain forwards it here so
+/// the bridge install isn't skipped in favour of the (already-present) CLI.
+#[tauri::command]
+pub async fn install_agent(
+    app_handle: AppHandle,
+    provider_id: String,
+    fix_type: Option<FixType>,
+) -> Result<(), String> {
+    run_fix(
+        app_handle,
+        provider_id,
+        fix_type.unwrap_or(FixType::Command),
+        None,
+    )
+    .await
 }
 
 #[tauri::command]
@@ -131,5 +169,60 @@ mod tests {
     #[test]
     fn crate_check_id_passes_through_goose() {
         assert_eq!(crate_check_id("goose"), "ai-agent-goose");
+    }
+
+    fn check_with_fix(fix_type: Option<FixType>) -> doctor::DoctorCheck {
+        doctor::DoctorCheck {
+            id: "ai-agent-codex".into(),
+            label: "Codex".into(),
+            status: doctor::CheckStatus::Warn,
+            message: String::new(),
+            fix_url: None,
+            fix_command: None,
+            fix_type,
+            path: None,
+            bridge_path: None,
+            raw_output: None,
+            auth_status: None,
+            installed_version: None,
+            latest_version: None,
+            update_available: None,
+            install_source: None,
+            self_updating: None,
+            main: None,
+            bridge: None,
+        }
+    }
+
+    #[test]
+    fn install_fix_for_check_returns_the_two_install_recipes() {
+        assert_eq!(
+            install_fix_for_check(&check_with_fix(Some(FixType::Command))),
+            Some(FixType::Command)
+        );
+        assert_eq!(
+            install_fix_for_check(&check_with_fix(Some(FixType::Bridge))),
+            Some(FixType::Bridge)
+        );
+    }
+
+    #[test]
+    fn install_fix_for_check_ignores_auth_update_and_absent_fixes() {
+        // Auth and the per-readout update fixes are handled by later chain
+        // steps, not the install loop, so they don't keep the loop running.
+        assert_eq!(
+            install_fix_for_check(&check_with_fix(Some(FixType::Auth))),
+            None
+        );
+        assert_eq!(
+            install_fix_for_check(&check_with_fix(Some(FixType::UpdateMain))),
+            None
+        );
+        assert_eq!(
+            install_fix_for_check(&check_with_fix(Some(FixType::UpdateBridge))),
+            None
+        );
+        // A fully-installed agent has no install fix pending.
+        assert_eq!(install_fix_for_check(&check_with_fix(None)), None);
     }
 }

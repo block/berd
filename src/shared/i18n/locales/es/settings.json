@@ -406,7 +406,11 @@
         "unknownPath": "esa ruta",
         "unknownPlatform": "otra plataforma"
       },
+      "fix": "Reparar",
+      "fixLabel": "Reparar {{name}}",
+      "install": "Instalar",
       "installLabel": "Instalar {{name}}",
+      "missingComponent": "{{name}} no está instalado",
       "progress": {
         "installing": "Instalando {{name}}...",
         "step": "Paso {{step}} de {{total}}",
@@ -420,7 +424,8 @@
         "setupFailed": "La configuración falló"
       },
       "title": "Arneses de agentes",
-      "troubleshootInChat": "Solucionar en chat"
+      "troubleshootInChat": "Solucionar en chat",
+      "updateLabel": "Actualizar {{name}}"
     },
     "custom": {
       "actions": {
