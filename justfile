@@ -193,19 +193,24 @@ dev:
 
     EXTRA_CONFIG_ARGS=(--config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
 
-    if git rev-parse --is-inside-work-tree &>/dev/null; then
-        GIT_DIR=$(git rev-parse --git-dir)
-        if [[ "$GIT_DIR" == *".git/worktrees/"* ]]; then
-            BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
-            WORKTREE_LABEL="${BRANCH_NAME##*/}"
-            ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
-            mkdir -p "$ICON_DIR"
-            DEV_ICON="$ICON_DIR/icon.icns"
-            if swift scripts/generate-dev-icon.swift src-tauri/icons/icon.icns "$DEV_ICON" "$WORKTREE_LABEL"; then
-                echo "🌳 Worktree: ${WORKTREE_LABEL}"
-                EXTRA_CONFIG_ARGS+=(--config "{\"bundle\":{\"icon\":[\"$DEV_ICON\"]}}")
-            fi
-        fi
+    ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
+    mkdir -p "$ICON_DIR"
+    DEV_ICON_LABEL="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || true)"
+    if [[ -z "$DEV_ICON_LABEL" || "$DEV_ICON_LABEL" == "HEAD" ]]; then
+        DEV_ICON_LABEL="local"
+    fi
+    DEV_ICON_LABEL="${DEV_ICON_LABEL##*/}"
+    DEV_ICON_SLUG="$(node -e 'const label = process.argv[1] || "local"; process.stdout.write(label.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48) || "local");' "$DEV_ICON_LABEL")"
+    DEV_ICON_CACHE_KEY="$(node -e 'const { createHash } = require("node:crypto"); const { readFileSync } = require("node:fs"); const [label, ...files] = process.argv.slice(1); const hash = createHash("sha256"); hash.update(label); for (const file of files) hash.update(readFileSync(file)); process.stdout.write(hash.digest("hex").slice(0, 12));' "$DEV_ICON_LABEL" scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns)"
+    DEV_ICON_PNG="$ICON_DIR/icon-${DEV_ICON_SLUG}-${DEV_ICON_CACHE_KEY}.png"
+    DEV_APP_ICON="$ICON_DIR/icon-${DEV_ICON_SLUG}-${DEV_ICON_CACHE_KEY}.icns"
+    if node scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns "$DEV_ICON_PNG" "$DEV_ICON_LABEL" && \
+       node scripts/generate-dev-icon.mjs src-tauri/icons/icon.icns "$DEV_APP_ICON" "$DEV_ICON_LABEL"; then
+        export GOOSE_INTERNAL_DEV_APP_NAME="Goose (${DEV_ICON_LABEL})"
+        export GOOSE_INTERNAL_DEV_APP_ICON="$DEV_ICON_PNG"
+        DEV_ICON_CONFIG="$(node -e 'const [label, icns, png] = process.argv.slice(1); process.stdout.write(JSON.stringify({ productName: `Goose (${label})`, bundle: { icon: [icns, png] } }));' "$DEV_ICON_LABEL" "$DEV_APP_ICON" "$DEV_ICON_PNG")"
+        echo "Using blue dev icon: ${DEV_ICON_PNG} (${DEV_ICON_LABEL})"
+        EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 
     pnpm tauri dev --features app-test-driver --config src-tauri/tauri.dev.conf.json "${EXTRA_CONFIG_ARGS[@]}"

@@ -3,9 +3,11 @@ mod services;
 mod types;
 
 #[cfg(target_os = "macos")]
-use objc2_app_kit::NSApplication;
+use objc2::AnyThread;
 #[cfg(target_os = "macos")]
-use objc2_foundation::{MainThreadMarker, NSString};
+use objc2_app_kit::{NSApplication, NSImage};
+#[cfg(target_os = "macos")]
+use objc2_foundation::{MainThreadMarker, NSProcessInfo, NSString};
 use services::{bundled_agents, bundled_skills, distro_bundle::DistroBundleState};
 #[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
@@ -18,6 +20,10 @@ use tauri_plugin_window_state::StateFlags;
 #[cfg(target_os = "macos")]
 const TRAFFIC_LIGHT_POSITION: (f64, f64) = (14.0, 28.0);
 const APP_LOG_MAX_FILE_SIZE_BYTES: u128 = 10 * 1024 * 1024;
+#[cfg(target_os = "macos")]
+const DEV_APP_NAME_ENV: &str = "GOOSE_INTERNAL_DEV_APP_NAME";
+#[cfg(target_os = "macos")]
+const DEV_APP_ICON_ENV: &str = "GOOSE_INTERNAL_DEV_APP_ICON";
 
 fn install_panic_logging_hook() {
     std::panic::set_hook(Box::new(|info| {
@@ -31,9 +37,51 @@ fn install_panic_logging_hook() {
     }));
 }
 
+#[cfg(target_os = "macos")]
+fn set_dev_process_name() {
+    let Ok(app_name) = std::env::var(DEV_APP_NAME_ENV) else {
+        return;
+    };
+    let app_name = app_name.trim();
+    if app_name.is_empty() {
+        return;
+    }
+
+    NSProcessInfo::processInfo().setProcessName(&NSString::from_str(app_name));
+}
+
+#[cfg(target_os = "macos")]
+fn set_dev_dock_icon() {
+    let Ok(icon_path) = std::env::var(DEV_APP_ICON_ENV) else {
+        return;
+    };
+    let icon_path = icon_path.trim();
+    if icon_path.is_empty() {
+        return;
+    }
+
+    let Some(mtm) = MainThreadMarker::new() else {
+        return;
+    };
+
+    let Some(icon) =
+        NSImage::initWithContentsOfFile(NSImage::alloc(), &NSString::from_str(icon_path))
+    else {
+        log::warn!("Failed to load dev app icon from {icon_path}");
+        return;
+    };
+
+    let ns_app = NSApplication::sharedApplication(mtm);
+    unsafe {
+        ns_app.setApplicationIconImage(Some(&icon));
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     install_panic_logging_hook();
+    #[cfg(target_os = "macos")]
+    set_dev_process_name();
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -170,6 +218,7 @@ pub fn run() {
             // "Goose" instead of the lowercase Cargo binary name "goose".
             #[cfg(target_os = "macos")]
             {
+                set_dev_dock_icon();
                 refresh_traffic_light_position_on_window_changes(app);
                 attach_main_window_lifecycle(app);
 

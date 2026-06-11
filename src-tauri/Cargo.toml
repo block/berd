@@ -53,8 +53,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 mac-notification-sys = "0.6.12"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSMenu", "NSMenuItem"] }
-objc2-foundation = { version = "0.3.2", features = ["NSString"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem"] }
+objc2-foundation = { version = "0.3.2", features = ["NSProcessInfo", "NSString"] }
 
 
 [features]
