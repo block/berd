@@ -18,7 +18,6 @@ const HELP_INTENT_PATTERNS = [
   /\b(?:help|show|walk)\s+me\b/,
   /\b(?:troubleshoot|debug|diagnose|fix)\b/,
   /\b(?:broken|stuck|confusing|not\s+working|doesn['’]?t\s+work|won['’]?t|can['’]?t|cannot|failed|failing|error)\b/,
-  /\b(?:set\s*up|setup|configure|connect|reconnect|disconnect|change|edit|create|download|export|install|enable|disable)\b/,
 ];
 
 const APP_CONTEXT_PATTERNS = [
@@ -35,7 +34,8 @@ const APP_CONTEXT_PATTERNS = [
   /\bextensions?\s+(?:settings|page|setup|connection|connect)\b/,
   /\bconnections?\s+(?:settings|page|setup|connect|reconnect)\b/,
   /\bprojects?\s+(?:picker|page|view|settings|working\s+director(?:y|ies))\b/,
-  /\b(?:automation|automations)\b/,
+  /\b(?:configure|manage|edit|enable|disable)\s+(?:my\s+)?automations?\b/,
+  /\bautomations?\s+(?:settings|page|view|screen)\b/,
   /\bdoctor\b/,
   /\bsettings\s+(?:page|view|screen|section)\b/,
   /\bsession\s+(?:history|archive|export|transcript|thread)\b/,
@@ -46,7 +46,11 @@ const APP_CONTEXT_PATTERNS = [
 ];
 
 function normalizeHelpText(text: string): string {
-  return text.trim().toLowerCase().replace(/\s+/g, " ");
+  return text
+    .replace(/(?:https?:\/\/|www\.)\S+/gi, " ")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
 }
 
 export function shouldAutoInvokeGooseHelpSkill(text: string): boolean {

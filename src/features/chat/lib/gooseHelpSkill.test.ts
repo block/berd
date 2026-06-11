@@ -25,6 +25,9 @@ describe("goose help skill routing", () => {
     "Create an agent in my Python project",
     "Where is the settings file in this repository?",
     "/skill-builder create a troubleshooting skill",
+    "Use workflowkit. Every Wednesday, pull our Slack, Linear (https://linear.app/squareup/initiative/foundational-automation-7490b7e2ce9d/overview), and GitHub activity (https://github.com/squareup/agents/pull/3840) for the block-workflow-kit project, group it into Shipped / In flight / Risks / Discussion, flag anything that mentions blocked or broken as a risk, and let me approve before it posts to #proj-bwk-wg.",
+    "Create a weekly project status automation that flags anything mentioning blocked or broken.",
+    "Debug the failing deploy mentioned in https://example.com/goose/settings.",
     "",
   ])("does not auto-invoke for unrelated work: %s", (text) => {
     expect(shouldAutoInvokeGooseHelpSkill(text)).toBe(false);
