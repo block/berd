@@ -31,6 +31,13 @@ function readinessFromReport(
     const providerId = crateCheckIdToProviderId(check.id);
     if (!providerId) continue;
 
+    // The in-app Goose provider is served by the bundled `goosed` sidecar and
+    // does not depend on the system `goose` CLI. The `ai-agent-goose` doctor
+    // check only probes that external CLI, so it must not gate readiness for
+    // the served backend: leave the seeded "ready" value untouched. The check
+    // is still surfaced via `checksByProviderId` for the version readout.
+    if (providerId === "goose") continue;
+
     const installed =
       (check.status === "pass" || check.status === "warn") &&
       (check.path != null || check.bridgePath != null);

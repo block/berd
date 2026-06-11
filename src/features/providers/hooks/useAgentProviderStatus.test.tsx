@@ -306,4 +306,107 @@ describe("useAgentProviderStatus", () => {
     expect(result.current.agentReadiness.get("codex-acp")).toBe("not_ready");
     expect(result.current.readyAgentIds.has("codex-acp")).toBe(false);
   });
+
+  it("keeps the served Goose provider ready even when the goose CLI check fails", async () => {
+    // The `ai-agent-goose` check probes the external `goose` CLI (`goose acp
+    // --help`). A broken/stale CLI fails that probe, but the in-app Goose
+    // provider is served by the bundled `goosed` sidecar and must not be gated
+    // on it. So the seeded "ready" value survives and Goose stays selectable.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-goose",
+          label: "Goose",
+          status: "fail",
+          message: "Goose ACP subcommand not available — upgrade required",
+          path: "/usr/local/bin/goose",
+          bridgePath: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("goose")).toBe("ready");
+    expect(result.current.readyAgentIds.has("goose")).toBe(true);
+  });
+
+  it("keeps the served Goose provider ready when the goose CLI check warns or has no path", async () => {
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-goose",
+          label: "Goose",
+          status: "warn",
+          path: null,
+          bridgePath: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("goose")).toBe("ready");
+    expect(result.current.readyAgentIds.has("goose")).toBe(true);
+  });
+
+  it("still surfaces the goose CLI check via agentChecks for the version readout", async () => {
+    // Skipping the goose readiness override must not drop the check itself:
+    // the AI Providers tab reads the goose version line from `agentChecks`.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-goose",
+          label: "Goose",
+          status: "fail",
+          path: "/usr/local/bin/goose",
+          installedVersion: "1.7.0",
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    const gooseCheck = result.current.agentChecks.get("goose");
+    expect(gooseCheck?.id).toBe("ai-agent-goose");
+    expect(gooseCheck?.installedVersion).toBe("1.7.0");
+  });
+
+  it("still gates non-goose agents whose CLI check fails", async () => {
+    // The goose exemption is scoped to the served backend only — other agents
+    // remain gated on their doctor health as before.
+    runDoctor.mockResolvedValue(
+      report([
+        check({
+          id: "ai-agent-claude",
+          status: "fail",
+          path: null,
+          bridgePath: null,
+        }),
+      ]),
+    );
+
+    const { result } = renderHook(() => useAgentProviderStatus(), {
+      wrapper: createWrapper(),
+    });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.agentReadiness.get("claude-acp")).toBe(
+      "not_installed",
+    );
+    expect(result.current.readyAgentIds.has("claude-acp")).toBe(false);
+  });
 });
