@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders } from "@/test/render";
 import { MessageTimeline } from "../MessageTimeline";
@@ -528,5 +528,83 @@ describe("chat search backend delegation", () => {
     await waitFor(() => {
       expect(screen.getByRole("status")).toHaveTextContent("No results");
     });
+  });
+});
+
+describe("chat search bar keyboard ownership", () => {
+  const windowKeyDown = vi.fn();
+
+  beforeEach(() => {
+    windowKeyDown.mockClear();
+    window.addEventListener("keydown", windowKeyDown);
+  });
+
+  afterEach(() => {
+    window.removeEventListener("keydown", windowKeyDown);
+  });
+
+  function renderBar() {
+    const onNext = vi.fn();
+    const onPrevious = vi.fn();
+    const onClose = vi.fn();
+    renderWithProviders(
+      <ChatSearchBar
+        query="needle"
+        totalMatches={3}
+        activeMatchIndex={0}
+        isIndexing={false}
+        announcedTotalMatches={3}
+        announcedActiveMatchIndex={0}
+        announcedIsIndexing={false}
+        focusSignal={0}
+        onQueryChange={vi.fn()}
+        onNext={onNext}
+        onPrevious={onPrevious}
+        onClose={onClose}
+      />,
+    );
+    const input = screen.getByRole("searchbox", {
+      name: "Search chat messages",
+    });
+    return { input, onNext, onPrevious, onClose };
+  }
+
+  it("stops consumed Ctrl+N/Ctrl+P from reaching window-level handlers", () => {
+    const { input, onNext, onPrevious } = renderBar();
+
+    fireEvent.keyDown(input, { key: "n", ctrlKey: true });
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(input, { key: "p", ctrlKey: true });
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+
+    // Off macOS these combos are the new-conversation and quick-switch
+    // defaults; consumed navigation must not also fire window commands.
+    expect(windowKeyDown).not.toHaveBeenCalled();
+
+    // Control: unconsumed keys keep bubbling to window handlers.
+    fireEvent.keyDown(input, { key: "a" });
+    expect(windowKeyDown).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops the closing Escape from reaching window-level handlers", () => {
+    const { input, onClose } = renderBar();
+
+    fireEvent.keyDown(input, { key: "Escape" });
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(windowKeyDown).not.toHaveBeenCalled();
+  });
+
+  it("consumes Enter with any modifiers for result navigation", () => {
+    const { input, onNext, onPrevious } = renderBar();
+
+    fireEvent.keyDown(input, { key: "Enter", metaKey: true });
+    expect(onNext).toHaveBeenCalledTimes(1);
+
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true, shiftKey: true });
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+
+    expect(windowKeyDown).not.toHaveBeenCalled();
   });
 });

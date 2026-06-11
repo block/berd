@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
+
 const KEY = "goose-zoom-level";
 const STEP = 0.1;
 const MIN = 0.7;
@@ -29,12 +31,15 @@ export function useZoom() {
     applyZoom(level);
 
     const handler = (e: KeyboardEvent) => {
-      if (!e.metaKey && !e.ctrlKey) return;
-
-      if (e.key === "=" || e.key === "+") level = adjust(level + STEP);
-      else if (e.key === "-") level = adjust(level - STEP);
-      else if (e.key === "0") level = adjust(1.0);
-      else return;
+      if (eventMatchesShortcutCommand(e, "view.zoomIn")) {
+        level = adjust(level + STEP);
+      } else if (eventMatchesShortcutCommand(e, "view.zoomOut")) {
+        level = adjust(level - STEP);
+      } else if (eventMatchesShortcutCommand(e, "view.zoomReset")) {
+        level = adjust(1.0);
+      } else {
+        return;
+      }
 
       e.preventDefault();
       localStorage.setItem(KEY, String(level));

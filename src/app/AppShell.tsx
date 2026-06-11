@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
 import { KeyboardShortcutsDialog } from "@/features/shortcuts/ui/KeyboardShortcutsDialog";
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { prefetchProjectArtifactRenderer } from "@/features/projects/artifact/prefetchProjectArtifactRenderer";
 import { getPlatform, type Platform } from "@/shared/lib/platform";
@@ -288,10 +289,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const isPaneJumpNavigationEnabled = Boolean(
     paneJumpNavigationExperiment?.enabled,
   );
-  const paneJumpNavigationShortcut =
-    typeof paneJumpNavigationExperiment?.config.shortcut === "string"
-      ? paneJumpNavigationExperiment.config.shortcut
-      : undefined;
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -2303,24 +2300,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (e.isComposing || e.repeat) {
         return;
       }
-      // Platform-primary accelerator: Cmd on macOS, Ctrl elsewhere
-      // (exclusively, matching the transcript search guard).
-      const mod =
-        getPlatform() === "mac"
-          ? e.metaKey && !e.ctrlKey
-          : e.ctrlKey && !e.metaKey;
-      if (!mod || e.altKey) {
-        return;
-      }
-      if (e.shiftKey) {
-        return;
-      }
-      // Cmd+/ / Ctrl+/ toggles the keyboard shortcuts reference. Handled
-      // before the layer guard so it can close its own (modal) dialog.
-      // Requires both the physical slash key and the "/" character so
-      // layouts that put other characters there are unaffected (matching
-      // the transcript search matcher).
-      if (e.code === "Slash" && e.key === "/") {
+      // Toggles the keyboard shortcuts reference. Handled before the layer
+      // guard so it can close its own (modal) dialog.
+      if (eventMatchesShortcutCommand(e, "help.shortcuts")) {
         e.preventDefault();
         useShortcutsDialogStore.getState().toggle();
         return;
@@ -2330,32 +2312,36 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (hasOpenKeyboardOwningLayer()) {
         return;
       }
-      // Cmd+, for settings
-      if (e.key === ",") {
+      // Settings (default mod+,)
+      if (eventMatchesShortcutCommand(e, "navigation.openSettings")) {
         e.preventDefault();
         if (activeView === "settings") {
           leaveSecondarySurface();
           return;
         }
         handleNavigate("settings");
+        return;
       }
-      // Cmd+B for sidebar toggle
-      if (e.key === "b") {
+      // Sidebar toggle (default mod+b)
+      if (eventMatchesShortcutCommand(e, "view.toggleSidebar")) {
         e.preventDefault();
         toggleSidebar();
+        return;
       }
-      // Cmd+K opens universal search.
-      if (e.key === "k") {
+      // Universal search (default mod+k)
+      if (eventMatchesShortcutCommand(e, "navigation.search")) {
         e.preventDefault();
         handleNavigate("search");
+        return;
       }
-      // Cmd+P opens the session quick switcher.
-      if (e.key === "p" && e.metaKey && !e.shiftKey && !e.altKey) {
+      // Session quick switcher (default mod+p)
+      if (eventMatchesShortcutCommand(e, "session.quickSwitch")) {
         e.preventDefault();
         setQuickSwitcherOpen((open) => !open);
+        return;
       }
-      // Cmd+W returns to home instead of closing the window
-      if (e.key === "w") {
+      // Returns to home instead of closing the window (default mod+w)
+      if (eventMatchesShortcutCommand(e, "navigation.closeSession")) {
         e.preventDefault();
         const { activeSessionId } = useChatSessionStore.getState();
         if (activeSessionId) {
@@ -2367,9 +2353,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           clearSettingsSectionUrl();
           setActiveView("home");
         }
+        return;
       }
-      // Cmd+N opens new conversation screen
-      if (e.key === "n") {
+      // New conversation screen (default mod+n)
+      if (eventMatchesShortcutCommand(e, "navigation.newConversation")) {
         e.preventDefault();
         guardAppNavigation(() => {
           setActiveSession(null);
@@ -2418,10 +2405,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }
 
   return (
-    <FocusRegionProvider
-      enabled={isPaneJumpNavigationEnabled}
-      shortcut={paneJumpNavigationShortcut}
-    >
+    <FocusRegionProvider enabled={isPaneJumpNavigationEnabled}>
       <AppShellLayout
         topBar={{
           breadcrumbs: topBarBreadcrumbs,

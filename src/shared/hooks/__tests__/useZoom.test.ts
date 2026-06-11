@@ -3,7 +3,11 @@ import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
 import { useZoom } from "../useZoom";
 
+const getPlatformMock = vi.hoisted(() => vi.fn(() => "mac"));
+vi.mock("@/shared/lib/platform", () => ({ getPlatform: getPlatformMock }));
+
 const ZOOM_CUSTOM_PROPERTY = "--goose-content-zoom";
+const SHORTCUT_PREFERENCES_KEY = "goose:keyboard-shortcuts:v1";
 
 function fireKey(key: string, opts: Partial<KeyboardEventInit> = {}) {
   window.dispatchEvent(
@@ -27,6 +31,7 @@ describe("useZoom", () => {
   beforeEach(() => {
     localStorage.clear();
     clearAppliedZoom();
+    getPlatformMock.mockReturnValue("mac");
     (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ = true;
   });
 
@@ -81,10 +86,46 @@ describe("useZoom", () => {
     await expectAppliedZoom("1");
   });
 
+  it("Cmd+Shift++ zooms in (mac)", async () => {
+    renderHook(() => useZoom());
+    await expectAppliedZoom("1");
+    fireKey("+", { metaKey: true, shiftKey: true });
+    await expectAppliedZoom("1.1");
+  });
+
   it("Ctrl+= works (non-mac)", async () => {
+    getPlatformMock.mockReturnValue("linux");
     renderHook(() => useZoom());
     await expectAppliedZoom("1");
     fireKey("=", { ctrlKey: true });
+    await expectAppliedZoom("1.1");
+  });
+
+  it("ignores Ctrl+= on mac", async () => {
+    renderHook(() => useZoom());
+    await expectAppliedZoom("1");
+    fireKey("=", { ctrlKey: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getAppliedZoom()).toBe("1");
+  });
+
+  it("honors a zoom-in override without remounting", async () => {
+    renderHook(() => useZoom());
+    await expectAppliedZoom("1");
+
+    localStorage.setItem(
+      SHORTCUT_PREFERENCES_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "view.zoomIn": "meta+shift+9" },
+      }),
+    );
+
+    fireKey("=", { metaKey: true });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(getAppliedZoom()).toBe("1");
+
+    fireKey("9", { metaKey: true, shiftKey: true });
     await expectAppliedZoom("1.1");
   });
 

@@ -17,6 +17,7 @@ import {
   setExperimentEnabled,
 } from "@/features/experiments/experimentPreferences";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
+import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -1535,5 +1536,95 @@ describe("AppShell global navigation", () => {
     fireEvent.keyDown(window, { key: "/", code: "Digit7", metaKey: true });
 
     expect(useShortcutsDialogStore.getState().open).toBe(false);
+  });
+
+  it("opens search with an overridden combo instead of the default", async () => {
+    window.localStorage.setItem(
+      SHORTCUT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "navigation.search": "meta+shift+x" },
+      }),
+    );
+    const user = userEvent.setup();
+    render(<AppShell />);
+
+    await user.keyboard("{Meta>}k{/Meta}");
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+
+    await user.keyboard("{Meta>}{Shift>}x{/Shift}{/Meta}");
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("search");
+    });
+  });
+
+  it("toggles the shortcuts reference with an overridden combo, including while it is open", async () => {
+    window.localStorage.setItem(
+      SHORTCUT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "help.shortcuts": "meta+shift+h" },
+      }),
+    );
+    render(<AppShell />);
+
+    // The default no longer fires once overridden.
+    fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
+    expect(useShortcutsDialogStore.getState().open).toBe(false);
+
+    fireEvent.keyDown(window, { key: "h", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(useShortcutsDialogStore.getState().open).toBe(true);
+    });
+    // The dialog is a keyboard-owning layer; the toggle must still close it.
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(window, { key: "h", metaKey: true, shiftKey: true });
+    await waitFor(() => {
+      expect(useShortcutsDialogStore.getState().open).toBe(false);
+    });
+  });
+
+  it("does not run global shortcuts while a keyboard-owning layer is open", async () => {
+    render(<AppShell />);
+
+    fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
+    await screen.findByRole("dialog");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+  });
+
+  it("opens the session quick switcher with Cmd+P, honoring an override over the default", async () => {
+    render(<AppShell />);
+
+    // The default combo opens the switcher.
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    const input = await screen.findByPlaceholderText("Jump to session...");
+
+    fireEvent.keyDown(input, { key: "Escape" });
+    await waitFor(() => {
+      expect(
+        screen.queryByPlaceholderText("Jump to session..."),
+      ).not.toBeInTheDocument();
+    });
+
+    // Once overridden, the default stops firing and the override opens it.
+    window.localStorage.setItem(
+      SHORTCUT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "session.quickSwitch": "meta+shift+p" },
+      }),
+    );
+    fireEvent.keyDown(window, { key: "p", metaKey: true });
+    expect(
+      screen.queryByPlaceholderText("Jump to session..."),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "p", metaKey: true, shiftKey: true });
+    expect(
+      await screen.findByPlaceholderText("Jump to session..."),
+    ).toBeInTheDocument();
   });
 });

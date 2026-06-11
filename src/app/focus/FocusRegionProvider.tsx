@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useShortcutBindings } from "@/features/shortcuts/lib/shortcutRegistry";
 import {
   keyboardEventMatchesShortcut,
   normalizeKeyboardShortcut,
@@ -218,11 +219,9 @@ export function useFocusRegion(registration: FocusRegionRegistration): void {
 export function FocusRegionProvider({
   children,
   enabled = true,
-  shortcut = DEFAULT_PANE_JUMP_SHORTCUT,
 }: {
   children: ReactNode;
   enabled?: boolean;
-  shortcut?: string;
 }) {
   const registrationsRef = useRef(
     new Map<FocusRegionId, FocusRegionRegistration>(),
@@ -234,7 +233,11 @@ export function FocusRegionProvider({
   );
   const [paneJumpActive, setPaneJumpActive] = useState(false);
   const [paneJumpActivity, setPaneJumpActivity] = useState(0);
-  const paneJumpShortcut = normalizePaneJumpShortcut(shortcut);
+  // Resolved by the shortcut registry: user override → the pane-jump
+  // experiment's configured shortcut → the built-in default.
+  const paneJumpBindings = useShortcutBindings("navigation.paneJump");
+  const paneJumpShortcut =
+    paneJumpBindings[0]?.shortcut ?? DEFAULT_PANE_JUMP_SHORTCUT;
 
   const closePaneJump = useCallback(() => {
     activeRegionIdRef.current = null;
@@ -315,6 +318,14 @@ export function FocusRegionProvider({
     }
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      // A shortcut-recording control (Settings → Keyboard shortcuts) owns
+      // the keyboard entirely; don't intercept the prefix mid-recording.
+      if (
+        event.target instanceof Element &&
+        event.target.closest('[data-shortcut-recording="true"]')
+      ) {
+        return;
+      }
       const isPrefix = keyboardEventMatchesShortcut(event, paneJumpShortcut);
       const consumeKeyDown = () => {
         suppressedPaneJumpKeyRef.current = event.key;

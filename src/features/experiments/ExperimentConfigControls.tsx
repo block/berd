@@ -11,12 +11,10 @@ import {
   type ExperimentRegistry,
   type ExperimentState,
 } from "./experimentPreferences";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
+import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Label } from "@/shared/ui/label";
-import {
-  formatKeyboardShortcut,
-  keyboardShortcutFromEvent,
-} from "@/shared/keyboard/keyboardShortcut";
 import {
   Select,
   SelectContent,
@@ -67,19 +65,22 @@ export function ExperimentConfigControls({
           : null;
         const isMultilineTextControl =
           control.type === "text" && control.multiline !== false;
+        const isStackedControl =
+          isMultilineTextControl || control.type === "shortcut";
 
         return (
           <div
             key={key}
             className={
-              isMultilineTextControl
+              isStackedControl
                 ? "flex flex-col gap-2 py-3 pl-8 pr-4"
                 : "flex items-center justify-between gap-6 py-3 pl-8 pr-4"
             }
           >
             <div className="min-w-0 flex-1">
               <Label
-                htmlFor={controlId}
+                // The shortcut row renders no labelable control.
+                htmlFor={control.type === "shortcut" ? undefined : controlId}
                 className="text-xs text-muted-foreground"
               >
                 {t(control.labelKey)}
@@ -90,11 +91,7 @@ export function ExperimentConfigControls({
                 </p>
               ) : null}
             </div>
-            <div
-              className={
-                isMultilineTextControl ? "w-full" : "w-40 flex-shrink-0"
-              }
-            >
+            <div className={isStackedControl ? "w-full" : "w-40 flex-shrink-0"}>
               {control.type === "boolean" ? (
                 <Switch
                   id={controlId}
@@ -144,13 +141,24 @@ export function ExperimentConfigControls({
                 />
               ) : null}
               {control.type === "shortcut" ? (
-                <ShortcutExperimentControl
-                  id={controlId}
-                  disabled={disabled}
-                  value={String(experiment.config[key])}
-                  placeholder={control.placeholderKey}
-                  onCommit={(value) => handleConfigChange(key, value)}
-                />
+                /* Shortcut editing moved to Settings → Keyboard shortcuts
+                   (pane jump is the only shortcut control). The stored
+                   config value stays untouched: the shortcut registry
+                   reads it as the fallback binding. */
+                <div className="flex flex-col items-start gap-1">
+                  <p className="text-xs text-muted-foreground">
+                    {t("experiments.paneJumpNavigation.shortcutMoved")}
+                  </p>
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    onClick={() => requestOpenSettings("shortcuts")}
+                  >
+                    {t("nav.shortcuts")}
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>
@@ -222,41 +230,6 @@ function TextExperimentControl({
 
   return (
     <Textarea {...inputProps} className="min-h-32 resize-y" variant="code" />
-  );
-}
-
-function ShortcutExperimentControl({
-  id,
-  disabled,
-  value,
-  placeholder,
-  onCommit,
-}: {
-  id: string;
-  disabled: boolean;
-  value: string;
-  placeholder?: string;
-  onCommit: (value: string) => boolean;
-}) {
-  const { t } = useTranslation("settings");
-
-  return (
-    <Input
-      id={id}
-      readOnly
-      disabled={disabled}
-      value={formatKeyboardShortcut(value)}
-      placeholder={placeholder ? t(placeholder) : undefined}
-      onKeyDown={(event) => {
-        const shortcut = keyboardShortcutFromEvent(event.nativeEvent);
-        if (!shortcut) {
-          return;
-        }
-
-        event.preventDefault();
-        onCommit(shortcut);
-      }}
-    />
   );
 }
 

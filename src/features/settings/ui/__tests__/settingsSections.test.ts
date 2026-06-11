@@ -12,6 +12,16 @@ describe("settingsSections", () => {
     expect(resolveSettingsSection("experiments")).toBe("experiments");
   });
 
+  it("includes shortcuts in settings navigation after notifications", () => {
+    const sectionIds = SETTINGS_SECTIONS.map((section) => section.id);
+
+    expect(sectionIds).toContain("shortcuts");
+    expect(sectionIds.indexOf("shortcuts")).toBe(
+      sectionIds.indexOf("notifications") + 1,
+    );
+    expect(resolveSettingsSection("shortcuts")).toBe("shortcuts");
+  });
+
   it("includes updates in settings navigation", () => {
     expect(SETTINGS_SECTIONS.map((section) => section.id)).toContain("updates");
     expect(resolveSettingsSection("updates")).toBe("updates");

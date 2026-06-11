@@ -1154,22 +1154,37 @@ describe("ChatView MCP app messaging", () => {
     expect(tabs[1]).toHaveAttribute("aria-selected", "true");
   });
 
-  it("opens a new terminal tab with cmd+t", async () => {
+  it("opens a new terminal tab with the platform new-tab shortcut", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    // Mocked platform is linux, so the binding resolves to Ctrl+T.
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    await user.keyboard("{Control>}t{/Control}");
+
+    expect(screen.queryByText("~/test/repo (1)")).not.toBeInTheDocument();
+
+    screen.getByRole("tab", { name: "terminal.selectTab" }).focus();
+    await user.keyboard("{Control>}t{/Control}");
+
+    expect(screen.getByText("~/test/repo (1)")).toBeInTheDocument();
+    expect(screen.getByText("~/test/repo (2)")).toBeInTheDocument();
+  });
+
+  it("ignores the new-tab shortcut with the wrong platform modifier", async () => {
     const user = userEvent.setup();
     const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
 
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    screen.getByRole("tab", { name: "terminal.selectTab" }).focus();
+    // Mocked platform is linux, so Meta+T must pass through untouched.
     await user.keyboard("{Meta>}t{/Meta}");
 
     expect(screen.queryByText("~/test/repo (1)")).not.toBeInTheDocument();
-
-    screen.getByRole("tab", { name: "terminal.selectTab" }).focus();
-    await user.keyboard("{Meta>}t{/Meta}");
-
-    expect(screen.getByText("~/test/repo (1)")).toBeInTheDocument();
-    expect(screen.getByText("~/test/repo (2)")).toBeInTheDocument();
   });
 
   it("ignores terminal shortcuts while a key event is composing", async () => {
@@ -1183,7 +1198,7 @@ describe("ChatView MCP app messaging", () => {
 
     fireEvent.keyDown(window, {
       key: "t",
-      metaKey: true,
+      ctrlKey: true,
       isComposing: true,
     });
 

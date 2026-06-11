@@ -6,7 +6,7 @@ import {
   type RefObject,
 } from "react";
 import { hasOpenKeyboardOwningLayer } from "@/app/focus/FocusRegionProvider";
-import { getPlatform } from "@/shared/lib/platform";
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import {
   clearTranscriptSearchHighlights,
   findTranscriptMatches,
@@ -82,7 +82,8 @@ export interface UseChatTranscriptSearchOptions {
 /**
  * Find-in-transcript controller. Without a backend it matches against the
  * rendered DOM under `rootRef`, so the count always equals what highlighting
- * can show. Owns the find keyboard shortcut (platform primary modifier + F).
+ * can show. Owns the find keyboard shortcut (`chat.findInConversation`,
+ * Mod+F by default and user-rebindable).
  *
  * Scrolling happens only on user intent (query edits and next/previous
  * navigation); content mutations from streaming re-match and re-paint but
@@ -194,23 +195,16 @@ export function useChatTranscriptSearch(
     }
   }, [applyMatches, backendRef]);
 
-  // The find shortcut. Strict per-platform modifier — on macOS Ctrl+F is the
-  // system caret-forward binding inside text fields and must pass through.
+  // The find shortcut. Registry matching is strict (exact modifier set), so
+  // with the default Mod+F binding macOS Ctrl+F — the system caret-forward
+  // binding inside text fields — still passes through.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229) {
         return;
       }
 
-      const findModifierPressed =
-        getPlatform() === "mac"
-          ? event.metaKey && !event.ctrlKey
-          : event.ctrlKey && !event.metaKey;
-      if (!findModifierPressed || event.shiftKey || event.altKey) {
-        return;
-      }
-
-      if (event.key.toLowerCase() !== "f") {
+      if (!eventMatchesShortcutCommand(event, "chat.findInConversation")) {
         return;
       }
 

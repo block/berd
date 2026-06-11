@@ -53,6 +53,7 @@ import { usePersistedState } from "@/shared/hooks/usePersistedState";
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { getTextContent } from "@/shared/types/messages";
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 
@@ -461,19 +462,13 @@ export function ChatView({
         return;
       }
 
-      if (event.shiftKey || event.altKey || !(event.metaKey || event.ctrlKey)) {
-        return;
-      }
-
-      const key = event.key.toLowerCase();
-
-      if (key === "j") {
+      if (eventMatchesShortcutCommand(event, "view.toggleTerminal")) {
         event.preventDefault();
         toggleTerminal();
         return;
       }
 
-      if (key === "t") {
+      if (eventMatchesShortcutCommand(event, "terminal.newTab")) {
         const target = event.target;
         const terminalHasFocus =
           target instanceof Node &&

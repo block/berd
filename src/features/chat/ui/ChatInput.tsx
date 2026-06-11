@@ -18,6 +18,7 @@ import {
   getChatInputAgentLabel,
   getChatInputPlaceholder,
 } from "../lib/chatInputPlaceholder";
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { cn } from "@/shared/lib/cn";
 import { Badge } from "@/shared/ui/badge";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
@@ -462,17 +463,29 @@ export function ChatInput({
     const isComposing =
       event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
     if (mentionOpen && !isComposing) {
-      if (event.key === "Escape") {
+      if (
+        eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.close")
+      ) {
         event.preventDefault();
         closeMention();
         return;
       }
-      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      if (eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.next")) {
         event.preventDefault();
-        navigateMention(event.key === "ArrowDown" ? "down" : "up");
+        navigateMention("down");
+        return;
+      }
+      if (
+        eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.previous")
+      ) {
+        event.preventDefault();
+        navigateMention("up");
         return;
       }
       if (event.key === "Enter") {
+        // The open menu consumes Enter with any modifiers (the fixed
+        // chat.mention.confirm command) so send/send-now never fire with a
+        // half-typed mention in the composer.
         event.preventDefault();
         const item = confirmMention();
         if (item) {
@@ -481,12 +494,13 @@ export function ChatInput({
         return;
       }
       if (
-        event.key === "Tab" &&
-        !event.shiftKey &&
-        !event.ctrlKey &&
-        !event.metaKey &&
-        !event.altKey
+        eventMatchesShortcutCommand(
+          event.nativeEvent,
+          "chat.mention.completeDirectory",
+        )
       ) {
+        // Tab only completes when a mention confirms; otherwise it falls
+        // through for native focus navigation.
         const item = confirmMention();
         if (item) {
           event.preventDefault();
@@ -496,14 +510,9 @@ export function ChatInput({
       }
     }
     if (
-      event.key === "ArrowUp" &&
-      !event.metaKey &&
-      !event.ctrlKey &&
-      !event.altKey &&
-      !event.shiftKey &&
-      !event.nativeEvent.isComposing &&
-      event.nativeEvent.keyCode !== 229 &&
-      !hasDraftContent
+      !isComposing &&
+      !hasDraftContent &&
+      eventMatchesShortcutCommand(event.nativeEvent, "chat.recallLastMessage")
     ) {
       if (queuedMessage) {
         if (restoreQueuedMessage()) {
@@ -512,7 +521,8 @@ export function ChatInput({
         return;
       }
 
-      // ↑ in an empty composer recalls the most recent sent message (single level).
+      // Recall (↑ by default) in an empty composer restores the most recent
+      // sent message (single level).
       const recalled = onRecallLastUserMessage?.() ?? null;
       if (recalled !== null) {
         event.preventDefault();
@@ -520,18 +530,38 @@ export function ChatInput({
         return;
       }
     }
-    if (
-      event.key === "Enter" &&
-      !event.shiftKey &&
-      !event.altKey &&
-      !event.nativeEvent.isComposing &&
-      event.nativeEvent.keyCode !== 229
-    ) {
+    if (isComposing) {
+      return;
+    }
+    if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendNow")) {
       event.preventDefault();
-      if ((event.metaKey || event.ctrlKey) && canInterruptAndSendNow) {
-        void handleSend({ sendNow: true });
+      // Send-now degrades to a normal queued send when there is nothing
+      // streaming to interrupt.
+      void handleSend(canInterruptAndSendNow ? { sendNow: true } : undefined);
+      return;
+    }
+    if (eventMatchesShortcutCommand(event.nativeEvent, "chat.insertNewline")) {
+      if (
+        event.key === "Enter" &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        // Plain/Shift+Enter inserts the newline natively, preserving undo.
         return;
       }
+      // Rebound to a combo the textarea won't handle natively: insert the
+      // newline through the controlled state, keeping the caret after it.
+      event.preventDefault();
+      const textarea = textareaRef.current;
+      const selectionStart = textarea?.selectionStart ?? text.length;
+      const selectionEnd = textarea?.selectionEnd ?? text.length;
+      setText(`${text.slice(0, selectionStart)}\n${text.slice(selectionEnd)}`);
+      pendingCursorOffsetRef.current = selectionStart + 1;
+      return;
+    }
+    if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendMessage")) {
+      event.preventDefault();
       void handleSend();
     }
   };

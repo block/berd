@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
+import { SHORTCUT_PREFERENCES_STORAGE_KEY } from "@/features/shortcuts/lib/shortcutRegistry";
 import { isEditableTarget } from "@/shared/keyboard/isEditableTarget";
 import {
   FocusRegionProvider,
@@ -82,7 +83,12 @@ describe("focus region helpers", () => {
     expect(normalizePaneJumpShortcut(" Control + K ")).toBe("ctrl+k");
     expect(normalizePaneJumpShortcut("Ctrl+.")).toBe("ctrl+.");
     expect(normalizePaneJumpShortcut("shift+k")).toBe("shift+k");
+    // A doubled separator means the "+" key; a single dangling one is
+    // invalid and falls back.
+    expect(normalizePaneJumpShortcut("ctrl++")).toBe("ctrl+plus");
     expect(normalizePaneJumpShortcut("ctrl+")).toBe("ctrl+;");
+    expect(normalizePaneJumpShortcut("bogus+k")).toBe("ctrl+;");
+    expect(normalizePaneJumpShortcut(undefined)).toBe("ctrl+;");
   });
 
   it("filters disabled, hidden, inert, and zero-size regions", () => {
@@ -179,6 +185,7 @@ describe("focus region helpers", () => {
 describe("FocusRegionProvider", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.localStorage.clear();
   });
 
   it("opens, cancels with Escape, and times out", () => {
@@ -222,13 +229,20 @@ describe("FocusRegionProvider", () => {
     expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
   });
 
-  it("opens with a configured shortcut", () => {
+  it("opens with a user-overridden shortcut from the registry", () => {
+    window.localStorage.setItem(
+      SHORTCUT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "navigation.paneJump": "ctrl+." },
+      }),
+    );
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
       rect(0, 0),
     );
 
     render(
-      <FocusRegionProvider shortcut="Ctrl+.">
+      <FocusRegionProvider>
         <TestRegion id="main" shortcutKey="m" label="main content" />
       </FocusRegionProvider>,
     );

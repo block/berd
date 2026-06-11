@@ -26,6 +26,12 @@ vi.mock("../hooks/useVoiceDictation", () => ({
   useVoiceDictation: () => mockVoiceDictation,
 }));
 
+// Deterministic shortcut modifiers across dev machines and CI: "mod"
+// combos (e.g. chat.sendNow's Mod+Enter) resolve to Meta.
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: () => "mac",
+}));
+
 vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   useAgentProviderStatus: () => ({
     readyAgentIds: new Set(["goose", "claude-acp", "codex-acp"]),
@@ -217,6 +223,7 @@ async function stageRecallAttachment() {
 
 describe("ChatInput", () => {
   beforeEach(() => {
+    localStorage.clear();
     mockSearchFilesForMentions.mockClear();
     mockSearchFilesForMentions.mockResolvedValue([]);
     mockVoiceDictation.isEnabled = true;
@@ -754,6 +761,70 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("consumes Meta+Enter in the open mention menu instead of send-now", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onSendNow = vi.fn();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSendNow={onSendNow}
+        isStreaming
+        selectedProjectId="project-1"
+        availableProjects={[
+          {
+            id: "project-1",
+            name: "goose2",
+            workingDirs: ["/Users/wesb/dev/goose2"],
+          },
+        ]}
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    const wasNotPrevented = fireEvent.keyDown(input, {
+      key: "Enter",
+      metaKey: true,
+    });
+
+    // The open menu owns Enter with any modifiers: the mention confirms and
+    // the half-typed draft never reaches send-now (or queued send).
+    expect(wasNotPrevented).toBe(false);
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(onSendNow).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("consumes Shift+Enter in the open mention menu without a newline or send", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput(onSend);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@read");
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
+
+    const wasNotPrevented = fireEvent.keyDown(input, {
+      key: "Enter",
+      shiftKey: true,
+    });
+
+    // preventDefault blocks the native newline; the mention confirms instead.
+    expect(wasNotPrevented).toBe(false);
+    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect((input as HTMLTextAreaElement).value).not.toContain("\n");
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1507,5 +1578,61 @@ describe("ChatInput", () => {
 
     expect(onRecall).not.toHaveBeenCalled();
     expect(recallTextbox()).toHaveValue("");
+  });
+
+  // -------------------------------------------------------------------------
+  // User-configured shortcut overrides (goose:keyboard-shortcuts:v1)
+  // -------------------------------------------------------------------------
+
+  function setShortcutOverrides(overrides: Record<string, string>) {
+    localStorage.setItem(
+      "goose:keyboard-shortcuts:v1",
+      JSON.stringify({ version: 1, overrides }),
+    );
+  }
+
+  it("recalls with a rebound combo and releases plain ArrowUp", () => {
+    setShortcutOverrides({ "chat.recallLastMessage": "alt+arrowup" });
+    const onRecall = vi.fn(() => "my previous message");
+    render(<ChatInput onSend={vi.fn()} onRecallLastUserMessage={onRecall} />);
+
+    pressRecallArrowUp();
+    expect(onRecall).not.toHaveBeenCalled();
+    expect(recallTextbox()).toHaveValue("");
+
+    pressRecallArrowUp({ altKey: true });
+    expect(onRecall).toHaveBeenCalledTimes(1);
+    expect(recallTextbox()).toHaveValue("my previous message");
+  });
+
+  it("sends with a rebound combo and releases plain Enter", async () => {
+    setShortcutOverrides({ "chat.sendMessage": "alt+enter" });
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={onSend} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "hello");
+
+    const plainEnterNotPrevented = fireEvent.keyDown(input, { key: "Enter" });
+    expect(plainEnterNotPrevented).toBe(true);
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.keyboard("{Alt>}{Enter}{/Alt}");
+    expect(onSend).toHaveBeenCalledWith("hello", undefined, undefined);
+  });
+
+  it("ignores a stored override that conflicts with another command default", async () => {
+    // mod+enter is chat.sendNow's default; the registry drops the override
+    // on read, so plain Enter keeps sending.
+    setShortcutOverrides({ "chat.sendMessage": "meta+enter" });
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<ChatInput onSend={onSend} />);
+
+    await user.type(screen.getByRole("textbox"), "hello");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("hello", undefined, undefined);
   });
 });

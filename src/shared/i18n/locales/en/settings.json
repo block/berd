@@ -188,6 +188,7 @@
       "description": "Use Ctrl+; to jump between visible app panes with badge letters or h/j/k/l.",
       "shortcutDescription": "Choose the prefix that opens pane jump mode.",
       "shortcutLabel": "Shortcut",
+      "shortcutMoved": "Customize the pane jump shortcut in Settings → Keyboard shortcuts.",
       "shortcutPlaceholder": "Ctrl+;",
       "title": "Pane jump navigation"
     },
@@ -296,6 +297,7 @@
     "notifications": "Notifications",
     "providers": "AI providers",
     "providersUpdateAvailable": "Update available",
+    "shortcuts": "Keyboard shortcuts",
     "updates": "Updates"
   },
   "notifications": {

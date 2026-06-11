@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { renderWithProviders } from "@/test/render";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
+import {
+  OPEN_SETTINGS_EVENT,
+  type OpenSettingsEventDetail,
+} from "@/features/settings/lib/settingsEvents";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
@@ -112,6 +116,26 @@ describe("GeneralSettings appearance section", () => {
     await waitFor(() => {
       expect(localStorage.getItem("goose-primary-color")).toBeNull();
     });
+  });
+
+  it("opens the keyboard shortcuts settings section from the shortcuts row", async () => {
+    const user = userEvent.setup();
+    const listener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, listener);
+
+    try {
+      renderGeneralSettings();
+
+      await user.click(screen.getByRole("button", { name: "Customize" }));
+
+      expect(listener).toHaveBeenCalledTimes(1);
+      const event = listener.mock.calls[0][0] as CustomEvent<
+        OpenSettingsEventDetail | undefined
+      >;
+      expect(event.detail?.section).toBe("shortcuts");
+    } finally {
+      window.removeEventListener(OPEN_SETTINGS_EVENT, listener);
+    }
   });
 
   it("restores Agent Tools composer tips", async () => {

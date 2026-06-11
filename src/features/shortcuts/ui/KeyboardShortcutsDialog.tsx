@@ -1,6 +1,9 @@
 import { useTranslation } from "react-i18next";
 
-import { resolveShortcutGroups } from "@/features/shortcuts/lib/shortcutRegistry";
+import {
+  resolveShortcutGroups,
+  useShortcutPreferences,
+} from "@/features/shortcuts/lib/shortcutRegistry";
 import { keyboardShortcutDisplayParts } from "@/shared/keyboard/keyboardShortcut";
 import { getPlatform } from "@/shared/lib/platform";
 import {
@@ -23,6 +26,9 @@ export function KeyboardShortcutsDialog({
 }: KeyboardShortcutsDialogProps) {
   const { t } = useTranslation("shortcuts");
   const isMac = getPlatform() === "mac";
+  // Subscribe to shortcut preferences so override changes while the dialog
+  // is open re-render the resolved groups.
+  void useShortcutPreferences();
   const groups = open ? resolveShortcutGroups() : [];
 
   return (

@@ -6,6 +6,7 @@ import { Button } from "@/shared/ui/button";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { CHAT_SEARCH_BAR_ATTRIBUTE } from "@/features/chat/hooks/useChatTranscriptSearch";
+import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { MAX_TRANSCRIPT_SEARCH_MATCHES } from "@/features/chat/lib/transcriptSearch";
 
 const searchBarRootAttribute = { [CHAT_SEARCH_BAR_ATTRIBUTE]: "" };
@@ -94,19 +95,25 @@ export function ChatSearchBar({
       return;
     }
 
-    if (event.key === "Escape") {
+    if (eventMatchesShortcutCommand(event.nativeEvent, "chat.search.close")) {
       event.preventDefault();
+      event.stopPropagation();
       onClose();
     }
   };
 
+  // Enter/ArrowDown/Ctrl+N step forward; Shift+Enter/ArrowUp/Ctrl+P step back
+  // (the fixed `chat.search.*` bindings).
   const handleInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing) {
       return;
     }
 
+    // The bar consumes Enter with any modifiers (pre-registry behavior) so
+    // e.g. Cmd+Enter steps results instead of falling through.
     if (event.key === "Enter") {
       event.preventDefault();
+      event.stopPropagation();
       if (event.shiftKey) {
         onPrevious();
       } else {
@@ -115,29 +122,22 @@ export function ChatSearchBar({
       return;
     }
 
-    if (event.key === "ArrowDown") {
+    // stopPropagation keeps consumed keys from also firing window-level
+    // commands — Ctrl+N/Ctrl+P collide with the new-conversation and
+    // quick-switch defaults off macOS.
+    if (eventMatchesShortcutCommand(event.nativeEvent, "chat.search.next")) {
       event.preventDefault();
+      event.stopPropagation();
       onNext();
       return;
     }
 
-    if (event.key === "ArrowUp") {
+    if (
+      eventMatchesShortcutCommand(event.nativeEvent, "chat.search.previous")
+    ) {
       event.preventDefault();
+      event.stopPropagation();
       onPrevious();
-      return;
-    }
-
-    if (event.ctrlKey && !event.metaKey && !event.altKey) {
-      const key = event.key.toLowerCase();
-      if (key === "n") {
-        event.preventDefault();
-        onNext();
-        return;
-      }
-      if (key === "p") {
-        event.preventDefault();
-        onPrevious();
-      }
     }
   };
 

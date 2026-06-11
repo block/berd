@@ -13,7 +13,7 @@ import {
 } from "@/shared/ui/select";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Button } from "@/shared/ui/button";
-import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
+import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
   Check,
@@ -99,7 +99,6 @@ function AboutInfoRow({ label, value }: { label: string; value: string }) {
 
 export function GeneralSettings() {
   const { t } = useTranslation(["settings", "shortcuts"]);
-  const openShortcutsDialog = useShortcutsDialogStore((state) => state.setOpen);
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
@@ -372,9 +371,9 @@ export function GeneralSettings() {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => openShortcutsDialog(true)}
+            onClick={() => requestOpenSettings("shortcuts")}
           >
-            {t("shortcuts:settings.view")}
+            {t("shortcuts:settings.customize")}
           </Button>
         </SettingRow>
       </SettingsSection>

@@ -1,8 +1,16 @@
-import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import {
+  setShortcutOverride,
+  SHORTCUT_PREFERENCES_STORAGE_KEY,
+} from "@/features/shortcuts/lib/shortcutRegistry";
 import { renderWithProviders } from "@/test/render";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+
+vi.mock("@/shared/lib/platform", () => ({
+  getPlatform: () => "mac",
+}));
 
 async function renderOpenDialog(onOpenChange: (open: boolean) => void) {
   renderWithProviders(
@@ -13,7 +21,19 @@ async function renderOpenDialog(onOpenChange: (open: boolean) => void) {
   });
 }
 
+function getShortcutRow(label: string) {
+  const row = screen.getByText(label).closest("li");
+  if (!row) {
+    throw new Error(`Shortcut row for "${label}" not found`);
+  }
+  return row;
+}
+
 describe("KeyboardShortcutsDialog", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it("renders grouped shortcuts when open", async () => {
     await renderOpenDialog(() => {});
 
@@ -47,6 +67,38 @@ describe("KeyboardShortcutsDialog", () => {
     await renderOpenDialog(onOpenChange);
 
     fireEvent.click(screen.getByRole("button", { name: /close/i }));
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("renders the overridden combo when an override is stored", async () => {
+    localStorage.setItem(
+      SHORTCUT_PREFERENCES_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        overrides: { "navigation.search": "meta+shift+x" },
+      }),
+    );
+    await renderOpenDialog(() => {});
+
+    expect(getShortcutRow("Open search")).toHaveTextContent("⌘⇧X");
+  });
+
+  it("updates while open when an override changes and still closes on Escape", async () => {
+    const onOpenChange = vi.fn();
+    await renderOpenDialog(onOpenChange);
+
+    expect(getShortcutRow("Open search")).toHaveTextContent("⌘K");
+
+    act(() => {
+      const result = setShortcutOverride("navigation.search", "meta+shift+x");
+      expect(result).toEqual({ ok: true });
+    });
+
+    expect(getShortcutRow("Open search")).toHaveTextContent("⌘⇧X");
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     await waitFor(() => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });

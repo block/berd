@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ExperimentDefinition } from "../experimentDefinitions";
 import { ExperimentsSettings } from "../ExperimentsSettings";
 import { EXPERIMENT_PREFERENCES_STORAGE_KEY } from "../experimentPreferences";
+import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import { i18n } from "@/shared/i18n";
 import { renderWithProviders } from "@/test/render";
 
@@ -106,33 +107,40 @@ describe("ExperimentsSettings", () => {
       ),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("textbox", {
+      screen.getByText(
+        i18n.t("experiments.paneJumpNavigation.shortcutMoved", {
+          ns: "settings",
+        }),
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("points the pane jump shortcut control at keyboard shortcut settings", async () => {
+    vi.stubEnv("DEV", true);
+    const user = userEvent.setup();
+    const openSettingsListener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+    renderWithProviders(<ExperimentsSettings />);
+
+    // Editing moved to Settings → Keyboard shortcuts; no recording input.
+    expect(
+      screen.queryByRole("textbox", {
         name: i18n.t("experiments.paneJumpNavigation.shortcutLabel", {
           ns: "settings",
         }),
       }),
-    ).toHaveValue("Ctrl+;");
-  });
+    ).not.toBeInTheDocument();
 
-  it("records shortcut config from key presses", async () => {
-    vi.stubEnv("DEV", true);
-    const user = userEvent.setup();
-    renderWithProviders(<ExperimentsSettings />);
-
-    const shortcutInput = screen.getByRole("textbox", {
-      name: i18n.t("experiments.paneJumpNavigation.shortcutLabel", {
-        ns: "settings",
+    await user.click(
+      screen.getByRole("button", {
+        name: i18n.t("nav.shortcuts", { ns: "settings" }),
       }),
-    });
+    );
 
-    await user.click(shortcutInput);
-    await user.keyboard("{Control>}k{/Control}");
-
-    expect(shortcutInput).toHaveValue("Ctrl+K");
-    expect(
-      JSON.parse(localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "")
-        .experiments["pane-jump-navigation"].config.shortcut,
-    ).toBe("ctrl+k");
+    expect(openSettingsListener).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: { section: "shortcuts" } }),
+    );
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
   });
 
   it("renders dev default copy on a separate line", () => {

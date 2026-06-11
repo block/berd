@@ -188,6 +188,7 @@
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
       "shortcutLabel": "Atajo",
+      "shortcutMoved": "Personaliza el atajo de salto de paneles en Ajustes → Atajos de teclado.",
       "shortcutPlaceholder": "Ctrl+;",
       "title": "Navegación de paneles"
     },
@@ -296,6 +297,7 @@
     "notifications": "Notificaciones",
     "providers": "Proveedores de IA",
     "providersUpdateAvailable": "Actualización disponible",
+    "shortcuts": "Atajos de teclado",
     "updates": "Actualizaciones"
   },
   "notifications": {
