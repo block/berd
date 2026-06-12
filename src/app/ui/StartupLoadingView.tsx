@@ -19,6 +19,7 @@ export function StartupLoadingView() {
       className="flex h-screen w-screen items-center justify-center bg-dot-grid text-foreground"
       role="status"
       aria-label={t("startup.loadingLabel")}
+      data-tauri-drag-region
     >
       {shouldReduceMotion ? (
         <img

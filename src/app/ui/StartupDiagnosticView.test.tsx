@@ -32,6 +32,16 @@ describe("StartupDiagnosticView", () => {
     installClipboardMock();
   });
 
+  it("marks the backdrop as a window drag region", () => {
+    const issue = buildStartupDiagnosticIssue(new Error("boom"));
+
+    const { container } = render(
+      <StartupDiagnosticView issue={issue} onRetry={vi.fn()} />,
+    );
+
+    expect(container.firstChild).toHaveAttribute("data-tauri-drag-region");
+  });
+
   it("renders startup copy while keeping raw text in technical details", () => {
     const issue = buildStartupDiagnosticIssue(
       new Error("Failed to spawn goose serve: denied"),

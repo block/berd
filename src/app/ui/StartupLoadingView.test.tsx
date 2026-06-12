@@ -18,6 +18,7 @@ describe("StartupLoadingView", () => {
     const { container } = render(<StartupLoadingView />);
 
     expect(container.firstChild).toHaveClass("bg-dot-grid");
+    expect(container.firstChild).toHaveAttribute("data-tauri-drag-region");
     expect(
       container.querySelector('img[src*="startup-loading"]'),
     ).toBeInTheDocument();
