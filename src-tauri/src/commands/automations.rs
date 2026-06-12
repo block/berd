@@ -32,6 +32,10 @@ const KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT: Duration = Duration::from_secs(30);
 const PUSH_MESSAGES_ENDPOINT: &str = "v3/push-messages";
 const REFRESH_TILE_ENDPOINT: &str = "v3/refresh-tile";
 const UPDATE_TILE_ENDPOINT: &str = "v3/update-tile";
+const NON_GENERIC_AUTOMATION_TILE_ERROR: &str =
+    "Changes can't be made because expected an automation but found a tile";
+const DELETE_UNMANAGED_AUTOMATION_ERROR: &str =
+    "This automation can't be deleted because it isn't managed by Goose";
 
 #[derive(Default)]
 pub struct AutomationStreamState {
@@ -204,7 +208,7 @@ pub async fn update_automation_tile(
         .and_then(Value::as_str)
         .ok_or_else(|| "automation id must not be empty".to_string())?
         .to_string();
-    ensure_generic_automation_tile(state.inner(), &id).await?;
+    ensure_generic_automation_tile(state.inner(), &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
     kgoose::post_json(state.inner(), UPDATE_TILE_ENDPOINT, request).await
 }
 
@@ -214,7 +218,7 @@ pub async fn delete_automation_tile(
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    ensure_generic_automation_tile(state.inner(), &id).await?;
+    ensure_generic_automation_tile(state.inner(), &id, DELETE_UNMANAGED_AUTOMATION_ERROR).await?;
     kgoose::post_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
 }
 
@@ -224,7 +228,7 @@ pub async fn refresh_automation_tile(
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    ensure_generic_automation_tile(state.inner(), &id).await?;
+    ensure_generic_automation_tile(state.inner(), &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
     kgoose::post_json(state.inner(), REFRESH_TILE_ENDPOINT, json!({ "id": id })).await
 }
 
@@ -254,6 +258,7 @@ pub async fn get_automation_session_messages(
 async fn ensure_generic_automation_tile(
     distro_state: &DistroBundleState,
     id: &str,
+    non_generic_error: &str,
 ) -> Result<(), String> {
     let response = kgoose::post_json(distro_state, GET_TILE_ENDPOINT, json!({ "id": id })).await?;
     let tile = response
@@ -262,13 +267,17 @@ async fn ensure_generic_automation_tile(
         .and_then(Value::as_object)
         .ok_or_else(|| "kgoose did not return tileInfo for automation".to_string())?;
 
-    validate_generic_automation_tile(tile)
+    validate_generic_automation_tile(tile, non_generic_error)
 }
 
-fn validate_generic_automation_tile(tile: &Map<String, Value>) -> Result<(), String> {
-    let space_id = tile.get("spaceId").or_else(|| tile.get("space_id"));
-    if !matches!(space_id, None | Some(Value::Null)) {
-        return Err("Refusing to mutate a space-scoped tile as an automation".to_string());
+fn validate_generic_automation_tile(
+    tile: &Map<String, Value>,
+    non_generic_error: &str,
+) -> Result<(), String> {
+    if !is_generic_automation_space_id(tile.get("spaceId"))
+        || !is_generic_automation_space_id(tile.get("space_id"))
+    {
+        return Err(non_generic_error.to_string());
     }
 
     let tile_type = tile
@@ -280,6 +289,14 @@ fn validate_generic_automation_tile(tile: &Map<String, Value>) -> Result<(), Str
     }
 
     Ok(())
+}
+
+fn is_generic_automation_space_id(space_id: Option<&Value>) -> bool {
+    match space_id {
+        None | Some(Value::Null) => true,
+        Some(Value::String(space_id)) => space_id.is_empty(),
+        Some(_) => false,
+    }
 }
 
 async fn stream_kgoose_messages(
@@ -408,34 +425,68 @@ fn automation_messages_payload_from_sse_message(
 mod tests {
     use super::{
         automation_messages_payload_from_sse_message, parse_automation_sse_event_data,
-        validate_generic_automation_tile,
+        validate_generic_automation_tile, DELETE_UNMANAGED_AUTOMATION_ERROR,
+        NON_GENERIC_AUTOMATION_TILE_ERROR,
     };
     use crate::services::sse::SseMessage;
     use serde_json::json;
+
+    fn validate_tile(tile: &serde_json::Value) -> Result<(), String> {
+        validate_generic_automation_tile(
+            tile.as_object().unwrap(),
+            NON_GENERIC_AUTOMATION_TILE_ERROR,
+        )
+    }
 
     #[test]
     fn rejects_tiles_without_valid_type_metadata() {
         let missing_type = json!({ "spaceId": null });
         let object_type = json!({ "type": { "name": "summary" }, "spaceId": null });
 
-        assert!(validate_generic_automation_tile(missing_type.as_object().unwrap()).is_err());
-        assert!(validate_generic_automation_tile(object_type.as_object().unwrap()).is_err());
+        assert!(validate_tile(&missing_type).is_err());
+        assert!(validate_tile(&object_type).is_err());
     }
 
     #[test]
     fn rejects_builderbot_and_space_scoped_tiles() {
         let builderbot = json!({ "type": "TILE_TYPE_BUILDERBOT_AUTOMATION" });
+        let space_scoped_camel = json!({ "type": "summary", "spaceId": "space-1" });
+        let space_scoped_snake = json!({ "type": "summary", "space_id": "space-1" });
+
+        assert!(validate_tile(&builderbot).is_err());
+        assert!(validate_tile(&space_scoped_camel).is_err());
+        assert!(validate_tile(&space_scoped_snake).is_err());
+    }
+
+    #[test]
+    fn uses_delete_error_for_space_scoped_tiles() {
         let space_scoped = json!({ "type": "summary", "spaceId": "space-1" });
 
-        assert!(validate_generic_automation_tile(builderbot.as_object().unwrap()).is_err());
-        assert!(validate_generic_automation_tile(space_scoped.as_object().unwrap()).is_err());
+        assert_eq!(
+            validate_generic_automation_tile(
+                space_scoped.as_object().unwrap(),
+                DELETE_UNMANAGED_AUTOMATION_ERROR,
+            ),
+            Err(DELETE_UNMANAGED_AUTOMATION_ERROR.to_string())
+        );
     }
 
     #[test]
     fn accepts_generic_automation_tiles() {
-        let tile = json!({ "type": "summary", "spaceId": null });
+        let missing_space_id = json!({ "type": "summary" });
+        let null_space_id = json!({ "type": "summary", "spaceId": null });
 
-        assert!(validate_generic_automation_tile(tile.as_object().unwrap()).is_ok());
+        assert!(validate_tile(&missing_space_id).is_ok());
+        assert!(validate_tile(&null_space_id).is_ok());
+    }
+
+    #[test]
+    fn accepts_empty_string_space_id_as_generic_automation_tile() {
+        let empty_camel_space_id = json!({ "type": "summary", "spaceId": "" });
+        let empty_snake_space_id = json!({ "type": "summary", "space_id": "" });
+
+        assert!(validate_tile(&empty_camel_space_id).is_ok());
+        assert!(validate_tile(&empty_snake_space_id).is_ok());
     }
 
     #[test]
