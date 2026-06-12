@@ -14,6 +14,28 @@ function fileItem(overrides: Partial<FileMentionItem>): FileMentionItem {
 }
 
 describe("useMentionDetection file ordering", () => {
+  it("shows skills only for slash commands, not @ mentions", () => {
+    const skill = {
+      id: "global:/skills/code-review",
+      name: "code-review",
+      description: "Reviews code",
+      sourceLabel: "Personal",
+    };
+    const { result } = renderHook(() => useMentionDetection([], [skill], []));
+
+    act(() => {
+      result.current.detectMention("@code", 5);
+    });
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.filteredSkills).toEqual([]);
+
+    act(() => {
+      result.current.detectMention("/code", 5);
+    });
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.filteredSkills).toEqual([skill]);
+  });
+
   it("ranks backend-matched entries above local fuzzy ties in the same tier", () => {
     // A session-context item whose long absolute path happens to contain the
     // query as a scattered subsequence ("r..d..m..e"), tying it into the
@@ -145,6 +167,29 @@ describe("useMentionDetection file ordering", () => {
     });
     expect(result.current.mentionOpen).toBe(true);
     expect(result.current.mentionQuery).toBe("rea");
+  });
+
+  it("does not keep a stale text mention open when a later URL contains slashes", () => {
+    const { result } = renderHook(() => useMentionDetection([], [], []));
+    const text = "@code-review https://example.com/path";
+
+    act(() => {
+      result.current.detectMention(text, text.length);
+    });
+
+    expect(result.current.mentionOpen).toBe(false);
+  });
+
+  it("still allows spaces after a path-like mention token", () => {
+    const { result } = renderHook(() => useMentionDetection([], [], []));
+    const text = "@/Users/me/My Project/file.ts";
+
+    act(() => {
+      result.current.detectMention(text, text.length);
+    });
+
+    expect(result.current.mentionOpen).toBe(true);
+    expect(result.current.mentionQuery).toBe("/Users/me/My Project/file.ts");
   });
 
   it("orders backend entries by their native rank", () => {

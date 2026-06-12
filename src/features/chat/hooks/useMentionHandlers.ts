@@ -28,6 +28,7 @@ interface MentionHandlersOptions {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onPersonaChange?: ((id: string | null) => void) | undefined;
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
+  onFileMentionSelect?: (file: FileMentionItem) => void;
 }
 
 const FILE_MENTION_SEARCH_DEBOUNCE_MS = 90;
@@ -244,25 +245,6 @@ function buildStaticPathItems(
   return entries;
 }
 
-function replaceMentionQuery(
-  text: string,
-  mentionStartIndex: number,
-  mentionQuery: string,
-  label: string,
-) {
-  const before = text.slice(0, mentionStartIndex);
-  const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
-  const inserted = `@${label.trim()}`;
-  const separator =
-    after.length === 0 || /^[^\s.,!?;:)]/.test(after) ? " " : "";
-  const newText = `${before}${inserted}${separator}${after}`;
-
-  return {
-    newText,
-    cursorPosition: before.length + inserted.length + separator.length,
-  };
-}
-
 function removeMentionQuery(
   text: string,
   mentionStartIndex: number,
@@ -313,6 +295,7 @@ export function useMentionHandlers({
   textareaRef,
   onPersonaChange,
   onSkillMentionSelect,
+  onFileMentionSelect,
 }: MentionHandlersOptions) {
   const { getAllSessionArtifacts } = useArtifactPolicyContext();
   const normalizedProjectRoots = useMemo(
@@ -582,6 +565,19 @@ export function useMentionHandlers({
 
   const handleFileMentionSelect = useCallback(
     (file: FileMentionItem) => {
+      if (onFileMentionSelect) {
+        const { newText, cursorPosition } = removeMentionQuery(
+          text,
+          mentionStartIndex,
+          mentionQuery,
+        );
+        pendingCursorRef.current = cursorPosition;
+        setText(newText);
+        closeMention();
+        onFileMentionSelect(file);
+        return;
+      }
+
       const before = text.slice(0, mentionStartIndex);
       const after = text.slice(mentionStartIndex + 1 + mentionQuery.length);
       const inserted = `@${file.resolvedPath.trim()}`;
@@ -596,6 +592,7 @@ export function useMentionHandlers({
       mentionStartIndex,
       mentionQuery,
       closeMention,
+      onFileMentionSelect,
       registerCompletedMention,
       setText,
     ],
@@ -617,11 +614,10 @@ export function useMentionHandlers({
 
   const handleSkillMentionSelect = useCallback(
     (skill: SkillMentionItem) => {
-      const { newText, cursorPosition } = replaceMentionQuery(
+      const { newText, cursorPosition } = removeMentionQuery(
         text,
         mentionStartIndex,
         mentionQuery,
-        skill.name,
       );
       pendingCursorRef.current = cursorPosition;
       setText(newText);

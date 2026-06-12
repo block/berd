@@ -750,9 +750,10 @@ describe("GlobalComposerPill", () => {
     ).toBeInTheDocument();
   });
 
-  it("inserts selected project file mentions as paths", async () => {
+  it("attaches selected project file mentions as chips", async () => {
+    const onSend = vi.fn();
     const user = userEvent.setup();
-    renderGlobalComposer();
+    renderGlobalComposer(onSend);
     mockSearchFilesForMentions.mockResolvedValue([
       {
         resolvedPath: "/workspace/project/src/readme.md",
@@ -760,6 +761,14 @@ describe("GlobalComposerPill", () => {
         filename: "readme.md",
         kind: "file",
         source: "project",
+      },
+    ]);
+    mockInspectAttachmentPaths.mockResolvedValue([
+      {
+        name: "readme.md",
+        path: "/workspace/project/src/readme.md",
+        kind: "file",
+        mimeType: "text/markdown",
       },
     ]);
 
@@ -783,8 +792,22 @@ describe("GlobalComposerPill", () => {
       await screen.findByRole("option", { name: /readme\.md/i }),
     );
 
-    expect(screen.getByRole("textbox")).toHaveValue(
-      "@/workspace/project/src/readme.md ",
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(await screen.findByText("readme.md")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "",
+      expect.objectContaining({
+        attachments: [
+          expect.objectContaining({
+            kind: "file",
+            name: "readme.md",
+            path: "/workspace/project/src/readme.md",
+          }),
+        ],
+      }),
     );
   });
 

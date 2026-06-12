@@ -80,12 +80,16 @@ function isPathLikeMentionQuery(query: string): boolean {
 }
 
 function allowsSpacesInPathMentionQuery(query: string): boolean {
+  const firstWhitespaceIndex = query.search(/\s/);
+  const firstToken =
+    firstWhitespaceIndex === -1 ? query : query.slice(0, firstWhitespaceIndex);
+
   return (
-    query.startsWith("/") ||
-    query.startsWith("~") ||
-    query.includes("/") ||
-    query.includes("\\") ||
-    /^[a-z]:[\\/]/i.test(query)
+    firstToken.startsWith("/") ||
+    firstToken.startsWith("~") ||
+    firstToken.includes("/") ||
+    firstToken.includes("\\") ||
+    /^[a-z]:[\\/]/i.test(firstToken)
   );
 }
 
@@ -313,13 +317,13 @@ export function useMentionDetection(
       .filter(isScoredFileMention)
       .sort(compareScoredFileMentions)
       .map((entry) => withMatchHighlight(q, entry.file));
-    const matchesSkill = (skill: SkillMentionItem) =>
-      fuzzyMatch(q, skill.name.toLowerCase()) ||
-      skill.description.toLowerCase().includes(q) ||
-      fuzzyMatch(q, skill.sourceLabel.toLowerCase());
-    const matchingSkills = q ? skills.filter(matchesSkill) : skills;
-
     if (mentionState.trigger === "/") {
+      const matchesSkill = (skill: SkillMentionItem) =>
+        fuzzyMatch(q, skill.name.toLowerCase()) ||
+        skill.description.toLowerCase().includes(q) ||
+        fuzzyMatch(q, skill.sourceLabel.toLowerCase());
+      const matchingSkills = q ? skills.filter(matchesSkill) : skills;
+
       return {
         filteredPersonas: [],
         filteredSkills: matchingSkills,
@@ -330,7 +334,7 @@ export function useMentionDetection(
     if (!q) {
       return {
         filteredPersonas: personas,
-        filteredSkills: skills,
+        filteredSkills: [],
         filteredFiles: matchingFiles,
       };
     }
@@ -339,7 +343,7 @@ export function useMentionDetection(
       filteredPersonas: personas.filter((p) =>
         fuzzyMatch(q, p.displayName.toLowerCase()),
       ),
-      filteredSkills: matchingSkills,
+      filteredSkills: [],
       filteredFiles: matchingFiles,
     };
   }, [

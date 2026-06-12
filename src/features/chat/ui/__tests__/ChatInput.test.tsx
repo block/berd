@@ -53,6 +53,19 @@ const mockSearchFilesForMentions = vi.fn<
     maxResults?: number;
   }) => Promise<unknown[]>
 >(async () => []);
+const mockInspectAttachmentPaths = vi.fn<
+  (paths: string[]) => Promise<
+    {
+      name: string;
+      path: string;
+      kind: "file" | "directory";
+      mimeType?: string | null;
+    }[]
+  >
+>(async () => []);
+const mockReadImageAttachment = vi.fn<
+  (path: string) => Promise<{ base64: string; mimeType: string }>
+>(async () => ({ base64: "abc", mimeType: "image/png" }));
 vi.mock("@/shared/api/system", () => ({
   getHomeDir: vi.fn().mockResolvedValue("/Users/wesb"),
   searchFilesForMentions: (input: {
@@ -60,6 +73,9 @@ vi.mock("@/shared/api/system", () => ({
     query: string;
     maxResults?: number;
   }) => mockSearchFilesForMentions(input),
+  inspectAttachmentPaths: (paths: string[]) =>
+    mockInspectAttachmentPaths(paths),
+  readImageAttachment: (path: string) => mockReadImageAttachment(path),
 }));
 
 vi.mock("@/features/skills/api/skills", () => ({
@@ -172,6 +188,15 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function basename(path: string) {
+  return (
+    path
+      .split(/[\\/]+/)
+      .filter(Boolean)
+      .at(-1) ?? path
+  );
+}
+
 function recallTextbox(): HTMLTextAreaElement {
   return screen.getByRole("textbox") as HTMLTextAreaElement;
 }
@@ -227,6 +252,19 @@ describe("ChatInput", () => {
     localStorage.clear();
     mockSearchFilesForMentions.mockClear();
     mockSearchFilesForMentions.mockResolvedValue([]);
+    mockInspectAttachmentPaths.mockClear();
+    mockInspectAttachmentPaths.mockImplementation(async (paths) =>
+      paths.map((path) => ({
+        name: basename(path),
+        path,
+        kind: /\.[^\\/]+$/.test(path) ? "file" : "directory",
+      })),
+    );
+    mockReadImageAttachment.mockClear();
+    mockReadImageAttachment.mockResolvedValue({
+      base64: "abc",
+      mimeType: "image/png",
+    });
     mockVoiceDictation.isEnabled = true;
     mockVoiceDictation.isRecording = false;
     mockVoiceDictation.isTranscribing = false;
@@ -240,7 +278,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(
       screen.getByPlaceholderText(
-        "Chat with Goose or @ to add files, paths, agents, or skills",
+        "Chat with Goose or @ to add files, paths, or agents",
       ),
     ).toBeInTheDocument();
   });
@@ -718,11 +756,12 @@ describe("ChatInput", () => {
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
-  it("shows project files in @mention results and inserts the selected path", async () => {
+  it("shows project files in @mention results and attaches the selected path", async () => {
+    const onSend = vi.fn();
     const user = userEvent.setup();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
 
-    renderProjectChatInput();
+    renderProjectChatInput(onSend);
 
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
@@ -744,25 +783,70 @@ describe("ChatInput", () => {
     });
     await user.click(fileOption);
 
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
+    expect(mockInspectAttachmentPaths).toHaveBeenCalledWith([
+      "/Users/wesb/dev/goose2/README.md",
+    ]);
+
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith(
+      "",
+      undefined,
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          name: "README.md",
+          path: "/Users/wesb/dev/goose2/README.md",
+        }),
+      ]),
+    );
   });
 
-  it("pressing Enter inserts the active path mention without sending", async () => {
+  it("pressing Enter attaches the active path mention without sending", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    const inspection =
+      deferred<Awaited<ReturnType<typeof mockInspectAttachmentPaths>>>();
+    mockInspectAttachmentPaths.mockReturnValue(inspection.promise);
     renderProjectChatInput(onSend);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "check @read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
 
     await user.keyboard("{Enter}");
+    expect(input).toHaveValue("check ");
 
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    await user.keyboard("{Enter}");
     expect(onSend).not.toHaveBeenCalled();
+
+    inspection.resolve([
+      {
+        name: "README.md",
+        path: "/Users/wesb/dev/goose2/README.md",
+        kind: "file",
+      },
+    ]);
+
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "check",
+      undefined,
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file",
+          name: "README.md",
+          path: "/Users/wesb/dev/goose2/README.md",
+        }),
+      ]),
+    );
   });
 
   it("consumes Meta+Enter in the open mention menu instead of send-now", async () => {
@@ -798,7 +882,8 @@ describe("ChatInput", () => {
     // The open menu owns Enter with any modifiers: the mention confirms and
     // the half-typed draft never reaches send-now (or queued send).
     expect(wasNotPrevented).toBe(false);
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -821,12 +906,13 @@ describe("ChatInput", () => {
 
     // preventDefault blocks the native newline; the mention confirms instead.
     expect(wasNotPrevented).toBe(false);
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
     expect((input as HTMLTextAreaElement).value).not.toContain("\n");
     expect(onSend).not.toHaveBeenCalled();
   });
 
-  it("pressing Tab inserts the active file path mention", async () => {
+  it("pressing Tab attaches the active file path mention", async () => {
     const user = userEvent.setup();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
     renderProjectChatInput();
@@ -839,7 +925,8 @@ describe("ChatInput", () => {
 
     await user.keyboard("{Tab}");
 
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
   });
 
   it("pressing Tab completes the active folder path without closing mentions", async () => {
@@ -930,7 +1017,7 @@ describe("ChatInput", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("inserts folder and static root references as @path tokens", async () => {
+  it("attaches folder and static root references as chips", async () => {
     const user = userEvent.setup();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
     renderProjectChatInput();
@@ -941,12 +1028,15 @@ describe("ChatInput", () => {
       name: /src/i,
     });
     await user.click(folderOptions[0]);
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/src ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("src")).toBeInTheDocument();
 
-    await user.clear(input);
     await user.type(input, "@goose2");
     await user.click(await screen.findByRole("option", { name: /^goose2/i }));
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2 ");
+    expect(input).toHaveValue("");
+    expect(
+      await screen.findByTitle("/Users/wesb/dev/goose2"),
+    ).toBeInTheDocument();
   });
 
   it("shows static path shortcuts on empty @ without searching project files", async () => {
@@ -1022,7 +1112,8 @@ describe("ChatInput", () => {
       await screen.findByRole("option", { name: /zsh-fzf-tab-kalvin/i }),
     );
 
-    expect(input).toHaveValue("@/tmp/zsh-fzf-tab-kalvin ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("zsh-fzf-tab-kalvin")).toBeInTheDocument();
   });
 
   it("keeps long project-relative path mentions searchable past the text mention cap", async () => {
@@ -1136,7 +1227,8 @@ describe("ChatInput", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(input).toHaveValue("@/Users/wesb/Downloads ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("Downloads")).toBeInTheDocument();
   });
 
   it("does not match static shortcut labels for plain text file mentions", async () => {
@@ -1285,7 +1377,8 @@ describe("ChatInput", () => {
 
     await user.keyboard("{Enter}");
 
-    expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
+    expect(input).toHaveValue("");
+    expect(await screen.findByText("README.md")).toBeInTheDocument();
   });
 
   it("uses textarea-safe aria with live mention status and stable listbox options", async () => {

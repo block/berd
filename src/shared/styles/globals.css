@@ -413,8 +413,8 @@
 
   /* Composer chip tones — file/chat/project/agent/skill/automation identity
      colors. Each tone gets a bg + fg pair. Light values; dark block redefines. */
-  --chip-file-bg: var(--accent);
-  --chip-file-fg: var(--color-gray-600);
+  --chip-file-bg: var(--color-gray-200);
+  --chip-file-fg: var(--color-gray-700);
   --chip-chat-bg: color-mix(in oklab, var(--color-indigo-200) 18%, transparent);
   --chip-chat-fg: var(--color-indigo-700);
   --chip-project-bg: color-mix(
@@ -832,8 +832,8 @@
   --outline-composer-glass-outer: rgba(255, 255, 255, 0.05);
 
   /* Composer chip tones — dark variants */
-  --chip-file-bg: var(--color-gray-800);
-  --chip-file-fg: var(--color-gray-400);
+  --chip-file-bg: var(--color-gray-700);
+  --chip-file-fg: var(--color-gray-200);
   --chip-chat-bg: color-mix(in oklab, var(--color-indigo-100) 10%, transparent);
   --chip-chat-fg: var(--color-indigo-100);
   --chip-project-bg: color-mix(

@@ -74,16 +74,9 @@ describe("ChatInput skill mentions", () => {
     mockVoiceDictation.isStarting.mockReturnValue(false);
   });
 
-  it("shows skills in @mention results, completes the mention text, and creates a skill chip", async () => {
+  it("does not show skills in @mention results", async () => {
     const user = userEvent.setup();
-    mockListSkills.mockResolvedValue([
-      {
-        id: "global:/skills/code-review",
-        name: "code-review",
-        description: "Reviews code",
-        sourceLabel: "Personal",
-      },
-    ]);
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -94,14 +87,56 @@ describe("ChatInput skill mentions", () => {
     const input = screen.getByRole("textbox");
     await user.type(input, "@code");
 
+    expect(screen.queryByText("Skills")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /code-review/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows skills in slash results, removes the command text, and creates a skill chip", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/code");
+
     expect(await screen.findByText("Skills")).toBeInTheDocument();
 
     await user.click(
       await screen.findByRole("option", { name: /code-review/i }),
     );
 
-    expect(input).toHaveValue("@code-review ");
+    expect(input).toHaveValue("");
     expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
+  it("keeps the skill chip selected without reopening references when typing a URL", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/code");
+    await user.click(
+      await screen.findByRole("option", { name: /code-review/i }),
+    );
+
+    await user.type(input, "https://example.com/path");
+
+    expect(input).toHaveValue("https://example.com/path");
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
   it("shows and dismisses Agent Tools availability tips", async () => {

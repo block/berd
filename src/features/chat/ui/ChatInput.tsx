@@ -149,6 +149,7 @@ export function ChatInput({
     [onDraftChange],
   );
   const [isCompact, setIsCompact] = useState(false);
+  const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const pendingCursorOffsetRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -160,10 +161,29 @@ export function ChatInput({
     replaceAttachments,
     clearAttachments,
   } = useChatInputAttachments();
+  const attachmentWorkPending = attachmentWorkCount > 0;
+  const runAttachmentWork = useCallback(async (task: () => Promise<void>) => {
+    setAttachmentWorkCount((count) => count + 1);
+    try {
+      await task();
+    } finally {
+      setAttachmentWorkCount((count) => Math.max(0, count - 1));
+    }
+  }, []);
+  const addPathAttachmentsWithPending = useCallback(
+    (paths: string[]) => runAttachmentWork(() => addPathAttachments(paths)),
+    [addPathAttachments, runAttachmentWork],
+  );
   const attachmentsRef = useRef(attachments);
   attachmentsRef.current = attachments;
   const selectedSkillsRef = useRef(selectedSkills);
   selectedSkillsRef.current = visibleSelectedSkills;
+  const handleFileMentionAttachmentSelect = useCallback(
+    (file: { resolvedPath: string }) => {
+      void addPathAttachmentsWithPending([file.resolvedPath]);
+    },
+    [addPathAttachmentsWithPending],
+  );
 
   // Cap how tall the textarea grows before it scrolls internally. The docked
   // chat composer can consume most of the chat panel; the floating Home pill
@@ -225,12 +245,17 @@ export function ChatInput({
   const hasComposedMessage = text.trim().length > 0 || hasDraftContext;
   const hasDraftContent = text.length > 0 || hasDraftContext;
   const canQueueMessage =
-    hasComposedMessage && !hasQueuedMessage && !disabled && !sendDisabled;
+    hasComposedMessage &&
+    !hasQueuedMessage &&
+    !disabled &&
+    !sendDisabled &&
+    !attachmentWorkPending;
   const canSteerCurrentMessage =
     hasComposedMessage &&
     !hasQueuedMessage &&
     !disabled &&
     !sendDisabled &&
+    !attachmentWorkPending &&
     isStreaming &&
     canSteerMessage &&
     Boolean(onSteerMessage);
@@ -289,6 +314,9 @@ export function ChatInput({
     textareaRef,
     onPersonaChange,
     onSkillMentionSelect: handleSkillMentionAdded,
+    onFileMentionSelect: scopedControls.attachments
+      ? handleFileMentionAttachmentSelect
+      : undefined,
   });
   const mentionListboxId = useId();
   const mentionStatusId = useId();
@@ -354,7 +382,8 @@ export function ChatInput({
     onSend,
     onAutoSubmit: handleVoiceAutoSubmit,
     resetTextarea,
-    isSendLocked: hasQueuedMessage || disabled || sendDisabled,
+    isSendLocked:
+      hasQueuedMessage || disabled || sendDisabled || attachmentWorkPending,
   });
 
   const submitCurrentMessage = useCallback(
@@ -634,9 +663,9 @@ export function ChatInput({
       }
 
       event.preventDefault();
-      void addBrowserFiles(files);
+      void runAttachmentWork(() => addBrowserFiles(files));
     },
-    [addBrowserFiles, scopedControls.attachments],
+    [addBrowserFiles, runAttachmentWork, scopedControls.attachments],
   );
 
   const {
@@ -650,15 +679,15 @@ export function ChatInput({
     isStreaming,
     targetRef: containerRef,
     onDropFiles: (files) => {
-      void addBrowserFiles(files);
+      void runAttachmentWork(() => addBrowserFiles(files));
     },
     onDropPaths: (paths) => {
-      void addPathAttachments(paths);
+      void addPathAttachmentsWithPending(paths);
     },
   });
   const { handleAttachFiles, handleAttachFolders } = useChatInputFilePicker({
     disabled: disabled || !scopedControls.attachments,
-    addPathAttachments,
+    addPathAttachments: addPathAttachmentsWithPending,
   });
 
   const providerDisplayName =

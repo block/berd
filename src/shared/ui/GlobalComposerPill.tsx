@@ -199,6 +199,13 @@ export function GlobalComposerPill({
     });
   }, []);
 
+  const handleFileMentionAttachmentSelect = useCallback(
+    (file: { resolvedPath: string }) => {
+      runAttachmentWork(() => addPathAttachments([file.resolvedPath]));
+    },
+    [addPathAttachments, runAttachmentWork],
+  );
+
   const handleSkillMentionSelected = useCallback((skill: SkillMentionItem) => {
     setSelectedSkills((current) =>
       current.some((selected) => selected.id === skill.id)
@@ -485,6 +492,7 @@ export function GlobalComposerPill({
     textareaRef,
     onPersonaChange: handlePersonaChange,
     onSkillMentionSelect: handleSkillMentionSelected,
+    onFileMentionSelect: handleFileMentionAttachmentSelect,
   });
   const mentionListboxId = useId();
   const mentionStatusId = useId();
