@@ -174,6 +174,33 @@ export async function acpSendMessage(
   }
 }
 
+/** Add context to the active ACP run without cancelling or starting a new turn. */
+export async function acpSteerMessage(
+  sessionId: string,
+  expectedRunId: string | null,
+  prompt: string,
+  options: Pick<AcpSendMessageOptions, "assistantPrompt" | "images"> = {},
+): Promise<string> {
+  const { assistantPrompt, images } = options;
+  const content: ContentBlock[] = [];
+  const assistantText = assistantPrompt?.trim();
+  if (assistantText) {
+    content.push({
+      type: "text",
+      text: assistantText,
+      annotations: { audience: ["assistant"] },
+    });
+  }
+  content.push({ type: "text", text: prompt });
+  if (images) {
+    for (const [data, mimeType] of images) {
+      content.push({ type: "image", data, mimeType } as ContentBlock);
+    }
+  }
+
+  return directAcp.steerSession(sessionId, content, expectedRunId);
+}
+
 /** Prepare or warm an ACP session ahead of the first prompt. */
 export async function acpPrepareSession(
   sessionId: string,

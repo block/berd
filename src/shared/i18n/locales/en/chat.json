@@ -61,6 +61,7 @@
   },
   "errors": {
     "sessionPreparationSuperseded": "Session configuration changed while preparing. Try sending again.",
+    "steeringBackendUnavailable": "Steering is not available in this Goose backend. Restart with the steering backend branch and try again.",
     "voiceInputFailedTitle": "Voice dictation failed",
     "voiceInputNoMicrophoneDescription": "Connect or select a microphone, then try voice dictation again.",
     "voiceInputNoMicrophoneTitle": "No microphone found",
@@ -253,7 +254,8 @@
     "mcpApp": "MCP App",
     "mcpAppLoading": "Loading MCP App…",
     "mcpAppRenderError": "Unable to render MCP App inline.",
-    "redactedThinking": "(thinking redacted)"
+    "redactedThinking": "(thinking redacted)",
+    "steerLabel": "Steered"
   },
   "persona": {
     "chooseAssistant": "Choose assistant",
@@ -332,7 +334,8 @@
     "selectModel": "Select model",
     "selectProject": "Select project",
     "sendMessage": "Send message",
-    "sendNow": "Send now",
+    "steer": "Steer",
+    "steerQueuedWithEnter": "Press Enter again to steer",
     "sessionStarting": "Starting session...",
     "sessionStartFailed": "Session failed to start",
     "sessionMissingProjectDir": "Can't start this session — the project folder doesn't exist: {{paths}}. Edit the project to update its folders.",

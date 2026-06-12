@@ -31,13 +31,14 @@ export function useChatInputSubmit({
       submittedText: string,
       submittedAttachments: ChatAttachmentDraft[],
       submittedSkills: ChatSkillDraft[],
+      submitHandler: ChatInputSendHandler = onSend,
     ) =>
       submitComposerMessage({
         text: submittedText,
         attachments: submittedAttachments,
         skills: submittedSkills,
         selectedPersonaId,
-        onSend,
+        onSend: submitHandler,
         resolveSkillSlashCommand,
         resolveAutoSkill,
       }),

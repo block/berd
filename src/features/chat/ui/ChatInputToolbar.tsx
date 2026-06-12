@@ -32,7 +32,6 @@ import type {
 interface ChatInputToolbarComposerActions {
   canSend: boolean;
   isStreaming: boolean;
-  hasQueuedMessage: boolean;
   onSend: () => void;
   onStop?: () => void;
   onAttachFiles?: () => void;
@@ -99,7 +98,6 @@ export function ChatInputToolbar({
   const {
     canSend,
     isStreaming,
-    hasQueuedMessage,
     onSend,
     onStop,
     onAttachFiles,
@@ -390,7 +388,7 @@ export function ChatInputToolbar({
         </div>
 
         <div>
-          {isStreaming && !canSend && !hasQueuedMessage ? (
+          {isStreaming && !canSend ? (
             <Button
               type="button"
               onClick={onStop}

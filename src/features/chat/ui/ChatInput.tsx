@@ -8,7 +8,7 @@ import {
   useId,
 } from "react";
 import { X } from "lucide-react";
-import { IconCheck } from "@tabler/icons-react";
+import { IconCheck, IconCornerDownLeft } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   attachmentSnapshotsMatch,
@@ -33,7 +33,6 @@ import { useChatInputFilePicker } from "../hooks/useChatInputFilePicker";
 import { ChatInputAttachments } from "./ChatInputAttachments";
 import { ChatInputSelectionChips } from "./ChatInputSelectionChips";
 import { useChatInputSubmit } from "../hooks/useChatInputSubmit";
-import { submitComposerMessage } from "../lib/submitComposerMessage";
 import { useVoiceDictation } from "../hooks/useVoiceDictation";
 import { resolveDisplayModelLabel } from "../lib/modelDisplayLabel";
 import { resolveAgentToolsCapabilityTip } from "../lib/agentToolsCapabilities";
@@ -42,6 +41,10 @@ import { getImageFilesFromClipboardItems } from "../lib/clipboardAttachments";
 import { resolveGooseHelpSkill } from "../lib/gooseHelpSkill";
 import type { ChatInputProps, ChatSkillDraft } from "../types";
 import { ContextualTip } from "@/shared/ui/contextual-tip";
+import {
+  getStreamingShortcutAction,
+  useStreamingShortcutPreference,
+} from "../lib/streamingShortcutPreference";
 
 export function ChatInput({
   composerActions,
@@ -62,9 +65,11 @@ export function ChatInput({
 }: ChatInputProps) {
   const {
     onSend,
+    onSteerMessage,
     onStop,
-    onSendNow,
-    onSendQueuedNow,
+    onSteerQueuedMessage,
+    canSteerMessage = false,
+    canSteerQueuedMessage = false,
     isStreaming = false,
     disabled = false,
     sendDisabled = false,
@@ -107,6 +112,7 @@ export function ChatInput({
     supportsCompactionControls,
   } = contextUsage ?? {};
   const { t } = useTranslation("chat");
+  const streamingShortcutPreference = useStreamingShortcutPreference();
   const scopedControls = {
     agentModelPicker: controls?.agentModelPicker ?? true,
     attachments: controls?.attachments ?? attachmentsEnabled,
@@ -213,7 +219,6 @@ export function ChatInput({
   }, [resizeTextarea, surface]);
 
   const hasQueuedMessage = queuedMessage !== null;
-  const canInterruptAndSendNow = isStreaming && Boolean(onSendNow);
   const hasDraftContext =
     (scopedControls.attachments && attachments.length > 0) ||
     visibleSelectedSkills.length > 0;
@@ -221,8 +226,14 @@ export function ChatInput({
   const hasDraftContent = text.length > 0 || hasDraftContext;
   const canQueueMessage =
     hasComposedMessage && !hasQueuedMessage && !disabled && !sendDisabled;
-  const canSendNow =
-    hasComposedMessage && canInterruptAndSendNow && !disabled && !sendDisabled;
+  const canSteerCurrentMessage =
+    hasComposedMessage &&
+    !hasQueuedMessage &&
+    !disabled &&
+    !sendDisabled &&
+    isStreaming &&
+    canSteerMessage &&
+    Boolean(onSteerMessage);
 
   const activePersona = useMemo(
     () => personas.find((persona) => persona.id === selectedPersonaId) ?? null,
@@ -346,10 +357,9 @@ export function ChatInput({
     isSendLocked: hasQueuedMessage || disabled || sendDisabled,
   });
 
-  const handleSend = useCallback(
-    async (options?: { sendNow?: boolean }) => {
-      const shouldSendNow = options?.sendNow === true;
-      if (shouldSendNow ? !canSendNow : !canQueueMessage) {
+  const submitCurrentMessage = useCallback(
+    async (submitHandler: typeof onSend, canSubmitCurrentMessage: boolean) => {
+      if (!canSubmitCurrentMessage) {
         return;
       }
 
@@ -369,22 +379,12 @@ export function ChatInput({
       const submittedAttachments = scopedControls.attachments
         ? attachments
         : [];
-      const send = shouldSendNow ? onSendNow : undefined;
-      const accepted = send
-        ? await submitComposerMessage({
-            text: submittedText,
-            attachments: submittedAttachments,
-            skills: submittedSkills,
-            selectedPersonaId,
-            onSend: send,
-            resolveSkillSlashCommand,
-            resolveAutoSkill,
-          })
-        : await submitChatInputMessage(
-            submittedText,
-            submittedAttachments,
-            submittedSkills,
-          );
+      const accepted = await submitChatInputMessage(
+        submittedText,
+        submittedAttachments,
+        submittedSkills,
+        submitHandler,
+      );
       if (!accepted) {
         return;
       }
@@ -412,16 +412,10 @@ export function ChatInput({
     },
     [
       attachments,
-      canQueueMessage,
-      canSendNow,
       clearAttachments,
       dictation,
-      onSendNow,
-      resolveAutoSkill,
-      resolveSkillSlashCommand,
       scopedControls.attachments,
       scopedControls.voice,
-      selectedPersonaId,
       setSelectedSkills,
       setText,
       submitChatInputMessage,
@@ -430,12 +424,24 @@ export function ChatInput({
     ],
   );
 
-  const handleSendQueuedNow = useCallback(() => {
-    if (!onSendQueuedNow) {
+  const handleSend = useCallback(async () => {
+    await submitCurrentMessage(onSend, canQueueMessage);
+  }, [canQueueMessage, onSend, submitCurrentMessage]);
+
+  const handleSteerCurrentMessage = useCallback(async () => {
+    if (!onSteerMessage) {
       return;
     }
-    void onSendQueuedNow();
-  }, [onSendQueuedNow]);
+
+    await submitCurrentMessage(onSteerMessage, canSteerCurrentMessage);
+  }, [canSteerCurrentMessage, onSteerMessage, submitCurrentMessage]);
+
+  const handleSteerQueuedMessage = useCallback(() => {
+    if (!onSteerQueuedMessage || !canSteerQueuedMessage) {
+      return;
+    }
+    void onSteerQueuedMessage();
+  }, [canSteerQueuedMessage, onSteerQueuedMessage]);
 
   const setTextWithCursorAtEnd = (value: string) => {
     setText(value);
@@ -535,9 +541,23 @@ export function ChatInput({
     }
     if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendNow")) {
       event.preventDefault();
-      // Send-now degrades to a normal queued send when there is nothing
-      // streaming to interrupt.
-      void handleSend(canInterruptAndSendNow ? { sendNow: true } : undefined);
+      if (isStreaming) {
+        const action = getStreamingShortcutAction(
+          streamingShortcutPreference.mode,
+          event.metaKey || event.ctrlKey,
+        );
+        if (action === "steer") {
+          if (canSteerCurrentMessage) {
+            void handleSteerCurrentMessage();
+            return;
+          }
+          if (hasQueuedMessage && !hasDraftContent && canSteerQueuedMessage) {
+            handleSteerQueuedMessage();
+            return;
+          }
+        }
+      }
+      void handleSend();
       return;
     }
     if (eventMatchesShortcutCommand(event.nativeEvent, "chat.insertNewline")) {
@@ -562,6 +582,34 @@ export function ChatInput({
     }
     if (eventMatchesShortcutCommand(event.nativeEvent, "chat.sendMessage")) {
       event.preventDefault();
+      if (isStreaming) {
+        if (
+          !event.metaKey &&
+          !event.ctrlKey &&
+          hasQueuedMessage &&
+          !hasDraftContent &&
+          canSteerQueuedMessage
+        ) {
+          handleSteerQueuedMessage();
+          return;
+        }
+
+        const action = getStreamingShortcutAction(
+          streamingShortcutPreference.mode,
+          event.metaKey,
+        );
+        if (action === "steer") {
+          if (canSteerCurrentMessage) {
+            void handleSteerCurrentMessage();
+            return;
+          }
+          if (canSteerQueuedMessage) {
+            handleSteerQueuedMessage();
+            return;
+          }
+        }
+      }
+
       void handleSend();
     }
   };
@@ -772,15 +820,19 @@ export function ChatInput({
                   <span className="flex-1 truncate text-xs opacity-75">
                     {t("queue.label", { text: queuedMessage.text })}
                   </span>
-                  {isStreaming && onSendQueuedNow ? (
+                  {isStreaming && canSteerQueuedMessage ? (
                     <button
                       type="button"
-                      onClick={handleSendQueuedNow}
-                      className="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
-                      aria-label={t("toolbar.sendNow")}
-                      title={t("toolbar.sendNow")}
+                      onClick={handleSteerQueuedMessage}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium text-current opacity-75 hover:bg-surface-chat-responding-pill-fg/15 hover:opacity-100"
+                      aria-label={t("toolbar.steer")}
+                      title={t("toolbar.steerQueuedWithEnter")}
                     >
-                      {t("toolbar.sendNow")}
+                      <IconCornerDownLeft
+                        className="size-3"
+                        aria-hidden="true"
+                      />
+                      {t("toolbar.steer")}
                     </button>
                   ) : null}
                   <button
@@ -865,7 +917,6 @@ export function ChatInput({
                 composerActions={{
                   canSend,
                   isStreaming,
-                  hasQueuedMessage,
                   attachmentsEnabled: scopedControls.attachments,
                   onAttachFiles: handleAttachFiles,
                   onAttachFolders: handleAttachFolders,

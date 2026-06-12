@@ -282,3 +282,55 @@ export async function prompt(
   const client = await getClient();
   return client.prompt({ sessionId, prompt: content, _meta: meta });
 }
+
+const UNKNOWN_EXPECTED_RUN_ID = "__goose_internal_unknown_active_run__";
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function extractActualRunId(error: unknown): string | null {
+  if (!isRecord(error) || !("data" in error)) {
+    return null;
+  }
+
+  const data = error.data;
+  if (isRecord(data) && typeof data.actualRunId === "string") {
+    return data.actualRunId;
+  }
+
+  const message =
+    typeof data === "string"
+      ? data
+      : isRecord(data) && typeof data.message === "string"
+        ? data.message
+        : "";
+  const match = message.match(/found `([^`]+)`/);
+  return match?.[1] ?? null;
+}
+
+export async function steerSession(
+  sessionId: string,
+  content: ContentBlock[],
+  expectedRunId: string | null,
+): Promise<string> {
+  const client = await getClient();
+  const steer = async (runId: string) => {
+    const response = await client.extMethod("_goose/unstable/session/steer", {
+      sessionId,
+      prompt: content,
+      expectedRunId: runId,
+    });
+    return typeof response.runId === "string" ? response.runId : runId;
+  };
+
+  try {
+    return await steer(expectedRunId ?? UNKNOWN_EXPECTED_RUN_ID);
+  } catch (error) {
+    const actualRunId = extractActualRunId(error);
+    if (actualRunId && actualRunId !== expectedRunId) {
+      return steer(actualRunId);
+    }
+    throw error;
+  }
+}

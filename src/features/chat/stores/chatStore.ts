@@ -83,6 +83,58 @@ function persistUnreadStateIfChanged(
   persistUnreadSessionIds(nextUnreadIds);
 }
 
+function createAssistantContinuationMessage(
+  previousMessage?: Message,
+): Message {
+  return {
+    id: crypto.randomUUID(),
+    role: "assistant",
+    created: Date.now(),
+    content: [],
+    metadata: {
+      userVisible: true,
+      agentVisible: true,
+      completionStatus: "inProgress",
+      ...(previousMessage?.metadata?.personaId
+        ? { personaId: previousMessage.metadata.personaId }
+        : {}),
+      ...(previousMessage?.metadata?.personaName
+        ? { personaName: previousMessage.metadata.personaName }
+        : {}),
+      ...(previousMessage?.metadata?.providerId
+        ? { providerId: previousMessage.metadata.providerId }
+        : {}),
+    },
+  };
+}
+
+function insertMessageAfter(
+  messages: Message[],
+  afterMessageId: string,
+  message: Message,
+): Message[] {
+  const index = messages.findIndex((item) => item.id === afterMessageId);
+  if (index === -1) {
+    return [...messages, message];
+  }
+
+  return [
+    ...messages.slice(0, index + 1),
+    message,
+    ...messages.slice(index + 1),
+  ];
+}
+
+function findLatestInterventionMessageId(messages: Message[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    if (message.role === "user" && message.metadata?.delivery === "steer") {
+      return message.id;
+    }
+  }
+  return null;
+}
+
 export interface QueuedMessage {
   text: string;
   personaId?: string;
@@ -123,6 +175,11 @@ interface ChatStoreActions {
   getActiveMessages: () => Message[];
   getSessionRuntime: (sessionId: string) => SessionChatRuntime;
   setStreamingMessageId: (sessionId: string, id: string | null) => void;
+  setActiveRunId: (sessionId: string, runId: string | null) => void;
+  setPendingInterventionBoundary: (
+    sessionId: string,
+    boundary: SessionChatRuntime["pendingInterventionBoundary"],
+  ) => void;
   setPendingAssistantProvider: (
     sessionId: string,
     providerId: string | null,
@@ -132,6 +189,7 @@ interface ChatStoreActions {
     content: MessageContent,
   ) => void;
   updateStreamingText: (sessionId: string, text: string) => void;
+  startAssistantStreamAfterIntervention: (sessionId: string) => void;
   setChatState: (sessionId: string, state: ChatState) => void;
   setError: (sessionId: string, error: string | null) => void;
   setConnected: (connected: boolean) => void;
@@ -329,6 +387,31 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ...(state.sessionStateById[sessionId] ??
             createInitialSessionRuntime()),
           streamingMessageId: id,
+          ...(id === null ? { pendingInterventionBoundary: null } : {}),
+        },
+      },
+    })),
+
+  setActiveRunId: (sessionId, activeRunId) =>
+    set((state) => ({
+      sessionStateById: {
+        ...state.sessionStateById,
+        [sessionId]: {
+          ...(state.sessionStateById[sessionId] ??
+            createInitialSessionRuntime()),
+          activeRunId,
+        },
+      },
+    })),
+
+  setPendingInterventionBoundary: (sessionId, pendingInterventionBoundary) =>
+    set((state) => ({
+      sessionStateById: {
+        ...state.sessionStateById,
+        [sessionId]: {
+          ...(state.sessionStateById[sessionId] ??
+            createInitialSessionRuntime()),
+          pendingInterventionBoundary,
         },
       },
     })),
@@ -399,6 +482,9 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       if (!messages) return state;
 
       let shouldMarkUnread = false;
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+
       const updatedMessages = messages.map((message) => {
         if (message.id !== streamingMessageId) return message;
 
@@ -420,31 +506,84 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         return { ...message, content: newContent };
       });
 
-      const current =
-        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
-
       return {
         messagesBySession: {
           ...state.messagesBySession,
           [sessionId]: updatedMessages,
         },
-        ...(shouldMarkUnread
-          ? {
-              sessionStateById: {
-                ...state.sessionStateById,
-                [sessionId]: {
-                  ...current,
-                  hasUnread: true,
-                },
-              },
-            }
-          : {}),
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            ...(shouldMarkUnread ? { hasUnread: true } : {}),
+          },
+        },
       };
     });
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,
     );
+  },
+
+  startAssistantStreamAfterIntervention: (sessionId) => {
+    set((state) => {
+      const messages = state.messagesBySession[sessionId];
+      if (!messages) return state;
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const interventionMessageId =
+        current.pendingInterventionBoundary?.interventionMessageId ??
+        findLatestInterventionMessageId(messages);
+      if (!interventionMessageId) return state;
+
+      const interventionIndex = messages.findIndex(
+        (message) => message.id === interventionMessageId,
+      );
+      const existingContinuationMessage =
+        interventionIndex >= 0 ? messages[interventionIndex + 1] : undefined;
+      if (
+        existingContinuationMessage?.role === "assistant" &&
+        existingContinuationMessage.metadata?.completionStatus === "inProgress"
+      ) {
+        return {
+          sessionStateById: {
+            ...state.sessionStateById,
+            [sessionId]: {
+              ...current,
+              streamingMessageId: existingContinuationMessage.id,
+              pendingInterventionBoundary: null,
+            },
+          },
+        };
+      }
+
+      const streamingMessage = messages.find(
+        (message) => message.id === current.streamingMessageId,
+      );
+      const assistantContinuationMessage =
+        createAssistantContinuationMessage(streamingMessage);
+
+      return {
+        messagesBySession: {
+          ...state.messagesBySession,
+          [sessionId]: insertMessageAfter(
+            messages,
+            interventionMessageId,
+            assistantContinuationMessage,
+          ),
+        },
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            streamingMessageId: assistantContinuationMessage.id,
+            pendingInterventionBoundary: null,
+          },
+        },
+      };
+    });
   },
 
   // State

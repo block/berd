@@ -7,6 +7,7 @@ import type { Message } from "@/shared/types/messages";
 import { clearReplayBuffer } from "../replayBuffer";
 
 const mockAcpSendMessage = vi.fn();
+const mockAcpSteerMessage = vi.fn();
 const mockAcpCancelSession = vi.fn();
 const mockAcpLoadSession = vi.fn();
 const mockAcpPrepareSession = vi.fn();
@@ -14,6 +15,7 @@ const mockAcpSetModel = vi.fn();
 
 vi.mock("@/shared/api/acp", () => ({
   acpSendMessage: (...args: unknown[]) => mockAcpSendMessage(...args),
+  acpSteerMessage: (...args: unknown[]) => mockAcpSteerMessage(...args),
   acpCancelSession: (...args: unknown[]) => mockAcpCancelSession(...args),
   acpLoadSession: (...args: unknown[]) => mockAcpLoadSession(...args),
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
@@ -57,6 +59,7 @@ function createDeferredPromise<T = void>() {
 describe("useChat", () => {
   beforeEach(() => {
     mockAcpSendMessage.mockReset();
+    mockAcpSteerMessage.mockReset();
     mockAcpCancelSession.mockReset();
     mockAcpLoadSession.mockReset();
     mockAcpPrepareSession.mockReset();
@@ -104,6 +107,7 @@ describe("useChat", () => {
       isLoading: false,
     });
     mockAcpSendMessage.mockResolvedValue(undefined);
+    mockAcpSteerMessage.mockResolvedValue("run-1");
     mockAcpCancelSession.mockResolvedValue(true);
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockAcpPrepareSession.mockResolvedValue(undefined);
@@ -144,6 +148,230 @@ describe("useChat", () => {
 
     message = useChatStore.getState().messagesBySession["session-1"][0];
     expect(message.metadata?.completionStatus).toBe("stopped");
+  });
+
+  it("steers the active run without changing chat state", async () => {
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.steerMessage("lean into examples");
+    });
+
+    expect(accepted).toBe(true);
+    expect(mockAcpSteerMessage).toHaveBeenCalledWith(
+      "session-1",
+      "run-1",
+      "lean into examples",
+      { images: undefined },
+    );
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("idle");
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toMatchObject([
+      {
+        role: "user",
+        metadata: {
+          delivery: "steer",
+          userVisible: true,
+        },
+      },
+    ]);
+  });
+
+  it("registers the intervention boundary before the backend acknowledges the steer", async () => {
+    const steerDeferred = createDeferredPromise<string>();
+    mockAcpSteerMessage.mockReturnValue(steerDeferred.promise);
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    addStreamingAssistantMessage(
+      "session-1",
+      "assistant-before-steer",
+      "persona-a",
+      "Persona A",
+    );
+    useChatStore.getState().updateStreamingText("session-1", "Initial answer");
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let steerPromise!: Promise<boolean>;
+    await act(async () => {
+      steerPromise = result.current.steerMessage("make it shorter");
+      await Promise.resolve();
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toMatchObject([
+      { id: "assistant-before-steer", role: "assistant" },
+      { role: "user", metadata: { delivery: "steer" } },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .pendingInterventionBoundary,
+    ).toMatchObject({
+      interventionMessageId: messages[1].id,
+    });
+
+    act(() => {
+      useChatStore
+        .getState()
+        .startAssistantStreamAfterIntervention("session-1");
+      useChatStore
+        .getState()
+        .updateStreamingText("session-1", "Revised before ack");
+    });
+
+    const updatedMessages =
+      useChatStore.getState().messagesBySession["session-1"];
+    expect(updatedMessages[0].content).toEqual([
+      { type: "text", text: "Initial answer" },
+    ]);
+    expect(updatedMessages[2].content).toEqual([
+      { type: "text", text: "Revised before ack" },
+    ]);
+
+    await act(async () => {
+      steerDeferred.resolve("run-2");
+      await steerPromise;
+    });
+  });
+
+  it("starts a new visible assistant stream when the structured intervention boundary arrives", async () => {
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+    addStreamingAssistantMessage(
+      "session-1",
+      "assistant-before-steer",
+      "persona-a",
+      "Persona A",
+    );
+    useChatStore.getState().updateStreamingText("session-1", "Initial answer");
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    await act(async () => {
+      await result.current.steerMessage("make it shorter");
+    });
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toMatchObject([
+      {
+        id: "assistant-before-steer",
+        role: "assistant",
+        content: [{ type: "text", text: "Initial answer" }],
+      },
+      {
+        role: "user",
+        metadata: { delivery: "steer" },
+      },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").streamingMessageId,
+    ).toBe("assistant-before-steer");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .pendingInterventionBoundary,
+    ).toMatchObject({
+      interventionMessageId: messages[1].id,
+    });
+
+    act(() => {
+      useChatStore
+        .getState()
+        .updateStreamingText("session-1", " still belongs above");
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"][0].content,
+    ).toEqual([{ type: "text", text: "Initial answer still belongs above" }]);
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      2,
+    );
+
+    act(() => {
+      useChatStore
+        .getState()
+        .updateStreamingText("session-1", " make it shorter naturally");
+    });
+
+    expect(
+      useChatStore.getState().messagesBySession["session-1"][0].content,
+    ).toEqual([
+      {
+        type: "text",
+        text: "Initial answer still belongs above make it shorter naturally",
+      },
+    ]);
+    expect(useChatStore.getState().messagesBySession["session-1"]).toHaveLength(
+      2,
+    );
+
+    act(() => {
+      useChatStore
+        .getState()
+        .startAssistantStreamAfterIntervention("session-1");
+      useChatStore
+        .getState()
+        .updateStreamingText("session-1", "Revised answer below");
+    });
+
+    const updatedMessages =
+      useChatStore.getState().messagesBySession["session-1"];
+    const continuationAssistant = updatedMessages[2];
+    expect(
+      useChatStore.getState().messagesBySession["session-1"][2].content,
+    ).toEqual([{ type: "text", text: "Revised answer below" }]);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"][0].content,
+    ).toEqual([
+      {
+        type: "text",
+        text: "Initial answer still belongs above make it shorter naturally",
+      },
+    ]);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").streamingMessageId,
+    ).toBe(continuationAssistant.id);
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .pendingInterventionBoundary,
+    ).toBeNull();
+    expect(continuationAssistant).toMatchObject({
+      role: "assistant",
+      metadata: {
+        completionStatus: "inProgress",
+        personaId: "persona-a",
+        personaName: "Persona A",
+      },
+    });
+  });
+
+  it("explains when steering is missing from the running backend", async () => {
+    mockAcpSteerMessage.mockRejectedValue(new Error("Method not found"));
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.steerMessage("now about land");
+    });
+
+    expect(accepted).toBe(false);
+    expect(
+      useChatStore.getState().messagesBySession["session-1"],
+    ).toMatchObject([
+      {
+        role: "system",
+        content: [
+          {
+            type: "systemNotification",
+            text: "Steering is not available in this Goose backend. Restart with the steering backend branch and try again.",
+          },
+        ],
+      },
+    ]);
   });
 
   it("does not overwrite a completed message when stop loses the race", async () => {

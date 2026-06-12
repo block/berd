@@ -461,14 +461,30 @@ describe("setShortcutOverride", () => {
 
   it("reports a storage failure without dispatching the changed event", () => {
     const changeCount = listenForChanges();
-    vi.spyOn(Storage.prototype, "setItem").mockImplementationOnce(() => {
-      throw new Error("quota exceeded");
+    const originalLocalStorage = window.localStorage;
+    Object.defineProperty(window, "localStorage", {
+      configurable: true,
+      value: {
+        getItem: originalLocalStorage.getItem.bind(originalLocalStorage),
+        removeItem: originalLocalStorage.removeItem.bind(originalLocalStorage),
+        setItem: () => {
+          throw new Error("quota exceeded");
+        },
+      },
     });
-    expect(setShortcutOverride("navigation.search", "meta+shift+x")).toEqual({
-      ok: false,
-      reason: "storage",
-    });
-    expect(changeCount()).toBe(0);
+
+    try {
+      expect(setShortcutOverride("navigation.search", "meta+shift+x")).toEqual({
+        ok: false,
+        reason: "storage",
+      });
+      expect(changeCount()).toBe(0);
+    } finally {
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        value: originalLocalStorage,
+      });
+    }
   });
 });
 

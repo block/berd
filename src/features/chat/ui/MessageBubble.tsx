@@ -92,6 +92,7 @@ function MessageAttachmentRow({
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
+  animateEntry?: boolean;
   contentOverride?: readonly MessageContent[];
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
@@ -391,6 +392,7 @@ function renderContentBlock(
 export const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  animateEntry = true,
   contentOverride,
   fragmentRole,
   onRetryMessage,
@@ -539,6 +541,7 @@ export const MessageBubble = memo(function MessageBubble({
       !showPersonaGutterAvatar &&
       (assistantDisplayName || personaGutterImage || assistantProviderIcon),
   );
+  const isSteeredMessage = isUser && message.metadata?.delivery === "steer";
   const messageAttachments = message.metadata?.attachments ?? [];
   const messageChips = message.metadata?.chips ?? [];
   const timestamp = (
@@ -558,7 +561,8 @@ export const MessageBubble = memo(function MessageBubble({
       className={cn(
         "flex",
         outerSpacingClassName,
-        "animate-in fade-in duration-200 motion-reduce:animate-none",
+        animateEntry &&
+          "animate-in fade-in duration-200 motion-reduce:animate-none",
         isUser ? "ml-auto flex-row-reverse gap-3" : "flex-row gap-3",
       )}
       data-role={isUser ? "user-message" : "assistant-message"}
@@ -645,6 +649,14 @@ export const MessageBubble = memo(function MessageBubble({
           )}
           onClick={handleContentClick}
         >
+          {isSteeredMessage ? (
+            <span
+              data-role="steer-message-label"
+              className="mb-1 block text-xs font-normal leading-4 text-muted-foreground"
+            >
+              {t("message.steerLabel")}
+            </span>
+          ) : null}
           {isUser && messageChips.length > 0 && (
             <div className="mb-1.5 flex flex-wrap gap-1.5">
               {messageChips.map((chip) => (

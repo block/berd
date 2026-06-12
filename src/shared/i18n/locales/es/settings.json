@@ -232,6 +232,12 @@
       "spanish": "Español",
       "system": "Predeterminado del sistema ({{language}})"
     },
+    "followUpBehavior": {
+      "description": "Pon seguimientos en cola mientras Goose responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
+      "label": "Comportamiento de seguimiento",
+      "queue": "Cola",
+      "steer": "Guiar"
+    },
     "terminalFallback": {
       "change": "Cambiar",
       "chooseDialogTitle": "Elegir carpeta de reserva del terminal",

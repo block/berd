@@ -168,6 +168,24 @@ describe("MessageBubble", () => {
     expect(screen.getByText("hello world")).toBeInTheDocument();
   });
 
+  it("labels steered user messages", () => {
+    const message = userMessage("adjust course");
+    message.metadata = {
+      ...message.metadata,
+      delivery: "steer",
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const label = screen.getByText("Steered");
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveAttribute("data-role", "steer-message-label");
+    expect(label).not.toHaveAttribute("data-slot", "badge");
+    expect(label).toHaveClass("leading-4");
+    expect(label.closest(".bg-message-user-bg")).toHaveClass("py-2");
+    expect(label.closest(".bg-message-user-bg")).not.toHaveClass("py-2.5");
+  });
+
   it("renders compaction notifications as centered success messages", () => {
     const { container } = render(
       <MessageBubble
@@ -255,6 +273,20 @@ describe("MessageBubble", () => {
     );
     expect(messageRoot).toHaveClass("py-1");
     expect(messageRoot).not.toHaveAttribute("data-message-fragment-role");
+  });
+
+  it("can suppress entry animation for virtualized rows", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        animateEntry={false}
+      />,
+    );
+
+    const messageRoot = container.querySelector(
+      '[data-role="assistant-message"]',
+    );
+    expect(messageRoot).not.toHaveClass("animate-in", "fade-in");
   });
 
   it("stitches assistant text fragments without repeated row padding", () => {

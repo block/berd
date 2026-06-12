@@ -232,6 +232,12 @@
       "spanish": "Spanish",
       "system": "System default ({{language}})"
     },
+    "followUpBehavior": {
+      "description": "Queue follow-ups while Goose responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
+      "label": "Follow-up behavior",
+      "queue": "Queue",
+      "steer": "Steer"
+    },
     "terminalFallback": {
       "change": "Change",
       "chooseDialogTitle": "Choose terminal fallback folder",

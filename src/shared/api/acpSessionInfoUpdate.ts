@@ -1,10 +1,12 @@
 import type { SessionUpdate } from "@agentclientprotocol/sdk";
+import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 
 type SessionInfoUpdate = SessionUpdate & {
   sessionUpdate: "session_info_update";
   title?: unknown;
   updatedAt?: unknown;
+  meta?: unknown;
   _meta?: unknown;
 };
 
@@ -18,12 +20,28 @@ export function handleSessionInfoUpdate(
 ): void {
   const info = update as SessionInfoUpdate;
   const sessionStore = useChatSessionStore.getState();
+  const meta = isRecord(info._meta)
+    ? info._meta
+    : isRecord(info.meta)
+      ? info.meta
+      : {};
+  const gooseMeta = isRecord(meta.goose) ? meta.goose : null;
+  if (gooseMeta && "activeRunId" in gooseMeta) {
+    useChatStore
+      .getState()
+      .setActiveRunId(
+        sessionId,
+        typeof gooseMeta.activeRunId === "string"
+          ? gooseMeta.activeRunId
+          : null,
+      );
+  }
+
   const session = sessionStore.getSession(sessionId);
   if (!session) {
     return;
   }
 
-  const meta = isRecord(info._meta) ? info._meta : {};
   const patch: Parameters<typeof sessionStore.patchSession>[1] = {};
 
   if (typeof info.title === "string" && info.title && !session.userSetName) {

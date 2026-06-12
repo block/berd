@@ -18,9 +18,14 @@ const mockGoosePreferencesRead = vi.fn();
 const mockGoosePreferencesSave = vi.fn();
 const mockToastError = vi.fn();
 const mockUseChatSendMessage = vi.fn();
+const mockUseChatSteerMessage = vi.fn();
 const mockUseMessageQueue = vi.fn();
 const mockPreSeedDraftAgent = vi.fn();
 const mockDeletePersonaSource = vi.fn();
+const mockUseChatRuntime = {
+  chatState: "idle",
+  activeRunId: null as string | null,
+};
 const mockPickerState = {
   pickerAgents: [{ id: "goose", label: "Goose" }],
   availableModels: [] as Array<{
@@ -89,13 +94,15 @@ vi.mock("../useChat", () => ({
     options?: { ensurePrepared?: () => Promise<boolean | undefined> },
   ) => ({
     messages: [],
-    chatState: "idle",
+    chatState: mockUseChatRuntime.chatState,
     tokenState: null,
     sendMessage: (...args: unknown[]) =>
       mockUseChatSendMessage(options, ...args),
+    steerMessage: (...args: unknown[]) => mockUseChatSteerMessage(...args),
     compactConversation: vi.fn(),
     stopStreaming: vi.fn(),
     streamingMessageId: null,
+    activeRunId: mockUseChatRuntime.activeRunId,
   }),
 }));
 
@@ -232,6 +239,8 @@ describe("useChatSessionController", () => {
     mockPickerState.availableModels = [];
     mockPickerState.modelsLoading = false;
     mockPickerState.modelStatusMessage = null;
+    mockUseChatRuntime.chatState = "idle";
+    mockUseChatRuntime.activeRunId = null;
 
     useAgentStore.setState({
       personas: [],
@@ -410,8 +419,9 @@ describe("useChatSessionController", () => {
     expect(queueChatState).toBe("idle");
   });
 
-  it("keeps a queued message when send-now is not accepted", async () => {
+  it("keeps a queued message when steer is not accepted", async () => {
     const dismiss = vi.fn();
+    mockUseChatSteerMessage.mockResolvedValue(false);
     mockUseMessageQueue.mockImplementation(() => ({
       queuedMessage: {
         text: "make an agent",
@@ -429,11 +439,53 @@ describe("useChatSessionController", () => {
 
     let accepted: boolean | undefined;
     await act(async () => {
-      accepted = await result.current.sendQueuedNow();
+      accepted = await result.current.steerQueuedMessage();
     });
 
     expect(accepted).toBe(false);
     expect(dismiss).not.toHaveBeenCalled();
+  });
+
+  it("steers a draft message while the agent is responding", async () => {
+    mockUseChatRuntime.chatState = "streaming";
+    mockUseChatSteerMessage.mockResolvedValue(true);
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    let accepted: boolean | undefined;
+    await act(async () => {
+      accepted = await result.current.steerDraftMessage(
+        "make it shorter",
+        undefined,
+        undefined,
+        { displayText: "make it shorter" },
+      );
+    });
+
+    expect(accepted).toBe(true);
+    expect(mockUseChatSteerMessage).toHaveBeenCalledWith(
+      "make it shorter",
+      undefined,
+      { displayText: "make it shorter" },
+    );
+  });
+
+  it("offers steering for queued messages while the agent is responding without active run metadata", () => {
+    mockUseChatRuntime.chatState = "streaming";
+    mockUseChatRuntime.activeRunId = null;
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: { text: "a little shorter" },
+      enqueue: vi.fn(),
+      dismiss: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.canSteerQueuedMessage).toBe(true);
   });
 
   it("handleCreatePersona calls the AppShell-provided callback", () => {

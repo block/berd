@@ -34,6 +34,10 @@ import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPreference";
 import { useTerminalFallbackCwdPreference } from "@/features/terminal/lib/terminalCwdPreference";
+import {
+  useStreamingShortcutPreference,
+  type StreamingShortcutMode,
+} from "@/features/chat/lib/streamingShortcutPreference";
 
 interface AboutAppInfo {
   name: string;
@@ -104,6 +108,7 @@ export function GeneralSettings() {
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
+  const streamingShortcutPreference = useStreamingShortcutPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
@@ -115,6 +120,8 @@ export function GeneralSettings() {
     setPrimaryColor,
     resetPrimaryColor,
   } = useTheme();
+  const followUpBehavior =
+    streamingShortcutPreference.mode === "cmd-enter-steers" ? "queue" : "steer";
 
   // The picker is self-contained: a "follow theme" swatch (clears the custom
   // override so the primary tracks the active light/dark theme) plus the
@@ -375,6 +382,45 @@ export function GeneralSettings() {
           >
             {t("shortcuts:settings.customize")}
           </Button>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.followUpBehavior.label")}
+          description={t("general.followUpBehavior.description")}
+        >
+          <fieldset className="flex items-center gap-1">
+            <legend className="sr-only">
+              {t("general.followUpBehavior.label")}
+            </legend>
+            <Button
+              type="button"
+              aria-pressed={followUpBehavior === "queue"}
+              className="min-w-16"
+              size="sm"
+              variant={followUpBehavior === "queue" ? "default" : "ghost"}
+              onClick={() =>
+                streamingShortcutPreference.setMode(
+                  "cmd-enter-steers" satisfies StreamingShortcutMode,
+                )
+              }
+            >
+              {t("general.followUpBehavior.queue")}
+            </Button>
+            <Button
+              type="button"
+              aria-pressed={followUpBehavior === "steer"}
+              className="min-w-16"
+              size="sm"
+              variant={followUpBehavior === "steer" ? "default" : "ghost"}
+              onClick={() =>
+                streamingShortcutPreference.setMode(
+                  "enter-steers" satisfies StreamingShortcutMode,
+                )
+              }
+            >
+              {t("general.followUpBehavior.steer")}
+            </Button>
+          </fieldset>
         </SettingRow>
       </SettingsSection>
 

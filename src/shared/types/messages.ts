@@ -222,6 +222,7 @@ export interface MessageChip {
 export interface MessageMetadata {
   userVisible?: boolean;
   agentVisible?: boolean;
+  delivery?: "steer";
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
   personaId?: string;

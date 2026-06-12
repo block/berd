@@ -446,6 +446,8 @@ describe("VirtualMessageTimeline", () => {
       "data-transcript-message-id",
       "fragmented",
     );
+    expect(firstFragment.style.left).toBe("0px");
+    expect(firstFragment.style.right).toBe("0px");
     expect(middleFragment).not.toHaveAttribute("data-transcript-message-id");
     expect(lastFragment).toHaveAttribute(
       "data-virtual-row-fragment-role",

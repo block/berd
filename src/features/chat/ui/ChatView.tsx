@@ -798,8 +798,10 @@ export function ChatView({
           }
           composerActions={{
             onSend: controller.handleSend,
-            onSendNow: controller.sendNow,
-            onSendQueuedNow: controller.sendQueuedNow,
+            onSteerMessage: controller.steerDraftMessage,
+            canSteerMessage: controller.canSteerMessage,
+            onSteerQueuedMessage: controller.steerQueuedMessage,
+            canSteerQueuedMessage: controller.canSteerQueuedMessage,
             disabled:
               isReadOnly ||
               controller.projectMetadataPending ||

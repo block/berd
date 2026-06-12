@@ -12,6 +12,7 @@ import type { ChatState, TokenState } from "@/shared/types/chat";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import {
   acpSendMessage,
+  acpSteerMessage,
   acpCancelSession,
   acpLoadSession,
 } from "@/shared/api/acp";
@@ -78,6 +79,13 @@ function markMessageStopped(sessionId: string, messageId: string) {
       ),
     };
   });
+}
+
+function formatSteerErrorMessage(error: unknown): string {
+  const message = formatAcpErrorMessage(error);
+  return message.toLowerCase().includes("method not found")
+    ? i18n.t("chat:errors.steeringBackendUnavailable")
+    : message;
 }
 
 /**
@@ -309,6 +317,89 @@ export function useChat(
     ],
   );
 
+  const steerMessage = useCallback(
+    async (
+      text: string,
+      attachments?: ChatAttachmentDraft[],
+      sendOptions?: ChatSendOptions,
+    ) => {
+      const images = buildAcpImages(attachments);
+      const hasAttachments = (attachments?.length ?? 0) > 0;
+      const activeRunId = useChatStore
+        .getState()
+        .getSessionRuntime(sessionId).activeRunId;
+
+      if (!text.trim() && !hasAttachments) {
+        return false;
+      }
+
+      const userMessage = createUserMessage(
+        sendOptions?.displayText ?? text,
+        buildMessageAttachments(attachments),
+        sendOptions?.chips,
+      );
+      userMessage.metadata = {
+        ...userMessage.metadata,
+        delivery: "steer",
+      };
+
+      if (images && images.length > 0) {
+        for (const img of images) {
+          userMessage.content.push({
+            type: "image",
+            data: img.base64,
+            mimeType: img.mimeType,
+          });
+        }
+      }
+
+      const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
+      const acpPrompt =
+        promptWithPaths || (images?.length ? " " : promptWithPaths);
+      addMessage(sessionId, userMessage);
+      useChatStore.getState().setPendingInterventionBoundary(sessionId, {
+        interventionMessageId: userMessage.id,
+      });
+
+      try {
+        const steeredRunId = await acpSteerMessage(
+          sessionId,
+          activeRunId,
+          acpPrompt,
+          {
+            ...(sendOptions?.assistantPrompt
+              ? { assistantPrompt: sendOptions.assistantPrompt }
+              : {}),
+            images: images?.map(
+              (img) => [img.base64, img.mimeType] as [string, string],
+            ),
+          },
+        );
+        useChatStore.getState().setActiveRunId(sessionId, steeredRunId);
+        useChatSessionStore.getState().patchSession(sessionId, {
+          updatedAt: new Date().toISOString(),
+        });
+        return true;
+      } catch (err) {
+        const chatStore = useChatStore.getState();
+        chatStore.removeMessage(sessionId, userMessage.id);
+        if (
+          chatStore.getSessionRuntime(sessionId).pendingInterventionBoundary
+            ?.interventionMessageId === userMessage.id
+        ) {
+          chatStore.setPendingInterventionBoundary(sessionId, null);
+        }
+        const errorMessage = formatSteerErrorMessage(err);
+        chatStore.addMessage(
+          sessionId,
+          createSystemNotificationMessage(errorMessage, "error"),
+        );
+        return false;
+      }
+    },
+    [addMessage, sessionId],
+  );
+
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort();
     const runtime = useChatStore.getState().getSessionRuntime(sessionId);
@@ -316,6 +407,7 @@ export function useChat(
 
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
+    useChatStore.getState().setActiveRunId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
     // Cancel the backend ACP session to stop orphaned streaming/tool events. We
     // send cancellation even while still "thinking" before ACP has created a
@@ -344,6 +436,7 @@ export function useChat(
     resetPersonaHandoff(sessionId);
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
+    useChatStore.getState().setActiveRunId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
   }, [
     sessionId,
@@ -466,7 +559,9 @@ export function useChat(
     tokenState: tokenState as TokenState,
     error,
     streamingMessageId,
+    activeRunId: runtime.activeRunId,
     sendMessage,
+    steerMessage,
     stopGeneration,
     stopStreaming,
     clearChat,

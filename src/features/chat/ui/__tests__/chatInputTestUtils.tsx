@@ -27,9 +27,11 @@ type ChatInputHarnessProps = Omit<
 
 export function ChatInput({
   onSend,
+  onSteerMessage,
   onStop,
-  onSendNow,
-  onSendQueuedNow,
+  onSteerQueuedMessage,
+  canSteerMessage,
+  canSteerQueuedMessage,
   isStreaming,
   disabled,
   sendDisabled,
@@ -70,9 +72,11 @@ export function ChatInput({
       {...props}
       composerActions={{
         onSend,
+        onSteerMessage,
         onStop,
-        onSendNow,
-        onSendQueuedNow,
+        onSteerQueuedMessage,
+        canSteerMessage,
+        canSteerQueuedMessage,
         isStreaming,
         disabled,
         sendDisabled,

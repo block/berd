@@ -61,6 +61,7 @@
   },
   "errors": {
     "sessionPreparationSuperseded": "La configuración de la sesión cambió durante la preparación. Intenta enviar de nuevo.",
+    "steeringBackendUnavailable": "La guía no está disponible en este backend de Goose. Reinicia con la rama del backend de guía e inténtalo de nuevo.",
     "voiceInputFailedTitle": "Falló el dictado por voz",
     "voiceInputNoMicrophoneDescription": "Conecta o selecciona un micrófono y vuelve a intentar el dictado por voz.",
     "voiceInputNoMicrophoneTitle": "No se encontró ningún micrófono",
@@ -253,7 +254,8 @@
     "mcpApp": "MCP App",
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
-    "redactedThinking": "(pensamiento redactado)"
+    "redactedThinking": "(pensamiento redactado)",
+    "steerLabel": "Guiado"
   },
   "persona": {
     "chooseAssistant": "Elegir asistente",
@@ -330,7 +332,8 @@
     "selectModel": "Seleccionar modelo",
     "selectProject": "Seleccionar proyecto",
     "sendMessage": "Enviar mensaje",
-    "sendNow": "Enviar ahora",
+    "steer": "Guiar",
+    "steerQueuedWithEnter": "Pulsa Enter de nuevo para guiar",
     "sessionStarting": "Iniciando sesión...",
     "sessionStartFailed": "No se pudo iniciar la sesión",
     "sessionMissingProjectDir": "No se puede iniciar esta sesión: la carpeta del proyecto no existe: {{paths}}. Edita el proyecto para actualizar sus carpetas.",

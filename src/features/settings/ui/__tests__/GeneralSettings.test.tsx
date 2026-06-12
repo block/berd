@@ -11,6 +11,7 @@ import {
   type OpenSettingsEventDetail,
 } from "@/features/settings/lib/settingsEvents";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
+import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -39,6 +40,9 @@ const toastSuccessMock = vi.mocked(toast.success);
 
 if (!HTMLElement.prototype.hasPointerCapture) {
   HTMLElement.prototype.hasPointerCapture = () => false;
+}
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 }
 
 function createQueryClient() {
@@ -158,6 +162,41 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("updates the follow-up behavior", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    expect(screen.getByRole("button", { name: "Queue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Steer" }));
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY)).toBe(
+        "enter-steers",
+      );
+    });
+    expect(screen.getByRole("button", { name: "Steer" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Queue" }));
+
+    await waitFor(() => {
+      expect(localStorage.getItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY)).toBe(
+        "cmd-enter-steers",
+      );
+    });
+    expect(screen.getByRole("button", { name: "Queue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("updates the default artifact location", async () => {

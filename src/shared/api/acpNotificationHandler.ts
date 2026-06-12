@@ -344,6 +344,19 @@ function getChunkMessageId(update: SessionUpdate): string | null {
     : null;
 }
 
+function isRunInterventionBoundary(update: SessionUpdate): boolean {
+  const record: Record<string, unknown> = update;
+  const meta = record._meta;
+  if (!isRecord(meta)) {
+    return false;
+  }
+  // Goose currently marks a mid-run steer echo as the intervention boundary.
+  // Keep that backend-specific shape at the ACP edge so the chat store only
+  // has to reason about generic intervention boundaries.
+  const goose = meta.goose;
+  return isRecord(goose) && goose.steer === true;
+}
+
 function getReplayAssistantMessageMetadata(
   sessionId: string,
   update: SessionUpdate,
@@ -528,6 +541,11 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
 
   switch (update.sessionUpdate) {
     case "agent_message_chunk": {
+      if (isRunInterventionBoundary(update)) {
+        store.startAssistantStreamAfterIntervention(sessionId);
+        break;
+      }
+
       const messageId = ensureLiveAssistantMessage(
         sessionId,
         getChunkMessageId(update) ?? undefined,
@@ -536,6 +554,13 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       if (update.content.type === "text" && "text" in update.content) {
         store.setStreamingMessageId(sessionId, messageId);
         store.updateStreamingText(sessionId, update.content.text);
+      }
+      break;
+    }
+
+    case "user_message_chunk": {
+      if (isRunInterventionBoundary(update)) {
+        store.startAssistantStreamAfterIntervention(sessionId);
       }
       break;
     }

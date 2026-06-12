@@ -217,6 +217,109 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("uses goose steer metadata as the live stream boundary", async () => {
+    useChatStore.getState().setMessages("acp-session", [
+      {
+        id: "assistant-before-steer",
+        role: "assistant",
+        created: 1,
+        content: [{ type: "text", text: "Initial answer" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          completionStatus: "inProgress",
+          personaId: "persona-a",
+          personaName: "Persona A",
+        },
+      },
+      {
+        id: "steer-message",
+        role: "user",
+        created: 2,
+        content: [{ type: "text", text: "make it shorter" }],
+        metadata: {
+          userVisible: true,
+          agentVisible: true,
+          delivery: "steer",
+        },
+      },
+    ]);
+    useChatStore
+      .getState()
+      .setStreamingMessageId("acp-session", "assistant-before-steer");
+    useChatStore.getState().setPendingInterventionBoundary("acp-session", {
+      interventionMessageId: "steer-message",
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: " make it shorter can appear naturally",
+        },
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        messageId: "steer-message",
+        content: {
+          type: "text",
+          text: "make it shorter",
+        },
+        _meta: {
+          goose: {
+            steer: true,
+            messageId: "steer-message",
+            activeRunId: "run-2",
+          },
+        },
+      },
+    } as never);
+
+    const continuationMessageId =
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .streamingMessageId ?? "";
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "Revised answer",
+        },
+      },
+    } as never);
+
+    const messages = useChatStore.getState().messagesBySession["acp-session"];
+    expect(messages).toHaveLength(3);
+    expect(messages[0].content).toEqual([
+      {
+        type: "text",
+        text: "Initial answer make it shorter can appear naturally",
+      },
+    ]);
+    expect(messages[2]).toMatchObject({
+      id: continuationMessageId,
+      role: "assistant",
+      content: [{ type: "text", text: "Revised answer" }],
+      metadata: {
+        completionStatus: "inProgress",
+        personaId: "persona-a",
+        personaName: "Persona A",
+      },
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("acp-session")
+        .pendingInterventionBoundary,
+    ).toBeNull();
+  });
+
   it("attaches replay assistant persona identity from update metadata", async () => {
     markSessionReplayLoading();
 

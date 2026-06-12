@@ -30,7 +30,6 @@ import {
 } from "./ToolChainVirtualRows";
 import { getVirtualTranscriptRowSpacingClassName } from "./virtualTranscriptRowSpacing";
 
-const VIRTUAL_ROW_INLINE_INSET = "var(--chat-transcript-inline-padding)";
 const STREAMING_ROW_ACTION_GUTTER = "0.75rem";
 const EMPTY_MESSAGE_BUBBLE_CALLBACKS: MessageBubbleCallbacks = {};
 
@@ -95,10 +94,10 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
             }
           : null),
         left: streamingActionGutter
-          ? `calc(${VIRTUAL_ROW_INLINE_INSET} - ${streamingActionGutter})`
-          : VIRTUAL_ROW_INLINE_INSET,
+          ? `calc(0px - ${streamingActionGutter})`
+          : 0,
         position: "absolute",
-        right: VIRTUAL_ROW_INLINE_INSET,
+        right: 0,
         top: 0,
         transform: `translateY(${virtualItem.start}px)`,
       }
@@ -258,6 +257,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       >
         <MessageBubble
           message={message}
+          animateEntry={false}
           contentOverride={row.fragment.content}
           fragmentRole={row.fragment.role}
           isStreaming={row.fragment.isStreamingTail && isStreaming}
@@ -328,6 +328,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       >
         <MessageBubble
           message={message}
+          animateEntry={false}
           isStreaming={isStreaming}
           onRetryMessage={
             message.role === "assistant" ? onRetryMessage : undefined

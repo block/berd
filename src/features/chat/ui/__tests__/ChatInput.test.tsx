@@ -12,6 +12,7 @@ import { ChatInput } from "./chatInputTestUtils";
 import { ChatInputToolbar } from "../ChatInputToolbar";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { Persona } from "@/shared/types/agents";
+import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "../../lib/streamingShortcutPreference";
 
 const mockVoiceDictation = {
   isEnabled: true,
@@ -767,12 +768,10 @@ describe("ChatInput", () => {
   it("consumes Meta+Enter in the open mention menu instead of send-now", async () => {
     const user = userEvent.setup();
     const onSend = vi.fn();
-    const onSendNow = vi.fn();
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
     render(
       <ChatInput
         onSend={onSend}
-        onSendNow={onSendNow}
         isStreaming
         selectedProjectId="project-1"
         availableProjects={[
@@ -800,7 +799,6 @@ describe("ChatInput", () => {
     // the half-typed draft never reaches send-now (or queued send).
     expect(wasNotPrevented).toBe(false);
     expect(input).toHaveValue("@/Users/wesb/dev/goose2/README.md ");
-    expect(onSendNow).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();
   });
 
@@ -1364,59 +1362,167 @@ describe("ChatInput", () => {
     expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
   });
 
-  it("queues on plain enter during streaming even when send-now is available", async () => {
+  it("queues on plain enter during streaming", async () => {
     const onSend = vi.fn();
-    const onSendNow = vi.fn();
+    const onSteerMessage = vi.fn();
     const user = userEvent.setup();
-    render(<ChatInput onSend={onSend} onSendNow={onSendNow} isStreaming />);
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+      />,
+    );
 
     await user.type(screen.getByRole("textbox"), "follow up");
     await user.keyboard("{Enter}");
 
     expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
-    expect(onSendNow).not.toHaveBeenCalled();
+    expect(onSteerMessage).not.toHaveBeenCalled();
   });
 
-  it("sends queued message now from the queue bar", async () => {
-    const onSendQueuedNow = vi.fn();
+  it("steers on cmd-enter during streaming by default", async () => {
+    const onSend = vi.fn();
+    const onSteerMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "follow up");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSteerMessage).toHaveBeenCalledWith(
+      "follow up",
+      undefined,
+      undefined,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("steers queued message from the queue bar", async () => {
+    const onSteerQueuedMessage = vi.fn();
     const user = userEvent.setup();
     render(
       <ChatInput
         onSend={vi.fn()}
-        onSendQueuedNow={onSendQueuedNow}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
         onStop={vi.fn()}
         isStreaming
         queuedMessage={{ text: "queued msg" }}
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /send now/i }));
+    expect(screen.getByTitle("Press Enter again to steer")).toBeInTheDocument();
 
-    expect(onSendQueuedNow).toHaveBeenCalledOnce();
+    await user.click(screen.getByRole("button", { name: /steer/i }));
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
     expect(
-      screen.queryByRole("button", { name: /stop generation/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: /stop generation/i }),
+    ).toBeInTheDocument();
   });
 
-  it("cmd-enter sends immediately while busy", async () => {
-    const onSendNow = vi.fn();
-    const user = userEvent.setup();
-    render(<ChatInput onSend={vi.fn()} onSendNow={onSendNow} isStreaming />);
-
-    await user.type(screen.getByRole("textbox"), "replacement");
-    await user.keyboard("{Meta>}{Enter}{/Meta}");
-
-    expect(onSendNow).toHaveBeenCalledWith("replacement", undefined, undefined);
-  });
-
-  it("does not send when queue is full", async () => {
+  it("steers a queued message on a second plain enter", async () => {
     const onSend = vi.fn();
-    const onSendNow = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
     const user = userEvent.setup();
     render(
       <ChatInput
         onSend={onSend}
-        onSendNow={onSendNow}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ text: "queued msg" }}
+      />,
+    );
+
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).toHaveBeenCalledOnce();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not steer a queued message on enter when the composer has a draft", async () => {
+    const onSend = vi.fn();
+    const onSteerQueuedMessage = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerQueuedMessage={onSteerQueuedMessage}
+        canSteerQueuedMessage
+        isStreaming
+        queuedMessage={{ text: "queued msg" }}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "another draft");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerQueuedMessage).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("queues on cmd-enter when enter is configured to steer", async () => {
+    const onSend = vi.fn();
+    const onSteerMessage = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "follow up");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSend).toHaveBeenCalledWith("follow up", undefined, undefined);
+    expect(onSteerMessage).not.toHaveBeenCalled();
+  });
+
+  it("steers on enter when enter is configured to steer", async () => {
+    const onSend = vi.fn();
+    const onSteerMessage = vi.fn();
+    const user = userEvent.setup();
+    localStorage.setItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY, "enter-steers");
+    render(
+      <ChatInput
+        onSend={onSend}
+        onSteerMessage={onSteerMessage}
+        canSteerMessage
+        isStreaming
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "follow up");
+    await user.keyboard("{Enter}");
+
+    expect(onSteerMessage).toHaveBeenCalledWith(
+      "follow up",
+      undefined,
+      undefined,
+    );
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("does not send when queue is full", async () => {
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={onSend}
         isStreaming
         queuedMessage={{ text: "queued msg" }}
       />,
@@ -1426,7 +1532,6 @@ describe("ChatInput", () => {
     await user.keyboard("{Enter}");
 
     expect(onSend).not.toHaveBeenCalled();
-    expect(onSendNow).not.toHaveBeenCalled();
   });
 
   it("does not stop dictation when send is blocked", async () => {
@@ -1469,7 +1574,6 @@ describe("ChatInput", () => {
         composerActions={{
           canSend: false,
           isStreaming: false,
-          hasQueuedMessage: false,
           onSend: vi.fn(),
           voiceEnabled: false,
           voiceRecording: true,

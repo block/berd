@@ -36,10 +36,12 @@ vi.mock("../useChat", () => ({
     chatState: "idle",
     tokenState: mockTokenState,
     sendMessage: (...args: unknown[]) => mockSendMessage(...args),
+    steerMessage: vi.fn(),
     compactConversation: (...args: unknown[]) =>
       mockCompactConversation(...args),
     stopStreaming: vi.fn(),
     streamingMessageId: null,
+    activeRunId: null,
   }),
 }));
 

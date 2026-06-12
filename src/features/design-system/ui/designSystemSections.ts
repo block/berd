@@ -146,7 +146,6 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-split-button", label: "Split Button" },
   { id: "component-context-menu", label: "Context Menu" },
   { id: "component-drawer", label: "Drawer" },
-  { id: "component-toggle-group", label: "Toggle Group" },
   { id: "component-form", label: "Form" },
   { id: "component-goose-logo", label: "Goose Logo" },
   { id: "component-hover-card", label: "Hover Card" },
@@ -162,6 +161,7 @@ export const DESIGN_SYSTEM_UNUSED_COMPONENT_SECTIONS: Array<{
   { id: "component-sidebar", label: "Sidebar" },
   { id: "component-table", label: "Table" },
   { id: "component-toggle", label: "Toggle" },
+  { id: "component-toggle-group", label: "Toggle Group" },
 ];
 
 export const DESIGN_SYSTEM_ALL_COMPONENT_SECTIONS = [

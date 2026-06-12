@@ -33,6 +33,10 @@ export interface SessionChatRuntime {
   tokenState: TokenState;
   hasUsageSnapshot: boolean;
   streamingMessageId: string | null;
+  activeRunId: string | null;
+  pendingInterventionBoundary: {
+    interventionMessageId: string;
+  } | null;
   pendingAssistantProviderId: string | null;
   error: string | null;
   hasUnread: boolean;
@@ -43,6 +47,8 @@ export const INITIAL_SESSION_CHAT_RUNTIME: SessionChatRuntime = {
   tokenState: INITIAL_TOKEN_STATE,
   hasUsageSnapshot: false,
   streamingMessageId: null,
+  activeRunId: null,
+  pendingInterventionBoundary: null,
   pendingAssistantProviderId: null,
   error: null,
   hasUnread: false,

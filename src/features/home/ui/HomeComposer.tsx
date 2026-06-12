@@ -26,8 +26,8 @@ export function HomeComposer({
     <ChatInput
       composerActions={{
         onSend: controller.handleSend,
-        onSendNow: controller.sendNow,
-        onSendQueuedNow: controller.sendQueuedNow,
+        onSteerQueuedMessage: controller.steerQueuedMessage,
+        canSteerQueuedMessage: controller.canSteerQueuedMessage,
         disabled: controller.projectMetadataPending,
         queuedMessage: controller.queue.queuedMessage,
         onDismissQueue: controller.queue.dismiss,

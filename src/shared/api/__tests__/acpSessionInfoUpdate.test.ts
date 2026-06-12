@@ -90,4 +90,59 @@ describe("ACP session info updates", () => {
       userSetName: true,
     });
   });
+
+  it("stores the active run id from Goose session metadata", async () => {
+    await handleSessionNotification({
+      sessionId: "goose-session-active-run",
+      update: {
+        sessionUpdate: "session_info_update",
+        _meta: {
+          goose: {
+            activeRunId: "run-123",
+          },
+        },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-active-run")
+        .activeRunId,
+    ).toBe("run-123");
+
+    await handleSessionNotification({
+      sessionId: "goose-session-active-run",
+      update: {
+        sessionUpdate: "session_info_update",
+        _meta: {
+          goose: {
+            activeRunId: null,
+          },
+        },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-active-run")
+        .activeRunId,
+    ).toBeNull();
+  });
+
+  it("stores the active run id from alternate ACP meta field shape", async () => {
+    await handleSessionNotification({
+      sessionId: "goose-session-active-run",
+      update: {
+        sessionUpdate: "session_info_update",
+        meta: {
+          goose: {
+            activeRunId: "run-from-meta",
+          },
+        },
+      },
+    } as never);
+
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-active-run")
+        .activeRunId,
+    ).toBe("run-from-meta");
+  });
 });
