@@ -393,6 +393,13 @@ export const zGetSessionExtensionsResponseUnstable = z.object({
 });
 
 /**
+ * Return list-style metadata for a single session without loading the conversation.
+ */
+export const zGetSessionInfoRequestUnstable = z.object({
+    sessionId: z.string()
+});
+
+/**
  * List all tools available in a session.
  */
 export const zGetToolsRequestUnstable = z.object({
@@ -1191,6 +1198,41 @@ export const zResourceLink = z.object({
 });
 
 /**
+ * A unique identifier for a conversation session between a client and agent.
+ *
+ * Sessions maintain their own context, conversation history, and state,
+ * allowing multiple independent interactions with the same agent.
+ *
+ * See protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)
+ */
+export const zSessionId = z.string();
+
+/**
+ * Information about a session returned by session/list
+ */
+export const zSessionInfo = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    additionalDirectories: z.array(z.string()).optional(),
+    cwd: z.string(),
+    sessionId: zSessionId,
+    title: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    updatedAt: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zGetSessionInfoResponseUnstable = z.object({
+    session: zSessionInfo
+});
+
+/**
  * How a session system prompt update should be applied.
  */
 export const zSessionSystemPromptMode = z.union([
@@ -1583,6 +1625,7 @@ export const zExtResponse = z.union([
                 zOnboardingImportApplyResponseUnstable,
                 zExportSessionResponseUnstable,
                 zImportSessionResponseUnstable,
+                zGetSessionInfoResponseUnstable,
                 zCreateSourceResponseUnstable,
                 zListSourcesResponseUnstable,
                 zUpdateSourceResponseUnstable,
@@ -1658,6 +1701,7 @@ export const zExtRequest = z.object({
             zOnboardingImportApplyRequestUnstable,
             zExportSessionRequestUnstable,
             zImportSessionRequestUnstable,
+            zGetSessionInfoRequestUnstable,
             zElicitationRespondRequestUnstable,
             zUpdateSessionProjectRequestUnstable,
             zRenameSessionRequestUnstable,

@@ -51,6 +51,8 @@ import type {
   GetConfigExtensionsResponseUnstable,
   GetSessionExtensionsRequestUnstable,
   GetSessionExtensionsResponseUnstable,
+  GetSessionInfoRequestUnstable,
+  GetSessionInfoResponseUnstable,
   GetToolsRequestUnstable,
   GetToolsResponseUnstable,
   GooseToolCallRequestUnstable,
@@ -120,6 +122,7 @@ import {
   zGetAvailableExtensionsResponseUnstable,
   zGetConfigExtensionsResponseUnstable,
   zGetSessionExtensionsResponseUnstable,
+  zGetSessionInfoResponseUnstable,
   zGetToolsResponseUnstable,
   zGooseToolCallResponseUnstable,
   zImportSessionResponseUnstable,
@@ -556,6 +559,18 @@ export class GooseExtClient {
     return zImportSessionResponseUnstable.parse(
       raw,
     ) as ImportSessionResponseUnstable;
+  }
+
+  async GooseUnstableSessionInfo(
+    params: GetSessionInfoRequestUnstable,
+  ): Promise<GetSessionInfoResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/session/info",
+      params,
+    );
+    return zGetSessionInfoResponseUnstable.parse(
+      raw,
+    ) as GetSessionInfoResponseUnstable;
   }
 
   async GooseUnstableElicitationRespond(
