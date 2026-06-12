@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { getCachedAvatarForRef } from "@/shared/api/avatars";
+import { setHomePinLabelsAlwaysVisible } from "@/features/home/lib/homePinLabelPreference";
 import type { Persona } from "@/shared/types/agents";
 import type { WidgetInstance } from "./types";
 import { AgentPinWidget } from "./AgentPinWidget";
@@ -88,6 +89,7 @@ describe("AgentPinWidget", () => {
       },
     });
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it.each([
@@ -144,5 +146,16 @@ describe("AgentPinWidget", () => {
     expect(screen.queryByText("Agent")).not.toBeInTheDocument();
     expect(container.querySelector('img[aria-hidden="true"]')).toBeTruthy();
     expect(screen.queryByText("A")).not.toBeInTheDocument();
+  });
+
+  it("keeps the label always visible when the home pin labels preference is enabled", () => {
+    setHomePinLabelsAlwaysVisible(true);
+
+    renderPin();
+
+    const label = screen.getByTestId("agent-pin-hover-label");
+    expect(label).toHaveTextContent("Agent One");
+    expect(label).toHaveClass("opacity-100");
+    expect(label).not.toHaveClass("opacity-0", "group-hover:opacity-100");
   });
 });

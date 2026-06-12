@@ -21,6 +21,10 @@
       "description": "Loop video avatars in chats, agent lists, and previews.",
       "label": "Animated avatars"
     },
+    "homePinLabels": {
+      "description": "Always show names on pinned agents and projects, not just on hover.",
+      "label": "Always show pin labels"
+    },
     "theme": {
       "darkLabel": "Dark",
       "description": "Choose how Goose looks: light, dark, or matched to your system.",

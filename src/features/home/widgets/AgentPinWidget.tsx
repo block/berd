@@ -5,6 +5,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import { cn } from "@/shared/lib/cn";
+import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import { useWidgetGestureFreeze } from "./useWidgetGestureFreeze";
 import type { WidgetRenderProps } from "./types";
@@ -21,6 +22,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const personas = useAgentStore((state) => state.personas);
+  const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
 
   const agentId = getAgentId(instance.state);
   const persona =
@@ -110,7 +112,12 @@ export const AgentPinWidget = memo(function AgentPinWidget({
       <span
         aria-hidden="true"
         data-testid="agent-pin-hover-label"
-        className="pointer-events-none absolute bottom-1 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-2 truncate whitespace-nowrap rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-within:opacity-100"
+        className={cn(
+          "pointer-events-none absolute bottom-1 left-1/2 z-10 max-w-[calc(100%-1.5rem)] -translate-x-1/2 translate-y-2 truncate whitespace-nowrap rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground backdrop-blur-md transition-opacity duration-150",
+          alwaysShowLabel
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100",
+        )}
       >
         {label}
       </span>

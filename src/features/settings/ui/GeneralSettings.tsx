@@ -30,6 +30,7 @@ import { GooseAutoCompactSettings } from "./GooseAutoCompactSettings";
 import { Switch } from "@/shared/ui/switch";
 import { useAgentToolsTipsPreference } from "@/features/chat/lib/agentToolsTipPreferences";
 import { useAnimatedAvatarsPreference } from "@/shared/avatars/avatarPlaybackPreferences";
+import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { clearLocalMediaCaches } from "@/shared/api/localMediaCaches";
 import { useArtifactRootPreference } from "@/shared/artifacts/useArtifactRootPreference";
@@ -110,6 +111,7 @@ export function GeneralSettings() {
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
+  const homePinLabelsPreference = useHomePinLabelsPreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const {
@@ -504,6 +506,17 @@ export function GeneralSettings() {
             checked={animatedAvatarsPreference.enabled}
             onCheckedChange={animatedAvatarsPreference.setEnabled}
             aria-label={t("appearance.animatedAvatars.label")}
+          />
+        </SettingRow>
+
+        <SettingRow
+          label={t("appearance.homePinLabels.label")}
+          description={t("appearance.homePinLabels.description")}
+        >
+          <Switch
+            checked={homePinLabelsPreference.enabled}
+            onCheckedChange={homePinLabelsPreference.setEnabled}
+            aria-label={t("appearance.homePinLabels.label")}
           />
         </SettingRow>
 

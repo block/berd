@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import { setHomePinLabelsAlwaysVisible } from "@/features/home/lib/homePinLabelPreference";
 import type { WidgetInstance } from "./types";
 import { ProjectArtifactWidget } from "./ProjectArtifactWidget";
 
@@ -90,6 +91,7 @@ describe("ProjectArtifactWidget", () => {
     state.projects = [project()];
     state.sessions = [];
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("renders the project artifact with a hover-only project name", () => {
@@ -120,6 +122,17 @@ describe("ProjectArtifactWidget", () => {
       "group-hover:opacity-100",
     );
     expect(screen.queryByText("Project")).not.toBeInTheDocument();
+  });
+
+  it("keeps the project name always visible when the home pin labels preference is enabled", () => {
+    setHomePinLabelsAlwaysVisible(true);
+
+    renderWidget();
+
+    const label = screen.getByTestId("project-artifact-hover-label");
+    expect(label).toHaveTextContent("Alpha Project");
+    expect(label).toHaveClass("opacity-100");
+    expect(label).not.toHaveClass("opacity-0", "group-hover:opacity-100");
   });
 
   it("passes the saved artifact identity to the preview", () => {

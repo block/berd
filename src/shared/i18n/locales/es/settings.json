@@ -21,6 +21,10 @@
       "description": "Reproduce avatares de video en bucle en chats, listas de agentes y vistas previas.",
       "label": "Avatares animados"
     },
+    "homePinLabels": {
+      "description": "Muestra siempre los nombres de los agentes y proyectos fijados, no solo al pasar el cursor.",
+      "label": "Mostrar siempre las etiquetas de los pines"
+    },
     "theme": {
       "darkLabel": "Oscuro",
       "description": "Elige cómo se ve Goose: claro, oscuro o según tu sistema.",

@@ -15,6 +15,7 @@ import type {
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import { cn } from "@/shared/lib/cn";
+import { useHomePinLabelsPreference } from "@/features/home/lib/homePinLabelPreference";
 import { useWidgetActivationGuard } from "./useWidgetActivationGuard";
 import { useWidgetGestureFreeze } from "./useWidgetGestureFreeze";
 import type { WidgetRenderProps } from "./types";
@@ -51,6 +52,7 @@ export function ProjectArtifactWidget({
   onStartProjectChat,
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
+  const { enabled: alwaysShowLabel } = useHomePinLabelsPreference();
   const projects = useProjectStore(selectProjects);
   const sessions = useChatSessionStore((state) => state.sessions);
   const projectId = getProjectId(instance.state);
@@ -217,7 +219,12 @@ export function ProjectArtifactWidget({
       <span
         aria-hidden="true"
         data-testid="project-artifact-hover-label"
-        className="pointer-events-none absolute bottom-[13%] left-1/2 z-30 max-w-[calc(100%-1.25rem)] -translate-x-1/2 truncate rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground opacity-0 shadow-sm backdrop-blur-md transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+        className={cn(
+          "pointer-events-none absolute bottom-[13%] left-1/2 z-30 max-w-[calc(100%-1.25rem)] -translate-x-1/2 truncate rounded-full bg-card/90 px-2.5 py-1 text-xs font-medium text-foreground shadow-sm backdrop-blur-md transition-opacity duration-150",
+          alwaysShowLabel
+            ? "opacity-100"
+            : "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100",
+        )}
       >
         {label}
       </span>
