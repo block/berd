@@ -771,7 +771,10 @@ export function ChatView({
   const composerFooter = (
     <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
-        className={cn("pointer-events-auto w-full", CHAT_COMPOSER_SHELL_CLASS)}
+        className={cn(
+          "pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)]",
+          CHAT_COMPOSER_SHELL_CLASS,
+        )}
       >
         <ChatInput
           surface="bare"

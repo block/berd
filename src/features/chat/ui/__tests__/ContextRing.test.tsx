@@ -20,5 +20,9 @@ describe("ContextRing", () => {
       "w-[var(--context-ring-size)]",
     );
     expect(ring?.style.getPropertyValue("--context-ring-size")).toBe("24px");
+    expect(container.querySelector("circle")).toHaveAttribute(
+      "stroke",
+      "var(--color-surface-composer-action)",
+    );
   });
 });

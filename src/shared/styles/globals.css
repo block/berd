@@ -707,7 +707,7 @@
   --canvas-project-tint: #1a1d22;
   --surface-composer: rgba(255, 255, 255, 0.06);
   --surface-composer-hover: rgba(255, 255, 255, 0.14);
-  --surface-chat-composer: color-mix(in srgb, var(--muted) 66%, transparent);
+  --surface-chat-composer: var(--color-gray-700);
   --chat-search-match-bg: color-mix(
     in oklab,
     var(--color-yellow-500) 35%,
@@ -716,14 +716,10 @@
   --chat-search-match-fg: var(--foreground);
   --chat-search-match-active-bg: var(--primary);
   --chat-search-match-active-fg: var(--primary-foreground);
-  --surface-chat-composer-hover: color-mix(
-    in srgb,
-    var(--muted) 70%,
-    transparent
-  );
-  --surface-composer-action: var(--color-gray-700);
-  --surface-composer-action-hover: var(--color-gray-600);
-  --surface-composer-action-active: var(--color-gray-600);
+  --surface-chat-composer-hover: var(--color-gray-600);
+  --surface-composer-action: var(--color-gray-600);
+  --surface-composer-action-hover: var(--color-gray-500);
+  --surface-composer-action-active: var(--color-gray-500);
   --surface-chat-responding-pill-bg: var(--background);
   --surface-chat-responding-pill-fg: var(--foreground);
   --filter-chat-responding-goose: none;
@@ -863,11 +859,7 @@
 
   --skill-pill-fg: var(--color-gray-900);
 
-  --text-placeholder-composer: color-mix(
-    in oklab,
-    var(--color-white) 35%,
-    transparent
-  );
+  --text-placeholder-composer: var(--color-gray-400);
 
   --success: var(--color-green-400);
   --success-foreground: var(--color-black);

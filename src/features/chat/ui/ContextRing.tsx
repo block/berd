@@ -37,7 +37,7 @@ export function ContextRing({
         cy={size / 2}
         r={radius}
         fill="none"
-        stroke="var(--color-border)"
+        stroke="var(--color-surface-composer-action)"
         strokeWidth={2.5}
       />
       <circle
