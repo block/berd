@@ -17,6 +17,7 @@ type MockUpdaterState = {
   availableVersion: string | null;
   downloadProgress: number | null;
   errorMessage: string | null;
+  errorDetail: string | null;
   checkForUpdate: ReturnType<typeof vi.fn>;
   downloadAndInstall: ReturnType<typeof vi.fn>;
   relaunch: ReturnType<typeof vi.fn>;
@@ -37,6 +38,7 @@ function setUpdaterState(overrides: Partial<MockUpdaterState> = {}) {
     availableVersion: null,
     downloadProgress: null,
     errorMessage: null,
+    errorDetail: null,
     checkForUpdate: vi.fn(),
     downloadAndInstall: vi.fn(),
     relaunch: vi.fn(),
@@ -140,5 +142,20 @@ describe("UpdatesSettings", () => {
     await user.click(screen.getByRole("button", { name: "Try Again" }));
 
     expect(state.checkForUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the raw error detail alongside the friendly summary", () => {
+    setUpdaterState({
+      status: "error",
+      errorMessage: "Update failed. Try again.",
+      errorDetail: "signature verification failed",
+    });
+
+    renderWithProviders(<UpdatesSettings />);
+
+    expect(screen.getByText("Update failed. Try again.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Details: signature verification failed"),
+    ).toBeInTheDocument();
   });
 });

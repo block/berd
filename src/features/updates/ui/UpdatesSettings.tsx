@@ -4,7 +4,6 @@ import {
   type UpdateStatus,
   useUpdaterContext,
 } from "@/features/updates/hooks/useUpdater";
-import { cn } from "@/shared/lib/cn";
 import { Button, type ButtonProps } from "@/shared/ui/button";
 import { Progress } from "@/shared/ui/progress";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
@@ -43,6 +42,7 @@ export function UpdatesSettings() {
     availableVersion,
     downloadProgress,
     errorMessage,
+    errorDetail,
     checkForUpdate,
     relaunch,
   } = useUpdaterContext();
@@ -124,18 +124,25 @@ export function UpdatesSettings() {
           )}
         </div>
 
-        {status !== "idle" ? (
-          <p
-            className={cn(
-              "mt-4 text-xs leading-4 text-muted-foreground",
-              status === "error" && "text-destructive",
-            )}
-          >
-            {status === "error" && errorMessage
-              ? errorMessage
-              : t(`updates.details.${STATUS_KEY[status]}`, {
+        {status === "error" ? (
+          <div className="mt-4 space-y-1 text-xs leading-4 text-destructive">
+            <p>
+              {errorMessage ??
+                t(`updates.details.${STATUS_KEY[status]}`, {
                   version: availableVersion ?? "",
                 })}
+            </p>
+            {errorDetail && errorDetail !== errorMessage ? (
+              <p className="whitespace-pre-wrap break-words text-muted-foreground">
+                {t("updates.errors.detail", { detail: errorDetail })}
+              </p>
+            ) : null}
+          </div>
+        ) : status !== "idle" ? (
+          <p className="mt-4 text-xs leading-4 text-muted-foreground">
+            {t(`updates.details.${STATUS_KEY[status]}`, {
+              version: availableVersion ?? "",
+            })}
           </p>
         ) : null}
 

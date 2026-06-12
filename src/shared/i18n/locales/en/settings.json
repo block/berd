@@ -368,6 +368,7 @@
       "upToDate": "Goose is up to date."
     },
     "errors": {
+      "detail": "Details: {{detail}}",
       "generic": "Update failed. Try again.",
       "networkAccess": "Unable to check for updates. Connect to Cloudflare WARP and try again."
     },

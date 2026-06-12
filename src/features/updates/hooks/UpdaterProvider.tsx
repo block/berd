@@ -38,6 +38,7 @@ type UpdaterContextValue = {
   availableVersion: string | null;
   downloadProgress: number | null;
   errorMessage: string | null;
+  errorDetail: string | null;
   checkForUpdate: (options?: CheckForUpdateOptions) => Promise<void>;
   downloadAndInstall: () => Promise<void>;
   relaunch: () => Promise<void>;
@@ -96,6 +97,7 @@ export function UpdaterProvider({
   const [availableVersion, setAvailableVersion] = useState<string | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [errorDetail, setErrorDetail] = useState<string | null>(null);
 
   const statusRef = useRef<UpdateStatus>(status);
   const updateRef = useRef<TauriUpdate | null>(null);
@@ -111,12 +113,17 @@ export function UpdaterProvider({
 
   const recordError = useCallback(
     (error: unknown, fallbackMessage = t("updates.errors.generic")) => {
-      console.warn(`[updater] ${getErrorMessage(error)}`);
-      const message = fallbackMessage;
-      setErrorMessage(message);
+      const detail = getErrorMessage(error);
+      console.warn(`[updater] ${detail}`);
+      setErrorMessage(fallbackMessage);
+      // Keep the raw detail separate so the pane can show what actually
+      // failed alongside the friendly summary, while the toast stays short.
+      setErrorDetail(detail || null);
       setStatusValue("error");
       toast.error(t("updates.toast.error.title"), {
-        description: t("updates.toast.error.description", { message }),
+        description: t("updates.toast.error.description", {
+          message: fallbackMessage,
+        }),
       });
     },
     [setStatusValue, t],
@@ -146,6 +153,7 @@ export function UpdaterProvider({
 
       const installPromise = (async () => {
         setErrorMessage(null);
+        setErrorDetail(null);
         downloadedBytesRef.current = 0;
         downloadTotalBytesRef.current = null;
         setDownloadProgress(null);
@@ -241,6 +249,7 @@ export function UpdaterProvider({
 
       const checkPromise = (async () => {
         setErrorMessage(null);
+        setErrorDetail(null);
         setDownloadProgress(null);
         setStatusValue("checking");
 
@@ -326,6 +335,7 @@ export function UpdaterProvider({
       availableVersion,
       downloadProgress,
       errorMessage,
+      errorDetail,
       checkForUpdate,
       downloadAndInstall,
       relaunch,
@@ -336,6 +346,7 @@ export function UpdaterProvider({
       availableVersion,
       downloadProgress,
       errorMessage,
+      errorDetail,
       checkForUpdate,
       downloadAndInstall,
       relaunch,

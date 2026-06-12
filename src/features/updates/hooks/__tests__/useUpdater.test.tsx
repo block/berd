@@ -126,6 +126,9 @@ describe("UpdaterProvider", () => {
       "Unable to check for updates. Connect to Cloudflare WARP and try again.";
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe(networkMessage);
+    // WARP guidance is shown, but the raw detail is still captured so a
+    // non-network root cause isn't masked behind the heuristic.
+    expect(result.current.errorDetail).toContain("global.block-artifacts.com");
     expect(toast.error).toHaveBeenCalledWith(
       "Update failed",
       expect.objectContaining({
@@ -174,6 +177,9 @@ describe("UpdaterProvider", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("Update failed. Try again.");
+    expect(result.current.errorDetail).toBe(
+      "invalid manifest: unexpected end of JSON input",
+    );
     expect(toast.error).toHaveBeenCalledWith(
       "Update failed",
       expect.objectContaining({
@@ -184,6 +190,13 @@ describe("UpdaterProvider", () => {
       expect.any(String),
       expect.objectContaining({
         description: expect.stringContaining("WARP"),
+      }),
+    );
+    // Toast stays short — the raw detail belongs in the pane, not the toast.
+    expect(toast.error).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        description: expect.stringContaining("invalid manifest"),
       }),
     );
   });
@@ -242,6 +255,7 @@ describe("UpdaterProvider", () => {
 
     expect(result.current.status).toBe("error");
     expect(result.current.errorMessage).toBe("Update failed. Try again.");
+    expect(result.current.errorDetail).toBe("download failed");
     expect(toast.error).toHaveBeenCalled();
   });
 
