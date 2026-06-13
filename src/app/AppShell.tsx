@@ -277,6 +277,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       false,
       validateBooleanPreference,
     );
+  const [
+    designSystemInspectorModeToggleRequest,
+    setDesignSystemInspectorModeToggleRequest,
+  ] = useState(0);
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
   const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
@@ -2300,6 +2304,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (e.isComposing || e.repeat) {
         return;
       }
+      if (eventMatchesShortcutCommand(e, "view.toggleDesignSystemInspector")) {
+        e.preventDefault();
+        setDesignSystemInspectorModeToggleRequest(0);
+        setDesignSystemInspectorVisible((visible) => !visible);
+        return;
+      }
+      if (
+        eventMatchesShortcutCommand(e, "view.toggleDesignSystemInspectorMode")
+      ) {
+        e.preventDefault();
+        setDesignSystemInspectorVisible(true);
+        setDesignSystemInspectorModeToggleRequest((request) => request + 1);
+        return;
+      }
       // Toggles the keyboard shortcuts reference. Handled before the layer
       // guard so it can close its own (modal) dialog.
       if (eventMatchesShortcutCommand(e, "help.shortcuts")) {
@@ -2376,6 +2394,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     leaveSecondarySurface,
     requestGlobalComposerFocus,
     setActiveSession,
+    setDesignSystemInspectorVisible,
     toggleSidebar,
   ]);
 
@@ -2480,6 +2499,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         contentUnderSidebar={activeView === "home"}
         contentUnderTopBar={activeView === "home"}
         projectTint={activeView === "chat" ? activeProjectTint : null}
+        designSystemInspectorModeToggleRequest={
+          designSystemInspectorModeToggleRequest
+        }
         showDesignSystemInspector={designSystemInspectorVisible}
         createProjectDialog={{
           isOpen: createProjectOpen,

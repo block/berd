@@ -62,6 +62,7 @@ function layoutProps({
     onHeightResizeDoubleClick: noop,
     onCornerResizeStart: noop,
     onCornerResizeDoubleClick: noop,
+    designSystemInspectorModeToggleRequest: 0,
     showDesignSystemInspector: false,
     createProjectDialog: {
       isOpen: false,

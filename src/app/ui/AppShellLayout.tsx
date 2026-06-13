@@ -47,6 +47,7 @@ interface AppShellLayoutProps {
   sidebarOuterWidth: number;
   /** Full slide panel width (content + gutter); stays constant while collapsing. */
   sidebarPanelOuterWidth: number;
+  designSystemInspectorModeToggleRequest: number;
   showDesignSystemInspector: boolean;
   topBar: ComponentProps<typeof TopBar>;
 }
@@ -84,6 +85,7 @@ export function AppShellLayout({
   sidebarOuterHeight,
   sidebarOuterWidth,
   sidebarPanelOuterWidth,
+  designSystemInspectorModeToggleRequest,
   showDesignSystemInspector,
   topBar,
 }: AppShellLayoutProps) {
@@ -285,7 +287,9 @@ export function AppShellLayout({
 
       <CreateProjectDialog {...createProjectDialog} />
       {isDesignSystemExplorerEnabled() && showDesignSystemInspector ? (
-        <DesignSystemInspector />
+        <DesignSystemInspector
+          inspectModeToggleRequest={designSystemInspectorModeToggleRequest}
+        />
       ) : null}
     </div>
   );

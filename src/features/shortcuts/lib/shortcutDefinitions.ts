@@ -3,6 +3,7 @@ import {
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { getExperiment } from "@/features/experiments/experimentPreferences";
+import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
   normalizeKeyboardShortcut,
   type ShortcutBinding,
@@ -36,6 +37,8 @@ export type KnownShortcutCommandId =
   | "view.zoomIn"
   | "view.zoomOut"
   | "view.zoomReset"
+  | "view.toggleDesignSystemInspector"
+  | "view.toggleDesignSystemInspectorMode"
   | "help.shortcuts";
 
 /** Fixed/internal command ids stay open-ended so component-level entries
@@ -306,6 +309,26 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     descriptionKey: "actions.zoomReset",
     configurable: true,
     discoverable: true,
+  },
+  {
+    id: "view.toggleDesignSystemInspector",
+    category: "view",
+    scope: "global",
+    defaultBindings: [{ shortcut: "mod+d" }],
+    descriptionKey: "actions.toggleDesignSystemInspector",
+    configurable: true,
+    discoverable: true,
+    when: isDesignSystemExplorerEnabled,
+  },
+  {
+    id: "view.toggleDesignSystemInspectorMode",
+    category: "view",
+    scope: "global",
+    defaultBindings: [{ shortcut: "mod+i" }],
+    descriptionKey: "actions.toggleDesignSystemInspectorMode",
+    configurable: true,
+    discoverable: true,
+    when: isDesignSystemExplorerEnabled,
   },
   // Help. AppShell matches this before its keyboard-owning-layer guard so
   // the combo can close the dialog it opens.

@@ -27,6 +27,8 @@
     "zoomIn": "Acercar",
     "zoomOut": "Alejar",
     "zoomReset": "Restablecer zoom",
+    "toggleDesignSystemInspector": "Mostrar u ocultar inspector del sistema de diseño",
+    "toggleDesignSystemInspectorMode": "Mostrar u ocultar modo de inspección del sistema de diseño",
     "showShortcuts": "Mostrar esta referencia",
     "mentionClose": "Cerrar el menú de menciones",
     "mentionNext": "Siguiente sugerencia de mención",

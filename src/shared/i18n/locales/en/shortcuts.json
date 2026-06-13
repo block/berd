@@ -27,6 +27,8 @@
     "zoomIn": "Zoom in",
     "zoomOut": "Zoom out",
     "zoomReset": "Reset zoom",
+    "toggleDesignSystemInspector": "Toggle design system inspector",
+    "toggleDesignSystemInspectorMode": "Toggle design system inspect mode",
     "showShortcuts": "Show this reference",
     "mentionClose": "Close mention menu",
     "mentionNext": "Next mention suggestion",

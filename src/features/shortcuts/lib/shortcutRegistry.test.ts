@@ -127,6 +127,28 @@ describe("shortcut command definitions", () => {
     ]);
   });
 
+  it("registers the design system inspector shortcuts on macOS", () => {
+    const visibilityCommand = getShortcutCommand(
+      "view.toggleDesignSystemInspector",
+    );
+    expect(visibilityCommand).toBeDefined();
+    expect(visibilityCommand?.configurable).toBe(true);
+    expect(visibilityCommand?.discoverable).toBe(true);
+    expect(getShortcutBindings("view.toggleDesignSystemInspector")).toEqual([
+      { shortcut: "meta+d" },
+    ]);
+
+    const inspectModeCommand = getShortcutCommand(
+      "view.toggleDesignSystemInspectorMode",
+    );
+    expect(inspectModeCommand).toBeDefined();
+    expect(inspectModeCommand?.configurable).toBe(true);
+    expect(inspectModeCommand?.discoverable).toBe(true);
+    expect(getShortcutBindings("view.toggleDesignSystemInspectorMode")).toEqual(
+      [{ shortcut: "meta+i" }],
+    );
+  });
+
   it("ships no colliding default combos across overlapping scopes", () => {
     // Deliberate exceptions, both reconciled by ChatSearchBar stopping
     // propagation of consumed keys (Ctrl+N/Ctrl+P off macOS).

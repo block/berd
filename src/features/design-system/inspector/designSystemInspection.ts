@@ -74,15 +74,80 @@ const semanticClassFragments = [
   "popover",
 ];
 
-function getInspectableElement(target: EventTarget | null) {
-  if (!(target instanceof Element)) return null;
-  if (target.closest(INSPECTOR_SELECTOR)) return null;
+export function isDesignSystemInspectorTarget(target: EventTarget | null) {
+  if (!(target instanceof Element)) return false;
+  return Boolean(target.closest(INSPECTOR_SELECTOR));
+}
 
+function getElementSlot(element: HTMLElement) {
   return (
-    target.closest<HTMLElement>("[data-ds-component]") ??
-    target.closest<HTMLElement>(INSPECTABLE_SELECTOR) ??
-    (target instanceof HTMLElement ? target : null)
+    element.getAttribute("data-slot") ?? element.getAttribute("data-ds-slot")
   );
+}
+
+function getElementComponent(element: HTMLElement) {
+  const slot = getElementSlot(element);
+  return (
+    element.getAttribute("data-ds-component") ?? getComponentFromSlot(slot)
+  );
+}
+
+function getInspectableAncestors(target: Element) {
+  const ancestors: HTMLElement[] = [];
+  let current: HTMLElement | null =
+    target instanceof HTMLElement ? target : target.closest<HTMLElement>("*");
+
+  while (current) {
+    if (current.matches(INSPECTABLE_SELECTOR)) {
+      ancestors.push(current);
+    }
+    current = current.parentElement;
+  }
+
+  return ancestors;
+}
+
+function getEntryInspectableElement(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  if (isDesignSystemInspectorTarget(target)) return null;
+
+  const ancestors = getInspectableAncestors(target);
+  const nearest = ancestors[0];
+  if (!nearest) return target instanceof HTMLElement ? target : null;
+
+  const nearestComponent = getElementComponent(nearest);
+  const sameComponentAncestors = nearestComponent
+    ? ancestors.filter(
+        (ancestor) => getElementComponent(ancestor) === nearestComponent,
+      )
+    : [];
+
+  if (sameComponentAncestors.length >= 2) {
+    return sameComponentAncestors[sameComponentAncestors.length - 2] ?? nearest;
+  }
+
+  return nearest;
+}
+
+function getScopedInspectableElement(
+  target: EventTarget | null,
+  scope: HTMLElement,
+) {
+  if (!(target instanceof Element)) return null;
+  if (isDesignSystemInspectorTarget(target)) return null;
+  if (!scope.contains(target)) return null;
+
+  let current: HTMLElement | null =
+    target instanceof HTMLElement ? target : target.closest<HTMLElement>("*");
+
+  while (current && current !== scope) {
+    if (current.matches(INSPECTABLE_SELECTOR)) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+
+  return target instanceof HTMLElement && target !== scope ? target : null;
 }
 
 function getComponentFromSlot(slot: string | null) {
@@ -187,14 +252,17 @@ function buildFindings({
   return findings;
 }
 
-export function collectDesignSystemInspection(target: EventTarget | null) {
-  const element = getInspectableElement(target);
+export function collectDesignSystemInspection(
+  target: EventTarget | null,
+  options: { scope?: HTMLElement } = {},
+) {
+  const element = options.scope
+    ? getScopedInspectableElement(target, options.scope)
+    : getEntryInspectableElement(target);
   if (!element) return null;
 
-  const slot =
-    element.getAttribute("data-slot") ?? element.getAttribute("data-ds-slot");
-  const component =
-    element.getAttribute("data-ds-component") ?? getComponentFromSlot(slot);
+  const slot = getElementSlot(element);
+  const component = getElementComponent(element);
   const source =
     element.getAttribute("data-ds-source") ??
     (component ? sourceByComponent[component] : null);

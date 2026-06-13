@@ -6,6 +6,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -26,6 +27,7 @@ import {
   EXPERIMENT_PREFERENCES_STORAGE_KEY,
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
 } from "@/features/experiments/experimentPreferences";
+import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -68,9 +70,26 @@ function mockVisibleRegionRects() {
   );
 }
 
+function appShellWithTheme(children?: ReactNode) {
+  return (
+    <ThemeProvider>
+      <AppShell>{children}</AppShell>
+    </ThemeProvider>
+  );
+}
+
+function renderAppShell(children?: ReactNode) {
+  return render(appShellWithTheme(children));
+}
+
 const mockGetPlatform = vi.hoisted(() => vi.fn(() => "mac"));
 vi.mock("@/shared/lib/platform", () => ({
   getPlatform: mockGetPlatform,
+}));
+
+const mockDesignSystemExplorerEnabled = vi.hoisted(() => vi.fn(() => false));
+vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
+  isDesignSystemExplorerEnabled: mockDesignSystemExplorerEnabled,
 }));
 
 vi.mock("./hooks/useAppStartup", () => ({
@@ -317,6 +336,7 @@ describe("AppShell global navigation", () => {
     window.history.replaceState(null, "", "/");
     window.localStorage.clear();
     mockGetPlatform.mockReturnValue("mac");
+    mockDesignSystemExplorerEnabled.mockReturnValue(false);
     useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
@@ -373,7 +393,7 @@ describe("AppShell global navigation", () => {
 
   it("starts a full blank chat from the sidebar new chat action", async () => {
     const user = userEvent.setup();
-    const { container } = render(<AppShell />);
+    const { container } = renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
 
@@ -410,7 +430,7 @@ describe("AppShell global navigation", () => {
         return rect(760, 580, 220, 100);
       },
     );
-    render(<AppShell />);
+    renderAppShell();
 
     fireEvent.keyDown(window, { key: ";", ctrlKey: true });
     expect(screen.getByTestId("pane-jump-overlay")).toBeInTheDocument();
@@ -430,7 +450,7 @@ describe("AppShell global navigation", () => {
 
   it("starts pane jump mode from the main composer", () => {
     mockVisibleRegionRects();
-    render(<AppShell />);
+    renderAppShell();
 
     screen.getByPlaceholderText("Start a conversation").focus();
     fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
@@ -448,7 +468,7 @@ describe("AppShell global navigation", () => {
       "Ctrl+.",
     );
     mockVisibleRegionRects();
-    render(<AppShell />);
+    renderAppShell();
 
     fireEvent.keyDown(window, { key: ";", ctrlKey: true });
     expect(screen.queryByTestId("pane-jump-overlay")).not.toBeInTheDocument();
@@ -460,7 +480,7 @@ describe("AppShell global navigation", () => {
   it("does not start pane jump mode when the experiment is disabled", () => {
     setExperimentEnabled(PANE_JUMP_NAVIGATION_EXPERIMENT_ID, false);
     mockVisibleRegionRects();
-    render(<AppShell />);
+    renderAppShell();
 
     screen.getByPlaceholderText("Start a conversation").focus();
     fireEvent.keyDown(screen.getByPlaceholderText("Start a conversation"), {
@@ -478,7 +498,7 @@ describe("AppShell global navigation", () => {
     );
     const user = userEvent.setup();
 
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
 
@@ -519,7 +539,7 @@ describe("AppShell global navigation", () => {
     });
     mockCheckDirectoriesExist.mockResolvedValue(["/missing/session"]);
 
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Open missing session" }),
@@ -545,7 +565,7 @@ describe("AppShell global navigation", () => {
 
   it("reserves toast space only while the global composer is visible", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await waitFor(() => {
       expect(document.documentElement).toHaveAttribute(
@@ -566,7 +586,7 @@ describe("AppShell global navigation", () => {
 
   it("returns home and focuses the global composer with Cmd+N from chat", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
     await waitFor(() => {
@@ -591,11 +611,7 @@ describe("AppShell global navigation", () => {
 
   it("drops pending Cmd+N focus when the global composer remains hidden", async () => {
     const user = userEvent.setup();
-    const { rerender } = render(
-      <AppShell>
-        <div>Custom shell content</div>
-      </AppShell>,
-    );
+    const { rerender } = renderAppShell(<div>Custom shell content</div>);
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
     await waitFor(() => {
@@ -610,7 +626,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(useChatSessionStore.getState().activeSessionId).toBeNull();
     });
-    rerender(<AppShell />);
+    rerender(appShellWithTheme());
 
     const textbox = await screen.findByPlaceholderText("Start a conversation");
     expect(textbox).not.toHaveFocus();
@@ -620,7 +636,7 @@ describe("AppShell global navigation", () => {
     const pendingSession = deferred<{ sessionId: string }>();
     mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
 
@@ -667,7 +683,7 @@ describe("AppShell global navigation", () => {
     error.data = "Failed to create session: provider config is missing";
     mockAcpCreateSession.mockRejectedValueOnce(error);
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
 
@@ -698,7 +714,7 @@ describe("AppShell global navigation", () => {
 
   it("goes back and forward through Skills detail subroutes", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
     await user.click(screen.getByRole("button", { name: "Open skill detail" }));
@@ -721,7 +737,7 @@ describe("AppShell global navigation", () => {
 
   it("goes back and forward through Automations tabs", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -754,7 +770,7 @@ describe("AppShell global navigation", () => {
   it("goes back and forward through Builderbot detail subroutes", async () => {
     enableBuilderbotExperiment();
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar builderbot" }),
@@ -790,7 +806,7 @@ describe("AppShell global navigation", () => {
 
   it("goes back and forward through Agents detail subroutes", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Open agent detail" }));
@@ -813,7 +829,7 @@ describe("AppShell global navigation", () => {
 
   it("starts a new agent builder session without prompting against itself", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -845,7 +861,7 @@ describe("AppShell global navigation", () => {
       properties: { draft: boolean; builderSessionId: string };
     }>();
     mockCreatePersonaSource.mockReturnValueOnce(draft.promise);
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -880,7 +896,7 @@ describe("AppShell global navigation", () => {
 
   it("prompts when navigating away from a dirty new agent draft", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -911,7 +927,7 @@ describe("AppShell global navigation", () => {
 
   it("does not prompt when navigating away from an untouched new agent draft", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -932,7 +948,7 @@ describe("AppShell global navigation", () => {
 
   it("returns to agent builder mode after going back then forward", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -963,7 +979,7 @@ describe("AppShell global navigation", () => {
 
   it("prompts when navigating away after typing in the agent builder chat", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -983,7 +999,7 @@ describe("AppShell global navigation", () => {
 
   it("returns from provider setup settings to the dirty agent draft without prompting", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -1035,7 +1051,7 @@ describe("AppShell global navigation", () => {
 
   it("discarding a dirty agent draft continues the pending navigation", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -1067,7 +1083,7 @@ describe("AppShell global navigation", () => {
 
   it("keeping a dirty agent draft continues the pending navigation without deleting it", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     await user.click(screen.getByRole("button", { name: "Create agent" }));
@@ -1099,7 +1115,7 @@ describe("AppShell global navigation", () => {
 
   it("prompts before leaving unsaved automation builder changes", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -1128,7 +1144,7 @@ describe("AppShell global navigation", () => {
 
   it("discarding unsaved automation builder changes continues navigation", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -1150,7 +1166,7 @@ describe("AppShell global navigation", () => {
 
   it("saving unsaved automation builder changes continues navigation", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -1175,7 +1191,7 @@ describe("AppShell global navigation", () => {
 
   it("prompts before leaving unsaved automation builder changes with keyboard navigation", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -1197,7 +1213,7 @@ describe("AppShell global navigation", () => {
 
   it("keeps Settings section navigation in the global stack", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar settings" }));
     await user.click(screen.getByRole("button", { name: "Sidebar providers" }));
@@ -1218,7 +1234,7 @@ describe("AppShell global navigation", () => {
 
   it("opens search from the top bar and returns to the previous view", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
@@ -1234,7 +1250,7 @@ describe("AppShell global navigation", () => {
 
   it("shows the page title as the top bar header on subpages", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
     expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
@@ -1250,7 +1266,7 @@ describe("AppShell global navigation", () => {
 
   it("shows and navigates from third-level Skills breadcrumbs", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
     await user.click(screen.getByRole("button", { name: "Open skill detail" }));
@@ -1270,7 +1286,7 @@ describe("AppShell global navigation", () => {
 
   it("shows Automations history as a third-level breadcrumb", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar automations" }),
@@ -1291,7 +1307,7 @@ describe("AppShell global navigation", () => {
   it("shows and navigates from Builderbot task breadcrumbs", async () => {
     enableBuilderbotExperiment();
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar builderbot" }),
@@ -1324,7 +1340,7 @@ describe("AppShell global navigation", () => {
   it("shows and navigates from Builderbot automation breadcrumbs", async () => {
     enableBuilderbotExperiment();
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Sidebar builderbot" }),
@@ -1358,7 +1374,7 @@ describe("AppShell global navigation", () => {
 
   it("shows Chat / project / session title for a chat inside a project", async () => {
     const user = userEvent.setup();
-    const { container } = render(<AppShell />);
+    const { container } = renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
     await waitFor(() => {
@@ -1428,7 +1444,7 @@ describe("AppShell global navigation", () => {
       ],
     });
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Start chat with resolving agent" }),
@@ -1463,7 +1479,7 @@ describe("AppShell global navigation", () => {
       ],
     });
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.click(
       screen.getByRole("button", { name: "Start chat with unresolved agent" }),
@@ -1483,7 +1499,7 @@ describe("AppShell global navigation", () => {
 
   it("opens search with Cmd+K", async () => {
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.keyboard("{Meta>}k{/Meta}");
 
@@ -1495,7 +1511,7 @@ describe("AppShell global navigation", () => {
   it("opens search with Ctrl+K off macOS", async () => {
     mockGetPlatform.mockReturnValue("windows");
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.keyboard("{Control>}k{/Control}");
 
@@ -1504,8 +1520,90 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("toggles the dev design system inspector with Cmd+D", async () => {
+    mockDesignSystemExplorerEnabled.mockReturnValue(true);
+    renderAppShell();
+
+    expect(
+      screen.queryByRole("button", { name: "Inspect (⌘I)" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "d",
+      metaKey: true,
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Inspect (⌘I)" }),
+    ).toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "d",
+      metaKey: true,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("button", { name: "Inspect (⌘I)" }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("toggles design system inspect mode with Cmd+I", async () => {
+    mockDesignSystemExplorerEnabled.mockReturnValue(true);
+    renderAppShell();
+
+    expect(
+      screen.queryByRole("button", { name: "Inspect (⌘I)" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "i",
+      metaKey: true,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Inspecting (⌘I)" }),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+
+    fireEvent.keyDown(window, {
+      key: "i",
+      metaKey: true,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Inspect (⌘I)" }),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+  });
+
+  it("does not toggle the design system inspector outside dev explorer mode", () => {
+    renderAppShell();
+
+    fireEvent.keyDown(window, {
+      key: "d",
+      metaKey: true,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Inspect (⌘I)" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, {
+      key: "i",
+      metaKey: true,
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Inspect (⌘I)" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("toggles the keyboard shortcuts reference with Cmd+/", async () => {
-    render(<AppShell />);
+    renderAppShell();
 
     fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
     await waitFor(() => {
@@ -1520,7 +1618,7 @@ describe("AppShell global navigation", () => {
 
   it("opens the shortcuts reference with Ctrl+/ off macOS", async () => {
     mockGetPlatform.mockReturnValue("windows");
-    render(<AppShell />);
+    renderAppShell();
 
     fireEvent.keyDown(window, { key: "/", code: "Slash", ctrlKey: true });
 
@@ -1530,7 +1628,7 @@ describe("AppShell global navigation", () => {
   });
 
   it("ignores Cmd on a non-Slash physical key that types '/'", async () => {
-    render(<AppShell />);
+    renderAppShell();
 
     // QWERTZ layouts type "/" from Shift+7; the shortcut must not fire.
     fireEvent.keyDown(window, { key: "/", code: "Digit7", metaKey: true });
@@ -1547,7 +1645,7 @@ describe("AppShell global navigation", () => {
       }),
     );
     const user = userEvent.setup();
-    render(<AppShell />);
+    renderAppShell();
 
     await user.keyboard("{Meta>}k{/Meta}");
     expect(screen.getByTestId("active-view")).toHaveTextContent("home");
@@ -1566,7 +1664,7 @@ describe("AppShell global navigation", () => {
         overrides: { "help.shortcuts": "meta+shift+h" },
       }),
     );
-    render(<AppShell />);
+    renderAppShell();
 
     // The default no longer fires once overridden.
     fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
@@ -1586,7 +1684,7 @@ describe("AppShell global navigation", () => {
   });
 
   it("does not run global shortcuts while a keyboard-owning layer is open", async () => {
-    render(<AppShell />);
+    renderAppShell();
 
     fireEvent.keyDown(window, { key: "/", code: "Slash", metaKey: true });
     await screen.findByRole("dialog");
@@ -1596,7 +1694,7 @@ describe("AppShell global navigation", () => {
   });
 
   it("opens the session quick switcher with Cmd+P, honoring an override over the default", async () => {
-    render(<AppShell />);
+    renderAppShell();
 
     // The default combo opens the switcher.
     fireEvent.keyDown(window, { key: "p", metaKey: true });
