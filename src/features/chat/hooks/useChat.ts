@@ -18,10 +18,7 @@ import {
 } from "@/shared/api/acp";
 import { resetPersonaHandoff } from "@/shared/api/acpPersonaHandoff";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import {
-  getSessionTitleFromDraft,
-  isDefaultChatTitle,
-} from "../lib/sessionTitle";
+import { dispatchPrompt } from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   appendAttachmentPaths,
@@ -152,8 +149,6 @@ export function useChat(
       sendOptions?: ChatSendOptions,
     ) => {
       const sid = sessionId.slice(0, 8);
-      const tSendStart = performance.now();
-      const images = buildAcpImages(attachments);
       const hasAttachments = (attachments?.length ?? 0) > 0;
       const hasAssistantPrompt = Boolean(sendOptions?.assistantPrompt?.trim());
       const currentChatState = useChatStore
@@ -176,134 +171,37 @@ export function useChat(
       );
       const agent = useAgentStore.getState().getActiveAgent();
       const providerId = providerOverride ?? agent?.provider ?? "goose";
-      const systemPrompt =
-        systemPromptOverride ?? agent?.systemPrompt ?? undefined;
+      const systemPrompt = systemPromptOverride ?? agent?.systemPrompt;
 
       // Ensure active session
       setActiveSession(sessionId);
-      setPendingAssistantProvider(sessionId, providerId);
-
-      // Create and add user message
-      const userMessage = createUserMessage(
-        sendOptions?.displayText ?? text,
-        buildMessageAttachments(attachments),
-        sendOptions?.chips,
-      );
-      if (effectivePersonaInfo) {
-        userMessage.metadata = {
-          ...userMessage.metadata,
-          targetPersonaId: effectivePersonaInfo.id,
-          targetPersonaName: effectivePersonaInfo.name,
-        };
-      }
-      // Embed image content blocks into the user message for local display
-      if (images && images.length > 0) {
-        for (const img of images) {
-          userMessage.content.push({
-            type: "image",
-            data: img.base64,
-            mimeType: img.mimeType,
-          });
-        }
-      }
-      addMessage(sessionId, userMessage);
-      setChatState(sessionId, "thinking");
-      setError(sessionId, null);
-
-      const sessionStore = useChatSessionStore.getState();
-      const session = sessionStore.getSession(sessionId);
-
-      // Immediately set the session/sidebar title from the user's message when
-      // the session still has the default placeholder.  This gives instant
-      // feedback instead of waiting for acp:done or acp:session_info.
-      // A better backend-generated title will overwrite this if it arrives
-      // via the acp:session_info event.
-      if (session && isDefaultChatTitle(session.title)) {
-        sessionStore.patchSession(sessionId, {
-          title: getSessionTitleFromDraft(text, attachments),
-          updatedAt: new Date().toISOString(),
-        });
-      } else {
-        sessionStore.patchSession(sessionId, {
-          updatedAt: new Date().toISOString(),
-        });
-      }
-
-      // Mirror the backend's last-message-snippet append optimistically so the
-      // sidebar subtitle updates the instant the user sends, instead of waiting
-      // for the next session/list load. Uses the same text as the title; the
-      // assistant's streamed text overwrites it as it arrives, and a full reload
-      // reconciles to the backend's canonical snippet.
-      sessionStore.updateSessionSubtitleFromText(sessionId, text);
-
-      options?.onMessageAccepted?.(sessionId);
-
-      clearDraft(sessionId);
 
       const abort = new AbortController();
       abortRef.current = abort;
 
       try {
-        await ensurePreparedForPrompt(
-          options?.ensurePrepared,
-          effectivePersonaInfo?.id,
-        );
-
-        setChatState(sessionId, "streaming");
-        const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
-        const acpPrompt =
-          promptWithPaths || (images?.length ? " " : promptWithPaths);
-        const tAcp = performance.now();
-        perfLog(
-          `[perf:send] ${sid} → acpSendMessage (setup took ${(tAcp - tSendStart).toFixed(1)}ms)`,
-        );
-        await acpSendMessage(sessionId, acpPrompt, {
+        await dispatchPrompt(sessionId, text, {
+          persona: effectivePersonaInfo,
+          attachments,
+          assistantPrompt: sendOptions?.assistantPrompt,
+          displayText: sendOptions?.displayText,
+          chips: sendOptions?.chips,
+          providerId,
           systemPrompt,
-          ...(sendOptions?.assistantPrompt
-            ? { assistantPrompt: sendOptions.assistantPrompt }
-            : {}),
-          personaId: effectivePersonaInfo?.id,
-          personaName: effectivePersonaInfo?.name,
-          images: images?.map(
-            (img) => [img.base64, img.mimeType] as [string, string],
-          ),
+          prepare: () =>
+            ensurePreparedForPrompt(
+              options?.ensurePrepared,
+              effectivePersonaInfo?.id,
+            ),
+          onUserMessageCommitted: () => {
+            options?.onMessageAccepted?.(sessionId);
+            clearDraft(sessionId);
+          },
         });
-        perfLog(
-          `[perf:send] ${sid} acpSendMessage returned after ${(performance.now() - tAcp).toFixed(1)}ms (total sendMessage ${(performance.now() - tSendStart).toFixed(1)}ms)`,
-        );
-
-        setChatState(sessionId, "idle");
-        setStreamingMessageId(sessionId, null);
-      } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          setChatState(sessionId, "idle");
-        } else {
-          const errorMessage = formatAcpErrorMessage(err);
-          const liveStore = useChatStore.getState();
-          const { streamingMessageId } = liveStore.getSessionRuntime(sessionId);
-          if (streamingMessageId) {
-            liveStore.updateMessage(
-              sessionId,
-              streamingMessageId,
-              (message) => ({
-                ...message,
-                metadata: {
-                  ...message.metadata,
-                  completionStatus: "error",
-                },
-              }),
-            );
-          }
-
-          liveStore.addMessage(
-            sessionId,
-            createSystemNotificationMessage(errorMessage, "error"),
-          );
-          setError(sessionId, errorMessage);
-          setChatState(sessionId, "idle");
-          setStreamingMessageId(sessionId, null);
-        }
-        setPendingAssistantProvider(sessionId, null);
+      } catch {
+        // dispatchPrompt already recorded the failure in the chat stores; for
+        // an AbortError it only returns the session to idle. sendMessage's
+        // contract is to never reject.
       } finally {
         abortRef.current = null;
       }
@@ -311,12 +209,7 @@ export function useChat(
     [
       sessionId,
       setActiveSession,
-      setPendingAssistantProvider,
-      addMessage,
-      setChatState,
-      setError,
       clearDraft,
-      setStreamingMessageId,
       providerOverride,
       systemPromptOverride,
       resolvePersonaInfo,
