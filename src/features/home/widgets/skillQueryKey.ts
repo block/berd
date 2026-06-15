@@ -1,4 +1,7 @@
+import { useContext, useEffect } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
 import { listSkills, type SkillInfo } from "@/features/skills/api/skills";
+import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 
 /**
  * Shared react-query key for the home pin menu's skill list. Both the picker
@@ -19,4 +22,18 @@ export const SKILL_LIST_QUERY_KEY = [
  */
 export function listHomeWidgetSkills(): Promise<SkillInfo[]> {
   return listSkills();
+}
+
+export function useInvalidateHomeWidgetSkillsOnChange(): void {
+  const queryClient = useContext(QueryClientContext);
+
+  useEffect(() => {
+    if (!queryClient) {
+      return;
+    }
+
+    return listenSkillsChanged(() => {
+      void queryClient.invalidateQueries({ queryKey: SKILL_LIST_QUERY_KEY });
+    });
+  }, [queryClient]);
 }

@@ -7,6 +7,7 @@ import {
   deriveProjectRoot,
   getSkillFileLocation,
 } from "../lib/skillsPath";
+import { emitSkillsChanged } from "../lib/skillsEvents";
 
 const SKILL_SOURCE_TYPE = "skill" as const;
 const BUILTIN_SKILL_SOURCE_TYPE = "builtinSkill" as const;
@@ -122,6 +123,10 @@ function toSkillInfo(source: SkillSourceEntry): SkillInfo {
   };
 }
 
+export function isProjectSkillId(id: string): boolean {
+  return id.startsWith("project:");
+}
+
 function readStoredColor(
   properties: SourceEntry["properties"] | undefined,
 ): string | null {
@@ -147,9 +152,9 @@ export async function createSkill(
   instructions: string,
   color: string,
   options: CreateSkillOptions = {},
-): Promise<void> {
+): Promise<SkillInfo> {
   const client = await getClient();
-  await client.goose.GooseUnstableSourcesCreate({
+  const response = await client.goose.GooseUnstableSourcesCreate({
     type: SKILL_SOURCE_TYPE,
     name,
     description,
@@ -159,6 +164,14 @@ export async function createSkill(
       : { scope: "global" },
     properties: { color },
   });
+
+  if (!isFilesystemSkillSource(response.source)) {
+    throw new Error(`Unexpected source type returned: ${response.source.type}`);
+  }
+
+  const skill = toSkillInfo(response.source);
+  emitSkillsChanged();
+  return skill;
 }
 
 export async function listSkills(
@@ -225,6 +238,8 @@ export async function deleteSkill(path: string): Promise<void> {
     type: SKILL_SOURCE_TYPE,
     path,
   });
+
+  emitSkillsChanged();
 }
 
 export async function updateSkill(
@@ -251,7 +266,9 @@ export async function updateSkill(
     throw new Error(`Unexpected source type returned: ${response.source.type}`);
   }
 
-  return toSkillInfo(response.source);
+  const skill = toSkillInfo(response.source);
+  emitSkillsChanged();
+  return skill;
 }
 
 export async function exportSkill(
@@ -279,6 +296,8 @@ export async function importSkills(
     data,
     target: { scope: "global" },
   });
+
+  emitSkillsChanged();
 
   return response.sources.filter(isFilesystemSkillSource).map(toSkillInfo);
 }

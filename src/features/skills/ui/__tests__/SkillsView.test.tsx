@@ -465,9 +465,7 @@ describe("SkillsView", () => {
       path: "/path/renamed-review",
       fileLocation: "/path/renamed-review/SKILL.md",
     };
-    listSkills
-      .mockResolvedValueOnce(mockSkills)
-      .mockResolvedValueOnce([mockSkills[0], renamedSkill, mockSkills[2]]);
+    listSkills.mockResolvedValueOnce(mockSkills);
     updateSkill.mockResolvedValueOnce(renamedSkill);
     const user = userEvent.setup();
 

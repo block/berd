@@ -11,6 +11,7 @@ import {
   HOME_WIDGET_CATALOG_BY_ID,
   widgetSizeForInstance,
 } from "../widgets/catalog";
+import { useInvalidateHomeWidgetSkillsOnChange } from "../widgets/skillQueryKey";
 import type { WidgetInstance } from "../widgets/types";
 import { WidgetCanvas } from "./WidgetCanvas";
 
@@ -43,6 +44,7 @@ export function HomeView({
 }: HomeViewProps) {
   const { t } = useTranslation("home");
   const setTopBarActions = useSetTopBarActions();
+  useInvalidateHomeWidgetSkillsOnChange();
   const [layoutMotionActive, setLayoutMotionActive] = useState(false);
   const {
     instances,

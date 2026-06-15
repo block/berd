@@ -1,15 +1,232 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SKILLS_CHANGED_EVENT } from "../lib/skillsEvents";
 
 const mockGooseSourcesList = vi.fn();
+const mockGooseSourcesCreate = vi.fn();
+const mockGooseSourcesDelete = vi.fn();
+const mockGooseSourcesUpdate = vi.fn();
+const mockGooseSourcesImport = vi.fn();
 
 vi.mock("@/shared/api/acpConnection", () => ({
   getClient: async () => ({
     goose: {
       GooseUnstableSourcesList: (...args: unknown[]) =>
         mockGooseSourcesList(...args),
+      GooseUnstableSourcesCreate: (...args: unknown[]) =>
+        mockGooseSourcesCreate(...args),
+      GooseUnstableSourcesDelete: (...args: unknown[]) =>
+        mockGooseSourcesDelete(...args),
+      GooseUnstableSourcesUpdate: (...args: unknown[]) =>
+        mockGooseSourcesUpdate(...args),
+      GooseUnstableSourcesImport: (...args: unknown[]) =>
+        mockGooseSourcesImport(...args),
     },
   }),
 }));
+
+describe("createSkill", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("returns the created global skill mapped to SkillInfo", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({
+      source: {
+        type: "skill",
+        name: "test-writer",
+        description: "Writes tests",
+        content: "Write tests",
+        path: "/Users/test/.agents/skills/test-writer",
+        global: true,
+        properties: { color: "blue" },
+      },
+    });
+
+    const { createSkill } = await import("./skills");
+    const skill = await createSkill(
+      "test-writer",
+      "Writes tests",
+      "Write tests",
+      "blue",
+    );
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith({
+      type: "skill",
+      name: "test-writer",
+      description: "Writes tests",
+      content: "Write tests",
+      target: { scope: "global" },
+      properties: { color: "blue" },
+    });
+    expect(skill).toMatchObject({
+      id: "global:/Users/test/.agents/skills/test-writer",
+      name: "test-writer",
+      description: "Writes tests",
+      instructions: "Write tests",
+      path: "/Users/test/.agents/skills/test-writer",
+      sourceKind: "global",
+      sourceLabel: "Personal",
+      projectLinks: [],
+      readonly: false,
+      color: "blue",
+    });
+  });
+
+  it("targets the project scope and maps a project skill", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({
+      source: {
+        type: "skill",
+        name: "test-writer",
+        description: "Writes tests",
+        content: "Write tests",
+        path: "/tmp/alpha/.agents/skills/test-writer",
+        global: false,
+        properties: { color: "blue" },
+      },
+    });
+
+    const { createSkill } = await import("./skills");
+    const skill = await createSkill(
+      "test-writer",
+      "Writes tests",
+      "Write tests",
+      "blue",
+      { projectId: "alpha-project" },
+    );
+
+    expect(mockGooseSourcesCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        target: { scope: "projectId", projectId: "alpha-project" },
+      }),
+    );
+    expect(skill).toMatchObject({
+      id: "project:/tmp/alpha/.agents/skills/test-writer",
+      sourceKind: "project",
+      sourceLabel: "alpha",
+      projectLinks: [
+        {
+          id: "/tmp/alpha",
+          name: "alpha",
+          workingDir: "/tmp/alpha",
+        },
+      ],
+    });
+  });
+});
+
+describe("isProjectSkillId", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("recognizes project-scoped skill ids", async () => {
+    const { isProjectSkillId } = await import("./skills");
+
+    expect(isProjectSkillId("project:/tmp/alpha/.agents/skills/test")).toBe(
+      true,
+    );
+    expect(isProjectSkillId("global:/Users/test/.agents/skills/test")).toBe(
+      false,
+    );
+    expect(isProjectSkillId("builtin:test")).toBe(false);
+  });
+});
+
+describe("skill mutation events", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it("emits the skills changed event after a successful create", async () => {
+    mockGooseSourcesCreate.mockResolvedValue({
+      source: {
+        type: "skill",
+        name: "test-writer",
+        description: "Writes tests",
+        content: "Write tests",
+        path: "/Users/test/.agents/skills/test-writer",
+        global: true,
+      },
+    });
+    const listener = vi.fn();
+    window.addEventListener(SKILLS_CHANGED_EVENT, listener);
+
+    try {
+      const { createSkill } = await import("./skills");
+      await createSkill("test-writer", "Writes tests", "Write tests", "blue");
+
+      expect(listener).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(SKILLS_CHANGED_EVENT, listener);
+    }
+  });
+
+  it("emits the skills changed event after successful update, delete, and import", async () => {
+    mockGooseSourcesUpdate.mockResolvedValue({
+      source: {
+        type: "skill",
+        name: "test-writer",
+        description: "Writes tests",
+        content: "Write tests",
+        path: "/Users/test/.agents/skills/test-writer",
+        global: true,
+      },
+    });
+    mockGooseSourcesDelete.mockResolvedValue({});
+    mockGooseSourcesImport.mockResolvedValue({
+      sources: [
+        {
+          type: "skill",
+          name: "imported",
+          description: "Imported skill",
+          content: "Imported instructions",
+          path: "/Users/test/.agents/skills/imported",
+          global: true,
+        },
+      ],
+    });
+    const listener = vi.fn();
+    window.addEventListener(SKILLS_CHANGED_EVENT, listener);
+
+    try {
+      const { deleteSkill, importSkills, updateSkill } = await import(
+        "./skills"
+      );
+      await updateSkill(
+        "/Users/test/.agents/skills/test-writer",
+        "test-writer",
+        "Writes tests",
+        "Write tests",
+        "blue",
+      );
+      await deleteSkill("/Users/test/.agents/skills/test-writer");
+      await importSkills([123, 125], "imported.skill.json");
+
+      expect(listener).toHaveBeenCalledTimes(3);
+    } finally {
+      window.removeEventListener(SKILLS_CHANGED_EVENT, listener);
+    }
+  });
+
+  it("does not emit the skills changed event when a mutation fails", async () => {
+    mockGooseSourcesCreate.mockRejectedValue(new Error("permission denied"));
+    const listener = vi.fn();
+    window.addEventListener(SKILLS_CHANGED_EVENT, listener);
+
+    try {
+      const { createSkill } = await import("./skills");
+      await expect(
+        createSkill("test-writer", "Writes tests", "Write tests", "blue"),
+      ).rejects.toThrow("permission denied");
+
+      expect(listener).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener(SKILLS_CHANGED_EVENT, listener);
+    }
+  });
+});
 
 describe("listSkills", () => {
   beforeEach(() => {

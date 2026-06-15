@@ -28,6 +28,7 @@ import { SkillDetailPage } from "./SkillDetailPage";
 import { SkillsDialogs } from "./SkillsDialogs";
 import { skillsGridClass, SkillsGrid } from "./SkillsGrid";
 import { hydrateProjectNames } from "../lib/projectHydration";
+import { listenSkillsChanged } from "../lib/skillsEvents";
 import type { AppNavigationUpdateOptions } from "@/app/types/appNavigation";
 import {
   deleteSkill,
@@ -156,6 +157,12 @@ export function SkillsView({
     loadSkills();
   }, [loadSkills]);
 
+  useEffect(() => {
+    return listenSkillsChanged(() => {
+      void loadSkills();
+    });
+  }, [loadSkills]);
+
   const projectsWithSkillDirs = useMemo(
     () => projects.filter((project) => project.workingDirs.length > 0),
     [projects],
@@ -225,18 +232,24 @@ export function SkillsView({
   };
 
   const handleConfirmDeleteSkill = async () => {
-    if (!deletingSkill) return;
-    if (deletingSkill.readonly) {
+    const skillToDelete = deletingSkill;
+    if (!skillToDelete) return;
+    if (skillToDelete.readonly) {
       setDeletingSkill(null);
       return;
     }
     try {
-      await deleteSkill(deletingSkill.path);
-      await loadSkills();
-      if (currentActiveSkillId === deletingSkill.id) {
+      await deleteSkill(skillToDelete.path);
+      setSkills((current) =>
+        current.filter(
+          (skill) =>
+            skill.id !== skillToDelete.id && skill.path !== skillToDelete.path,
+        ),
+      );
+      if (currentActiveSkillId === skillToDelete.id) {
         setActiveSkill(null, { replace: true });
       }
-      toast.success(t("view.deleteSuccess", { name: deletingSkill.name }));
+      toast.success(t("view.deleteSuccess", { name: skillToDelete.name }));
     } catch (error) {
       toast.error(formatAcpErrorMessage(error, t("view.deleteError")));
     }
@@ -301,24 +314,34 @@ export function SkillsView({
   }, [onStartChatWithSkill, selectedProjectId]);
 
   const handleSkillSaved = useCallback(
-    async (savedSkill?: SkillInfo) => {
-      const refreshedSkills = await loadSkills();
-      if (
-        savedSkill &&
-        refreshedSkills.some((skill) => skill.id === savedSkill.id)
-      ) {
-        setActiveSkill(savedSkill.id);
+    (savedSkill?: SkillInfo) => {
+      if (!savedSkill) {
+        return;
       }
+
+      const previousPath = editingSkill?.path;
+      setSkills((current) => {
+        const existingIndex = current.findIndex(
+          (skill) =>
+            skill.id === savedSkill.id ||
+            skill.path === savedSkill.path ||
+            (previousPath ? skill.path === previousPath : false),
+        );
+        if (existingIndex === -1) {
+          return [...current, savedSkill];
+        }
+
+        const next = [...current];
+        next[existingIndex] = savedSkill;
+        return next;
+      });
+      setActiveSkill(savedSkill.id);
     },
-    [loadSkills, setActiveSkill],
+    [editingSkill?.path, setActiveSkill],
   );
 
-  const refreshSkills = useCallback(async () => {
-    await loadSkills();
-  }, [loadSkills]);
-
   const { fileInputRef, handleFileChange, openFilePicker, handleExport } =
-    useSkillImportExport(refreshSkills);
+    useSkillImportExport();
 
   const setTopBarActions = useSetTopBarActions();
 

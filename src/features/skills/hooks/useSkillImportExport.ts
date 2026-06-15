@@ -5,7 +5,7 @@ import { useFileImportZone } from "@/shared/hooks/useFileImportZone";
 import { exportSkill, importSkills, type SkillInfo } from "../api/skills";
 import { downloadExport } from "../lib/skillsHelpers";
 
-export function useSkillImportExport(onAfterImport: () => Promise<void>) {
+export function useSkillImportExport() {
   const { t } = useTranslation(["skills"]);
 
   const handleExport = async (skill: SkillInfo) => {
@@ -25,7 +25,6 @@ export function useSkillImportExport(onAfterImport: () => Promise<void>) {
   const handleImport = async (fileBytes: number[], fileName: string) => {
     try {
       await importSkills(fileBytes, fileName);
-      await onAfterImport();
       toast.success(t("view.importSuccess"));
     } catch (error) {
       toast.error(formatAcpErrorMessage(error, t("view.importError")));

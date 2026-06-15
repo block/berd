@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { listSkills, type SkillInfo } from "@/features/skills/api/skills";
 import { hydrateProjectNames } from "@/features/skills/lib/projectHydration";
+import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { filterByQuery } from "../lib/filterByQuery";
 
 // Module-level cache so the dropdown feels instant after the first load.
@@ -10,6 +11,12 @@ import { filterByQuery } from "../lib/filterByQuery";
 let skillsCache: SkillInfo[] | null = null;
 let skillsRequest: Promise<SkillInfo[]> | null = null;
 let skillsRequestKey = "";
+
+function clearSkillsCache(): void {
+  skillsCache = null;
+  skillsRequest = null;
+  skillsRequestKey = "";
+}
 
 function loadSkills(projectDirs: string[]): Promise<SkillInfo[]> {
   const requestKey = [...new Set(projectDirs)].sort().join("\n");
@@ -46,21 +53,36 @@ export function useSkillSearch(query: string): SkillInfo[] {
 
   useEffect(() => {
     let cancelled = false;
+    let requestId = 0;
 
-    void loadSkills(projectDirs)
-      .then((loadedSkills) => {
-        if (!cancelled) {
-          setSkills(hydrateProjectNames(loadedSkills, projects));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setSkills([]);
-        }
-      });
+    const reloadSkills = (forceRefresh = false) => {
+      const currentRequestId = requestId + 1;
+      requestId = currentRequestId;
+      if (forceRefresh) {
+        clearSkillsCache();
+      }
+
+      void loadSkills(projectDirs)
+        .then((loadedSkills) => {
+          if (!cancelled && currentRequestId === requestId) {
+            setSkills(hydrateProjectNames(loadedSkills, projects));
+          }
+        })
+        .catch(() => {
+          if (!cancelled && currentRequestId === requestId) {
+            setSkills([]);
+          }
+        });
+    };
+
+    reloadSkills();
+    const cleanup = listenSkillsChanged(() => {
+      reloadSkills(true);
+    });
 
     return () => {
       cancelled = true;
+      cleanup();
     };
   }, [projectDirs, projects]);
 

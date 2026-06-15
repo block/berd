@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listSkills } from "@/features/skills/api/skills";
+import { listenSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import {
   expandSkillSlashCommand,
@@ -391,31 +392,41 @@ export function useMentionHandlers({
 
   useEffect(() => {
     let cancelled = false;
+    let requestId = 0;
 
     if (!skillsEnabled) {
       return;
     }
 
-    void listSkills(normalizedProjectRoots)
-      .then((skills) => {
-        if (cancelled) return;
-        setSkillMentionItems(
-          skills.map((skill) => ({
-            id: skill.id,
-            name: skill.name,
-            description: skill.description,
-            sourceLabel: skill.sourceLabel,
-          })),
-        );
-      })
-      .catch((error) => {
-        if (cancelled) return;
-        console.error("Failed to load skills for mentions:", error);
-        setSkillMentionItems([]);
-      });
+    const loadSkillMentions = () => {
+      const currentRequestId = requestId + 1;
+      requestId = currentRequestId;
+
+      void listSkills(normalizedProjectRoots)
+        .then((skills) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          setSkillMentionItems(
+            skills.map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+              sourceLabel: skill.sourceLabel,
+            })),
+          );
+        })
+        .catch((error) => {
+          if (cancelled || currentRequestId !== requestId) return;
+          console.error("Failed to load skills for mentions:", error);
+          setSkillMentionItems([]);
+        });
+    };
+
+    loadSkillMentions();
+    const cleanup = listenSkillsChanged(loadSkillMentions);
 
     return () => {
       cancelled = true;
+      cleanup();
     };
   }, [normalizedProjectRoots, skillsEnabled]);
 

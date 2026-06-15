@@ -197,7 +197,7 @@ export function SkillEditor({
       } else {
         const projectId =
           saveLocation !== GLOBAL_VALUE ? saveLocation : undefined;
-        await createSkill(
+        savedSkill = await createSkill(
           name,
           description.trim(),
           instructions,

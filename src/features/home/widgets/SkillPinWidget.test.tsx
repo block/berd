@@ -1,10 +1,15 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { SkillInfo } from "@/features/skills/api/skills";
+import { emitSkillsChanged } from "@/features/skills/lib/skillsEvents";
 import type { WidgetInstance } from "./types";
 import { SkillPinWidget } from "./SkillPinWidget";
+import {
+  listHomeWidgetSkills,
+  useInvalidateHomeWidgetSkillsOnChange,
+} from "./skillQueryKey";
 
 const state = vi.hoisted(() => ({ skills: [] as SkillInfo[] }));
 
@@ -48,9 +53,16 @@ function renderPin(skillId: string, onOpenSkill = vi.fn()) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
+  function SkillQueryInvalidationEvents() {
+    useInvalidateHomeWidgetSkillsOnChange();
+    return null;
+  }
   function Wrapper({ children }: { children: ReactNode }) {
     return (
-      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      <QueryClientProvider client={queryClient}>
+        <SkillQueryInvalidationEvents />
+        {children}
+      </QueryClientProvider>
     );
   }
 
@@ -110,5 +122,23 @@ describe("SkillPinWidget", () => {
         sourceLabel: "Personal",
       }),
     );
+  });
+
+  it("refreshes the shared skill query when skills change", async () => {
+    renderPin("global:/Users/tulsi/.agents/skills/agent-browser");
+
+    expect(await screen.findByText("agent-browser")).toBeVisible();
+
+    state.skills = [
+      skill({
+        name: "agent-browser-updated",
+      }),
+    ];
+    emitSkillsChanged();
+
+    await waitFor(() => {
+      expect(listHomeWidgetSkills).toHaveBeenCalledTimes(2);
+    });
+    expect(await screen.findByText("agent-browser-updated")).toBeVisible();
   });
 });
