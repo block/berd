@@ -46,6 +46,34 @@ describe("SessionCard", () => {
     expect(onSelect).toHaveBeenCalledWith("s1");
   });
 
+  it("lets the click overlay receive pointer events through visible content", () => {
+    const expectPointerPassthroughLayer = (text: string) => {
+      expect(screen.getByText(text).closest(".pointer-events-none")).not.toBe(
+        null,
+      );
+    };
+
+    render(
+      <SessionCard
+        {...defaultProps}
+        projectName="My Project"
+        personaName="Code Assistant"
+        snippet="Matched message excerpt"
+        matchCount={3}
+      />,
+    );
+
+    expect(screen.getByText("Fix sidebar bug")).toHaveClass(
+      "pointer-events-none",
+    );
+    expectPointerPassthroughLayer("My Project");
+    expectPointerPassthroughLayer("Matched message excerpt");
+    expectPointerPassthroughLayer("3 message matches");
+    expect(
+      screen.getByRole("button", { name: /options for fix sidebar bug/i }),
+    ).not.toHaveClass("pointer-events-none");
+  });
+
   it("toggles selection with command-click instead of opening", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

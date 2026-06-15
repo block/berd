@@ -216,12 +216,12 @@ export function SessionCard({
       />
 
       {/* Title */}
-      <p className="relative z-0 truncate pr-6 text-sm leading-normal text-foreground">
+      <p className="pointer-events-none relative z-0 truncate pr-6 text-sm leading-normal text-foreground">
         {displayTitle}
       </p>
 
       {hasSubtitle && (
-        <div className="relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-normal text-foreground/40">
+        <div className="pointer-events-none relative z-0 flex min-w-0 items-center gap-1.5 text-[10px] leading-normal text-foreground/40">
           {projectName && (
             <span className="inline-flex shrink-0 items-center justify-center">
               {projectColor ? (
@@ -250,13 +250,13 @@ export function SessionCard({
       )}
 
       {workingDir && !hasSubtitle && (
-        <div className="relative z-0 truncate text-[10px] leading-normal text-foreground/40">
+        <div className="pointer-events-none relative z-0 truncate text-[10px] leading-normal text-foreground/40">
           {workingDir}
         </div>
       )}
 
       {(snippet || matchCount) && (
-        <div className="relative z-10 mt-1 space-y-1 text-xs">
+        <div className="pointer-events-none relative z-10 mt-1 space-y-1 text-xs">
           {snippet && (
             <p className="line-clamp-3 text-muted-foreground">{snippet}</p>
           )}
