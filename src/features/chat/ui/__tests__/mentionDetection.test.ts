@@ -1,6 +1,10 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { type FileMentionItem, useMentionDetection } from "../mentionDetection";
+import {
+  type FileMentionItem,
+  type SkillMentionItem,
+  useMentionDetection,
+} from "../mentionDetection";
 
 function fileItem(overrides: Partial<FileMentionItem>): FileMentionItem {
   return {
@@ -9,6 +13,16 @@ function fileItem(overrides: Partial<FileMentionItem>): FileMentionItem {
     filename: "file.ts",
     kind: "file",
     source: "project",
+    ...overrides,
+  };
+}
+
+function skillItem(overrides: Partial<SkillMentionItem>): SkillMentionItem {
+  return {
+    id: "global:/skills/example",
+    name: "example",
+    description: "Example skill",
+    sourceLabel: "Personal",
     ...overrides,
   };
 }
@@ -50,6 +64,73 @@ describe("useMentionDetection file ordering", () => {
     expect(result.current.mentionTrigger).toBe("/");
     expect(result.current.atMentionCategory).toBe("skills");
     expect(result.current.filteredSkills).toEqual([skill]);
+  });
+
+  it("ranks skill name matches before earlier description matches", () => {
+    const descriptionMatch = skillItem({
+      id: "global:/skills/release-notes",
+      name: "release-notes",
+      description: "write code status summaries",
+    });
+    const nameMatch = skillItem({
+      id: "global:/skills/code-review",
+      name: "code-review",
+      description: "reviews diffs",
+    });
+    const { result } = renderHook(() =>
+      useMentionDetection([], [descriptionMatch, nameMatch], []),
+    );
+
+    act(() => {
+      result.current.detectMention("/code", 5);
+    });
+
+    expect(result.current.filteredSkills).toEqual([
+      nameMatch,
+      descriptionMatch,
+    ]);
+  });
+
+  it("keeps description-only skill matches when no title matches", () => {
+    const descriptionMatch = skillItem({
+      id: "global:/skills/release-notes",
+      name: "release-notes",
+      description: "write code status summaries",
+    });
+    const nonMatch = skillItem({
+      id: "global:/skills/triage",
+      name: "triage",
+      description: "sort feedback",
+    });
+    const { result } = renderHook(() =>
+      useMentionDetection([], [descriptionMatch, nonMatch], []),
+    );
+
+    act(() => {
+      result.current.detectMention("/code", 5);
+    });
+
+    expect(result.current.filteredSkills).toEqual([descriptionMatch]);
+  });
+
+  it("preserves skill order for an empty slash query at prompt start", () => {
+    const firstSkill = skillItem({
+      id: "global:/skills/release-notes",
+      name: "release-notes",
+    });
+    const secondSkill = skillItem({
+      id: "global:/skills/code-review",
+      name: "code-review",
+    });
+    const { result } = renderHook(() =>
+      useMentionDetection([], [firstSkill, secondSkill], []),
+    );
+
+    act(() => {
+      result.current.detectMention("/", 1);
+    });
+
+    expect(result.current.filteredSkills).toEqual([firstSkill, secondSkill]);
   });
 
   it("opens slash skills at token boundaries once there is a query", () => {

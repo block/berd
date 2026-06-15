@@ -5,6 +5,10 @@ import { useState } from "react";
 import { ChatInput } from "./chatInputTestUtils";
 import type { ChatSkillDraft } from "../../types";
 
+if (!HTMLElement.prototype.scrollIntoView) {
+  HTMLElement.prototype.scrollIntoView = vi.fn();
+}
+
 const mockVoiceDictation = {
   isEnabled: true,
   isRecording: false,
@@ -117,6 +121,42 @@ describe("ChatInput skill mentions", () => {
 
     expect(input).toHaveValue("");
     expect(screen.getByText("code-review")).toBeInTheDocument();
+  });
+
+  it("selects skill name matches before earlier description matches", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/release-notes",
+        name: "release-notes",
+        description: "write code status summaries",
+        sourceLabel: "Personal",
+      },
+      {
+        id: "global:/skills/code-review",
+        name: "code-review",
+        description: "reviews diffs",
+        sourceLabel: "Personal",
+      },
+    ]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/code");
+
+    const options = await screen.findAllByRole("option");
+    expect(options[0]).toHaveTextContent("code-review");
+
+    await user.keyboard("{Enter}");
+
+    expect(input).toHaveValue("");
+    expect(screen.getByText("code-review")).toBeInTheDocument();
+    expect(screen.queryByText("release-notes")).not.toBeInTheDocument();
   });
 
   it("does not show all skills for an empty slash later in the prompt", async () => {

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
+import { Fzf } from "fzf";
 import { isReservedSlashCommand } from "@/features/skills/lib/skillChatPrompt";
 import type { AtMentionDefaultCategory } from "@/features/chat/lib/mentionPreference";
 import type { FileMentionMatchHighlight } from "@/shared/api/system";
@@ -49,6 +50,11 @@ export interface SkillMentionItem {
   description: string;
   sourceLabel: string;
 }
+
+type IndexedSkillMention = {
+  skill: SkillMentionItem;
+  index: number;
+};
 
 export type MentionItem =
   | { type: "persona"; persona: Persona }
@@ -342,6 +348,57 @@ function sameMentionItemKeys(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((key, index) => key === b[index]);
 }
 
+function rankSkillMentions(
+  skills: SkillMentionItem[],
+  query: string,
+): SkillMentionItem[] {
+  const trimmedQuery = query.trim();
+  const q = trimmedQuery.toLowerCase();
+  if (!q) return skills;
+
+  const indexedSkills: IndexedSkillMention[] = skills.map((skill, index) => ({
+    skill,
+    index,
+  }));
+  const fzf = new Fzf(indexedSkills, {
+    selector: ({ skill }) => skill.name,
+    casing: "case-insensitive",
+    sort: false,
+  });
+  const seenSkillIds = new Set<string>();
+  const rankedSkills: SkillMentionItem[] = [];
+  const appendSkill = (skill: SkillMentionItem) => {
+    rankedSkills.push(skill);
+    seenSkillIds.add(skill.id);
+  };
+
+  for (const result of fzf
+    .find(trimmedQuery)
+    .sort((a, b) => b.score - a.score || a.item.index - b.item.index)) {
+    appendSkill(result.item.skill);
+  }
+
+  for (const { skill } of indexedSkills) {
+    if (
+      !seenSkillIds.has(skill.id) &&
+      skill.description.toLowerCase().includes(q)
+    ) {
+      appendSkill(skill);
+    }
+  }
+
+  for (const { skill } of indexedSkills) {
+    if (
+      !seenSkillIds.has(skill.id) &&
+      fuzzyMatch(q, skill.sourceLabel.toLowerCase())
+    ) {
+      appendSkill(skill);
+    }
+  }
+
+  return rankedSkills;
+}
+
 export function useMentionDetection(
   personas: Persona[] = [],
   skills: SkillMentionItem[] = [],
@@ -403,11 +460,7 @@ export function useMentionDetection(
     }
 
     if (mentionState.category === "skills") {
-      const matchesSkill = (skill: SkillMentionItem) =>
-        fuzzyMatch(q, skill.name.toLowerCase()) ||
-        skill.description.toLowerCase().includes(q) ||
-        fuzzyMatch(q, skill.sourceLabel.toLowerCase());
-      const matchingSkills = q ? skills.filter(matchesSkill) : skills;
+      const matchingSkills = rankSkillMentions(skills, mentionState.query);
 
       return {
         filteredPersonas: [],
