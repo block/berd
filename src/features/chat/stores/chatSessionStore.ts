@@ -1,20 +1,13 @@
 import { create } from "zustand";
-import {
-  acpCreateSession,
-  acpListSessionsPage,
-  type AcpSessionInfo,
-  type AcpSessionsPage,
-} from "@/shared/api/acp";
+import { acpCreateSession, acpListSessionsPage } from "@/shared/api/acp";
 import type { Session } from "@/shared/types/chat";
-import {
-  DEFAULT_CHAT_TITLE,
-  normalizeAcpTitle,
-} from "@/features/chat/lib/sessionTitle";
+import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import {
   archiveSession as acpArchiveSession,
   unarchiveSession as acpUnarchiveSession,
 } from "@/shared/api/acpApi";
+import { mergeAcpSessionPage } from "@/features/chat/lib/acpSessionMapping";
 import { releaseSession } from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 
@@ -144,87 +137,6 @@ interface ChatSessionStoreActions {
 }
 
 export type ChatSessionStore = ChatSessionStoreState & ChatSessionStoreActions;
-
-function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
-  const now = new Date().toISOString();
-  return {
-    id: session.sessionId,
-    title: normalizeAcpTitle(session.title) ?? "Untitled",
-    projectId: session.projectId ?? undefined,
-    providerId: session.providerId ?? undefined,
-    personaId: session.personaId ?? undefined,
-    modelId: session.modelId ?? undefined,
-    workingDir: session.workingDir ?? undefined,
-    createdAt: session.createdAt ?? session.updatedAt ?? now,
-    updatedAt: session.updatedAt ?? now,
-    archivedAt: session.archivedAt ?? undefined,
-    messageCount: session.messageCount,
-    subtitle: session.subtitle ?? undefined,
-    userSetName: session.userSetName,
-  };
-}
-
-function sortByUpdatedAtDesc(sessions: ChatSession[]): ChatSession[] {
-  return [...sessions].sort(
-    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
-  );
-}
-
-function mergeSessionMetadata(
-  existingSessions: ChatSession[],
-  loadedSessions: ChatSession[],
-): ChatSession[] {
-  const byId = new Map<string, ChatSession>();
-
-  for (const session of existingSessions) {
-    byId.set(session.id, session);
-  }
-
-  for (const session of loadedSessions) {
-    const existing = byId.get(session.id);
-    const modelName =
-      existing?.modelId === session.modelId ? existing?.modelName : undefined;
-    byId.set(session.id, {
-      ...existing,
-      ...session,
-      modelName,
-      creationState: undefined,
-      creationError: undefined,
-    });
-  }
-
-  return sortByUpdatedAtDesc([...byId.values()]);
-}
-
-function mergeSessionPage(
-  state: ChatSessionStoreState,
-  page: AcpSessionsPage,
-  previousCursor: string | null,
-): Pick<
-  ChatSessionStoreState,
-  "sessions" | "sessionPageCursor" | "hasMoreSessions"
-> {
-  const { nextCursor } = page;
-  const repeatedCursor =
-    nextCursor != null &&
-    previousCursor != null &&
-    nextCursor === previousCursor;
-  if (repeatedCursor) {
-    console.warn(
-      "ACP session/list returned the same pagination cursor; stopping pagination to avoid an infinite loop.",
-    );
-  }
-  const hasMoreSessions = nextCursor != null && !repeatedCursor;
-
-  return {
-    sessions: mergeSessionMetadata(
-      state.sessions,
-      page.sessions.map(acpSessionToChatSession),
-    ),
-    sessionPageCursor: hasMoreSessions ? nextCursor : null,
-    hasMoreSessions,
-  };
-}
 
 function releaseWindowedSession(sessionId: string): void {
   if (!useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
@@ -461,7 +373,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     try {
       const page = await acpListSessionsPage();
       if (sessionLoadEpoch !== loadEpoch) return;
-      set((state) => mergeSessionPage(state, page, null));
+      set((state) => mergeAcpSessionPage(state, page, null));
     } catch (error) {
       if (sessionLoadEpoch === loadEpoch) {
         console.error("Failed to load sessions from ACP:", error);
@@ -484,7 +396,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     try {
       const page = await acpListSessionsPage({ cursor: sessionPageCursor });
       if (sessionLoadEpoch !== loadEpoch) return;
-      set((state) => mergeSessionPage(state, page, sessionPageCursor));
+      set((state) => mergeAcpSessionPage(state, page, sessionPageCursor));
     } catch (error) {
       if (sessionLoadEpoch === loadEpoch) {
         console.error("Failed to load more sessions from ACP:", error);
