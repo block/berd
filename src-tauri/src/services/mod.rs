@@ -9,6 +9,7 @@ pub(crate) mod kgoose;
 pub(crate) mod log_export;
 pub(crate) mod log_redaction;
 pub mod path_env;
+pub(crate) mod process;
 pub mod renderer_monitor;
 pub mod shell_env;
 pub(crate) mod sse;

@@ -16,6 +16,7 @@ use crate::services::distro_bundle::DistroBundleState;
 use crate::services::goose_config;
 use crate::services::log_redaction::redact_log_line;
 use crate::services::path_env;
+use crate::services::process::{pid_t_from_u32, process_is_alive};
 use crate::services::shell_env;
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
@@ -73,11 +74,20 @@ impl GooseServeProcess {
     /// Kill the child process. Called from the app exit handler to ensure
     /// the child doesn't outlive the Tauri process.
     pub fn kill(&self) {
-        if let Some(pid) = self._child.id() {
-            log::info!("Killing goose serve child (pid {pid})");
-            // SAFETY: sending SIGTERM to a known child process.
-            unsafe {
-                libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        if let Some(child_pid) = self._child.id() {
+            match pid_t_from_u32(child_pid) {
+                Some(pid) => {
+                    log::info!("Killing goose serve child (pid {child_pid})");
+                    // SAFETY: sending SIGTERM to a known child process.
+                    unsafe {
+                        libc::kill(pid, libc::SIGTERM);
+                    }
+                }
+                None => {
+                    log::warn!(
+                        "Skipping goose serve child kill because pid {child_pid} is outside pid_t range"
+                    );
+                }
             }
         }
         // Clean up this app instance's stale-process record.
@@ -466,23 +476,6 @@ async fn cleanup_process_record(path: &Path) {
 fn read_process_record(path: &Path) -> Result<ServeProcessRecord, String> {
     let contents = std::fs::read_to_string(path).map_err(|error| error.to_string())?;
     serde_json::from_str(&contents).map_err(|error| error.to_string())
-}
-
-fn pid_t_from_u32(pid: u32) -> Option<libc::pid_t> {
-    if pid > i32::MAX as u32 {
-        None
-    } else {
-        Some(pid as libc::pid_t)
-    }
-}
-
-fn process_is_alive(pid: libc::pid_t) -> bool {
-    // SAFETY: sending signal 0 to check process existence.
-    if unsafe { libc::kill(pid, 0) } == 0 {
-        return true;
-    }
-
-    std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
 
 async fn cleanup_orphaned_serve_process(path: &Path, pid: libc::pid_t) {
