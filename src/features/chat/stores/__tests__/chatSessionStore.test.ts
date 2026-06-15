@@ -1,7 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionInfo } from "@/shared/api/acp";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
-import { useChatSessionStore, type ChatSession } from "../chatSessionStore";
+import {
+  type ChatSession,
+  SessionNotFoundError,
+  useChatSessionStore,
+} from "../chatSessionStore";
 
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
@@ -110,17 +114,6 @@ describe("chatSessionStore", () => {
     mocks.unarchiveSession.mockResolvedValue(undefined);
   });
 
-  it("releases a windowed session when archiving", async () => {
-    seedSession({ id: "session-1" });
-    useSessionWindowStore
-      .getState()
-      .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
-
-    await useChatSessionStore.getState().archiveSession("session-1");
-
-    expect(mocks.releaseSession).toHaveBeenCalledWith("session-1");
-  });
-
   it("releases a windowed session when removing it locally", () => {
     seedSession({ id: "session-1" });
     useSessionWindowStore
@@ -130,6 +123,103 @@ describe("chatSessionStore", () => {
     useChatSessionStore.getState().removeSession("session-1");
 
     expect(mocks.releaseSession).toHaveBeenCalledWith("session-1");
+  });
+
+  describe("archiveSession", () => {
+    it("archives optimistically and awaits the backend call", async () => {
+      seedSession({ id: "session-1" });
+      useChatSessionStore.setState({ activeSessionId: "session-1" });
+
+      await useChatSessionStore.getState().archiveSession("session-1");
+
+      expect(mocks.archiveSession).toHaveBeenCalledWith("session-1");
+      const state = useChatSessionStore.getState();
+      expect(state.getSession("session-1")?.archivedAt).toEqual(
+        expect.any(String),
+      );
+      expect(state.activeSessionId).toBe("session-1");
+    });
+
+    it("rolls back archivedAt to the prior value when the backend fails", async () => {
+      seedSession({ id: "session-1" });
+      useChatSessionStore.setState({ activeSessionId: "session-1" });
+      mocks.archiveSession.mockRejectedValue(new Error("backend down"));
+
+      await expect(
+        useChatSessionStore.getState().archiveSession("session-1"),
+      ).rejects.toThrow("backend down");
+
+      const state = useChatSessionStore.getState();
+      expect(state.getSession("session-1")?.archivedAt).toBeUndefined();
+      expect(state.activeSessionId).toBe("session-1");
+    });
+
+    it("restores a pre-existing archivedAt timestamp on rollback", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.archiveSession.mockRejectedValue(new Error("backend down"));
+
+      await expect(
+        useChatSessionStore.getState().archiveSession("session-1"),
+      ).rejects.toThrow("backend down");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(priorArchivedAt);
+    });
+
+    it("throws SessionNotFoundError for an unknown id without calling the backend", async () => {
+      await expect(
+        useChatSessionStore.getState().archiveSession("missing-session"),
+      ).rejects.toBeInstanceOf(SessionNotFoundError);
+
+      expect(mocks.archiveSession).not.toHaveBeenCalled();
+      expect(mocks.releaseSession).not.toHaveBeenCalled();
+    });
+
+    it("does not release a windowed session when archiving", async () => {
+      seedSession({ id: "session-1" });
+      useSessionWindowStore
+        .getState()
+        .setSnapshot([{ sessionId: "session-1", windowLabel: "session:a" }]);
+
+      await useChatSessionStore.getState().archiveSession("session-1");
+
+      expect(mocks.releaseSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("unarchiveSession", () => {
+    it("clears archivedAt optimistically and awaits the backend call", async () => {
+      seedSession({ id: "session-1", archivedAt: "2026-03-15T00:00:00.000Z" });
+
+      await useChatSessionStore.getState().unarchiveSession("session-1");
+
+      expect(mocks.unarchiveSession).toHaveBeenCalledWith("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+    });
+
+    it("rolls back archivedAt when the backend fails", async () => {
+      const archivedAt = "2026-03-15T00:00:00.000Z";
+      seedSession({ id: "session-1", archivedAt });
+      mocks.unarchiveSession.mockRejectedValue(new Error("backend down"));
+
+      await expect(
+        useChatSessionStore.getState().unarchiveSession("session-1"),
+      ).rejects.toThrow("backend down");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(archivedAt);
+    });
+
+    it("does nothing for an unknown id", async () => {
+      await useChatSessionStore.getState().unarchiveSession("missing-session");
+
+      expect(mocks.unarchiveSession).not.toHaveBeenCalled();
+    });
   });
 
   describe("createSession", () => {

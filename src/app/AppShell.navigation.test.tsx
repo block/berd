@@ -12,6 +12,7 @@ import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import type { Message } from "@/shared/types/messages";
 import { PANE_JUMP_NAVIGATION_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
   setExperimentConfigValue,
@@ -32,6 +33,7 @@ import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
 const mockAcpCreateSession = vi.hoisted(() => vi.fn());
+const mockAcpArchiveSession = vi.hoisted(() => vi.fn());
 const mockAcpLoadSession = vi.hoisted(() => vi.fn());
 const mockCheckDirectoriesExist = vi.hoisted(() => vi.fn());
 const mockCreatePersonaSource = vi.hoisted(() => vi.fn());
@@ -39,6 +41,7 @@ const mockListPersonaSources = vi.hoisted(() => vi.fn());
 const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
+const mockToastError = vi.hoisted(() => vi.fn());
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -151,6 +154,20 @@ vi.mock("@/shared/api/acp", () => ({
   discoverAcpProviders: vi.fn().mockResolvedValue([]),
 }));
 
+vi.mock("@/shared/api/acpApi", () => ({
+  DEFAULT_PROVIDER: { id: "goose", label: "Goose (Default)" },
+  archiveSession: (...args: unknown[]) => mockAcpArchiveSession(...args),
+  renameSession: vi.fn().mockResolvedValue(undefined),
+  unarchiveSession: vi.fn().mockResolvedValue(undefined),
+  updateSessionProject: vi.fn().mockResolvedValue(undefined),
+}));
+
+vi.mock("sonner", () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+  },
+}));
+
 vi.mock("@/shared/api/agents", () => ({
   createPersonaSource: (...args: unknown[]) => mockCreatePersonaSource(...args),
   listPersonaSources: (...args: unknown[]) => mockListPersonaSources(...args),
@@ -200,6 +217,7 @@ vi.mock("./ui/AppShellContent", () => ({
     onAutomationBuilderLeaveActionChange,
     onCreatePersona,
     onExitSearch,
+    onArchiveChat,
     onOpenAgent,
     onSelectSession,
   }) => (
@@ -304,6 +322,12 @@ vi.mock("./ui/AppShellContent", () => ({
       >
         Open missing session
       </button>
+      <button type="button" onClick={() => onSelectSession?.("session-1")}>
+        Open session 1
+      </button>
+      <button type="button" onClick={() => onArchiveChat("session-1")}>
+        Archive session 1
+      </button>
       {activeView === "agents" ? (
         <button type="button" onClick={onCreatePersona}>
           Create agent
@@ -341,8 +365,11 @@ describe("AppShell global navigation", () => {
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
     mockAcpCreateSession.mockResolvedValue({ sessionId: "created-session" });
+    mockAcpArchiveSession.mockReset();
+    mockAcpArchiveSession.mockResolvedValue(undefined);
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
+    mockToastError.mockReset();
     mockCheckDirectoriesExist.mockReset();
     mockCheckDirectoriesExist.mockResolvedValue([]);
     mockCreatePersonaSource.mockReset();
@@ -561,6 +588,66 @@ describe("AppShell global navigation", () => {
       notificationType: "warning",
       action: { type: "openContextPanel" },
     });
+  });
+
+  it("cleans up archive UI optimistically and rolls back archivedAt on backend failure", async () => {
+    const user = userEvent.setup();
+    const archive = deferred<void>();
+    mockAcpArchiveSession.mockReturnValueOnce(archive.promise);
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    const message: Message = {
+      id: "message-1",
+      role: "user",
+      created: Date.now(),
+      content: [{ type: "text", text: "hello" }],
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+    useChatStore.setState({
+      messagesBySession: { "session-1": [message] },
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    await user.click(screen.getByRole("button", { name: "Archive session 1" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toEqual(expect.any(String));
+    expect(useChatStore.getState().messagesBySession["session-1"]).toBe(
+      undefined,
+    );
+
+    act(() => {
+      archive.reject(new Error("backend down"));
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+    });
+    expect(mockToastError).toHaveBeenCalledWith("backend down");
   });
 
   it("reserves toast space only while the global composer is visible", async () => {

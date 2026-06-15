@@ -15,6 +15,14 @@ const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
 let sessionLoadEpoch = 0;
 
+/** Thrown by archiveSession when the id matches no session in the store. */
+export class SessionNotFoundError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`No session "${sessionId}"`);
+    this.name = "SessionNotFoundError";
+  }
+}
+
 export interface ChatSession {
   id: string;
   title: string;
@@ -114,7 +122,18 @@ interface ChatSessionStoreActions {
   updateSessionSubtitleFromText: (sessionId: string, text: string) => void;
   addSession: (session: ChatSession) => void;
   removeSession: (id: string) => void;
+  /**
+   * Archive a session optimistically (sets `archivedAt`), then awaits the
+   * backend call. On backend failure `archivedAt` rolls back and the error is
+   * rethrown. App-owned cleanup/navigation belongs in AppShell.
+   * Throws {@link SessionNotFoundError} when the id matches no session.
+   */
   archiveSession: (id: string) => Promise<void>;
+  /**
+   * Unarchive a session optimistically (clears `archivedAt`), then awaits the
+   * backend call. On backend failure `archivedAt` rolls back and the error is
+   * rethrown.
+   */
   unarchiveSession: (id: string) => Promise<void>;
 
   setActiveSession: (sessionId: string | null) => void;
@@ -484,35 +503,58 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   },
 
   archiveSession: async (id) => {
-    set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === id
-          ? { ...session, archivedAt: new Date().toISOString() }
-          : session,
-      ),
-      activeSessionId:
-        state.activeSessionId === id ? null : state.activeSessionId,
-    }));
-    releaseWindowedSession(id);
     const session = get().sessions.find((candidate) => candidate.id === id);
-    if (session) {
-      acpArchiveSession(session.id).catch((err: unknown) =>
-        console.error("Failed to archive session in backend:", err),
-      );
+    if (!session) {
+      throw new SessionNotFoundError(id);
+    }
+    const previousArchivedAt = session.archivedAt;
+    set((state) => ({
+      sessions: state.sessions.map((candidate) =>
+        candidate.id === id
+          ? { ...candidate, archivedAt: new Date().toISOString() }
+          : candidate,
+      ),
+    }));
+    try {
+      await acpArchiveSession(session.id);
+    } catch (error) {
+      // Roll back only the archive flag; navigation/window cleanup is owned by
+      // AppShell's archive transaction.
+      set((state) => ({
+        sessions: state.sessions.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, archivedAt: previousArchivedAt }
+            : candidate,
+        ),
+      }));
+      throw error;
     }
   },
 
   unarchiveSession: async (id) => {
+    const session = get().sessions.find((candidate) => candidate.id === id);
+    if (!session) {
+      return;
+    }
+    const previousArchivedAt = session.archivedAt;
     set((state) => ({
-      sessions: state.sessions.map((session) =>
-        session.id === id ? { ...session, archivedAt: undefined } : session,
+      sessions: state.sessions.map((candidate) =>
+        candidate.id === id
+          ? { ...candidate, archivedAt: undefined }
+          : candidate,
       ),
     }));
-    const session = get().sessions.find((candidate) => candidate.id === id);
-    if (session) {
-      acpUnarchiveSession(session.id).catch((err: unknown) =>
-        console.error("Failed to unarchive session in backend:", err),
-      );
+    try {
+      await acpUnarchiveSession(session.id);
+    } catch (error) {
+      set((state) => ({
+        sessions: state.sessions.map((candidate) =>
+          candidate.id === id
+            ? { ...candidate, archivedAt: previousArchivedAt }
+            : candidate,
+        ),
+      }));
+      throw error;
     }
   },
 

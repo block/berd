@@ -446,11 +446,12 @@ export function SessionHistoryView({
         return;
       }
 
-      try {
-        await useChatSessionStore.getState().archiveSession(sessionId);
-      } catch {
-        // best-effort
-      }
+      void useChatSessionStore
+        .getState()
+        .archiveSession(sessionId)
+        .catch((err: unknown) =>
+          console.error("Failed to archive session in backend:", err),
+        );
     },
     [onArchiveChat],
   );

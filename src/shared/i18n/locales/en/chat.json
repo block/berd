@@ -239,6 +239,7 @@
     "compactionComplete": "Conversation compacted. Older context was summarized.",
     "modelSwitchError": "Could not switch to {{model}}. This chat is still using {{fallbackModel}}.",
     "modelSwitchErrorWithoutFallback": "Could not switch to {{model}}.",
+    "archiveError": "Failed to archive chat",
     "moveError": "Failed to move chat",
     "renameError": "Failed to rename chat"
   },

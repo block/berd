@@ -30,6 +30,7 @@ import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import {
   type ChatSession,
+  SessionNotFoundError,
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
@@ -80,7 +81,10 @@ import {
   hasConversationMessages,
   loadSessionMessages,
 } from "@/features/chat/lib/sessionActivation";
-import { focusSessionWindow } from "@/features/chat/lib/sessionWindowCommands";
+import {
+  focusSessionWindow,
+  releaseSession,
+} from "@/features/chat/lib/sessionWindowCommands";
 import { useSessionHandoffSource } from "@/features/chat/hooks/useSessionHandoffSource";
 import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowSupport";
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
@@ -411,7 +415,6 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   useCompletionNotifications(handleNavigateToSession);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
-  const archiveSession = useChatSessionStore((s) => s.archiveSession);
   const selectedProvider = useAgentStore(selectSelectedProvider);
   const projects = useProjectStore(selectProjects);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
@@ -1662,26 +1665,40 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   }, [openSettings]);
 
   const handleArchiveChat = useCallback(
-    async (sessionId: string) => {
-      const { activeSessionId: currentActiveSessionId } =
-        useChatSessionStore.getState();
-      const wasActiveSession = currentActiveSessionId === sessionId;
+    (sessionId: string): Promise<void> => {
+      const sessionStore = useChatSessionStore.getState();
+      const session = sessionStore.getSession(sessionId);
+      if (!session) {
+        return Promise.resolve();
+      }
 
-      try {
-        await archiveSession(sessionId);
-        cleanupChatSession(sessionId);
+      const wasActiveSession = sessionStore.activeSessionId === sessionId;
+      const archive = sessionStore.archiveSession(sessionId);
 
-        if (!wasActiveSession) {
-          return;
-        }
+      cleanupChatSession(sessionId);
+      if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+        void releaseSession(sessionId).catch((error: unknown) =>
+          console.error("Failed to release session window:", error),
+        );
+      }
 
+      if (wasActiveSession) {
         setActiveSession(null);
         setActiveView("home");
-      } catch {
-        // best-effort
       }
+
+      void archive.catch((error: unknown) => {
+        console.error("Failed to archive session in backend:", error);
+        if (error instanceof SessionNotFoundError) {
+          return;
+        }
+        toast.error(
+          formatAcpErrorMessage(error, t("chat:notifications.archiveError")),
+        );
+      });
+      return Promise.resolve();
     },
-    [archiveSession, cleanupChatSession, setActiveSession],
+    [cleanupChatSession, setActiveSession, t],
   );
   closeAgentBuilderSessionRef.current = handleArchiveChat;
 

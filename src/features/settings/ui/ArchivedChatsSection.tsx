@@ -40,7 +40,12 @@ export function ArchivedChatsSection() {
   }, []);
 
   async function handleRestoreChat(id: string) {
-    await useChatSessionStore.getState().unarchiveSession(id);
+    try {
+      await useChatSessionStore.getState().unarchiveSession(id);
+    } catch (err) {
+      console.error("Failed to unarchive session in backend:", err);
+      return;
+    }
     setArchivedChats((prev) => prev.filter((session) => session.id !== id));
   }
 
