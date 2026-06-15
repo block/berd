@@ -5,7 +5,14 @@ import {
   getReplayBuffer,
 } from "@/features/chat/hooks/replayBuffer";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  type ChatSession,
+  useChatSessionStore,
+} from "@/features/chat/stores/chatSessionStore";
+import {
+  messageSnippet,
+  SNIPPET_SCAN_LIMIT,
+} from "@/features/chat/lib/messageSnippet";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import type { McpAppPayload } from "@/shared/types/messages";
 import {
@@ -185,6 +192,102 @@ describe("acpNotificationHandler", () => {
       useChatStore.getState().getSessionRuntime("acp-session")
         .streamingMessageId,
     ).toBe("assistant-1");
+  });
+
+  it("bounds the per-chunk subtitle accumulator and still matches the canonical snippet", async () => {
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-1");
+    const seeded: ChatSession = {
+      id: "acp-session",
+      title: "Test Session",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 0,
+    };
+    useChatSessionStore.setState({ sessions: [seeded] });
+
+    // Spy with call-through so the subtitle still updates while we capture the
+    // text the handler passes in on each chunk.
+    const subtitleSpy = vi.spyOn(
+      useChatSessionStore.getState(),
+      "updateSessionSubtitleFromText",
+    );
+
+    try {
+      // Feed many small chunks whose accumulated length far exceeds the scan
+      // limit, so the handler's accumulator build is exercised past the bound.
+      const chunk = "the quick brown fox ";
+      const chunkCount = 300;
+      expect(chunk.length * chunkCount).toBeGreaterThan(SNIPPET_SCAN_LIMIT);
+      for (let i = 0; i < chunkCount; i++) {
+        await handleSessionNotification({
+          sessionId: "acp-session",
+          update: {
+            sessionUpdate: "agent_message_chunk",
+            content: { type: "text", text: chunk },
+          },
+        } as never);
+      }
+
+      // Step 2 lock-in: the handler never materializes more than a bounded
+      // leading prefix, so no per-chunk call exceeds SNIPPET_SCAN_LIMIT units.
+      expect(subtitleSpy).toHaveBeenCalled();
+      for (const [, text] of subtitleSpy.mock.calls) {
+        expect((text as string).length).toBeLessThanOrEqual(SNIPPET_SCAN_LIMIT);
+      }
+
+      // Liveness preserved: the bounded accumulator yields exactly the snippet of
+      // the full reply, so the live value won't flip on the next loadSessions().
+      const fullText = chunk.repeat(chunkCount);
+      expect(
+        useChatSessionStore.getState().getSession("acp-session")?.subtitle,
+      ).toBe(messageSnippet(fullText));
+    } finally {
+      subtitleSpy.mockRestore();
+    }
+  });
+
+  it("strips markdown from the live subtitle and reconciles to messageSnippet", async () => {
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-1");
+    const seeded: ChatSession = {
+      id: "acp-session",
+      title: "Test Session",
+      createdAt: "2026-04-01T00:00:00.000Z",
+      updatedAt: "2026-04-01T00:00:00.000Z",
+      messageCount: 0,
+    };
+    useChatSessionStore.setState({ sessions: [seeded] });
+
+    // Stream the reply in pieces that split markdown constructs across chunk
+    // boundaries (the `**`, the code fence, and the link all straddle a seam),
+    // so we exercise the live accumulate-then-strip path rather than stripping a
+    // single complete string.
+    const chunks = [
+      "**Hel",
+      "lo** world. Check `co",
+      "de` and [a li",
+      "nk](https://example.com) here.",
+    ];
+    for (const text of chunks) {
+      await handleSessionNotification({
+        sessionId: "acp-session",
+        update: {
+          sessionUpdate: "agent_message_chunk",
+          content: { type: "text", text },
+        },
+      } as never);
+    }
+
+    const fullText = chunks.join("");
+    const subtitle = useChatSessionStore
+      .getState()
+      .getSession("acp-session")?.subtitle;
+    // The live subtitle is the stripped, plain-text form...
+    expect(subtitle).toBe("Hello world. Check code and a link here.");
+    // ...and it equals the canonical snippet of the whole reply, so it will not
+    // flip when the next loadSessions() overwrites it with the backend's value.
+    expect(subtitle).toBe(messageSnippet(fullText));
   });
 
   it("attaches active persona identity to the live assistant message", async () => {

@@ -226,6 +226,7 @@ function toSidebarSessionItem(
   return {
     id: session.id,
     title: session.title,
+    subtitle: session.subtitle ?? undefined,
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,
     isRunning: isSessionRunning(runtime.chatState),

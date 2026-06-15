@@ -10,6 +10,7 @@ import {
   DEFAULT_CHAT_TITLE,
   normalizeAcpTitle,
 } from "@/features/chat/lib/sessionTitle";
+import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import {
   archiveSession as acpArchiveSession,
   unarchiveSession as acpUnarchiveSession,
@@ -34,6 +35,8 @@ export interface ChatSession {
   updatedAt: string;
   archivedAt?: string;
   messageCount: number;
+  /** First ~10 words of the session's latest real text message, or null. */
+  subtitle?: string | null;
   userSetName?: boolean;
   creationState?: "pending" | "failed";
   creationError?: string;
@@ -115,6 +118,7 @@ interface ChatSessionStoreActions {
   loadSessions: () => Promise<void>;
   loadMoreSessions: () => Promise<void>;
   patchSession: (id: string, patch: Partial<ChatSession>) => void;
+  updateSessionSubtitleFromText: (sessionId: string, text: string) => void;
   addSession: (session: ChatSession) => void;
   removeSession: (id: string) => void;
   archiveSession: (id: string) => Promise<void>;
@@ -155,6 +159,7 @@ function acpSessionToChatSession(session: AcpSessionInfo): ChatSession {
     updatedAt: session.updatedAt ?? now,
     archivedAt: session.archivedAt ?? undefined,
     messageCount: session.messageCount,
+    subtitle: session.subtitle ?? undefined,
     userSetName: session.userSetName,
   };
 }
@@ -512,6 +517,19 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         ),
       };
     });
+  },
+
+  // Update a session's sidebar subtitle in place from raw message text, mirroring
+  // the backend's last-message-snippet append path. Lets the subtitle track live
+  // streamed text without an extra session/list load; the next full loadSessions()
+  // still reconciles to the backend's canonical snippet.
+  updateSessionSubtitleFromText: (sessionId, text) => {
+    const snippet = messageSnippet(text);
+    // Tool-only / thinking-only / image-only / whitespace-only messages produce
+    // no snippet — leave the prior subtitle intact, never clear it. patchSession
+    // guards an unknown id and compare-and-skips when the subtitle is unchanged.
+    if (snippet === null) return;
+    get().patchSession(sessionId, { subtitle: snippet });
   },
 
   addSession: (session) => {

@@ -263,6 +263,7 @@ export function SidebarRecentsSection({
                 key={session.id}
                 id={session.id}
                 title={session.title}
+                subtitle={session.subtitle}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}

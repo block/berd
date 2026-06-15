@@ -127,6 +127,7 @@ function flattenMessages(value: unknown): ParsedMessage[] {
 
 function tryParseMessage(obj: Record<string, unknown>): ParsedMessage | null {
   if (!("role" in obj) || !("content" in obj || "text" in obj)) return null;
+  if (isUserHiddenMessage(obj)) return null;
 
   const role = toRole(obj.role);
   const texts =
@@ -143,6 +144,14 @@ function tryParseMessage(obj: Record<string, unknown>): ParsedMessage | null {
     role,
     texts,
   };
+}
+
+function isUserHiddenMessage(obj: Record<string, unknown>): boolean {
+  const metadata = obj.metadata;
+  return (
+    isObject(metadata) &&
+    (metadata.user_visible === false || metadata.userVisible === false)
+  );
 }
 
 function getSearchableTexts(

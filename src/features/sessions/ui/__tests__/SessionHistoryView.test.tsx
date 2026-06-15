@@ -100,15 +100,27 @@ vi.mock("../SessionCard", () => ({
     onExport,
     onOpenInWindow,
     isOpenInWindow,
+    snippet,
+    snippetLineClamp,
   }: {
     id: string;
     title: string;
     onExport?: (id: string) => void;
     onOpenInWindow?: (id: string) => void;
     isOpenInWindow?: boolean;
+    snippet?: string;
+    snippetLineClamp?: 1 | 3;
   }) => (
     <div data-testid="session-card">
       <span>{title}</span>
+      {snippet ? (
+        <span
+          data-testid={`session-snippet-${id}`}
+          data-line-clamp={snippetLineClamp ?? "default"}
+        >
+          {snippet}
+        </span>
+      ) : null}
       <button type="button" onClick={() => onExport?.(id)}>
         Export
       </button>
@@ -243,6 +255,47 @@ describe("SessionHistoryView", () => {
       handoff: false,
     });
     expect(focusSessionWindow).not.toHaveBeenCalled();
+  });
+
+  it("renders the latest session text on history cards", () => {
+    setSessionStoreState({
+      sessions: [
+        session({
+          subtitle: "Let's refactor the session list query",
+        }),
+      ],
+    });
+
+    renderHistory();
+
+    expect(
+      screen.getByText("Let's refactor the session list query"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("session-snippet-session-1")).toHaveAttribute(
+      "data-line-clamp",
+      "1",
+    );
+  });
+
+  it("does not use the session preview as a metadata search snippet", async () => {
+    const user = userEvent.setup();
+    setSessionStoreState({
+      sessions: [
+        session({
+          title: "Needle Chat",
+          subtitle: "Latest session text",
+        }),
+      ],
+    });
+
+    renderHistory();
+
+    await user.type(screen.getByRole("searchbox"), "Needle{Enter}");
+
+    await waitFor(() => {
+      expect(screen.getByText("Needle Chat")).toBeInTheDocument();
+      expect(screen.queryByText("Latest session text")).not.toBeInTheDocument();
+    });
   });
 
   it("focuses an existing session window from history when session windows are supported", async () => {

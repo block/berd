@@ -641,58 +641,67 @@ export function SessionHistoryView({
   const renderSessionCard = useCallback(
     (
       session: ChatSession,
-      options: {
+      options?: {
         snippet?: string;
         matchCount?: number;
         messageId?: string;
-      } = {},
-    ) => (
-      <SessionCard
-        key={session.id}
-        id={session.id}
-        title={session.title}
-        updatedAt={session.updatedAt}
-        personaName={
-          session.personaId ? getPersonaName(session.personaId) : undefined
-        }
-        projectName={
-          session.projectId ? getProjectName(session.projectId) : undefined
-        }
-        projectColor={
-          session.projectId ? getProjectColor(session.projectId) : undefined
-        }
-        workingDir={
-          session.projectId ? getWorkingDir(session.projectId) : undefined
-        }
-        archivedAt={session.archivedAt}
-        snippet={options.snippet}
-        matchCount={options.matchCount}
-        onSelect={
-          options.messageId
-            ? () => handleSelectResult(session.id, options.messageId)
-            : onSelectSession
-        }
-        selected={selectedSessionIds.has(session.id)}
-        selectionEnabled={selectedCount > 0}
-        selectionActionsDisabled={isApplyingSelectionAction}
-        selectionCount={selectedCount}
-        onSelectionClear={clearSelection}
-        onSelectionChange={toggleSessionSelection}
-        onRename={onRenameChat}
-        onArchive={handleArchive}
-        onArchiveSelected={requestArchiveSelected}
-        onExport={handleExport}
-        onExportSelected={handleExportSelected}
-        onOpenInWindow={
-          isMultiWindowEnabled && !session.archivedAt
-            ? handleOpenInWindow
-            : undefined
-        }
-        isOpenInWindow={isMultiWindowEnabled && session.id in openSessions}
-        onPinSelectedToHome={handlePinSelectedToHome}
-        isPinningSelectedToHome={isPinningBatch}
-      />
-    ),
+      },
+    ) => {
+      const isSearchResult = options !== undefined;
+      const messageId = options?.messageId;
+      const snippet = options
+        ? options.snippet
+        : (session.subtitle ?? undefined);
+
+      return (
+        <SessionCard
+          key={session.id}
+          id={session.id}
+          title={session.title}
+          updatedAt={session.updatedAt}
+          personaName={
+            session.personaId ? getPersonaName(session.personaId) : undefined
+          }
+          projectName={
+            session.projectId ? getProjectName(session.projectId) : undefined
+          }
+          projectColor={
+            session.projectId ? getProjectColor(session.projectId) : undefined
+          }
+          workingDir={
+            session.projectId ? getWorkingDir(session.projectId) : undefined
+          }
+          archivedAt={session.archivedAt}
+          snippet={snippet}
+          snippetLineClamp={isSearchResult ? undefined : 1}
+          matchCount={options?.matchCount}
+          onSelect={
+            messageId
+              ? () => handleSelectResult(session.id, messageId)
+              : onSelectSession
+          }
+          selected={selectedSessionIds.has(session.id)}
+          selectionEnabled={selectedCount > 0}
+          selectionActionsDisabled={isApplyingSelectionAction}
+          selectionCount={selectedCount}
+          onSelectionClear={clearSelection}
+          onSelectionChange={toggleSessionSelection}
+          onRename={onRenameChat}
+          onArchive={handleArchive}
+          onArchiveSelected={requestArchiveSelected}
+          onExport={handleExport}
+          onExportSelected={handleExportSelected}
+          onOpenInWindow={
+            isMultiWindowEnabled && !session.archivedAt
+              ? handleOpenInWindow
+              : undefined
+          }
+          isOpenInWindow={isMultiWindowEnabled && session.id in openSessions}
+          onPinSelectedToHome={handlePinSelectedToHome}
+          isPinningSelectedToHome={isPinningBatch}
+        />
+      );
+    },
     [
       getPersonaName,
       getProjectColor,

@@ -229,6 +229,13 @@ export function useChat(
         });
       }
 
+      // Mirror the backend's last-message-snippet append optimistically so the
+      // sidebar subtitle updates the instant the user sends, instead of waiting
+      // for the next session/list load. Uses the same text as the title; the
+      // assistant's streamed text overwrites it as it arrives, and a full reload
+      // reconciles to the backend's canonical snippet.
+      sessionStore.updateSessionSubtitleFromText(sessionId, text);
+
       options?.onMessageAccepted?.(sessionId);
 
       clearDraft(sessionId);

@@ -63,6 +63,8 @@ const SELECTED_CHAT_ROW_CLASS = cn(
 interface SidebarChatRowProps {
   id: string;
   title: string;
+  /** Snippet of the session's latest real text message; hides when absent. */
+  subtitle?: string;
   isActive: boolean;
   isRunning?: boolean;
   hasUnread?: boolean;
@@ -91,6 +93,7 @@ interface SidebarChatRowProps {
 export function SidebarChatRow({
   id,
   title,
+  subtitle,
   isActive,
   isRunning = false,
   hasUnread = false,
@@ -137,6 +140,10 @@ export function SidebarChatRow({
     t("common:session.defaultTitle"),
   );
   const [draftTitle, setDraftTitle] = useState(editableTitle);
+  // Only render the subtitle line when there's a real snippet — older or
+  // tool-only sessions keep the single-line layout they have today.
+  const trimmedSubtitle = subtitle?.trim() ?? "";
+  const hasSubtitle = trimmedSubtitle.length > 0;
   const rowPaddingClass = nested ? "pl-9" : SIDEBAR_CHAT_ROW_PADDING_CLASS;
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
@@ -298,9 +305,10 @@ export function SidebarChatRow({
         title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
         className={cn(
           "flex-1 min-w-0 justify-start rounded-sm pr-8",
-          SIDEBAR_ROW_HEIGHT_CLASS,
+          hasSubtitle
+            ? "h-auto py-1.5"
+            : cn(SIDEBAR_ROW_HEIGHT_CLASS, SIDEBAR_ROW_VERTICAL_PADDING_CLASS),
           SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
-          SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
           SIDEBAR_NAV_TEXT_CLASS,
           rowPaddingClass,
           rowButtonStateClass,
@@ -331,9 +339,18 @@ export function SidebarChatRow({
             <SidebarChatMenuIcon />
           </span>
         )}
-        <span className="flex-1 min-w-0 truncate text-left">
-          {displayTitle}
-        </span>
+        {hasSubtitle ? (
+          <span className="flex min-w-0 flex-1 flex-col text-left">
+            <span className="truncate leading-snug">{displayTitle}</span>
+            <span className="truncate text-xs leading-snug text-muted-foreground">
+              {trimmedSubtitle}
+            </span>
+          </span>
+        ) : (
+          <span className="flex-1 min-w-0 truncate text-left">
+            {displayTitle}
+          </span>
+        )}
         {isMultiWindowEnabled && isOpenInWindow ? (
           <span
             className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"

@@ -2,9 +2,11 @@ import type {
   ContentBlock,
   NewSessionResponse,
   LoadSessionResponse,
+  ListSessionsRequest,
   PromptResponse,
   SessionInfo,
 } from "@agentclientprotocol/sdk";
+import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
 import { getClient } from "./acpConnection";
@@ -23,6 +25,7 @@ export interface AcpSessionInfo {
   archivedAt: string | null;
   userSetName: boolean;
   messageCount: number;
+  subtitle: string | null;
   workingDir: string | null;
   projectId?: string | null;
   providerId: string | null;
@@ -40,8 +43,21 @@ export const DEFAULT_PROVIDER: AcpProvider = {
   label: "Goose (Default)",
 };
 
+const LIST_SESSIONS_META = {
+  goose: {
+    includeLastMessageSnippet: true,
+  },
+} satisfies NonNullable<ListSessionsRequest["_meta"]>;
+
 export async function listProviders(): Promise<AcpProvider[]> {
   return getCuratedAgentProviders();
+}
+
+function mapLastMessageSnippet(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  return messageSnippet(value);
 }
 
 function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
@@ -53,6 +69,7 @@ function mapSessionInfo(info: SessionInfo): AcpSessionInfo {
     archivedAt: (info._meta?.archivedAt as string) ?? null,
     userSetName: info._meta?.userSetName === true,
     messageCount: (info._meta?.messageCount as number) ?? 0,
+    subtitle: mapLastMessageSnippet(info._meta?.lastMessageSnippet),
     workingDir: info.cwd ?? null,
     projectId: (info._meta?.projectId as string) ?? null,
     providerId: (info._meta?.providerId as string) ?? null,
@@ -71,9 +88,14 @@ export async function listSessionsPage({
   // ACP session/list only standardizes cwd and cursor filters. Goose project
   // membership lives in _meta.projectId, so callers must paginate globally and
   // group by projectId client-side instead of using cwd as a proxy.
-  const response = await client.listSessions(
-    normalizedCursor == null ? {} : { cursor: normalizedCursor },
-  );
+  const params: ListSessionsRequest = {
+    _meta: LIST_SESSIONS_META,
+  };
+  if (normalizedCursor != null) {
+    params.cursor = normalizedCursor;
+  }
+
+  const response = await client.listSessions(params);
   return {
     sessions: response.sessions.map(mapSessionInfo),
     nextCursor: response.nextCursor?.trim() || null,
@@ -111,6 +133,7 @@ export async function forkSession(
     archivedAt: (response._meta?.archivedAt as string) ?? null,
     userSetName: response._meta?.userSetName === true,
     messageCount: (response._meta?.messageCount as number) ?? 0,
+    subtitle: mapLastMessageSnippet(response._meta?.lastMessageSnippet),
     workingDir,
     projectId: (response._meta?.projectId as string) ?? null,
     providerId: (response._meta?.providerId as string) ?? null,

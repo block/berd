@@ -29,6 +29,7 @@ const PROJECT_ROW_TEXT_CLASS =
 export interface SidebarSessionItem {
   id: string;
   title: string;
+  subtitle?: string;
   updatedAt: string;
   projectId?: string;
   isRunning?: boolean;
@@ -304,6 +305,7 @@ export function SidebarProjectSection({
                 key={session.id}
                 id={session.id}
                 title={session.title}
+                subtitle={session.subtitle}
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}

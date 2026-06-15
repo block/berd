@@ -74,6 +74,7 @@ function makeAcpSession(
     archivedAt: null,
     userSetName: false,
     messageCount: 1,
+    subtitle: null,
     workingDir: null,
     projectId: null,
     providerId: null,
@@ -700,6 +701,72 @@ describe("chatSessionStore", () => {
 
       const updated = useChatSessionStore.getState().getSession(session.id);
       expect(updated?.updatedAt).toBe(newTimestamp);
+    });
+  });
+
+  describe("updateSessionSubtitleFromText", () => {
+    it("sets the subtitle from real text", () => {
+      const session = seedSession({ subtitle: undefined });
+
+      useChatSessionStore
+        .getState()
+        .updateSessionSubtitleFromText(session.id, "  hello   world  ");
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.subtitle,
+      ).toBe("hello world");
+    });
+
+    it("strips markdown styling from the subtitle", () => {
+      const session = seedSession({ subtitle: undefined });
+
+      useChatSessionStore
+        .getState()
+        .updateSessionSubtitleFromText(session.id, "**hi** there");
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.subtitle,
+      ).toBe("hi there");
+    });
+
+    it("leaves the prior subtitle unchanged for empty or whitespace-only text", () => {
+      const session = seedSession({ subtitle: "previous snippet" });
+
+      useChatSessionStore
+        .getState()
+        .updateSessionSubtitleFromText(session.id, "   \n\t  ");
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.subtitle,
+      ).toBe("previous snippet");
+    });
+
+    it("does not bump updatedAt when updating the subtitle", () => {
+      const session = seedSession({ subtitle: undefined });
+      const originalUpdatedAt = session.updatedAt;
+
+      useChatSessionStore
+        .getState()
+        .updateSessionSubtitleFromText(session.id, "latest message");
+
+      expect(
+        useChatSessionStore.getState().getSession(session.id)?.updatedAt,
+      ).toBe(originalUpdatedAt);
+    });
+
+    it("ignores an unknown session id", () => {
+      seedSession({ id: "known", subtitle: "keep me" });
+
+      useChatSessionStore
+        .getState()
+        .updateSessionSubtitleFromText("missing", "new text");
+
+      expect(
+        useChatSessionStore.getState().getSession("missing"),
+      ).toBeUndefined();
+      expect(useChatSessionStore.getState().getSession("known")?.subtitle).toBe(
+        "keep me",
+      );
     });
   });
 

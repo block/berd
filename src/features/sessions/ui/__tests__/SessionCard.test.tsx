@@ -35,6 +35,24 @@ describe("SessionCard", () => {
     expect(screen.getByText("My Project")).toBeInTheDocument();
   });
 
+  it("renders snippets at three lines by default", () => {
+    render(<SessionCard {...defaultProps} snippet="Needle in message" />);
+
+    expect(screen.getByText("Needle in message")).toHaveClass("line-clamp-3");
+  });
+
+  it("can render snippets as a one-line preview", () => {
+    render(
+      <SessionCard
+        {...defaultProps}
+        snippet="Latest session text"
+        snippetLineClamp={1}
+      />,
+    );
+
+    expect(screen.getByText("Latest session text")).toHaveClass("line-clamp-1");
+  });
+
   it("calls onSelect when clicked", async () => {
     const user = userEvent.setup();
     const onSelect = vi.fn();

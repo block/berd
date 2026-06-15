@@ -8,6 +8,14 @@ const mocks = vi.hoisted(() => ({
   setSessionConfigOption: vi.fn(),
 }));
 
+const includeLastMessageSnippetMeta = {
+  _meta: {
+    goose: {
+      includeLastMessageSnippet: true,
+    },
+  },
+};
+
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
 }));
@@ -34,6 +42,7 @@ describe("listSessionsPage", () => {
             archivedAt: "2026-05-02T00:00:00.000Z",
             userSetName: true,
             messageCount: 7,
+            lastMessageSnippet: "Let's refactor the session list query",
             projectId: "project-1",
             providerId: "goose",
             modelId: "gpt-4.1",
@@ -56,6 +65,7 @@ describe("listSessionsPage", () => {
           archivedAt: "2026-05-02T00:00:00.000Z",
           userSetName: true,
           messageCount: 7,
+          subtitle: "Let's refactor the session list query",
           workingDir: "/tmp/project",
           projectId: "project-1",
           providerId: "goose",
@@ -65,7 +75,10 @@ describe("listSessionsPage", () => {
       ],
       nextCursor: "cursor-2",
     });
-    expect(mocks.listSessions).toHaveBeenCalledWith({ cursor: "cursor-1" });
+    expect(mocks.listSessions).toHaveBeenCalledWith({
+      ...includeLastMessageSnippetMeta,
+      cursor: "cursor-1",
+    });
   });
 
   it("omits an empty or blank cursor at the API boundary", async () => {
@@ -85,8 +98,131 @@ describe("listSessionsPage", () => {
       nextCursor: null,
     });
 
-    expect(mocks.listSessions).toHaveBeenNthCalledWith(1, {});
-    expect(mocks.listSessions).toHaveBeenNthCalledWith(2, {});
+    expect(mocks.listSessions).toHaveBeenNthCalledWith(
+      1,
+      includeLastMessageSnippetMeta,
+    );
+    expect(mocks.listSessions).toHaveBeenNthCalledWith(
+      2,
+      includeLastMessageSnippetMeta,
+    );
+  });
+
+  it("strips markdown and normalizes subtitles from session list metadata", async () => {
+    // The backend reverted its markdown stripping, so the canonical snippet
+    // ships raw markdown; the ACP->subtitle mapping must strip it on ingest.
+    mocks.listSessions.mockResolvedValueOnce({
+      sessions: [
+        {
+          sessionId: "bold-session",
+          _meta: { lastMessageSnippet: "**bold** update" },
+        },
+        {
+          sessionId: "plain-session",
+          _meta: { lastMessageSnippet: "hello world" },
+        },
+        {
+          sessionId: "markdown-session",
+          _meta: {
+            lastMessageSnippet:
+              "## **Big**   _Title_\n\nwith [docs](https://example.com)",
+          },
+        },
+        {
+          sessionId: "long-session",
+          _meta: {
+            lastMessageSnippet: `**${"x".repeat(130)}**`,
+          },
+        },
+        {
+          sessionId: "missing-snippet-session",
+          _meta: {},
+        },
+        {
+          sessionId: "missing-meta-session",
+        },
+        {
+          sessionId: "blank-snippet-session",
+          _meta: {
+            lastMessageSnippet: "   ",
+          },
+        },
+        {
+          sessionId: "non-string-snippet-session",
+          _meta: {
+            lastMessageSnippet: 42,
+          },
+        },
+        {
+          sessionId: "markdown-only-session",
+          _meta: {
+            lastMessageSnippet: "***",
+          },
+        },
+      ],
+      nextCursor: null,
+    });
+
+    const { listSessionsPage } = await import("../acpApi");
+
+    const page = await listSessionsPage();
+
+    expect(
+      page.sessions.map((session) => ({
+        sessionId: session.sessionId,
+        subtitle: session.subtitle,
+      })),
+    ).toEqual([
+      // Inline strong is stripped on ingest.
+      {
+        sessionId: "bold-session",
+        subtitle: "bold update",
+      },
+      // Plain text is idempotent: stripping leaves it byte-identical, so a
+      // reload does not flip the live value.
+      {
+        sessionId: "plain-session",
+        subtitle: "hello world",
+      },
+      // Heading + emphasis + link markers all stripped, whitespace collapsed.
+      {
+        sessionId: "markdown-session",
+        subtitle: "Big Title with docs",
+      },
+      // Already at/over the 128-code-point cap: re-running messageSnippet on the
+      // backend value preserves the existing ellipsis and never adds a second.
+      {
+        sessionId: "long-session",
+        subtitle: `${"x".repeat(128)}\u2026`,
+      },
+      // Missing/undefined snippet maps to null.
+      {
+        sessionId: "missing-snippet-session",
+        subtitle: null,
+      },
+      // Older or unsupported backends may omit the custom metadata entirely.
+      {
+        sessionId: "missing-meta-session",
+        subtitle: null,
+      },
+      // Blank and non-string custom metadata are ignored.
+      {
+        sessionId: "blank-snippet-session",
+        subtitle: null,
+      },
+      {
+        sessionId: "non-string-snippet-session",
+        subtitle: null,
+      },
+      // Markdown-only value strips to empty, so the subtitle is null.
+      {
+        sessionId: "markdown-only-session",
+        subtitle: null,
+      },
+    ]);
+    expect(mocks.listSessions).toHaveBeenCalledWith(
+      includeLastMessageSnippetMeta,
+    );
   });
 
   it("normalizes missing and blank next cursors to null", async () => {
@@ -161,6 +297,7 @@ describe("forkSession", () => {
       archivedAt: null,
       userSetName: true,
       messageCount: 7,
+      subtitle: null,
       workingDir: "/tmp/project",
       projectId: "project-1",
       providerId: "goose",

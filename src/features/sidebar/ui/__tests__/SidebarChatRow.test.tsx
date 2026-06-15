@@ -443,4 +443,41 @@ describe("SidebarChatRow", () => {
 
     expect(onRename).not.toHaveBeenCalled();
   });
+
+  it("renders a muted subtitle line beneath the title when a snippet is present", () => {
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Refactor session list"
+        subtitle="Let's refactor the session list query"
+        isActive={false}
+      />,
+    );
+
+    const subtitle = screen.getByText("Let's refactor the session list query");
+    expect(subtitle).toHaveClass("text-muted-foreground");
+    expect(subtitle).toHaveClass("truncate");
+  });
+
+  it("stays a single line for sessions without a usable snippet", () => {
+    const { container, rerender } = render(
+      <SidebarChatRow id="session-1" title="No snippet" isActive={false} />,
+    );
+
+    expect(screen.getByText("No snippet")).toBeInTheDocument();
+    // The two-line column wrapper only renders when a subtitle is shown.
+    expect(container.querySelector(".flex-col")).toBeNull();
+
+    // Whitespace-only snippets are treated as absent.
+    rerender(
+      <SidebarChatRow
+        id="session-1"
+        title="No snippet"
+        subtitle="   "
+        isActive={false}
+      />,
+    );
+    expect(screen.getByText("No snippet")).toBeInTheDocument();
+    expect(container.querySelector(".flex-col")).toBeNull();
+  });
 });

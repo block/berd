@@ -41,6 +41,7 @@ interface SessionCardProps {
   workingDir?: string;
   archivedAt?: string;
   snippet?: string;
+  snippetLineClamp?: 1 | 3;
   matchCount?: number;
   selected?: boolean;
   selectionEnabled?: boolean;
@@ -71,6 +72,7 @@ export function SessionCard({
   workingDir,
   archivedAt,
   snippet,
+  snippetLineClamp = 3,
   matchCount,
   selected = false,
   selectionEnabled = false,
@@ -258,7 +260,14 @@ export function SessionCard({
       {(snippet || matchCount) && (
         <div className="pointer-events-none relative z-10 mt-1 space-y-1 text-xs">
           {snippet && (
-            <p className="line-clamp-3 text-muted-foreground">{snippet}</p>
+            <p
+              className={cn(
+                snippetLineClamp === 1 ? "line-clamp-1" : "line-clamp-3",
+                "text-muted-foreground",
+              )}
+            >
+              {snippet}
+            </p>
           )}
           {typeof matchCount === "number" && (
             <p className="font-medium text-foreground/80">
