@@ -209,7 +209,7 @@ dev:
         export GOOSE_INTERNAL_DEV_APP_NAME="Goose (${DEV_ICON_LABEL})"
         export GOOSE_INTERNAL_DEV_APP_ICON="$DEV_ICON_PNG"
         DEV_ICON_CONFIG="$(node -e 'const [label, icns, png] = process.argv.slice(1); process.stdout.write(JSON.stringify({ productName: `Goose (${label})`, bundle: { icon: [icns, png] } }));' "$DEV_ICON_LABEL" "$DEV_APP_ICON" "$DEV_ICON_PNG")"
-        echo "Using blue dev icon: ${DEV_ICON_PNG} (${DEV_ICON_LABEL})"
+        echo "Using badged dev icon: ${DEV_ICON_PNG} (${DEV_ICON_LABEL})"
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 

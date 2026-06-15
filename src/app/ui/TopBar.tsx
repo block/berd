@@ -1,9 +1,10 @@
 import {
   IconArrowLeft,
   IconArrowRight,
-  IconInfoCircle,
   IconLayoutSidebar,
   IconLayoutSidebarFilled,
+  IconLayoutSidebarRight,
+  IconLayoutSidebarRightFilled,
   IconMessageReport,
   IconSearch,
 } from "@tabler/icons-react";
@@ -121,6 +122,9 @@ export function TopBar({
   const SidebarIcon = sidebarCollapsed
     ? IconLayoutSidebar
     : IconLayoutSidebarFilled;
+  const ContextPanelIcon = contextPanelOpen
+    ? IconLayoutSidebarRightFilled
+    : IconLayoutSidebarRight;
   const leadingSpaceClassName =
     chromeInsets.leading === "trafficLights"
       ? "w-[var(--spacing-app-top-bar-leading)]"
@@ -237,7 +241,7 @@ export function TopBar({
             aria-label={contextPanelLabel}
             title={contextPanelLabel}
           >
-            <IconInfoCircle aria-hidden="true" />
+            <ContextPanelIcon aria-hidden="true" />
           </Button>
         )}
       </div>

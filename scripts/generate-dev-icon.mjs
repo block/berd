@@ -24,7 +24,7 @@ if (!inputPath || !outputPath) {
 const PNG_SIGNATURE = Buffer.from([
   0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
 ]);
-const DEV_BLUE = [69, 145, 244]; // #4591F4
+const DEV_BLUE = [9, 102, 225]; // #0966E1
 const BADGE_BLUE = [13, 59, 140];
 
 function makeCrcTable() {
@@ -201,8 +201,7 @@ function recolorDevIcon(image) {
       (pixels[i] * 0.2126 + pixels[i + 1] * 0.7152 + pixels[i + 2] * 0.0722) /
       255;
 
-    // Keep the white goose mark intact; recolor the dark rounded-square body
-    // and its dark edge shading so the local build reads as a clean blue app.
+    // Keep the white goose mark intact; recolor the dark rounded-square body.
     if (alpha <= 0.08 || luminance >= 0.48) continue;
 
     pixels[i] = DEV_BLUE[0];
@@ -260,9 +259,9 @@ if !label.isEmpty {
     }
 
     let badgeHeight = size.height * 0.23
-    let minBadgeWidth = size.width * 0.4
-    let maxBadgeWidth = size.width * 0.8
-    let horizontalPadding = size.width * 0.035
+    let minBadgeWidth = size.width * 0.48
+    let maxBadgeWidth = size.width * 0.86
+    let horizontalPadding = size.width * 0.045
     let minFontSize = size.height * 0.058
     var fontSize = badgeHeight * 0.84
 
@@ -300,7 +299,7 @@ if !label.isEmpty {
         maxBadgeWidth
     )
     let badgeX = (size.width - badgeWidth) / 2
-    let badgeY = size.height * 0.12
+    let badgeY = size.height - badgeHeight - size.height * 0.12
     let cornerRadius = badgeHeight * 0.2
     let badgeRect = NSRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight)
 
