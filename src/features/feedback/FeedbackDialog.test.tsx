@@ -14,6 +14,7 @@ const mockGetVersion = vi.hoisted(() => vi.fn());
 const mockInvoke = vi.hoisted(() => vi.fn());
 const mockOpenDialog = vi.hoisted(() => vi.fn());
 const mockInspectAttachmentPaths = vi.hoisted(() => vi.fn());
+const mockTrackFeedbackSubmitted = vi.hoisted(() => vi.fn());
 
 vi.mock("@tauri-apps/api/app", () => ({
   getVersion: mockGetVersion,
@@ -30,6 +31,10 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
 
 vi.mock("@/shared/api/system", () => ({
   inspectAttachmentPaths: mockInspectAttachmentPaths,
+}));
+
+vi.mock("@/shared/telemetry/client", () => ({
+  trackFeedbackSubmitted: mockTrackFeedbackSubmitted,
 }));
 
 vi.mock("sonner", () => ({
@@ -77,6 +82,22 @@ describe("FeedbackDialog", () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith(message);
     });
+    expect(mockTrackFeedbackSubmitted).not.toHaveBeenCalled();
+  });
+
+  it("tracks feedback submitted after the backend accepts it", async () => {
+    const user = userEvent.setup();
+    vi.mocked(submitFeedbackIssue).mockResolvedValueOnce({});
+
+    render(<FeedbackDialog open={true} onOpenChange={vi.fn()} />);
+
+    await fillRequiredFields(user);
+    await user.click(screen.getByRole("button", { name: "Submit" }));
+
+    await waitFor(() => {
+      expect(submitFeedbackIssue).toHaveBeenCalled();
+    });
+    expect(mockTrackFeedbackSubmitted).toHaveBeenCalledTimes(1);
   });
 
   it("keeps pasted image names scoped to the current paste batch", async () => {

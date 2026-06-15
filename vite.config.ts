@@ -11,12 +11,43 @@ const packageJson = JSON.parse(
   readFileSync(new URL("./package.json", import.meta.url), "utf8"),
 ) as { version: string };
 
-export default defineConfig(async () => {
+type BuildEnvironment = "production" | "staging" | "development";
+
+const BUILD_ENVIRONMENTS: readonly BuildEnvironment[] = [
+  "production",
+  "staging",
+  "development",
+];
+
+function resolveBuildEnvironment(): BuildEnvironment {
+  const environment = process.env.VITE_ENVIRONMENT || "development";
+  if (!BUILD_ENVIRONMENTS.includes(environment as BuildEnvironment)) {
+    throw new Error(
+      `Invalid VITE_ENVIRONMENT "${environment}". Expected one of: ${BUILD_ENVIRONMENTS.join(", ")}`,
+    );
+  }
+  return environment as BuildEnvironment;
+}
+
+export default defineConfig(async ({ command }) => {
+  const define: Record<string, string> = {
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
+  };
+
+  // Generic builds must stay telemetry-inert unless a release/staging path
+  // explicitly opts in. Release scripts set VITE_ENVIRONMENT=production;
+  // staging builds set VITE_ENVIRONMENT=staging. Unset build env means
+  // development, so local/e2e/smoke `pnpm build` artifacts cannot emit live
+  // telemetry by accident.
+  if (command === "build") {
+    define["import.meta.env.VITE_ENVIRONMENT"] = JSON.stringify(
+      resolveBuildEnvironment(),
+    );
+  }
+
   return {
     plugins: [react()],
-    define: {
-      "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
-    },
+    define,
     resolve: {
       alias: [
         {

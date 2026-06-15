@@ -109,6 +109,28 @@ export function buildInitScript(options?: {
       const ACP_SESSIONS = [];
       const CALLBACKS = new Map();
       const EVENT_LISTENERS = new Map();
+      const LAYOUT_CONSTRAINTS = {
+        minCenter: -1000000,
+        maxCenter: 1000000,
+        minSize: 1,
+        maxSize: 100000,
+        minZoomBps: 1000,
+        maxZoomBps: 80000,
+        maxTitleOverrideLength: 200,
+        maxItems: 500,
+      };
+      let HOME_LAYOUT = {
+        layoutId: "home",
+        itemRevision: 1,
+        cameraRevision: 1,
+        camera: {
+          centerX: 0,
+          centerY: 0,
+          zoomBps: 10000,
+        },
+        items: [],
+        constraints: LAYOUT_CONSTRAINTS,
+      };
       let nextCallbackId = 1;
       let nextEventId = 1;
 
@@ -359,6 +381,13 @@ export function buildInitScript(options?: {
               providerId: message.params?.providerId ?? "openai",
               modelId: message.params?.modelId ?? "gpt-4.1",
             });
+          case "_goose/unstable/config/extensions/list":
+          case "_goose/unstable/session/extensions/list":
+            return jsonRpcResult(message.id, { extensions: [] });
+          case "_goose/unstable/config/extensions/add":
+          case "_goose/unstable/config/extensions/remove":
+          case "_goose/unstable/config/extensions/set-enabled":
+            return jsonRpcResult(message.id, {});
           case "_goose/onboarding/import/scan":
             return jsonRpcResult(message.id, { candidates: [] });
           case "_goose/onboarding/import/apply":
@@ -385,13 +414,15 @@ export function buildInitScript(options?: {
           case "goose/working_dir/update":
             return jsonRpcResult(message.id, {});
           case "_goose/sources/list":
+          case "_goose/unstable/sources/list":
             return jsonRpcResult(message.id, {
               sources:
                 message.params?.type === "agent"
                   ? clone(AGENT_SOURCES)
                   : clone(SKILL_SOURCES),
             });
-          case "_goose/sources/create": {
+          case "_goose/sources/create":
+          case "_goose/unstable/sources/create": {
             const type = message.params?.type ?? "skill";
             const name = message.params?.name ?? (type === "agent" ? "new-agent" : "new-skill");
             const source = {
@@ -417,6 +448,7 @@ export function buildInitScript(options?: {
             });
           }
           case "_goose/sources/update":
+          case "_goose/unstable/sources/update":
           case "goose/sources/update": {
             const path = message.params?.path ?? "/mock/.agents/skills/updated-skill";
             const sources = message.params?.type === "agent" ? AGENT_SOURCES : SKILL_SOURCES;
@@ -445,6 +477,7 @@ export function buildInitScript(options?: {
             });
           }
           case "_goose/sources/delete":
+          case "_goose/unstable/sources/delete":
           case "goose/sources/delete":
             if (message.params?.type === "agent") {
               AGENT_SOURCES = AGENT_SOURCES.filter(
@@ -454,6 +487,7 @@ export function buildInitScript(options?: {
             }
             return jsonRpcResult(message.id, {});
           case "_goose/sources/export":
+          case "_goose/unstable/sources/export":
           case "goose/sources/export": {
             const path = message.params?.path ?? "/mock/.agents/skills/skill";
             const name = String(path).split("/").filter(Boolean).at(-1) ?? "skill";
@@ -463,6 +497,7 @@ export function buildInitScript(options?: {
             });
           }
           case "_goose/sources/import":
+          case "_goose/unstable/sources/import":
             return jsonRpcResult(message.id, { sources: PERSONAS.map(personaToSourceEntry) });
           default:
             return jsonRpcResult(message.id, {});
@@ -507,6 +542,11 @@ export function buildInitScript(options?: {
       window.WebSocket = MockWebSocket;
 
       window.__TAURI_INTERNALS__ = {
+        metadata: {
+          currentWindow: {
+            label: "main",
+          },
+        },
         invoke(cmd, args) {
           switch (cmd) {
             // ---- ACP transport ----
@@ -528,8 +568,64 @@ export function buildInitScript(options?: {
                 backedUp: false,
                 backupPath: null,
               });
+            case "log_renderer_event":
+            case "write_diagnostic_event":
+              return Promise.resolve(null);
+            case "ensure_directory":
+              return Promise.resolve(null);
+            case "get_layout":
+              return Promise.resolve(clone(HOME_LAYOUT));
+            case "save_layout_items":
+              HOME_LAYOUT = {
+                ...HOME_LAYOUT,
+                itemRevision: HOME_LAYOUT.itemRevision + 1,
+                items: clone(args?.request?.items ?? []),
+              };
+              return Promise.resolve({
+                ok: true,
+                layout: clone(HOME_LAYOUT),
+              });
+            case "save_layout_camera":
+              HOME_LAYOUT = {
+                ...HOME_LAYOUT,
+                cameraRevision: HOME_LAYOUT.cameraRevision + 1,
+                camera: clone(args?.request?.camera ?? HOME_LAYOUT.camera),
+              };
+              return Promise.resolve({
+                ok: true,
+                layout: clone(HOME_LAYOUT),
+              });
+            case "reset_layout":
+              HOME_LAYOUT = {
+                ...HOME_LAYOUT,
+                itemRevision: HOME_LAYOUT.itemRevision + 1,
+                cameraRevision: HOME_LAYOUT.cameraRevision + 1,
+                camera: {
+                  centerX: 0,
+                  centerY: 0,
+                  zoomBps: 10000,
+                },
+                items: [],
+              };
+              return Promise.resolve({
+                ok: true,
+                layout: clone(HOME_LAYOUT),
+              });
 
             // ---- Sessions / Misc ----
+            case "get_session_window_support":
+              return Promise.resolve({
+                supported: false,
+                reason: "session windows are unavailable in e2e",
+              });
+            case "list_session_windows":
+              return Promise.resolve([]);
+            case "plugin:window|is_fullscreen":
+              return Promise.resolve(false);
+            case "plugin:window|set_min_size":
+            case "plugin:window|set_size":
+            case "plugin:window|show":
+              return Promise.resolve(null);
             case "list_sessions":
               return Promise.resolve(
                 ACP_SESSIONS.map((session) => ({

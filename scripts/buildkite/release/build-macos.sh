@@ -63,9 +63,12 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 
 # Stage the goose backend as the Tauri sidecar, then build for an explicit
 # aarch64 target so output paths are stable regardless of agent architecture.
-# No TAURI_SIGNING_PRIVATE_KEY needed — signing happens in publish-updater.sh.
+# Production telemetry is an explicit release opt-in; generic builds default to
+# development. No TAURI_SIGNING_PRIVATE_KEY needed — signing happens in
+# publish-updater.sh.
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
+VITE_ENVIRONMENT=production \
 VITE_UPDATER_ENABLED=true \
   pnpm tauri build --no-sign --target aarch64-apple-darwin \
     --config src-tauri/tauri.release.conf.json

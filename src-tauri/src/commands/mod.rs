@@ -22,5 +22,7 @@ pub mod path_resolver;
 pub mod project_icons;
 pub mod renderer;
 pub mod system;
+pub mod telemetry;
 pub mod terminal;
+pub mod whoami;
 pub mod window_session;

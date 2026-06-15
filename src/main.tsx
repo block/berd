@@ -16,6 +16,7 @@ import { LocalMediaCacheEvents } from "@/app/LocalMediaCacheEvents";
 import { RendererTelemetry } from "@/app/RendererTelemetry";
 import { UpdaterProvider } from "@/features/updates/hooks/useUpdater";
 import { I18nProvider } from "@/shared/i18n";
+import { initTelemetry, trackAppLaunched } from "@/shared/telemetry/client";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { RendererErrorBoundary } from "@/app/ui/RendererErrorBoundary";
 import "@xterm/xterm/css/xterm.css";
@@ -131,6 +132,9 @@ if (bootError) {
       renderBootError("The session window bundle could not be loaded.");
     });
 } else {
+  initTelemetry();
+  trackAppLaunched();
+
   reactRoot.render(
     <React.StrictMode>
       <RendererErrorBoundary>

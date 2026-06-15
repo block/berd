@@ -76,6 +76,8 @@
     "@react-three/fiber": "^9.6.1",
     "@react-three/postprocessing": "^3.0.4",
     "@rive-app/react-webgl2": "^4.27.3",
+    "@squareup/cdp": "^1.5.0",
+    "@squareup/message-schemas-web": "^2.20260605.2058",
     "@streamdown/cjk": "^1.0.3",
     "@streamdown/code": "^1.1.1",
     "@streamdown/math": "^1.0.2",

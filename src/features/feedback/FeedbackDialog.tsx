@@ -10,6 +10,7 @@ import {
   submitFeedbackIssue,
 } from "@/shared/api/feedback";
 import { getPlatform } from "@/shared/lib/platform";
+import { trackFeedbackSubmitted } from "@/shared/telemetry/client";
 import { Button } from "@/shared/ui/button";
 import { Checkbox } from "@/shared/ui/checkbox";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
@@ -172,6 +173,7 @@ export function FeedbackDialog({ open, onOpenChange }: FeedbackDialogProps) {
         includeLogs,
         doctorReport,
       });
+      trackFeedbackSubmitted();
       clearAttachments();
       setSuccess({ issueUrl: result.issueUrl });
     } catch (submitError) {
