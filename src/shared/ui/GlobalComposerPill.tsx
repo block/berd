@@ -471,6 +471,7 @@ export function GlobalComposerPill({
 
   const {
     mentionOpen,
+    atMentionCategory,
     mentionSelectedIndex,
     filteredPersonas,
     filteredSkills,
@@ -480,6 +481,8 @@ export function GlobalComposerPill({
     detectMention,
     closeMention,
     navigateMention,
+    setAtMentionCategory,
+    handleMentionCategoryKey,
     confirmMention,
     handleMentionConfirm,
   } = useMentionHandlers({
@@ -800,6 +803,13 @@ export function GlobalComposerPill({
                   const isComposing =
                     event.nativeEvent.isComposing ||
                     event.nativeEvent.keyCode === 229;
+                  if (
+                    !isComposing &&
+                    handleMentionCategoryKey(event.nativeEvent)
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
                   if (mentionOpen && !isComposing) {
                     if (event.key === "Escape") {
                       event.preventDefault();
@@ -829,7 +839,7 @@ export function GlobalComposerPill({
                       !event.altKey
                     ) {
                       const item = confirmMention();
-                      if (item) {
+                      if (item?.type === "file") {
                         event.preventDefault();
                         handleMentionConfirm(item, {
                           completeDirectories: true,
@@ -866,6 +876,8 @@ export function GlobalComposerPill({
               filteredPersonas={filteredPersonas}
               filteredSkills={filteredSkills}
               filteredFiles={filteredFiles}
+              atCategory={atMentionCategory}
+              onAtCategoryChange={setAtMentionCategory}
               selectedIndex={mentionSelectedIndex}
               onClose={closeMention}
               onSelectPersona={(persona) =>

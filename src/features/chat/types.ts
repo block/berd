@@ -132,6 +132,7 @@ export interface ChatInputProps {
   onDraftChange?: (text: string) => void;
   selectedSkills?: ChatSkillDraft[];
   onSkillsChange?: (skills: ChatSkillDraft[]) => void;
+  fileMentionRoots?: string[];
   attachmentsEnabled?: boolean;
   className?: string;
   personaPicker?: ChatInputPersonaPicker;

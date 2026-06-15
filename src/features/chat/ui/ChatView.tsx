@@ -395,6 +395,24 @@ export function ChatView({
       : effectiveSession?.workingDir;
   const terminalCwd =
     terminalWorkspacePath ?? sessionTerminalCwd ?? projectTerminalCwd ?? null;
+  const fileMentionRoots = useMemo(() => {
+    const roots = new Map<string, string>();
+    for (const root of [
+      terminalWorkspacePath,
+      sessionTerminalCwd,
+      ...(controller.project?.workingDirs ?? []),
+      terminalCwd,
+    ]) {
+      const normalizedRoot = root?.trim();
+      if (normalizedRoot) roots.set(normalizedRoot, normalizedRoot);
+    }
+    return Array.from(roots.values());
+  }, [
+    controller.project?.workingDirs,
+    sessionTerminalCwd,
+    terminalCwd,
+    terminalWorkspacePath,
+  ]);
   const terminalAvailable = Boolean(terminalCwd);
   const terminalTabs = terminalWorkspaceState.tabs;
   const activeTerminalTab = useMemo(
@@ -826,6 +844,7 @@ export function ChatView({
           onDraftChange={controller.handleDraftChange}
           selectedSkills={controller.selectedSkills}
           onSkillsChange={controller.handleSkillsChange}
+          fileMentionRoots={fileMentionRoots}
           personaPicker={{
             personas: controller.personas,
             selectedPersonaId: controller.selectedPersonaId,

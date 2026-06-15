@@ -1,4 +1,5 @@
 import { render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   MentionAutocomplete,
@@ -68,7 +69,12 @@ function renderAutocomplete(props: {
   filteredPersonas?: Persona[];
   filteredSkills?: SkillMentionItem[];
   filteredFiles?: FileMentionItem[];
+  trigger?: "@" | "/";
+  atCategory?: "agents" | "files" | "skills";
+  onAtCategoryChange?: (category: "agents" | "files" | "skills") => void;
 }) {
+  const atCategory =
+    props.atCategory ?? (props.trigger === "/" ? "skills" : "agents");
   return render(
     <Popover open>
       <PopoverAnchor asChild>
@@ -79,6 +85,8 @@ function renderAutocomplete(props: {
         filteredSkills={props.filteredSkills ?? []}
         filteredFiles={props.filteredFiles ?? FILES}
         isOpen
+        atCategory={atCategory}
+        onAtCategoryChange={props.onAtCategoryChange}
         onSelectPersona={vi.fn()}
         onSelectSkill={vi.fn()}
         onSelectFile={vi.fn()}
@@ -89,14 +97,45 @@ function renderAutocomplete(props: {
 }
 
 describe("MentionAutocomplete", () => {
-  it("renders persona and file items", () => {
+  it("renders agent tabs by default", () => {
     renderAutocomplete({});
     expect(screen.getByText("Solo")).toBeInTheDocument();
+    expect(screen.queryByText("file0.ts")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+    expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Skills" })).toBeInTheDocument();
+  });
+
+  it("renders file items in the files tab", () => {
+    renderAutocomplete({ atCategory: "files" });
     expect(screen.getByText("file0.ts")).toBeInTheDocument();
+    expect(screen.queryByText("Solo")).not.toBeInTheDocument();
+  });
+
+  it("changes @ categories when tabs are clicked", async () => {
+    const user = userEvent.setup();
+    const onAtCategoryChange = vi.fn();
+    renderAutocomplete({ onAtCategoryChange });
+
+    await user.click(screen.getByRole("tab", { name: "Files" }));
+    expect(onAtCategoryChange).toHaveBeenCalledTimes(1);
+    expect(onAtCategoryChange).toHaveBeenCalledWith("files");
+
+    await user.click(screen.getByRole("tab", { name: "Skills" }));
+    expect(onAtCategoryChange).toHaveBeenCalledTimes(2);
+    expect(onAtCategoryChange).toHaveBeenCalledWith("skills");
+
+    await user.click(screen.getByRole("tab", { name: "Agents" }));
+    expect(onAtCategoryChange).toHaveBeenCalledTimes(3);
+    expect(onAtCategoryChange).toHaveBeenCalledWith("agents");
   });
 
   it("highlights matched characters from the backend matcher", () => {
     renderAutocomplete({
+      atCategory: "files",
       filteredFiles: [
         {
           resolvedPath: "/project/readme.md",
@@ -120,6 +159,7 @@ describe("MentionAutocomplete", () => {
 
   it("does not highlight shortcut entries with substituted labels", () => {
     renderAutocomplete({
+      atCategory: "files",
       filteredFiles: [
         {
           resolvedPath: "/Users/me",
@@ -138,7 +178,12 @@ describe("MentionAutocomplete", () => {
   });
 
   it("renders skill items", () => {
-    renderAutocomplete({ filteredSkills: SKILLS, filteredFiles: [] });
+    renderAutocomplete({
+      trigger: "/",
+      filteredSkills: SKILLS,
+      filteredFiles: [],
+      filteredPersonas: [],
+    });
     expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("code-review")).toBeInTheDocument();
     expect(
@@ -160,6 +205,7 @@ describe("MentionAutocomplete", () => {
           filteredSkills={[]}
           filteredFiles={FILES}
           isOpen
+          atCategory="files"
           onSelectPersona={vi.fn()}
           onSelectSkill={vi.fn()}
           onSelectFile={vi.fn()}
@@ -180,6 +226,7 @@ describe("MentionAutocomplete", () => {
           filteredSkills={[]}
           filteredFiles={FILES}
           isOpen
+          atCategory="files"
           onSelectPersona={vi.fn()}
           onSelectSkill={vi.fn()}
           onSelectFile={vi.fn()}
@@ -192,7 +239,7 @@ describe("MentionAutocomplete", () => {
   });
 
   it("marks only the selected item as aria-selected", () => {
-    renderAutocomplete({ selectedIndex: 3 });
+    renderAutocomplete({ atCategory: "files", selectedIndex: 3 });
 
     const options = screen.getAllByRole("option");
     for (let i = 0; i < options.length; i++) {
@@ -225,7 +272,7 @@ describe("MentionAutocomplete", () => {
     expect(container.querySelector("[role='listbox']")).not.toBeInTheDocument();
   });
 
-  it("renders loading, empty, error, and footer states", () => {
+  it("renders loading, empty, and error states without footer help text", () => {
     const { rerender } = render(
       <Popover open>
         <PopoverAnchor asChild>
@@ -236,6 +283,7 @@ describe("MentionAutocomplete", () => {
           filteredSkills={[]}
           filteredFiles={[]}
           isOpen
+          atCategory="files"
           pathsLoading
           onSelectPersona={vi.fn()}
         />
@@ -246,8 +294,8 @@ describe("MentionAutocomplete", () => {
     expect(
       within(screen.getByRole("listbox")).queryByText("Loading paths..."),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Enter")).toBeInTheDocument();
-    expect(screen.getByText("to insert")).toBeInTheDocument();
+    expect(screen.queryByText("Enter")).not.toBeInTheDocument();
+    expect(screen.queryByText("to insert")).not.toBeInTheDocument();
 
     rerender(
       <Popover open>
@@ -259,6 +307,7 @@ describe("MentionAutocomplete", () => {
           filteredSkills={[]}
           filteredFiles={[]}
           isOpen
+          atCategory="files"
           onSelectPersona={vi.fn()}
         />
       </Popover>,
@@ -279,6 +328,7 @@ describe("MentionAutocomplete", () => {
           filteredSkills={[]}
           filteredFiles={[]}
           isOpen
+          atCategory="files"
           pathsError="load-error"
           onSelectPersona={vi.fn()}
         />
@@ -291,19 +341,16 @@ describe("MentionAutocomplete", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders paths before agents and skills with stable option ids", () => {
+  it("renders active category items with stable option ids", () => {
     renderAutocomplete({
       selectedIndex: 0,
-      filteredSkills: SKILLS,
+      atCategory: "files",
       filteredFiles: FILES.slice(0, 1),
     });
 
     const options = screen.getAllByRole("option");
     expect(options.map((option) => option.textContent)).toEqual([
       expect.stringContaining("file0.ts"),
-      expect.stringContaining("Solo"),
-      expect.stringContaining("Reviewer"),
-      expect.stringContaining("code-review"),
     ]);
     expect(options[0]).toHaveAttribute(
       "id",

@@ -1319,8 +1319,26 @@ fn search_file_mention_index(
     else {
         return Vec::new();
     };
-    if normalized_query.is_empty() || max_results == 0 {
+    if max_results == 0 {
         return Vec::new();
+    }
+    if normalized_query.is_empty() {
+        let mut matches = Vec::new();
+        for entry in index.entries.iter().filter(|entry| {
+            entry.depth == 1 && !has_hidden_path_segment(&entry.normalized_relative_path)
+        }) {
+            let mut path_entry = entry.entry.clone();
+            path_entry.match_rank = Some(0);
+            path_entry.match_highlight = None;
+            let candidate = FileMentionCandidate {
+                normalized_resolved_path: normalized_path_key(Path::new(&path_entry.resolved_path)),
+                normalized_relative_path: entry.normalized_relative_path.clone(),
+                entry: path_entry,
+                score: file_mention_score(entry, 0, 0, 0),
+            };
+            insert_ranked_file_mention_candidate(&mut matches, candidate, max_results);
+        }
+        return matches;
     }
 
     let mut query_matcher = FileMentionQueryMatcher::new(&normalized_query);
@@ -1610,7 +1628,7 @@ fn search_file_mentions_blocking(
         }
     }
 
-    if is_filesystem_query {
+    if is_filesystem_query && matches.is_empty() {
         for candidate in search_filesystem_path_mentions(query, limit) {
             insert_ranked_file_mention_candidate(&mut matches, candidate, limit);
         }
@@ -1724,6 +1742,31 @@ mod tests {
         let joined = mention_paths_joined(&files);
         assert!(joined.contains("visible.ts"));
         assert!(!joined.contains(".visible.ts"));
+    }
+
+    #[test]
+    fn falls_back_to_filesystem_for_absolute_hidden_paths_under_project_root() {
+        let dir = git_tempdir();
+        let root = dir.path();
+        let hidden = root.join(".visible.ts");
+
+        fs::write(&hidden, "").expect("hidden file");
+
+        let entries = search_file_mentions_blocking(
+            vec![root.to_string_lossy().to_string()],
+            format!("{}/.vis", root.to_string_lossy()),
+            Some(10),
+        );
+
+        assert!(
+            entries.iter().any(|entry| {
+                entry.resolved_path == hidden.to_string_lossy()
+                    && entry.filename == ".visible.ts"
+                    && entry.kind == "file"
+                    && entry.source == "filesystem"
+            }),
+            "absolute hidden path should fall back to filesystem results: {entries:?}"
+        );
     }
 
     #[test]
@@ -2095,6 +2138,37 @@ mod tests {
             vec!["alpha", "mango", "zebra", "b-file"],
             "directories first, alphabetical within each group"
         );
+    }
+
+    #[test]
+    fn lists_project_root_children_for_root_path_query() {
+        let dir = git_tempdir();
+        let root = dir.path();
+
+        for name in ["zebra", "alpha", "mango"] {
+            fs::create_dir_all(root.join(name)).expect("dir");
+        }
+        fs::write(root.join("b-file"), "").expect("file");
+
+        for query in [
+            root.to_string_lossy().to_string(),
+            format!("{}/", root.to_string_lossy()),
+        ] {
+            let entries = search_file_mentions_blocking(
+                vec![root.to_string_lossy().to_string()],
+                query,
+                Some(10),
+            );
+            let names: Vec<&str> = entries
+                .iter()
+                .map(|entry| entry.filename.as_str())
+                .collect();
+            assert_eq!(names, vec!["alpha", "mango", "zebra", "b-file"]);
+            assert!(
+                entries.iter().all(|entry| entry.source == "project"),
+                "root path query should return project entries: {entries:?}"
+            );
+        }
     }
 
     #[test]

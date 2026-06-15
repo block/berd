@@ -218,6 +218,12 @@
       "description": "Goose mostrará consejos en el chat sobre herramientas, skills o flujos relevantes.",
       "label": "Consejos de chat"
     },
+    "atMentionDefault": {
+      "agents": "Agentes",
+      "description": "Elige qué pestaña se abre primero cuando escribes @ en el chat.",
+      "files": "Archivos",
+      "label": "Predeterminado de menciones @"
+    },
     "artifacts": {
       "change": "Cambiar",
       "chooseDialogTitle": "Elegir carpeta de artefactos",

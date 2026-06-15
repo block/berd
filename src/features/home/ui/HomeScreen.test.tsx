@@ -220,7 +220,7 @@ describe("HomeScreen", () => {
     renderHome();
     expect(
       screen.getByPlaceholderText(
-        "Chat with Goose or @ to add files, paths, or agents",
+        "Chat with Goose, @ for agents/files, or / for skills",
       ),
     ).toBeInTheDocument();
   });

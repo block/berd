@@ -53,6 +53,7 @@ export function ChatInput({
   onDraftChange,
   selectedSkills: selectedSkillsProp,
   onSkillsChange,
+  fileMentionRoots,
   attachmentsEnabled = true,
   className,
   personaPicker,
@@ -270,6 +271,8 @@ export function ChatInput({
       null,
     [availableProjects, selectedProjectId],
   );
+  const effectiveFileMentionRoots =
+    fileMentionRoots ?? selectedProject?.workingDirs;
   const stickyPersona = activePersona;
 
   const canSend = canQueueMessage;
@@ -288,6 +291,7 @@ export function ChatInput({
 
   const {
     mentionOpen,
+    atMentionCategory,
     mentionSelectedIndex,
     filteredPersonas,
     filteredSkills,
@@ -298,6 +302,8 @@ export function ChatInput({
     detectMention,
     closeMention,
     navigateMention,
+    setAtMentionCategory,
+    handleMentionCategoryKey,
     confirmMention,
     handlePersonaMentionSelect,
     handleSkillMentionSelect,
@@ -306,7 +312,7 @@ export function ChatInput({
     skillMentionItems,
   } = useMentionHandlers({
     personas,
-    projectWorkingDirs: selectedProject?.workingDirs,
+    projectWorkingDirs: effectiveFileMentionRoots,
     skillsEnabled: scopedControls.skills,
     fileMentionsEnabled: scopedControls.fileMentions,
     text,
@@ -497,6 +503,10 @@ export function ChatInput({
   const handleKeyDown = (event: React.KeyboardEvent) => {
     const isComposing =
       event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+    if (!isComposing && handleMentionCategoryKey(event.nativeEvent)) {
+      event.preventDefault();
+      return;
+    }
     if (mentionOpen && !isComposing) {
       if (
         eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.close")
@@ -537,7 +547,7 @@ export function ChatInput({
         // Tab only completes when a mention confirms; otherwise it falls
         // through for native focus navigation.
         const item = confirmMention();
-        if (item) {
+        if (item?.type === "file") {
           event.preventDefault();
           handleMentionConfirm(item, { completeDirectories: true });
           return;
@@ -828,6 +838,8 @@ export function ChatInput({
                 onClose={closeMention}
                 selectedIndex={mentionSelectedIndex}
                 listboxId={mentionListboxId}
+                atCategory={atMentionCategory}
+                onAtCategoryChange={setAtMentionCategory}
                 pathsLoading={fileMentionsLoading}
                 pathsError={fileMentionsError}
               />

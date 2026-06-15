@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listSkills } from "@/features/skills/api/skills";
+import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import {
   expandSkillSlashCommand,
   resolveSkillSlashCommand,
@@ -44,6 +45,45 @@ type PathSearchCacheEntry = {
 function basename(path: string): string {
   const parts = path.split(/[\\/]+/).filter(Boolean);
   return parts[parts.length - 1] ?? path;
+}
+
+function normalizeProjectRootPrefixedQuery(
+  query: string,
+  roots: string[],
+): {
+  query: string;
+  hadProjectRootPrefix: boolean;
+  projectRoot: string | null;
+} {
+  const normalizedQuery = query.replace(/\\/g, "/");
+  const lowerQuery = normalizedQuery.toLowerCase();
+  for (const root of roots) {
+    const rootName = basename(root).toLowerCase();
+    if (!rootName) continue;
+    const normalizedRoot = root.replace(/\\/g, "/").replace(/\/+$/, "");
+    if (lowerQuery === rootName) {
+      return {
+        query: normalizedRoot,
+        hadProjectRootPrefix: true,
+        projectRoot: root,
+      };
+    }
+    if (lowerQuery === `${rootName}/`) {
+      return {
+        query: `${normalizedRoot}/`,
+        hadProjectRootPrefix: true,
+        projectRoot: root,
+      };
+    }
+    if (lowerQuery.startsWith(`${rootName}/`)) {
+      return {
+        query: normalizedQuery.slice(rootName.length + 1),
+        hadProjectRootPrefix: true,
+        projectRoot: root,
+      };
+    }
+  }
+  return { query, hadProjectRootPrefix: false, projectRoot: null };
 }
 
 function normalizeRoots(roots: string[] | undefined): string[] {
@@ -323,6 +363,11 @@ export function useMentionHandlers({
   const pathSearchInFlightRef = useRef<
     Map<string, Promise<FileMentionPathEntry[]>>
   >(new Map());
+  const { category: preferredAtMentionCategory } =
+    useAtMentionDefaultCategoryPreference();
+  const defaultAtMentionCategory = fileMentionsEnabled
+    ? preferredAtMentionCategory
+    : "agents";
   const pathSearchRequestIdRef = useRef(0);
   if (!skillsEnabled && skillMentionItems.length > 0) {
     setSkillMentionItems([]);
@@ -409,6 +454,8 @@ export function useMentionHandlers({
 
   const {
     mentionOpen,
+    mentionTrigger,
+    atMentionCategory,
     mentionQuery,
     mentionStartIndex,
     mentionSelectedIndex,
@@ -418,16 +465,38 @@ export function useMentionHandlers({
     detectMention,
     closeMention,
     navigateMention,
+    navigateAtMentionCategory,
+    setAtMentionCategory,
+    handleMentionCategoryKey,
     confirmMention,
     registerCompletedMention,
-  } = useMentionDetection(personas, skillMentionItems, fileMentionItems);
+  } = useMentionDetection(
+    personas,
+    skillMentionItems,
+    fileMentionItems,
+    defaultAtMentionCategory,
+  );
 
   const pathMentionQuery = mentionQuery.trim();
+  const normalizedPathMentionSearch = normalizeProjectRootPrefixedQuery(
+    pathMentionQuery,
+    normalizedProjectRoots,
+  );
+  const pathMentionSearchQuery = normalizedPathMentionSearch.query;
+  const pathMentionSearchRoot = normalizedPathMentionSearch.projectRoot;
+  const pathMentionSearchRoots = useMemo(
+    () =>
+      pathMentionSearchRoot ? [pathMentionSearchRoot] : normalizedProjectRoots,
+    [normalizedProjectRoots, pathMentionSearchRoot],
+  );
+  const pathMentionSearchRootsKey = pathMentionSearchRoots.join("\0");
   const pathMentionSearchKey =
     fileMentionsEnabled &&
     mentionOpen &&
-    shouldSearchPathMentions(pathMentionQuery, rootsKey.length > 0)
-      ? `${rootsKey}\0${pathMentionQuery}\0${FILE_MENTION_SEARCH_LIMIT}`
+    atMentionCategory === "files" &&
+    (normalizedPathMentionSearch.hadProjectRootPrefix ||
+      shouldSearchPathMentions(pathMentionSearchQuery, rootsKey.length > 0))
+      ? `${pathMentionSearchRootsKey}\0${pathMentionSearchQuery}\0${FILE_MENTION_SEARCH_LIMIT}`
       : "";
   const pathMentionCachedEntry = pathMentionSearchKey
     ? pathSearchCacheRef.current.get(pathMentionSearchKey)
@@ -477,8 +546,8 @@ export function useMentionHandlers({
       let request = pathSearchInFlightRef.current.get(cacheKey);
       if (!request) {
         request = searchFilesForMentions({
-          roots: normalizedProjectRoots,
-          query: pathMentionQuery,
+          roots: pathMentionSearchRoots,
+          query: pathMentionSearchQuery,
           maxResults: FILE_MENTION_SEARCH_LIMIT,
         }).finally(() => {
           pathSearchInFlightRef.current.delete(cacheKey);
@@ -513,9 +582,9 @@ export function useMentionHandlers({
       window.clearTimeout(timeoutId);
     };
   }, [
-    normalizedProjectRoots,
+    pathMentionSearchRoots,
     pathMentionCachedEntries,
-    pathMentionQuery,
+    pathMentionSearchQuery,
     pathMentionSearchKey,
   ]);
 
@@ -661,6 +730,8 @@ export function useMentionHandlers({
     fileMentionItems,
     skillMentionItems,
     mentionOpen,
+    mentionTrigger,
+    atMentionCategory,
     mentionQuery,
     mentionStartIndex,
     mentionSelectedIndex,
@@ -680,6 +751,9 @@ export function useMentionHandlers({
     detectMention,
     closeMention,
     navigateMention,
+    navigateAtMentionCategory,
+    setAtMentionCategory,
+    handleMentionCategoryKey,
     confirmMention,
     handlePersonaMentionSelect,
     handleSkillMentionSelect,

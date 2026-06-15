@@ -278,7 +278,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
     expect(
       screen.getByPlaceholderText(
-        "Chat with Goose or @ to add files, paths, or agents",
+        "Chat with Goose, @ for agents/files, or / for skills",
       ),
     ).toBeInTheDocument();
   });
@@ -756,6 +756,59 @@ describe("ChatInput", () => {
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
+  it("switches @ mention tabs with left and right arrows", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@");
+
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("@");
+    expect(input).toHaveValue("@");
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Skills" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+  });
+
+  it("opens the shared mention popover to skills for slash mentions", async () => {
+    const user = userEvent.setup();
+    renderProjectChatInput();
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "/");
+
+    expect(screen.getByRole("tab", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Files" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Skills" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+  });
+
   it("shows project files in @mention results and attaches the selected path", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();
@@ -766,7 +819,7 @@ describe("ChatInput", () => {
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -776,7 +829,7 @@ describe("ChatInput", () => {
       });
     });
 
-    expect(await screen.findByText("Paths")).toBeInTheDocument();
+    expect(await screen.findByText("Files")).toBeInTheDocument();
 
     const fileOption = await screen.findByRole("option", {
       name: /readme\.md/i,
@@ -814,7 +867,7 @@ describe("ChatInput", () => {
     renderProjectChatInput(onSend);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "check @read");
+    await user.type(input, "check @@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -869,7 +922,7 @@ describe("ChatInput", () => {
     );
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -894,7 +947,7 @@ describe("ChatInput", () => {
     renderProjectChatInput(onSend);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -918,7 +971,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -935,7 +988,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@src");
+    await user.type(input, "@@src");
     expect(
       await screen.findByRole("option", { name: /^src/i }),
     ).toBeInTheDocument();
@@ -974,7 +1027,7 @@ describe("ChatInput", () => {
     renderLongPathProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@");
+    await user.type(input, "@@");
     expect(
       await screen.findByRole("option", {
         name: /goose-internal project root/i,
@@ -1004,7 +1057,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -1023,7 +1076,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@src");
+    await user.type(input, "@@src");
     const folderOptions = await screen.findAllByRole("option", {
       name: /src/i,
     });
@@ -1031,7 +1084,7 @@ describe("ChatInput", () => {
     expect(input).toHaveValue("");
     expect(await screen.findByText("src")).toBeInTheDocument();
 
-    await user.type(input, "@goose2");
+    await user.type(input, "@@goose2");
     await user.click(await screen.findByRole("option", { name: /^goose2/i }));
     expect(input).toHaveValue("");
     expect(
@@ -1044,9 +1097,9 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@");
+    await user.type(input, "@@");
 
-    expect(await screen.findByText("Paths")).toBeInTheDocument();
+    expect(await screen.findByText("Files")).toBeInTheDocument();
     expect(
       screen.getByRole("option", { name: /goose2 project root/i }),
     ).toBeInTheDocument();
@@ -1066,7 +1119,7 @@ describe("ChatInput", () => {
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
     await user.clear(input);
-    await user.type(input, "@~");
+    await user.type(input, "@@~");
     expect(
       await screen.findByRole("option", { name: /home folder/i }),
     ).toBeInTheDocument();
@@ -1074,13 +1127,100 @@ describe("ChatInput", () => {
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
   });
 
+  it("uses explicit file mention roots when there is no selected project", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue([
+      {
+        resolvedPath: "/Users/wesb/Development/squareup/goose-internal/sdk",
+        displayPath: "goose-internal/sdk",
+        filename: "sdk",
+        kind: "folder",
+        source: "project",
+      },
+    ]);
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        fileMentionRoots={["/Users/wesb/Development/squareup/goose-internal"]}
+      />,
+    );
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@@");
+
+    expect(
+      await screen.findByRole("option", {
+        name: /goose-internal project root/i,
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /filesystem root/i }),
+    ).not.toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "@@goose-internal");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/Development/squareup/goose-internal"],
+        query: "/Users/wesb/Development/squareup/goose-internal",
+        maxResults: 12,
+      });
+    });
+    const rootQueryOptions = await screen.findAllByRole("option");
+    expect(rootQueryOptions[0]).toHaveAccessibleName(
+      /goose-internal project root/i,
+    );
+    expect(
+      screen.getByRole("option", { name: /sdk goose-internal\s*\/sdk/i }),
+    ).toBeInTheDocument();
+
+    await user.clear(input);
+    await user.type(input, "@@goose-internal/");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/Development/squareup/goose-internal"],
+        query: "/Users/wesb/Development/squareup/goose-internal/",
+        maxResults: 12,
+      });
+    });
+    expect(
+      await screen.findByRole("option", {
+        name: /goose-internal project root/i,
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("scopes project-root-prefixed path searches to the named root", async () => {
+    const user = userEvent.setup();
+    render(
+      <ChatInput
+        onSend={vi.fn()}
+        fileMentionRoots={["/workspace/frontend", "/workspace/backend"]}
+      />,
+    );
+
+    await user.type(screen.getByRole("textbox"), "@@frontend/src");
+
+    await waitFor(() => {
+      const srcCall = mockSearchFilesForMentions.mock.calls.find(
+        ([input]) => input.query === "src",
+      );
+      expect(srcCall?.[0]).toEqual({
+        roots: ["/workspace/frontend"],
+        query: "src",
+        maxResults: 12,
+      });
+    });
+  });
+
   it("does not search project files for single-character plain queries", async () => {
     const user = userEvent.setup();
     renderProjectChatInput();
 
-    await user.type(screen.getByRole("textbox"), "@r");
+    await user.type(screen.getByRole("textbox"), "@@r");
 
-    expect(screen.queryByText("Paths")).not.toBeInTheDocument();
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
   });
 
@@ -1098,7 +1238,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@/tmp/zs");
+    await user.type(input, "@@/tmp/zs");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -1122,7 +1262,7 @@ describe("ChatInput", () => {
       "src/features/chat/ui/very/long/path/with/more/segments/file.ts";
     renderProjectChatInput();
 
-    await user.type(screen.getByRole("textbox"), `@${query}`);
+    await user.type(screen.getByRole("textbox"), `@@${query}`);
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
@@ -1132,6 +1272,25 @@ describe("ChatInput", () => {
       });
     });
     expect(screen.getByRole("listbox")).toBeInTheDocument();
+  });
+
+  it("searches project paths after a typed project folder prefix", async () => {
+    const user = userEvent.setup();
+    mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
+    renderProjectChatInput();
+
+    await user.type(screen.getByRole("textbox"), "@@goose2/read");
+
+    await waitFor(() => {
+      expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
+        roots: ["/Users/wesb/dev/goose2"],
+        query: "read",
+        maxResults: 12,
+      });
+    });
+    expect(
+      await screen.findByRole("option", { name: /readme\.md/i }),
+    ).toBeInTheDocument();
   });
 
   it("keeps absolute path mentions open when the path contains spaces", async () => {
@@ -1148,7 +1307,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@/Users/wesb/My Project/");
+    await user.type(input, "@@/Users/wesb/My Project/");
     await user.type(input, "src");
 
     await waitFor(() => {
@@ -1170,7 +1329,7 @@ describe("ChatInput", () => {
     renderProjectChatInput(onSend);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({
         roots: ["/Users/wesb/dev/goose2"],
@@ -1192,7 +1351,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@src");
+    await user.type(input, "@@src");
     expect(
       await screen.findByRole("option", { name: /^src/i }),
     ).toBeInTheDocument();
@@ -1220,7 +1379,7 @@ describe("ChatInput", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@~/Dow");
+    await user.type(input, "@@~/Dow");
     expect(
       await screen.findByRole("option", { name: /^downloads/i }),
     ).toBeInTheDocument();
@@ -1236,7 +1395,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@pro");
+    await user.type(input, "@@pro");
 
     expect(
       screen.queryByRole("option", { name: /project root/i }),
@@ -1248,7 +1407,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@users");
+    await user.type(input, "@@users");
 
     expect(
       screen.queryByRole("option", { name: /project root/i }),
@@ -1303,7 +1462,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /readme\.md/i }),
     ).toBeInTheDocument();
@@ -1359,7 +1518,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@read");
+    await user.type(input, "@@read");
     expect(
       await screen.findByRole("option", { name: /reader\.md/i }),
     ).toBeInTheDocument();
@@ -1386,7 +1545,7 @@ describe("ChatInput", () => {
     renderProjectChatInput();
 
     const input = screen.getByRole("textbox");
-    await user.type(input, "@");
+    await user.type(input, "@@");
 
     expect(input).not.toHaveAttribute("aria-expanded");
     expect(input).not.toHaveAttribute("aria-autocomplete");

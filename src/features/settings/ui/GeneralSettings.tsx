@@ -39,6 +39,7 @@ import {
   useStreamingShortcutPreference,
   type StreamingShortcutMode,
 } from "@/features/chat/lib/streamingShortcutPreference";
+import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 
 interface AboutAppInfo {
   name: string;
@@ -110,6 +111,10 @@ export function GeneralSettings() {
   const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
   const streamingShortcutPreference = useStreamingShortcutPreference();
+  const {
+    category: atMentionDefaultCategory,
+    setCategory: setAtMentionDefaultCategory,
+  } = useAtMentionDefaultCategoryPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
   const artifactRootPreference = useArtifactRootPreference();
@@ -421,6 +426,41 @@ export function GeneralSettings() {
               }
             >
               {t("general.followUpBehavior.steer")}
+            </Button>
+          </fieldset>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.atMentionDefault.label")}
+          description={t("general.atMentionDefault.description")}
+        >
+          <fieldset className="flex items-center gap-1">
+            <legend className="sr-only">
+              {t("general.atMentionDefault.label")}
+            </legend>
+            <Button
+              type="button"
+              aria-pressed={atMentionDefaultCategory === "agents"}
+              className="min-w-16"
+              size="sm"
+              variant={
+                atMentionDefaultCategory === "agents" ? "default" : "ghost"
+              }
+              onClick={() => setAtMentionDefaultCategory("agents")}
+            >
+              {t("general.atMentionDefault.agents")}
+            </Button>
+            <Button
+              type="button"
+              aria-pressed={atMentionDefaultCategory === "files"}
+              className="min-w-16"
+              size="sm"
+              variant={
+                atMentionDefaultCategory === "files" ? "default" : "ghost"
+              }
+              onClick={() => setAtMentionDefaultCategory("files")}
+            >
+              {t("general.atMentionDefault.files")}
             </Button>
           </fieldset>
         </SettingRow>

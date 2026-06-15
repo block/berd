@@ -218,6 +218,12 @@
       "description": "Goose will show tips in chat for relevant tools, skills, or workflows.",
       "label": "Chat tips"
     },
+    "atMentionDefault": {
+      "agents": "Agents",
+      "description": "Choose which tab opens first when you type @ in chat.",
+      "files": "Files",
+      "label": "@ mention default"
+    },
     "artifacts": {
       "change": "Change",
       "chooseDialogTitle": "Choose artifact folder",

@@ -87,7 +87,10 @@ describe("ChatInput skill mentions", () => {
     const input = screen.getByRole("textbox");
     await user.type(input, "@code");
 
-    expect(screen.queryByText("Skills")).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
     expect(
       screen.queryByRole("option", { name: /code-review/i }),
     ).not.toBeInTheDocument();

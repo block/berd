@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { isReservedSlashCommand } from "@/features/skills/lib/skillChatPrompt";
+import type { AtMentionDefaultCategory } from "@/features/chat/lib/mentionPreference";
 import type { FileMentionMatchHighlight } from "@/shared/api/system";
 import type { Persona } from "@/shared/types/agents";
 
@@ -53,6 +54,55 @@ export type MentionItem =
   | { type: "persona"; persona: Persona }
   | { type: "skill"; skill: SkillMentionItem }
   | { type: "file"; file: FileMentionItem };
+export type MentionTrigger = "@" | "/";
+export type AtMentionCategory = "agents" | "files" | "skills";
+
+type MentionCategoryKeyEvent = Pick<KeyboardEvent, "code" | "key" | "shiftKey">;
+const MENTION_CATEGORIES: AtMentionCategory[] = ["agents", "files", "skills"];
+
+function nextMentionCategory(
+  category: AtMentionCategory,
+  direction: "next" | "previous",
+): AtMentionCategory {
+  const currentIndex = MENTION_CATEGORIES.indexOf(category);
+  const delta = direction === "next" ? 1 : -1;
+  return MENTION_CATEGORIES[
+    (currentIndex + delta + MENTION_CATEGORIES.length) %
+      MENTION_CATEGORIES.length
+  ];
+}
+
+function nextAtMentionCategory(
+  category: AtMentionCategory,
+  direction: "next" | "previous" = "next",
+): AtMentionCategory {
+  if (category === "skills") {
+    return direction === "next" ? "agents" : "files";
+  }
+  return category === "files" ? "agents" : "files";
+}
+
+function isTokenBoundary(value: string, index: number): boolean {
+  return index === 0 || /\s/.test(value[index - 1] ?? "");
+}
+
+function findLastAtMentionTrigger(value: string): number {
+  let index = value.lastIndexOf("@");
+  while (index >= 0) {
+    if (isTokenBoundary(value, index)) return index;
+    index = value.lastIndexOf("@", index - 1);
+  }
+  return -1;
+}
+
+function findLastSlashMentionTrigger(value: string): number {
+  let index = value.lastIndexOf("/");
+  while (index >= 0) {
+    if (isTokenBoundary(value, index)) return index;
+    index = value.lastIndexOf("/", index - 1);
+  }
+  return -1;
+}
 
 type ScoredFileMention = {
   file: FileMentionItem;
@@ -104,6 +154,10 @@ function pathBasename(path: string): string {
   return parts[parts.length - 1] ?? path;
 }
 
+function withoutTrailingPathSeparators(value: string): string {
+  return value.replace(/[\\/]+$/, "");
+}
+
 function searchableFilename(file: FileMentionItem): string {
   if (file.shortcut === "home") {
     return pathBasename(file.resolvedPath).toLowerCase();
@@ -148,23 +202,33 @@ function pathMentionScore(
   const resolvedPath = queryIsPathLike
     ? file.resolvedPath.toLowerCase().replace(/\\/g, "/")
     : "";
-  const searchablePath = [filename, displayPath, resolvedPath]
-    .filter(Boolean)
-    .join(" ");
+  const searchablePaths = [displayPath, resolvedPath].filter(Boolean);
+  const searchableFields = [filename, ...searchablePaths].filter(Boolean);
   const segments = [displayPath, resolvedPath]
     .filter(Boolean)
     .join("/")
     .split(/[\\/]+/);
+  if (
+    isProjectRootMention(file) &&
+    filename &&
+    withoutTrailingPathSeparators(query) === filename
+  ) {
+    return 0;
+  }
   if (filename === query) return 1;
   if (displayPath === query || resolvedPath === query) return 1;
   if (filename.startsWith(query)) return 2;
   if (displayPath.startsWith(query) || resolvedPath.startsWith(query)) return 2;
   if (segments.some((segment) => segment.startsWith(query))) return 3;
-  if (query.length >= 2 && searchablePath.includes(query)) return 4;
-  // A fuzzy match on the filename itself is a strong signal; one that only
-  // exists scattered across the full path is kept as a last-resort tier.
+  if (
+    query.length >= 2 &&
+    searchableFields.some((field) => field.includes(query))
+  ) {
+    return 4;
+  }
+  // Keep local fuzzy matching filename-only. Broader path fuzzy matching is
+  // handled by the backend for indexed project files.
   if (query.length >= 3 && fuzzyMatch(query, filename)) return 5;
-  if (query.length >= 3 && fuzzyMatch(query, searchablePath)) return 6;
   return null;
 }
 
@@ -274,21 +338,26 @@ export function useMentionDetection(
   personas: Persona[] = [],
   skills: SkillMentionItem[] = [],
   files: FileMentionItem[] = [],
+  defaultAtMentionCategory: AtMentionDefaultCategory = "agents",
 ) {
   const [mentionState, setMentionState] = useState<{
     isOpen: boolean;
-    trigger: "@" | "/";
+    trigger: MentionTrigger;
+    category: AtMentionCategory;
     query: string;
     startIndex: number;
     selectedIndex: number;
   }>({
     isOpen: false,
     trigger: "@",
+    category: "agents",
     query: "",
     startIndex: -1,
     selectedIndex: 0,
   });
   const completedMentionsRef = useRef<Set<string>>(new Set());
+  const mentionStateRef = useRef(mentionState);
+  mentionStateRef.current = mentionState;
 
   const registerCompletedMention = useCallback((mention: string) => {
     const trimmed = mention.trim();
@@ -317,7 +386,15 @@ export function useMentionDetection(
       .filter(isScoredFileMention)
       .sort(compareScoredFileMentions)
       .map((entry) => withMatchHighlight(q, entry.file));
-    if (mentionState.trigger === "/") {
+    if (mentionState.category === "files") {
+      return {
+        filteredPersonas: [],
+        filteredSkills: [],
+        filteredFiles: matchingFiles,
+      };
+    }
+
+    if (mentionState.category === "skills") {
       const matchesSkill = (skill: SkillMentionItem) =>
         fuzzyMatch(q, skill.name.toLowerCase()) ||
         skill.description.toLowerCase().includes(q) ||
@@ -331,20 +408,12 @@ export function useMentionDetection(
       };
     }
 
-    if (!q) {
-      return {
-        filteredPersonas: personas,
-        filteredSkills: [],
-        filteredFiles: matchingFiles,
-      };
-    }
-
     return {
-      filteredPersonas: personas.filter((p) =>
-        fuzzyMatch(q, p.displayName.toLowerCase()),
-      ),
+      filteredPersonas: q
+        ? personas.filter((p) => fuzzyMatch(q, p.displayName.toLowerCase()))
+        : personas,
       filteredSkills: [],
-      filteredFiles: matchingFiles,
+      filteredFiles: [],
     };
   }, [
     personas,
@@ -352,7 +421,7 @@ export function useMentionDetection(
     files,
     mentionState.isOpen,
     mentionState.query,
-    mentionState.trigger,
+    mentionState.category,
   ]);
 
   const totalCount =
@@ -395,16 +464,16 @@ export function useMentionDetection(
   const detectMention = useCallback(
     (value: string, cursorPos: number) => {
       const beforeCursor = value.slice(0, cursorPos);
-      const lastAt = beforeCursor.lastIndexOf("@");
-      const slashAtStart = beforeCursor.startsWith("/") ? 0 : -1;
+      const lastAt = findLastAtMentionTrigger(beforeCursor);
+      const lastSlash = findLastSlashMentionTrigger(beforeCursor);
 
-      if (lastAt === -1 && slashAtStart === -1) {
+      if (lastAt === -1 && lastSlash === -1) {
         if (mentionState.isOpen) closeMentionState(setMentionState);
         return;
       }
 
-      if (slashAtStart === 0 && lastAt === -1) {
-        const query = beforeCursor.slice(1);
+      if (lastSlash > lastAt) {
+        const query = beforeCursor.slice(lastSlash + 1);
         if (
           query.includes(" ") ||
           query.length > MAX_TEXT_MENTION_QUERY_LENGTH ||
@@ -417,18 +486,15 @@ export function useMentionDetection(
         setMentionState((prev) => ({
           isOpen: true,
           trigger: "/",
+          category:
+            prev.isOpen && prev.trigger === "/" ? prev.category : "skills",
           query,
-          startIndex: 0,
+          startIndex: lastSlash,
           selectedIndex:
             prev.query !== query || prev.trigger !== "/"
               ? 0
               : prev.selectedIndex,
         }));
-        return;
-      }
-
-      if (lastAt > 0 && !/\s/.test(beforeCursor[lastAt - 1])) {
-        if (mentionState.isOpen) closeMentionState(setMentionState);
         return;
       }
 
@@ -449,13 +515,17 @@ export function useMentionDetection(
       setMentionState((prev) => ({
         isOpen: true,
         trigger: "@",
+        category:
+          prev.isOpen && prev.trigger === "@"
+            ? prev.category
+            : defaultAtMentionCategory,
         query,
         startIndex: lastAt,
         selectedIndex:
           prev.query !== query || prev.trigger !== "@" ? 0 : prev.selectedIndex,
       }));
     },
-    [mentionState.isOpen],
+    [defaultAtMentionCategory, mentionState.isOpen],
   );
 
   const closeMention = useCallback(() => {
@@ -473,6 +543,92 @@ export function useMentionDetection(
       return true;
     },
     [mentionState.isOpen, totalCount],
+  );
+
+  const setAtMentionCategory = useCallback((category: AtMentionCategory) => {
+    setMentionState((prev) =>
+      prev.isOpen && prev.category !== category
+        ? { ...prev, category, selectedIndex: 0 }
+        : prev,
+    );
+  }, []);
+
+  const navigateAtMentionCategory = useCallback(
+    (direction: "next" | "previous"): boolean => {
+      if (!mentionState.isOpen || mentionState.trigger !== "@") return false;
+      setMentionState((prev) => {
+        if (!prev.isOpen || prev.trigger !== "@") return prev;
+        return {
+          ...prev,
+          category: nextAtMentionCategory(prev.category, direction),
+          selectedIndex: 0,
+        };
+      });
+      return true;
+    },
+    [mentionState.isOpen, mentionState.trigger],
+  );
+
+  const handleMentionCategoryKey = useCallback(
+    (event: MentionCategoryKeyEvent): boolean => {
+      const current = mentionStateRef.current;
+      if (!current.isOpen) return false;
+
+      const isAtKey =
+        event.key === "@" || (event.shiftKey && event.code === "Digit2");
+      const isSlashKey = event.key === "/";
+      if (isAtKey) {
+        setMentionState((prev) =>
+          prev.isOpen
+            ? {
+                ...prev,
+                category: nextAtMentionCategory(prev.category),
+                selectedIndex: 0,
+              }
+            : prev,
+        );
+        return true;
+      }
+      if (
+        isSlashKey &&
+        current.query.length === 0 &&
+        current.category !== "files"
+      ) {
+        setMentionState((prev) =>
+          prev.isOpen
+            ? { ...prev, category: "skills", selectedIndex: 0 }
+            : prev,
+        );
+        return true;
+      }
+      if (event.key === "ArrowRight") {
+        setMentionState((prev) =>
+          prev.isOpen
+            ? {
+                ...prev,
+                category: nextMentionCategory(prev.category, "next"),
+                selectedIndex: 0,
+              }
+            : prev,
+        );
+        return true;
+      }
+      if (event.key === "ArrowLeft") {
+        setMentionState((prev) =>
+          prev.isOpen
+            ? {
+                ...prev,
+                category: nextMentionCategory(prev.category, "previous"),
+                selectedIndex: 0,
+              }
+            : prev,
+        );
+        return true;
+      }
+
+      return false;
+    },
+    [],
   );
 
   const confirmMention = useCallback((): MentionItem | null => {
@@ -501,6 +657,8 @@ export function useMentionDetection(
 
   return {
     mentionOpen: mentionState.isOpen,
+    mentionTrigger: mentionState.trigger,
+    atMentionCategory: mentionState.category,
     mentionQuery: mentionState.query,
     mentionStartIndex: mentionState.startIndex,
     mentionSelectedIndex: mentionState.selectedIndex,
@@ -510,6 +668,9 @@ export function useMentionDetection(
     detectMention,
     closeMention,
     navigateMention,
+    navigateAtMentionCategory,
+    setAtMentionCategory,
+    handleMentionCategoryKey,
     confirmMention,
     registerCompletedMention,
   };
@@ -519,7 +680,8 @@ function closeMentionState(
   setMentionState: Dispatch<
     SetStateAction<{
       isOpen: boolean;
-      trigger: "@" | "/";
+      trigger: MentionTrigger;
+      category: AtMentionCategory;
       query: string;
       startIndex: number;
       selectedIndex: number;
@@ -529,6 +691,7 @@ function closeMentionState(
   setMentionState({
     isOpen: false,
     trigger: "@",
+    category: "agents",
     query: "",
     startIndex: -1,
     selectedIndex: 0,

@@ -205,7 +205,7 @@
   "input": {
     "ariaLabel": "Entrada de mensaje del chat",
     "agentBuilderPlaceholder": "Describe tu agente.",
-    "placeholder": "Chatea con {{agent}} o @ para agregar archivos, rutas, agentes o habilidades"
+    "placeholder": "Chatea con {{agent}}, @ para agentes/archivos o / para habilidades"
   },
   "loading": {
     "compacting": "Compactando conversación...",

@@ -257,6 +257,45 @@ describe("GlobalComposerPill", () => {
     expect(input).not.toHaveClass("scrollbar-subtle");
   });
 
+  it("switches @ mention tabs without inserting extra text", async () => {
+    const user = userEvent.setup();
+    setPersonas();
+    renderGlobalComposer(vi.fn());
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@");
+
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("@");
+    expect(input).toHaveValue("@");
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowLeft}");
+    expect(screen.getByRole("tab", { name: "Agents" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(screen.getByRole("tab", { name: "Skills" })).toHaveAttribute(
+      "data-state",
+      "active",
+    );
+  });
+
   it("applies the suggested persona's provider and model to the send payload", async () => {
     const user = userEvent.setup();
     useAgentStore.setState({
@@ -778,7 +817,7 @@ describe("GlobalComposerPill", () => {
 
     expect(mockSearchFilesForMentions).not.toHaveBeenCalled();
 
-    await user.type(screen.getByRole("textbox"), "@read");
+    await user.type(screen.getByRole("textbox"), "@@read");
 
     await waitFor(() => {
       expect(mockSearchFilesForMentions).toHaveBeenCalledWith({

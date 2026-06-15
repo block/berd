@@ -2,19 +2,21 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Sparkles, User } from "lucide-react";
-import { IconFile, IconFolder } from "@tabler/icons-react";
-import { SkillIcon } from "@/features/skills/ui/SkillIcon";
+import { IconBook, IconFile, IconFolder } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { useAvatarImage } from "@/shared/hooks/useAvatarSrc";
 import { PopoverContent } from "@/shared/ui/popover";
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 import type { Persona } from "@/shared/types/agents";
 import type {
+  AtMentionCategory,
   FileMentionItem,
   MentionItem,
   SkillMentionItem,
 } from "./mentionDetection";
 export { fuzzyMatch, useMentionDetection } from "./mentionDetection";
 export type {
+  AtMentionCategory,
   FileMentionItem,
   MentionItem,
   SkillMentionItem,
@@ -34,6 +36,8 @@ interface MentionAutocompleteProps {
   onClose?: (() => void) | undefined;
   selectedIndex?: number;
   listboxId?: string;
+  atCategory?: AtMentionCategory;
+  onAtCategoryChange?: (category: AtMentionCategory) => void;
   pathsLoading?: boolean;
   pathsError?: string | null;
 }
@@ -48,6 +52,8 @@ export function MentionAutocomplete({
   onSelectFile,
   selectedIndex: controlledIndex,
   listboxId = "mention-autocomplete-listbox",
+  atCategory = "agents",
+  onAtCategoryChange,
   pathsLoading = false,
   pathsError = null,
 }: MentionAutocompleteProps) {
@@ -66,17 +72,23 @@ export function MentionAutocomplete({
 
   const items: MentionItem[] = useMemo(() => {
     const result: MentionItem[] = [];
-    for (const f of filteredFiles) {
-      result.push({ type: "file" as const, file: f });
+    if (atCategory === "skills") {
+      for (const skill of filteredSkills) {
+        result.push({ type: "skill" as const, skill });
+      }
+      return result;
+    }
+    if (atCategory === "files") {
+      for (const f of filteredFiles) {
+        result.push({ type: "file" as const, file: f });
+      }
+      return result;
     }
     for (const p of filteredPersonas) {
       result.push({ type: "persona" as const, persona: p });
     }
-    for (const skill of filteredSkills) {
-      result.push({ type: "skill" as const, skill });
-    }
     return result;
-  }, [filteredPersonas, filteredSkills, filteredFiles]);
+  }, [atCategory, filteredPersonas, filteredSkills, filteredFiles]);
 
   const handleSelect = useCallback(
     (item: MentionItem) => {
@@ -93,8 +105,13 @@ export function MentionAutocomplete({
 
   if (!isOpen) return null;
 
+  const showFileStates = atCategory === "files";
+  const visibleFiles = showFileStates ? filteredFiles : [];
+  const visiblePersonas = atCategory === "agents" ? filteredPersonas : [];
+  const visibleSkills = atCategory === "skills" ? filteredSkills : [];
   const hasResults = items.length > 0;
-  const showEmpty = !pathsLoading && !pathsError && !hasResults;
+  const showEmpty =
+    (!showFileStates || (!pathsLoading && !pathsError)) && !hasResults;
   // Both helpers return the rendered text together with its highlight
   // indices, so substituted (translated) strings can never carry indices
   // that were computed against the original filename/path.
@@ -135,26 +152,48 @@ export function MentionAutocomplete({
       side="top"
       align="start"
       sideOffset={4}
-      className="w-72 px-1 py-1"
+      className="w-72 p-2"
       onOpenAutoFocus={(e) => e.preventDefault()}
       onCloseAutoFocus={(e) => e.preventDefault()}
       onEscapeKeyDown={(e) => e.preventDefault()}
       onInteractOutside={(e) => e.preventDefault()}
     >
-      <div className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-        {t("mention.referencesTitle")}
-      </div>
-      <div className="max-h-56 overflow-y-auto">
-        <div role="listbox" id={listboxId} aria-label={t("mention.ariaLabel")}>
-          {(filteredFiles.length > 0 || pathsLoading || pathsError) && (
-            <div
-              role="presentation"
-              className="px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              {t("mention.pathsTitle")}
-            </div>
-          )}
-          {filteredFiles.map((file, i) => {
+      <Tabs
+        value={atCategory}
+        onValueChange={(value) =>
+          onAtCategoryChange?.(value as AtMentionCategory)
+        }
+        className="gap-0 pb-2"
+      >
+        <TabsList variant="buttons" className="w-full justify-start gap-1">
+          <MentionTabTrigger
+            value="agents"
+            label={t("mention.title")}
+            symbol="@"
+            onSelect={onAtCategoryChange}
+          />
+          <MentionTabTrigger
+            value="files"
+            label={t("mention.filesTitle")}
+            symbol="@"
+            onSelect={onAtCategoryChange}
+          />
+          <MentionTabTrigger
+            value="skills"
+            label={t("mention.skillsTitle")}
+            symbol="/"
+            onSelect={onAtCategoryChange}
+          />
+        </TabsList>
+      </Tabs>
+      <div className="h-56 overflow-y-auto overscroll-contain scrollbar-none">
+        <div
+          role="listbox"
+          id={listboxId}
+          aria-label={t("mention.ariaLabel")}
+          className="pb-2"
+        >
+          {visibleFiles.map((file, i) => {
             const globalIndex = i;
             return (
               <button
@@ -172,37 +211,31 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent/50",
                 )}
                 onClick={() => handleSelect({ type: "file", file })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}
               >
-                {file.kind !== "file" ? (
-                  <IconFolder className="size-4 shrink-0" />
-                ) : (
-                  <IconFile className="size-4 shrink-0" />
-                )}
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+                  {file.kind !== "file" ? (
+                    <IconFolder className="size-4 shrink-0" />
+                  ) : (
+                    <IconFile className="size-4 shrink-0" />
+                  )}
+                </div>
                 <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-sm font-medium">
+                  <span className="truncate text-sm font-normal">
                     <HighlightedMatchText {...getFileLabel(file)} />
                   </span>
-                  <span className="truncate text-[10px] text-muted-foreground">
+                  <span className="truncate text-xs text-muted-foreground/60">
                     <HighlightedMatchText {...getFileDescription(file)} />
                   </span>
                 </div>
               </button>
             );
           })}
-          {filteredPersonas.length > 0 && (
-            <div
-              role="presentation"
-              className="mt-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              {t("mention.title")}
-            </div>
-          )}
-          {filteredPersonas.map((persona, i) => {
-            const globalIndex = filteredFiles.length + i;
+          {visiblePersonas.map((persona, i) => {
+            const globalIndex = i;
             return (
               <button
                 key={persona.id}
@@ -219,18 +252,18 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent/50",
                 )}
                 onClick={() => handleSelect({ type: "persona", persona })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}
               >
                 <MentionAvatar persona={persona} />
                 <div className="flex min-w-0 flex-col">
-                  <span className="text-sm font-medium">
+                  <span className="text-sm font-normal">
                     {persona.displayName}
                   </span>
                   {persona.provider && (
-                    <span className="text-[10px] text-muted-foreground">
+                    <span className="text-xs text-muted-foreground/60">
                       {persona.provider}
                       {persona.model
                         ? ` / ${persona.model.split("-").slice(0, 2).join("-")}`
@@ -242,17 +275,8 @@ export function MentionAutocomplete({
             );
           })}
 
-          {filteredSkills.length > 0 && (
-            <div
-              role="presentation"
-              className="mt-1 px-2 py-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-            >
-              {t("mention.skillsTitle")}
-            </div>
-          )}
-          {filteredSkills.map((skill, i) => {
-            const globalIndex =
-              filteredFiles.length + filteredPersonas.length + i;
+          {visibleSkills.map((skill, i) => {
+            const globalIndex = i;
             return (
               <button
                 key={skill.id}
@@ -269,17 +293,17 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-muted-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent/50",
                 )}
                 onClick={() => handleSelect({ type: "skill", skill })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}
               >
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
-                  <SkillIcon className="h-3.5 w-3.5" />
+                <div className="flex h-7 w-7 shrink-0 items-center justify-center">
+                  <IconBook className="size-4 shrink-0" />
                 </div>
                 <div className="flex min-w-0 flex-col">
-                  <span className="text-sm font-medium">{skill.name}</span>
-                  <span className="truncate text-[10px] text-muted-foreground">
+                  <span className="text-sm font-normal">{skill.name}</span>
+                  <span className="truncate text-xs text-muted-foreground/60">
                     {skill.description || skill.sourceLabel}
                   </span>
                 </div>
@@ -287,7 +311,7 @@ export function MentionAutocomplete({
             );
           })}
         </div>
-        {pathsLoading && (
+        {showFileStates && pathsLoading && (
           <div
             role="status"
             aria-live="polite"
@@ -296,7 +320,7 @@ export function MentionAutocomplete({
             {t("mention.loadingPaths")}
           </div>
         )}
-        {pathsError && (
+        {showFileStates && pathsError && (
           <div
             role="status"
             aria-live="polite"
@@ -315,13 +339,34 @@ export function MentionAutocomplete({
           </div>
         )}
       </div>
-      <div className="border-t px-2 py-1.5 text-[10px] text-muted-foreground">
-        <span className="font-medium text-foreground">
-          {t("mention.enterKey")}
-        </span>{" "}
-        {t("mention.toInsert")}
-      </div>
     </PopoverContent>
+  );
+}
+
+function MentionTabTrigger({
+  value,
+  label,
+  symbol,
+  onSelect,
+}: {
+  value: AtMentionCategory;
+  label: string;
+  symbol: "@" | "/";
+  onSelect?: (category: AtMentionCategory) => void;
+}) {
+  return (
+    <TabsTrigger
+      value={value}
+      variant="buttons"
+      className="h-7 flex-none rounded-sm px-2.5 text-xs"
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={() => onSelect?.(value)}
+    >
+      <span>{label}</span>
+      <span aria-hidden="true" className="text-muted-foreground/35">
+        {symbol}
+      </span>
+    </TabsTrigger>
   );
 }
 

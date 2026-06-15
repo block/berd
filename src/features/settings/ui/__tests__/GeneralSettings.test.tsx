@@ -12,6 +12,7 @@ import {
 } from "@/features/settings/lib/settingsEvents";
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
+import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -194,6 +195,41 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(screen.getByRole("button", { name: "Queue" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("updates the default @ mention tab", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Files" }));
+
+    await waitFor(() => {
+      expect(
+        localStorage.getItem(AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY),
+      ).toBe("files");
+    });
+    expect(screen.getByRole("button", { name: "Files" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Agents" }));
+
+    await waitFor(() => {
+      expect(
+        localStorage.getItem(AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY),
+      ).toBe("agents");
+    });
+    expect(screen.getByRole("button", { name: "Agents" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
