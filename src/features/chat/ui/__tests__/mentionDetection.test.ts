@@ -52,7 +52,7 @@ describe("useMentionDetection file ordering", () => {
     expect(result.current.filteredSkills).toEqual([skill]);
   });
 
-  it("opens slash skills at token boundaries in the composer", () => {
+  it("opens slash skills at token boundaries once there is a query", () => {
     const skill = {
       id: "global:/skills/code-review",
       name: "code-review",
@@ -78,7 +78,7 @@ describe("useMentionDetection file ordering", () => {
     expect(result.current.filteredSkills).toEqual([skill]);
   });
 
-  it("does not open slash skills inside another token", () => {
+  it("does not open slash skills inside another token or for empty later slashes", () => {
     const skill = {
       id: "global:/skills/code-review",
       name: "code-review",
@@ -90,7 +90,36 @@ describe("useMentionDetection file ordering", () => {
     act(() => {
       result.current.detectMention("src/features", 12);
     });
+    expect(result.current.mentionOpen).toBe(false);
 
+    act(() => {
+      result.current.detectMention("using it /", 10);
+    });
+    expect(result.current.mentionOpen).toBe(false);
+  });
+
+  it("does not keep slash skills open for path-shaped slash queries", () => {
+    const skill = {
+      id: "global:/skills/code-review",
+      name: "code-review",
+      description: "Reviews code",
+      sourceLabel: "Personal",
+    };
+    const { result } = renderHook(() => useMentionDetection([], [skill], []));
+
+    act(() => {
+      result.current.detectMention("/Users/me", 9);
+    });
+    expect(result.current.mentionOpen).toBe(false);
+
+    act(() => {
+      result.current.detectMention("open /Users/me", 14);
+    });
+    expect(result.current.mentionOpen).toBe(false);
+
+    act(() => {
+      result.current.detectMention("/tmp\\project", 12);
+    });
     expect(result.current.mentionOpen).toBe(false);
   });
 

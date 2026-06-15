@@ -119,6 +119,45 @@ describe("ChatInput skill mentions", () => {
     expect(screen.getByText("code-review")).toBeInTheDocument();
   });
 
+  it("does not show all skills for an empty slash later in the prompt", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "please use /");
+
+    expect(input).toHaveValue("please use /");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /code-review/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows skills for slash queries later in the prompt", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "please use /code");
+
+    expect(input).toHaveValue("please use /code");
+    expect(
+      await screen.findByRole("option", { name: /code-review/i }),
+    ).toBeInTheDocument();
+  });
+
   it("keeps the skill chip selected without reopening references when typing a URL", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([CODE_REVIEW_SKILL]);

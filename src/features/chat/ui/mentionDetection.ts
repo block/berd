@@ -104,6 +104,14 @@ function findLastSlashMentionTrigger(value: string): number {
   return -1;
 }
 
+function isPathShapedSlashMentionQuery(query: string): boolean {
+  return query.includes("/") || query.includes("\\");
+}
+
+function isPromptStart(value: string, index: number): boolean {
+  return value.slice(0, index).trim().length === 0;
+}
+
 type ScoredFileMention = {
   file: FileMentionItem;
   score: number;
@@ -475,7 +483,9 @@ export function useMentionDetection(
       if (lastSlash > lastAt) {
         const query = beforeCursor.slice(lastSlash + 1);
         if (
+          (!isPromptStart(beforeCursor, lastSlash) && query.length === 0) ||
           query.includes(" ") ||
+          isPathShapedSlashMentionQuery(query) ||
           query.length > MAX_TEXT_MENTION_QUERY_LENGTH ||
           isReservedSlashCommand(query)
         ) {
