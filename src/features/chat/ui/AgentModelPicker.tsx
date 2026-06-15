@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+} from "react";
 import { IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
@@ -15,7 +22,11 @@ import {
   resolveDisplayModelLabel,
   resolvePickerTriggerLabel,
 } from "../lib/modelDisplayLabel";
-import type { AgentPickerOption, ModelOption } from "../types";
+import type {
+  AgentPickerOption,
+  ChatInputReasoningEffort,
+  ModelOption,
+} from "../types";
 import { AllModelsList, RecommendedModelList } from "./AgentModelPickerLists";
 import { PickerItem } from "./AgentModelPickerItem";
 
@@ -36,9 +47,99 @@ interface AgentModelPickerProps {
   triggerTabIndex?: number;
   onOpen?: () => void;
   onOpenChange?: (open: boolean) => void;
+  reasoningEffort?: ChatInputReasoningEffort;
+  contentAlign?: PopoverContentAlign | "smart";
+  contentCollisionPadding?: number;
 }
 
 type ModelView = "recommended" | "all";
+type ReasoningEffortConfig = NonNullable<ChatInputReasoningEffort["config"]>;
+type PopoverContentAlign = NonNullable<
+  ComponentProps<typeof PopoverContent>["align"]
+>;
+const REASONING_EFFORT_COLUMN_TRANSITION_MS = 240;
+const PICKER_WIDTH_COMPACT_PX = 384;
+const PICKER_WIDTH_EXPANDED_PX = 560;
+
+function toSentenceCaseLabel(value: string | undefined): string {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const normalized = /^[a-z0-9_-]+$/.test(trimmed)
+    ? trimmed.replace(/[_-]+/g, " ")
+    : trimmed;
+
+  if (/[A-Z]{2,}/.test(normalized)) {
+    return normalized;
+  }
+
+  return normalized.charAt(0).toUpperCase() + normalized.slice(1).toLowerCase();
+}
+
+function isReasoningEffortOff(value: string | undefined): boolean {
+  return value?.trim().toLowerCase() === "off";
+}
+
+function ReasoningEffortList({
+  config,
+  disabled = false,
+  onChange,
+  t,
+}: {
+  config: ReasoningEffortConfig;
+  disabled?: boolean;
+  onChange?: (value: string) => void;
+  t: (key: string) => string;
+}) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" aria-busy={disabled}>
+      <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
+        {t("toolbar.reasoningEffort")}
+      </div>
+      <ScrollArea className="min-h-0 min-w-0 flex-1">
+        <div className="space-y-0.5 p-1">
+          {config.options.map((option) => {
+            const isSelected = option.id === config.currentValue;
+            return (
+              <PickerItem
+                key={option.id}
+                onClick={() => {
+                  if (!disabled) {
+                    onChange?.(option.id);
+                  }
+                }}
+                selected={isSelected}
+                aria-disabled={disabled}
+                tabIndex={disabled ? -1 : undefined}
+                className={cn(
+                  "justify-between transition-[background-color,color] duration-150 ease-[cubic-bezier(0.2,0,0,1)]",
+                  disabled &&
+                    "pointer-events-none text-muted-foreground hover:bg-transparent focus-visible:bg-transparent",
+                )}
+              >
+                <span className="min-w-0 flex-1 truncate transition-colors duration-150 ease-[cubic-bezier(0.2,0,0,1)]">
+                  {toSentenceCaseLabel(option.name ?? option.id)}
+                </span>
+                {isSelected ? (
+                  <IconCheck
+                    className={cn(
+                      "size-4 shrink-0 transition-colors duration-150 ease-[cubic-bezier(0.2,0,0,1)]",
+                      disabled
+                        ? "text-muted-foreground/70"
+                        : "text-muted-foreground",
+                    )}
+                  />
+                ) : null}
+              </PickerItem>
+            );
+          })}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+}
 
 export function AgentModelPicker({
   agents,
@@ -57,11 +158,19 @@ export function AgentModelPicker({
   triggerTabIndex,
   onOpen,
   onOpenChange,
+  reasoningEffort,
+  contentAlign = "start",
+  contentCollisionPadding = 16,
 }: AgentModelPickerProps) {
   const { t } = useTranslation("chat");
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const [modelView, setModelView] = useState<ModelView>("recommended");
+  const [resolvedContentAlign, setResolvedContentAlign] =
+    useState<PopoverContentAlign>("start");
+  const [latchedReasoningEffortConfig, setLatchedReasoningEffortConfig] =
+    useState<ReasoningEffortConfig | null>(null);
   const selectedAgentLabel =
     agents.find((agent) => agent.id === selectedAgentId)?.label ??
     formatProviderLabel(selectedAgentId);
@@ -118,6 +227,55 @@ export function AgentModelPicker({
     : selectedAgentLabel;
   const triggerTitle =
     triggerLabel ?? (loading ? t("toolbar.loading") : undefined);
+  const reasoningEffortConfig = reasoningEffort?.config;
+  const hasLiveReasoningEffort =
+    Boolean(reasoningEffortConfig?.configId) &&
+    (reasoningEffortConfig?.options.length ?? 0) > 1;
+  const isReasoningEffortPending =
+    open && !reasoningEffortConfig && Boolean(latchedReasoningEffortConfig);
+  const displayReasoningEffortConfig =
+    reasoningEffortConfig ?? latchedReasoningEffortConfig;
+  const selectedReasoningEffort = displayReasoningEffortConfig?.options.find(
+    (option) => option.id === displayReasoningEffortConfig.currentValue,
+  );
+  const selectedReasoningEffortValue =
+    selectedReasoningEffort?.id ?? displayReasoningEffortConfig?.currentValue;
+  const selectedReasoningEffortLabel = isReasoningEffortOff(
+    selectedReasoningEffortValue,
+  )
+    ? null
+    : toSentenceCaseLabel(
+        selectedReasoningEffort?.name ??
+          displayReasoningEffortConfig?.currentValue,
+      );
+  const showReasoningEffort =
+    hasLiveReasoningEffort || isReasoningEffortPending;
+  const renderedReasoningEffortConfig =
+    hasLiveReasoningEffort || isReasoningEffortPending
+      ? displayReasoningEffortConfig
+      : latchedReasoningEffortConfig;
+
+  useEffect(() => {
+    if (hasLiveReasoningEffort && reasoningEffortConfig) {
+      setLatchedReasoningEffortConfig(reasoningEffortConfig);
+      return;
+    }
+
+    if (!open) {
+      setLatchedReasoningEffortConfig(null);
+      return;
+    }
+
+    if (reasoningEffortConfig) {
+      const clearLatchedConfig = window.setTimeout(() => {
+        setLatchedReasoningEffortConfig(null);
+      }, REASONING_EFFORT_COLUMN_TRANSITION_MS);
+
+      return () => {
+        window.clearTimeout(clearLatchedConfig);
+      };
+    }
+  }, [hasLiveReasoningEffort, open, reasoningEffortConfig]);
 
   const handleAgentSelect = (agent: AgentPickerOption) => {
     if (agent.readiness && agent.readiness !== "ready") {
@@ -134,7 +292,7 @@ export function AgentModelPicker({
 
   const handleModelSelect = (model: ModelOption) => {
     onModelChange?.(model.id, model);
-    setOpen(false);
+    setModelView("recommended");
   };
 
   // Reset to recommended view when popover closes.
@@ -146,11 +304,39 @@ export function AgentModelPicker({
 
   // When in "all" view, expand the popover to full width for the search experience.
   const isAllView = modelView === "all";
+  const showReasoningEffortColumn = showReasoningEffort && !isAllView;
+  const pickerWidth = showReasoningEffortColumn
+    ? PICKER_WIDTH_EXPANDED_PX
+    : PICKER_WIDTH_COMPACT_PX;
+  const resolveContentAlign = useCallback((): PopoverContentAlign => {
+    if (contentAlign !== "smart") {
+      return contentAlign;
+    }
+
+    const triggerRect = triggerRef.current?.getBoundingClientRect();
+    if (!triggerRect) {
+      return "start";
+    }
+
+    const leftAlignedRightEdge = triggerRect.left + pickerWidth;
+    return leftAlignedRightEdge <= window.innerWidth - contentCollisionPadding
+      ? "start"
+      : "center";
+  }, [contentAlign, contentCollisionPadding, pickerWidth]);
+
+  useEffect(() => {
+    if (open) {
+      setResolvedContentAlign(resolveContentAlign());
+    }
+  }, [open, resolveContentAlign]);
 
   return (
     <Popover
       open={open}
       onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          setResolvedContentAlign(resolveContentAlign());
+        }
         setOpen(nextOpen);
         onOpenChange?.(nextOpen);
         if (nextOpen) onOpen?.();
@@ -158,6 +344,7 @@ export function AgentModelPicker({
     >
       <PopoverTrigger asChild>
         <Button
+          ref={triggerRef}
           type="button"
           variant="composer-action"
           size="sm"
@@ -171,18 +358,29 @@ export function AgentModelPicker({
         >
           <span
             className={cn(
-              "chat-composer-selector-label truncate",
+              "chat-composer-selector-label flex min-w-0 items-baseline gap-1.5 truncate",
               isCompact ? "max-w-32" : "max-w-56",
             )}
           >
-            {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
+            <span className="min-w-0 truncate">
+              {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
+            </span>
+            {showReasoningEffort && selectedReasoningEffortLabel ? (
+              <span className="shrink-0 text-muted-foreground/70">
+                {selectedReasoningEffortLabel}
+              </span>
+            ) : null}
           </span>
         </Button>
       </PopoverTrigger>
       <PopoverContent
         ref={contentRef}
-        align="start"
-        className="h-[min(24rem,50vh)] w-96 overflow-hidden p-1"
+        align={resolvedContentAlign}
+        collisionPadding={contentCollisionPadding}
+        className={cn(
+          "h-[min(24rem,50vh)] overflow-hidden p-1 transition-[width] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
+          showReasoningEffortColumn ? "w-[35rem]" : "w-96",
+        )}
         onOpenAutoFocus={(e) => {
           e.preventDefault();
           contentRef.current
@@ -211,7 +409,9 @@ export function AgentModelPicker({
             e.preventDefault();
             const content = e.currentTarget as HTMLElement;
             const cols = Array.from(
-              content.querySelectorAll<HTMLElement>("[data-col]"),
+              content.querySelectorAll<HTMLElement>(
+                "[data-col]:not([data-hidden='true'])",
+              ),
             );
             const currentCol = (document.activeElement as HTMLElement)?.closest(
               "[data-col]",
@@ -242,17 +442,15 @@ export function AgentModelPicker({
       >
         <div
           className={cn(
-            "grid h-full gap-1 overflow-hidden",
-            isAllView
-              ? "grid-cols-1"
-              : "grid-cols-[minmax(0,1fr)_minmax(0,1fr)]",
+            "h-full overflow-hidden",
+            isAllView ? "grid grid-cols-1" : "flex items-stretch",
           )}
         >
           {/* Agent column — hidden in "all models" search view */}
           {!isAllView ? (
             <div
               data-col="agent"
-              className="flex min-h-0 min-w-0 overflow-hidden p-1"
+              className="flex min-h-0 w-[11.75rem] shrink-0 overflow-hidden p-1"
             >
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                 <div className="shrink-0 px-2 py-1.5 text-sm font-semibold">
@@ -312,7 +510,10 @@ export function AgentModelPicker({
           {/* Model column */}
           <div
             data-col="model"
-            className="flex min-h-0 min-w-0 overflow-hidden p-1"
+            className={cn(
+              "flex min-h-0 min-w-0 overflow-hidden p-1",
+              isAllView ? "w-full" : "ml-1 w-[11.75rem] shrink-0",
+            )}
           >
             {modelsLoading ? (
               <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -372,6 +573,40 @@ export function AgentModelPicker({
               </div>
             )}
           </div>
+
+          {!isAllView ? (
+            <div
+              data-col="reasoning"
+              data-hidden={!showReasoningEffortColumn}
+              aria-hidden={!showReasoningEffortColumn}
+              className={cn(
+                "min-h-0 min-w-0 shrink-0 overflow-hidden transition-[width,opacity] duration-[240ms] ease-[cubic-bezier(0.2,0,0,1)]",
+                showReasoningEffortColumn
+                  ? "w-[11rem] opacity-100"
+                  : "pointer-events-none w-0 opacity-0",
+              )}
+            >
+              <div
+                className={cn(
+                  "flex h-full w-[11rem] min-w-0 p-1 pl-2 transition-[opacity,transform] duration-150 ease-[cubic-bezier(0.2,0,0,1)]",
+                  showReasoningEffortColumn
+                    ? "translate-x-0 opacity-100 delay-75"
+                    : "-translate-x-1 opacity-0 delay-0",
+                )}
+              >
+                {renderedReasoningEffortConfig ? (
+                  <ReasoningEffortList
+                    config={renderedReasoningEffortConfig}
+                    disabled={
+                      isReasoningEffortPending || !showReasoningEffortColumn
+                    }
+                    onChange={reasoningEffort?.onChange}
+                    t={t}
+                  />
+                ) : null}
+              </div>
+            </div>
+          ) : null}
         </div>
       </PopoverContent>
     </Popover>

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { AgentModelPicker } from "../AgentModelPicker";
@@ -204,6 +204,168 @@ describe("AgentModelPicker", () => {
     expect(onModelChange).toHaveBeenCalledWith(
       "gpt-4o",
       expect.objectContaining({ id: "gpt-4o" }),
+    );
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+  });
+
+  it("shows reasoning effort as a picker column when available", async () => {
+    const user = userEvent.setup();
+    const onReasoningEffortChange = vi.fn();
+
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="gpt-5.5"
+        currentModelName="GPT 5.5"
+        availableModels={[{ id: "gpt-5.5", name: "GPT 5.5" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "medium",
+            options: [
+              { id: "low", name: "low" },
+              { id: "medium", name: "medium" },
+              { id: "high", name: "high" },
+            ],
+          },
+          onChange: onReasoningEffortChange,
+        }}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("GPT 5.5");
+    expect(trigger).toHaveTextContent("Medium");
+
+    await user.click(trigger);
+
+    expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "High" }));
+
+    expect(onReasoningEffortChange).toHaveBeenCalledWith("high");
+  });
+
+  it("hides off reasoning effort in the picker trigger", () => {
+    render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="gpt-5.5"
+        currentModelName="GPT 5.5"
+        availableModels={[{ id: "gpt-5.5", name: "GPT 5.5" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "off",
+            options: [
+              { id: "off", name: "off" },
+              { id: "low", name: "low" },
+              { id: "medium", name: "medium" },
+            ],
+          },
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("GPT 5.5");
+    expect(trigger).not.toHaveTextContent("Off");
+  });
+
+  it("keeps the reasoning column stable while model reasoning config refreshes", async () => {
+    const user = userEvent.setup();
+    const reasoningEffortConfig = {
+      configId: "thinking_effort",
+      currentValue: "medium",
+      options: [
+        { id: "low", name: "low" },
+        { id: "medium", name: "medium" },
+        { id: "high", name: "high" },
+      ],
+    };
+
+    const { rerender } = render(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="gpt-5.5"
+        currentModelName="GPT 5.5"
+        availableModels={[{ id: "gpt-5.5", name: "GPT 5.5" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: reasoningEffortConfig,
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+
+    expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
+
+    rerender(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="claude-opus-4-8"
+        currentModelName="Claude Opus 4.8"
+        availableModels={[{ id: "claude-opus-4-8", name: "Claude Opus 4.8" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: undefined,
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Reasoning effort")).toBeInTheDocument();
+    expect(
+      screen.getByText("Reasoning effort").closest("[aria-busy='true']"),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "High" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+
+    rerender(
+      <AgentModelPicker
+        agents={AGENTS}
+        selectedAgentId="goose"
+        onAgentChange={vi.fn()}
+        currentModelId="gpt-4o"
+        currentModelName="GPT-4o"
+        availableModels={[{ id: "gpt-4o", name: "GPT-4o" }]}
+        onModelChange={vi.fn()}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "off",
+            options: [{ id: "off", name: "off" }],
+          },
+          onChange: vi.fn(),
+        }}
+      />,
+    );
+
+    await waitFor(
+      () => {
+        expect(screen.queryByText("Reasoning effort")).not.toBeInTheDocument();
+      },
+      { timeout: 500 },
     );
   });
 

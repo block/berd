@@ -27,6 +27,7 @@ import type {
   ChatInputAgentModelPicker,
   ChatInputContextUsage,
   ChatInputProjectPicker,
+  ChatInputReasoningEffort,
 } from "../types";
 
 interface ChatInputToolbarComposerActions {
@@ -47,6 +48,7 @@ interface ChatInputToolbarComposerActions {
 
 interface ChatInputToolbarProps {
   agentModelPicker: ChatInputAgentModelPicker & { enabled?: boolean };
+  reasoningEffort?: ChatInputReasoningEffort;
   projectPicker: ChatInputProjectPicker;
   contextUsage: ChatInputContextUsage;
   composerActions: ChatInputToolbarComposerActions;
@@ -55,6 +57,7 @@ interface ChatInputToolbarProps {
 
 export function ChatInputToolbar({
   agentModelPicker,
+  reasoningEffort,
   projectPicker,
   contextUsage,
   composerActions,
@@ -242,6 +245,7 @@ export function ChatInputToolbar({
               onOpen={onPickerOpen}
               loading={providersLoading}
               isCompact={isCompact}
+              reasoningEffort={reasoningEffort}
             />
           )}
 

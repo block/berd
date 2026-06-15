@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -15,6 +16,41 @@ const includeLastMessageSnippetMeta = {
     },
   },
 };
+
+function createConfigOptionsResponse() {
+  return {
+    configOptions: [
+      {
+        id: "model",
+        category: "model",
+        kind: {
+          type: "select",
+          currentValue: "claude-opus-4-8",
+          options: {
+            type: "ungrouped",
+            values: [{ value: "claude-opus-4-8", name: "Claude Opus 4.8" }],
+          },
+        },
+      },
+      {
+        id: "thinking_effort",
+        category: "thought_level",
+        kind: {
+          type: "select",
+          currentValue: "high",
+          options: {
+            type: "ungrouped",
+            values: [
+              { value: "low", name: "Low" },
+              { value: "medium", name: "Medium" },
+              { value: "high", name: "High" },
+            ],
+          },
+        },
+      },
+    ],
+  };
+}
 
 vi.mock("../acpConnection", () => ({
   getClient: (...args: unknown[]) => mocks.getClient(...args),
@@ -321,6 +357,15 @@ describe("provider wire translation", () => {
     });
     mocks.newSession.mockResolvedValue({ sessionId: "session-9" });
     mocks.setSessionConfigOption.mockResolvedValue(undefined);
+    useChatSessionStore.setState({
+      sessions: [],
+      activeSessionId: null,
+      isLoading: false,
+      hasHydratedSessions: true,
+      isContextPanelOpen: false,
+      activeWorkspaceBySession: {},
+      modelSelectionIntentBySession: {},
+    });
   });
 
   it("sends the default model provider when newSession is given the goose sentinel", async () => {
@@ -368,6 +413,54 @@ describe("provider wire translation", () => {
       sessionId: "session-9",
       configId: "provider",
       value: "codex-acp",
+    });
+  });
+
+  it("sets a generic session config option", async () => {
+    const { setSessionConfigOption } = await import("../acpApi");
+
+    await setSessionConfigOption("session-9", "thinking_effort", "high");
+
+    expect(mocks.setSessionConfigOption).toHaveBeenCalledWith({
+      sessionId: "session-9",
+      configId: "thinking_effort",
+      value: "high",
+    });
+  });
+
+  it("hydrates reasoning effort from the set config response", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "session-9",
+      title: "Chat",
+      providerId: "anthropic",
+      modelId: "claude-opus-4-8",
+      modelName: "Claude Opus 4.8",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+    mocks.setSessionConfigOption.mockResolvedValueOnce(
+      createConfigOptionsResponse(),
+    );
+
+    const { setModel } = await import("../acpApi");
+
+    await setModel("session-9", "claude-opus-4-8");
+
+    expect(
+      useChatSessionStore.getState().getSession("session-9"),
+    ).toMatchObject({
+      modelId: "claude-opus-4-8",
+      modelName: "Claude Opus 4.8",
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "low", name: "Low" },
+          { id: "medium", name: "Medium" },
+          { id: "high", name: "High" },
+        ],
+      },
     });
   });
 });

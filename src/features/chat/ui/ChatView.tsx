@@ -864,6 +864,10 @@ export function ChatView({
             onModelChange: controller.handleModelChange,
             onPickerOpen: controller.handlePickerOpen,
           }}
+          reasoningEffort={{
+            config: controller.reasoningEffort,
+            onChange: controller.handleReasoningEffortChange,
+          }}
           projectPicker={{
             selectedProjectId: controller.selectedProjectId,
             availableProjects: controller.availableProjects,

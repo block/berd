@@ -11,6 +11,7 @@ import type { ChatSendOptions } from "../../types";
 
 const mockAcpPrepareSession = vi.fn();
 const mockAcpSetModel = vi.fn();
+const mockAcpSetSessionConfigOption = vi.fn();
 const mockSetSelectedProvider = vi.fn();
 const mockResolveSessionCwd = vi.fn();
 const mockGooseDefaultsRead = vi.fn();
@@ -66,6 +67,8 @@ function deferred<T = void>() {
 vi.mock("@/shared/api/acp", () => ({
   acpPrepareSession: (...args: unknown[]) => mockAcpPrepareSession(...args),
   acpSetModel: (...args: unknown[]) => mockAcpSetModel(...args),
+  acpSetSessionConfigOption: (...args: unknown[]) =>
+    mockAcpSetSessionConfigOption(...args),
 }));
 
 vi.mock("sonner", () => ({
@@ -91,19 +94,25 @@ vi.mock("../useChat", () => ({
     _providerOverride?: string,
     _systemPromptOverride?: string,
     _personaInfo?: { id: string; name: string },
-    options?: { ensurePrepared?: () => Promise<boolean | undefined> },
-  ) => ({
-    messages: [],
-    chatState: mockUseChatRuntime.chatState,
-    tokenState: null,
-    sendMessage: (...args: unknown[]) =>
-      mockUseChatSendMessage(options, ...args),
-    steerMessage: (...args: unknown[]) => mockUseChatSteerMessage(...args),
-    compactConversation: vi.fn(),
-    stopStreaming: vi.fn(),
-    streamingMessageId: null,
-    activeRunId: mockUseChatRuntime.activeRunId,
-  }),
+    options?: {
+      ensurePrepared?: () => Promise<boolean | undefined>;
+      onMessageAccepted?: (sessionId: string) => void;
+    },
+  ) => {
+    const optionsWithSessionId = { ...options, __sessionId: _sessionId };
+    return {
+      messages: [],
+      chatState: mockUseChatRuntime.chatState,
+      tokenState: null,
+      sendMessage: (...args: unknown[]) =>
+        mockUseChatSendMessage(optionsWithSessionId, ...args),
+      steerMessage: (...args: unknown[]) => mockUseChatSteerMessage(...args),
+      compactConversation: vi.fn(),
+      stopStreaming: vi.fn(),
+      streamingMessageId: null,
+      activeRunId: mockUseChatRuntime.activeRunId,
+    };
+  },
 }));
 
 vi.mock("../useMessageQueue", () => ({
@@ -178,6 +187,20 @@ function latestMessageQueueArgs() {
   return call as [string, string, unknown];
 }
 
+function patchReasoningEffort(sessionId: string, currentValue = "off") {
+  useChatSessionStore.getState().patchSession(sessionId, {
+    reasoningEffort: {
+      configId: "thinking_effort",
+      currentValue,
+      options: [
+        { id: "off", name: "Off" },
+        { id: "low", name: "Low" },
+        { id: "high", name: "High" },
+      ],
+    },
+  });
+}
+
 describe("useChatSessionController", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -185,6 +208,8 @@ describe("useChatSessionController", () => {
     mockUseChatSendMessage.mockImplementation(
       async (options?: {
         ensurePrepared?: () => Promise<boolean | undefined>;
+        onMessageAccepted?: (sessionId: string) => void;
+        __sessionId?: string;
       }) => {
         await options?.ensurePrepared?.();
       },
@@ -224,6 +249,7 @@ describe("useChatSessionController", () => {
     ]);
     mockAcpPrepareSession.mockResolvedValue(undefined);
     mockAcpSetModel.mockResolvedValue(undefined);
+    mockAcpSetSessionConfigOption.mockResolvedValue(undefined);
     mockResolveSessionCwd.mockResolvedValue("/tmp/project");
     mockGooseDefaultsRead.mockResolvedValue({
       providerId: null,
@@ -518,6 +544,131 @@ describe("useChatSessionController", () => {
       "Create-persona requested without an AppShell handler",
     );
     warn.mockRestore();
+  });
+
+  it("saves a changed reasoning effort as the default after a message is accepted", async () => {
+    patchReasoningEffort("session-1");
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (options?: {
+        ensurePrepared?: () => Promise<boolean | undefined>;
+        onMessageAccepted?: (sessionId: string) => void;
+        __sessionId?: string;
+      }) => {
+        options?.onMessageAccepted?.(options.__sessionId ?? "session-1");
+        await options?.ensurePrepared?.();
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleReasoningEffortChange("high");
+    });
+    act(() => {
+      result.current.handleSend("hello");
+    });
+
+    await waitFor(() => {
+      expect(mockGoosePreferencesSave).toHaveBeenCalledWith({
+        values: [{ key: "gooseThinkingEffort", value: "high" }],
+      });
+    });
+    expect(mockAcpSetSessionConfigOption).toHaveBeenCalledWith(
+      "session-1",
+      "thinking_effort",
+      "high",
+    );
+  });
+
+  it("does not save a changed reasoning effort before the user sends", () => {
+    patchReasoningEffort("session-1");
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleReasoningEffortChange("high");
+    });
+
+    expect(mockGoosePreferencesSave).not.toHaveBeenCalled();
+  });
+
+  it("keeps pending reasoning-effort defaults scoped to each chat", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat A",
+          providerId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+        {
+          id: "session-2",
+          title: "Chat B",
+          providerId: "openai",
+          modelId: "gpt-5.4",
+          modelName: "GPT-5.4",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    patchReasoningEffort("session-1");
+    patchReasoningEffort("session-2");
+    mockUseChatSendMessage.mockImplementation(
+      async (options?: {
+        ensurePrepared?: () => Promise<boolean | undefined>;
+        onMessageAccepted?: (sessionId: string) => void;
+        __sessionId?: string;
+      }) => {
+        options?.onMessageAccepted?.(options.__sessionId ?? "session-1");
+        await options?.ensurePrepared?.();
+      },
+    );
+
+    const { result, rerender } = renderHook(
+      ({ sessionId }: { sessionId: string }) =>
+        useChatSessionController({ sessionId }),
+      {
+        initialProps: { sessionId: "session-1" },
+      },
+    );
+
+    act(() => {
+      result.current.handleReasoningEffortChange("high");
+    });
+    rerender({ sessionId: "session-2" });
+    act(() => {
+      result.current.handleReasoningEffortChange("low");
+    });
+    act(() => {
+      result.current.handleSend("send from chat b");
+    });
+
+    await waitFor(() => {
+      expect(mockGoosePreferencesSave).toHaveBeenCalledWith({
+        values: [{ key: "gooseThinkingEffort", value: "low" }],
+      });
+    });
+
+    rerender({ sessionId: "session-1" });
+    act(() => {
+      result.current.handleSend("send from chat a");
+    });
+
+    await waitFor(() => {
+      expect(mockGoosePreferencesSave).toHaveBeenLastCalledWith({
+        values: [{ key: "gooseThinkingEffort", value: "high" }],
+      });
+    });
   });
 
   it("handleSend in a builder session merges the builder assistant prompt", async () => {
@@ -914,6 +1065,40 @@ describe("useChatSessionController", () => {
     expect(
       useChatSessionStore.getState().getModelSelectionIntent("session-1"),
     ).toBeUndefined();
+  });
+
+  it("preserves reasoning effort rehydrated during a model switch", async () => {
+    patchReasoningEffort("session-1", "low");
+    mockAcpSetModel.mockImplementationOnce(async () => {
+      patchReasoningEffort("session-1", "high");
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleModelChange("claude-sonnet-4");
+    });
+
+    await waitFor(() => {
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "session-1",
+        "claude-sonnet-4",
+      );
+    });
+
+    await waitFor(() => {
+      expect(
+        useChatSessionStore.getState().getModelSelectionIntent("session-1"),
+      ).toBeUndefined();
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.reasoningEffort,
+    ).toMatchObject({
+      configId: "thinking_effort",
+      currentValue: "high",
+    });
   });
 
   it("keeps the selected model when send-time preparation supersedes the model switch", async () => {

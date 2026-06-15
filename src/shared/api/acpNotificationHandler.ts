@@ -3,7 +3,10 @@ import type {
   SessionUpdate,
 } from "@agentclientprotocol/sdk";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  useChatSessionStore,
+  type ChatSessionReasoningEffortConfig,
+} from "@/features/chat/stores/chatSessionStore";
 import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
 import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import type {
@@ -117,6 +120,14 @@ interface ModelConfigSnapshot {
   modelName: string;
 }
 
+interface SelectConfigOption {
+  id: string;
+  name?: string;
+  description?: string;
+  currentValue: string;
+  options: Array<{ id: string; name: string }>;
+}
+
 function getStringProperty(
   record: Record<string, unknown>,
   key: string,
@@ -125,7 +136,7 @@ function getStringProperty(
   return typeof value === "string" ? value : undefined;
 }
 
-function getModelOptions(
+function getSelectOptions(
   options: unknown,
 ): Array<{ id: string; name: string }> {
   if (Array.isArray(options)) {
@@ -140,7 +151,7 @@ function getModelOptions(
       if (!Array.isArray(value.options)) {
         return [];
       }
-      return getModelOptions(value.options);
+      return getSelectOptions(value.options);
     });
   }
 
@@ -187,43 +198,90 @@ function getModelOptions(
   });
 }
 
-function getModelConfigSnapshot(
-  update: SessionUpdate,
-): ModelConfigSnapshot | null {
-  const configUpdate = update as SessionUpdate & {
-    sessionUpdate: "config_option_update";
+function getConfigOptions(source: unknown): unknown[] | null {
+  if (!isRecord(source)) {
+    return null;
+  }
+  const configUpdate = source as {
     options?: unknown;
     configOptions?: unknown;
   };
   const options = Array.isArray(configUpdate.configOptions)
     ? configUpdate.configOptions
     : configUpdate.options;
-  if (!Array.isArray(options)) {
+  return Array.isArray(options) ? options : null;
+}
+
+function getSelectConfigOption(
+  source: unknown,
+  predicate: (option: Record<string, unknown>) => boolean,
+): SelectConfigOption | null {
+  const options = getConfigOptions(source);
+  if (!options) {
     return null;
   }
 
-  const modelOption = options.find(
-    (option) => isRecord(option) && option.category === "model",
+  const configOption = options.find(
+    (option) => isRecord(option) && predicate(option),
   );
-  if (!isRecord(modelOption)) {
+  if (!isRecord(configOption)) {
     return null;
   }
 
-  const select = isRecord(modelOption.kind) ? modelOption.kind : modelOption;
+  const select = isRecord(configOption.kind) ? configOption.kind : configOption;
   if (select.type !== "select") {
     return null;
   }
 
-  const modelId = getStringProperty(select, "currentValue");
-  if (!modelId) {
+  const id = getStringProperty(configOption, "id");
+  const currentValue = getStringProperty(select, "currentValue");
+  if (!id || !currentValue) {
     return null;
   }
 
-  const availableModels = getModelOptions(select.options);
-  const modelName =
-    availableModels.find((model) => model.id === modelId)?.name ?? modelId;
+  return {
+    id,
+    name: getStringProperty(configOption, "name"),
+    description: getStringProperty(configOption, "description"),
+    currentValue,
+    options: getSelectOptions(select.options),
+  };
+}
 
-  return { modelId, modelName };
+function getModelConfigSnapshot(source: unknown): ModelConfigSnapshot | null {
+  const modelOption = getSelectConfigOption(
+    source,
+    (option) => option.category === "model",
+  );
+  if (!modelOption) {
+    return null;
+  }
+
+  const modelName =
+    modelOption.options.find((model) => model.id === modelOption.currentValue)
+      ?.name ?? modelOption.currentValue;
+
+  return { modelId: modelOption.currentValue, modelName };
+}
+
+function getReasoningEffortConfigSnapshot(
+  source: unknown,
+): ChatSessionReasoningEffortConfig | null {
+  const option = getSelectConfigOption(
+    source,
+    (candidate) =>
+      candidate.category === "thought_level" ||
+      candidate.id === "thinking_effort",
+  );
+  if (!option) {
+    return null;
+  }
+
+  return {
+    configId: option.id,
+    currentValue: option.currentValue,
+    options: option.options,
+  };
 }
 
 function handleModelConfigSnapshot(
@@ -261,6 +319,22 @@ function handleModelConfigSnapshot(
     intentKind: intent?.kind,
     intentModelId: intent?.modelId,
   });
+}
+
+export function applySessionConfigOptionsSnapshot(
+  sessionId: string,
+  source: unknown,
+): void {
+  const snapshot = getModelConfigSnapshot(source);
+  if (snapshot) {
+    handleModelConfigSnapshot(sessionId, snapshot);
+  }
+  const reasoningEffort = getReasoningEffortConfigSnapshot(source);
+  if (reasoningEffort) {
+    useChatSessionStore.getState().patchSession(sessionId, {
+      reasoningEffort,
+    });
+  }
 }
 
 export function setActiveMessageId(
@@ -740,10 +814,7 @@ function handleShared(sessionId: string, update: SessionUpdate): void {
     }
 
     case "config_option_update": {
-      const snapshot = getModelConfigSnapshot(update);
-      if (snapshot) {
-        handleModelConfigSnapshot(sessionId, snapshot);
-      }
+      applySessionConfigOptionsSnapshot(sessionId, update);
       break;
     }
 

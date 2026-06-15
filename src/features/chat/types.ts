@@ -2,6 +2,7 @@ import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { Persona } from "@/shared/types/agents";
 import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type { ChatSessionReasoningEffortConfig } from "./stores/chatSessionStore";
 
 export interface ModelOption {
   id: string;
@@ -105,6 +106,11 @@ export interface ChatInputProjectPicker {
   }) => void;
 }
 
+export interface ChatInputReasoningEffort {
+  config?: ChatSessionReasoningEffortConfig;
+  onChange?: (value: string) => void;
+}
+
 export interface ChatInputContextUsage {
   contextTokens?: number;
   contextLimit?: number;
@@ -137,6 +143,7 @@ export interface ChatInputProps {
   className?: string;
   personaPicker?: ChatInputPersonaPicker;
   agentModelPicker?: ChatInputAgentModelPicker;
+  reasoningEffort?: ChatInputReasoningEffort;
   projectPicker?: ChatInputProjectPicker;
   contextUsage?: ChatInputContextUsage;
   controls?: ChatInputControls;

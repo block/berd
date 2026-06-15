@@ -58,6 +58,7 @@ export function ChatInput({
   className,
   personaPicker,
   agentModelPicker,
+  reasoningEffort,
   projectPicker,
   contextUsage,
   controls,
@@ -946,6 +947,7 @@ export function ChatInput({
                   onProjectChange,
                   onCreateProject,
                 }}
+                reasoningEffort={reasoningEffort}
                 contextUsage={{
                   contextTokens,
                   contextLimit,

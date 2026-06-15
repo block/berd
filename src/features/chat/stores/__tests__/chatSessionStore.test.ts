@@ -866,6 +866,11 @@ describe("chatSessionStore", () => {
         providerId: "openai",
         modelId: "gpt-4o",
         modelName: "GPT-4o",
+        reasoningEffort: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [{ id: "high", name: "high" }],
+        },
       });
 
       useChatSessionStore
@@ -876,6 +881,7 @@ describe("chatSessionStore", () => {
       expect(updated?.providerId).toBe("anthropic");
       expect(updated?.modelId).toBeUndefined();
       expect(updated?.modelName).toBeUndefined();
+      expect(updated?.reasoningEffort).toBeUndefined();
     });
   });
 

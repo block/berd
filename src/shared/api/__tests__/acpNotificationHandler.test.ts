@@ -47,6 +47,7 @@ function createModelConfigUpdate(
     sessionUpdate: "config_option_update",
     options: [
       {
+        id: "model",
         category: "model",
         kind: {
           type: "select",
@@ -54,6 +55,32 @@ function createModelConfigUpdate(
           options: {
             type: "ungrouped",
             values,
+          },
+        },
+      },
+    ],
+  };
+}
+
+function createReasoningEffortConfigUpdate(currentValue: string) {
+  return {
+    sessionUpdate: "config_option_update",
+    options: [
+      {
+        id: "thinking_effort",
+        name: "Thinking effort",
+        category: "thought_level",
+        kind: {
+          type: "select",
+          currentValue,
+          options: {
+            type: "ungrouped",
+            values: [
+              { value: "off", name: "off" },
+              { value: "low", name: "low" },
+              { value: "medium", name: "medium" },
+              { value: "high", name: "high" },
+            ],
           },
         },
       },
@@ -589,6 +616,69 @@ describe("acpNotificationHandler", () => {
     ).toMatchObject({
       modelId: "gpt-4o",
       modelName: "GPT-4o",
+    });
+  });
+
+  it("hydrates reasoning effort from a thought-level config option", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "goose",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createReasoningEffortConfigUpdate("high"),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+        options: [
+          { id: "off", name: "off" },
+          { id: "low", name: "low" },
+          { id: "medium", name: "medium" },
+          { id: "high", name: "high" },
+        ],
+      },
+    });
+  });
+
+  it("preserves reasoning effort when a partial config update omits it", async () => {
+    useChatSessionStore.getState().addSession({
+      id: "acp-session",
+      title: "Chat",
+      providerId: "goose",
+      createdAt: "2026-04-20T00:00:00.000Z",
+      updatedAt: "2026-04-20T00:00:00.000Z",
+      messageCount: 0,
+    });
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createReasoningEffortConfigUpdate("high"),
+    } as never);
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: createModelConfigUpdate("gpt-4o", [
+        { value: "gpt-4o", name: "GPT-4o" },
+      ]),
+    } as never);
+
+    expect(
+      useChatSessionStore.getState().getSession("acp-session"),
+    ).toMatchObject({
+      modelId: "gpt-4o",
+      reasoningEffort: {
+        configId: "thinking_effort",
+        currentValue: "high",
+      },
     });
   });
 

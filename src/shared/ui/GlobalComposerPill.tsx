@@ -29,6 +29,7 @@ import type { SkillMentionItem } from "@/features/chat/ui/mentionDetection";
 import { useVoiceDictation } from "@/features/chat/hooks/useVoiceDictation";
 import { getStoredModelPreference } from "@/features/chat/lib/modelPreferences";
 import type {
+  ChatInputReasoningEffort,
   ChatSendOptions,
   ChatSkillDraft,
   ModelOption,
@@ -51,12 +52,21 @@ export interface GlobalComposeOptions {
   attachments?: ChatAttachmentDraft[];
   personaId?: string | null;
   sendOptions?: ChatSendOptions;
+  reasoningEffort?: {
+    configId: string;
+    value: string;
+  };
 }
 
 interface GlobalComposerPillProps {
   focusRequest?: number;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
   suggestedPersonaId?: string | null;
+  reasoningEffort?: ChatInputReasoningEffort;
+  reasoningEffortModelSelection?: {
+    providerId?: string | null;
+    modelId?: string | null;
+  };
 }
 
 interface ModelSelection {
@@ -129,6 +139,8 @@ export function GlobalComposerPill({
   focusRequest = 0,
   onSend,
   suggestedPersonaId = null,
+  reasoningEffort,
+  reasoningEffortModelSelection,
 }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const { providers, providersLoading, selectedProvider, setSelectedProvider } =
@@ -468,6 +480,36 @@ export function GlobalComposerPill({
     [projects, selectedProjectId],
   );
   const effectiveModelSelection = modelOverride ?? defaultModelSelection;
+  const activeReasoningEffort = useMemo(() => {
+    if (!reasoningEffort?.config) {
+      return undefined;
+    }
+
+    const effortProviderId = reasoningEffortModelSelection?.providerId;
+    const effortModelId = reasoningEffortModelSelection?.modelId;
+    if (!effortProviderId && !effortModelId) {
+      return reasoningEffort;
+    }
+
+    const selectedProviderId =
+      effectiveModelSelection?.providerId ?? selectedProviderForPicker;
+    const selectedModelId = effectiveModelSelection?.modelId;
+    const providerMatches =
+      !effortProviderId ||
+      !selectedProviderId ||
+      selectedProviderId === effortProviderId;
+    const modelMatches =
+      !effortModelId || !selectedModelId || selectedModelId === effortModelId;
+
+    return providerMatches && modelMatches ? reasoningEffort : undefined;
+  }, [
+    effectiveModelSelection?.modelId,
+    effectiveModelSelection?.providerId,
+    reasoningEffort,
+    reasoningEffortModelSelection?.modelId,
+    reasoningEffortModelSelection?.providerId,
+    selectedProviderForPicker,
+  ]);
 
   const {
     mentionOpen,
@@ -542,6 +584,12 @@ export function GlobalComposerPill({
       if (selectedPersonaId) {
         options.personaId = selectedPersonaId;
       }
+      if (activeReasoningEffort?.config) {
+        options.reasoningEffort = {
+          configId: activeReasoningEffort.config.configId,
+          value: activeReasoningEffort.config.currentValue,
+        };
+      }
       const { messageText, sendOptions } = buildSkillSendPayload(
         trimmed,
         selectedSkills,
@@ -576,6 +624,7 @@ export function GlobalComposerPill({
       modelOverride,
       onSend,
       providerOverride,
+      activeReasoningEffort?.config,
       selectedPersonaId,
       selectedProjectId,
       selectedSkills,
@@ -942,6 +991,9 @@ export function GlobalComposerPill({
             loading={providersLoading}
             isCompact
             triggerTabIndex={expanded ? 0 : -1}
+            reasoningEffort={activeReasoningEffort}
+            contentAlign="smart"
+            contentCollisionPadding={16}
           />
 
           <ProjectInputSelector

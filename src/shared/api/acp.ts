@@ -247,6 +247,14 @@ export async function acpSetModel(
   return sessionRegistry.applySessionModel(sessionId, modelId);
 }
 
+export async function acpSetSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+): Promise<void> {
+  return directAcp.setSessionConfigOption(sessionId, configId, value);
+}
+
 export type { AcpSessionInfo, AcpSessionsPage };
 
 export interface AcpSessionSearchResult {

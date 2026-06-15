@@ -386,6 +386,7 @@ export function useResolvedAgentModelPicker({
       sessionStore.patchSession(sessionId, {
         modelId,
         modelName,
+        reasoningEffort: undefined,
       });
 
       void (async () => {
@@ -571,10 +572,37 @@ export function useResolvedAgentModelPicker({
     };
   }, [availableModels, session]);
 
+  const availableDefaultModelSelection =
+    useMemo<PreferredModelSelection | null>(() => {
+      const compatibleModels = concreteSelectedProviderId
+        ? availableModels.filter(
+            (model) =>
+              !model.providerId ||
+              model.providerId === concreteSelectedProviderId,
+          )
+        : availableModels;
+      const defaultModel =
+        compatibleModels.find((model) => model.recommended) ??
+        compatibleModels[0];
+
+      if (!defaultModel) {
+        return null;
+      }
+
+      return {
+        id: defaultModel.id,
+        name: defaultModel.displayName ?? defaultModel.name ?? defaultModel.id,
+        providerId: defaultModel.providerId ?? selectedProvider,
+        source: defaultModel.recommended ? "default" : "explicit",
+      };
+    }, [availableModels, concreteSelectedProviderId, selectedProvider]);
+
   const effectiveModelSelection =
     pendingModelSelection !== undefined
       ? pendingModelSelection
-      : (sessionModelSelection ?? preferredModelSelection);
+      : (sessionModelSelection ??
+        preferredModelSelection ??
+        availableDefaultModelSelection);
 
   return {
     selectedAgentId,

@@ -328,6 +328,8 @@
     "searchModels": "Search models...",
     "settings": "Settings",
     "recommended": "Recommended",
+    "reasoningEffort": "Reasoning effort",
+    "reasoningEffortCurrent": "Reasoning effort: {{value}}",
     "noModelsAvailable": "No models available",
     "noSearchResults": "No matching models",
     "showAllModels": "Browse all models",

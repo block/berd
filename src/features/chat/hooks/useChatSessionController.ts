@@ -24,6 +24,7 @@ import {
   resolveProjectDefaultArtifactRoot,
 } from "@/features/projects/lib/chatProjectContext";
 import { setStoredModelPreference } from "../lib/modelPreferences";
+import { saveDefaultReasoningEffort } from "../lib/reasoningEffortPreferences";
 import { applyLatestSessionConfig } from "../lib/sessionConfigRequests";
 import {
   shouldAutoCompactContext,
@@ -34,6 +35,7 @@ import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { useResolvedAgentModelPicker } from "./useResolvedAgentModelPicker";
 import { composeBuilderSendOptions } from "./useBuilderSendInterceptor";
 import { moveSessionToProject } from "../stores/chatSessionOperations";
+import { acpSetSessionConfigOption } from "@/shared/api/acp";
 import { updateSessionProject } from "@/shared/api/acpApi";
 import { preSeedDraftAgent } from "@/features/agents/lib/agentBuilderSession";
 import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
@@ -235,6 +237,12 @@ export function useChatSessionController({
   const [pendingProviderId, setPendingProviderId] = useState<string>();
   const [pendingModelSelection, setPendingModelSelection] =
     useState<PreferredModelSelection | null>();
+  const pendingDefaultReasoningEffortBySessionRef = useRef<
+    Record<string, string>
+  >({});
+  const reasoningEffortDefaultSaveQueueRef = useRef<Promise<void>>(
+    Promise.resolve(),
+  );
   const pendingDraftValue = useChatStore(
     isHomeSession
       ? (s) => s.draftsBySession[PENDING_HOME_SESSION_ID] ?? ""
@@ -451,6 +459,7 @@ export function useChatSessionController({
         modelId: modelToApply.id,
         modelName: modelToApply.name,
       });
+      delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
     [
@@ -525,6 +534,7 @@ export function useChatSessionController({
         modelId: modelSelection.id,
         modelName: modelSelection.name,
       });
+      delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
       return true;
     },
     [activeWorkspace?.path, project, session?.workingDir, sessionId],
@@ -604,10 +614,13 @@ export function useChatSessionController({
         return;
       }
 
+      if (sessionId) {
+        delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
+      }
       useChatStore.getState().resetTokenState(stateSessionId);
       handleProviderChange(providerId);
     },
-    [handleProviderChange, selectedProvider, stateSessionId],
+    [handleProviderChange, selectedProvider, sessionId, stateSessionId],
   );
 
   const handleModelChangeWithContextReset = useCallback(
@@ -620,6 +633,9 @@ export function useChatSessionController({
       ) {
         return;
       }
+      if (sessionId) {
+        delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
+      }
       useChatStore.getState().resetTokenState(stateSessionId);
       handleModelChange(modelId, model);
     },
@@ -627,8 +643,51 @@ export function useChatSessionController({
       effectiveModelSelection?.id,
       effectiveModelSelection?.providerId,
       handleModelChange,
+      sessionId,
       stateSessionId,
     ],
+  );
+
+  useEffect(() => {
+    if (sessionId && !session?.reasoningEffort) {
+      delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
+    }
+  }, [session?.reasoningEffort, sessionId]);
+
+  const handleReasoningEffortChange = useCallback(
+    (value: string) => {
+      if (!sessionId || !session?.reasoningEffort) {
+        return;
+      }
+      const current = session.reasoningEffort;
+      if (current.currentValue === value) {
+        return;
+      }
+
+      useChatSessionStore.getState().patchSession(sessionId, {
+        reasoningEffort: {
+          ...current,
+          currentValue: value,
+        },
+      });
+      pendingDefaultReasoningEffortBySessionRef.current[sessionId] = value;
+
+      void acpSetSessionConfigOption(sessionId, current.configId, value).catch(
+        (error) => {
+          console.error("Failed to set reasoning effort:", error);
+          if (
+            pendingDefaultReasoningEffortBySessionRef.current[sessionId] ===
+            value
+          ) {
+            delete pendingDefaultReasoningEffortBySessionRef.current[sessionId];
+          }
+          useChatSessionStore.getState().patchSession(sessionId, {
+            reasoningEffort: current,
+          });
+        },
+      );
+    },
+    [session?.reasoningEffort, sessionId],
   );
 
   const handleProjectChange = useCallback(
@@ -786,6 +845,40 @@ export function useChatSessionController({
   const personaInfo = selectedPersona
     ? { id: selectedPersona.id, name: selectedPersona.displayName }
     : undefined;
+  const handleMessageAccepted = useCallback(
+    (acceptedSessionId: string) => {
+      onMessageAccepted?.(acceptedSessionId);
+      const pendingValue =
+        pendingDefaultReasoningEffortBySessionRef.current[acceptedSessionId];
+      if (!pendingValue) {
+        return;
+      }
+
+      const queuedSave = reasoningEffortDefaultSaveQueueRef.current
+        .catch(() => undefined)
+        .then(() => saveDefaultReasoningEffort(pendingValue));
+      reasoningEffortDefaultSaveQueueRef.current = queuedSave.catch(
+        () => undefined,
+      );
+
+      void queuedSave
+        .then(() => {
+          if (
+            pendingDefaultReasoningEffortBySessionRef.current[
+              acceptedSessionId
+            ] === pendingValue
+          ) {
+            delete pendingDefaultReasoningEffortBySessionRef.current[
+              acceptedSessionId
+            ];
+          }
+        })
+        .catch((error) => {
+          console.error("Failed to save default reasoning effort:", error);
+        });
+    },
+    [onMessageAccepted],
+  );
   const {
     messages,
     chatState,
@@ -801,7 +894,7 @@ export function useChatSessionController({
     effectiveSystemPrompt,
     personaInfo,
     {
-      onMessageAccepted: sessionId ? onMessageAccepted : undefined,
+      onMessageAccepted: sessionId ? handleMessageAccepted : undefined,
       ensurePrepared: selectedProvider
         ? () =>
             prepareCurrentSessionWithModel(
@@ -1357,7 +1450,12 @@ export function useChatSessionController({
       const patch: Partial<
         Pick<
           ChatSession,
-          "providerId" | "personaId" | "modelId" | "modelName" | "projectId"
+          | "providerId"
+          | "personaId"
+          | "modelId"
+          | "modelName"
+          | "projectId"
+          | "reasoningEffort"
         >
       > = {};
 
@@ -1365,11 +1463,13 @@ export function useChatSessionController({
         patch.providerId = nextProviderId;
         patch.modelId = undefined;
         patch.modelName = undefined;
+        patch.reasoningEffort = undefined;
       }
       if (homePendingModel?.id) {
         patch.providerId = homePendingProviderId;
         patch.modelId = homePendingModel.id;
         patch.modelName = homePendingModel.name;
+        patch.reasoningEffort = undefined;
       }
       if (hasPendingPersona) {
         patch.personaId = nextPersonaId;
@@ -1506,6 +1606,8 @@ export function useChatSessionController({
     modelStatusMessage,
     handleModelChange: handleModelChangeWithContextReset,
     handlePickerOpen,
+    reasoningEffort: session?.reasoningEffort,
+    handleReasoningEffortChange,
     selectedProjectId: effectiveProjectId,
     availableProjects,
     handleProjectChange,

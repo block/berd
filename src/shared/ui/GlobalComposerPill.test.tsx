@@ -642,6 +642,92 @@ describe("GlobalComposerPill", () => {
     expect(onSend).toHaveBeenCalledWith("Hello");
   });
 
+  it("sends the selected reasoning effort from the mini composer", async () => {
+    const user = userEvent.setup();
+    const onSend = renderGlobalComposer(vi.fn(), {
+      reasoningEffort: {
+        config: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [
+            { id: "low", name: "low" },
+            { id: "medium", name: "medium" },
+            { id: "high", name: "high" },
+          ],
+        },
+        onChange: vi.fn(),
+      },
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "Think hard");
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Think hard", {
+      reasoningEffort: {
+        configId: "thinking_effort",
+        value: "high",
+      },
+    });
+  });
+
+  it("omits stale reasoning effort after switching to a different local model", async () => {
+    const user = userEvent.setup();
+    mockGetModelsForAgent.mockImplementation((agentId: string) =>
+      agentId === "goose"
+        ? [
+            {
+              id: "gpt-5",
+              name: "GPT 5",
+              providerId: "openai",
+              providerName: "OpenAI",
+              recommended: true,
+            },
+            {
+              id: "claude-sonnet-4",
+              name: "Claude Sonnet 4",
+              displayName: "Claude Sonnet 4",
+              providerId: "anthropic",
+              providerName: "Anthropic",
+              recommended: true,
+            },
+          ]
+        : [],
+    );
+    const onSend = renderGlobalComposer(vi.fn(), {
+      reasoningEffort: {
+        config: {
+          configId: "thinking_effort",
+          currentValue: "high",
+          options: [
+            { id: "low", name: "low" },
+            { id: "medium", name: "medium" },
+            { id: "high", name: "high" },
+          ],
+        },
+        onChange: vi.fn(),
+      },
+      reasoningEffortModelSelection: {
+        providerId: "openai",
+        modelId: "gpt-5",
+      },
+    });
+
+    await user.click(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"), "Use Sonnet");
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await user.click(screen.getByRole("button", { name: "Claude Sonnet 4" }));
+    await user.click(screen.getByRole("button", { name: /send message/i }));
+
+    expect(onSend).toHaveBeenCalledWith("Use Sonnet", {
+      providerId: "anthropic",
+      modelId: "claude-sonnet-4",
+      modelName: "Claude Sonnet 4",
+    });
+  });
+
   it("attaches an image through the picker and sends it without text", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();

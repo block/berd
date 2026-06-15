@@ -10,6 +10,7 @@ import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
 import { getClient } from "./acpConnection";
+import { applySessionConfigOptionsSnapshot } from "./acpNotificationHandler";
 import { perfLog } from "@/shared/lib/perfLog";
 
 export interface AcpProvider {
@@ -150,13 +151,34 @@ export async function setModel(
   const tClient = performance.now();
   const client = await getClient();
   const tCall = performance.now();
-  await client.setSessionConfigOption({
+  const response = await client.setSessionConfigOption({
     sessionId,
     configId: "model",
     value: modelId,
   });
+  applySessionConfigOptionsSnapshot(sessionId, response);
   perfLog(
     `[perf:api] ${sid} setModel(${modelId}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
+  );
+}
+
+export async function setSessionConfigOption(
+  sessionId: string,
+  configId: string,
+  value: string,
+): Promise<void> {
+  const sid = sessionId.slice(0, 8);
+  const tClient = performance.now();
+  const client = await getClient();
+  const tCall = performance.now();
+  const response = await client.setSessionConfigOption({
+    sessionId,
+    configId,
+    value,
+  });
+  applySessionConfigOptionsSnapshot(sessionId, response);
+  perfLog(
+    `[perf:api] ${sid} setSessionConfigOption(${configId}=${value}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );
 }
 
@@ -169,11 +191,12 @@ export async function setProvider(
   const client = await getClient();
   const wireProvider = toWireProviderId(providerId);
   const tCall = performance.now();
-  await client.setSessionConfigOption({
+  const response = await client.setSessionConfigOption({
     sessionId,
     configId: "provider",
     value: wireProvider,
   });
+  applySessionConfigOptionsSnapshot(sessionId, response);
   perfLog(
     `[perf:api] ${sid} setProvider(${providerId}→${wireProvider}) getClient=${(tCall - tClient).toFixed(1)}ms wire=${(performance.now() - tCall).toFixed(1)}ms`,
   );

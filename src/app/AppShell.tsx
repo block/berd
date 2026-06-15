@@ -107,7 +107,7 @@ import {
   GlobalComposerPill,
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
-import { acpCreateSession } from "@/shared/api/acp";
+import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { findMissingProjectDirs } from "@/features/projects/lib/missingProjectDirs";
 import {
@@ -1453,6 +1453,37 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     ],
   );
 
+  const handleGlobalComposerReasoningEffortChange = useCallback(
+    (value: string) => {
+      if (!homeSessionId || !homeSession?.reasoningEffort) {
+        return;
+      }
+      const current = homeSession.reasoningEffort;
+      if (current.currentValue === value) {
+        return;
+      }
+
+      patchSession(homeSessionId, {
+        reasoningEffort: {
+          ...current,
+          currentValue: value,
+        },
+      });
+
+      void acpSetSessionConfigOption(
+        homeSessionId,
+        current.configId,
+        value,
+      ).catch((error) => {
+        console.error("Failed to set Home reasoning effort:", error);
+        patchSession(homeSessionId, {
+          reasoningEffort: current,
+        });
+      });
+    },
+    [homeSession?.reasoningEffort, homeSessionId, patchSession],
+  );
+
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
       guardAppNavigation(() => {
@@ -1469,7 +1500,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
         void createChat
-          .then((session) => {
+          .then(async (session) => {
             if (options?.providerId || options?.modelId) {
               patchSession(session.id, {
                 ...(options.providerId
@@ -1485,6 +1516,20 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
             }
             if (options?.personaId) {
               patchSession(session.id, { personaId: options.personaId });
+            }
+            if (options?.reasoningEffort) {
+              try {
+                await acpSetSessionConfigOption(
+                  session.id,
+                  options.reasoningEffort.configId,
+                  options.reasoningEffort.value,
+                );
+              } catch (error) {
+                console.error(
+                  "Failed to apply reasoning effort from global composer:",
+                  error,
+                );
+              }
             }
             useChatStore.getState().enqueueMessage(session.id, {
               text,
@@ -2587,6 +2632,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               <GlobalComposerPill
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
+                reasoningEffort={{
+                  config: homeSession?.reasoningEffort,
+                  onChange: handleGlobalComposerReasoningEffortChange,
+                }}
+                reasoningEffortModelSelection={{
+                  providerId: homeSession?.providerId,
+                  modelId: homeSession?.modelId,
+                }}
                 suggestedPersonaId={
                   activeView === "agents" ? agentsPersonaId : null
                 }

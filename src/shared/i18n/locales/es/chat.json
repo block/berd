@@ -326,6 +326,8 @@
     "searchModels": "Buscar modelos...",
     "settings": "Configuración",
     "recommended": "Recomendados",
+    "reasoningEffort": "Esfuerzo de razonamiento",
+    "reasoningEffortCurrent": "Esfuerzo de razonamiento: {{value}}",
     "noModelsAvailable": "No hay modelos disponibles",
     "noSearchResults": "Sin resultados",
     "showAllModels": "Ver todos los modelos",

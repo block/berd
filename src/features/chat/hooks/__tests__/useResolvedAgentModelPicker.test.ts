@@ -190,7 +190,7 @@ describe("useResolvedAgentModelPicker", () => {
     expect(setPendingModelSelection).toHaveBeenCalledWith(undefined);
   });
 
-  it("drops Goose fallback models that are incompatible with a concrete provider", () => {
+  it("uses a compatible available model when Goose fallback models do not match a concrete provider", () => {
     window.localStorage.setItem(
       "goose:preferredModelsByAgent",
       JSON.stringify({
@@ -257,7 +257,70 @@ describe("useResolvedAgentModelPicker", () => {
       }),
     );
 
-    expect(result.current.effectiveModelSelection).toBeNull();
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "gpt-5.4",
+      name: "GPT-5.4",
+      providerId: "openai",
+      source: "explicit",
+    });
+  });
+
+  it("uses the recommended agent harness model when no saved model exists", () => {
+    mockUseAgentModelPickerState.mockImplementation(() => ({
+      pickerAgents: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      availableModels: [
+        {
+          id: "gpt-5.4-mini",
+          name: "GPT Mini 5.4",
+          providerId: "codex-acp",
+        },
+        {
+          id: "gpt-5.5",
+          name: "GPT 5.5",
+          providerId: "codex-acp",
+          recommended: true,
+        },
+      ],
+      modelsLoading: false,
+      modelStatusMessage: null,
+      handleProviderChange: vi.fn(),
+      handleModelChange: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useResolvedAgentModelPicker({
+        providers: [
+          { id: "goose", label: "Goose" },
+          { id: "codex-acp", label: "Codex" },
+        ],
+        selectedProvider: "codex-acp",
+        sessionId: "session-1",
+        session: {
+          id: "session-1",
+          title: "Chat",
+          providerId: "codex-acp",
+          createdAt: "2026-04-21T00:00:00.000Z",
+          updatedAt: "2026-04-21T00:00:00.000Z",
+          messageCount: 0,
+        },
+        pendingModelSelection: undefined,
+        setPendingProviderId: vi.fn(),
+        setPendingModelSelection: vi.fn(),
+        setGlobalSelectedProvider: vi.fn(),
+        prepareSelectedProvider: vi.fn(),
+        applySessionModelSelection: vi.fn().mockResolvedValue(true),
+      }),
+    );
+
+    expect(result.current.effectiveModelSelection).toEqual({
+      id: "gpt-5.5",
+      name: "GPT 5.5",
+      providerId: "codex-acp",
+      source: "default",
+    });
   });
 
   it("enforces concrete provider compatibility before catalog loads", () => {

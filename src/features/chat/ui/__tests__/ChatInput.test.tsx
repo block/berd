@@ -1838,6 +1838,97 @@ describe("ChatInput", () => {
     expect(screen.getByRole("button", { name: "Listening..." })).toBeEnabled();
   });
 
+  it("shows and updates reasoning effort from the model picker", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [],
+        }}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "medium",
+            options: [
+              { id: "off", name: "off" },
+              { id: "medium", name: "medium" },
+              { id: "high", name: "high" },
+            ],
+          },
+          onChange,
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const pickerTrigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(pickerTrigger).toHaveTextContent("Medium");
+
+    await user.click(pickerTrigger);
+    await user.click(screen.getByRole("button", { name: "High" }));
+
+    expect(onChange).toHaveBeenCalledWith("high");
+  });
+
+  it("hides reasoning effort when there is only one available value", () => {
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [],
+        }}
+        reasoningEffort={{
+          config: {
+            configId: "thinking_effort",
+            currentValue: "off",
+            options: [{ id: "off", name: "off" }],
+          },
+          onChange: vi.fn(),
+        }}
+        projectPicker={{
+          selectedProjectId: null,
+          availableProjects: [],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    ).not.toHaveTextContent("Off");
+  });
+
   it("keeps the selected assistant chip after sending subsequent messages", async () => {
     const onSend = vi.fn();
     const user = userEvent.setup();

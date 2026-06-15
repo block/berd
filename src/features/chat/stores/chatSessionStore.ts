@@ -31,6 +31,7 @@ export interface ChatSession {
   personaId?: string;
   modelId?: string;
   modelName?: string;
+  reasoningEffort?: ChatSessionReasoningEffortConfig;
   workingDir?: string | null;
   createdAt: string;
   updatedAt: string;
@@ -46,6 +47,17 @@ export interface ChatSession {
   intent?: "build-agent" | null;
   targetAgentPath?: string | null;
   targetAgentSlug?: string | null;
+}
+
+export interface ChatSessionReasoningEffortOption {
+  id: string;
+  name: string;
+}
+
+export interface ChatSessionReasoningEffortConfig {
+  configId: string;
+  currentValue: string;
+  options: ChatSessionReasoningEffortOption[];
 }
 
 export interface ActiveWorkspace {
@@ -614,6 +626,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
                 providerId,
                 modelId: undefined,
                 modelName: undefined,
+                reasoningEffort: undefined,
                 updatedAt: session.updatedAt,
               }
             : session,
