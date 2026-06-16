@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mock CDP. Identity is stamped per-event via the envelope `overrides`, so the
 // client only needs `trackWithSchema`; there is no `user`/`_identify` to model.
 const trackWithSchema = vi.fn();
+const desktopPageContext = {
+  path: "",
+  referrer: "",
+  search: "",
+  title: "Goose Internal",
+  url: "",
+};
 
 vi.mock("@squareup/cdp", () => ({
   CDP: vi.fn(function CDPMock() {
@@ -113,6 +120,7 @@ describe("telemetry", () => {
         producer: "goose-internal",
       },
     });
+    expect(options.page).toEqual(desktopPageContext);
     expect(options.overrides.entityId).toBe("someone@squareup.com");
     expect(options.overrides.entityType).toBe("SQUARE_EMPLOYEE");
   });
@@ -303,6 +311,7 @@ describe("telemetry", () => {
           },
         },
         options: {
+          page: desktopPageContext,
           overrides: {
             entityId: "",
             entityType: "ANON_VISITOR",
@@ -336,6 +345,7 @@ describe("telemetry", () => {
           },
         },
         options: {
+          page: desktopPageContext,
           overrides: {
             entityId: "",
             entityType: "ANON_VISITOR",

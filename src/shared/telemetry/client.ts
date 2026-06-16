@@ -28,6 +28,7 @@
  */
 
 import { CDP, EntityTypes } from "@squareup/cdp";
+import type { Options, TrackSchemaMessageProps } from "@squareup/cdp";
 import {
   type Event,
   GooseInternalAppFeedbackInitiated,
@@ -47,9 +48,18 @@ import {
 import { IdentityProvider, type ResolvedIdentity } from "./identity";
 import { installTelemetryTransportBridge } from "./transport";
 
-// Injected from package.json by vite.config.ts (`import.meta.env.VITE_APP_VERSION`).
+// Injected by vite.config.ts from VITE_APP_VERSION, falling back to package.json.
 const appVersion = import.meta.env.VITE_APP_VERSION ?? "0.0.0";
 const TELEMETRY_DEBUG_STORAGE_KEY = "goose.telemetry.debug";
+type TrackSchemaOptions = Options<TrackSchemaMessageProps>;
+
+export const TELEMETRY_DESKTOP_PAGE_CONTEXT: Record<string, string> = {
+  path: "",
+  referrer: "",
+  search: "",
+  title: "Goose Internal",
+  url: "",
+};
 
 const client = new CDP({
   application: {
@@ -105,6 +115,15 @@ function telemetryUserId(): string {
   return resolvedIdentity?.email ?? "";
 }
 
+function trackOptions(
+  overrides: TrackSchemaOptions["overrides"],
+): TrackSchemaOptions {
+  return {
+    page: TELEMETRY_DESKTOP_PAGE_CONTEXT,
+    overrides,
+  };
+}
+
 // Pre-identity buffer: holds events emitted before whoami settles. Bounded in
 // size and time so it can neither leak nor delay forever; events are flushed
 // (backdated) once identity settles, or as anonymous on timeout, but never
@@ -131,7 +150,7 @@ function emit(createEvent: () => Event, timestamp?: string): void {
   const overrides = timestamp
     ? { ...entityOverrides(), originalTimestamp: timestamp, timestamp }
     : entityOverrides();
-  client.trackWithSchema(event, { overrides });
+  client.trackWithSchema(event, trackOptions(overrides));
 }
 
 function logDebugEvent(createEvent: () => Event): void {
@@ -141,7 +160,7 @@ function logDebugEvent(createEvent: () => Event): void {
     const event = createEvent();
     console.info("[telemetry:debug] event suppressed", {
       event,
-      options: { overrides: entityOverrides() },
+      options: trackOptions(entityOverrides()),
     });
   } catch {
     // Debug logging must never affect app behavior.

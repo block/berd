@@ -68,6 +68,7 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
 # publish-updater.sh.
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
+VITE_APP_VERSION="$RELEASE_VERSION" \
 VITE_ENVIRONMENT=production \
 VITE_UPDATER_ENABLED=true \
   pnpm tauri build --no-sign --target aarch64-apple-darwin \

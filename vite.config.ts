@@ -29,9 +29,13 @@ function resolveBuildEnvironment(): BuildEnvironment {
   return environment as BuildEnvironment;
 }
 
+function resolveAppVersion(): string {
+  return process.env.VITE_APP_VERSION?.trim() || packageJson.version;
+}
+
 export default defineConfig(async ({ command }) => {
   const define: Record<string, string> = {
-    "import.meta.env.VITE_APP_VERSION": JSON.stringify(packageJson.version),
+    "import.meta.env.VITE_APP_VERSION": JSON.stringify(resolveAppVersion()),
   };
 
   // Generic builds must stay telemetry-inert unless a release/staging path
