@@ -262,6 +262,7 @@
     "chooseAssistant": "Choose assistant",
     "create": "Create agent...",
     "clearActive": "Clear active assistant",
+    "removeSelected": "Remove {{agent}} agent",
     "defaultDescription": "No agent selected - chat directly with Goose"
   },
   "skill": {

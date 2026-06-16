@@ -574,7 +574,7 @@ describe("GlobalComposerPill", () => {
     });
 
     await user.click(
-      screen.getByRole("button", { name: /clear active assistant/i }),
+      screen.getByRole("button", { name: /remove research scout agent/i }),
     );
     await user.type(screen.getByRole("textbox"), "Hello");
     await user.click(screen.getByRole("button", { name: /send message/i }));
@@ -590,7 +590,7 @@ describe("GlobalComposerPill", () => {
     );
 
     await user.click(
-      screen.getByRole("button", { name: /clear active assistant/i }),
+      screen.getByRole("button", { name: /remove research scout agent/i }),
     );
     rerender(
       <GlobalComposerPill onSend={vi.fn()} suggestedPersonaId="persona-1" />,

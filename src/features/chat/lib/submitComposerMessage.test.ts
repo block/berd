@@ -83,4 +83,57 @@ describe("submitComposerMessage", () => {
       assistantPrompt: "Use these skills for this request: code-review.",
     });
   });
+
+  it("sends visible agent chips without changing the message text", async () => {
+    const onSend = vi.fn().mockReturnValue(true);
+
+    await submitComposerMessage({
+      text: " ask both agents ",
+      attachments: [],
+      skills: [],
+      chips: [
+        { label: "Reviewer", type: "agent" },
+        { label: "Solo", type: "agent" },
+      ],
+      selectedPersonaId: "solo",
+      onSend,
+      resolveSkillSlashCommand: () => null,
+      resolveAutoSkill: () => null,
+    });
+
+    expect(onSend).toHaveBeenCalledWith("ask both agents", "solo", undefined, {
+      chips: [
+        { label: "Reviewer", type: "agent" },
+        { label: "Solo", type: "agent" },
+      ],
+    });
+  });
+
+  it("keeps selected agent chips when skill chips are also present", async () => {
+    const onSend = vi.fn().mockReturnValue(true);
+
+    await submitComposerMessage({
+      text: "review this",
+      attachments: [],
+      skills: [{ id: "global:/skills/code-review", name: "code-review" }],
+      chips: [
+        { label: "Reviewer", type: "agent" },
+        { label: "Solo", type: "agent" },
+      ],
+      selectedPersonaId: "solo",
+      onSend,
+      resolveSkillSlashCommand: () => null,
+      resolveAutoSkill: () => gooseHelpSkill,
+    });
+
+    expect(onSend).toHaveBeenCalledWith("review this", "solo", undefined, {
+      chips: [
+        { label: "Reviewer", type: "agent" },
+        { label: "Solo", type: "agent" },
+        { label: "code-review", type: "skill" },
+      ],
+      displayText: "review this",
+      assistantPrompt: "Use these skills for this request: code-review.",
+    });
+  });
 });

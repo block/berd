@@ -29,6 +29,7 @@ interface MentionHandlersOptions {
   setText: (value: string) => void;
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   onPersonaChange?: ((id: string | null) => void) | undefined;
+  onPersonaMentionSelect?: (persona: Persona) => void;
   onSkillMentionSelect?: (skill: SkillMentionItem) => void;
   onFileMentionSelect?: (file: FileMentionItem) => void;
 }
@@ -335,6 +336,7 @@ export function useMentionHandlers({
   setText,
   textareaRef,
   onPersonaChange,
+  onPersonaMentionSelect,
   onSkillMentionSelect,
   onFileMentionSelect,
 }: MentionHandlersOptions) {
@@ -631,6 +633,7 @@ export function useMentionHandlers({
       pendingCursorRef.current = cursorPosition;
       setText(newText);
       closeMention();
+      onPersonaMentionSelect?.(persona);
       onPersonaChange?.(persona.id);
     },
     [
@@ -638,6 +641,7 @@ export function useMentionHandlers({
       mentionStartIndex,
       mentionQuery,
       closeMention,
+      onPersonaMentionSelect,
       onPersonaChange,
       setText,
     ],

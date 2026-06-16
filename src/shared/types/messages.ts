@@ -215,8 +215,10 @@ export interface MessageAttachment {
 }
 
 export interface MessageChip {
+  id?: string;
   label: string;
-  type: "skill" | "extension" | "recipe";
+  agentRole?: "active" | "mentioned";
+  type: "agent" | "skill" | "extension" | "recipe";
 }
 
 export interface MessageMetadata {

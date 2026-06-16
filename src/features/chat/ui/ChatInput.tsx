@@ -15,7 +15,7 @@ import {
   skillDraftSnapshotsMatch,
 } from "../lib/chatInputSnapshots";
 import {
-  getChatInputAgentLabel,
+  getChatInputAgentGroupLabel,
   getChatInputPlaceholder,
 } from "../lib/chatInputPlaceholder";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
@@ -45,6 +45,8 @@ import {
   getStreamingShortcutAction,
   useStreamingShortcutPreference,
 } from "../lib/streamingShortcutPreference";
+import type { MessageChip } from "@/shared/types/messages";
+import type { Persona } from "@/shared/types/agents";
 
 export function ChatInput({
   composerActions,
@@ -132,6 +134,7 @@ export function ChatInput({
   const [internalSelectedSkills, setInternalSelectedSkills] = useState<
     ChatSkillDraft[]
   >([]);
+  const [mentionedPersonas, setMentionedPersonas] = useState<Persona[]>([]);
   const selectedSkills = selectedSkillsProp ?? internalSelectedSkills;
   const visibleSelectedSkills = scopedControls.skills ? selectedSkills : [];
   const setSelectedSkills = scopedControls.skills
@@ -275,6 +278,50 @@ export function ChatInput({
   const effectiveFileMentionRoots =
     fileMentionRoots ?? selectedProject?.workingDirs;
   const stickyPersona = activePersona;
+  const selectedPersonasForChips = useMemo(
+    () =>
+      mentionedPersonas.length > 0
+        ? mentionedPersonas
+        : stickyPersona
+          ? [stickyPersona]
+          : [],
+    [mentionedPersonas, stickyPersona],
+  );
+  const selectedMessageChips = useMemo<MessageChip[]>(
+    () =>
+      selectedPersonasForChips.map((persona) => ({
+        id: persona.id,
+        label: persona.displayName,
+        agentRole: persona.id === selectedPersonaId ? "active" : "mentioned",
+        type: "agent",
+      })),
+    [selectedPersonaId, selectedPersonasForChips],
+  );
+  const selectedMessageChipsRef = useRef(selectedMessageChips);
+  selectedMessageChipsRef.current = selectedMessageChips;
+
+  useEffect(() => {
+    if (!selectedPersonaId) {
+      setMentionedPersonas([]);
+      return;
+    }
+
+    setMentionedPersonas((current) =>
+      current.length > 0 &&
+      !current.some((persona) => persona.id === selectedPersonaId)
+        ? []
+        : current,
+    );
+  }, [selectedPersonaId]);
+
+  const handlePersonaMentionAdded = useCallback((persona: Persona) => {
+    setMentionedPersonas((current) => {
+      if (current.some((selected) => selected.id === persona.id)) {
+        return current;
+      }
+      return [...current, persona];
+    });
+  }, []);
 
   const canSend = canQueueMessage;
 
@@ -320,6 +367,7 @@ export function ChatInput({
     setText,
     textareaRef,
     onPersonaChange,
+    onPersonaMentionSelect: handlePersonaMentionAdded,
     onSkillMentionSelect: handleSkillMentionAdded,
     onFileMentionSelect: scopedControls.attachments
       ? handleFileMentionAttachmentSelect
@@ -373,6 +421,7 @@ export function ChatInput({
   const { submitChatInputMessage, handleVoiceAutoSubmit } = useChatInputSubmit({
     attachmentsRef,
     selectedSkillsRef,
+    selectedChipsRef: selectedMessageChipsRef,
     selectedPersonaId,
     onSend,
     setSelectedSkills,
@@ -704,9 +753,13 @@ export function ChatInput({
   const providerDisplayName =
     providers.find((provider) => provider.id === selectedProvider)?.label ??
     formatProviderLabel(selectedProvider);
-  const agentDisplayName = getChatInputAgentLabel(
-    activePersona?.displayName,
+  const agentDisplayName = getChatInputAgentGroupLabel(
+    selectedPersonasForChips.map((persona) => ({
+      id: persona.id,
+      displayName: persona.displayName,
+    })),
     providerDisplayName,
+    selectedPersonasForChips.length > 1 ? activePersona?.id : null,
   );
   const resolvedCurrentModel = useMemo(() => {
     return (
@@ -742,9 +795,23 @@ export function ChatInput({
     setDismissedAgentToolsTipId(null);
   }
 
-  const handleClearStickyPersona = useCallback(() => {
-    onPersonaChange?.(null);
-  }, [onPersonaChange]);
+  const handleRemovePersona = useCallback(
+    (personaId: string) => {
+      setMentionedPersonas((current) => {
+        if (current.length === 0) {
+          onPersonaChange?.(null);
+          return current;
+        }
+
+        const next = current.filter((persona) => persona.id !== personaId);
+        if (personaId === selectedPersonaId) {
+          onPersonaChange?.(next.at(-1)?.id ?? null);
+        }
+        return next;
+      });
+    },
+    [onPersonaChange, selectedPersonaId],
+  );
 
   const handleRemoveSkill = useCallback(
     (skillId: string) => {
@@ -851,9 +918,10 @@ export function ChatInput({
               />
 
               <ChatInputSelectionChips
-                persona={stickyPersona}
+                personas={selectedPersonasForChips}
+                activePersonaId={selectedPersonaId}
                 skills={visibleSelectedSkills}
-                onClearPersona={handleClearStickyPersona}
+                onRemovePersona={handleRemovePersona}
                 onRemoveSkill={handleRemoveSkill}
               />
 

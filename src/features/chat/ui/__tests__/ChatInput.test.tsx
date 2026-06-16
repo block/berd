@@ -756,6 +756,100 @@ describe("ChatInput", () => {
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 
+  it("sends the selected sticky persona as one visible agent chip", async () => {
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<StatefulChatInput onSend={onSend} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "check this");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "check this",
+      "builtin-solo",
+      undefined,
+      {
+        chips: [
+          {
+            id: "builtin-solo",
+            label: "Solo",
+            agentRole: "active",
+            type: "agent",
+          },
+        ],
+      },
+    );
+  });
+
+  it("sends a single persona @mention as one visible agent chip", async () => {
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<StatefulChatInput onSend={onSend} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@Rev");
+    await user.click(screen.getByRole("option", { name: /reviewer/i }));
+    await user.type(input, "check this");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith("check this", "reviewer", undefined, {
+      chips: [
+        {
+          id: "reviewer",
+          label: "Reviewer",
+          agentRole: "active",
+          type: "agent",
+        },
+      ],
+    });
+  });
+
+  it("keeps multiple persona @mentions as visible agent chips", async () => {
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+    render(<StatefulChatInput onSend={onSend} />);
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "@Rev");
+    await user.click(screen.getByRole("option", { name: /reviewer/i }));
+    await user.type(input, "@Sol");
+    await user.click(screen.getByRole("option", { name: /solo/i }));
+
+    expect(screen.getByText("@Reviewer")).toBeInTheDocument();
+    expect(screen.getByText("Solo")).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText(
+        "Chat with Solo (can summon Reviewer), @ for agents/files, or / for skills",
+      ),
+    ).toBeInTheDocument();
+
+    await user.type(input, "compare these approaches");
+    await user.keyboard("{Enter}");
+
+    expect(onSend).toHaveBeenCalledWith(
+      "compare these approaches",
+      "builtin-solo",
+      undefined,
+      {
+        chips: [
+          {
+            id: "reviewer",
+            label: "Reviewer",
+            agentRole: "mentioned",
+            type: "agent",
+          },
+          {
+            id: "builtin-solo",
+            label: "Solo",
+            agentRole: "active",
+            type: "agent",
+          },
+        ],
+      },
+    );
+  });
+
   it("switches @ mention tabs with left and right arrows", async () => {
     const user = userEvent.setup();
     renderProjectChatInput();
@@ -1942,7 +2036,16 @@ describe("ChatInput", () => {
     await user.type(input, "hello");
     await user.keyboard("{Enter}");
 
-    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined);
+    expect(onSend).toHaveBeenCalledWith("hello", "reviewer", undefined, {
+      chips: [
+        {
+          id: "reviewer",
+          label: "Reviewer",
+          agentRole: "active",
+          type: "agent",
+        },
+      ],
+    });
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
   });
 

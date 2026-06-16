@@ -34,6 +34,7 @@ const mockPickerState = {
     name: string;
     displayName?: string;
     providerId?: string;
+    recommended?: boolean;
   }>,
   modelsLoading: false,
   modelStatusMessage: null as string | null,
@@ -95,7 +96,7 @@ vi.mock("../useChat", () => ({
     _systemPromptOverride?: string,
     _personaInfo?: { id: string; name: string },
     options?: {
-      ensurePrepared?: () => Promise<boolean | undefined>;
+      ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
       onMessageAccepted?: (sessionId: string) => void;
     },
   ) => {
@@ -207,7 +208,7 @@ describe("useChatSessionController", () => {
     window.localStorage.clear();
     mockUseChatSendMessage.mockImplementation(
       async (options?: {
-        ensurePrepared?: () => Promise<boolean | undefined>;
+        ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
         onMessageAccepted?: (sessionId: string) => void;
         __sessionId?: string;
       }) => {
@@ -1412,6 +1413,50 @@ describe("useChatSessionController", () => {
         "goose",
         "/tmp/project",
       );
+      expect(mockAcpSetModel).toHaveBeenCalledWith(
+        "session-1",
+        "goose-claude-opus-4-8",
+      );
+    });
+  });
+
+  it("falls back when a selected persona's saved model is no longer available", async () => {
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "goose",
+          model: "goose-claude-fable-5",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "goose-claude-opus-4-8",
+        displayName: "Claude Opus 4.8",
+        providerId: "goose",
+        recommended: true,
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handlePersonaChange("persona-1");
+    });
+
+    await waitFor(() => {
+      expect(result.current.currentModelId).toBe("goose-claude-opus-4-8");
+    });
+    expect(result.current.currentModelName).toBe("Claude Opus 4.8");
+    await waitFor(() => {
       expect(mockAcpSetModel).toHaveBeenCalledWith(
         "session-1",
         "goose-claude-opus-4-8",

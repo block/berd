@@ -798,9 +798,10 @@ export function GlobalComposerPill({
       {(selectedPersona || selectedSkills.length > 0) && (
         <div className="px-2">
           <ChatInputSelectionChips
-            persona={selectedPersona}
+            personas={selectedPersona ? [selectedPersona] : []}
+            activePersonaId={selectedPersona?.id ?? null}
             skills={selectedSkills}
-            onClearPersona={() => handlePersonaChange(null)}
+            onRemovePersona={() => handlePersonaChange(null)}
             onRemoveSkill={handleRemoveSelectedSkill}
           />
         </div>

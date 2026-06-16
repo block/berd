@@ -40,6 +40,7 @@ import { updateSessionProject } from "@/shared/api/acpApi";
 import { preSeedDraftAgent } from "@/features/agents/lib/agentBuilderSession";
 import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { deletePersonaSource } from "@/shared/api/agents";
+import type { Persona } from "@/shared/types/agents";
 import {
   ensureAgentBuilderSkillDraft,
   hasAgentBuilderSkillDraft,
@@ -84,6 +85,14 @@ type SessionCwdProject = Parameters<typeof resolveSessionCwd>[0];
 type ProviderCatalogEntries = Parameters<
   typeof resolveAgentProviderCatalogIdStrictFromEntries
 >[0];
+
+function chooseFallbackModel(models: ModelOption[]): ModelOption | undefined {
+  return (
+    models.find((model) => model.recommended) ??
+    models.find((model) => model.featured) ??
+    models[0]
+  );
+}
 
 interface PendingHomeModelSyncArgs {
   sessionId: string;
@@ -577,6 +586,102 @@ export function useChatSessionController({
     prepareSelectedProvider,
     applySessionModelSelection,
   });
+  const resolvePersonaModelSelection = useCallback(
+    (
+      persona: Persona,
+      providerId: string,
+    ): PreferredModelSelection | undefined => {
+      const providerModels = availableModels.filter(
+        (model) => !model.providerId || model.providerId === providerId,
+      );
+      const savedModel = persona.model
+        ? providerModels.find((model) => model.id === persona.model)
+        : undefined;
+      const model = savedModel ?? chooseFallbackModel(providerModels);
+      if (!model) {
+        return undefined;
+      }
+
+      return {
+        id: model.id,
+        name: model.displayName ?? model.name,
+        providerId,
+        source: savedModel ? "explicit" : "default",
+      };
+    },
+    [availableModels],
+  );
+  const prepareSessionForPersona = useCallback(
+    async (personaId?: string) => {
+      const persona = personaId
+        ? useAgentStore.getState().getPersonaById(personaId)
+        : undefined;
+      if (!persona?.provider) {
+        return selectedProvider
+          ? prepareCurrentSessionWithModel(
+              selectedProvider,
+              project,
+              activeWorkspace?.path,
+            )
+          : undefined;
+      }
+
+      const matchingProvider = resolvePersonaProvider(persona, providers);
+      if (!matchingProvider) {
+        return selectedProvider
+          ? prepareCurrentSessionWithModel(
+              selectedProvider,
+              project,
+              activeWorkspace?.path,
+            )
+          : undefined;
+      }
+
+      const personaModelSelection = resolvePersonaModelSelection(
+        persona,
+        matchingProvider.id,
+      );
+      if (!personaModelSelection) {
+        return prepareCurrentSession(
+          matchingProvider.id,
+          project,
+          activeWorkspace?.path,
+        );
+      }
+
+      const workingDir = await resolveSessionCwd(
+        project,
+        activeWorkspace?.path,
+      );
+      const result = await applyLatestSessionConfig({
+        sessionId: stateSessionId,
+        providerId: matchingProvider.id,
+        workingDir,
+        modelId: personaModelSelection.id,
+      });
+      if (!result.applied) {
+        return result.applied;
+      }
+
+      useChatSessionStore.getState().patchSession(stateSessionId, {
+        workingDir,
+        providerId: matchingProvider.id,
+        modelId: personaModelSelection.id,
+        modelName: personaModelSelection.name,
+      });
+      return true;
+    },
+    [
+      activeWorkspace?.path,
+      prepareCurrentSession,
+      prepareCurrentSessionWithModel,
+      project,
+      providers,
+      resolvePersonaModelSelection,
+      selectedProvider,
+      stateSessionId,
+    ],
+  );
 
   const prevWorkspaceRef = useRef(activeWorkspace);
   useEffect(() => {
@@ -717,15 +822,10 @@ export function useChatSessionController({
       if (persona?.provider) {
         const matchingProvider = resolvePersonaProvider(persona, providers);
         if (matchingProvider) {
-          const personaModelSelection: PreferredModelSelection | undefined =
-            persona.model
-              ? {
-                  id: persona.model,
-                  name: persona.model,
-                  providerId: matchingProvider.id,
-                  source: "explicit",
-                }
-              : undefined;
+          const personaModelSelection = resolvePersonaModelSelection(
+            persona,
+            matchingProvider.id,
+          );
 
           if (!sessionId) {
             setPendingProviderId(matchingProvider.id);
@@ -817,6 +917,7 @@ export function useChatSessionController({
       personas,
       prepareSelectedProvider,
       providers,
+      resolvePersonaModelSelection,
       session?.modelId,
       session?.modelName,
       session?.providerId,
@@ -895,14 +996,7 @@ export function useChatSessionController({
     personaInfo,
     {
       onMessageAccepted: sessionId ? handleMessageAccepted : undefined,
-      ensurePrepared: selectedProvider
-        ? () =>
-            prepareCurrentSessionWithModel(
-              selectedProvider,
-              project,
-              activeWorkspace?.path,
-            )
-        : undefined,
+      ensurePrepared: prepareSessionForPersona,
     },
   );
   const resolvedTokenState = tokenState ?? INITIAL_TOKEN_STATE;

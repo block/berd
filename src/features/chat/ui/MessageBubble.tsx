@@ -661,7 +661,7 @@ export const MessageBubble = memo(function MessageBubble({
             <div className="mb-1.5 flex flex-wrap gap-1.5">
               {messageChips.map((chip) => (
                 <MessageMetadataChip
-                  key={`${chip.type}-${chip.label}`}
+                  key={`${chip.type}-${chip.id ?? chip.label}`}
                   chip={chip}
                 />
               ))}
