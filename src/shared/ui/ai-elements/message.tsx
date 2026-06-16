@@ -10,6 +10,7 @@ import { isExternalHref } from "@/shared/lib/isExternalHref";
 import { LinkSafetyModal } from "@/shared/ui/ai-elements/link-safety-modal";
 import { cn } from "@/shared/lib/cn";
 import { useVirtualLayoutPendingForStreamdown } from "@/features/chat/transcript/measurement";
+import { useStreamdownTableScrollbarSizing } from "@/shared/ui/ai-elements/streamdown-table-scrollbar";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
@@ -30,6 +31,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Streamdown, type CustomRenderer } from "streamdown";
@@ -446,6 +448,7 @@ export const MessageResponse = memo(
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
+    const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
       contentKey: children,
       isAnimating,
@@ -453,6 +456,7 @@ export const MessageResponse = memo(
       onAnimationEnd,
       onAnimationStart,
     });
+    useStreamdownTableScrollbarSizing(streamdownRootRef, children);
 
     const openModal = useCallback((url: string) => {
       setModalUrl(url);
@@ -497,6 +501,7 @@ export const MessageResponse = memo(
         <div
           className="contents"
           onClickCapture={handleClickCapture}
+          ref={streamdownRootRef}
           {...streamdownLayoutPending.layoutPendingAttributes}
         >
           <Streamdown

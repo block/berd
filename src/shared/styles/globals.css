@@ -1736,6 +1736,11 @@ body,
   border: none;
 }
 
+[data-streamdown="table-wrapper"] > div:has(> [data-streamdown="table"]) {
+  overflow-y: hidden;
+  padding-block-end: var(--streamdown-table-scrollbar-block-size, 0px);
+}
+
 [data-streamdown="code-block"][data-streamdown] {
   display: grid;
   grid-template-columns: 1fr auto;
