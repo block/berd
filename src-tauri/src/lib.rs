@@ -125,6 +125,15 @@ pub fn run() {
                 std::collections::BTreeMap::new(),
             );
 
+            #[cfg(target_os = "macos")]
+            {
+                if let Err(error) =
+                    commands::notifications::init_completion_notifications(app.handle())
+                {
+                    log::warn!("Failed to initialize completion notifications: {error}");
+                }
+            }
+
             let deep_link_app = app.handle().clone();
             app.deep_link().on_open_url(move |event| {
                 for url in event.urls() {

@@ -7,6 +7,7 @@ name = "Goose"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "block2",
  "bytes",
  "chrono",
  "dirs",
@@ -17,12 +18,12 @@ dependencies = [
  "infer",
  "libc",
  "log",
- "mac-notification-sys",
  "mime_guess",
  "nucleo-matcher",
  "objc2",
  "objc2-app-kit",
  "objc2-foundation",
+ "objc2-user-notifications",
  "portable-pty",
  "reqwest",
  "serde",
@@ -3463,7 +3464,10 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9df9128cbbfef73cda168416ccf7f837b62737d748333bfe9ab71c245d76613e"
 dependencies = [
+ "bitflags 2.11.0",
+ "block2",
  "objc2",
+ "objc2-core-location",
  "objc2-foundation",
 ]
 

@@ -1,21 +1,27 @@
 #[cfg(target_os = "macos")]
-use serde::Serialize;
-#[cfg(target_os = "macos")]
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Command;
 use tauri::AppHandle;
 #[cfg(target_os = "macos")]
-use tauri::{Emitter, Manager};
+use tauri::Manager;
+
+struct CompletionNotificationRequest {
+    session_id: String,
+    body: String,
+    sound: Option<String>,
+}
 
 #[cfg(target_os = "macos")]
-const COMPLETION_NOTIFICATION_CLICKED_EVENT: &str = "completion-notification-clicked";
-
-#[cfg(target_os = "macos")]
-#[derive(Clone, Serialize)]
+#[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CompletionNotificationClickedPayload {
     session_id: String,
+}
+
+#[cfg(target_os = "macos")]
+struct CompletionNotificationState {
+    _delegate: objc2::rc::Retained<macos_completion::CompletionNotificationDelegate>,
 }
 
 #[tauri::command]
@@ -25,66 +31,246 @@ pub fn show_completion_notification(
     body: String,
     sound: Option<String>,
 ) -> Result<(), String> {
-    show_platform_completion_notification(app, session_id, body, sound)
+    show_platform_completion_notification(
+        app,
+        CompletionNotificationRequest {
+            session_id,
+            body,
+            sound,
+        },
+    )
+}
+
+#[cfg(target_os = "macos")]
+pub fn init_completion_notifications(app: &tauri::AppHandle) -> Result<(), String> {
+    macos_completion::init_completion_notifications(app)
 }
 
 #[cfg(target_os = "macos")]
 fn show_platform_completion_notification(
     app: AppHandle,
-    session_id: String,
-    body: String,
-    sound: Option<String>,
+    request: CompletionNotificationRequest,
 ) -> Result<(), String> {
-    std::thread::spawn(move || {
-        if let Err(error) = show_macos_completion_notification(app, session_id, body, sound) {
-            log::warn!("Failed to show completion notification: {error}");
-        }
-    });
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn show_macos_completion_notification(
-    app: AppHandle,
-    session_id: String,
-    body: String,
-    sound: Option<String>,
-) -> Result<(), String> {
-    use mac_notification_sys::{set_application, Notification, NotificationResponse};
-
-    let bundle_id = if tauri::is_dev() {
-        "com.apple.Terminal".to_string()
-    } else {
-        app.config().identifier.clone()
-    };
-    let _ = set_application(&bundle_id);
-
-    let mut notification = Notification::new();
-    notification
-        .title("Goose")
-        .message(&body)
-        .wait_for_click(true);
-
-    configure_macos_completion_notification_sound(&mut notification, &app, sound.as_deref());
-
-    match notification.send().map_err(|error| error.to_string())? {
-        NotificationResponse::Click | NotificationResponse::ActionButton(_) => {
-            emit_completion_notification_clicked(&app, session_id);
-        }
-        NotificationResponse::None
-        | NotificationResponse::CloseButton(_)
-        | NotificationResponse::Reply(_) => {}
+    if tauri::is_dev() {
+        return show_macos_fallback_completion_notification(app, request);
     }
 
-    Ok(())
+    macos_completion::show_completion_notification(app, request)
 }
 
 #[cfg(target_os = "macos")]
-fn configure_macos_completion_notification_sound(
-    notification: &mut mac_notification_sys::Notification<'_>,
-    app: &AppHandle,
-    sound: Option<&str>,
-) {
+mod macos_completion {
+    use super::{
+        completion_notification_identifier, play_macos_completion_notification_sound,
+        CompletionNotificationClickedPayload, CompletionNotificationRequest,
+        CompletionNotificationState,
+    };
+    use block2::RcBlock;
+    use objc2::define_class;
+    use objc2::rc::Retained;
+    use objc2::runtime::ProtocolObject;
+    use objc2::{msg_send, AnyThread, DefinedClass};
+    use objc2_app_kit::NSApplication;
+    use objc2_foundation::{NSDictionary, NSError, NSObject, NSObjectProtocol, NSString};
+    use objc2_user_notifications::{
+        UNMutableNotificationContent, UNNotification, UNNotificationDismissActionIdentifier,
+        UNNotificationPresentationOptions, UNNotificationRequest, UNNotificationResponse,
+        UNUserNotificationCenter, UNUserNotificationCenterDelegate,
+    };
+    use tauri::{AppHandle, Emitter, Manager};
+
+    #[derive(Clone)]
+    pub struct NotificationDelegateIvars {
+        app: AppHandle,
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = AnyThread]
+        #[ivars = NotificationDelegateIvars]
+        pub struct CompletionNotificationDelegate;
+
+        unsafe impl NSObjectProtocol for CompletionNotificationDelegate {}
+
+        #[allow(non_snake_case)]
+        unsafe impl UNUserNotificationCenterDelegate for CompletionNotificationDelegate {
+            #[unsafe(method(userNotificationCenter:willPresentNotification:withCompletionHandler:))]
+            fn userNotificationCenter_willPresentNotification_withCompletionHandler(
+                &self,
+                _center: &UNUserNotificationCenter,
+                _notification: &UNNotification,
+                completion_handler: &block2::DynBlock<dyn Fn(UNNotificationPresentationOptions)>,
+            ) {
+                completion_handler.call((UNNotificationPresentationOptions::Banner
+                    | UNNotificationPresentationOptions::List
+                    | UNNotificationPresentationOptions::Sound,));
+            }
+
+            #[unsafe(method(userNotificationCenter:didReceiveNotificationResponse:withCompletionHandler:))]
+            fn userNotificationCenter_didReceiveNotificationResponse_withCompletionHandler(
+                &self,
+                _center: &UNUserNotificationCenter,
+                response: &UNNotificationResponse,
+                completion_handler: &block2::DynBlock<dyn Fn()>,
+            ) {
+                completion_handler.call(());
+
+                let action_identifier = response.actionIdentifier();
+                if &*action_identifier == unsafe { UNNotificationDismissActionIdentifier } {
+                    return;
+                }
+
+                let Some(session_id) = session_id_from_response(response) else {
+                    log::warn!("Completion notification click did not include a session id");
+                    return;
+                };
+
+                let app = self.ivars().app.clone();
+                let app_for_main_thread = app.clone();
+                if let Err(error) = app.run_on_main_thread(move || {
+                    focus_app_for_completion_notification(&app_for_main_thread);
+                    if let Err(error) = app_for_main_thread.emit(
+                        "completion-notification-clicked",
+                        CompletionNotificationClickedPayload { session_id },
+                    ) {
+                        log::warn!("Failed to emit completion notification click event: {error}");
+                    }
+                }) {
+                    log::warn!("Failed to handle completion notification click: {error}");
+                }
+            }
+        }
+    );
+
+    impl CompletionNotificationDelegate {
+        fn new(app: AppHandle) -> Retained<Self> {
+            let this = Self::alloc().set_ivars(NotificationDelegateIvars { app });
+            // SAFETY: `this` is an allocated NSObject subclass with initialized ivars.
+            unsafe { msg_send![super(this), init] }
+        }
+    }
+
+    pub fn init_completion_notifications(app: &AppHandle) -> Result<(), String> {
+        // UNUserNotificationCenter asserts in unbundled dev runs because
+        // bundleProxyForCurrentProcess is nil for the Cargo target binary.
+        if tauri::is_dev() {
+            return Ok(());
+        }
+
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+        let delegate = CompletionNotificationDelegate::new(app.clone());
+        let delegate_ref: &ProtocolObject<dyn UNUserNotificationCenterDelegate> =
+            ProtocolObject::from_ref(&*delegate);
+        center.setDelegate(Some(delegate_ref));
+
+        app.manage(CompletionNotificationState {
+            _delegate: delegate,
+        });
+        Ok(())
+    }
+
+    pub fn show_completion_notification(
+        app: AppHandle,
+        request: CompletionNotificationRequest,
+    ) -> Result<(), String> {
+        let center = UNUserNotificationCenter::currentNotificationCenter();
+
+        let content = UNMutableNotificationContent::new();
+        content.setTitle(&NSString::from_str("Goose"));
+        content.setBody(&NSString::from_str(&request.body));
+
+        let key = NSString::from_str("sessionId");
+        let value = NSString::from_str(&request.session_id);
+        let user_info = NSDictionary::from_slices(&[&*key], &[&*value]);
+        // SAFETY: NSDictionary generics are Rust-side type information. This erases the
+        // `NSString, NSString` parameters for the untyped generated UserNotifications API.
+        let user_info =
+            unsafe { &*((&*user_info as *const NSDictionary<NSString, NSString>).cast()) };
+        // SAFETY: `user_info` contains NSString keys and values, which are property-list objects
+        // accepted by `UNNotificationContent.userInfo`.
+        unsafe { content.setUserInfo(user_info) };
+
+        let identifier =
+            NSString::from_str(&completion_notification_identifier(&request.session_id));
+        let notification_request = UNNotificationRequest::requestWithIdentifier_content_trigger(
+            &identifier,
+            &content,
+            None,
+        );
+        let sound = request.sound;
+        let block = RcBlock::new(move |error: *mut NSError| {
+            if error.is_null() {
+                play_macos_completion_notification_sound(&app, sound.as_deref());
+            } else {
+                log::warn!(
+                    "Failed to schedule completion notification: {}",
+                    error_description(error)
+                );
+            }
+        });
+        center.addNotificationRequest_withCompletionHandler(&notification_request, Some(&block));
+
+        Ok(())
+    }
+
+    fn error_description(error: *mut NSError) -> String {
+        if error.is_null() {
+            return "unknown error".to_string();
+        }
+
+        // SAFETY: UserNotifications passes a valid NSError pointer when non-null.
+        unsafe { &*error }.localizedDescription().to_string()
+    }
+
+    fn session_id_from_response(response: &UNNotificationResponse) -> Option<String> {
+        let key = NSString::from_str("sessionId");
+        let notification = response.notification();
+        let request = notification.request();
+        let content = request.content();
+        let user_info = content.userInfo();
+        // SAFETY: Completion notifications store `sessionId` as an NSString value in userInfo.
+        let session_id: Option<Retained<NSString>> =
+            unsafe { msg_send![&*user_info, objectForKey: &*key] };
+        session_id
+            .map(|session_id| session_id.to_string())
+            .filter(|session_id| !session_id.trim().is_empty())
+    }
+
+    #[allow(deprecated)]
+    fn focus_app_for_completion_notification(app: &AppHandle) {
+        if let Some(window) = app.get_webview_window("main") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+
+        if let Some(mtm) = objc2_foundation::MainThreadMarker::new() {
+            let ns_app = NSApplication::sharedApplication(mtm);
+            ns_app.activateIgnoringOtherApps(true);
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn show_macos_fallback_completion_notification(
+    app: AppHandle,
+    request: CompletionNotificationRequest,
+) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+
+    let CompletionNotificationRequest {
+        session_id: _session_id,
+        body,
+        sound,
+    } = request;
+
+    let builder = app.notification().builder().title("Goose").body(body);
+    play_macos_completion_notification_sound(&app, sound.as_deref());
+    builder.show().map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn play_macos_completion_notification_sound(app: &AppHandle, sound: Option<&str>) {
     let Some(sound) = sound else {
         return;
     };
@@ -94,11 +280,7 @@ fn configure_macos_completion_notification_sound(
         return;
     }
 
-    if tauri::is_dev() {
-        play_completion_notification_sound(app, sound);
-    } else {
-        notification.sound(sound);
-    }
+    play_completion_notification_sound(app, sound);
 }
 
 #[cfg(target_os = "macos")]
@@ -166,15 +348,23 @@ fn is_plain_sound_resource_name(sound: &str) -> bool {
             .all(|component| matches!(component, Component::Normal(_)))
 }
 
+#[cfg(target_os = "macos")]
+fn completion_notification_identifier(session_id: &str) -> String {
+    format!("completion:{}:{}", session_id, uuid::Uuid::new_v4())
+}
+
 #[cfg(not(target_os = "macos"))]
 fn show_platform_completion_notification(
     app: AppHandle,
-    _session_id: String,
-    body: String,
-    sound: Option<String>,
+    request: CompletionNotificationRequest,
 ) -> Result<(), String> {
     use tauri_plugin_notification::NotificationExt;
 
+    let CompletionNotificationRequest {
+        session_id: _session_id,
+        body,
+        sound,
+    } = request;
     let mut builder = app.notification().builder().title("Goose").body(body);
     if let Some(sound) = sound {
         builder = builder.sound(sound);
@@ -182,47 +372,12 @@ fn show_platform_completion_notification(
     builder.show().map_err(|error| error.to_string())
 }
 
-#[cfg(target_os = "macos")]
-fn emit_completion_notification_clicked(app: &AppHandle, session_id: String) {
-    focus_main_window(app);
-
-    let _ = app.emit(
-        COMPLETION_NOTIFICATION_CLICKED_EVENT,
-        CompletionNotificationClickedPayload { session_id },
-    );
-}
-
-#[cfg(target_os = "macos")]
-fn focus_main_window(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-
-        let window_for_activation = window.clone();
-        let _ = window.run_on_main_thread(move || {
-            activate_macos_app();
-            let _ = window_for_activation.show();
-            let _ = window_for_activation.unminimize();
-            let _ = window_for_activation.set_focus();
-        });
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn activate_macos_app() {
-    use objc2_app_kit::NSApplication;
-    use objc2_foundation::MainThreadMarker;
-
-    if let Some(mtm) = MainThreadMarker::new() {
-        #[allow(deprecated)]
-        NSApplication::sharedApplication(mtm).activateIgnoringOtherApps(true);
-    }
-}
-
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
-    use super::{dev_completion_notification_sound_path, is_plain_sound_resource_name};
+    use super::{
+        completion_notification_identifier, dev_completion_notification_sound_path,
+        is_plain_sound_resource_name,
+    };
 
     #[test]
     fn bundled_completion_sound_exists_for_dev_resolution() {
@@ -235,5 +390,15 @@ mod tests {
         assert!(!is_plain_sound_resource_name(""));
         assert!(!is_plain_sound_resource_name("../goose-sounds-4.mp3"));
         assert!(!is_plain_sound_resource_name("/tmp/goose-sounds-4.mp3"));
+    }
+
+    #[test]
+    fn completion_notification_identifiers_are_prefixed_and_unique() {
+        let first = completion_notification_identifier("session-1");
+        let second = completion_notification_identifier("session-1");
+
+        assert!(first.starts_with("completion:session-1:"));
+        assert!(second.starts_with("completion:session-1:"));
+        assert_ne!(first, second);
     }
 }
