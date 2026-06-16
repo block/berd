@@ -651,7 +651,7 @@ export function useChatSessionController({
 
       const workingDir = await resolveSessionCwd(
         project,
-        activeWorkspace?.path,
+        activeWorkspace?.path ?? session?.workingDir,
       );
       const result = await applyLatestSessionConfig({
         sessionId: stateSessionId,
@@ -679,6 +679,7 @@ export function useChatSessionController({
       providers,
       resolvePersonaModelSelection,
       selectedProvider,
+      session?.workingDir,
       stateSessionId,
     ],
   );

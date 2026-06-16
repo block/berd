@@ -1420,6 +1420,77 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("preserves the existing session working directory when sending with a configured persona", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          personaId: "persona-1",
+          workingDir: "/tmp/stored-session",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          provider: "goose",
+          model: "goose-claude-opus-4-8",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+    mockPickerState.availableModels = [
+      {
+        id: "goose-claude-opus-4-8",
+        name: "goose-claude-opus-4-8",
+        providerId: "goose",
+      },
+    ];
+    mockResolveSessionCwd.mockResolvedValue("/tmp/stored-session");
+    mockUseChatSendMessage.mockImplementationOnce(
+      async (options?: {
+        ensurePrepared?: (personaId?: string) => Promise<boolean | undefined>;
+      }) => {
+        await options?.ensurePrepared?.("persona-1");
+      },
+    );
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend("hello from persona");
+    });
+
+    await waitFor(() => {
+      expect(mockResolveSessionCwd).toHaveBeenCalledWith(
+        null,
+        "/tmp/stored-session",
+      );
+    });
+    expect(mockAcpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "goose",
+      "/tmp/stored-session",
+    );
+    expect(mockAcpSetModel).toHaveBeenCalledWith(
+      "session-1",
+      "goose-claude-opus-4-8",
+    );
+  });
+
   it("falls back when a selected persona's saved model is no longer available", async () => {
     useAgentStore.setState({
       personas: [
