@@ -1,0 +1,13 @@
+# Automatically generated - DO NOT EDIT!
+
+"$schema" = "../../schemas/schema.json"
+
+[[permission]]
+identifier = "allow-submit-result"
+description = "Enables the submit_result command without any pre-configured scope."
+commands.allow = ["submit_result"]
+
+[[permission]]
+identifier = "deny-submit-result"
+description = "Denies the submit_result command without any pre-configured scope."
+commands.deny = ["submit_result"]

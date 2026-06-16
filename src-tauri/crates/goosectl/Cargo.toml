@@ -1,0 +1,19 @@
+[package]
+name = "goosectl"
+version = "0.1.0"
+description = "Command-line control of the Goose desktop app"
+authors = ["Block, Inc."]
+edition = "2021"
+
+[dependencies]
+# string: the clap tree is built at runtime from the embedded contract
+# artifacts (tree.rs), so ids/longs/help are owned strings, not 'static.
+# wrap_help: authored help prose carries no manual line breaks; clap wraps it
+# at the pinned width tree.rs sets.
+clap = { version = "4", features = ["env", "string", "wrap_help"] }
+# serde: the contract files' key order IS the CLI's noun/verb order (help
+# output must stay byte-stable under regeneration).
+indexmap = { version = "2", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ureq = { version = "3", features = ["json"] }

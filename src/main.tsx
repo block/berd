@@ -90,6 +90,29 @@ function renderBootError(message: string) {
   );
 }
 
+function OptionalGoosectlBridge() {
+  const [Bridge, setBridge] = React.useState<React.ComponentType | null>(null);
+
+  React.useEffect(() => {
+    let mounted = true;
+    import("@/features/goosectl/bridge/GoosectlBridge")
+      .then(({ GoosectlBridge }) => {
+        if (mounted) {
+          setBridge(() => GoosectlBridge);
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to load goosectl bridge:", error);
+        reportRendererError("goosectl_bridge_load_failed", error);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  return Bridge ? <Bridge /> : null;
+}
+
 const sessionKey = new URLSearchParams(window.location.search).get(
   "sessionKey",
 );
@@ -140,6 +163,7 @@ if (bootError) {
       <RendererErrorBoundary>
         <QueryClientProvider client={queryClient}>
           <LocalMediaCacheEvents />
+          <OptionalGoosectlBridge />
           <RendererTelemetry />
           <I18nProvider>
             <ThemeProvider>

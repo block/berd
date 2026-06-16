@@ -1,0 +1,135 @@
+{
+  "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:goosectl-contract`. CLI projection of api-surface.json: the noun/verb tree mapping onto groups/actions, plus CLI-only prose (noun about lines, verb summaries, after-help footers), derived from TOOL_GROUPS' cli metadata and each command's summary/helpFooter (src/features/goosectl/commands/registry.ts and impl/*.ts). goosectl embeds this file plus api-surface.json and builds its clap tree from them at startup (tree.rs); vitest asserts freshness (src/features/goosectl/__tests__/cliSurface.test.ts).",
+  "nouns": {
+    "session": {
+      "group": "sessions",
+      "about": "Manage chat sessions: create, open, list, get, rename, move, clear project, archive",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
+          "afterHelp": "Example:\n  goosectl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `goosectl session get --session-id <session_id>`."
+        },
+        "open": {
+          "action": "open",
+          "about": "Open a session in the app window the user is looking at",
+          "afterHelp": "Example:\n  goosectl session open --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the session is now on screen."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's chat sessions (most recent first)",
+          "afterHelp": "Example:\n  goosectl session list --query \"review\" --limit 10 --json\n\nResult:\n  {\"sessions\": [{\"session_id\": \"...\", \"title\": \"...\",\n                 \"project_id\": \"...\"|null, \"updated_at\": \"...\",\n                 \"message_count\": 12}, ...]}\n  Most recent first; archived sessions are excluded."
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one session's metadata and optionally its latest messages",
+          "afterHelp": "Example:\n  goosectl session get --session-id <session-id> --messages 5 --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"model_id\": \"...\"|null, \"agent_id\": \"...\"|null,\n   \"project_id\": \"...\"|null, \"working_dir\": \"...\"|null,\n   \"created_at\": \"...\", \"updated_at\": \"...\", \"archived\": false,\n   \"message_count\": 12,\n   \"messages\": [{\"role\": \"user\"|\"assistant\"|null, \"text\": \"...\"}, ...]}\n  \"messages\" is present only when --messages > 0; each message text is\n  truncated to 2000 chars."
+        },
+        "rename": {
+          "action": "rename",
+          "about": "Rename a chat session",
+          "afterHelp": "Example:\n  goosectl session rename --session-id <session-id> --title \"CI triage\"\n\nResult:\n  {\"ok\": true} — the new title appears immediately in the app's session list."
+        },
+        "move": {
+          "action": "move",
+          "about": "Move a chat session into a project",
+          "afterHelp": "Example:\n  goosectl session move --session-id <session-id> --project-id <project-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "clear-project": {
+          "action": "clear_project",
+          "about": "Move a chat session out of any project",
+          "afterHelp": "Example:\n  goosectl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "archive": {
+          "action": "archive",
+          "about": "Archive a chat session (reversible; nothing is deleted)",
+          "afterHelp": "Archiving is reversible from the app's archive view; nothing is deleted.\n\nExample:\n  goosectl session archive --session-id <session-id>\n\n  Result:\n  {\"ok\": true} — the session disappears from the active session list."
+        }
+      }
+    },
+    "project": {
+      "group": "projects",
+      "about": "Manage projects: create, list, get, archive",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new project",
+          "afterHelp": "Example:\n  goosectl project create --name \"Code reviews\" \\\n    --instructions \"Prefer small diffs\" --working-dir /Users/me/src/repo\n\nResult:\n  {\"project_id\": \"...\"} — the project appears immediately in the app's\n  project list."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's projects",
+          "afterHelp": "Example:\n  goosectl project list --json\n\nResult:\n  {\"projects\": [{\"project_id\": \"...\", \"name\": \"...\",\n                 \"description\": \"...\", \"working_dirs\": [\"...\"]}, ...]}"
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one project's details",
+          "afterHelp": "Example:\n  goosectl project get --project-id <project-id> --json\n\nResult:\n  {\"project_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"instructions\": \"...\", \"working_dirs\": [\"...\"], \"archived\": false,\n   \"session_count\": 4}"
+        },
+        "archive": {
+          "action": "archive",
+          "about": "Archive a project (reversible; nothing is deleted)",
+          "afterHelp": "Archiving is reversible from the app's archive view; nothing is\ndeleted, and the project's sessions are left untouched.\n\nExample:\n  goosectl project archive --project-id <project-id>\n\nResult:\n  {\"ok\": true} — the project disappears from the app's project list."
+        }
+      }
+    },
+    "agent": {
+      "group": "agents",
+      "about": "Manage agents (personas): create, list",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new agent (persona)",
+          "afterHelp": "Example:\n  goosectl agent create --name \"Reviewer\" \\\n    --system-prompt \"You review diffs for correctness; be terse.\"\n\nResult:\n  {\"agent_id\": \"...\"} — the agent is saved and becomes available in\n  future chats; pass it as --agent-id to `goosectl session create`."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's agents (personas)",
+          "afterHelp": "Example:\n  goosectl agent list --json\n\nResult:\n  {\"agents\": [{\"agent_id\": \"...\", \"name\": \"...\",\n               \"summary\": \"...\", \"builtin\": false}, ...]}\n  Use an agent_id as --agent-id when creating a session."
+        }
+      }
+    },
+    "skill": {
+      "group": "skills",
+      "about": "Manage skills: create, list, get",
+      "verbs": {
+        "create": {
+          "action": "create",
+          "about": "Create a new skill (saved as a SKILL.md)",
+          "afterHelp": "Example:\n  goosectl skill create --name \"release-notes\" \\\n    --description \"Draft release notes from merged PRs\" \\\n    --content \"$(cat SKILL.md)\"\n\nResult:\n  {\"skill_id\": \"...\"} — the skill is saved as a SKILL.md and auto-loads\n  into future sessions."
+        },
+        "list": {
+          "action": "list",
+          "about": "List the user's skills (name and description only)",
+          "afterHelp": "Example:\n  goosectl skill list --json\n\nResult:\n  {\"skills\": [{\"skill_id\": \"...\", \"name\": \"...\",\n               \"description\": \"...\",\n               \"source\": \"builtin\"|\"global\"|\"project\"}, ...]}\n  Read a skill's full content with `goosectl skill get`."
+        },
+        "get": {
+          "action": "get",
+          "about": "Read one skill including its SKILL.md instructions",
+          "afterHelp": "Example:\n  goosectl skill get --skill-id <skill-id> --json\n\nResult:\n  {\"skill_id\": \"...\", \"name\": \"...\", \"description\": \"...\",\n   \"source\": \"builtin\"|\"global\"|\"project\", \"instructions\": \"...\"}"
+        }
+      }
+    },
+    "info": {
+      "group": "info",
+      "about": "Look up installed harnesses, available models, and the app context",
+      "verbs": {
+        "harnesses": {
+          "action": "list_harnesses",
+          "about": "List the agent harnesses sessions can run on, with readiness",
+          "afterHelp": "Example:\n  goosectl info harnesses --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"goose\", \"name\": \"...\",\n                  \"is_default\": true,\n                  \"status\": \"ready\"|\"not_installed\"|\"not_ready\"}, ...]}\n  Only \"ready\" harnesses accept new sessions; \"not_installed\" and\n  \"not_ready\" (sign-in or setup required) need the user to fix them in\n  the app first."
+        },
+        "models": {
+          "action": "list_models",
+          "about": "List the models available per agent harness",
+          "afterHelp": "Example:\n  goosectl info models --harness-id goose --json\n\nResult:\n  {\"harnesses\": [{\"harness_id\": \"...\",\n                  \"models\": [{\"model_id\": \"...\", \"name\": \"...\",\n                              \"provider\": \"...\"?}],\n                  \"warning\": \"...\"?}]}\n  Use a model_id (with its harness) as --model-id when creating a session.\n  \"warning\" appears when a stale cached list was served or when the harness\n  manages its model outside the app."
+        },
+        "context": {
+          "action": "get_context",
+          "about": "Read what the user is looking at in the app right now",
+          "afterHelp": "Example:\n  goosectl info context --json\n\nResult:\n  {\"view\": \"...\", \"active_session_id\": \"...\"|null,\n   \"active_project_id\": \"...\"|null, \"app_version\": \"...\"}"
+        }
+      }
+    }
+  }
+}

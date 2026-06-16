@@ -180,6 +180,10 @@
     }
   },
   "experiments": {
+    "goosectl": {
+      "description": "Permite a los agentes controlar la app mediante la línea de comandos goosectl incluida: abrir, crear, renombrar, mover y archivar chats, y gestionar proyectos, agentes y skills. Las acciones se aplican de inmediato; archivar es reversible.",
+      "title": "Control de la app por el agente"
+    },
     "autoEnable": {
       "description": "Las compilaciones de desarrollo activan los experimentos de forma predeterminada. Desactiva experimentos individuales abajo cuando necesites el flujo estable.",
       "label": "Activar nuevos experimentos automáticamente"

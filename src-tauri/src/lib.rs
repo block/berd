@@ -112,6 +112,9 @@ pub fn run() {
     #[cfg(feature = "app-test-driver")]
     let builder = builder.plugin(tauri_plugin_app_test_driver::init());
 
+    #[cfg(feature = "goosectl")]
+    let builder = builder.plugin(tauri_plugin_goosectl::init());
+
     builder
         .setup(|app| {
             services::diagnostic_log::record_event(
@@ -147,6 +150,15 @@ pub fn run() {
             if updater_pubkey_present {
                 app.handle()
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
+            }
+
+            match app.path().app_data_dir() {
+                Ok(app_data_dir) => {
+                    services::goosectl_discovery::sweep_stale_discovery_files(&app_data_dir);
+                }
+                Err(error) => log::warn!(
+                    "Skipping goosectl discovery sweep: failed to resolve app data dir: {error}"
+                ),
             }
 
             let distro_state = DistroBundleState::new(app.handle());

@@ -37,10 +37,14 @@ function persistProjects(projects: ProjectInfo[]): void {
 export interface ProjectStore {
   projects: ProjectInfo[];
   loading: boolean;
+  /** True once fetchProjects has succeeded this app session; the
+   *  localStorage seed alone never sets it. */
+  hasFetchedProjects: boolean;
   activeProjectId: string | null;
 
   // Actions
   fetchProjects: () => Promise<void>;
+  replaceProjectsFromBackend: (projects: ProjectInfo[]) => void;
   addProject: (
     name: string,
     description: string,
@@ -73,17 +77,22 @@ export interface ProjectStore {
 export const useProjectStore = create<ProjectStore>((set, get) => ({
   projects: loadCachedProjects(),
   loading: false,
+  hasFetchedProjects: false,
   activeProjectId: null,
 
   fetchProjects: async () => {
     set({ loading: true });
     try {
       const projects = await listProjects();
-      set({ projects, loading: false });
-      persistProjects(projects);
+      get().replaceProjectsFromBackend(projects);
     } catch {
       set({ loading: false });
     }
+  },
+
+  replaceProjectsFromBackend: (projects) => {
+    set({ projects, loading: false, hasFetchedProjects: true });
+    persistProjects(projects);
   },
 
   addProject: async (

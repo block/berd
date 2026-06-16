@@ -63,7 +63,7 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg", "deb", "rpm", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -81,7 +81,7 @@
       "../resources/goose-sounds-5.mp3": "goose-sounds-5.mp3",
       "../resources/goose-sounds-6.mp3": "goose-sounds-6.mp3"
     },
-    "externalBin": ["binaries/goosed"],
+    "externalBin": ["binaries/goosed", "binaries/goosectl"],
     "linux": {
       "deb": {
         "depends": ["libvulkan1"]

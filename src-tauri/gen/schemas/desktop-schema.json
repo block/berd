@@ -2709,6 +2709,60 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
+          "description": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe goosectl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`",
+          "type": "string",
+          "const": "goosectl:default",
+          "markdownDescription": "Default permissions for the app control plugin (the loopback HTTP broker for\nthe goosectl CLI). Grants the main window access to the broker lifecycle,\ntimeout, and bridge-result commands.\n\n#### This default permission set includes:\n\n- `allow-start`\n- `allow-stop`\n- `allow-set-timeouts`\n- `allow-submit-result`"
+        },
+        {
+          "description": "Enables the set_timeouts command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:allow-set-timeouts",
+          "markdownDescription": "Enables the set_timeouts command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the start command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:allow-start",
+          "markdownDescription": "Enables the start command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:allow-stop",
+          "markdownDescription": "Enables the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the submit_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:allow-submit-result",
+          "markdownDescription": "Enables the submit_result command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_timeouts command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:deny-set-timeouts",
+          "markdownDescription": "Denies the set_timeouts command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the start command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:deny-start",
+          "markdownDescription": "Denies the start command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the stop command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:deny-stop",
+          "markdownDescription": "Denies the stop command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the submit_result command without any pre-configured scope.",
+          "type": "string",
+          "const": "goosectl:deny-submit-result",
+          "markdownDescription": "Denies the submit_result command without any pre-configured scope."
+        },
+        {
           "description": "Allows the log command\n#### This default permission set includes:\n\n- `allow-log`",
           "type": "string",
           "const": "log:default",

@@ -61,20 +61,23 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
   src-tauri/tauri.release.conf.json > "$tmp" \
   && mv "$tmp" src-tauri/tauri.release.conf.json
 
-# Stage the goose backend as the Tauri sidecar, then build for an explicit
-# aarch64 target so output paths are stable regardless of agent architecture.
+# Stage the goose backend and goosectl CLI as Tauri sidecars, then build for
+# an explicit aarch64 target so output paths are stable regardless of agent
+# architecture. The goosectl staged name must carry that same triple.
 # Production telemetry is an explicit release opt-in; generic builds default to
 # development. No TAURI_SIGNING_PRIVATE_KEY needed — signing happens in
 # publish-updater.sh.
+TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
+./scripts/prepare-goosectl-sidecar.sh "$TARGET_TRIPLE"
 VITE_APP_VERSION="$RELEASE_VERSION" \
 VITE_ENVIRONMENT=production \
 VITE_UPDATER_ENABLED=true \
-  pnpm tauri build --no-sign --target aarch64-apple-darwin \
+  pnpm tauri build --no-sign --target "$TARGET_TRIPLE" --features goosectl \
     --config src-tauri/tauri.release.conf.json
 
-UNSIGNED_APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/${APP_BUNDLE_NAME}.app"
+UNSIGNED_APP="src-tauri/target/${TARGET_TRIPLE}/release/bundle/macos/${APP_BUNDLE_NAME}.app"
 [[ -d "$UNSIGNED_APP" ]] || { echo "Missing $UNSIGNED_APP" >&2; exit 1; }
 
 echo "+++ :package: Staging unsigned .app for apple-codesign"

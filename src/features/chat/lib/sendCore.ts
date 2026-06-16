@@ -39,6 +39,11 @@ export interface SendCoreOptions {
   /** Pending-assistant provider; defaults to the active agent's provider. */
   providerId?: string;
   /**
+   * Fire-and-forget background send used by goosectl; keeps prompt whitespace
+   * intact and skips foreground dispatch perf logs.
+   */
+  background?: boolean;
+  /**
    * System prompt forwarded verbatim to the ACP send. The caller owns fallback
    * policy; useChat falls back to the active agent's prompt before dispatching.
    */
@@ -59,6 +64,8 @@ export interface SendCoreOptions {
  * Foreground send core: commits the user message, drives the
  * thinking-to-streaming-to-idle chat-state transitions, patches the session
  * title, and dispatches the prompt over ACP.
+ * Background sends use the same store transitions without foreground perf
+ * logging.
  *
  * Rejects with the original error after recording it: on failure the
  * streaming message is marked errored and a system-notification message is
@@ -74,6 +81,7 @@ export async function dispatchPrompt(
   const {
     assistantPrompt,
     attachments,
+    background,
     chips,
     displayText,
     onUserMessageCommitted,
@@ -150,13 +158,18 @@ export async function dispatchPrompt(
     await prepare?.();
 
     setChatState(sessionId, "streaming");
-    const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
+    const promptWithPaths = appendAttachmentPaths(
+      background ? text : text.trim(),
+      attachments,
+    );
     const acpPrompt =
       promptWithPaths || (images?.length ? " " : promptWithPaths);
     const tAcp = performance.now();
-    perfLog(
-      `[perf:send] ${sid} → acpSendMessage (setup took ${(tAcp - tSendStart).toFixed(1)}ms)`,
-    );
+    if (!background) {
+      perfLog(
+        `[perf:send] ${sid} → acpSendMessage (setup took ${(tAcp - tSendStart).toFixed(1)}ms)`,
+      );
+    }
     await acpSendMessage(sessionId, acpPrompt, {
       systemPrompt,
       ...(assistantPrompt ? { assistantPrompt } : {}),
@@ -166,9 +179,11 @@ export async function dispatchPrompt(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),
     });
-    perfLog(
-      `[perf:send] ${sid} acpSendMessage returned after ${(performance.now() - tAcp).toFixed(1)}ms (total dispatchPrompt ${(performance.now() - tSendStart).toFixed(1)}ms)`,
-    );
+    if (!background) {
+      perfLog(
+        `[perf:send] ${sid} acpSendMessage returned after ${(performance.now() - tAcp).toFixed(1)}ms (total dispatchPrompt ${(performance.now() - tSendStart).toFixed(1)}ms)`,
+      );
+    }
 
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);

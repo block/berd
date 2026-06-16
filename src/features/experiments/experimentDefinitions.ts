@@ -49,6 +49,8 @@ export interface ExperimentDefinition {
   config?: Record<string, ExperimentConfigControl>;
 }
 
+export const GOOSECTL_EXPERIMENT_ID = "goosectl";
+
 export const BUILDERBOT_SURFACE_EXPERIMENT_ID = "builderbot-surface";
 
 export const GOOSE_STYLE_GUIDELINES_EXPERIMENT_ID = "goose-style-guidelines";
@@ -103,5 +105,10 @@ export const EXPERIMENT_DEFINITIONS = [
     id: TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
     titleKey: "experiments.transcriptVirtualRenderer.title",
     descriptionKey: "experiments.transcriptVirtualRenderer.description",
+  },
+  {
+    id: GOOSECTL_EXPERIMENT_ID,
+    titleKey: "experiments.goosectl.title",
+    descriptionKey: "experiments.goosectl.description",
   },
 ] as const satisfies readonly ExperimentDefinition[];

@@ -72,7 +72,7 @@ function searchSession(
   const conversation = root.conversation ?? root.messages;
   if (!conversation) return null;
 
-  const messages = flattenMessages(conversation);
+  const messages = flattenMessages(conversation, false);
   if (!messages.length) return null;
 
   let firstMatch: {
@@ -106,6 +106,33 @@ function searchSession(
   };
 }
 
+export interface ExportedSessionMessage {
+  role: MessageRole | null;
+  text: string;
+}
+
+/**
+ * The last `limit` text-bearing messages of a session, read via export so it
+ * works without loading the session into the UI. Unlike search (which scans
+ * broadly and only ever returns a snippet), this hands full message bodies to
+ * another agent, so block types are ALLOWLISTED: anything not an explicitly
+ * known plain-text type (tool output, thinking, future provider blocks) is
+ * dropped rather than leaked.
+ */
+export async function lastSessionMessages(
+  sessionId: string,
+  limit: number,
+): Promise<ExportedSessionMessage[]> {
+  const exported = await exportSession(sessionId);
+  const root = safeParse(exported);
+  if (!root) return [];
+  const conversation = root.conversation ?? root.messages;
+  if (!conversation) return [];
+  return flattenMessages(conversation, true)
+    .slice(-limit)
+    .map((msg) => ({ role: msg.role, text: msg.texts.join("\n") }));
+}
+
 function safeParse(json: string): Record<string, unknown> | null {
   try {
     return JSON.parse(json);
@@ -114,25 +141,32 @@ function safeParse(json: string): Record<string, unknown> | null {
   }
 }
 
-function flattenMessages(value: unknown): ParsedMessage[] {
-  if (Array.isArray(value)) return value.flatMap(flattenMessages);
+function flattenMessages(
+  value: unknown,
+  strictTypes: boolean,
+): ParsedMessage[] {
+  if (Array.isArray(value))
+    return value.flatMap((entry) => flattenMessages(entry, strictTypes));
   if (!isObject(value)) return [];
 
-  if ("message" in value) return flattenMessages(value.message);
-  if ("messages" in value) return flattenMessages(value.messages);
+  if ("message" in value) return flattenMessages(value.message, strictTypes);
+  if ("messages" in value) return flattenMessages(value.messages, strictTypes);
 
-  const msg = tryParseMessage(value);
+  const msg = tryParseMessage(value, strictTypes);
   return msg ? [msg] : [];
 }
 
-function tryParseMessage(obj: Record<string, unknown>): ParsedMessage | null {
+function tryParseMessage(
+  obj: Record<string, unknown>,
+  strictTypes: boolean,
+): ParsedMessage | null {
   if (!("role" in obj) || !("content" in obj || "text" in obj)) return null;
   if (isUserHiddenMessage(obj)) return null;
 
   const role = toRole(obj.role);
   const texts =
     obj.content !== undefined
-      ? getSearchableTexts(obj.content, role)
+      ? getSearchableTexts(obj.content, role, strictTypes)
       : typeof obj.text === "string" && role && obj.text.trim()
         ? [obj.text.trim()]
         : [];
@@ -157,18 +191,24 @@ function isUserHiddenMessage(obj: Record<string, unknown>): boolean {
 function getSearchableTexts(
   value: unknown,
   role: MessageRole | null,
+  strictTypes: boolean,
 ): string[] {
   if (typeof value === "string") {
     return role && SEARCHABLE_ROLES.has(role) && value.trim()
       ? [value.trim()]
       : [];
   }
-  if (Array.isArray(value)) return value.flatMap((v) => getBlockText(v, role));
-  if (isObject(value)) return getBlockText(value, role);
+  if (Array.isArray(value))
+    return value.flatMap((v) => getBlockText(v, role, strictTypes));
+  if (isObject(value)) return getBlockText(value, role, strictTypes);
   return [];
 }
 
-function getBlockText(value: unknown, role: MessageRole | null): string[] {
+function getBlockText(
+  value: unknown,
+  role: MessageRole | null,
+  strictTypes: boolean,
+): string[] {
   if (!isObject(value)) return [];
   const type = value.type as string | undefined;
   const text = (value.text as string | undefined)?.trim();
@@ -176,6 +216,10 @@ function getBlockText(value: unknown, role: MessageRole | null): string[] {
 
   if (SKIPPED_BLOCK_TYPES.has(type ?? "")) return [];
   if (SEARCHABLE_BLOCK_TYPES.has(type ?? "")) return [text];
+  // Unknown block types: search may scan them (only a snippet ever leaves the
+  // app), but strict consumers hand full bodies to another agent and must not
+  // leak block types we have not classified.
+  if (strictTypes) return [];
   return role && SEARCHABLE_ROLES.has(role) ? [text] : [];
 }
 

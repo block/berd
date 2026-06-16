@@ -64,6 +64,7 @@
     "dialog:allow-open",
     "dialog:allow-save",
     "app-test-driver:default",
+    "goosectl:default",
     "updater:default",
     "process:allow-restart",
     "notification:default"

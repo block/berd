@@ -4,8 +4,12 @@ import { beforeEach, vi } from "vitest";
 
 import { DEFAULT_LOCALE, TRANSLATION_NAMESPACES, i18n } from "@/shared/i18n";
 
-globalThis.Event = window.Event;
-globalThis.CustomEvent = window.CustomEvent;
+const hasWindow = typeof window !== "undefined";
+
+if (hasWindow) {
+  globalThis.Event = window.Event;
+  globalThis.CustomEvent = window.CustomEvent;
+}
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
@@ -32,27 +36,29 @@ globalThis.ResizeObserver = class ResizeObserver {
   disconnect() {}
 };
 
-// Mock matchMedia for jsdom (not available by default)
-Object.defineProperty(window, "matchMedia", {
-  writable: true,
-  value: (query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  }),
-});
+if (hasWindow) {
+  // Mock matchMedia for jsdom (not available by default)
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    value: (query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }),
+  });
 
-// jsdom exposes media methods but reports them as not implemented when called.
-Object.assign(HTMLMediaElement.prototype, {
-  load: () => {},
-  pause: () => {},
-  play: () => Promise.resolve(),
-});
+  // jsdom exposes media methods but reports them as not implemented when called.
+  Object.assign(HTMLMediaElement.prototype, {
+    load: () => {},
+    pause: () => {},
+    play: () => Promise.resolve(),
+  });
+}
 
 function createInMemoryStorage(): Storage {
   const store = new Map<string, string>();
@@ -100,11 +106,15 @@ function ensureLocalStorage() {
   });
 }
 
-ensureLocalStorage();
+if (hasWindow) {
+  ensureLocalStorage();
+}
 
 beforeEach(async () => {
-  ensureLocalStorage();
-  localStorage.removeItem("goose:locale");
+  if (hasWindow) {
+    ensureLocalStorage();
+    localStorage.removeItem("goose:locale");
+  }
   await i18n.changeLanguage(DEFAULT_LOCALE);
   await i18n.loadNamespaces(TRANSLATION_NAMESPACES);
 });

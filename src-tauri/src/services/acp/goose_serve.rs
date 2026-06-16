@@ -148,7 +148,18 @@ impl GooseServeProcess {
             }
         }
 
+        #[cfg(feature = "goosectl")]
+        let goosectl_paths = resolve_goosectl_spawn_paths(&app_handle, &mut prepend_dirs);
+
         apply_shell_env_with_extended_path(&mut command, &shell_env, &prepend_dirs);
+        // Set after the shell-env copy so a same-named var in the user's
+        // shell cannot clobber the values.
+        #[cfg(feature = "goosectl")]
+        apply_goosectl_env(
+            &mut command,
+            goosectl_paths.app_data_dir.as_deref(),
+            goosectl_paths.goosectl_bin.as_deref(),
+        );
         if let Some(config_path) = distro_config_path.as_deref() {
             apply_additional_config_files_env(&mut command, &shell_env, config_path);
         }
@@ -563,6 +574,130 @@ fn process_executable_name(pid: libc::pid_t) -> Option<String> {
     path.file_name()?.to_str().map(String::from)
 }
 
+/// Paths resolved by `resolve_goosectl_spawn_paths`, consumed by
+/// `apply_goosectl_env` after PATH assembly.
+#[cfg(feature = "goosectl")]
+struct GoosectlSpawnPaths {
+    goosectl_bin: Option<PathBuf>,
+    app_data_dir: Option<PathBuf>,
+}
+
+/// Resolve the bundled goosectl CLI and the app data dir before PATH
+/// assembly: the shim dir only goes on PATH when the shim was actually
+/// created, and the same resolved paths feed `apply_goosectl_env` after
+/// the shell-env copy.
+#[cfg(feature = "goosectl")]
+fn resolve_goosectl_spawn_paths(
+    app_handle: &tauri::AppHandle,
+    prepend_dirs: &mut Vec<PathBuf>,
+) -> GoosectlSpawnPaths {
+    let goosectl_bin = resolve_goosectl_bin();
+    let app_data_dir = match app_handle.path().app_data_dir() {
+        Ok(app_data_dir) => Some(app_data_dir),
+        Err(error) => {
+            log::warn!(
+                "Skipping goosectl PATH shim and GOOSECTL_LOCK: failed to resolve app data dir: {error}"
+            );
+            None
+        }
+    };
+    if let (Some(cli_path), Some(app_data_dir)) = (goosectl_bin.as_deref(), app_data_dir.as_deref())
+    {
+        let shim_dir = app_data_dir.join("bin");
+        match create_goosectl_shim(&shim_dir, cli_path) {
+            // After the distro bin dir so that dir keeps its
+            // pinned PATH-front position.
+            Ok(()) => prepend_dirs.push(shim_dir),
+            Err(error) => log::warn!("Skipping goosectl PATH shim: {error}"),
+        }
+    }
+    GoosectlSpawnPaths {
+        goosectl_bin,
+        app_data_dir,
+    }
+}
+
+/// Point goosed — and the harness children that inherit its environment — at
+/// this app instance's goosectl discovery file and the bundled goosectl
+/// CLI. Both values are static paths knowable before the broker exists; the
+/// broker starts lazily and writes the discovery file itself. A `None`
+/// app_data_dir (the caller already warned about it) skips
+/// GOOSECTL_LOCK.
+#[cfg(feature = "goosectl")]
+fn apply_goosectl_env(
+    command: &mut Command,
+    app_data_dir: Option<&Path>,
+    goosectl_bin: Option<&Path>,
+) {
+    if let Some(app_data_dir) = app_data_dir {
+        command.env(
+            "GOOSECTL_LOCK",
+            tauri_plugin_goosectl::discovery_file_path(app_data_dir, std::process::id()),
+        );
+    }
+
+    if let Some(goosectl_bin) = goosectl_bin {
+        command.env("GOOSECTL_BIN", goosectl_bin);
+    } else {
+        log::warn!("Skipping GOOSECTL_BIN: could not resolve the goosectl binary path");
+    }
+}
+
+/// Create or refresh the PATH shim that lets harness children run a bare
+/// `goosectl`: a `goosectl` symlink in `shim_dir` pointing at `cli_path`.
+/// The symlink is recreated on every spawn because the resolved bundle path
+/// changes under App Translocation and app updates; when multiple dev app
+/// instances share an app_data_dir the last spawner wins, which is
+/// acceptable. A symlink (not a copy) keeps the signed bundled binary and
+/// its updates authoritative.
+#[cfg(feature = "goosectl")]
+fn create_goosectl_shim(shim_dir: &Path, cli_path: &Path) -> Result<(), String> {
+    if !cli_path.exists() {
+        return Err(format!(
+            "goosectl binary not found at {}",
+            cli_path.display()
+        ));
+    }
+
+    std::fs::create_dir_all(shim_dir)
+        .map_err(|error| format!("failed to create {}: {error}", shim_dir.display()))?;
+
+    let link = shim_dir.join("goosectl");
+    // `remove_file` deletes a symlink itself rather than its target.
+    match std::fs::remove_file(&link) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(format!(
+                "failed to remove stale shim {}: {error}",
+                link.display()
+            ));
+        }
+    }
+    std::os::unix::fs::symlink(cli_path, &link).map_err(|error| {
+        format!(
+            "failed to symlink {} -> {}: {error}",
+            link.display(),
+            cli_path.display()
+        )
+    })
+}
+
+/// Mirrors `get_goose_command`: explicit env override (exported by `just
+/// dev`, where externalBin is empty) wins; otherwise the externalBin sidecar
+/// sits next to the app executable.
+#[cfg(feature = "goosectl")]
+fn resolve_goosectl_bin() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("GOOSECTL_BIN") {
+        if !override_path.is_empty() {
+            return Some(PathBuf::from(override_path));
+        }
+    }
+
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.parent()?.join("goosectl"))
+}
+
 pub fn get_goose_command(app_handle: &tauri::AppHandle) -> Result<Command, String> {
     if let Ok(override_path) = std::env::var("GOOSE_BIN") {
         Ok(Command::new(override_path))
@@ -766,5 +901,82 @@ mod tests {
             Some(Path::new("/distro/bin"))
         );
         assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+    }
+
+    // The distro bin dir keeps the PATH-front position; the goosectl shim
+    // dir follows it, and both precede the login-shell PATH.
+    #[test]
+    fn apply_shell_env_keeps_distro_bin_first_with_shim_dir_second() {
+        let mut command = Command::new("goose");
+        let mut shell_env = HashMap::new();
+        shell_env.insert("PATH".to_string(), "/shell/bin".to_string());
+
+        apply_shell_env_with_extended_path(
+            &mut command,
+            &shell_env,
+            &[PathBuf::from("/distro/bin"), PathBuf::from("/app-data/bin")],
+        );
+
+        let path = env_value(&command, "PATH").expect("PATH should be set");
+        let paths: Vec<_> = std::env::split_paths(&path).collect();
+        assert_eq!(
+            paths.first().map(|p| p.as_path()),
+            Some(Path::new("/distro/bin"))
+        );
+        assert_eq!(
+            paths.get(1).map(|p| p.as_path()),
+            Some(Path::new("/app-data/bin"))
+        );
+        assert!(paths.iter().any(|p| p == Path::new("/shell/bin")));
+    }
+
+    #[cfg(feature = "goosectl")]
+    mod goosectl_shim {
+        use super::super::create_goosectl_shim;
+        use std::path::Path;
+
+        fn write_fake_cli(dir: &Path, name: &str) -> std::path::PathBuf {
+            let path = dir.join(name);
+            std::fs::write(&path, "#!/bin/sh\n").expect("write fake cli");
+            path
+        }
+
+        #[test]
+        fn shim_symlink_points_at_resolved_cli_path() {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let cli_path = write_fake_cli(temp.path(), "goosectl");
+            let shim_dir = temp.path().join("bin");
+
+            create_goosectl_shim(&shim_dir, &cli_path).expect("shim creation should succeed");
+
+            let link = shim_dir.join("goosectl");
+            assert!(link.symlink_metadata().expect("shim exists").is_symlink());
+            assert_eq!(std::fs::read_link(&link).expect("read link"), cli_path);
+        }
+
+        #[test]
+        fn shim_symlink_is_refreshed_when_target_path_changes() {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let shim_dir = temp.path().join("bin");
+            let old_cli = write_fake_cli(temp.path(), "goosectl-old");
+            let new_cli = write_fake_cli(temp.path(), "goosectl-new");
+
+            create_goosectl_shim(&shim_dir, &old_cli).expect("first shim creation");
+            create_goosectl_shim(&shim_dir, &new_cli).expect("shim refresh");
+
+            let link = shim_dir.join("goosectl");
+            assert_eq!(std::fs::read_link(&link).expect("read link"), new_cli);
+        }
+
+        #[test]
+        fn shim_creation_fails_when_cli_path_is_missing() {
+            let temp = tempfile::tempdir().expect("temp dir");
+            let shim_dir = temp.path().join("bin");
+
+            let result = create_goosectl_shim(&shim_dir, &temp.path().join("missing"));
+
+            assert!(result.is_err());
+            assert!(!shim_dir.exists());
+        }
     }
 }

@@ -5,6 +5,7 @@ pub mod bundled_skills;
 pub(crate) mod diagnostic_log;
 pub mod distro_bundle;
 pub(crate) mod goose_config;
+pub(crate) mod goosectl_discovery;
 pub(crate) mod kgoose;
 pub(crate) mod log_export;
 pub(crate) mod log_redaction;

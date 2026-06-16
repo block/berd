@@ -17,6 +17,10 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `scripts/ensure-local-goose.sh` — managed local Goose checkout for dev
 - `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling
 - `scripts/update-goose-backend-lock.sh` — resolves and records a new Goose backend pin
+- `src/features/goosectl/` — goosectl command registry
+- `src-tauri/plugins/goosectl/` — goosectl broker
+- `src-tauri/crates/goosectl/` — bundled goosectl CLI
+- `distro/skills/goosectl/` — seeded skill agents use to discover goosectl
 
 ## Startup assets
 
@@ -57,7 +61,40 @@ requires it.
 - Frontend changes: `just check`
 - Vitest-covered behavior: `just test`
 - `src-tauri/`, Tauri config, sidecars, or Rust: `just tauri-check`
+- goosectl commands: `pnpm generate:goosectl-contract`, `pnpm vitest run
+  src/features/goosectl`, and `cargo test -p goosectl` (from `src-tauri/`)
 - Broad/release/packaging changes: `just ci`
+
+## goosectl
+
+goosectl lets agents control the app: CLI → broker → renderer registry.
+Design and reasoning: `docs/goosectl-architecture.md`. To add or change a
+command, use `.agents/skills/goosectl-new-command/SKILL.md`
+(`just new-command <noun> <verb>`).
+
+Invariants (1, 3, 4 are gated by test failures; 2, 5, 6 are review rules —
+the doc has the whys and the enforcement map):
+
+1. No command-specific knowledge below the renderer registry — the broker
+   stays transport-only (single reviewed exception: the create-cap's
+   `action == "create"` peek).
+2. Single dispatch point in the renderer.
+3. Bounds live in zod; clap only mirrors them.
+4. Help is hand-authored in the command module (summary, description,
+   helpFooter, `.describe()` per field); `cargo test -p goosectl` fails on
+   empty/TODO prose.
+5. Reversible, UI-visible verbs only — anything else reopens the auth
+   decision as a design review, not a PR.
+6. Reviewers identify breaking wire reshapes and bump `protocolVersion` in
+   both discovery.rs copies and the contract.ts mirror; tests pin only that
+   the constants are equal.
+
+The CLI is built from the contract at startup: command modules (zod schemas
++ help prose) → `pnpm generate:goosectl-contract` → `api-surface.json` (the
+client-neutral wire surface, with JSON Schema per action) +
+`cli-surface.json` (the CLI projection) → embedded by the goosectl crate,
+whose `tree.rs` builds the clap tree at runtime (`validate.rs` gates
+consistency via the crate's tests). Never hand-edit the contract JSONs.
 
 ## Linear
 

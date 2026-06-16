@@ -180,6 +180,10 @@
     }
   },
   "experiments": {
+    "goosectl": {
+      "description": "Lets agents control the app through the bundled goosectl command line: open, create, rename, move, and archive chats, and manage projects, agents, and skills. Actions apply immediately; archiving is reversible.",
+      "title": "In-app agent control"
+    },
     "autoEnable": {
       "description": "Dev builds enable experiments by default. Turn off individual experiments below when you need the stable path.",
       "label": "Auto-enable new experiments"

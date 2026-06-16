@@ -7,6 +7,9 @@ vite_port := `python3 -c "import hashlib,os; h=int(hashlib.sha256(os.getcwd().en
 # `Goose` binary on case-insensitive macOS filesystems.
 tauri_cargo_target_dir := `if [ -n "${GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR:-}" ]; then printf '%s\n' "$GOOSE_INTERNAL_TAURI_CARGO_TARGET_DIR"; elif [ -n "${XDG_CACHE_HOME:-}" ]; then printf '%s/goose-internal-tauri/cargo-target\n' "$XDG_CACHE_HOME"; elif [ "$(uname -s)" = "Darwin" ]; then printf '%s/Library/Caches/goose-internal-tauri/cargo-target\n' "$HOME"; else printf '%s/.cache/goose-internal-tauri/cargo-target\n' "$HOME"; fi`
 
+# Cargo features for the full dev/CI posture of the app crate.
+app_features := "goosectl,app-test-driver"
+
 # Default recipe
 default:
     @just --list
@@ -37,8 +40,16 @@ setup: _setup-dev-deps
 
 # ── Build & Check ────────────────────────────────────────────
 
-# Run the frontend non-test checks: design-system guardrails, formatting, lint, i18n, and TypeScript.
-check: design-system-check frontend-fmt-check lint i18n-check typecheck
+# Run the frontend non-test checks: design-system guardrails, goosectl contract freshness, formatting, lint, i18n, and TypeScript.
+check: design-system-check goosectl-contract-check frontend-fmt-check lint i18n-check typecheck
+
+# Regenerate the goosectl CLI contract artifacts from the command registry.
+goosectl-contract-generate:
+    pnpm generate:goosectl-contract
+
+# Check that the generated goosectl contract artifacts are up to date.
+goosectl-contract-check:
+    pnpm generate:goosectl-contract --check
 
 # Format frontend and Tauri/Rust files.
 fmt:
@@ -102,6 +113,9 @@ tauri-fmt-check:
 # Run Rust clippy with warnings denied.
 clippy:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy --features {{ app_features }} -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p goosectl -- -D warnings
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo clippy -p tauri-plugin-goosectl --features server -- -D warnings
 
 # Build the frontend.
 build:
@@ -110,14 +124,22 @@ build:
 # Check the Tauri/Rust crate with external sidecars disabled.
 tauri-check:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check --features {{ app_features }}
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo check -p goosectl
+
+# Run the Rust plugin tests with external sidecars disabled.
+tauri-test:
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p tauri-plugin-goosectl --features server
+    cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" TAURI_CONFIG='{"bundle":{"externalBin":[]}}' cargo test -p goosectl
 
 # Run the local CI gate.
-ci: check tauri-fmt-check tauri-check clippy test build
+ci: check tauri-fmt-check tauri-check tauri-test clippy test build
 
-# Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
+# Stage the pinned Goose backend and goosectl CLI into src-tauri/binaries and build bundles.
 bundle:
     ./scripts/prepare-goose-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" pnpm tauri build
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" pnpm tauri build --features goosectl
 
 # Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
 bundle-debug:
@@ -125,6 +147,7 @@ bundle-debug:
     set -euo pipefail
 
     ./scripts/prepare-goose-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
 
     # Use a temporary config overlay so normal release bundles keep devtools disabled.
     DEBUG_CONFIG="$(mktemp -t goose-tauri-debug.XXXXXX.json)"
@@ -132,7 +155,7 @@ bundle-debug:
     jq '.app.windows[0].devtools = true' src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
-      pnpm tauri build --features devtools --config "$DEBUG_CONFIG"
+      pnpm tauri build --features goosectl,devtools --config "$DEBUG_CONFIG"
 
 # ── Test ─────────────────────────────────────────────────────
 
@@ -169,6 +192,13 @@ dev:
     export RUST_LOG="${RUST_LOG:-perf=debug,info}"
     export CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}"
     echo "Using Tauri Cargo target dir: ${CARGO_TARGET_DIR}"
+
+    # tauri dev only builds the root package; the goosectl CLI workspace
+    # member needs an explicit build, resolved at runtime via GOOSECTL_BIN
+    # because tauri.dev.conf.json blanks externalBin.
+    (cd src-tauri && cargo build -p goosectl)
+    export GOOSECTL_BIN="${CARGO_TARGET_DIR}/debug/goosectl"
+    echo "Using goosectl CLI: ${GOOSECTL_BIN}"
 
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"
@@ -213,7 +243,7 @@ dev:
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 
-    pnpm tauri dev --features app-test-driver --config src-tauri/tauri.dev.conf.json "${EXTRA_CONFIG_ARGS[@]}"
+    pnpm tauri dev --features {{ app_features }} --config src-tauri/tauri.dev.conf.json "${EXTRA_CONFIG_ARGS[@]}"
 
 dev-debug: dev
 
@@ -231,12 +261,17 @@ release-notes from="" to="HEAD":
 
 # ── Utilities ────────────────────────────────────────────────
 
+# Scaffold a new goosectl command (see .agents/skills/goosectl-new-command/SKILL.md).
+new-command noun verb:
+    node scripts/new-goosectl-command.mjs {{ noun }} {{ verb }}
+
 clean:
     cd src-tauri && CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" cargo clean
     rm -rf dist node_modules sdk/node_modules sdk/dist
 
 stage-sidecar:
     ./scripts/prepare-goose-sidecar.sh
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
 
 avatars-manifest source version:
     pnpm avatars:manifest -- --source="{{ source }}" --version="{{ version }}"

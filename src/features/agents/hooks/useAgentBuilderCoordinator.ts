@@ -32,6 +32,11 @@ interface UseAgentBuilderCoordinatorOptions {
 
 type PendingNavigation = () => void;
 
+interface PendingNavigationEntry {
+  next: PendingNavigation;
+  onCancel?: () => void;
+}
+
 export function useAgentBuilderCoordinator({
   startupReady,
   createNewTab,
@@ -41,7 +46,7 @@ export function useAgentBuilderCoordinator({
 }: UseAgentBuilderCoordinatorOptions) {
   const { t } = useTranslation("agents");
   const [leaveDraftPromptOpen, setLeaveDraftPromptOpen] = useState(false);
-  const pendingNavigationRef = useRef<PendingNavigation | null>(null);
+  const pendingNavigationRef = useRef<PendingNavigationEntry | null>(null);
   const pendingSessionIdRef = useRef<string | null>(null);
   const sessionsSignature = useChatSessionStore((state) =>
     state.sessions
@@ -77,14 +82,23 @@ export function useAgentBuilderCoordinator({
   }, []);
 
   const runPendingNavigation = useCallback(() => {
-    const next = pendingNavigationRef.current;
+    const pending = pendingNavigationRef.current;
     clearPendingNavigation();
-    next?.();
+    pending?.next();
+  }, [clearPendingNavigation]);
+
+  const cancelPendingNavigation = useCallback(() => {
+    const pending = pendingNavigationRef.current;
+    clearPendingNavigation();
+    pending?.onCancel?.();
   }, [clearPendingNavigation]);
 
   const promptForNavigation = useCallback(
-    (sessionId: string, next: PendingNavigation) => {
-      pendingNavigationRef.current = next;
+    (sessionId: string, next: PendingNavigation, onCancel?: () => void) => {
+      // A newer guarded navigation supersedes any pending one; settle the old
+      // entry as cancelled so its caller is not left waiting forever.
+      pendingNavigationRef.current?.onCancel?.();
+      pendingNavigationRef.current = { next, onCancel };
       pendingSessionIdRef.current = sessionId;
       setLeaveDraftPromptOpen(true);
     },
@@ -92,7 +106,7 @@ export function useAgentBuilderCoordinator({
   );
 
   const guardNavigation = useCallback(
-    (next: PendingNavigation): boolean => {
+    (next: PendingNavigation, onCancel?: () => void): boolean => {
       const session = useChatSessionStore.getState().getActiveSession();
       if (!session || session.intent !== "build-agent") {
         next();
@@ -108,10 +122,10 @@ export function useAgentBuilderCoordinator({
           return;
         }
 
-        promptForNavigation(session.id, next);
+        promptForNavigation(session.id, next, onCancel);
       })().catch((error) => {
         console.error("Failed to inspect active agent draft:", error);
-        promptForNavigation(session.id, next);
+        promptForNavigation(session.id, next, onCancel);
       });
 
       return false;
@@ -182,14 +196,18 @@ export function useAgentBuilderCoordinator({
   );
 
   const handleCancelLeaveDraft = useCallback(() => {
-    clearPendingNavigation();
-  }, [clearPendingNavigation]);
+    cancelPendingNavigation();
+  }, [cancelPendingNavigation]);
 
   const handleDiscardLeaveDraft = useCallback(() => {
+    // Capture and clear the pending entry synchronously: a concurrent guarded
+    // navigation can install a new entry during the async discard gap, and a
+    // re-read of the ref in .finally would hijack that newer continuation.
     const sessionId = pendingSessionIdRef.current;
-    setLeaveDraftPromptOpen(false);
+    const pending = pendingNavigationRef.current;
+    clearPendingNavigation();
     if (!sessionId) {
-      runPendingNavigation();
+      pending?.next();
       return;
     }
 
@@ -198,20 +216,20 @@ export function useAgentBuilderCoordinator({
         console.error("Failed to discard agent draft:", error);
       })
       .finally(() => {
-        runPendingNavigation();
+        pending?.next();
       });
-  }, [runPendingNavigation]);
+  }, [clearPendingNavigation]);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
-        clearPendingNavigation();
+        cancelPendingNavigation();
         return;
       }
 
       setLeaveDraftPromptOpen(open);
     },
-    [clearPendingNavigation],
+    [cancelPendingNavigation],
   );
 
   const leaveDraftDialogProps = useMemo<AgentBuilderLeaveDraftDialogProps>(

@@ -22,8 +22,9 @@ function initialReadiness(): Map<string, AgentProviderReadiness> {
 
 // Derive per-agent readiness from the doctor report. The crate identifies
 // agents by `ai-agent-<name>`; map those back to the frontend's provider ids
-// before recording readiness.
-function readinessFromReport(
+// before recording readiness. Exported for non-hook consumers (goosectl)
+// that share the agent picker's readiness semantics.
+export function readinessFromReport(
   report: DoctorReport,
 ): Map<string, AgentProviderReadiness> {
   const readiness = initialReadiness();

@@ -169,15 +169,6 @@ interface ChatSessionStoreActions {
 
 export type ChatSessionStore = ChatSessionStoreState & ChatSessionStoreActions;
 
-function releaseWindowedSession(sessionId: string): void {
-  if (!useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
-    return;
-  }
-  releaseSession(sessionId).catch((err: unknown) =>
-    console.error("Failed to release session window:", err),
-  );
-}
-
 function loadContextPanelOpenPreference(): boolean {
   if (typeof window === "undefined") return false;
 
@@ -199,6 +190,15 @@ function persistContextPanelOpenPreference(open: boolean): void {
   } catch {
     // localStorage may be unavailable
   }
+}
+
+function releaseWindowedSession(sessionId: string): void {
+  if (!useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+    return;
+  }
+  releaseSession(sessionId).catch((err: unknown) =>
+    console.error("Failed to release session window:", err),
+  );
 }
 
 export function sessionToChatSession(session: Session): ChatSession {

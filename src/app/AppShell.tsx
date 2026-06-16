@@ -66,6 +66,10 @@ import {
   setSettingsSectionUrl,
 } from "./lib/settingsSectionUrl";
 import { useAgentBuilderCoordinator } from "@/features/agents/hooks/useAgentBuilderCoordinator";
+import {
+  type ArchiveChatWithCleanupOptions,
+  useRegisterAppNavigationController,
+} from "@/features/goosectl/navigation";
 import { AgentBuilderLeaveDraftDialog } from "@/features/agents/ui/AgentBuilderLeaveDraftDialog";
 import { AutomationBuilderLeaveDialog } from "@/features/automations/ui/AutomationBuilderLeaveDialog";
 import type { AutomationBuilderLeaveAction } from "@/features/automations/ui/AutomationBuilderView";
@@ -360,7 +364,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   >(() => {});
   const automationBuilderLeaveActionRef =
     useRef<AutomationBuilderLeaveAction | null>(null);
-  const pendingAutomationNavigationRef = useRef<(() => void) | null>(null);
+  const pendingAutomationNavigationRef = useRef<{
+    next: () => void;
+    onCancel?: () => void;
+  } | null>(null);
   const [
     automationBuilderHasUnsavedChanges,
     setAutomationBuilderHasUnsavedChanges,
@@ -1206,7 +1213,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const guardAutomationBuilderNavigation = useCallback(
-    (next: () => void) => {
+    (next: () => void, onCancel?: () => void) => {
       const action = automationBuilderLeaveActionRef.current;
       if (
         activeView === "automations" &&
@@ -1214,7 +1221,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         automationBuilderHasUnsavedChanges &&
         action?.hasUnsavedChanges
       ) {
-        pendingAutomationNavigationRef.current = next;
+        // A newer guarded navigation supersedes any pending one; settle the
+        // old entry as cancelled so its caller is not left waiting forever.
+        pendingAutomationNavigationRef.current?.onCancel?.();
+        pendingAutomationNavigationRef.current = { next, onCancel };
         setAutomationLeavePromptOpen(true);
         return;
       }
@@ -1225,25 +1235,25 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   const guardAppNavigation = useCallback(
-    (next: () => void) => {
+    (next: () => void, onCancel?: () => void) => {
       agentBuilder.guardNavigation(() => {
-        guardAutomationBuilderNavigation(next);
-      });
+        guardAutomationBuilderNavigation(next, onCancel);
+      }, onCancel);
     },
     [agentBuilder.guardNavigation, guardAutomationBuilderNavigation],
   );
 
   const continuePendingAutomationNavigation = useCallback(() => {
-    const next = pendingAutomationNavigationRef.current;
+    const pending = pendingAutomationNavigationRef.current;
     pendingAutomationNavigationRef.current = null;
-    if (next) {
-      next();
-    }
+    pending?.next();
   }, []);
 
   const cancelAutomationLeave = useCallback(() => {
+    const pending = pendingAutomationNavigationRef.current;
     pendingAutomationNavigationRef.current = null;
     setAutomationLeavePromptOpen(false);
+    pending?.onCancel?.();
   }, []);
 
   const discardAutomationLeave = useCallback(() => {
@@ -1709,41 +1719,74 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     };
   }, [openSettings]);
 
-  const handleArchiveChat = useCallback(
-    (sessionId: string): Promise<void> => {
+  const archiveChatWithCleanup = useCallback(
+    async (sessionId: string, options: ArchiveChatWithCleanupOptions = {}) => {
+      const mode = options.mode ?? "optimistic";
+      const reportErrors = options.reportErrors ?? false;
       const sessionStore = useChatSessionStore.getState();
       const session = sessionStore.getSession(sessionId);
       if (!session) {
-        return Promise.resolve();
+        return { ok: false as const, reason: "session_not_found" as const };
       }
 
       const wasActiveSession = sessionStore.activeSessionId === sessionId;
-      const archive = sessionStore.archiveSession(sessionId);
-
-      cleanupChatSession(sessionId);
-      if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
-        void releaseSession(sessionId).catch((error: unknown) =>
-          console.error("Failed to release session window:", error),
-        );
-      }
-
-      if (wasActiveSession) {
-        setActiveSession(null);
-        setActiveView("home");
-      }
-
-      void archive.catch((error: unknown) => {
-        console.error("Failed to archive session in backend:", error);
-        if (error instanceof SessionNotFoundError) {
-          return;
+      const cleanup = () => {
+        cleanupChatSession(sessionId);
+        if (useSessionWindowStore.getState().isOpenInWindow(sessionId)) {
+          releaseSession(sessionId).catch((err: unknown) =>
+            console.error("Failed to release session window:", err),
+          );
         }
-        toast.error(
-          formatAcpErrorMessage(error, t("chat:notifications.archiveError")),
-        );
-      });
-      return Promise.resolve();
+        if (wasActiveSession) {
+          setActiveSession(null);
+          setActiveView("home");
+        }
+      };
+      const handleFailure = (error: unknown) => {
+        if (reportErrors) {
+          toast.error(
+            formatAcpErrorMessage(error, t("chat:notifications.archiveError")),
+          );
+        }
+        return {
+          ok: false as const,
+          reason:
+            error instanceof SessionNotFoundError
+              ? ("session_not_found" as const)
+              : ("backend_archive_failed" as const),
+        };
+      };
+
+      const archive = useChatSessionStore.getState().archiveSession(sessionId);
+      if (mode === "optimistic") {
+        cleanup();
+        try {
+          await archive;
+          return { ok: true as const };
+        } catch (error) {
+          return handleFailure(error);
+        }
+      }
+
+      try {
+        await archive;
+      } catch (error) {
+        return handleFailure(error);
+      }
+      cleanup();
+      return { ok: true as const };
     },
     [cleanupChatSession, setActiveSession, t],
+  );
+
+  const handleArchiveChat = useCallback(
+    async (sessionId: string) => {
+      void archiveChatWithCleanup(sessionId, {
+        mode: "optimistic",
+        reportErrors: true,
+      });
+    },
+    [archiveChatWithCleanup],
   );
   closeAgentBuilderSessionRef.current = handleArchiveChat;
 
@@ -1933,6 +1976,31 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       isBuilderbotSurfaceEnabled,
     ],
   );
+
+  useRegisterAppNavigationController({
+    guardAppNavigation,
+    selectSessionDirect,
+    archiveChatWithCleanup,
+    getActiveSessionId: () => useChatSessionStore.getState().activeSessionId,
+    hasSession: (sessionId) =>
+      Boolean(useChatSessionStore.getState().getSession(sessionId)),
+    isSessionOpenInWindow: (sessionId) =>
+      useSessionWindowStore.getState().isOpenInWindow(sessionId),
+    focusSessionWindow,
+    getAppContext: () => {
+      const sessionStore = useChatSessionStore.getState();
+      const activeSession = sessionStore.activeSessionId
+        ? sessionStore.getSession(sessionStore.activeSessionId)
+        : undefined;
+      return {
+        view: activeView,
+        activeSessionId: sessionStore.activeSessionId,
+        activeProjectId: activeSession?.projectId ?? null,
+      };
+    },
+    activeView,
+    isMultiWindowEnabled,
+  });
 
   const navigateSkills = useCallback(
     (skillId: string | null, options?: AppNavigationUpdateOptions) => {
