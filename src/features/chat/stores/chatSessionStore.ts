@@ -14,6 +14,7 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 const CONTEXT_PANEL_OPEN_STORAGE_KEY = "goose:context-panel-open";
 
 let sessionLoadEpoch = 0;
+let archiveMutationOperationId = 0;
 
 /** Thrown by archiveSession when the id matches no session in the store. */
 export class SessionNotFoundError extends Error {
@@ -60,6 +61,25 @@ export interface ChatSessionReasoningEffortConfig {
   options: ChatSessionReasoningEffortOption[];
 }
 
+type ArchiveMutationStatus = "pending" | "succeeded";
+
+export type ArchiveSessionMutation =
+  | {
+      operationId: number;
+      desiredState: "archived";
+      optimisticArchivedAt: string;
+      previousArchivedAt?: string;
+      status: ArchiveMutationStatus;
+    }
+  | {
+      operationId: number;
+      desiredState: "unarchived";
+      previousArchivedAt?: string;
+      status: ArchiveMutationStatus;
+    };
+
+export type ArchiveMutationBySessionId = Record<string, ArchiveSessionMutation>;
+
 export interface ActiveWorkspace {
   path: string;
   branch: string | null;
@@ -105,6 +125,7 @@ interface ChatSessionStoreState {
   isContextPanelOpen: boolean;
   activeWorkspaceBySession: Record<string, ActiveWorkspace>;
   modelSelectionIntentBySession: Record<string, ModelSelectionIntent>;
+  archiveMutationBySessionId: ArchiveMutationBySessionId;
 }
 
 interface CreateSessionOpts {
@@ -169,6 +190,102 @@ interface ChatSessionStoreActions {
 
 export type ChatSessionStore = ChatSessionStoreState & ChatSessionStoreActions;
 
+function getArchiveMutationDesiredArchivedAt(
+  mutation: ArchiveSessionMutation,
+): string | undefined {
+  return mutation.desiredState === "archived"
+    ? mutation.optimisticArchivedAt
+    : undefined;
+}
+
+function getArchiveMutationRollbackArchivedAt(
+  session: ChatSession,
+  existingMutation?: ArchiveSessionMutation,
+): string | undefined {
+  if (!existingMutation) {
+    return session.archivedAt;
+  }
+  return existingMutation.status === "succeeded"
+    ? getArchiveMutationDesiredArchivedAt(existingMutation)
+    : existingMutation.previousArchivedAt;
+}
+
+function recordArchiveMutationSuccess(
+  state: ChatSessionStore,
+  sessionId: string,
+  completedMutation: ArchiveSessionMutation,
+): Partial<ChatSessionStore> | ChatSessionStore {
+  const currentMutation = state.archiveMutationBySessionId[sessionId];
+  const completedSucceededMutation = {
+    ...completedMutation,
+    status: "succeeded" as const,
+  };
+
+  if (!currentMutation) {
+    if (!state.sessions.some((candidate) => candidate.id === sessionId)) {
+      return state;
+    }
+
+    return {
+      sessions: state.sessions.map((candidate) =>
+        candidate.id === sessionId
+          ? {
+              ...candidate,
+              archivedAt:
+                getArchiveMutationDesiredArchivedAt(completedMutation),
+            }
+          : candidate,
+      ),
+      archiveMutationBySessionId: {
+        ...state.archiveMutationBySessionId,
+        [sessionId]: completedSucceededMutation,
+      },
+    };
+  }
+
+  if (currentMutation.operationId === completedMutation.operationId) {
+    return {
+      archiveMutationBySessionId: {
+        ...state.archiveMutationBySessionId,
+        [sessionId]: { ...currentMutation, status: "succeeded" as const },
+      },
+    };
+  }
+
+  return {
+    archiveMutationBySessionId: {
+      ...state.archiveMutationBySessionId,
+      [sessionId]: {
+        ...currentMutation,
+        previousArchivedAt:
+          getArchiveMutationDesiredArchivedAt(completedMutation),
+      },
+    },
+  };
+}
+
+function rollbackFailedArchiveMutation(
+  state: ChatSessionStore,
+  sessionId: string,
+  operationId: number,
+): Partial<ChatSessionStore> | ChatSessionStore {
+  const mutation = state.archiveMutationBySessionId[sessionId];
+  if (!mutation || mutation.operationId !== operationId) {
+    return state;
+  }
+
+  const { [sessionId]: _mutation, ...archiveMutationBySessionId } =
+    state.archiveMutationBySessionId;
+  return {
+    sessions: state.sessions.map((candidate) =>
+      candidate.id === sessionId
+        ? { ...candidate, archivedAt: mutation.previousArchivedAt }
+        : candidate,
+    ),
+    archiveMutationBySessionId,
+  };
+}
+
 function loadContextPanelOpenPreference(): boolean {
   if (typeof window === "undefined") return false;
 
@@ -230,6 +347,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
   isContextPanelOpen: loadContextPanelOpenPreference(),
   activeWorkspaceBySession: {},
   modelSelectionIntentBySession: {},
+  archiveMutationBySessionId: {},
 
   createSession: async (opts) => {
     if (!opts?.workingDir) {
@@ -494,7 +612,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       const nextSessions = state.sessions.filter(
         (session) => session.id !== id,
       );
-      if (nextSessions.length === state.sessions.length) {
+      const hasMutation = id in state.archiveMutationBySessionId;
+      if (nextSessions.length === state.sessions.length && !hasMutation) {
         return state;
       }
 
@@ -502,6 +621,8 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
         state.activeWorkspaceBySession;
       const { [id]: _intent, ...modelSelectionIntentBySession } =
         state.modelSelectionIntentBySession;
+      const { [id]: _mutation, ...archiveMutationBySessionId } =
+        state.archiveMutationBySessionId;
 
       return {
         sessions: nextSessions,
@@ -509,6 +630,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
           state.activeSessionId === id ? null : state.activeSessionId,
         activeWorkspaceBySession,
         modelSelectionIntentBySession,
+        archiveMutationBySessionId,
       };
     });
     releaseWindowedSession(id);
@@ -519,26 +641,36 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     if (!session) {
       throw new SessionNotFoundError(id);
     }
-    const previousArchivedAt = session.archivedAt;
+    const optimisticArchivedAt = new Date().toISOString();
+    const operationId = ++archiveMutationOperationId;
+    const mutation: ArchiveSessionMutation = {
+      operationId,
+      desiredState: "archived",
+      optimisticArchivedAt,
+      previousArchivedAt: getArchiveMutationRollbackArchivedAt(
+        session,
+        get().archiveMutationBySessionId[id],
+      ),
+      status: "pending",
+    };
     set((state) => ({
       sessions: state.sessions.map((candidate) =>
         candidate.id === id
-          ? { ...candidate, archivedAt: new Date().toISOString() }
+          ? { ...candidate, archivedAt: optimisticArchivedAt }
           : candidate,
       ),
+      archiveMutationBySessionId: {
+        ...state.archiveMutationBySessionId,
+        [id]: mutation,
+      },
     }));
     try {
       await acpArchiveSession(session.id);
+      set((state) => recordArchiveMutationSuccess(state, id, mutation));
     } catch (error) {
       // Roll back only the archive flag; navigation/window cleanup is owned by
       // AppShell's archive transaction.
-      set((state) => ({
-        sessions: state.sessions.map((candidate) =>
-          candidate.id === id
-            ? { ...candidate, archivedAt: previousArchivedAt }
-            : candidate,
-        ),
-      }));
+      set((state) => rollbackFailedArchiveMutation(state, id, operationId));
       throw error;
     }
   },
@@ -548,24 +680,32 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
     if (!session) {
       return;
     }
-    const previousArchivedAt = session.archivedAt;
+    const operationId = ++archiveMutationOperationId;
+    const mutation: ArchiveSessionMutation = {
+      operationId,
+      desiredState: "unarchived",
+      previousArchivedAt: getArchiveMutationRollbackArchivedAt(
+        session,
+        get().archiveMutationBySessionId[id],
+      ),
+      status: "pending",
+    };
     set((state) => ({
       sessions: state.sessions.map((candidate) =>
         candidate.id === id
           ? { ...candidate, archivedAt: undefined }
           : candidate,
       ),
+      archiveMutationBySessionId: {
+        ...state.archiveMutationBySessionId,
+        [id]: mutation,
+      },
     }));
     try {
       await acpUnarchiveSession(session.id);
+      set((state) => recordArchiveMutationSuccess(state, id, mutation));
     } catch (error) {
-      set((state) => ({
-        sessions: state.sessions.map((candidate) =>
-          candidate.id === id
-            ? { ...candidate, archivedAt: previousArchivedAt }
-            : candidate,
-        ),
-      }));
+      set((state) => rollbackFailedArchiveMutation(state, id, operationId));
       throw error;
     }
   },

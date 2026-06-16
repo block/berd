@@ -1781,7 +1781,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleArchiveChat = useCallback(
     async (sessionId: string) => {
-      void archiveChatWithCleanup(sessionId, {
+      await archiveChatWithCleanup(sessionId, {
         mode: "optimistic",
         reportErrors: true,
       });

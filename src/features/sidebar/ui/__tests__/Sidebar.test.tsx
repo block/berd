@@ -1,5 +1,6 @@
 import { useState, type ComponentProps } from "react";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -148,6 +149,14 @@ function attachScrollTo(element: HTMLElement) {
     value: scrollTo,
   });
   return scrollTo;
+}
+
+function createDeferredPromise<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }
 
 async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
@@ -874,6 +883,72 @@ describe("Sidebar", () => {
     await waitFor(() => {
       expect(onArchiveChat).toHaveBeenCalledWith("active-session");
       expect(onArchiveChat).toHaveBeenCalledWith("session-2");
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: /archive \d+ chats/i }),
+      ).not.toBeInTheDocument();
+    });
+  });
+
+  it("keeps bulk archive actions disabled until archive callbacks settle", async () => {
+    const user = userEvent.setup();
+    const archive = createDeferredPromise<void>();
+    const onArchiveChat = vi.fn(() => archive.promise);
+    seedSessions(
+      {
+        id: "active-session",
+        title: "Active Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "session-2",
+        title: "Second Chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    renderSidebar({
+      activeSessionId: "active-session",
+      onArchiveChat,
+    });
+
+    await user.keyboard("[ControlLeft>]");
+    await user.click(screen.getByRole("button", { name: "Second Chat" }));
+    await user.keyboard("[/ControlLeft]");
+    await user.click(
+      screen.getByRole("button", { name: /options for second chat/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: /^archive$/i }));
+    await user.click(screen.getByRole("button", { name: /^archive$/i }));
+
+    await waitFor(() => {
+      expect(onArchiveChat).toHaveBeenCalledTimes(2);
+    });
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", { name: /archive \d+ chats/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /options for second chat/i }),
+    );
+    expect(
+      screen.getByRole("menuitem", { name: /^archive$/i }),
+    ).toHaveAttribute("data-disabled");
+
+    await act(async () => {
+      archive.resolve(undefined);
+      await archive.promise;
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("menuitem", { name: /^archive$/i }),
+      ).not.toHaveAttribute("data-disabled");
     });
   });
 

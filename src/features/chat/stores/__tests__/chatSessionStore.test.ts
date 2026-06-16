@@ -44,6 +44,7 @@ function resetStore() {
     isContextPanelOpen: false,
     activeWorkspaceBySession: {},
     modelSelectionIntentBySession: {},
+    archiveMutationBySessionId: {},
   });
 }
 
@@ -97,10 +98,12 @@ function mockPage(
 
 function createDeferredPromise<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 describe("chatSessionStore", () => {
@@ -187,6 +190,110 @@ describe("chatSessionStore", () => {
 
       expect(mocks.releaseSession).not.toHaveBeenCalled();
     });
+
+    it("does not let an older unarchive failure roll back a newer archive", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      const unarchive = createDeferredPromise<void>();
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const latestArchivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      expect(latestArchivedAt).toEqual(expect.any(String));
+
+      unarchive.reject(new Error("stale failure"));
+      await expect(unarchivePromise).rejects.toThrow("stale failure");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(latestArchivedAt);
+
+      archive.resolve(undefined);
+      await archivePromise;
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(latestArchivedAt);
+    });
+
+    it("rolls back to the backend-known archived state when overlapping unarchive and archive both fail", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      const unarchive = createDeferredPromise<void>();
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+
+      unarchive.reject(new Error("unarchive failed"));
+      await expect(unarchivePromise).rejects.toThrow("unarchive failed");
+      archive.reject(new Error("archive failed"));
+      await expect(archivePromise).rejects.toThrow("archive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(priorArchivedAt);
+    });
+
+    it("applies an older archive success after a newer unarchive failure clears the mutation", async () => {
+      const archive = createDeferredPromise<void>();
+      const unarchive = createDeferredPromise<void>();
+      seedSession({ id: "session-1" });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const archivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      expect(archivedAt).toEqual(expect.any(String));
+
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+      unarchive.reject(new Error("unarchive failed"));
+      await expect(unarchivePromise).rejects.toThrow("unarchive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId,
+      ).not.toHaveProperty("session-1");
+
+      archive.resolve(undefined);
+      await archivePromise;
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(archivedAt);
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId["session-1"],
+      ).toMatchObject({
+        desiredState: "archived",
+        status: "succeeded",
+      });
+    });
   });
 
   describe("unarchiveSession", () => {
@@ -219,6 +326,103 @@ describe("chatSessionStore", () => {
       await useChatSessionStore.getState().unarchiveSession("missing-session");
 
       expect(mocks.unarchiveSession).not.toHaveBeenCalled();
+    });
+
+    it("rolls back to the backend-known unarchived state when overlapping archive and unarchive both fail", async () => {
+      const archive = createDeferredPromise<void>();
+      const unarchive = createDeferredPromise<void>();
+      seedSession({ id: "session-1" });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+
+      archive.reject(new Error("archive failed"));
+      await expect(archivePromise).rejects.toThrow("archive failed");
+      unarchive.reject(new Error("unarchive failed"));
+      await expect(unarchivePromise).rejects.toThrow("unarchive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+    });
+
+    it("uses an older successful archive as rollback base when a newer unarchive fails", async () => {
+      const archive = createDeferredPromise<void>();
+      const unarchive = createDeferredPromise<void>();
+      seedSession({ id: "session-1" });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const archivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+
+      archive.resolve(undefined);
+      await archivePromise;
+      unarchive.reject(new Error("unarchive failed"));
+      await expect(unarchivePromise).rejects.toThrow("unarchive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(archivedAt);
+    });
+
+    it("applies an older unarchive success after a newer archive failure clears the mutation", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      const unarchive = createDeferredPromise<void>();
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toEqual(expect.any(String));
+
+      archive.reject(new Error("archive failed"));
+      await expect(archivePromise).rejects.toThrow("archive failed");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(priorArchivedAt);
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId,
+      ).not.toHaveProperty("session-1");
+
+      unarchive.resolve(undefined);
+      await unarchivePromise;
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId["session-1"],
+      ).toMatchObject({
+        desiredState: "unarchived",
+        status: "succeeded",
+      });
     });
   });
 
@@ -559,6 +763,142 @@ describe("chatSessionStore", () => {
       expect(state.hasMoreSessions).toBe(true);
     });
 
+    it("preserves a pending optimistic archive when ACP returns stale unarchived state", async () => {
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1" });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const optimisticArchivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      expect(optimisticArchivedAt).toEqual(expect.any(String));
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage([
+          makeAcpSession({ sessionId: "session-1", archivedAt: null }),
+        ]),
+      );
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(optimisticArchivedAt);
+
+      archive.resolve(undefined);
+      await archivePromise;
+    });
+
+    it("preserves a succeeded optimistic archive until ACP confirms the archived state", async () => {
+      const canonicalArchivedAt = "2026-04-10T00:00:00.000Z";
+      seedSession({ id: "session-1" });
+
+      await useChatSessionStore.getState().archiveSession("session-1");
+      const optimisticArchivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      expect(optimisticArchivedAt).toEqual(expect.any(String));
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage([
+          makeAcpSession({ sessionId: "session-1", archivedAt: null }),
+        ]),
+      );
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(optimisticArchivedAt);
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId,
+      ).toHaveProperty("session-1");
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage([
+          makeAcpSession({
+            sessionId: "session-1",
+            archivedAt: canonicalArchivedAt,
+          }),
+        ]),
+      );
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(canonicalArchivedAt);
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId,
+      ).not.toHaveProperty("session-1");
+    });
+
+    it("rolls back a failed archive after a stale ACP page merged while pending", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const optimisticArchivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+      expect(optimisticArchivedAt).not.toBe(priorArchivedAt);
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage([
+          makeAcpSession({ sessionId: "session-1", archivedAt: null }),
+        ]),
+      );
+      await useChatSessionStore.getState().loadSessions();
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(optimisticArchivedAt);
+
+      archive.reject(new Error("backend down"));
+      await expect(archivePromise).rejects.toThrow("backend down");
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(priorArchivedAt);
+      expect(
+        useChatSessionStore.getState().archiveMutationBySessionId,
+      ).not.toHaveProperty("session-1");
+    });
+
+    it("preserves a pending optimistic unarchive when ACP returns the old archived timestamp", async () => {
+      const priorArchivedAt = "2026-03-15T00:00:00.000Z";
+      const unarchive = createDeferredPromise<void>();
+      seedSession({ id: "session-1", archivedAt: priorArchivedAt });
+      mocks.unarchiveSession.mockReturnValueOnce(unarchive.promise);
+
+      const unarchivePromise = useChatSessionStore
+        .getState()
+        .unarchiveSession("session-1");
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage([
+          makeAcpSession({
+            sessionId: "session-1",
+            archivedAt: priorArchivedAt,
+          }),
+        ]),
+      );
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBeUndefined();
+
+      unarchive.resolve(undefined);
+      await unarchivePromise;
+    });
+
     it("keeps empty sessions list on error", async () => {
       mocks.acpListSessionsPage.mockRejectedValue(new Error("Network error"));
 
@@ -603,6 +943,41 @@ describe("chatSessionStore", () => {
       ]);
       expect(state.sessionPageCursor).toBe("cursor-3");
       expect(state.hasMoreSessions).toBe(true);
+    });
+
+    it("preserves optimistic archive state while loading more sessions", async () => {
+      const archive = createDeferredPromise<void>();
+      seedSession({ id: "session-1" });
+      useChatSessionStore.setState({
+        sessionPageCursor: "cursor-2",
+        hasMoreSessions: true,
+      });
+      mocks.archiveSession.mockReturnValueOnce(archive.promise);
+
+      const archivePromise = useChatSessionStore
+        .getState()
+        .archiveSession("session-1");
+      const optimisticArchivedAt = useChatSessionStore
+        .getState()
+        .getSession("session-1")?.archivedAt;
+
+      mocks.acpListSessionsPage.mockResolvedValueOnce(
+        mockPage(
+          [makeAcpSession({ sessionId: "session-1", archivedAt: null })],
+          "cursor-3",
+        ),
+      );
+      await useChatSessionStore.getState().loadMoreSessions();
+
+      expect(mocks.acpListSessionsPage).toHaveBeenCalledWith({
+        cursor: "cursor-2",
+      });
+      expect(
+        useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+      ).toBe(optimisticArchivedAt);
+
+      archive.resolve(undefined);
+      await archivePromise;
     });
 
     it("does not start a second next-page request while one is in flight", async () => {
