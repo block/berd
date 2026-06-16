@@ -570,5 +570,6 @@ describe("useHomeCanvasViewport", () => {
       y: 380,
       zoom: 1,
     });
+    expect(result.current.canvasSize).toEqual({ width: 800, height: 600 });
   });
 });

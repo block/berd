@@ -177,6 +177,7 @@
     },
     "canvasControls": {
       "cleanUpTitle": "Clean up pins",
+      "recenterVisibleLabel": "Recenter",
       "recenterTitle": "Recenter pinned objects",
       "restoreTitle": "Revert layout"
     },

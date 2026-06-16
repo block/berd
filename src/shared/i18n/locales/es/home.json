@@ -177,6 +177,7 @@
     },
     "canvasControls": {
       "cleanUpTitle": "Ordenar pins",
+      "recenterVisibleLabel": "Recentrar",
       "recenterTitle": "Recentrar objetos fijados",
       "restoreTitle": "Revertir diseño"
     },

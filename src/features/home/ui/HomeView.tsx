@@ -27,6 +27,7 @@ export interface HomeViewProps {
   onOpenSkills?: () => void;
   onOpenAutomations?: () => void;
   onHydratePinnedChatSessions?: (sessionIds: string[]) => void;
+  viewportLeftOcclusionPx?: number;
 }
 
 export function HomeView({
@@ -41,6 +42,7 @@ export function HomeView({
   onOpenSkills,
   onOpenAutomations,
   onHydratePinnedChatSessions,
+  viewportLeftOcclusionPx = 0,
 }: HomeViewProps) {
   const { t } = useTranslation("home");
   const setTopBarActions = useSetTopBarActions();
@@ -78,6 +80,7 @@ export function HomeView({
     return ids.join("\u001f");
   }, [instances]);
   const recenterTitle = t("widgets.canvasControls.recenterTitle");
+  const recenterVisibleLabel = t("widgets.canvasControls.recenterVisibleLabel");
   const cleanUpTitle = t("widgets.canvasControls.cleanUpTitle");
   const restoreTitle = t("widgets.canvasControls.restoreTitle");
   const cleanUpControlTitle = cleanUpSnapshot ? restoreTitle : cleanUpTitle;
@@ -184,6 +187,11 @@ export function HomeView({
           instances={instances}
           mutations={widgetMutations}
           animateCameraTransition={layoutMotionActive}
+          onRecenter={handleRecenter}
+          recenterTarget={recenterTarget}
+          recenterLabel={recenterVisibleLabel}
+          recenterTitle={recenterTitle}
+          viewportLeftOcclusionPx={viewportLeftOcclusionPx}
           onOpenProject={onOpenProject}
           onOpenSkill={onOpenSkill}
           onOpenAgent={onOpenAgent}

@@ -1,4 +1,5 @@
 import type React from "react";
+import { Crosshair } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
@@ -6,6 +7,11 @@ import type {
   LayoutConstraints,
 } from "@/features/layout/api/layout";
 import { cn } from "@/shared/lib/cn";
+import { Button } from "@/shared/ui/button";
+import {
+  hasVisibleHomeCanvasWidget,
+  isHomeCanvasPointInsideViewport,
+} from "../lib/homeCanvasVisibility";
 import { snapCanvasPointToDevicePixels } from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import {
@@ -40,6 +46,11 @@ interface WidgetCanvasProps extends WidgetNavigationHandlers {
   instances: WidgetInstance[];
   mutations: WidgetMutationHandlers;
   animateCameraTransition?: boolean;
+  onRecenter?: () => void;
+  recenterTarget?: { x: number; y: number } | null;
+  recenterLabel?: string;
+  recenterTitle?: string;
+  viewportLeftOcclusionPx?: number;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
 }
@@ -246,6 +257,8 @@ function starterStickyPlacementsNearAnchor(
 const HOME_MIN_ZOOM_BPS = 5_000;
 const HOME_MAX_ZOOM_BPS = 20_000;
 const WIDGET_TEXT_SCALE_MULTIPLIER = 1.08;
+const RECENTER_VISIBILITY_INSET_PX = 50;
+const RECENTER_CONTROL_EXIT_MS = 180;
 
 function homeCanvasZoomConstraints(
   constraints: LayoutConstraints,
@@ -270,6 +283,11 @@ export function WidgetCanvas({
   instances,
   mutations,
   animateCameraTransition = false,
+  onRecenter,
+  recenterTarget,
+  recenterLabel,
+  recenterTitle,
+  viewportLeftOcclusionPx = 0,
   onOpenAgent,
   onOpenProject,
   onOpenSkill,
@@ -282,6 +300,10 @@ export function WidgetCanvas({
   onOpenAutomations,
 }: WidgetCanvasProps) {
   const { t } = useTranslation("home");
+  const resolvedRecenterLabel =
+    recenterLabel ?? t("widgets.canvasControls.recenterVisibleLabel");
+  const resolvedRecenterTitle =
+    recenterTitle ?? t("widgets.canvasControls.recenterTitle");
   const camera = useHomeWidgetStore((state) => state.camera) ?? DEFAULT_CAMERA;
   const constraints =
     useHomeWidgetStore((state) => state.constraints) ?? DEFAULT_CONSTRAINTS;
@@ -329,6 +351,7 @@ export function WidgetCanvas({
   const {
     canvasRef,
     viewport,
+    canvasSize,
     dragPositions,
     resizePreviews,
     worldPointForClientPoint,
@@ -435,9 +458,66 @@ export function WidgetCanvas({
     event.stopPropagation();
   }, []);
 
-  const renderedInstances = instances.filter(
-    (instance) => HOME_WIDGET_CATALOG_BY_ID[instance.type]?.Component,
+  const renderedInstances = useMemo(
+    () =>
+      instances.filter(
+        (instance) => HOME_WIDGET_CATALOG_BY_ID[instance.type]?.Component,
+      ),
+    [instances],
   );
+  const hasVisibleWidget = useMemo(
+    () =>
+      hasVisibleHomeCanvasWidget({
+        viewport,
+        viewportSize: canvasSize,
+        instances: renderedInstances,
+        widgetSizeForInstance,
+        viewportInsetPx: RECENTER_VISIBILITY_INSET_PX,
+        viewportLeftOcclusionPx,
+      }),
+    [canvasSize, renderedInstances, viewport, viewportLeftOcclusionPx],
+  );
+  const recenterTargetInView = useMemo(
+    () =>
+      recenterTarget
+        ? isHomeCanvasPointInsideViewport({
+            viewport,
+            viewportSize: canvasSize,
+            point: recenterTarget,
+            viewportInsetPx: RECENTER_VISIBILITY_INSET_PX,
+            viewportLeftOcclusionPx,
+          })
+        : false,
+    [canvasSize, recenterTarget, viewport, viewportLeftOcclusionPx],
+  );
+  const showRecenterControl = Boolean(
+    onRecenter &&
+      renderedInstances.length > 0 &&
+      recenterTarget &&
+      canvasSize.width > 0 &&
+      canvasSize.height > 0 &&
+      !hasVisibleWidget &&
+      !recenterTargetInView,
+  );
+  const [renderRecenterControl, setRenderRecenterControl] =
+    useState(showRecenterControl);
+
+  useEffect(() => {
+    if (showRecenterControl) {
+      setRenderRecenterControl(true);
+      return;
+    }
+
+    if (!renderRecenterControl) {
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      setRenderRecenterControl(false);
+    }, RECENTER_CONTROL_EXIT_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [renderRecenterControl, showRecenterControl]);
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: freeform spatial canvas; child widgets and picker provide semantic controls
@@ -595,6 +675,37 @@ export function WidgetCanvas({
           );
         })}
       </div>
+
+      {renderRecenterControl ? (
+        <div
+          className="pointer-events-none absolute inset-0 z-[1000] flex items-center justify-center"
+          style={
+            viewportLeftOcclusionPx > 0
+              ? { left: viewportLeftOcclusionPx }
+              : undefined
+          }
+          aria-hidden={showRecenterControl ? undefined : true}
+        >
+          <Button
+            type="button"
+            variant="glass-strong"
+            size="sm"
+            className={cn(
+              "transition-[opacity,transform] duration-[180ms] ease-out motion-reduce:animate-none motion-reduce:transition-none",
+              showRecenterControl
+                ? "pointer-events-auto animate-scale-in translate-y-0 scale-100 opacity-100"
+                : "pointer-events-none translate-y-1 scale-95 opacity-0",
+            )}
+            title={resolvedRecenterTitle}
+            tabIndex={showRecenterControl ? undefined : -1}
+            leftIcon={<Crosshair aria-hidden="true" />}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={showRecenterControl ? onRecenter : undefined}
+          >
+            {resolvedRecenterLabel}
+          </Button>
+        </div>
+      ) : null}
 
       <WidgetPicker
         open={picker.open}

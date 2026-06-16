@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   createEvent,
   fireEvent,
   render,
@@ -241,6 +242,11 @@ type RenderCanvasOptions = WidgetNavigationHandlers & {
   instances?: WidgetInstance[];
   mutations?: Partial<WidgetMutationHandlers>;
   animateCameraTransition?: boolean;
+  onRecenter?: () => void;
+  recenterTarget?: { x: number; y: number } | null;
+  recenterLabel?: string;
+  recenterTitle?: string;
+  viewportLeftOcclusionPx?: number;
   onCreatePersona?: () => void;
   onCreateProject?: () => void;
 };
@@ -507,6 +513,173 @@ describe("WidgetCanvas", () => {
     );
 
     expect(widgetNode.className).toContain("transition-[left,top]");
+  });
+
+  it("shows a centered recenter button when all widgets are offscreen", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget({ x: 2000, y: 30 })],
+      onRecenter: vi.fn(),
+      recenterTarget: { x: 2120, y: 150 },
+      recenterLabel: "Recenter",
+      recenterTitle: "Recenter pinned objects",
+    });
+
+    const recenterButton = screen.getByRole("button", { name: "Recenter" });
+    expect(recenterButton).toBeVisible();
+    expect(recenterButton).toHaveClass("pointer-events-auto");
+    expect(recenterButton).toHaveClass("animate-scale-in");
+    expect(recenterButton).toHaveAttribute("title", "Recenter pinned objects");
+  });
+
+  it("animates the centered recenter button out before unmounting", () => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    const onRecenter = vi.fn();
+    const { rerender } = renderCanvas({
+      instances: [widget({ x: 2000, y: 30 })],
+      onRecenter,
+      recenterTarget: { x: 2120, y: 150 },
+      recenterLabel: "Recenter",
+    });
+
+    expect(screen.getByRole("button", { name: "Recenter" })).toHaveClass(
+      "animate-scale-in",
+    );
+
+    rerender(
+      <PickerTestProvider>
+        <WidgetCanvas
+          instances={[widget()]}
+          mutations={mutationHandlers()}
+          onRecenter={onRecenter}
+          recenterTarget={{ x: 2120, y: 150 }}
+          recenterLabel="Recenter"
+        />
+      </PickerTestProvider>,
+    );
+
+    expect(screen.queryByRole("button", { name: "Recenter" })).toBeNull();
+
+    const exitingButton = screen.getByRole("button", {
+      name: "Recenter",
+      hidden: true,
+    });
+    expect(exitingButton).toHaveClass("opacity-0");
+    expect(exitingButton).toHaveClass("scale-95");
+    expect(exitingButton).toHaveClass("translate-y-1");
+    expect(exitingButton).toHaveClass("pointer-events-none");
+    expect(exitingButton).toHaveAttribute("tabindex", "-1");
+
+    act(() => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(
+      screen.queryByRole("button", { name: "Recenter", hidden: true }),
+    ).toBeNull();
+  });
+
+  it("shows the centered recenter button when content is only slightly on screen", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget({ x: 760, y: 30 })],
+      onRecenter: vi.fn(),
+      recenterTarget: { x: 880, y: 150 },
+      recenterLabel: "Recenter",
+    });
+
+    expect(screen.getByRole("button", { name: "Recenter" })).toBeVisible();
+  });
+
+  it("shows the centered recenter button when content is hidden by the sidebar", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget({ x: -340, y: 30 })],
+      onRecenter: vi.fn(),
+      recenterTarget: { x: -220, y: 150 },
+      recenterLabel: "Recenter",
+      viewportLeftOcclusionPx: 260,
+    });
+
+    const recenterButton = screen.getByRole("button", { name: "Recenter" });
+    expect(recenterButton).toBeVisible();
+    expect(recenterButton.parentElement).toHaveStyle({ left: "260px" });
+  });
+
+  it("hides the centered recenter button while any widget is visible", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget(), widget({ id: "offscreen-widget", x: 2000 })],
+      onRecenter: vi.fn(),
+      recenterTarget: { x: 1120, y: 150 },
+      recenterLabel: "Recenter",
+    });
+
+    expect(screen.queryByRole("button", { name: "Recenter" })).toBeNull();
+  });
+
+  it("hides the centered recenter button when the recenter target is in view", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget({ x: -220 }), widget({ id: "right-edge", x: 780 })],
+      onRecenter: vi.fn(),
+      recenterTarget: { x: 400, y: 150 },
+      recenterLabel: "Recenter",
+    });
+
+    expect(screen.queryByRole("button", { name: "Recenter" })).toBeNull();
+  });
+
+  it("does not show the centered recenter button for an empty canvas", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [],
+      onRecenter: vi.fn(),
+      recenterLabel: "Recenter",
+    });
+
+    expect(screen.queryByRole("button", { name: "Recenter" })).toBeNull();
+  });
+
+  it("calls the recenter handler from the centered button", async () => {
+    const user = userEvent.setup();
+    const onRecenter = vi.fn();
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [widget({ x: 2000 })],
+      onRecenter,
+      recenterTarget: { x: 2120, y: 150 },
+      recenterLabel: "Recenter",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Recenter" }));
+
+    expect(onRecenter).toHaveBeenCalledTimes(1);
   });
 
   it("renders sticky note widgets with actionable CTAs", async () => {

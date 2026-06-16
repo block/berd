@@ -232,6 +232,7 @@ export function useHomeCanvasViewport({
   const [viewport, setViewport] = useState<CanvasViewport>(() =>
     layoutCameraToCanvasViewport(camera, { width: 0, height: 0 }, constraints),
   );
+  const [canvasSize, setCanvasSize] = useState(() => viewportSize(null));
   const [dragPositions, setDragPositions] = useState<
     Record<string, CanvasPoint>
   >({});
@@ -322,6 +323,7 @@ export function useHomeCanvasViewport({
 
   const syncViewportToCamera = useCallback(() => {
     const size = viewportSize(canvasRef.current);
+    setCanvasSize(size);
     if (size.width <= 0 || size.height <= 0) {
       return;
     }
@@ -711,6 +713,7 @@ export function useHomeCanvasViewport({
   return {
     canvasRef,
     viewport,
+    canvasSize,
     dragPositions,
     resizePreviews,
     worldPointForClientPoint,

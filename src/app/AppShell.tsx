@@ -2586,6 +2586,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               activeDesignSystemSection={activeDesignSystemSection}
               activeSession={activeSession}
               homeSessionId={homeSessionId}
+              homeViewportLeftOcclusionPx={
+                activeView === "home" ? sidebarOuterWidth : 0
+              }
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}
               onNavigateAutomations={navigateAutomations}

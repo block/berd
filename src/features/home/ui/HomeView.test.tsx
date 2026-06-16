@@ -23,6 +23,14 @@ import { HomeView } from "./HomeView";
 const ONBOARDING_STICKIES_SEEDED_STORAGE_KEY =
   "goose:home:onboarding-stickies-seeded";
 
+type WidgetCanvasProps = ComponentProps<
+  typeof import("./WidgetCanvas").WidgetCanvas
+>;
+
+const widgetCanvasMock = vi.hoisted(() =>
+  vi.fn((_props: WidgetCanvasProps) => <div>widget canvas</div>),
+);
+
 vi.mock("@/features/layout/api/layout", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/layout/api/layout")>();
@@ -43,7 +51,7 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("./WidgetCanvas", () => ({
-  WidgetCanvas: () => <div>widget canvas</div>,
+  WidgetCanvas: widgetCanvasMock,
 }));
 
 function layout(overrides: Partial<Layout> = {}): Layout {
@@ -103,6 +111,7 @@ function renderHomeViewWithTopBarActions() {
 
 beforeEach(() => {
   resetHomeWidgetStoreForTests();
+  widgetCanvasMock.mockClear();
   vi.mocked(getLayout).mockReset();
   vi.mocked(saveLayoutItems).mockReset();
   vi.mocked(saveLayoutItems).mockImplementation(async (request) => ({
@@ -271,6 +280,61 @@ describe("HomeView", () => {
     await user.click(
       screen.getByRole("button", { name: "Recenter pinned objects" }),
     );
+
+    expect(useHomeWidgetStore.getState().camera).toEqual({
+      centerX: 440,
+      centerY: 300,
+      zoomBps: 10_000,
+    });
+  });
+
+  it("passes the recenter action through to the widget canvas", async () => {
+    vi.mocked(getLayout).mockResolvedValue(
+      layout({
+        items: [
+          {
+            id: "00000000-0000-0000-0000-000000000001",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000001",
+            centerX: 240,
+            centerY: 240,
+            width: 240,
+            height: 240,
+            zIndex: 1,
+            titleOverride: null,
+          },
+          {
+            id: "00000000-0000-0000-0000-000000000002",
+            kind: "clock",
+            targetId: "widget:00000000-0000-0000-0000-000000000002",
+            centerX: 640,
+            centerY: 360,
+            width: 240,
+            height: 240,
+            zIndex: 2,
+            titleOverride: null,
+          },
+        ],
+      }),
+    );
+
+    renderHomeViewWithProps({ viewportLeftOcclusionPx: 260 });
+    await screen.findByText("widget canvas");
+
+    const canvasProps = widgetCanvasMock.mock.calls.at(-1)?.[0];
+    if (!canvasProps) {
+      throw new Error("WidgetCanvas was not rendered");
+    }
+
+    expect(canvasProps.recenterLabel).toBe("Recenter");
+    expect(canvasProps.recenterTitle).toBe("Recenter pinned objects");
+    expect(canvasProps.recenterTarget).toEqual({ x: 440, y: 300 });
+    expect(canvasProps.viewportLeftOcclusionPx).toBe(260);
+    expect(canvasProps.onRecenter).toEqual(expect.any(Function));
+
+    act(() => {
+      canvasProps.onRecenter?.();
+    });
 
     expect(useHomeWidgetStore.getState().camera).toEqual({
       centerX: 440,

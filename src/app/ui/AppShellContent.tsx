@@ -41,6 +41,7 @@ interface AppShellContentProps {
   activeDesignSystemSection: DesignSystemSection;
   activeSession?: ChatSession;
   homeSessionId: string | null;
+  homeViewportLeftOcclusionPx?: number;
   onNavigateSkills: (
     skillId: string | null,
     options?: AppNavigationUpdateOptions,
@@ -110,6 +111,7 @@ export function AppShellContent({
   activeDesignSystemSection,
   activeSession,
   homeSessionId,
+  homeViewportLeftOcclusionPx = 0,
   onNavigateSkills,
   onNavigateAgents,
   onNavigateAutomations,
@@ -165,6 +167,7 @@ export function AppShellContent({
       onOpenSkills={() => onNavigateSkills(null)}
       onOpenAutomations={() => onNavigateAutomations({ surface: "overview" })}
       onHydratePinnedChatSessions={onHydratePinnedChatSessions}
+      viewportLeftOcclusionPx={homeViewportLeftOcclusionPx}
     />
   );
 
