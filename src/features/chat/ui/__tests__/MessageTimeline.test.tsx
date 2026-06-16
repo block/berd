@@ -757,6 +757,21 @@ describe("MessageTimeline", () => {
     expect(log).not.toContainElement(screen.getByTestId("composer-footer"));
   });
 
+  it("lets the empty placeholder fill the scroll viewport before centering", () => {
+    renderWithProviders(
+      <MessageTimeline
+        messages={[]}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+
+    const log = screen.getByRole("log", { name: "Chat messages" });
+
+    expect(log.parentElement).toHaveClass("min-h-full", "flex-col");
+    expect(log).toHaveClass("flex-1");
+    expect(screen.getByText("Start a conversation")).toBeInTheDocument();
+  });
+
   it("docks the footer in layout flow at the bottom of the message surface", () => {
     renderWithProviders(
       <MessageTimeline

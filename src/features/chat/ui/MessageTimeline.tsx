@@ -893,14 +893,16 @@ export function MessageTimeline({
         onTouchMove={handleUserScrollIntent}
         onPointerDown={handleUserScrollIntent}
       >
-        <div
-          ref={searchContentRef}
-          className="flex min-h-0 flex-1 flex-col"
-          role="log"
-          aria-label={t("timeline.ariaLabel")}
-          aria-live="polite"
-        >
-          {content}
+        <div className="flex min-h-full flex-col">
+          <div
+            ref={searchContentRef}
+            className="flex min-h-0 flex-1 flex-col"
+            role="log"
+            aria-label={t("timeline.ariaLabel")}
+            aria-live="polite"
+          >
+            {content}
+          </div>
         </div>
       </MessageTimelineScrollContainer>
       {footer ? (
