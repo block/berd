@@ -90,6 +90,20 @@ function renderAutomationsView(props?: {
   );
 }
 
+async function renderDailyRevenueDigestDetails() {
+  const user = userEvent.setup({ delay: null });
+  renderAutomationsView();
+
+  await user.click(
+    await screen.findByRole("button", { name: "Daily revenue digest" }),
+  );
+
+  return {
+    user,
+    titleInput: await screen.findByRole("textbox", { name: "Title" }),
+  };
+}
+
 describe("AutomationsView", () => {
   beforeEach(() => {
     resetHomeWidgetStoreForTests();
@@ -1013,15 +1027,11 @@ describe("AutomationsView", () => {
     ).toBeInTheDocument();
   });
 
-  it("edits a generic automation", async () => {
-    const user = userEvent.setup();
-    renderAutomationsView();
+  it("edits a generic automation title", async () => {
+    const { user, titleInput } = await renderDailyRevenueDigestDetails();
 
-    await user.click(
-      await screen.findByRole("button", { name: "Daily revenue digest" }),
-    );
-    await user.clear(screen.getByLabelText("Title"));
-    await user.type(screen.getByLabelText("Title"), "Revenue digest v2");
+    await user.clear(titleInput);
+    await user.type(titleInput, "Revenue digest v2");
 
     await user.tab();
     await waitFor(() => {
@@ -1033,6 +1043,10 @@ describe("AutomationsView", () => {
         expect.anything(),
       );
     });
+  });
+
+  it("updates a generic automation schedule preset", async () => {
+    const { user } = await renderDailyRevenueDigestDetails();
 
     await user.click(screen.getByRole("combobox", { name: "Repeats" }));
     await user.click(await screen.findByRole("option", { name: "Weekdays" }));
@@ -1056,6 +1070,10 @@ describe("AutomationsView", () => {
     expect(scheduleUpdate).toBeDefined();
     expect(scheduleUpdate).not.toHaveProperty("title");
     expect(scheduleUpdate).not.toHaveProperty("instructions");
+  });
+
+  it("updates a generic automation time zone", async () => {
+    const { user } = await renderDailyRevenueDigestDetails();
 
     await user.click(screen.getByRole("combobox", { name: "Time zone" }));
     await user.type(
@@ -1076,6 +1094,10 @@ describe("AutomationsView", () => {
         expect.anything(),
       );
     });
+  });
+
+  it("removes a generic automation schedule", async () => {
+    const { user } = await renderDailyRevenueDigestDetails();
 
     await user.click(screen.getByRole("combobox", { name: "Repeats" }));
     await user.click(
