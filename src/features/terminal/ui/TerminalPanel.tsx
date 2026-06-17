@@ -492,7 +492,7 @@ export function TerminalPanel({
       >
         <div
           ref={containerRef}
-          className="h-full min-h-0 w-full overflow-hidden rounded-md bg-transparent p-2"
+          className="h-full min-h-0 w-full overflow-hidden rounded-md bg-transparent"
         />
       </div>
     </section>

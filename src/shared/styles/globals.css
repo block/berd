@@ -5,8 +5,18 @@
 @source "../../../node_modules/streamdown/dist";
 
 .goose-terminal .xterm {
+  align-items: flex-start;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
   height: 100%;
-  padding: 0;
+  /* Keep leftover sub-row pixels above the grid and away from rounded edges. */
+  justify-content: flex-end;
+  padding: 8px 8px 2px;
+}
+
+.goose-terminal .xterm-screen {
+  flex: 0 0 auto;
 }
 
 .goose-terminal .xterm,
