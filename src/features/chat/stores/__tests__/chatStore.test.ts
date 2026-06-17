@@ -29,6 +29,7 @@ describe("chatStore", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      recentMessageSessionIds: [],
       isViewingActiveSession: false,
       isConnected: false,
       loadingSessionIds: new Set(),
@@ -52,6 +53,63 @@ describe("chatStore", () => {
 
     expect(useChatStore.getState().messagesBySession.s1).toEqual([first]);
     expect(useChatStore.getState().messagesBySession.s2).toEqual([second]);
+  });
+
+  it("keeps the 10 most recently active message sessions", () => {
+    for (let index = 1; index <= 11; index += 1) {
+      const sessionId = `s${index}`;
+      useChatStore.getState().setActiveSession(sessionId);
+      useChatStore
+        .getState()
+        .setMessages(sessionId, [makeMessage({ id: `message-${index}` })]);
+    }
+
+    const messagesBySession = useChatStore.getState().messagesBySession;
+    expect(Object.keys(messagesBySession)).toHaveLength(10);
+    expect(messagesBySession.s1).toBeUndefined();
+    expect(messagesBySession.s2).toHaveLength(1);
+    expect(messagesBySession.s11).toHaveLength(1);
+  });
+
+  it("refreshes cached sessions on activation so back-and-forth sessions stay warm", () => {
+    for (let index = 1; index <= 10; index += 1) {
+      const sessionId = `s${index}`;
+      useChatStore.getState().setActiveSession(sessionId);
+      useChatStore
+        .getState()
+        .setMessages(sessionId, [makeMessage({ id: `message-${index}` })]);
+    }
+
+    useChatStore.getState().setActiveSession("s1");
+    useChatStore.getState().setActiveSession("s11");
+    useChatStore
+      .getState()
+      .setMessages("s11", [makeMessage({ id: "message-11" })]);
+
+    const messagesBySession = useChatStore.getState().messagesBySession;
+    expect(Object.keys(messagesBySession)).toHaveLength(10);
+    expect(messagesBySession.s1).toHaveLength(1);
+    expect(messagesBySession.s2).toBeUndefined();
+    expect(messagesBySession.s11).toHaveLength(1);
+  });
+
+  it("does not evict inactive messages for a running session", () => {
+    useChatStore.getState().setActiveSession("running");
+    useChatStore
+      .getState()
+      .setMessages("running", [makeMessage({ id: "running-message" })]);
+    useChatStore.getState().setStreamingMessageId("running", "running-message");
+    useChatStore.getState().setChatState("running", "streaming");
+
+    for (let index = 1; index <= 11; index += 1) {
+      const sessionId = `s${index}`;
+      useChatStore.getState().setActiveSession(sessionId);
+      useChatStore
+        .getState()
+        .setMessages(sessionId, [makeMessage({ id: `message-${index}` })]);
+    }
+
+    expect(useChatStore.getState().messagesBySession.running).toHaveLength(1);
   });
 
   it("updates runtime state per session", () => {
@@ -392,6 +450,7 @@ describe("chatStore draft localStorage persistence", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      recentMessageSessionIds: [],
       isViewingActiveSession: false,
       isConnected: false,
     });
@@ -452,6 +511,7 @@ describe("chatStore session loading state", () => {
       draftsBySession: {},
       skillDraftsBySession: {},
       activeSessionId: null,
+      recentMessageSessionIds: [],
       isViewingActiveSession: false,
       isConnected: false,
       loadingSessionIds: new Set<string>(),

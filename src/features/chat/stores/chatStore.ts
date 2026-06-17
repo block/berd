@@ -21,6 +21,8 @@ import {
   persistUnreadSessionIds,
 } from "./unreadPersistence";
 
+const MESSAGE_SESSION_CACHE_LIMIT = 10;
+
 function createInitialSessionRuntime(): SessionChatRuntime {
   return {
     ...INITIAL_SESSION_CHAT_RUNTIME,
@@ -33,6 +35,94 @@ function isSessionActivelyViewed(
   sessionId: string,
 ): boolean {
   return state.activeSessionId === sessionId && state.isViewingActiveSession;
+}
+
+function canEvictSessionMessages(
+  state: ChatStoreState,
+  sessionId: string,
+): boolean {
+  if (state.loadingSessionIds.has(sessionId)) return false;
+
+  const runtime = state.sessionStateById[sessionId];
+  if (!runtime) return true;
+
+  return (
+    runtime.chatState === "idle" &&
+    runtime.activeRunId === null &&
+    runtime.streamingMessageId === null &&
+    !runtime.isRunCancellationPending
+  );
+}
+
+function updateRecentMessageSessionIds(
+  recentSessionIds: string[] | undefined,
+  sessionId: string,
+): string[] {
+  return [
+    sessionId,
+    ...(recentSessionIds ?? []).filter((id) => id !== sessionId),
+  ].slice(0, MESSAGE_SESSION_CACHE_LIMIT);
+}
+
+function removeRecentMessageSessionId(
+  recentSessionIds: string[] | undefined,
+  sessionId: string,
+): string[] {
+  return (recentSessionIds ?? []).filter((id) => id !== sessionId);
+}
+
+function replaceRecentMessageSessionId(
+  recentSessionIds: string[] | undefined,
+  fromSessionId: string,
+  toSessionId: string,
+): string[] {
+  return Array.from(
+    new Set(
+      (recentSessionIds ?? []).map((id) =>
+        id === fromSessionId ? toSessionId : id,
+      ),
+    ),
+  ).slice(0, MESSAGE_SESSION_CACHE_LIMIT);
+}
+
+function trimMessageSessionCache(
+  state: ChatStoreState,
+  recentMessageSessionIds: string[],
+  additionalProtectedSessionIds: string[] = [],
+): {
+  messagesBySession: Record<string, Message[]>;
+  evictedSessionIds: string[];
+} {
+  const protectedSessionIds = new Set([
+    ...recentMessageSessionIds,
+    ...additionalProtectedSessionIds,
+  ]);
+  const evictedSessionIds: string[] = [];
+  let cachedSessionCount = Object.keys(state.messagesBySession).length;
+  let messagesBySession = state.messagesBySession;
+
+  if (cachedSessionCount <= MESSAGE_SESSION_CACHE_LIMIT) {
+    return { messagesBySession, evictedSessionIds };
+  }
+
+  for (const sessionId of Object.keys(state.messagesBySession)) {
+    if (cachedSessionCount <= MESSAGE_SESSION_CACHE_LIMIT) break;
+    if (
+      protectedSessionIds.has(sessionId) ||
+      !canEvictSessionMessages(state, sessionId)
+    ) {
+      continue;
+    }
+
+    if (messagesBySession === state.messagesBySession) {
+      messagesBySession = { ...state.messagesBySession };
+    }
+    delete messagesBySession[sessionId];
+    evictedSessionIds.push(sessionId);
+    cachedSessionCount -= 1;
+  }
+
+  return { messagesBySession, evictedSessionIds };
 }
 
 function shouldMarkSessionUnread(
@@ -154,6 +244,7 @@ interface ChatStoreState {
   draftsBySession: Record<string, string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
   activeSessionId: string | null;
+  recentMessageSessionIds: string[];
   isViewingActiveSession: boolean;
   isConnected: boolean;
   loadingSessionIds: Set<string>;
@@ -230,22 +321,40 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   draftsBySession: loadCachedDrafts(),
   skillDraftsBySession: {},
   activeSessionId: null,
+  recentMessageSessionIds: [],
   isViewingActiveSession: false,
   isConnected: false,
   loadingSessionIds: new Set<string>(),
   scrollTargetMessageBySession: {},
 
   // Session management
-  setActiveSession: (sessionId) =>
-    set((state) => ({
-      activeSessionId: sessionId,
-      sessionStateById: state.sessionStateById[sessionId]
-        ? state.sessionStateById
-        : {
-            ...state.sessionStateById,
-            [sessionId]: createInitialSessionRuntime(),
-          },
-    })),
+  setActiveSession: (sessionId) => {
+    let evictedSessionIds: string[] = [];
+    set((state) => {
+      const recentMessageSessionIds = updateRecentMessageSessionIds(
+        state.recentMessageSessionIds,
+        sessionId,
+      );
+      const trimmedCache = trimMessageSessionCache(
+        state,
+        recentMessageSessionIds,
+      );
+      evictedSessionIds = trimmedCache.evictedSessionIds;
+
+      return {
+        activeSessionId: sessionId,
+        recentMessageSessionIds,
+        messagesBySession: trimmedCache.messagesBySession,
+        sessionStateById: state.sessionStateById[sessionId]
+          ? state.sessionStateById
+          : {
+              ...state.sessionStateById,
+              [sessionId]: createInitialSessionRuntime(),
+            },
+      };
+    });
+    evictedSessionIds.forEach(clearReplayBuffer);
+  },
 
   setActiveSessionViewing: (isViewingActiveSession) =>
     set({ isViewingActiveSession }),
@@ -253,6 +362,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   // Message management
   addMessage: (sessionId, message) => {
     const previousSessionStateById = get().sessionStateById;
+    let evictedSessionIds: string[] = [];
     set((state) => {
       const current =
         state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
@@ -261,12 +371,27 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         sessionId,
         message,
       );
+      const recentMessageSessionIds =
+        state.activeSessionId === sessionId
+          ? updateRecentMessageSessionIds(
+              state.recentMessageSessionIds,
+              sessionId,
+            )
+          : state.recentMessageSessionIds;
+      const nextMessagesBySession = {
+        ...state.messagesBySession,
+        [sessionId]: [...(state.messagesBySession[sessionId] ?? []), message],
+      };
+      const trimmedCache = trimMessageSessionCache(
+        { ...state, messagesBySession: nextMessagesBySession },
+        recentMessageSessionIds,
+        [sessionId],
+      );
+      evictedSessionIds = trimmedCache.evictedSessionIds;
 
       return {
-        messagesBySession: {
-          ...state.messagesBySession,
-          [sessionId]: [...(state.messagesBySession[sessionId] ?? []), message],
-        },
+        messagesBySession: trimmedCache.messagesBySession,
+        recentMessageSessionIds,
         ...(shouldMarkUnread
           ? {
               sessionStateById: {
@@ -280,6 +405,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           : {}),
       };
     });
+    evictedSessionIds.forEach(clearReplayBuffer);
     persistUnreadStateIfChanged(
       previousSessionStateById,
       get().sessionStateById,
@@ -342,13 +468,34 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       };
     }),
 
-  setMessages: (sessionId, messages) =>
-    set((state) => ({
-      messagesBySession: {
+  setMessages: (sessionId, messages) => {
+    let evictedSessionIds: string[] = [];
+    set((state) => {
+      const recentMessageSessionIds =
+        state.activeSessionId === sessionId
+          ? updateRecentMessageSessionIds(
+              state.recentMessageSessionIds,
+              sessionId,
+            )
+          : state.recentMessageSessionIds;
+      const nextMessagesBySession = {
         ...state.messagesBySession,
         [sessionId]: messages,
-      },
-    })),
+      };
+      const trimmedCache = trimMessageSessionCache(
+        { ...state, messagesBySession: nextMessagesBySession },
+        recentMessageSessionIds,
+        [sessionId],
+      );
+      evictedSessionIds = trimmedCache.evictedSessionIds;
+
+      return {
+        messagesBySession: trimmedCache.messagesBySession,
+        recentMessageSessionIds,
+      };
+    });
+    evictedSessionIds.forEach(clearReplayBuffer);
+  },
 
   clearMessages: (sessionId) => {
     const previousSessionStateById = get().sessionStateById;
@@ -880,6 +1027,11 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           state.activeSessionId === draftSessionId
             ? backendSessionId
             : state.activeSessionId,
+        recentMessageSessionIds: replaceRecentMessageSessionId(
+          state.recentMessageSessionIds,
+          draftSessionId,
+          backendSessionId,
+        ),
       };
     });
     persistDrafts(get().draftsBySession);
@@ -916,6 +1068,10 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         scrollTargetMessageBySession: remainingTargets,
         activeSessionId:
           state.activeSessionId === sessionId ? null : state.activeSessionId,
+        recentMessageSessionIds: removeRecentMessageSessionId(
+          state.recentMessageSessionIds,
+          sessionId,
+        ),
         isViewingActiveSession:
           state.activeSessionId === sessionId
             ? false
