@@ -330,15 +330,6 @@ export const zDictationTranscribeResponseUnstable = z.object({
 });
 
 /**
- * Submit a response for a pending MCP elicitation in an active session.
- */
-export const zElicitationRespondRequestUnstable = z.object({
-    elicitationId: z.string(),
-    sessionId: z.string(),
-    userData: z.unknown().optional().default(null)
-});
-
-/**
  * Empty success response for operations that return no data.
  */
 export const zEmptyResponse = z.record(z.unknown());
@@ -465,24 +456,6 @@ export const zImportSessionResponseUnstable = z.object({
         z.string(),
         z.null()
     ]).optional()
-});
-
-export const zInteractionState = z.enum(['pending', 'submitted']);
-
-export const zInteraction = z.object({
-    id: z.string(),
-    message: z.union([
-        z.string(),
-        z.null()
-    ]).optional(),
-    requestedSchema: z.unknown().optional(),
-    state: zInteractionState,
-    type: z.literal('elicitation')
-});
-
-export const zInteractionUpdate = z.object({
-    _meta: z.unknown().optional(),
-    interaction: zInteraction
 });
 
 /**
@@ -1428,10 +1401,7 @@ export const zGooseSessionUpdate = z.union([
     }).and(zSessionUsageUpdate),
     z.object({
         sessionUpdate: z.literal('status_message')
-    }).and(zStatusMessageUpdate),
-    z.object({
-        sessionUpdate: z.literal('interaction_update')
-    }).and(zInteractionUpdate)
+    }).and(zStatusMessageUpdate)
 ]);
 
 /**
@@ -1702,7 +1672,6 @@ export const zExtRequest = z.object({
             zExportSessionRequestUnstable,
             zImportSessionRequestUnstable,
             zGetSessionInfoRequestUnstable,
-            zElicitationRespondRequestUnstable,
             zUpdateSessionProjectRequestUnstable,
             zRenameSessionRequestUnstable,
             zArchiveSessionRequestUnstable,

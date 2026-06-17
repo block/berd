@@ -844,24 +844,6 @@
       "x-method": "_goose/unstable/dictation/transcribe",
       "x-side": "agent"
     },
-    "ElicitationRespondRequest_unstable": {
-      "description": "Submit a response for a pending MCP elicitation in an active session.",
-      "properties": {
-        "elicitationId": {
-          "type": "string"
-        },
-        "sessionId": {
-          "type": "string"
-        },
-        "userData": {
-          "default": null
-        }
-      },
-      "required": ["sessionId", "elicitationId"],
-      "type": "object",
-      "x-method": "_goose/unstable/elicitation/respond",
-      "x-side": "agent"
-    },
     "EmbeddedResource": {
       "description": "The contents of a resource, embedded into a prompt or tool call result.",
       "properties": {
@@ -1378,15 +1360,6 @@
                   ],
                   "description": "Params for _goose/unstable/session/info",
                   "title": "GetSessionInfoRequest_unstable"
-                },
-                {
-                  "allOf": [
-                    {
-                      "$ref": "#/$defs/ElicitationRespondRequest_unstable"
-                    }
-                  ],
-                  "description": "Params for _goose/unstable/elicitation/respond",
-                  "title": "ElicitationRespondRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -2164,7 +2137,6 @@
       "description": "Discriminated union of goose-specific session update payloads.\nVariant tag matches ACP's convention (`sessionUpdate: \"<snake_case>\"`).\n\n`discriminator.mapping` is what makes TS codegen (`@hey-api/openapi-ts`)\nemit the correct snake_case tag value even when this enum has a single\nvariant. Add a mapping entry per variant.",
       "discriminator": {
         "mapping": {
-          "interaction_update": "#/$defs/InteractionUpdate",
           "status_message": "#/$defs/StatusMessageUpdate",
           "usage_update": "#/$defs/SessionUsageUpdate"
         },
@@ -2187,17 +2159,6 @@
           "properties": {
             "sessionUpdate": {
               "const": "status_message",
-              "type": "string"
-            }
-          },
-          "required": ["sessionUpdate"],
-          "type": "object"
-        },
-        {
-          "$ref": "#/$defs/InteractionUpdate",
-          "properties": {
-            "sessionUpdate": {
-              "const": "interaction_update",
               "type": "string"
             }
           },
@@ -2356,44 +2317,6 @@
       "type": "object",
       "x-method": "_goose/unstable/sources/import",
       "x-side": "agent"
-    },
-    "Interaction": {
-      "oneOf": [
-        {
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "message": {
-              "type": ["string", "null"]
-            },
-            "requestedSchema": {},
-            "state": {
-              "$ref": "#/$defs/InteractionState"
-            },
-            "type": {
-              "const": "elicitation",
-              "type": "string"
-            }
-          },
-          "required": ["type", "id", "state"],
-          "type": "object"
-        }
-      ]
-    },
-    "InteractionState": {
-      "enum": ["pending", "submitted"],
-      "type": "string"
-    },
-    "InteractionUpdate": {
-      "properties": {
-        "_meta": {},
-        "interaction": {
-          "$ref": "#/$defs/Interaction"
-        }
-      },
-      "required": ["interaction"],
-      "type": "object"
     },
     "ListProvidersRequest_unstable": {
       "description": "List providers with setup metadata and the current model inventory snapshot.",

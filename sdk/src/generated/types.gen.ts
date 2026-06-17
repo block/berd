@@ -415,15 +415,6 @@ export type DictationTranscribeResponseUnstable = {
 };
 
 /**
- * Submit a response for a pending MCP elicitation in an active session.
- */
-export type ElicitationRespondRequestUnstable = {
-    elicitationId: string;
-    sessionId: string;
-    userData?: unknown;
-};
-
-/**
  * The contents of a resource, embedded into a prompt or tool call result.
  */
 export type EmbeddedResource = {
@@ -514,7 +505,7 @@ export type ExtNotification = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | GetSessionInfoRequestUnstable | ElicitationRespondRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
+    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | GetSessionInfoRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };
@@ -643,9 +634,7 @@ export type GooseSessionUpdate = ({
     sessionUpdate: 'usage_update';
 } & SessionUsageUpdate) | ({
     sessionUpdate: 'status_message';
-} & StatusMessageUpdate) | ({
-    sessionUpdate: 'interaction_update';
-} & InteractionUpdate);
+} & StatusMessageUpdate);
 
 /**
  * Call a tool from an extension.
@@ -739,21 +728,6 @@ export type ImportSourcesRequestUnstable = {
 
 export type ImportSourcesResponseUnstable = {
     sources: Array<SourceEntry>;
-};
-
-export type Interaction = {
-    id: string;
-    message?: string | null;
-    requestedSchema?: unknown;
-    state: InteractionState;
-    type: 'elicitation';
-};
-
-export type InteractionState = 'pending' | 'submitted';
-
-export type InteractionUpdate = {
-    _meta?: unknown;
-    interaction: Interaction;
 };
 
 /**
