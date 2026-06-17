@@ -29,6 +29,7 @@ import {
   applyProjectArtifactCubeTexture,
   disposeProjectArtifactCubeMaterials,
 } from "./projectArtifactThreeResources";
+import { useRenderWindowVisible } from "./renderVisibility";
 import type {
   ProjectArtifactContentMode,
   ProjectArtifactRendererProps,
@@ -1716,6 +1717,7 @@ export function ProjectArtifactRenderer({
   gestureFreezeActive = false,
   motionImpulse,
   onGlCanvasReady,
+  renderPaused = false,
   variant = "preview",
 }: ProjectArtifactRendererProps) {
   const initialImageIndex = initialImageIndexForState(
@@ -1728,6 +1730,8 @@ export function ProjectArtifactRenderer({
   );
   const containerRef = useRef<HTMLDivElement>(null);
   const interactive = variant === "preview";
+  const isRenderWindowVisible = useRenderWindowVisible();
+  const pauseRenderLoop = renderPaused || !isRenderWindowVisible;
   const hasTransparentBackground = usesTransparentBackground(variant);
   const canvasBackground = useMemo(
     () => getSceneBackgroundColor(state.accentColor, variant),
@@ -1915,7 +1919,9 @@ export function ProjectArtifactRenderer({
           )}
           dpr={[1, variant === "tile" ? 1.25 : 1.5]}
           frameloop={
-            variant === "tile" && gestureFreezeActive ? "demand" : "always"
+            pauseRenderLoop || (variant === "tile" && gestureFreezeActive)
+              ? "demand"
+              : "always"
           }
           resize={{ offsetSize: true, debounce: 0 }}
           gl={{

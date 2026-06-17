@@ -48,6 +48,7 @@ export function ProjectArtifactWidget({
   instance,
   canvasGestureActive = false,
   widgetResizePreviewActive = false,
+  renderPaused = false,
   shouldIgnoreActivation,
   onStartProjectChat,
 }: WidgetRenderProps) {
@@ -209,6 +210,7 @@ export function ProjectArtifactWidget({
             input={input}
             gestureFreezeActive={shouldFreezeVisual}
             motionImpulse={motionImpulse}
+            renderPaused={renderPaused}
             onGlCanvasReady={(canvas) => {
               glCanvasRef.current = canvas;
             }}

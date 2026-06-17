@@ -3,6 +3,7 @@ import type { WidgetInstance, WidgetSize } from "../widgets/types";
 import {
   hasVisibleHomeCanvasWidget,
   isHomeCanvasPointInsideViewport,
+  isHomeCanvasWidgetVisible,
 } from "./homeCanvasVisibility";
 
 function widget(overrides: Partial<WidgetInstance> = {}): WidgetInstance {
@@ -98,6 +99,26 @@ describe("hasVisibleHomeCanvasWidget", () => {
         viewport: { x: 0, y: 0, zoom: 1 },
         viewportSize: { width: 800, height: 600 },
         instances: [widget({ x: 801, y: 100 })],
+        widgetSizeForInstance,
+      }),
+    ).toBe(false);
+  });
+
+  it("checks visibility for one widget", () => {
+    expect(
+      isHomeCanvasWidgetVisible({
+        viewport: { x: 0, y: 0, zoom: 1 },
+        viewportSize: { width: 800, height: 600 },
+        instance: widget({ x: 100, y: 100 }),
+        widgetSizeForInstance,
+      }),
+    ).toBe(true);
+
+    expect(
+      isHomeCanvasWidgetVisible({
+        viewport: { x: 0, y: 0, zoom: 1 },
+        viewportSize: { width: 800, height: 600 },
+        instance: widget({ x: 801, y: 100 }),
         widgetSizeForInstance,
       }),
     ).toBe(false);

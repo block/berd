@@ -70,6 +70,8 @@ export interface WidgetRenderProps {
   canvasGestureActive?: boolean;
   /** True while live resize is previewing new bounds (content is CSS-scaled). */
   widgetResizePreviewActive?: boolean;
+  /** True when the widget is mounted outside the visible home canvas viewport. */
+  renderPaused?: boolean;
 }
 
 export interface WidgetCatalogEntry {

@@ -27,15 +27,18 @@ vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
   ProjectArtifactPreview: ({
     input,
     motionImpulse,
+    renderPaused,
   }: {
     input: { artifact?: { seed: number } | null; name: string };
     motionImpulse?: { deltaX: number; deltaY: number; sequence: number };
+    renderPaused?: boolean;
   }) => (
     <div
       data-artifact-seed={input.artifact?.seed ?? ""}
       data-motion-delta-x={motionImpulse?.deltaX ?? ""}
       data-motion-delta-y={motionImpulse?.deltaY ?? ""}
       data-motion-sequence={motionImpulse?.sequence ?? ""}
+      data-render-paused={String(renderPaused ?? false)}
       data-testid="project-artifact-preview"
     >
       {input.name}
@@ -74,6 +77,7 @@ function project(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
 function renderWidget(
   overrides: {
     onStartProjectChat?: (projectId: string) => void;
+    renderPaused?: boolean;
     shouldIgnoreActivation?: () => boolean;
   } = {},
 ) {
@@ -133,6 +137,15 @@ describe("ProjectArtifactWidget", () => {
     expect(label).toHaveTextContent("Alpha Project");
     expect(label).toHaveClass("opacity-100");
     expect(label).not.toHaveClass("opacity-0", "group-hover:opacity-100");
+  });
+
+  it("passes render pause state to the preview", () => {
+    renderWidget({ renderPaused: true });
+
+    expect(screen.getByTestId("project-artifact-preview")).toHaveAttribute(
+      "data-render-paused",
+      "true",
+    );
   });
 
   it("passes the saved artifact identity to the preview", () => {

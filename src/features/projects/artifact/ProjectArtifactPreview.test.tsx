@@ -136,6 +136,18 @@ describe("ProjectArtifactPreview", () => {
     expect(queryClient.getQueryData(ARTIFACTS_QUERY_KEY)).toEqual(rawArtifacts);
   });
 
+  it("uses the fallback and skips asset loading while rendering is paused", () => {
+    renderWithQueryClient(
+      <ProjectArtifactPreview input={{ name: "Launch plan" }} renderPaused />,
+    );
+
+    expect(screen.getByTestId("project-artifact-preview")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("project-artifact-renderer"),
+    ).not.toBeInTheDocument();
+    expect(mockedGetArtifacts).not.toHaveBeenCalled();
+  });
+
   it("limits tile renderer images while preserving the deterministic first image", async () => {
     mockedGetArtifacts.mockResolvedValue({
       catalogVersion: "20260521T121530123Z",

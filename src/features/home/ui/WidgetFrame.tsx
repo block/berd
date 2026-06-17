@@ -22,6 +22,7 @@ interface WidgetFrameProps extends WidgetNavigationHandlers {
   constraints?: LayoutConstraints | null;
   canvasGestureActive?: boolean;
   widgetResizePreviewActive?: boolean;
+  renderPaused?: boolean;
   shouldIgnoreActivation?: () => boolean;
   gestureHandlers?: Partial<WidgetFrameGestureHandlers>;
   onVisualLiftReset?: (id: string) => void;
@@ -49,6 +50,7 @@ export function WidgetFrame({
   constraints,
   canvasGestureActive = false,
   widgetResizePreviewActive = false,
+  renderPaused = false,
   shouldIgnoreActivation = () => false,
   gestureHandlers = {},
   onVisualLiftReset = () => {},
@@ -155,6 +157,7 @@ export function WidgetFrame({
           instance={instance}
           canvasGestureActive={canvasGestureActive}
           widgetResizePreviewActive={widgetResizePreviewActive}
+          renderPaused={renderPaused}
           onUpdateState={handleUpdateState}
           shouldIgnoreActivation={shouldIgnoreActivation}
           onOpenAgent={onOpenAgent}

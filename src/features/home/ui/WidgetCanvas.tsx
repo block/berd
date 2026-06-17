@@ -11,6 +11,7 @@ import { Button } from "@/shared/ui/button";
 import {
   hasVisibleHomeCanvasWidget,
   isHomeCanvasPointInsideViewport,
+  isHomeCanvasWidgetVisible,
 } from "../lib/homeCanvasVisibility";
 import { snapCanvasPointToDevicePixels } from "../lib/layoutCamera";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
@@ -565,6 +566,17 @@ export function WidgetCanvas({
                 height: previewSize.height,
               }
             : instance;
+          const widgetInViewport = isHomeCanvasWidgetVisible({
+            viewport,
+            viewportSize: canvasSize,
+            instance: {
+              ...renderInstance,
+              x: renderWorldPosition.x,
+              y: renderWorldPosition.y,
+            },
+            widgetSizeForInstance,
+            viewportLeftOcclusionPx,
+          });
           // Scale text against the instance's *active* size profile, not the
           // static catalog default. The clock's digital profile (landscape)
           // differs from its analog default (square); using the catalog default
@@ -622,6 +634,7 @@ export function WidgetCanvas({
                   constraints={constraints}
                   canvasGestureActive={canvasGestureActive}
                   widgetResizePreviewActive={isResizePreview}
+                  renderPaused={!widgetInViewport}
                   currentMaxZ={currentMaxZ}
                   mutations={mutations}
                   shouldIgnoreActivation={

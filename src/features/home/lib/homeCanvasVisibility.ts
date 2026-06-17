@@ -23,6 +23,15 @@ interface HomeCanvasPointVisibilityInput {
   viewportLeftOcclusionPx?: number;
 }
 
+interface HomeCanvasWidgetVisibilityInput {
+  viewport: CanvasViewport;
+  viewportSize: ViewportSize;
+  instance: WidgetInstance;
+  widgetSizeForInstance: WidgetSizeForInstance;
+  viewportInsetPx?: number;
+  viewportLeftOcclusionPx?: number;
+}
+
 function isPositiveFinite(value: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
@@ -99,14 +108,14 @@ function viewportWorldRect({
   };
 }
 
-export function hasVisibleHomeCanvasWidget({
+export function isHomeCanvasWidgetVisible({
   viewport,
   viewportSize,
-  instances,
+  instance,
   widgetSizeForInstance,
   viewportInsetPx,
   viewportLeftOcclusionPx,
-}: HomeCanvasVisibilityInput): boolean {
+}: HomeCanvasWidgetVisibilityInput): boolean {
   const visibleWorldRect = viewportWorldRect({
     viewport,
     viewportSize,
@@ -117,22 +126,40 @@ export function hasVisibleHomeCanvasWidget({
     return false;
   }
 
-  return instances.some((instance) => {
-    const size = widgetSizeForInstance(instance);
-    const widgetRect = {
-      minX: instance.x,
-      minY: instance.y,
-      maxX: instance.x + size.width,
-      maxY: instance.y + size.height,
-    };
+  const size = widgetSizeForInstance(instance);
+  const widgetRect = {
+    minX: instance.x,
+    minY: instance.y,
+    maxX: instance.x + size.width,
+    maxY: instance.y + size.height,
+  };
 
-    return (
-      widgetRect.minX < visibleWorldRect.maxX &&
-      widgetRect.maxX > visibleWorldRect.minX &&
-      widgetRect.minY < visibleWorldRect.maxY &&
-      widgetRect.maxY > visibleWorldRect.minY
-    );
-  });
+  return (
+    widgetRect.minX < visibleWorldRect.maxX &&
+    widgetRect.maxX > visibleWorldRect.minX &&
+    widgetRect.minY < visibleWorldRect.maxY &&
+    widgetRect.maxY > visibleWorldRect.minY
+  );
+}
+
+export function hasVisibleHomeCanvasWidget({
+  viewport,
+  viewportSize,
+  instances,
+  widgetSizeForInstance,
+  viewportInsetPx,
+  viewportLeftOcclusionPx,
+}: HomeCanvasVisibilityInput): boolean {
+  return instances.some((instance) =>
+    isHomeCanvasWidgetVisible({
+      viewport,
+      viewportSize,
+      instance,
+      widgetSizeForInstance,
+      viewportInsetPx,
+      viewportLeftOcclusionPx,
+    }),
+  );
 }
 
 export function isHomeCanvasPointInsideViewport({

@@ -55,6 +55,8 @@ export interface ProjectArtifactRendererProps {
   motionImpulse?: ProjectArtifactMotionImpulse;
   /** Pauses continuous rendering while the home canvas drags/resizes the widget. */
   gestureFreezeActive?: boolean;
+  /** Pauses continuous rendering while a mounted preview is not visible. */
+  renderPaused?: boolean;
   onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 

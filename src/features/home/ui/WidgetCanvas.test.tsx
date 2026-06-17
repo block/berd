@@ -146,8 +146,19 @@ vi.mock("@/features/projects/stores/projectStore", () => ({
 }));
 
 vi.mock("@/features/projects/artifact/ProjectArtifactPreview", () => ({
-  ProjectArtifactPreview: ({ input }: { input: { name: string } }) => (
-    <div data-testid="project-artifact-preview">{input.name}</div>
+  ProjectArtifactPreview: ({
+    input,
+    renderPaused,
+  }: {
+    input: { name: string };
+    renderPaused?: boolean;
+  }) => (
+    <div
+      data-testid="project-artifact-preview"
+      data-render-paused={String(renderPaused ?? false)}
+    >
+      {input.name}
+    </div>
   ),
 }));
 
@@ -1444,6 +1455,35 @@ describe("WidgetCanvas", () => {
       { projectId: "project-2" },
       CANVAS_CONSTRAINTS,
     );
+  });
+
+  it("pauses project artifact widgets outside the visible canvas viewport", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      canvasRect(),
+    );
+
+    renderCanvas({
+      instances: [
+        widget({
+          id: "visible-project-widget",
+          type: "projectArtifactPin",
+          state: { projectId: "project-1" },
+          x: 100,
+          y: 100,
+        }),
+        widget({
+          id: "offscreen-project-widget",
+          type: "projectArtifactPin",
+          state: { projectId: "project-2" },
+          x: 2000,
+          y: 100,
+        }),
+      ],
+    });
+
+    const previews = screen.getAllByTestId("project-artifact-preview");
+    expect(previews[0]).toHaveAttribute("data-render-paused", "false");
+    expect(previews[1]).toHaveAttribute("data-render-paused", "true");
   });
 
   it("disables already pinned project targets", async () => {

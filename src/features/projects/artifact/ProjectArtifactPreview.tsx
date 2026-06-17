@@ -30,6 +30,7 @@ interface ProjectArtifactPreviewProps {
   variant?: ProjectArtifactRendererProps["variant"];
   motionImpulse?: ProjectArtifactRendererProps["motionImpulse"];
   gestureFreezeActive?: boolean;
+  renderPaused?: boolean;
   onGlCanvasReady?: (canvas: HTMLCanvasElement) => void;
 }
 
@@ -138,13 +139,14 @@ export function ProjectArtifactPreview({
   className,
   motionImpulse,
   gestureFreezeActive,
+  renderPaused = false,
   onGlCanvasReady,
   variant = "preview",
 }: ProjectArtifactPreviewProps) {
   const state = useMemo(() => deriveProjectArtifactState(input), [input]);
-  const canUseRenderer = canUseWebGlRenderer();
+  const shouldRenderWebGl = canUseWebGlRenderer() && !renderPaused;
   const assetQuery = useArtifacts({
-    enabled: canUseRenderer,
+    enabled: shouldRenderWebGl,
     select: selectProjectPreviewArtifacts,
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 2000),
@@ -162,7 +164,7 @@ export function ProjectArtifactPreview({
     }
   }, [assetQuery.error]);
 
-  if (!canUseRenderer || !assetQuery.data) {
+  if (!shouldRenderWebGl || !assetQuery.data) {
     return (
       <ProjectArtifactFallback
         className={className}
