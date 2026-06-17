@@ -498,6 +498,39 @@ describe("AgentBuilderRail", () => {
     expect(screen.getByText(/loading agent/i)).toBeInTheDocument();
   });
 
+  it("renders a preparing state while the draft target is pending", () => {
+    mockHook({ data: null, error: "missing", isLoading: false });
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={null}
+        targetAgentSlug={null}
+      />,
+    );
+
+    expect(screen.getByText(/preparing draft/i)).toBeInTheDocument();
+    expect(screen.queryByText(/draft missing/i)).not.toBeInTheDocument();
+    expect(vi.mocked(usePersonaSource).mock.calls.at(-1)?.[0]).toBeNull();
+  });
+
+  it("renders a retry state when preparing the draft target fails", () => {
+    const onRecoverMissingDraft = vi.fn();
+    mockHook({ data: null, error: "missing", isLoading: false });
+    renderWithProviders(
+      <AgentBuilderRail
+        sessionId="s1"
+        targetAgentPath={null}
+        targetAgentSlug={null}
+        draftState="failed"
+        onRecoverMissingDraft={onRecoverMissingDraft}
+      />,
+    );
+
+    expect(screen.getByText(/couldn't prepare draft/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(onRecoverMissingDraft).toHaveBeenCalledTimes(1);
+  });
+
   it("renders a 'Draft missing' state when the source can't be found", () => {
     mockHook({ data: null, error: "missing", isLoading: false });
     renderWithProviders(

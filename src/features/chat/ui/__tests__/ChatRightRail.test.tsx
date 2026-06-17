@@ -13,6 +13,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
   AgentBuilderRail: (props: {
+    targetAgentPath?: string | null;
+    targetAgentSlug?: string | null;
+    draftState?: "preparing" | "failed" | null;
     onDraftPromoted?: (source: unknown) => void;
     onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
     onRecoverMissingDraft?: () => void;
@@ -20,6 +23,12 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
     onLocalEditStateChange?: (hasLocalEdits: boolean) => void;
   }) => (
     <div data-testid="agent-builder-rail">
+      <span data-testid="agent-builder-target">
+        {props.targetAgentPath ?? "pending"}
+      </span>
+      <span data-testid="agent-builder-draft-state">
+        {props.draftState ?? "ready"}
+      </span>
       <button
         type="button"
         onClick={() => props.onDraftPromoted?.({ path: "/path" })}
@@ -54,7 +63,8 @@ vi.mock("@/features/agents/ui/AgentBuilderRail", () => ({
 }));
 
 vi.mock("@/features/agents/lib/agentBuilderSession", () => ({
-  recoverDraftAgent: (...args: unknown[]) => mocks.recoverDraftAgent(...args),
+  recoverPendingDraftAgent: (...args: unknown[]) =>
+    mocks.recoverDraftAgent(...args),
   setAgentBuilderSessionLocalEdits: (...args: unknown[]) =>
     mocks.setAgentBuilderSessionLocalEdits(...args),
 }));
@@ -113,10 +123,38 @@ describe("ChatRightRail", () => {
     );
 
     expect(screen.getByTestId("agent-builder-rail")).toBeTruthy();
+    expect(screen.getByTestId("agent-builder-target")).toHaveTextContent(
+      "/path",
+    );
     expect(screen.queryByTestId("chat-context-panel")).toBeNull();
     expect(screen.getByTestId("agent-builder-rail").parentElement).toHaveStyle({
       width: "509px",
     });
+  });
+
+  it("renders AgentBuilderRail for provisional build-agent sessions", () => {
+    render(
+      <ChatRightRail
+        session={
+          {
+            id: "s1",
+            intent: "build-agent",
+            targetAgentPath: null,
+            targetAgentSlug: null,
+            targetAgentDraftState: "preparing",
+          } as never
+        }
+      />,
+    );
+
+    expect(screen.getByTestId("agent-builder-rail")).toBeTruthy();
+    expect(screen.getByTestId("agent-builder-target")).toHaveTextContent(
+      "pending",
+    );
+    expect(screen.getByTestId("agent-builder-draft-state")).toHaveTextContent(
+      "preparing",
+    );
+    expect(screen.queryByTestId("chat-context-panel")).toBeNull();
   });
 
   it("applies builder column entrance props to the build-agent rail shell", () => {
@@ -185,6 +223,7 @@ describe("ChatRightRail", () => {
         intent: null,
         targetAgentPath: null,
         targetAgentSlug: null,
+        targetAgentDraftState: null,
       });
       expect(mocks.setPersonas).toHaveBeenCalledWith(personas);
       expect(onDraftPromoted).toHaveBeenCalledWith({ path: "/path" });
@@ -210,6 +249,7 @@ describe("ChatRightRail", () => {
     expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
       targetAgentPath: "/Users/x/.agents/agents/moved.md",
       targetAgentSlug: "moved",
+      targetAgentDraftState: null,
     });
   });
 
@@ -230,11 +270,15 @@ describe("ChatRightRail", () => {
     fireEvent.click(screen.getByRole("button", { name: "recover" }));
 
     await waitFor(() => {
+      expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
+        targetAgentDraftState: "preparing",
+      });
       expect(mocks.recoverDraftAgent).toHaveBeenCalledWith("s1", "/path");
       expect(mocks.patchSession).toHaveBeenCalledWith("s1", {
         intent: "build-agent",
         targetAgentPath: "/Users/x/.agents/agents/recovered.md",
         targetAgentSlug: "recovered",
+        targetAgentDraftState: null,
       });
     });
   });

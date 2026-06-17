@@ -162,6 +162,44 @@ describe("loadSessionMessages", () => {
     );
   });
 
+  it("skips ACP load while optimistic session creation is pending", async () => {
+    seedSession(
+      {
+        id: "draft-session",
+        creationState: "pending",
+        messageCount: 0,
+      },
+      { replay: false },
+    );
+    useChatStore.getState().setSessionLoading("draft-session", true);
+
+    await expect(loadSessionMessages("draft-session")).resolves.toBe(true);
+
+    expect(acpLoadSession).not.toHaveBeenCalled();
+    expect(resolvePath).not.toHaveBeenCalled();
+    expect(checkDirectoriesExist).not.toHaveBeenCalled();
+    expect(useChatStore.getState().loadingSessionIds.has("draft-session")).toBe(
+      false,
+    );
+  });
+
+  it("skips ACP load for a stale optimistic session id after promotion", async () => {
+    seedSession(
+      {
+        id: "backend-session",
+        clientSessionId: "draft-session",
+        messageCount: 0,
+      },
+      { replay: false },
+    );
+
+    await expect(loadSessionMessages("draft-session")).resolves.toBe(true);
+
+    expect(acpLoadSession).not.toHaveBeenCalled();
+    expect(resolvePath).not.toHaveBeenCalled();
+    expect(checkDirectoriesExist).not.toHaveBeenCalled();
+  });
+
   it("missing project cwd loads with artifact fallback and appends an edit-project warning", async () => {
     seedSession(
       { id: "s1" },

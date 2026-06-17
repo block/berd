@@ -356,11 +356,11 @@ export function ChatView({
     },
     [setTerminalWorkspaceState],
   );
-  const isAgentBuilderSession =
-    effectiveSession?.intent === "build-agent" &&
-    Boolean(
-      effectiveSession.targetAgentPath && effectiveSession.targetAgentSlug,
-    );
+  const isAgentBuilderSession = effectiveSession?.intent === "build-agent";
+  const isAgentBuilderTargetFailed =
+    effectiveSession?.targetAgentDraftState === "failed";
+  const isAgentBuilderTargetPending =
+    isAgentBuilderSession && !effectiveSession?.targetAgentPath;
   const hasVisibleRightRail =
     isAgentBuilderSession ||
     Boolean(
@@ -684,6 +684,10 @@ export function ChatView({
   } else if (effectiveSession?.creationState === "failed") {
     sendDisabledReason =
       effectiveSession.creationError ?? t("toolbar.sessionStartFailed");
+  } else if (isAgentBuilderTargetFailed) {
+    sendDisabledReason = t("toolbar.agentBuilderPrepareFailed");
+  } else if (isAgentBuilderTargetPending) {
+    sendDisabledReason = t("toolbar.agentBuilderPreparing");
   }
 
   useEffect(() => {
@@ -827,7 +831,10 @@ export function ChatView({
               isReadOnly ||
               controller.projectMetadataPending ||
               controller.isCompactingContext,
-            sendDisabled: isReadOnly || effectiveSession?.creationState != null,
+            sendDisabled:
+              isReadOnly ||
+              effectiveSession?.creationState != null ||
+              isAgentBuilderTargetPending,
             sendDisabledReason,
             queuedMessage: controller.queue.queuedMessage,
             onDismissQueue: controller.queue.dismiss,

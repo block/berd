@@ -84,27 +84,191 @@ export async function startAgentBuilderSession(
     }
   }
 
-  const session = await deps.createNewTab("New agent", { activate: false });
-  const sessionId = session.id;
+  if (path || slug) {
+    const session = await deps.createNewTab("New agent", { activate: false });
+    const sessionId = session.id;
+    try {
+      const target = await resolveExistingAgentTarget({ path, slug });
+      useChatSessionStore.getState().patchSession(sessionId, {
+        intent: "build-agent",
+        targetAgentPath: target.path,
+        targetAgentSlug: target.slug,
+        targetAgentDraftState: null,
+      });
 
-  try {
-    const target =
-      path || slug
-        ? await resolveExistingAgentTarget({ path, slug })
-        : await preSeedDraftAgent(sessionId);
-
-    useChatSessionStore.getState().patchSession(sessionId, {
-      intent: "build-agent",
-      targetAgentPath: target.path,
-      targetAgentSlug: target.slug,
-    });
-
-    await deps.navigateChat(sessionId);
-    return sessionId;
-  } catch (error) {
-    await deps.closeSession(sessionId);
-    throw error;
+      await deps.navigateChat(sessionId);
+      return sessionId;
+    } catch (error) {
+      await deps.closeSession(sessionId);
+      throw error;
+    }
   }
+
+  const session = await deps.createNewTab("New agent");
+  const sessionId = session.id;
+  const provisionalSessionId =
+    findSessionByInitialId(sessionId)?.id ?? sessionId;
+  useChatSessionStore.getState().patchSession(provisionalSessionId, {
+    intent: "build-agent",
+    targetAgentPath: null,
+    targetAgentSlug: null,
+    targetAgentDraftState: "preparing",
+  });
+
+  await deps.navigateChat(provisionalSessionId);
+  void prepareProvisionalDraftTarget(sessionId).catch((error) => {
+    console.error("Failed to prepare agent builder draft:", error);
+    markProvisionalDraftTargetFailed(sessionId);
+  });
+  return sessionId;
+}
+
+async function prepareProvisionalDraftTarget(
+  initialSessionId: string,
+): Promise<void> {
+  const sessionId = await resolveFinalBuilderSessionId(initialSessionId);
+  const target = await preSeedDraftAgent(sessionId);
+  const chatStore = useChatSessionStore.getState();
+  const session = chatStore.getSession(sessionId);
+
+  if (!session || session.archivedAt || session.intent !== "build-agent") {
+    await discardAgentBuilderSource(target.path).catch((error) => {
+      console.error("Failed to discard canceled agent draft:", error);
+    });
+    return;
+  }
+
+  if (session.targetAgentPath) {
+    await discardAgentBuilderSource(target.path).catch((error) => {
+      console.error("Failed to discard duplicate agent draft:", error);
+    });
+    return;
+  }
+
+  chatStore.patchSession(sessionId, {
+    intent: "build-agent",
+    targetAgentPath: target.path,
+    targetAgentSlug: target.slug,
+    targetAgentDraftState: null,
+  });
+}
+
+function markProvisionalDraftTargetFailed(initialSessionId: string): void {
+  const session = findSessionByInitialId(initialSessionId);
+  if (
+    !session ||
+    session.archivedAt ||
+    session.intent !== "build-agent" ||
+    session.targetAgentPath
+  ) {
+    return;
+  }
+
+  useChatSessionStore.getState().patchSession(session.id, {
+    targetAgentDraftState: "failed",
+  });
+}
+
+function resolveFinalBuilderSessionId(
+  initialSessionId: string,
+): Promise<string> {
+  const immediate = readFinalBuilderSessionId(initialSessionId);
+  if (immediate.status === "resolved") {
+    return Promise.resolve(immediate.sessionId);
+  }
+  if (immediate.status === "failed") {
+    return Promise.reject(new Error(immediate.message));
+  }
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      window.clearTimeout(timeout);
+      unsubscribe();
+    };
+    const resolveWith = (sessionId: string) => {
+      cleanup();
+      resolve(sessionId);
+    };
+    const rejectWith = (error: Error) => {
+      cleanup();
+      reject(error);
+    };
+
+    const timeout = window.setTimeout(() => {
+      rejectWith(
+        new Error("Timed out waiting for agent builder session creation."),
+      );
+    }, 60_000);
+
+    const unsubscribe = useChatSessionStore.subscribe(() => {
+      const result = readFinalBuilderSessionId(initialSessionId);
+      if (result.status === "resolved") {
+        resolveWith(result.sessionId);
+        return;
+      }
+      if (result.status === "failed") {
+        rejectWith(new Error(result.message));
+      }
+    });
+  });
+}
+
+function readFinalBuilderSessionId(
+  initialSessionId: string,
+):
+  | { status: "pending" }
+  | { status: "failed"; message: string }
+  | { status: "resolved"; sessionId: string } {
+  const session = findSessionByInitialId(initialSessionId);
+  if (!session) {
+    return {
+      status: "failed",
+      message: "Agent builder session closed before draft preparation.",
+    };
+  }
+
+  if (session.archivedAt) {
+    return {
+      status: "failed",
+      message: "Agent builder session was archived before draft preparation.",
+    };
+  }
+
+  if (session.creationState === "failed") {
+    return {
+      status: "failed",
+      message:
+        session.creationError ?? "Agent builder session failed to start.",
+    };
+  }
+
+  if (session.creationState === "pending") {
+    return { status: "pending" };
+  }
+
+  return { status: "resolved", sessionId: session.id };
+}
+
+function findSessionByInitialId(initialSessionId: string) {
+  const sessions = useChatSessionStore.getState().sessions;
+  return sessions.find(
+    (session) =>
+      session.id === initialSessionId ||
+      session.clientSessionId === initialSessionId,
+  );
+}
+
+export async function recoverPendingDraftAgent(
+  sessionId: string,
+  stalePath?: string | null,
+): Promise<{ path: string; slug: string }> {
+  const finalSessionId = await resolveFinalBuilderSessionId(sessionId);
+  return recoverDraftAgent(finalSessionId, stalePath);
 }
 
 export async function preSeedDraftAgent(
@@ -273,6 +437,7 @@ export async function reconcileAgentBuilderSessions(): Promise<void> {
         intent: "build-agent",
         targetAgentPath: source.path,
         targetAgentSlug: fileStem(source.path) || deriveSlug(source.name),
+        targetAgentDraftState: null,
       });
       continue;
     }
@@ -290,6 +455,7 @@ export function clearBuilderSessionState(sessionId: string): void {
     intent: null,
     targetAgentPath: null,
     targetAgentSlug: null,
+    targetAgentDraftState: null,
   });
 
   const chatStore = useChatStore.getState();

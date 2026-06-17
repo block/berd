@@ -32,6 +32,7 @@ describe("chat session builder metadata", () => {
     expect(session?.intent ?? null).toBeNull();
     expect(session?.targetAgentPath ?? null).toBeNull();
     expect(session?.targetAgentSlug ?? null).toBeNull();
+    expect(session?.targetAgentDraftState ?? null).toBeNull();
   });
 
   it("patchSession accepts builder fields", () => {
@@ -44,11 +45,13 @@ describe("chat session builder metadata", () => {
       intent: "build-agent",
       targetAgentPath: "/Users/x/.agents/agents/draft-abc.md",
       targetAgentSlug: "draft-abc",
+      targetAgentDraftState: null,
     });
 
     const session = useChatSessionStore.getState().getSession(created.id);
     expect(session?.intent).toBe("build-agent");
     expect(session?.targetAgentPath).toMatch(/draft-abc\.md$/);
     expect(session?.targetAgentSlug).toBe("draft-abc");
+    expect(session?.targetAgentDraftState).toBeNull();
   });
 });

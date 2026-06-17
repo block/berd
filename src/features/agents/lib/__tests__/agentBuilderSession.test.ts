@@ -5,9 +5,13 @@ const chatState = vi.hoisted(() => ({
     id: string;
     title?: string;
     archivedAt?: string;
+    creationState?: "pending" | "failed";
+    creationError?: string;
+    clientSessionId?: string;
     intent?: "build-agent" | null;
     targetAgentPath?: string | null;
     targetAgentSlug?: string | null;
+    targetAgentDraftState?: "preparing" | "failed" | null;
   }>,
   hasHydratedSessions: true,
   hasMoreSessions: false,
@@ -26,9 +30,18 @@ const mocks = vi.hoisted(() => ({
   readAgentSourceFile: vi.fn(),
 }));
 
+const sessionListeners = new Set<() => void>();
+
+function notifySessionListeners() {
+  for (const listener of sessionListeners) {
+    listener();
+  }
+}
+
 const createNewTab = vi.fn(async (_title?: string) => {
   const session = { id: "sess-1", title: "New agent" };
   chatState.sessions = [session, ...chatState.sessions];
+  notifySessionListeners();
   return { id: session.id };
 });
 const closeSession = vi.fn();
@@ -45,6 +58,10 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
         chatState.sessions.find((session) => session.id === id),
       patchSession: mocks.patchSession,
     }),
+    subscribe: (listener: () => void) => {
+      sessionListeners.add(listener);
+      return () => sessionListeners.delete(listener);
+    },
   },
 }));
 
@@ -104,6 +121,7 @@ function patchSessionState(
   chatState.sessions = chatState.sessions.map((session) =>
     session.id === id ? { ...session, ...patch } : session,
   );
+  notifySessionListeners();
 }
 
 function addBuilderSession(
@@ -121,8 +139,15 @@ function addBuilderSession(
   ];
 }
 
+async function flushDraftPreparation() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe("agentBuilderSession", () => {
   beforeEach(() => {
+    sessionListeners.clear();
     chatState.sessions = [];
     chatState.hasHydratedSessions = true;
     chatState.hasMoreSessions = false;
@@ -154,6 +179,17 @@ describe("agentBuilderSession", () => {
     const id = await startAgentBuilderSession({}, deps);
 
     expect(id).toBe("sess-1");
+    expect(createNewTab).toHaveBeenCalledWith("New agent");
+    expect(navigateChat).toHaveBeenCalledWith("sess-1");
+    expect(mocks.patchSession).toHaveBeenNthCalledWith(1, "sess-1", {
+      intent: "build-agent",
+      targetAgentPath: null,
+      targetAgentSlug: null,
+      targetAgentDraftState: "preparing",
+    });
+
+    await flushDraftPreparation();
+
     expect(mocks.createPersonaSource).toHaveBeenCalledWith(
       expect.objectContaining({
         name: expect.stringMatching(/^Untitled agent/),
@@ -167,13 +203,71 @@ describe("agentBuilderSession", () => {
       intent: "build-agent",
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
+      targetAgentDraftState: null,
     });
     expect(chatState.sessions[0]).toMatchObject({
       intent: "build-agent",
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
     });
-    expect(navigateChat).toHaveBeenCalledWith("sess-1");
+  });
+
+  it("creates the draft source after an optimistic session promotes", async () => {
+    createNewTab.mockImplementationOnce(async () => {
+      chatState.sessions = [
+        {
+          id: "local-session",
+          title: "New agent",
+          creationState: "pending",
+          clientSessionId: "local-session",
+        },
+      ];
+      notifySessionListeners();
+      return { id: "local-session" };
+    });
+    mocks.createPersonaSource.mockResolvedValue({
+      ...draftSource,
+      path: "/Users/x/.agents/agents/draft-backend-session.md",
+      properties: { draft: true, builderSessionId: "backend-session" },
+    });
+
+    const id = await startAgentBuilderSession({}, deps);
+
+    expect(id).toBe("local-session");
+    expect(mocks.createPersonaSource).not.toHaveBeenCalled();
+    expect(chatState.sessions[0]).toMatchObject({
+      id: "local-session",
+      intent: "build-agent",
+      targetAgentDraftState: "preparing",
+    });
+
+    chatState.sessions = [
+      {
+        id: "backend-session",
+        title: "New agent",
+        clientSessionId: "local-session",
+        intent: "build-agent",
+        targetAgentPath: null,
+        targetAgentSlug: null,
+        targetAgentDraftState: "preparing",
+      },
+    ];
+    notifySessionListeners();
+    await flushDraftPreparation();
+
+    expect(mocks.createPersonaSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        properties: expect.objectContaining({
+          builderSessionId: "backend-session",
+        }),
+      }),
+    );
+    expect(mocks.patchSession).toHaveBeenCalledWith("backend-session", {
+      intent: "build-agent",
+      targetAgentPath: "/Users/x/.agents/agents/draft-backend-session.md",
+      targetAgentSlug: "draft-backend-session",
+      targetAgentDraftState: null,
+    });
   });
 
   it("seeds the draft with the stored Goose provider and model preference", async () => {
@@ -186,6 +280,7 @@ describe("agentBuilderSession", () => {
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
     await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
 
     expect(mocks.createPersonaSource).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -209,6 +304,7 @@ describe("agentBuilderSession", () => {
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
     await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
 
     expect(mocks.createPersonaSource).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -237,6 +333,7 @@ describe("agentBuilderSession", () => {
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
     await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
 
     expect(mocks.createPersonaSource).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -252,6 +349,7 @@ describe("agentBuilderSession", () => {
     mocks.createPersonaSource.mockResolvedValue(draftSource);
 
     await startAgentBuilderSession({}, deps);
+    await flushDraftPreparation();
 
     expect(mocks.createPersonaSource).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -593,6 +691,7 @@ describe("agentBuilderSession", () => {
       intent: "build-agent",
       targetAgentPath: draftSource.path,
       targetAgentSlug: "draft-sess-1",
+      targetAgentDraftState: null,
     });
   });
 

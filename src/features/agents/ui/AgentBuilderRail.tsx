@@ -48,9 +48,10 @@ const FIELD_LABEL_CLASS = "mb-2 block text-xs text-muted-foreground";
 
 export interface AgentBuilderRailProps {
   sessionId: string;
-  targetAgentPath: string;
+  targetAgentPath: string | null;
   /** Reserved for future deep-linking / re-binding by slug; not used in v1 render. */
-  targetAgentSlug: string;
+  targetAgentSlug: string | null;
+  draftState?: "preparing" | "failed" | null;
   className?: string;
   onDraftPromoted?: (source: AgentSourceEntry) => void;
   onDraftTargetChanged?: (target: { path: string; slug: string }) => void;
@@ -63,6 +64,7 @@ export interface AgentBuilderRailProps {
 export function AgentBuilderRail({
   sessionId,
   targetAgentPath,
+  draftState = null,
   className,
   onDraftPromoted,
   onDraftTargetChanged,
@@ -94,7 +96,8 @@ export function AgentBuilderRail({
   const [failedMissingDraftRecoveryKey, setFailedMissingDraftRecoveryKey] =
     useState<string | null>(null);
   const avatarLibrary = useAvatarLibrary(true);
-  const missingDraftRecoveryKey = `${sessionId}:${targetAgentPath}`;
+  const isWaitingForDraftTarget = !targetAgentPath;
+  const missingDraftRecoveryKey = `${sessionId}:${targetAgentPath ?? "pending"}`;
   const [previousMissingDraftRecoveryKey, setPreviousMissingDraftRecoveryKey] =
     useState(missingDraftRecoveryKey);
   if (previousMissingDraftRecoveryKey !== missingDraftRecoveryKey) {
@@ -103,6 +106,7 @@ export function AgentBuilderRail({
     setFailedMissingDraftRecoveryKey(null);
   }
   const shouldRecoverMissingDraft =
+    !isWaitingForDraftTarget &&
     error === "missing" &&
     !data &&
     !isLoading &&
@@ -187,7 +191,7 @@ export function AgentBuilderRail({
   }, [personas]);
 
   const defaultAvatarId =
-    data && trimmedAvatar.length === 0
+    data && targetAgentPath && trimmedAvatar.length === 0
       ? pickDefaultAvatarId(
           avatarLibrary,
           `${sessionId}:${targetAgentPath}`,
@@ -232,7 +236,9 @@ export function AgentBuilderRail({
     ? isPlaceholderAgentName(data.name)
       ? t("builderRail.newAgent")
       : data.name
-    : null;
+    : isWaitingForDraftTarget
+      ? t("builderRail.newAgent")
+      : null;
   const nameFieldValue =
     data && !isPlaceholderAgentName(data.name) ? data.name : "";
   const contentFieldValue = data?.content ?? "";
@@ -268,6 +274,10 @@ export function AgentBuilderRail({
     !isPromoting &&
     !blockingError;
 
+  const showCloseButton = Boolean(
+    onClose && (isWaitingForDraftTarget || (data && isDraft)),
+  );
+
   const headerNode = (
     <div className="flex items-center justify-between rounded-full bg-card/40 px-3 py-2 text-sm text-foreground">
       <span className="flex min-w-0 items-center gap-2">
@@ -292,7 +302,7 @@ export function AgentBuilderRail({
           <span className="truncate">{t("builderRail.eyebrow")}</span>
         )}
       </span>
-      {data && isDraft && onClose ? (
+      {showCloseButton ? (
         <Button
           type="button"
           variant="ghost"
@@ -447,6 +457,43 @@ export function AgentBuilderRail({
           </div>
         </div>
       </section>,
+    );
+  }
+
+  if (isWaitingForDraftTarget) {
+    return shell(
+      headerNode,
+      draftState === "failed" ? (
+        <section className="rounded-md border border-destructive/40 bg-destructive/10 p-3">
+          <div className="flex items-start gap-2">
+            <IconAlertTriangle className="mt-0.5 size-4 text-destructive" />
+            <div>
+              <h3 className="text-sm font-normal text-foreground">
+                {t("builderRail.prepareDraftFailedTitle")}
+              </h3>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("builderRail.prepareDraftFailedBody")}
+              </p>
+              {onRecoverMissingDraft ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-3"
+                  onClick={() => void onRecoverMissingDraft()}
+                >
+                  {t("builderRail.retryPrepareDraft")}
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        </section>
+      ) : (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" />
+          <span>{t("builderRail.preparingDraft")}</span>
+        </div>
+      ),
     );
   }
 

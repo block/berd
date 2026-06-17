@@ -48,11 +48,12 @@ export function useAgentBuilderCoordinator({
   const [leaveDraftPromptOpen, setLeaveDraftPromptOpen] = useState(false);
   const pendingNavigationRef = useRef<PendingNavigationEntry | null>(null);
   const pendingSessionIdRef = useRef<string | null>(null);
+  const pendingStartKeyRef = useRef<string | null>(null);
   const sessionsSignature = useChatSessionStore((state) =>
     state.sessions
       .map(
         (session) =>
-          `${session.id}:${session.archivedAt ?? ""}:${session.intent ?? ""}:${session.targetAgentPath ?? ""}:${session.targetAgentSlug ?? ""}`,
+          `${session.id}:${session.archivedAt ?? ""}:${session.intent ?? ""}:${session.targetAgentPath ?? ""}:${session.targetAgentSlug ?? ""}:${session.targetAgentDraftState ?? ""}`,
       )
       .join("|"),
   );
@@ -136,19 +137,35 @@ export function useAgentBuilderCoordinator({
   const start = useCallback(
     (args?: { path?: string; slug?: string }) => {
       const startBuilderSession = () => {
+        const startKey = `${args?.path ?? ""}\u0000${args?.slug ?? ""}`;
+        if (pendingStartKeyRef.current === startKey) {
+          return;
+        }
+
+        pendingStartKeyRef.current = startKey;
         clearPendingNavigation();
         void startAgentBuilderSession(args, {
           createNewTab,
           closeSession,
           navigateChat,
-        }).catch((error) => {
-          console.error("Failed to start agent builder session:", error);
-          toast.error(t("builderRail.openFailed"));
-        });
+        })
+          .catch((error) => {
+            console.error("Failed to start agent builder session:", error);
+            toast.error(t("builderRail.openFailed"));
+          })
+          .finally(() => {
+            if (pendingStartKeyRef.current === startKey) {
+              pendingStartKeyRef.current = null;
+            }
+          });
       };
 
       const session = useChatSessionStore.getState().getActiveSession();
       if (session?.intent === "build-agent") {
+        if (!session.targetAgentPath) {
+          return;
+        }
+
         void (async () => {
           const isDraft = await isDraftAgentBuilderSession(session.id);
           if (

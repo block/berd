@@ -48,6 +48,7 @@ export interface ChatSession {
   intent?: "build-agent" | null;
   targetAgentPath?: string | null;
   targetAgentSlug?: string | null;
+  targetAgentDraftState?: "preparing" | "failed" | null;
 }
 
 export interface ChatSessionReasoningEffortOption {
@@ -375,6 +376,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       intent: null,
       targetAgentPath: null,
       targetAgentSlug: null,
+      targetAgentDraftState: null,
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;
@@ -404,6 +406,7 @@ export const useChatSessionStore = create<ChatSessionStore>((set, get) => ({
       intent: null,
       targetAgentPath: null,
       targetAgentSlug: null,
+      targetAgentDraftState: null,
     };
     set((state) => ({ sessions: [chatSession, ...state.sessions] }));
     return chatSession;

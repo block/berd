@@ -1,7 +1,7 @@
 import { useCallback, type CSSProperties } from "react";
 import { AgentBuilderRail } from "@/features/agents/ui/AgentBuilderRail";
 import {
-  recoverDraftAgent,
+  recoverPendingDraftAgent,
   setAgentBuilderSessionLocalEdits,
 } from "@/features/agents/lib/agentBuilderSession";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -58,6 +58,7 @@ export function ChatRightRail({
         intent: null,
         targetAgentPath: null,
         targetAgentSlug: null,
+        targetAgentDraftState: null,
       });
       void listPersonas()
         .then((personas) => {
@@ -81,6 +82,7 @@ export function ChatRightRail({
       patchSession(session.id, {
         targetAgentPath: target.path,
         targetAgentSlug: target.slug,
+        targetAgentDraftState: null,
       });
     },
     [patchSession, session?.id],
@@ -95,6 +97,7 @@ export function ChatRightRail({
         intent: null,
         targetAgentPath: null,
         targetAgentSlug: null,
+        targetAgentDraftState: null,
       });
       void listPersonas()
         .then((personas) => {
@@ -114,12 +117,27 @@ export function ChatRightRail({
       return;
     }
 
-    const target = await recoverDraftAgent(session.id, session.targetAgentPath);
     patchSession(session.id, {
-      intent: "build-agent",
-      targetAgentPath: target.path,
-      targetAgentSlug: target.slug,
+      targetAgentDraftState: "preparing",
     });
+
+    try {
+      const target = await recoverPendingDraftAgent(
+        session.id,
+        session.targetAgentPath,
+      );
+      patchSession(session.id, {
+        intent: "build-agent",
+        targetAgentPath: target.path,
+        targetAgentSlug: target.slug,
+        targetAgentDraftState: null,
+      });
+    } catch (error) {
+      patchSession(session.id, {
+        targetAgentDraftState: "failed",
+      });
+      throw error;
+    }
   }, [patchSession, session?.id, session?.targetAgentPath]);
   const handleLocalEditStateChange = useCallback(
     (hasLocalEdits: boolean) => {
@@ -132,11 +150,10 @@ export function ChatRightRail({
     [session?.id],
   );
 
-  if (
-    session?.intent === "build-agent" &&
-    session.targetAgentPath &&
-    session.targetAgentSlug
-  ) {
+  if (session?.intent === "build-agent") {
+    const draftState =
+      session.targetAgentDraftState ??
+      (session.targetAgentPath ? null : "preparing");
     return (
       <div
         className={cn(
@@ -152,8 +169,9 @@ export function ChatRightRail({
       >
         <AgentBuilderRail
           sessionId={session.id}
-          targetAgentPath={session.targetAgentPath}
-          targetAgentSlug={session.targetAgentSlug}
+          targetAgentPath={session.targetAgentPath ?? null}
+          targetAgentSlug={session.targetAgentSlug ?? null}
+          draftState={draftState}
           onDraftPromoted={handleDraftPromoted}
           onDraftTargetChanged={handleDraftTargetChanged}
           onRecoverMissingDraft={handleRecoverMissingDraft}

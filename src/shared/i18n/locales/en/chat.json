@@ -340,6 +340,8 @@
     "sendMessage": "Send message",
     "steer": "Steer",
     "steerQueuedWithEnter": "Press Enter again to steer",
+    "agentBuilderPrepareFailed": "Couldn't prepare agent draft.",
+    "agentBuilderPreparing": "Preparing agent draft...",
     "sessionStarting": "Starting session...",
     "sessionStartFailed": "Session failed to start",
     "sessionMissingProjectDir": "Can't start this session — the project folder doesn't exist: {{paths}}. Edit the project to update its folders.",

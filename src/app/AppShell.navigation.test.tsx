@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
+import { resetAgentBuilderSourceLifecycleForTests } from "@/features/agents/lib/agentBuilderSourceLifecycle";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
@@ -83,6 +84,18 @@ function appShellWithTheme(children?: ReactNode) {
 
 function renderAppShell(children?: ReactNode) {
   return render(appShellWithTheme(children));
+}
+
+async function waitForCreatedAgentBuilderTarget() {
+  await waitFor(() => {
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+      targetAgentPath:
+        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      targetAgentDraftState: null,
+    });
+  });
 }
 
 const mockGetPlatform = vi.hoisted(() => vi.fn(() => "mac"));
@@ -361,6 +374,7 @@ describe("AppShell global navigation", () => {
     window.localStorage.clear();
     mockGetPlatform.mockReturnValue("mac");
     mockDesignSystemExplorerEnabled.mockReturnValue(false);
+    resetAgentBuilderSourceLifecycleForTests();
     useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
     mockAcpCreateSession.mockReset();
@@ -927,15 +941,10 @@ describe("AppShell global navigation", () => {
     expect(
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
-    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-      id: "created-session",
-      intent: "build-agent",
-      targetAgentPath:
-        "/Users/test/.agents/agents/untitled-agent-created-session.md",
-    });
+    await waitForCreatedAgentBuilderTarget();
   });
 
-  it("waits to show the new agent builder until the draft target is ready", async () => {
+  it("shows the new agent builder before the draft target is ready", async () => {
     const user = userEvent.setup();
     const draft = deferred<{
       type: "agent";
@@ -947,7 +956,7 @@ describe("AppShell global navigation", () => {
       writable: boolean;
       properties: { draft: boolean; builderSessionId: string };
     }>();
-    mockCreatePersonaSource.mockReturnValueOnce(draft.promise);
+    mockCreatePersonaSource.mockImplementation(() => draft.promise);
     renderAppShell();
 
     await user.click(screen.getByRole("button", { name: "Sidebar agents" }));
@@ -956,8 +965,21 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(mockAcpCreateSession).toHaveBeenCalled();
     });
-    expect(screen.getByTestId("active-view")).toHaveTextContent("agents");
-    expect(useChatSessionStore.getState().getActiveSession()).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().activeSessionId).toBe(
+        "created-session",
+      );
+    });
+    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+      id: "created-session",
+      intent: "build-agent",
+      targetAgentPath: null,
+      targetAgentSlug: null,
+      targetAgentDraftState: "preparing",
+    });
 
     draft.resolve({
       type: "agent",
@@ -973,12 +995,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-      id: "created-session",
-      intent: "build-agent",
-      targetAgentPath:
-        "/Users/test/.agents/agents/untitled-agent-created-session.md",
-    });
+    await waitForCreatedAgentBuilderTarget();
   });
 
   it("prompts when navigating away from a dirty new agent draft", async () => {
@@ -990,6 +1007,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
+    await waitForCreatedAgentBuilderTarget();
 
     const dirtyDraft = {
       type: "agent",
@@ -1030,7 +1048,6 @@ describe("AppShell global navigation", () => {
     expect(
       screen.queryByText("Save this agent draft?"),
     ).not.toBeInTheDocument();
-    expect(mockDeletePersonaSource).not.toHaveBeenCalled();
   });
 
   it("returns to agent builder mode after going back then forward", async () => {
@@ -1042,9 +1059,11 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-      id: "created-session",
-      intent: "build-agent",
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+        id: "created-session",
+        intent: "build-agent",
+      });
     });
 
     await user.click(screen.getByRole("button", { name: "Back" }));
@@ -1056,11 +1075,13 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
-    expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
-      id: "created-session",
-      intent: "build-agent",
-      targetAgentPath:
-        "/Users/test/.agents/agents/untitled-agent-created-session.md",
+    await waitFor(() => {
+      expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
+        id: "created-session",
+        intent: "build-agent",
+        targetAgentPath:
+          "/Users/test/.agents/agents/untitled-agent-created-session.md",
+      });
     });
   });
 
@@ -1073,6 +1094,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
+    await waitForCreatedAgentBuilderTarget();
 
     useChatStore.getState().setDraft("created-session", "make me a reviewer");
 
@@ -1093,6 +1115,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
+    await waitForCreatedAgentBuilderTarget();
 
     const dirtyDraft = {
       type: "agent",
@@ -1145,6 +1168,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
+    await waitForCreatedAgentBuilderTarget();
 
     const dirtyDraft = {
       type: "agent",
@@ -1177,6 +1201,7 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     });
+    await waitForCreatedAgentBuilderTarget();
 
     const dirtyDraft = {
       type: "agent",
@@ -1190,6 +1215,7 @@ describe("AppShell global navigation", () => {
     };
     mockListPersonaSources.mockResolvedValue([dirtyDraft]);
     mockReadAgentSourceFile.mockResolvedValue(dirtyDraft);
+    mockDeletePersonaSource.mockClear();
 
     await user.click(screen.getByRole("button", { name: "Sidebar skills" }));
     await user.click(await screen.findByRole("button", { name: "Save draft" }));

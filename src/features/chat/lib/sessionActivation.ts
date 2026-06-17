@@ -153,6 +153,31 @@ export async function loadSessionMessages(
     return true;
   }
 
+  const sessionStore = useChatSessionStore.getState();
+  const sessionAtRequest = sessionStore.getSession(sessionId);
+  if (sessionAtRequest?.creationState === "pending") {
+    perfLog(`[perf:load] ${sid} skip — session creation pending`);
+    useChatStore.getState().setSessionLoading(sessionId, false);
+    return true;
+  }
+
+  if (sessionAtRequest?.creationState === "failed") {
+    perfLog(`[perf:load] ${sid} skip — session creation failed`);
+    useChatStore.getState().setSessionLoading(sessionId, false);
+    return false;
+  }
+
+  if (
+    !sessionAtRequest &&
+    sessionStore.sessions.some(
+      (session) => session.clientSessionId === sessionId,
+    )
+  ) {
+    perfLog(`[perf:load] ${sid} skip — stale client session id`);
+    useChatStore.getState().setSessionLoading(sessionId, false);
+    return true;
+  }
+
   const t0 = performance.now();
   perfLog(`[perf:load] ${sid} start`);
   useChatStore.getState().setSessionLoading(sessionId, true);

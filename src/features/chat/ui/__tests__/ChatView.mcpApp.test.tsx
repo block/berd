@@ -735,6 +735,33 @@ describe("ChatView MCP app messaging", () => {
     expect(document.querySelector(".agent-builder-column-enter")).toBeTruthy();
   });
 
+  it("uses failed draft copy when an agent builder draft target fails", () => {
+    const activeSession = {
+      id: "session-1",
+      title: "Build agent",
+      createdAt: "2026-05-27T00:00:00.000Z",
+      updatedAt: "2026-05-27T00:00:00.000Z",
+      messageCount: 0,
+      intent: "build-agent",
+      targetAgentPath: null,
+      targetAgentSlug: null,
+      targetAgentDraftState: "failed",
+    } satisfies ChatSession;
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+      composerActions?: {
+        sendDisabled?: boolean;
+        sendDisabledReason?: string;
+      };
+    };
+    expect(chatInputProps.composerActions?.sendDisabled).toBe(true);
+    expect(chatInputProps.composerActions?.sendDisabledReason).toBe(
+      "toolbar.agentBuilderPrepareFailed",
+    );
+  });
+
   it("uses an inline rail gap while the desktop context panel takes layout space", () => {
     mocks.isContextPanelOpen = true;
     mockMatchMedia(false);

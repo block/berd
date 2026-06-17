@@ -338,6 +338,8 @@
     "sendMessage": "Enviar mensaje",
     "steer": "Guiar",
     "steerQueuedWithEnter": "Pulsa Enter de nuevo para guiar",
+    "agentBuilderPrepareFailed": "No se pudo preparar el borrador del agente.",
+    "agentBuilderPreparing": "Preparando borrador de agente...",
     "sessionStarting": "Iniciando sesión...",
     "sessionStartFailed": "No se pudo iniciar la sesión",
     "sessionMissingProjectDir": "No se puede iniciar esta sesión: la carpeta del proyecto no existe: {{paths}}. Edita el proyecto para actualizar sus carpetas.",
