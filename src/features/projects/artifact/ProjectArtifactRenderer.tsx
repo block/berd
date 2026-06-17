@@ -25,6 +25,10 @@ import {
 import * as THREE from "three";
 import { cn } from "@/shared/lib/cn";
 import { PROJECT_ARTIFACT_CUBE_MODEL_URL } from "./assets";
+import {
+  applyProjectArtifactCubeTexture,
+  disposeProjectArtifactCubeMaterials,
+} from "./projectArtifactThreeResources";
 import type {
   ProjectArtifactContentMode,
   ProjectArtifactRendererProps,
@@ -495,6 +499,38 @@ function useGlassTint(accentColorRef: MutableRefObject<THREE.Color>) {
   return tintRef;
 }
 
+function useStrictModeSafeDisposal<T>(
+  resource: T,
+  dispose: (resource: T) => void,
+) {
+  const pendingDisposalRef = useRef<{
+    resource: T;
+    timeoutId: number;
+  } | null>(null);
+
+  useEffect(() => {
+    const pendingDisposal = pendingDisposalRef.current;
+    if (pendingDisposal?.resource === resource) {
+      window.clearTimeout(pendingDisposal.timeoutId);
+      pendingDisposalRef.current = null;
+    }
+
+    return () => {
+      const timeoutId = window.setTimeout(() => {
+        if (pendingDisposalRef.current?.resource === resource) {
+          pendingDisposalRef.current = null;
+        }
+        dispose(resource);
+      }, 0);
+      pendingDisposalRef.current = { resource, timeoutId };
+    };
+  }, [dispose, resource]);
+}
+
+function disposeThreeResource(resource: { dispose: () => void }) {
+  resource.dispose();
+}
+
 function getSceneBackgroundColor(
   accentColor: string,
   variant: NonNullable<ProjectArtifactRendererProps["variant"]>,
@@ -883,6 +919,8 @@ function ImageSphereContent({
     [],
   );
 
+  useStrictModeSafeDisposal(material, disposeThreeResource);
+
   useFrame((frameState, delta) => {
     const cycle = cycleRef.current;
     const runtime = runtimeRef.current;
@@ -976,35 +1014,32 @@ function InnerCubeContent({
     [runtimeRef, textures],
   );
 
+  const materials = useMemo(
+    () => [...materialsA, ...materialsB],
+    [materialsA, materialsB],
+  );
+  useStrictModeSafeDisposal(materials, disposeProjectArtifactCubeMaterials);
+
   const applyCubeTexture = (
     material: THREE.MeshBasicMaterial,
     texture: THREE.Texture,
     driftFaceIndex: number,
     time: number,
   ) => {
+    const map = applyProjectArtifactCubeTexture({
+      cloneForUvTransform: mode === "cubeStatic",
+      material,
+      texture,
+    });
+
     if (mode !== "cubeStatic") {
-      if (material.map !== texture) {
-        material.map = texture;
-        material.needsUpdate = true;
-      }
       return;
     }
 
-    if (!material.map) {
-      material.map = texture.clone();
-      material.userData.sourceTextureUuid = texture.uuid;
-      material.needsUpdate = true;
-    } else if (material.userData.sourceTextureUuid !== texture.uuid) {
-      material.map.image = texture.image;
-      material.map.needsUpdate = true;
-      material.userData.sourceTextureUuid = texture.uuid;
-    }
-    material.map.wrapS = THREE.RepeatWrapping;
-    material.map.wrapT = THREE.RepeatWrapping;
-    material.map.offset.x =
-      drifts[driftFaceIndex].sx * time * SCENE_ANIM.uvDriftSpeed;
-    material.map.offset.y =
-      drifts[driftFaceIndex].sy * time * SCENE_ANIM.uvDriftSpeed;
+    map.wrapS = THREE.RepeatWrapping;
+    map.wrapT = THREE.RepeatWrapping;
+    map.offset.x = drifts[driftFaceIndex].sx * time * SCENE_ANIM.uvDriftSpeed;
+    map.offset.y = drifts[driftFaceIndex].sy * time * SCENE_ANIM.uvDriftSpeed;
   };
 
   useFrame((frameState, delta) => {
@@ -1519,7 +1554,7 @@ function PrototypeCube({
   };
 
   return (
-    <group ref={groupRef} dispose={null}>
+    <group ref={groupRef}>
       <mesh
         castShadow
         geometry={geometry ?? undefined}
