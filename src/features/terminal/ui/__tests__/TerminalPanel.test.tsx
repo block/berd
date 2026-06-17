@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   focusAndResize: vi.fn(),
   resumeResize: vi.fn(),
   restart: vi.fn(),
+  resolvedTheme: "light" as "dark" | "light",
   sessionStatus: "running",
   stop: vi.fn(),
   subscriptionListener: null as (() => void) | null,
@@ -26,7 +27,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/shared/theme/ThemeProvider", () => ({
-  useTheme: () => ({ resolvedTheme: "light" }),
+  useTheme: () => ({ resolvedTheme: mocks.resolvedTheme }),
 }));
 
 vi.mock("../../lib/terminalSessionManager", () => ({
@@ -55,6 +56,7 @@ describe("TerminalPanel", () => {
     mocks.focusAndResize.mockClear();
     mocks.resumeResize.mockClear();
     mocks.restart.mockClear();
+    mocks.resolvedTheme = "light";
     mocks.sessionStatus = "running";
     mocks.stop.mockClear();
     mocks.subscriptionListener = null;
@@ -65,6 +67,10 @@ describe("TerminalPanel", () => {
     document.documentElement.style.removeProperty(
       "--scrollbar-thumb-hover-alpha",
     );
+    document.documentElement.style.removeProperty("--foreground");
+    document.documentElement.style.removeProperty("--card");
+    document.documentElement.style.removeProperty("--primary");
+    document.documentElement.style.removeProperty("--accent");
   });
 
   it("does not defer terminal resize when mounted expanded", () => {
@@ -132,6 +138,40 @@ describe("TerminalPanel", () => {
         }),
       }),
     );
+  });
+
+  it("keeps terminal selections visible when the dark accent matches the background", () => {
+    mocks.resolvedTheme = "dark";
+    document.documentElement.style.setProperty("--foreground", "#ffffff");
+    document.documentElement.style.setProperty("--card", "#1f2937");
+    document.documentElement.style.setProperty("--primary", "#ffffff");
+    document.documentElement.style.setProperty("--accent", "#1f2937");
+
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        onCollapse={vi.fn()}
+        onExpand={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(getOrCreateTerminalSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        theme: expect.objectContaining({
+          background: "rgb(31, 41, 55)",
+          selectionBackground: "rgba(255, 255, 255, 0.3)",
+          selectionForeground: "rgb(255, 255, 255)",
+          selectionInactiveBackground: "rgba(255, 255, 255, 0.18)",
+        }),
+      }),
+    );
+
+    const [{ theme }] = getOrCreateTerminalSessionMock.mock.calls[0];
+    expect(theme.selectionBackground).not.toBe(theme.background);
+    expect(theme.selectionInactiveBackground).not.toBe(theme.background);
   });
 
   it("resumes terminal resize after expansion even without a transition event", () => {

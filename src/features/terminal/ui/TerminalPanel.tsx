@@ -116,6 +116,7 @@ function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
 
   const defaultForeground = resolvedTheme === "dark" ? "#ffffff" : "#242424";
   const defaultBackground = resolvedTheme === "dark" ? "#232323" : "#ffffff";
+  const defaultPrimary = resolvedTheme === "dark" ? "#ffffff" : "#242424";
   const styles = window.getComputedStyle(document.documentElement);
   const foreground = readColorToken(styles, "--foreground", defaultForeground);
   const background = readColorToken(
@@ -124,6 +125,7 @@ function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
     defaultBackground,
     "backgroundColor",
   );
+  const primary = readColorToken(styles, "--primary", defaultPrimary);
   const mutedForeground = readColorToken(
     styles,
     "--muted-foreground",
@@ -149,11 +151,14 @@ function resolveTerminalTheme(resolvedTheme: "dark" | "light"): ITheme {
     foreground,
     cursor: foreground,
     cursorAccent: background,
-    selectionBackground: readColorToken(
-      styles,
-      "--accent",
-      "var(--accent)",
-      "backgroundColor",
+    selectionBackground: withAlpha(
+      primary,
+      resolvedTheme === "dark" ? 0.3 : 0.18,
+    ),
+    selectionForeground: foreground,
+    selectionInactiveBackground: withAlpha(
+      primary,
+      resolvedTheme === "dark" ? 0.18 : 0.12,
     ),
     scrollbarSliderBackground: withAlpha(foreground, scrollbarAlpha),
     scrollbarSliderHoverBackground: withAlpha(foreground, scrollbarHoverAlpha),
