@@ -154,7 +154,28 @@ const highlighterCache = new Map<
 >();
 
 // Token cache
+const MAX_TOKEN_CACHE_ENTRIES = 100;
 const tokensCache = new Map<string, TokenizedCode>();
+
+const getCachedTokenizedCode = (key: string): TokenizedCode | null => {
+  const cached = tokensCache.get(key);
+  if (!cached) return null;
+
+  tokensCache.delete(key);
+  tokensCache.set(key, cached);
+  return cached;
+};
+
+const rememberTokenizedCode = (key: string, value: TokenizedCode) => {
+  tokensCache.delete(key);
+  tokensCache.set(key, value);
+
+  while (tokensCache.size > MAX_TOKEN_CACHE_ENTRIES) {
+    const oldest = tokensCache.keys().next();
+    if (oldest.done) break;
+    tokensCache.delete(oldest.value);
+  }
+};
 
 // Subscribers for async token updates
 const subscribers = new Map<
@@ -216,7 +237,7 @@ export const highlightCode = (
   const tokensCacheKey = getTokensCacheKey(code, language);
 
   // Return cached result if available
-  const cached = tokensCache.get(tokensCacheKey);
+  const cached = getCachedTokenizedCode(tokensCacheKey);
   if (cached) {
     return cached;
   }
@@ -254,7 +275,7 @@ export const highlightCode = (
       };
 
       // Cache the result
-      tokensCache.set(tokensCacheKey, tokenized);
+      rememberTokenizedCode(tokensCacheKey, tokenized);
 
       // Notify all subscribers
       const subs = subscribers.get(tokensCacheKey);
