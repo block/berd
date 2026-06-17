@@ -53,6 +53,16 @@ const renamedSessionSource = {
   properties: { draft: true, builderSessionId: "sess-1" },
 };
 
+let documentHasFocus = true;
+let hasFocusSpy: ReturnType<typeof vi.spyOn> | null = null;
+
+function setDocumentVisibility(value: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", {
+    configurable: true,
+    value,
+  });
+}
+
 async function flushPromises() {
   await act(async () => {
     await Promise.resolve();
@@ -73,6 +83,11 @@ function deferred<T>() {
 describe("usePersonaSource", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    documentHasFocus = true;
+    hasFocusSpy = vi.spyOn(document, "hasFocus").mockImplementation(() => {
+      return documentHasFocus;
+    });
+    setDocumentVisibility("visible");
     listMock.mockReset();
     readSourceMock.mockReset();
     readSourceMock.mockImplementation(
@@ -84,6 +99,8 @@ describe("usePersonaSource", () => {
   });
 
   afterEach(() => {
+    hasFocusSpy?.mockRestore();
+    hasFocusSpy = null;
     vi.useRealTimers();
   });
 
@@ -107,6 +124,69 @@ describe("usePersonaSource", () => {
       vi.advanceTimersByTime(800);
       await Promise.resolve();
     });
+
+    expect(result.current.data?.name).toBe("Snark");
+  });
+
+  it("pauses polling while the window is hidden", async () => {
+    listMock.mockResolvedValue([sourceV1]);
+    renderHook(() => usePersonaSource(path));
+    await flushPromises();
+    expect(listMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      await Promise.resolve();
+    });
+
+    expect(listMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses polling while the window is unfocused", async () => {
+    listMock.mockResolvedValue([sourceV1]);
+    renderHook(() => usePersonaSource(path));
+    await flushPromises();
+    expect(listMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      documentHasFocus = false;
+      window.dispatchEvent(new Event("blur"));
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      await Promise.resolve();
+    });
+
+    expect(listMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("resumes polling with a fresh reload when the window becomes visible", async () => {
+    listMock.mockResolvedValueOnce([sourceV1]).mockResolvedValue([sourceV2]);
+    const { result } = renderHook(() => usePersonaSource(path));
+    await flushPromises();
+    expect(result.current.data?.name).toBe("Untitled agent");
+
+    await act(async () => {
+      setDocumentVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(800);
+      await Promise.resolve();
+    });
+    expect(result.current.data?.name).toBe("Untitled agent");
+
+    await act(async () => {
+      setDocumentVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await flushPromises();
 
     expect(result.current.data?.name).toBe("Snark");
   });

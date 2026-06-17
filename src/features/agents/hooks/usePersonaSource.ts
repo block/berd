@@ -54,6 +54,10 @@ export function usePersonaSource(
   const mountedRef = useRef(true);
   const [saveStatus, setSaveStatus] =
     useState<UsePersonaSourceResult["saveStatus"]>("saved");
+  const [isPollingActive, setIsPollingActive] = useState(() =>
+    shouldPollPersonaSource(),
+  );
+  const wasPollingActiveRef = useRef(isPollingActive);
   const sourceIdentity = `${builderSessionId ?? ""}\u0000${path ?? ""}`;
   const [previousSourceIdentity, setPreviousSourceIdentity] =
     useState(sourceIdentity);
@@ -385,20 +389,49 @@ export function usePersonaSource(
   }, [onResolvedPathChange]);
 
   useEffect(() => {
-    void reload();
+    const updatePollingState = () => {
+      setIsPollingActive(shouldPollPersonaSource());
+    };
 
-    if (!path) {
+    window.addEventListener("focus", updatePollingState);
+    window.addEventListener("blur", updatePollingState);
+    document.addEventListener("visibilitychange", updatePollingState);
+
+    return () => {
+      window.removeEventListener("focus", updatePollingState);
+      window.removeEventListener("blur", updatePollingState);
+      document.removeEventListener("visibilitychange", updatePollingState);
+    };
+  }, []);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
+
+  useEffect(() => {
+    const wasPollingActive = wasPollingActiveRef.current;
+    wasPollingActiveRef.current = isPollingActive;
+
+    if (isPollingActive && !wasPollingActive) {
+      void reload();
+    }
+  }, [isPollingActive, reload]);
+
+  useEffect(() => {
+    if (!path || !isPollingActive) {
       return;
     }
 
     const intervalId = setInterval(() => {
-      void reload();
+      if (shouldPollPersonaSource()) {
+        void reload();
+      }
     }, POLL_MS);
 
     return () => {
       clearInterval(intervalId);
     };
-  }, [path, reload]);
+  }, [isPollingActive, path, reload]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -411,6 +444,10 @@ export function usePersonaSource(
   }, []);
 
   return { data, isLoading, error, update, saveStatus, saveNow };
+}
+
+function shouldPollPersonaSource() {
+  return document.visibilityState !== "hidden" && document.hasFocus();
 }
 
 function resolvePersonaSource(
