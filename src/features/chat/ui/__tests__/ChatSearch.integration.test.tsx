@@ -248,7 +248,9 @@ describe("chat search integration", () => {
     expect(scrollIntoViewMock).toHaveBeenCalledTimes(1);
 
     await user.keyboard("{Enter}");
-    expect(scrollIntoViewMock).toHaveBeenCalledTimes(2);
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalledTimes(2);
+    });
     expect(scrollIntoViewMock).toHaveBeenLastCalledWith({
       block: "center",
       behavior: "smooth",

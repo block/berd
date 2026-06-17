@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { ASSISTIVE_UX_STORAGE_KEY, ASSISTIVE_UX_RULES } from "./registry";
 import {
+  hasAssistiveMomentBeenShown,
   recordAssistiveMomentAccepted,
   recordAssistiveMomentRetired,
   recordAssistiveMomentShown,
@@ -8,6 +9,7 @@ import {
 } from "./runtime";
 
 const changeSoundId = ASSISTIVE_UX_RULES.notificationsChangeSound.id;
+const responseStartId = ASSISTIVE_UX_RULES.chatJumpToResponseStart.id;
 
 describe("Assistive UX runtime", () => {
   beforeEach(() => {
@@ -16,6 +18,14 @@ describe("Assistive UX runtime", () => {
 
   it("shows a fresh discover moment", () => {
     expect(shouldShowAssistiveMoment(changeSoundId)).toBe(true);
+  });
+
+  it("reports whether a moment has been shown", () => {
+    expect(hasAssistiveMomentBeenShown(responseStartId)).toBe(false);
+
+    recordAssistiveMomentShown(responseStartId);
+
+    expect(hasAssistiveMomentBeenShown(responseStartId)).toBe(true);
   });
 
   it("stops showing after the discover moment reaches its show limit", () => {
@@ -29,6 +39,21 @@ describe("Assistive UX runtime", () => {
     expect(
       JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
         .moments[changeSoundId].retiredReason,
+    ).toBe("expired");
+  });
+
+  it("allows the response-start discover moment to show four times", () => {
+    recordAssistiveMomentShown(responseStartId);
+    recordAssistiveMomentShown(responseStartId);
+    recordAssistiveMomentShown(responseStartId);
+    expect(shouldShowAssistiveMoment(responseStartId)).toBe(true);
+
+    recordAssistiveMomentShown(responseStartId);
+
+    expect(shouldShowAssistiveMoment(responseStartId)).toBe(false);
+    expect(
+      JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
+        .moments[responseStartId].retiredReason,
     ).toBe("expired");
   });
 

@@ -1,8 +1,11 @@
 import type { ReactNode } from "react";
-import { Check, Copy, Pencil, RotateCcw } from "lucide-react";
+import { Check, Copy, Pencil, RotateCcw, X } from "lucide-react";
+import { IconChevronsUp } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/shared/lib/cn";
 import { MessageAction, MessageActions } from "@/shared/ui/ai-elements/message";
+import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
+import { Button } from "@/shared/ui/button";
 
 interface MessageBubbleActionsProps {
   isUser: boolean;
@@ -13,6 +16,10 @@ interface MessageBubbleActionsProps {
   onCopy: () => void;
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onJumpToResponseStart?: (messageId: string) => void;
+  showJumpToResponseStartHint?: boolean;
+  onJumpToResponseStartHintClose?: (messageId: string) => void;
+  onJumpToResponseStartHintDismiss?: (messageId: string) => void;
 }
 
 export function MessageBubbleActions({
@@ -24,22 +31,44 @@ export function MessageBubbleActions({
   onCopy,
   onRetryMessage,
   onEditMessage,
+  onJumpToResponseStart,
+  showJumpToResponseStartHint,
+  onJumpToResponseStartHintClose,
+  onJumpToResponseStartHintDismiss,
 }: MessageBubbleActionsProps) {
   const { t } = useTranslation(["chat", "common"]);
+  const jumpToResponseStartLabel = t("message.jumpToResponseStart");
+  const copyLabel = copied ? t("message.copied") : t("common:actions.copy");
+  const copyTooltip = showJumpToResponseStartHint ? undefined : copyLabel;
+  const jumpToResponseStartAction = onJumpToResponseStart ? (
+    <MessageAction
+      size="icon-xs"
+      variant="ghost-light"
+      className="text-muted-foreground/80"
+      label={jumpToResponseStartLabel}
+      tooltip={
+        showJumpToResponseStartHint ? undefined : jumpToResponseStartLabel
+      }
+      onClick={() => onJumpToResponseStart(messageId)}
+    >
+      <IconChevronsUp className="size-3.5" />
+    </MessageAction>
+  ) : null;
 
   return (
-    <MessageActions className="pt-0">
+    <MessageActions className="gap-0 pt-0">
       {isUser && timestamp}
       {textContent && (
         <MessageAction
-          size="xs"
+          size="icon-xs"
           variant="ghost-light"
           className={cn(
-            "text-muted-foreground",
+            "text-muted-foreground/80",
             copied &&
               "bg-accent text-foreground hover:bg-accent active:bg-accent",
           )}
-          tooltip={copied ? t("message.copied") : t("common:actions.copy")}
+          label={copyLabel}
+          tooltip={copyTooltip}
           onClick={onCopy}
         >
           {copied ? (
@@ -49,11 +78,53 @@ export function MessageBubbleActions({
           )}
         </MessageAction>
       )}
+      {!isUser && jumpToResponseStartAction ? (
+        showJumpToResponseStartHint ? (
+          <Popover
+            open
+            onOpenChange={(open) => {
+              if (!open) {
+                onJumpToResponseStartHintClose?.(messageId);
+              }
+            }}
+          >
+            <PopoverTrigger asChild>{jumpToResponseStartAction}</PopoverTrigger>
+            <PopoverContent
+              variant="tooltip"
+              align="center"
+              side="top"
+              onOpenAutoFocus={(event) => event.preventDefault()}
+              className="max-w-56 p-3"
+            >
+              <div className="relative">
+                <p className="pr-7 text-xs font-medium leading-4">
+                  {jumpToResponseStartLabel}
+                </p>
+                <p className="mt-1 text-xs leading-4 text-popover-inverse-foreground/80">
+                  {t("message.jumpToResponseStartHint")}
+                </p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-xs"
+                  className="absolute right-0 top-0 size-4 p-0 text-popover-inverse-foreground/75 hover:bg-transparent hover:text-popover-inverse-foreground"
+                  aria-label={t("message.jumpToResponseStartHintDismiss")}
+                  onClick={() => onJumpToResponseStartHintDismiss?.(messageId)}
+                >
+                  <X className="size-3.5" />
+                </Button>
+              </div>
+            </PopoverContent>
+          </Popover>
+        ) : (
+          jumpToResponseStartAction
+        )
+      ) : null}
       {!isUser && onRetryMessage && (
         <MessageAction
-          size="xs"
+          size="icon-xs"
           variant="ghost-light"
-          className="text-muted-foreground"
+          className="text-muted-foreground/80"
           tooltip={t("common:actions.retry")}
           onClick={() => onRetryMessage(messageId)}
         >
@@ -62,9 +133,9 @@ export function MessageBubbleActions({
       )}
       {isUser && onEditMessage && (
         <MessageAction
-          size="xs"
+          size="icon-xs"
           variant="ghost-light"
-          className="text-muted-foreground"
+          className="text-muted-foreground/80"
           tooltip={t("common:actions.edit")}
           onClick={() => onEditMessage(messageId)}
         >

@@ -287,7 +287,7 @@ describe("MessageBubble", () => {
     );
 
     expect(
-      container.querySelector('[data-role="assistant-message"] .pb-8'),
+      container.querySelector('[data-role="assistant-message"] .pb-9'),
     ).toBeInTheDocument();
     expect(
       container.querySelector(
@@ -295,6 +295,107 @@ describe("MessageBubble", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
+  });
+
+  it("renders a response-start action for completed assistant messages", async () => {
+    const user = userEvent.setup();
+    const onJumpToResponseStart = vi.fn();
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        onJumpToResponseStart={onJumpToResponseStart}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Jump to response start" }),
+    );
+
+    expect(onJumpToResponseStart).toHaveBeenCalledWith("a1");
+  });
+
+  it("renders a dismissible response-start hint", async () => {
+    const user = userEvent.setup();
+    const onJumpToResponseStartHintDismiss = vi.fn();
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        onJumpToResponseStart={vi.fn()}
+        showJumpToResponseStartHint
+        onJumpToResponseStartHintDismiss={onJumpToResponseStartHintDismiss}
+      />,
+    );
+
+    const hint = screen.getByRole("dialog");
+    expect(hint).toHaveTextContent("Jump to response start");
+    expect(hint).toHaveTextContent(
+      "For long replies, this takes you back to the top.",
+    );
+
+    await user.click(
+      screen.getByRole("button", {
+        name: "Dismiss response start tip",
+      }),
+    );
+
+    expect(onJumpToResponseStartHintDismiss).toHaveBeenCalledWith("a1");
+  });
+
+  it("suppresses copy tooltip while response-start hint is visible", async () => {
+    const user = userEvent.setup();
+    render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        onJumpToResponseStart={vi.fn()}
+        showJumpToResponseStartHint
+      />,
+    );
+
+    expect(screen.getByRole("dialog")).toHaveTextContent(
+      "Jump to response start",
+    );
+    const copyButton = screen.getByRole("button", { name: "Copy" });
+
+    await user.hover(copyButton);
+
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+  });
+
+  it("does not show assistant actions while the message is streaming", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        isStreaming
+        onRetryMessage={vi.fn()}
+        onJumpToResponseStart={vi.fn()}
+      />,
+    );
+
+    expect(
+      container.querySelector(
+        '[data-role="assistant-message"] [data-role="message-actions"]',
+      ),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Jump to response start" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("can keep assistant actions visible without hover", () => {
+    const { container } = render(
+      <MessageBubble
+        message={assistantMessage([{ type: "text", text: "response" }])}
+        actionsAlwaysVisible
+      />,
+    );
+
+    const actions = container.querySelector(
+      '[data-role="assistant-message"] [data-role="message-actions"]',
+    );
+    expect(actions).toHaveClass("opacity-100", "pointer-events-auto");
   });
 
   it("keeps whole assistant messages on the legacy outer spacing contract", () => {
@@ -385,11 +486,11 @@ describe("MessageBubble", () => {
       '[data-message-fragment-role="end"] [data-role="assistant-message-content"]',
     );
 
-    expect(startContent).not.toHaveClass("pb-8");
+    expect(startContent).not.toHaveClass("pb-9");
     expect(startContent?.querySelector('[data-role="message-actions"]')).toBe(
       null,
     );
-    expect(endContent).toHaveClass("pb-8");
+    expect(endContent).toHaveClass("pb-9");
     expect(
       endContent?.querySelector('[data-role="message-actions"]'),
     ).toBeInTheDocument();
@@ -409,6 +510,8 @@ describe("MessageBubble", () => {
     expect(timestamp).toHaveClass("shrink-0");
     expect(timestamp).toHaveClass("text-[13px]");
     expect(timestamp).toHaveClass("leading-relaxed");
+    expect(timestamp).toHaveClass("pl-2");
+    expect(timestamp).toHaveClass("pr-1");
     expect(timestamp).not.toHaveClass("text-sm");
     expect(timestamp).not.toHaveClass("text-[10px]");
   });
@@ -441,6 +544,12 @@ describe("MessageBubble", () => {
         (element) => element.tagName,
       ),
     ).toEqual(["SPAN", "BUTTON", "BUTTON"]);
+
+    const userTimestamp = userActions?.querySelector(
+      '[data-role="message-timestamp"]',
+    );
+    expect(userTimestamp).toHaveClass("pl-1");
+    expect(userTimestamp).toHaveClass("pr-2");
   });
 
   it("keeps copy confirmation visible until it resets", async () => {

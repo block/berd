@@ -17,6 +17,14 @@ import { MessageBubble } from "./MessageBubble";
 import { TranscriptSearchSkip } from "./TranscriptSearchSkip";
 import { MessageTimelineScrollContainer } from "./MessageTimelineScrollContainer";
 import { getTextContent, type Message } from "@/shared/types/messages";
+import { ASSISTIVE_UX_RULES } from "@/shared/assistive-ux/registry";
+import {
+  hasAssistiveMomentBeenShown,
+  recordAssistiveMomentAccepted,
+  recordAssistiveMomentRetired,
+  recordAssistiveMomentShown,
+  shouldShowAssistiveMoment,
+} from "@/shared/assistive-ux/runtime";
 import {
   easeOutCubic,
   JUMP_TO_LATEST_SCROLL_MS,
@@ -27,11 +35,21 @@ import {
   REDUCED_MOTION_QUERY,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
+import {
+  getTimelineBottomScrollTop,
+  getTimelineDistanceFromBottom,
+  hasTimelineRealScrollableOverflow,
+  isTimelineNearLatest,
+  isTimelinePinnedToLatest,
+  shouldResumeTimelineFollowFromUserScroll,
+  shouldShowTimelineJumpToLatest,
+  TIMELINE_AUTO_SCROLL_THRESHOLD_PX,
+  TIMELINE_MCP_APP_STICKY_SCROLL_MS,
+  type TimelineScrollIntent,
+} from "./timelineScrollIntent";
 
-const AUTO_SCROLL_THRESHOLD_PX = 180;
-const PINNED_BOTTOM_THRESHOLD_PX = 8;
-const MCP_APP_STICKY_SCROLL_MS = 1500;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
+const RESPONSE_START_HINT_VIEWPORT_SLOP_PX = 16;
 
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
@@ -130,9 +148,24 @@ export function MessageTimeline({
   const autoScrollTimersRef = useRef<number[]>([]);
   const jumpToLatestAnimationFrameRef = useRef<number | null>(null);
   const lastMcpAppSignatureRef = useRef<string | null>(null);
-  const followStreamingMessageIdRef = useRef<string | null>(null);
+  const suppressFollowResumeFromProgrammaticScrollRef = useRef(false);
+  const scrollIntentRef = useRef<TimelineScrollIntent>("following-latest");
+  const previousStreamingMessageIdRef = useRef<string | null>(null);
+  const previousLatestAssistantCompletionStatusRef = useRef<string | null>(
+    null,
+  );
+  const previousLatestCompletedAssistantMessageIdRef = useRef<string | null>(
+    null,
+  );
+  const hasInitializedResponseStartHintRef = useRef(false);
+  const responseStartHintCandidateMessageIdRef = useRef<string | null>(null);
+  const responseStartHintAnimationFrameRef = useRef<number | null>(null);
+  const responseStartHintSeenMessageIdsRef = useRef(new Set<string>());
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
-  const [userDetached, setUserDetached] = useState(false);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [responseStartHintMessageId, setResponseStartHintMessageId] = useState<
+    string | null
+  >(null);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const hasFooter = footer != null;
   const messageListBottomPaddingPx = hasFooter
@@ -169,18 +202,47 @@ export function MessageTimeline({
     return textMatch?.id ?? null;
   }, [scrollTargetMessageId, scrollTargetQuery, visibleMessages]);
 
-  const getBottomScrollTop = useCallback((container: HTMLDivElement) => {
-    return Math.max(0, container.scrollHeight - container.clientHeight);
-  }, []);
+  const getBottomScrollTop = useCallback(
+    (container: HTMLDivElement) => getTimelineBottomScrollTop(container),
+    [],
+  );
 
   const hasRealScrollableOverflow = useCallback((container: HTMLDivElement) => {
-    return (
-      Math.max(
-        0,
-        container.scrollHeight - messageListBottomPaddingPxRef.current,
-      ) > container.clientHeight
-    );
+    return hasTimelineRealScrollableOverflow({
+      metrics: container,
+      bottomPaddingPx: messageListBottomPaddingPxRef.current,
+    });
   }, []);
+
+  const syncJumpToLatestVisibility = useCallback(
+    (intent: TimelineScrollIntent = scrollIntentRef.current) => {
+      const container = containerRef.current;
+      if (!container) {
+        setShowJumpToLatest(false);
+        return;
+      }
+
+      setShowJumpToLatest(
+        shouldShowTimelineJumpToLatest({
+          intent,
+          metrics: container,
+          bottomPaddingPx: messageListBottomPaddingPxRef.current,
+        }),
+      );
+    },
+    [],
+  );
+
+  const latestAssistantMessage = useMemo(() => {
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (message?.role === "assistant") {
+        return message;
+      }
+    }
+    return null;
+  }, [visibleMessages]);
+  const latestAssistantMessageId = latestAssistantMessage?.id ?? null;
 
   const setTimelineScrollTop = useCallback(
     (container: HTMLDivElement, scrollTop: number) => {
@@ -224,6 +286,67 @@ export function MessageTimeline({
     cancelAnimationFrame(jumpToLatestAnimationFrameRef.current);
     jumpToLatestAnimationFrameRef.current = null;
   }, []);
+
+  const clearProgrammaticFollowResumeSuppression = useCallback(() => {
+    suppressFollowResumeFromProgrammaticScrollRef.current = false;
+  }, []);
+
+  const scrollToTargetWithControlledSmooth = useCallback(
+    (
+      targetScrollTop: number,
+      { suppressFollowResume = false }: { suppressFollowResume?: boolean } = {},
+    ) => {
+      const container = containerRef.current;
+      if (!container) {
+        return;
+      }
+
+      cancelJumpToLatestAnimation();
+      if (suppressFollowResume) {
+        suppressFollowResumeFromProgrammaticScrollRef.current = true;
+      }
+
+      const startScrollTop = container.scrollTop;
+      if (
+        Math.abs(targetScrollTop - startScrollTop) <= 1 ||
+        window.matchMedia(REDUCED_MOTION_QUERY).matches
+      ) {
+        setTimelineScrollTop(container, targetScrollTop);
+        return;
+      }
+
+      let startTime: number | null = null;
+      const animate = (now: number) => {
+        const nextContainer = containerRef.current;
+        if (!nextContainer) {
+          jumpToLatestAnimationFrameRef.current = null;
+          return;
+        }
+
+        startTime ??= now;
+        const progress = Math.min(
+          1,
+          (now - startTime) / JUMP_TO_LATEST_SCROLL_MS,
+        );
+        const nextScrollTop =
+          startScrollTop +
+          (targetScrollTop - startScrollTop) * easeOutCubic(progress);
+        setTimelineScrollTop(nextContainer, nextScrollTop);
+
+        if (progress < 1) {
+          jumpToLatestAnimationFrameRef.current =
+            requestAnimationFrame(animate);
+          return;
+        }
+
+        setTimelineScrollTop(nextContainer, targetScrollTop);
+        jumpToLatestAnimationFrameRef.current = null;
+      };
+
+      jumpToLatestAnimationFrameRef.current = requestAnimationFrame(animate);
+    },
+    [cancelJumpToLatestAnimation, setTimelineScrollTop],
+  );
 
   const scrollToBottomWithControlledSmooth = useCallback(() => {
     const container = containerRef.current;
@@ -276,27 +399,53 @@ export function MessageTimeline({
     jumpToLatestAnimationFrameRef.current = requestAnimationFrame(animate);
   }, [cancelJumpToLatestAnimation, getBottomScrollTop, setTimelineScrollTop]);
 
+  const isResponseStartHintEligible = useCallback((messageId: string) => {
+    const container = containerRef.current;
+    const target = messageRefs.current[messageId];
+    if (!container || !target) {
+      return false;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const footerRect = footerRef.current?.getBoundingClientRect();
+    const visibleBottom = footerRect
+      ? Math.min(containerRect.bottom, footerRect.top)
+      : containerRect.bottom;
+    const visibleHeight = Math.max(0, visibleBottom - containerRect.top);
+
+    return (
+      targetRect.height >
+        visibleHeight - RESPONSE_START_HINT_VIEWPORT_SLOP_PX ||
+      targetRect.top < containerRect.top + RESPONSE_START_HINT_VIEWPORT_SLOP_PX
+    );
+  }, []);
+
   const setDetachedFromLatest = useCallback(
-    (detached: boolean) => {
-      // The jump-to-latest button is driven by this detached state. Only allow
-      // the detached state when there is real content overflow to scroll to;
-      // otherwise the docked composer's bottom padding can inflate scrollHeight
-      // past clientHeight and surface the button with nothing to scroll to.
+    (
+      detached: boolean,
+      intent: TimelineScrollIntent = detached
+        ? "user-detached"
+        : "following-latest",
+    ) => {
       if (detached) {
         const container = containerRef.current;
         if (!container || !hasRealScrollableOverflow(container)) {
+          syncJumpToLatestVisibility("following-latest");
           return;
         }
       }
+
+      scrollIntentRef.current = intent;
+      syncJumpToLatestVisibility(intent);
 
       if (userDetachedRef.current === detached) {
         return;
       }
 
       userDetachedRef.current = detached;
-      setUserDetached(detached);
     },
-    [hasRealScrollableOverflow],
+    [hasRealScrollableOverflow, syncJumpToLatestVisibility],
   );
 
   const syncUnscrollableState = useCallback(
@@ -318,7 +467,10 @@ export function MessageTimeline({
         return;
       }
 
-      if (userDetachedRef.current) {
+      if (
+        userDetachedRef.current ||
+        suppressFollowResumeFromProgrammaticScrollRef.current
+      ) {
         return;
       }
 
@@ -329,7 +481,7 @@ export function MessageTimeline({
       if (
         !isNearBottomRef.current &&
         !stickyActive &&
-        distanceFromBottom >= AUTO_SCROLL_THRESHOLD_PX
+        distanceFromBottom >= TIMELINE_AUTO_SCROLL_THRESHOLD_PX
       ) {
         return;
       }
@@ -340,11 +492,15 @@ export function MessageTimeline({
   );
 
   const schedulePinnedBottomBurst = useCallback(() => {
-    if (userDetachedRef.current) {
+    if (
+      userDetachedRef.current ||
+      suppressFollowResumeFromProgrammaticScrollRef.current
+    ) {
       return;
     }
 
-    stickyScrollUntilRef.current = performance.now() + MCP_APP_STICKY_SCROLL_MS;
+    stickyScrollUntilRef.current =
+      performance.now() + TIMELINE_MCP_APP_STICKY_SCROLL_MS;
 
     for (const timer of autoScrollTimersRef.current) {
       window.clearTimeout(timer);
@@ -352,6 +508,12 @@ export function MessageTimeline({
     autoScrollTimersRef.current = [];
 
     const run = () => {
+      if (
+        userDetachedRef.current ||
+        suppressFollowResumeFromProgrammaticScrollRef.current
+      ) {
+        return;
+      }
       scrollToBottom("auto");
     };
 
@@ -371,7 +533,10 @@ export function MessageTimeline({
       return;
     }
 
-    if (userDetachedRef.current) {
+    if (
+      userDetachedRef.current ||
+      suppressFollowResumeFromProgrammaticScrollRef.current
+    ) {
       return;
     }
 
@@ -379,18 +544,25 @@ export function MessageTimeline({
       container.scrollHeight - container.scrollTop - container.clientHeight;
     const shouldStick =
       isNearBottomRef.current ||
-      distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX ||
+      distanceFromBottom < TIMELINE_AUTO_SCROLL_THRESHOLD_PX ||
       stickyScrollUntilRef.current > performance.now();
 
     if (!shouldStick) {
       return;
     }
 
-    stickyScrollUntilRef.current = performance.now() + MCP_APP_STICKY_SCROLL_MS;
+    stickyScrollUntilRef.current =
+      performance.now() + TIMELINE_MCP_APP_STICKY_SCROLL_MS;
 
     const alignElementBottom = () => {
       const nextContainer = containerRef.current;
       if (!nextContainer || !element.isConnected) {
+        return;
+      }
+      if (
+        userDetachedRef.current ||
+        suppressFollowResumeFromProgrammaticScrollRef.current
+      ) {
         return;
       }
 
@@ -415,49 +587,6 @@ export function MessageTimeline({
       alignElementBottom();
     });
   }, []);
-
-  const activeStreamingMessage = streamingMessageId
-    ? (visibleMessages.find((message) => message.id === streamingMessageId) ??
-      null)
-    : null;
-
-  useEffect(() => {
-    if (!activeStreamingMessage || userDetachedRef.current) {
-      return;
-    }
-
-    if (activeStreamingMessage.role !== "assistant") {
-      return;
-    }
-
-    if (followStreamingMessageIdRef.current === activeStreamingMessage.id) {
-      return;
-    }
-
-    const container = containerRef.current;
-    const messageEl = messageRefs.current[activeStreamingMessage.id];
-    if (!container || !messageEl) {
-      return;
-    }
-
-    const messageHeight = messageEl.getBoundingClientRect().height;
-    const viewportHeight = container.clientHeight;
-
-    if (messageHeight <= viewportHeight || viewportHeight <= 0) {
-      return;
-    }
-
-    // Mark this streaming message as handled so the effect does not re-fire on
-    // every streaming token if the user scrolls back near the latest message.
-    followStreamingMessageIdRef.current = activeStreamingMessage.id;
-
-    const targetScrollTop = Math.max(0, messageEl.offsetTop - 16);
-    isNearBottomRef.current = false;
-    isPinnedToBottomRef.current = false;
-    stickyScrollUntilRef.current = 0;
-    setDetachedFromLatest(true);
-    setTimelineScrollTop(container, targetScrollTop);
-  }, [activeStreamingMessage, setDetachedFromLatest, setTimelineScrollTop]);
 
   // Use scrollTo instead of scrollIntoView to avoid scrolling parent/document-level ancestors.
   // biome-ignore lint/correctness/useExhaustiveDependencies: refs are stable and don't need to be in deps
@@ -501,7 +630,10 @@ export function MessageTimeline({
     if (!hasFooter && tailPaddingPx == null) {
       return;
     }
-    if (userDetachedRef.current) {
+    if (
+      userDetachedRef.current ||
+      suppressFollowResumeFromProgrammaticScrollRef.current
+    ) {
       return;
     }
     if (
@@ -538,11 +670,9 @@ export function MessageTimeline({
       }
 
       lastScrollTopRef.current = container.scrollTop;
-      const distanceFromBottom =
-        container.scrollHeight - container.scrollTop - container.clientHeight;
-      isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
-      isPinnedToBottomRef.current =
-        distanceFromBottom <= PINNED_BOTTOM_THRESHOLD_PX;
+      const distanceFromBottom = getTimelineDistanceFromBottom(container);
+      isNearBottomRef.current = isTimelineNearLatest(container);
+      isPinnedToBottomRef.current = isTimelinePinnedToLatest(container);
       hadRealScrollableOverflowRef.current =
         hasRealScrollableOverflow(container);
 
@@ -551,15 +681,22 @@ export function MessageTimeline({
       // detached state from the post-resize position so "Jump to latest"
       // appears (or hides) to match what the user actually sees.
       if (userDetachedRef.current) {
-        if (isPinnedToBottomRef.current) {
+        if (
+          isPinnedToBottomRef.current &&
+          !suppressFollowResumeFromProgrammaticScrollRef.current
+        ) {
           setDetachedFromLatest(false);
+        } else {
+          syncJumpToLatestVisibility();
         }
         return;
       }
 
-      if (distanceFromBottom >= AUTO_SCROLL_THRESHOLD_PX) {
+      if (distanceFromBottom >= TIMELINE_AUTO_SCROLL_THRESHOLD_PX) {
         setDetachedFromLatest(true);
         stickyScrollUntilRef.current = 0;
+      } else {
+        syncJumpToLatestVisibility();
       }
     };
 
@@ -609,6 +746,7 @@ export function MessageTimeline({
     hasRealScrollableOverflow,
     scrollToBottom,
     setDetachedFromLatest,
+    syncJumpToLatestVisibility,
     syncUnscrollableState,
   ]);
 
@@ -620,14 +758,145 @@ export function MessageTimeline({
       return;
     }
 
+    clearProgrammaticFollowResumeSuppression();
     setDetachedFromLatest(false);
     scrollToBottom("auto");
   }, [
+    clearProgrammaticFollowResumeSuppression,
     latestVisibleMessageId,
     latestVisibleMessage?.role,
     scrollToBottom,
     setDetachedFromLatest,
   ]);
+
+  const scheduleResponseStartHint = useCallback(
+    (messageId: string) => {
+      if (responseStartHintAnimationFrameRef.current != null) {
+        cancelAnimationFrame(responseStartHintAnimationFrameRef.current);
+      }
+
+      responseStartHintAnimationFrameRef.current = requestAnimationFrame(() => {
+        responseStartHintAnimationFrameRef.current = null;
+
+        if (responseStartHintSeenMessageIdsRef.current.has(messageId)) {
+          responseStartHintCandidateMessageIdRef.current = null;
+          return;
+        }
+
+        const completedMessage = visibleMessages.find(
+          (message) => message.id === messageId,
+        );
+        const rejectionReason = !completedMessage
+          ? "missing-message"
+          : completedMessage.role !== "assistant"
+            ? "not-assistant"
+            : completedMessage.id !== latestAssistantMessageId
+              ? "not-latest-assistant"
+              : completedMessage.metadata?.completionStatus === "inProgress" &&
+                  completedMessage.id === streamingMessageId
+                ? "still-in-progress"
+                : !shouldShowAssistiveMoment(
+                      ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+                    )
+                  ? "assistive-ux-not-eligible"
+                  : !isResponseStartHintEligible(completedMessage.id)
+                    ? "response-start-not-eligible"
+                    : null;
+        if (rejectionReason) {
+          if (completedMessage) {
+            responseStartHintCandidateMessageIdRef.current = null;
+          }
+          return;
+        }
+        if (!completedMessage) {
+          return;
+        }
+
+        responseStartHintSeenMessageIdsRef.current.add(completedMessage.id);
+        responseStartHintCandidateMessageIdRef.current = null;
+        recordAssistiveMomentShown(
+          ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+        );
+        setResponseStartHintMessageId(completedMessage.id);
+      });
+    },
+    [
+      isResponseStartHintEligible,
+      latestAssistantMessageId,
+      streamingMessageId,
+      visibleMessages,
+    ],
+  );
+
+  useLayoutEffect(() => {
+    const latestAssistantCompletionStatus =
+      latestAssistantMessage?.metadata?.completionStatus ?? null;
+    const previousLatestAssistantCompletionStatus =
+      previousLatestAssistantCompletionStatusRef.current;
+    previousLatestAssistantCompletionStatusRef.current =
+      latestAssistantCompletionStatus;
+    const latestCompletedAssistantMessageId =
+      latestAssistantMessage?.id &&
+      latestAssistantMessage.id !== streamingMessageId
+        ? latestAssistantMessage.id
+        : null;
+    const previousLatestCompletedAssistantMessageId =
+      previousLatestCompletedAssistantMessageIdRef.current;
+    previousLatestCompletedAssistantMessageIdRef.current =
+      latestCompletedAssistantMessageId;
+    const hasInitializedResponseStartHint =
+      hasInitializedResponseStartHintRef.current;
+    hasInitializedResponseStartHintRef.current = true;
+
+    if (streamingMessageId) {
+      previousStreamingMessageIdRef.current = streamingMessageId;
+      responseStartHintCandidateMessageIdRef.current = streamingMessageId;
+      return;
+    }
+
+    if (
+      latestAssistantMessage?.id &&
+      latestAssistantCompletionStatus === "inProgress" &&
+      latestAssistantMessage.id === streamingMessageId
+    ) {
+      responseStartHintCandidateMessageIdRef.current =
+        latestAssistantMessage.id;
+      return;
+    }
+
+    const completedCandidateMessageId =
+      previousStreamingMessageIdRef.current ??
+      (previousLatestAssistantCompletionStatus === "inProgress"
+        ? latestAssistantMessage?.id
+        : null) ??
+      responseStartHintCandidateMessageIdRef.current ??
+      (hasInitializedResponseStartHint &&
+      latestCompletedAssistantMessageId &&
+      latestCompletedAssistantMessageId !==
+        previousLatestCompletedAssistantMessageId
+        ? latestCompletedAssistantMessageId
+        : null);
+    previousStreamingMessageIdRef.current = null;
+
+    if (!completedCandidateMessageId) {
+      return;
+    }
+
+    scheduleResponseStartHint(completedCandidateMessageId);
+  }, [
+    latestAssistantMessage?.id,
+    latestAssistantMessage?.metadata?.completionStatus,
+    scheduleResponseStartHint,
+    streamingMessageId,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      if (responseStartHintAnimationFrameRef.current != null) {
+        cancelAnimationFrame(responseStartHintAnimationFrameRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!resolvedScrollTargetMessageId) {
@@ -725,26 +994,35 @@ export function MessageTimeline({
       syncUnscrollableState(scrollTop);
       return;
     }
-    const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
-    isNearBottomRef.current = distanceFromBottom < AUTO_SCROLL_THRESHOLD_PX;
-    isPinnedToBottomRef.current =
-      distanceFromBottom <= PINNED_BOTTOM_THRESHOLD_PX;
+    isNearBottomRef.current = isTimelineNearLatest(container);
+    isPinnedToBottomRef.current = isTimelinePinnedToLatest(container);
 
-    const scrollingDown = scrollTop > lastScrollTopRef.current;
+    const shouldResumeFollowing =
+      !suppressFollowResumeFromProgrammaticScrollRef.current &&
+      shouldResumeTimelineFollowFromUserScroll({
+        hasUserScrollIntent: userScrollIntentRef.current,
+        isNearLatest: isNearBottomRef.current,
+        isPinnedToLatest: isPinnedToBottomRef.current,
+        isStreaming: Boolean(streamingMessageId),
+        scrollingTowardLatest: scrollTop > lastScrollTopRef.current,
+      });
 
-    if (
-      isNearBottomRef.current &&
-      (!userDetachedRef.current || scrollingDown)
-    ) {
+    if (shouldResumeFollowing) {
       setDetachedFromLatest(false);
+      if (streamingMessageId && !isPinnedToBottomRef.current) {
+        scrollToBottom("auto");
+        isNearBottomRef.current = true;
+        isPinnedToBottomRef.current = true;
+      }
     } else if (
       userScrollIntentRef.current ||
       scrollTop < lastScrollTopRef.current
     ) {
       setDetachedFromLatest(true);
       stickyScrollUntilRef.current = 0;
+    } else {
+      syncJumpToLatestVisibility();
     }
-
     lastScrollTopRef.current = scrollTop;
     userScrollIntentRef.current = false;
   };
@@ -767,6 +1045,7 @@ export function MessageTimeline({
     }
 
     userScrollIntentRef.current = true;
+    clearProgrammaticFollowResumeSuppression();
 
     if (event.deltaY < 0) {
       setDetachedFromLatest(true);
@@ -778,22 +1057,75 @@ export function MessageTimeline({
     if (footerRef.current?.contains(event.target as Node)) {
       return;
     }
+    clearProgrammaticFollowResumeSuppression();
     userScrollIntentRef.current = true;
   };
 
   const handleJumpToLatest = () => {
-    if (streamingMessageId) {
-      followStreamingMessageIdRef.current = streamingMessageId;
-    }
+    clearProgrammaticFollowResumeSuppression();
     setDetachedFromLatest(false);
     isNearBottomRef.current = true;
     isPinnedToBottomRef.current = true;
     scrollToBottomWithControlledSmooth();
   };
 
+  const handleJumpToResponseStart = (messageId: string) => {
+    const container = containerRef.current;
+    const target = messageRefs.current[messageId];
+    if (!container || !target) {
+      return;
+    }
+
+    cancelJumpToLatestAnimation();
+    responseStartHintSeenMessageIdsRef.current.add(messageId);
+    if (
+      responseStartHintMessageId === messageId &&
+      hasAssistiveMomentBeenShown(ASSISTIVE_UX_RULES.chatJumpToResponseStart.id)
+    ) {
+      recordAssistiveMomentAccepted(
+        ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+      );
+    }
+    setResponseStartHintMessageId((current) =>
+      current === messageId ? null : current,
+    );
+    setDetachedFromLatest(true);
+    stickyScrollUntilRef.current = 0;
+    isNearBottomRef.current = false;
+    isPinnedToBottomRef.current = false;
+
+    const containerRect = container.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetScrollTop = Math.max(
+      0,
+      container.scrollTop + targetRect.top - containerRect.top - 16,
+    );
+    scrollToTargetWithControlledSmooth(targetScrollTop, {
+      suppressFollowResume: true,
+    });
+  };
+
+  const handleResponseStartHintClose = (messageId: string) => {
+    responseStartHintSeenMessageIdsRef.current.add(messageId);
+    setResponseStartHintMessageId((current) =>
+      current === messageId ? null : current,
+    );
+  };
+
+  const handleResponseStartHintDismiss = (messageId: string) => {
+    responseStartHintSeenMessageIdsRef.current.add(messageId);
+    recordAssistiveMomentRetired(
+      ASSISTIVE_UX_RULES.chatJumpToResponseStart.id,
+      "dismissed",
+    );
+    setResponseStartHintMessageId((current) =>
+      current === messageId ? null : current,
+    );
+  };
+
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestLabel = t("timeline.jumpToLatest");
-  const jumpToLatestButton = userDetached ? (
+  const jumpToLatestButton = showJumpToLatest ? (
     <MessageTimelineJumpToLatestButton
       compact={hasFooterStatus}
       label={jumpToLatestLabel}
@@ -843,12 +1175,28 @@ export function MessageTimeline({
             <MessageBubble
               message={message}
               isStreaming={message.id === streamingMessageId}
+              actionsAlwaysVisible={
+                message.role === "assistant" &&
+                message.id === latestAssistantMessageId &&
+                message.id !== streamingMessageId
+              }
               onRetryMessage={
                 message.role === "assistant" ? onRetryMessage : undefined
               }
               onEditMessage={
                 message.role === "user" ? onEditMessage : undefined
               }
+              onJumpToResponseStart={
+                message.role === "assistant" &&
+                message.id !== streamingMessageId
+                  ? handleJumpToResponseStart
+                  : undefined
+              }
+              showJumpToResponseStartHint={
+                message.id === responseStartHintMessageId
+              }
+              onJumpToResponseStartHintClose={handleResponseStartHintClose}
+              onJumpToResponseStartHintDismiss={handleResponseStartHintDismiss}
               onSendMcpAppMessage={onSendMcpAppMessage}
               onMcpAppAutoScroll={requestMcpAppAutoScroll}
               onRunShellCommand={onRunShellCommand}
@@ -917,7 +1265,7 @@ export function MessageTimeline({
       ) : null}
       {!footer && jumpToLatestButton ? (
         <div
-          className="absolute left-1/2 -translate-x-1/2"
+          className="absolute left-1/2 flex -translate-x-1/2 gap-2"
           style={{ bottom: (tailPaddingPx ?? 16) + 8 }}
         >
           {jumpToLatestButton}

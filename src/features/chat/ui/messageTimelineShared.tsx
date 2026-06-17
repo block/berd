@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { IconArrowDown } from "@tabler/icons-react";
+import { IconChevronsDown } from "@tabler/icons-react";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
@@ -10,6 +10,9 @@ import type { McpAppMessageHandler } from "./mcpAppTypes";
 export interface MessageBubbleCallbacks {
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onJumpToResponseStart?: (messageId: string) => void;
+  onJumpToResponseStartHintClose?: (messageId: string) => void;
+  onJumpToResponseStartHintDismiss?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
@@ -70,7 +73,7 @@ export function MessageTimelineJumpToLatestButton({
         aria-label={label}
         title={label}
       >
-        <IconArrowDown aria-hidden="true" />
+        <IconChevronsDown aria-hidden="true" />
       </Button>
     );
   }
@@ -81,7 +84,7 @@ export function MessageTimelineJumpToLatestButton({
       variant="jump-to-latest"
       size="sm"
       onClick={onClick}
-      leftIcon={<IconArrowDown />}
+      leftIcon={<IconChevronsDown />}
     >
       {label}
     </Button>

@@ -2073,7 +2073,13 @@ export const designSystemComponentManifest = [
     exports: ["Popover", "PopoverAnchor", "PopoverContent", "PopoverTrigger"],
     slots: ["popover", "popover-anchor", "popover-content", "popover-trigger"],
     cva: [],
-    tokenClasses: ["bg-popover", "text-popover-foreground"],
+    tokenClasses: [
+      "bg-popover",
+      "bg-popover-inverse",
+      "fill-popover-inverse",
+      "text-popover-foreground",
+      "text-popover-inverse-foreground",
+    ],
     stateClasses: [
       "data-[side=bottom]:slide-in-from-top-2",
       "data-[side=left]:slide-in-from-right-2",

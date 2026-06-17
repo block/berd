@@ -252,6 +252,9 @@
   "message": {
     "copied": "Copiado",
     "defaultImageAlt": "Adjunto",
+    "jumpToResponseStart": "Ir al inicio de la respuesta",
+    "jumpToResponseStartHint": "En respuestas largas, esto te lleva de vuelta al inicio.",
+    "jumpToResponseStartHintDismiss": "Descartar consejo de inicio de respuesta",
     "mcpApp": "MCP App",
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",

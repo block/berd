@@ -3,7 +3,9 @@ export const ASSISTIVE_UX_STORAGE_VERSION = 1;
 
 export type AssistiveUxMomentType = "discover" | "suggest" | "autoApply";
 
-export type AssistiveUxMomentId = "notifications.changeSound";
+export type AssistiveUxMomentId =
+  | "notifications.changeSound"
+  | "chat.jumpToResponseStart";
 
 export type AssistiveUxRetiredReason =
   | "accepted"
@@ -23,6 +25,11 @@ export const ASSISTIVE_UX_RULES = {
     id: "notifications.changeSound",
     type: "discover",
     maxShows: 3,
+  },
+  chatJumpToResponseStart: {
+    id: "chat.jumpToResponseStart",
+    type: "discover",
+    maxShows: 4,
   },
 } as const satisfies Record<string, AssistiveUxRuleDefinition>;
 

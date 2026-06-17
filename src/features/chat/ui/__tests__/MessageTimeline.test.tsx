@@ -43,14 +43,19 @@ vi.mock("../MessageBubble", () => ({
     message,
     isStreaming,
     onMcpAppAutoScroll,
+    onJumpToResponseStart,
+    showJumpToResponseStartHint,
   }: {
     message: Message;
     isStreaming?: boolean;
     onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
+    onJumpToResponseStart?: (messageId: string) => void;
+    showJumpToResponseStartHint?: boolean;
   }) => (
     <div
       data-testid={`message-${message.id}`}
       data-streaming={isStreaming ? "true" : "false"}
+      data-response-start-hint={showJumpToResponseStartHint ? "true" : "false"}
     >
       {message.content
         .filter((block) => block.type === "text")
@@ -83,6 +88,11 @@ vi.mock("../MessageBubble", () => ({
             }}
           />
         ))}
+      {message.role === "assistant" && !isStreaming && onJumpToResponseStart ? (
+        <button type="button" onClick={() => onJumpToResponseStart(message.id)}>
+          Jump to response start
+        </button>
+      ) : null}
     </div>
   ),
 }));
@@ -297,7 +307,7 @@ describe("MessageTimeline", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("lets long streaming content continue below and shows Jump to latest", async () => {
+  it("keeps following long streaming content without a response-start action", async () => {
     const messages = [
       message("user-1", "user", "Question"),
       message("assistant-1", "assistant", "First token"),
@@ -314,10 +324,8 @@ describe("MessageTimeline", () => {
     const messageFrame = screen.getByTestId("message-assistant-1")
       .parentElement as HTMLElement;
     setElementRect(messageFrame, { height: 650 });
-    Object.defineProperty(messageFrame, "offsetTop", {
-      configurable: true,
-      value: 240,
-    });
+    setElementRect(scroller, { top: 100 });
+    setElementRect(messageFrame, { height: 650, top: -160 });
     const scrollTo = attachScrollTo(scroller);
 
     rerender(
@@ -331,13 +339,105 @@ describe("MessageTimeline", () => {
     );
 
     expect(
-      await screen.findByRole("button", { name: "Jump to latest" }),
-    ).toBeInTheDocument();
-    expect(scroller.scrollTop).toBe(224);
-    expect(scrollTo).not.toHaveBeenCalled();
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Jump to response start" }),
+    ).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1100,
+        behavior: "smooth",
+      }),
+    );
   });
 
-  it("keeps following a long stream after Jump to latest", async () => {
+  it("keeps following follow-up streaming messages in the same user turn", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "First token"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1800,
+      clientHeight: 500,
+    });
+    const firstMessageFrame = screen.getByTestId("message-assistant-1")
+      .parentElement as HTMLElement;
+    setElementRect(firstMessageFrame, { height: 650 });
+    Object.defineProperty(firstMessageFrame, "offsetTop", {
+      configurable: true,
+      value: 240,
+    });
+    const scrollTo = attachScrollTo(scroller);
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          messages[0],
+          message("assistant-1", "assistant", "First token\nSecond token"),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1300,
+        behavior: "smooth",
+      }),
+    );
+
+    setScrollMetrics(scroller, {
+      scrollTop: 1700,
+      scrollHeight: 2200,
+      clientHeight: 500,
+    });
+    scrollTo.mockClear();
+
+    const followUpMessages = [
+      messages[0],
+      message("assistant-1", "assistant", "First token\nSecond token"),
+      message("assistant-2", "assistant", "New process context"),
+    ];
+    rerender(
+      <MessageTimeline
+        messages={followUpMessages}
+        streamingMessageId="assistant-2"
+      />,
+    );
+    const secondMessageFrame = screen.getByTestId("message-assistant-2")
+      .parentElement as HTMLElement;
+    setElementRect(secondMessageFrame, { height: 650 });
+    Object.defineProperty(secondMessageFrame, "offsetTop", {
+      configurable: true,
+      value: 520,
+    });
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          followUpMessages[0],
+          followUpMessages[1],
+          message("assistant-2", "assistant", "New process context\nMore"),
+        ]}
+        streamingMessageId="assistant-2"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1700,
+        behavior: "smooth",
+      }),
+    );
+  });
+
+  it("jumps to a response start and can resume following with Jump to latest", async () => {
     const user = userEvent.setup();
     const animationFrame = mockRequestAnimationFrame();
     const messages = [
@@ -345,7 +445,7 @@ describe("MessageTimeline", () => {
       message("assistant-1", "assistant", "First token"),
     ];
     const { rerender } = renderWithProviders(
-      <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
+      <MessageTimeline messages={messages} />,
     );
     const scroller = getTimelineScroller();
     setScrollMetrics(scroller, {
@@ -368,20 +468,162 @@ describe("MessageTimeline", () => {
           messages[0],
           message("assistant-1", "assistant", "First token\nSecond token"),
         ]}
+      />,
+    );
+
+    const updatedMessageFrame = screen.getByTestId("message-assistant-1")
+      .parentElement as HTMLElement;
+    setElementRect(scroller, { top: 100 });
+    setElementRect(updatedMessageFrame, { height: 650, top: -760 });
+    scrollTo.mockClear();
+
+    await user.click(
+      await screen.findByRole("button", { name: "Jump to response start" }),
+    );
+    expect(scrollTo).not.toHaveBeenCalled();
+    fireEvent.scroll(scroller);
+    animationFrame.finish(1000);
+    expect(scroller.scrollTop).toBe(224);
+    setScrollMetrics(scroller, {
+      scrollTop: 224,
+      scrollHeight: 1600,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    scrollTo.mockClear();
+    setScrollMetrics(scroller, {
+      scrollTop: 224,
+      scrollHeight: 1800,
+      clientHeight: 500,
+    });
+    rerender(
+      <MessageTimeline
+        messages={[
+          messages[0],
+          message(
+            "assistant-1",
+            "assistant",
+            "First token\nSecond token\nThird token",
+          ),
+        ]}
         streamingMessageId="assistant-1"
       />,
     );
+    expect(scrollTo).not.toHaveBeenCalled();
 
     await user.click(
       await screen.findByRole("button", { name: "Jump to latest" }),
     );
     animationFrame.finish(1000);
-    expect(scroller.scrollTop).toBe(1100);
+    expect(scroller.scrollTop).toBe(1300);
 
     scrollTo.mockClear();
     setScrollMetrics(scroller, {
-      scrollTop: 1100,
-      scrollHeight: 1800,
+      scrollTop: 1300,
+      scrollHeight: 2000,
+      clientHeight: 500,
+    });
+
+    rerender(
+      <MessageTimeline
+        messages={[
+          messages[0],
+          message(
+            "assistant-1",
+            "assistant",
+            "First token\nSecond token\nThird token\nFourth token",
+          ),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    await waitFor(() =>
+      expect(scrollTo).toHaveBeenCalledWith({
+        top: 1500,
+        behavior: "smooth",
+      }),
+    );
+  });
+
+  it("shows the response-start hint when a completed assistant appears without an observed streaming transition", async () => {
+    const animationFrame = mockRequestAnimationFrame();
+    const userMessage = message("user-1", "user", "Question");
+    const assistantMessage = message(
+      "assistant-1",
+      "assistant",
+      Array.from({ length: 40 }, (_, index) => `Answer ${index}`).join("\n"),
+    );
+
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={[userMessage]} />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 0,
+      scrollHeight: 1400,
+      clientHeight: 500,
+    });
+
+    rerender(<MessageTimeline messages={[userMessage, assistantMessage]} />);
+
+    const messageFrame = screen.getByTestId("message-assistant-1")
+      .parentElement as HTMLElement;
+    setElementRect(messageFrame, { top: 0, height: 700 });
+
+    animationFrame.run(1000);
+
+    expect(screen.getByTestId("message-assistant-1")).toHaveAttribute(
+      "data-response-start-hint",
+      "true",
+    );
+  });
+
+  it("resumes following a long stream when the user scrolls down to latest", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "First token"),
+    ];
+    const { rerender } = renderWithProviders(
+      <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 5000,
+      clientHeight: 500,
+    });
+    const scrollTo = attachScrollTo(scroller);
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+    scrollTo.mockClear();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4380,
+      scrollHeight: 5000,
+      clientHeight: 500,
+    });
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    fireEvent.scroll(scroller);
+
+    expect(scrollTo).toHaveBeenCalledWith({
+      top: 4500,
+      behavior: "auto",
+    });
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+
+    scrollTo.mockClear();
+    setScrollMetrics(scroller, {
+      scrollTop: 4500,
+      scrollHeight: 5200,
       clientHeight: 500,
     });
 
@@ -401,7 +643,7 @@ describe("MessageTimeline", () => {
 
     await waitFor(() =>
       expect(scrollTo).toHaveBeenCalledWith({
-        top: 1300,
+        top: 4700,
         behavior: "smooth",
       }),
     );
@@ -504,7 +746,7 @@ describe("MessageTimeline", () => {
       />,
     );
     const scroller = getTimelineScroller();
-    setScrollMetrics(scroller, { scrollTop: 450 });
+    setScrollMetrics(scroller, { scrollTop: 300 });
 
     fireEvent.wheel(scroller, { deltaY: -40 });
 
@@ -514,6 +756,42 @@ describe("MessageTimeline", () => {
     });
     expect(jumpButton).toHaveClass("h-8", "w-8");
     expect(screen.queryByText("Jump to latest")).not.toBeInTheDocument();
+  });
+
+  it("keeps Jump hidden when only small footer clearance remains below latest", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <MessageTimeline
+        messages={messages}
+        footer={<div data-testid="composer-footer" />}
+      />,
+    );
+    const scroller = getTimelineScroller();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 430,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.wheel(scroller, { deltaY: -40 });
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.wheel(scroller, { deltaY: -40 });
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
   });
 
   it("keeps MCP app auto-scroll above the footer and skips it while detached", async () => {
@@ -552,6 +830,11 @@ describe("MessageTimeline", () => {
     animationFrame.run(1000);
 
     scrollBy.mockClear();
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
     fireEvent.wheel(scroller, { deltaY: -40 });
 
     rerender(
@@ -875,7 +1158,7 @@ describe("MessageTimeline", () => {
     ).not.toBeInTheDocument();
 
     setScrollMetrics(scroller, {
-      scrollTop: 450,
+      scrollTop: 300,
       scrollHeight: 1000,
       clientHeight: 500,
     });
@@ -925,7 +1208,7 @@ describe("MessageTimeline", () => {
     setScrollMetrics(scroller, {
       scrollTop: 300,
       scrollHeight: 1000,
-      clientHeight: 650,
+      clientHeight: 630,
     });
     triggerResizeObservers();
     animationFrame.run(1000);

@@ -24,6 +24,10 @@ export function shouldShowAssistiveMoment(id: AssistiveUxMomentId): boolean {
   return true;
 }
 
+export function hasAssistiveMomentBeenShown(id: AssistiveUxMomentId): boolean {
+  return (readAssistiveUxState().moments[id]?.shownCount ?? 0) > 0;
+}
+
 export function recordAssistiveMomentShown(id: AssistiveUxMomentId): void {
   const rule = getAssistiveUxRule(id);
   const shownAt = nowIsoString();

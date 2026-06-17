@@ -54,6 +54,8 @@ interface VirtualTranscriptRowProps {
   offscreenMeasurementKind?: "real";
   measurementPlan?: TranscriptShellMeasurementPlan;
   isStreaming?: boolean;
+  actionsAlwaysVisible?: boolean;
+  showJumpToResponseStartHint?: boolean;
   isPulsing?: boolean;
   rowStateProvider?: VirtualTranscriptRowStateProviderConfig;
   bubbleCallbacks?: MessageBubbleCallbacks;
@@ -76,6 +78,8 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   offscreenMeasurementKind,
   measurementPlan,
   isStreaming,
+  actionsAlwaysVisible,
+  showJumpToResponseStartHint,
   isPulsing,
   rowStateProvider,
   bubbleCallbacks,
@@ -163,6 +167,9 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   const {
     onRetryMessage,
     onEditMessage,
+    onJumpToResponseStart,
+    onJumpToResponseStartHintClose,
+    onJumpToResponseStartHintDismiss,
     onSendMcpAppMessage,
     onMcpAppAutoScroll,
     onRunShellCommand,
@@ -273,11 +280,20 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           contentOverride={row.fragment.content}
           fragmentRole={row.fragment.role}
           isStreaming={row.fragment.isStreamingTail && isStreaming}
+          actionsAlwaysVisible={actionsAlwaysVisible}
+          showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             row.fragment.role === "end" || row.fragment.role === "single"
               ? onRetryMessage
               : undefined
           }
+          onJumpToResponseStart={
+            message.role === "assistant" && !isStreaming
+              ? onJumpToResponseStart
+              : undefined
+          }
+          onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}
+          onJumpToResponseStartHintDismiss={onJumpToResponseStartHintDismiss}
           onSendMcpAppMessage={onSendMcpAppMessage}
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
@@ -342,10 +358,19 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           message={message}
           animateEntry={false}
           isStreaming={isStreaming}
+          actionsAlwaysVisible={actionsAlwaysVisible}
+          showJumpToResponseStartHint={showJumpToResponseStartHint}
           onRetryMessage={
             message.role === "assistant" ? onRetryMessage : undefined
           }
           onEditMessage={message.role === "user" ? onEditMessage : undefined}
+          onJumpToResponseStart={
+            message.role === "assistant" && !isStreaming
+              ? onJumpToResponseStart
+              : undefined
+          }
+          onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}
+          onJumpToResponseStartHintDismiss={onJumpToResponseStartHintDismiss}
           onSendMcpAppMessage={onSendMcpAppMessage}
           onMcpAppAutoScroll={onMcpAppAutoScroll}
           onRunShellCommand={onRunShellCommand}
@@ -394,6 +419,8 @@ function areVirtualTranscriptRowPropsEqual(
     previous.offscreenMeasurementKind === next.offscreenMeasurementKind &&
     previous.measurementPlan === next.measurementPlan &&
     previous.isStreaming === next.isStreaming &&
+    previous.actionsAlwaysVisible === next.actionsAlwaysVisible &&
+    previous.showJumpToResponseStartHint === next.showJumpToResponseStartHint &&
     previous.isPulsing === next.isPulsing &&
     previous.rowStateProvider === next.rowStateProvider &&
     previous.bubbleCallbacks === next.bubbleCallbacks &&

@@ -92,12 +92,17 @@ function MessageAttachmentRow({
 interface MessageBubbleProps {
   message: Message;
   isStreaming?: boolean;
+  actionsAlwaysVisible?: boolean;
   animateEntry?: boolean;
   contentOverride?: readonly MessageContent[];
   fragmentRole?: "single" | "start" | "middle" | "end";
   onCopy?: () => void;
   onRetryMessage?: (messageId: string) => void;
   onEditMessage?: (messageId: string) => void;
+  onJumpToResponseStart?: (messageId: string) => void;
+  showJumpToResponseStartHint?: boolean;
+  onJumpToResponseStartHintClose?: (messageId: string) => void;
+  onJumpToResponseStartHintDismiss?: (messageId: string) => void;
   onSendMcpAppMessage?: McpAppMessageHandler;
   onMcpAppAutoScroll?: (element: HTMLElement | null) => void;
   onRunShellCommand?: (command: string, options?: RunCommandOptions) => void;
@@ -392,11 +397,16 @@ function renderContentBlock(
 export const MessageBubble = memo(function MessageBubble({
   message,
   isStreaming,
+  actionsAlwaysVisible = false,
   animateEntry = true,
   contentOverride,
   fragmentRole,
   onRetryMessage,
   onEditMessage,
+  onJumpToResponseStart,
+  showJumpToResponseStartHint,
+  onJumpToResponseStartHintClose,
+  onJumpToResponseStartHintDismiss,
   onSendMcpAppMessage,
   onMcpAppAutoScroll,
   onRunShellCommand,
@@ -526,7 +536,10 @@ export const MessageBubble = memo(function MessageBubble({
   const showLeadingAssistantChrome =
     !fragmentRole || fragmentRole === "start" || fragmentRole === "single";
   const showMessageActions =
-    !fragmentRole || fragmentRole === "end" || fragmentRole === "single";
+    !isStreaming &&
+    (!fragmentRole || fragmentRole === "end" || fragmentRole === "single");
+  const messageActionsArePersistentlyVisible =
+    actionsAlwaysVisible || isCopyConfirmed;
   const outerSpacingClassName =
     fragmentRole === "start"
       ? "pt-1 pb-0"
@@ -549,7 +562,10 @@ export const MessageBubble = memo(function MessageBubble({
   const timestamp = (
     <span
       data-role="message-timestamp"
-      className="shrink-0 whitespace-nowrap px-1 text-[13px] leading-relaxed text-muted-foreground"
+      className={cn(
+        "shrink-0 whitespace-nowrap text-[13px] leading-relaxed text-muted-foreground",
+        isUser ? "pl-1 pr-2" : "pl-2 pr-1",
+      )}
     >
       {formatDate(created, {
         hour: "2-digit",
@@ -609,7 +625,7 @@ export const MessageBubble = memo(function MessageBubble({
         }
         className={cn(
           "group relative min-w-0 flex flex-col gap-1",
-          showMessageActions && "pb-8",
+          showMessageActions && "pb-9",
           isUser
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
             : "w-full items-start",
@@ -735,10 +751,11 @@ export const MessageBubble = memo(function MessageBubble({
             className={cn(
               "absolute bottom-0 transition-opacity duration-150 ease-out",
               "opacity-0 pointer-events-none",
-              "group-hover:animate-in group-hover:slide-in-from-top-2 group-hover:opacity-100 group-hover:pointer-events-auto",
-              "group-focus-within:animate-in group-focus-within:slide-in-from-top-2 group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
-              isCopyConfirmed && "opacity-100 pointer-events-auto",
-              isUser ? "right-0" : "-left-3",
+              !messageActionsArePersistentlyVisible &&
+                "group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+              messageActionsArePersistentlyVisible &&
+                "opacity-100 pointer-events-auto",
+              isUser ? "right-0" : "-left-1.5",
             )}
           >
             <MessageBubbleActions
@@ -750,6 +767,16 @@ export const MessageBubble = memo(function MessageBubble({
               onCopy={() => copyToClipboard(actionTextContent)}
               onRetryMessage={onRetryMessage}
               onEditMessage={onEditMessage}
+              onJumpToResponseStart={
+                !isUser && !isStreaming ? onJumpToResponseStart : undefined
+              }
+              showJumpToResponseStartHint={
+                !isUser && !isStreaming ? showJumpToResponseStartHint : false
+              }
+              onJumpToResponseStartHintClose={onJumpToResponseStartHintClose}
+              onJumpToResponseStartHintDismiss={
+                onJumpToResponseStartHintDismiss
+              }
             />
           </div>
         ) : null}
