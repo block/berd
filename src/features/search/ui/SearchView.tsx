@@ -58,6 +58,8 @@ const DEBOUNCE_MS = 100;
 
 const searchViewStyle = {
   "--search-results-top": "clamp(260px, 39vh, 374px)",
+  "--search-heading-raised-top":
+    "clamp(32px, calc(50% - 264px), calc(var(--search-results-top) - 152px))",
   "--search-results-height":
     "min(512px, max(220px, calc(100% - var(--search-results-top) - 132px)))",
 } as CSSProperties;
