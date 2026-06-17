@@ -1130,8 +1130,8 @@ function RealRendererBridgeApp() {
           countProtectedRows(currentState),
         blankViewportPixels: measureBlankViewportPixels(),
         timeToFirstVisibleTailMs:
-          currentMetrics.timeToFirstVisibleTailMs ||
           productionDiagnostics?.timeToFirstVisibleTailMs ||
+          currentMetrics.timeToFirstVisibleTailMs ||
           0,
         restoreReplayDrainMs: Math.max(
           currentMetrics.maxOperationDurationMs,
