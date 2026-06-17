@@ -3,6 +3,7 @@ pub(crate) mod builderbot;
 pub mod bundled_agents;
 pub mod bundled_skills;
 pub(crate) mod diagnostic_log;
+pub(crate) mod dir_env;
 pub mod distro_bundle;
 pub(crate) mod goose_config;
 pub(crate) mod goosectl_discovery;

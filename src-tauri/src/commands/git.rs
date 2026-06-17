@@ -1,9 +1,13 @@
 use serde::Serialize;
+use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 use std::time::Duration;
 use tokio::process::Command as TokioCommand;
 use tokio::time::timeout;
+
+use crate::services::dir_env;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +41,29 @@ pub(crate) const GIT_READ_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 pub(crate) const GIT_STATUS_COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 pub(crate) const GIT_MUTATING_COMMAND_TIMEOUT: Duration = Duration::from_secs(300);
 const GIT_STATE_OPERATION_TIMEOUT: Duration = Duration::from_secs(90);
+
+fn dir_env_capture_timeout(command_timeout: Duration) -> Duration {
+    command_timeout
+        .checked_add(command_timeout / 2)
+        .unwrap_or(command_timeout)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnvSource {
+    /// Try the inherited environment first and retry with captured env only for
+    /// failures that plausibly depend on directory-scoped shell activation.
+    Smart,
+    /// Inherited process env with inherited `GIT_*` variables stripped.
+    Lite,
+    /// Per-directory interactive-login-shell env; falls back to Lite on
+    /// capture failure.
+    Captured,
+}
+
+enum GitRunError {
+    TimedOut,
+    Spawn(io::Error),
+}
 
 #[tauri::command]
 pub async fn get_git_state(path: String) -> Result<GitState, String> {
@@ -287,20 +314,203 @@ async fn run_git_output_async(
     args: &[&str],
     command_timeout: Duration,
 ) -> Result<Output, String> {
+    run_git_output_with_env_source_async(path, args, command_timeout, env_source_for_git_args(args))
+        .await
+}
+
+async fn run_git_output_with_env_source_async(
+    path: &Path,
+    args: &[&str],
+    command_timeout: Duration,
+    env_source: EnvSource,
+) -> Result<Output, String> {
     let rendered_args = args.join(" ");
+    match env_source {
+        EnvSource::Smart => {
+            warm_dir_env_async(path, command_timeout);
+            match run_git_once_async(path, args, command_timeout, EnvSource::Lite).await {
+                Ok(output)
+                    if output.status.success() || !should_retry_with_captured_output(&output) =>
+                {
+                    Ok(output)
+                }
+                Ok(_) => {
+                    log::info!(
+                        "Retrying git {} with captured env after lite-env failure in {}",
+                        rendered_args,
+                        path.display()
+                    );
+                    run_git_once_async(path, args, command_timeout, EnvSource::Captured)
+                        .await
+                        .map_err(|error| {
+                            format_git_run_error(error, &rendered_args, command_timeout)
+                        })
+                }
+                Err(error) if should_retry_with_captured_error(&error) => {
+                    log::info!(
+                        "Retrying git {} with captured env after lite-env spawn failure in {}",
+                        rendered_args,
+                        path.display()
+                    );
+                    run_git_once_async(path, args, command_timeout, EnvSource::Captured)
+                        .await
+                        .map_err(|error| {
+                            format_git_run_error(error, &rendered_args, command_timeout)
+                        })
+                }
+                Err(error) => Err(format_git_run_error(error, &rendered_args, command_timeout)),
+            }
+        }
+        EnvSource::Lite | EnvSource::Captured => {
+            run_git_once_async(path, args, command_timeout, env_source)
+                .await
+                .map_err(|error| format_git_run_error(error, &rendered_args, command_timeout))
+        }
+    }
+}
+
+async fn run_git_once_async(
+    path: &Path,
+    args: &[&str],
+    command_timeout: Duration,
+    env_source: EnvSource,
+) -> Result<Output, GitRunError> {
     let mut command = TokioCommand::new("git");
     command.args(args).current_dir(path).kill_on_drop(true);
 
+    apply_git_environment(
+        &mut command,
+        path,
+        env_source,
+        dir_env_capture_timeout(command_timeout),
+    )
+    .await;
+
     timeout(command_timeout, command.output())
         .await
-        .map_err(|_| {
-            format!(
-                "git {} timed out after {} seconds",
-                rendered_args,
-                command_timeout.as_secs()
-            )
-        })?
-        .map_err(|error| format!("Failed to run git: {}", error))
+        .map_err(|_| GitRunError::TimedOut)?
+        .map_err(GitRunError::Spawn)
+}
+
+fn env_source_for_git_args(args: &[&str]) -> EnvSource {
+    match args {
+        ["switch", ..]
+        | ["stash", ..]
+        | ["init", ..]
+        | ["fetch", ..]
+        | ["pull", ..]
+        | ["worktree", "add", ..] => EnvSource::Captured,
+        _ => EnvSource::Smart,
+    }
+}
+
+#[cfg(not(test))]
+fn warm_dir_env_async(path: &Path, command_timeout: Duration) {
+    let path = path.to_path_buf();
+    let capture_timeout = dir_env_capture_timeout(command_timeout);
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        handle.spawn(async move {
+            let _ = dir_env::capture_dir_env(&path, capture_timeout).await;
+        });
+    }
+}
+
+#[cfg(test)]
+fn warm_dir_env_async(_path: &Path, _command_timeout: Duration) {}
+
+fn should_retry_with_captured_error(error: &GitRunError) -> bool {
+    matches!(error, GitRunError::Spawn(error) if error.kind() == io::ErrorKind::NotFound)
+}
+
+fn format_git_run_error(
+    error: GitRunError,
+    rendered_args: &str,
+    command_timeout: Duration,
+) -> String {
+    match error {
+        GitRunError::TimedOut => format!(
+            "git {} timed out after {} seconds",
+            rendered_args,
+            command_timeout.as_secs()
+        ),
+        GitRunError::Spawn(error) => format!("Failed to run git: {}", error),
+    }
+}
+
+async fn apply_git_environment(
+    command: &mut TokioCommand,
+    path: &Path,
+    env_source: EnvSource,
+    capture_timeout: Duration,
+) {
+    match env_source {
+        EnvSource::Smart | EnvSource::Lite => apply_lite_git_env(command),
+        EnvSource::Captured => {
+            if let Some(env) = dir_env::capture_dir_env(path, capture_timeout).await {
+                apply_captured_git_env(command, &env);
+            } else {
+                apply_lite_git_env(command);
+            }
+        }
+    }
+
+    force_non_interactive(command);
+    pin_c_locale(command);
+    detach_from_ctty(command);
+}
+
+fn apply_captured_git_env(command: &mut TokioCommand, env: &HashMap<String, String>) {
+    command.env_clear();
+    for (key, value) in env {
+        command.env(key, value);
+    }
+}
+
+fn apply_lite_git_env(command: &mut TokioCommand) {
+    strip_inherited_git_env(command);
+}
+
+fn strip_inherited_git_env(command: &mut TokioCommand) {
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+}
+
+fn force_non_interactive(command: &mut TokioCommand) {
+    command.env("GIT_TERMINAL_PROMPT", "0");
+    if !has_env(command, "GIT_SSH_COMMAND") {
+        command.env(
+            "GIT_SSH_COMMAND",
+            "ssh -o BatchMode=yes -o ConnectTimeout=10",
+        );
+    }
+}
+
+fn has_env(command: &TokioCommand, key: &str) -> bool {
+    command
+        .as_std()
+        .get_envs()
+        .any(|(env_key, value)| value.is_some() && env_key == key)
+}
+
+fn pin_c_locale(command: &mut TokioCommand) {
+    command.env("LC_ALL", "C");
+    command.env("LANG", "C");
+}
+
+fn detach_from_ctty(command: &mut TokioCommand) {
+    #[cfg(unix)]
+    unsafe {
+        // SAFETY: `setsid()` is async-signal-safe.
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    #[cfg(not(unix))]
+    let _ = command;
 }
 
 pub(crate) async fn run_git_success_async(
@@ -311,14 +521,50 @@ pub(crate) async fn run_git_success_async(
     let output = run_git_output_async(path, args, command_timeout).await?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let message = if !stderr.is_empty() { stderr } else { stdout };
+        let message = output_failure_message(&output);
         let rendered_args = args.join(" ");
         return Err(format!("git {} failed: {}", rendered_args, message));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn should_retry_with_captured_output(output: &Output) -> bool {
+    if output.status.success() {
+        return false;
+    }
+
+    let message = output_failure_message(output);
+    !is_not_git_repo_error(&message) && !is_missing_ref_or_object_error(&message)
+}
+
+fn output_failure_message(output: &Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if !stderr.is_empty() {
+        return stderr;
+    }
+
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+fn is_not_git_repo_error(message: &str) -> bool {
+    message.contains("not a git repository")
+}
+
+fn is_missing_ref_or_object_error(message: &str) -> bool {
+    const REF_RESOLVE_FAILURE_PATTERNS: &[&str] = &[
+        "Needed a single revision",
+        "unknown revision or path",
+        "no upstream configured",
+        "Not a valid object name",
+        "Not a valid commit name",
+        "bad revision",
+        "bad object",
+    ];
+
+    REF_RESOLVE_FAILURE_PATTERNS
+        .iter()
+        .any(|pattern| message.contains(pattern))
 }
 
 pub(crate) fn trim_to_option(value: String) -> Option<String> {
@@ -533,4 +779,252 @@ async fn list_local_branches_async(path: &Path) -> Result<Vec<String>, String> {
         .map(|line| line.trim().to_string())
         .filter(|line| !line.is_empty())
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsString;
+
+    fn env_value(command: &TokioCommand, key: &str) -> Option<OsString> {
+        command.as_std().get_envs().find_map(|(env_key, value)| {
+            if env_key == key {
+                value.map(|value| value.to_os_string())
+            } else {
+                None
+            }
+        })
+    }
+
+    fn env_is_removed(command: &TokioCommand, key: &str) -> bool {
+        command
+            .as_std()
+            .get_envs()
+            .any(|(env_key, value)| env_key == key && value.is_none())
+    }
+
+    #[test]
+    fn dir_env_capture_timeout_is_one_and_a_half_times_command_timeout() {
+        assert_eq!(
+            dir_env_capture_timeout(Duration::from_secs(10)),
+            Duration::from_secs(15)
+        );
+    }
+
+    #[test]
+    fn captured_git_env_replaces_command_env_and_preserves_full_snapshot() {
+        let mut command = TokioCommand::new("git");
+        command.env("STALE_VAR", "remove-me");
+        let env = HashMap::from([
+            (
+                "PATH".to_string(),
+                "/repo/.hermit/bin:/repo/bin:/usr/bin".to_string(),
+            ),
+            ("CUSTOM_DIR_ENV".to_string(), "forwarded".to_string()),
+        ]);
+
+        apply_captured_git_env(&mut command, &env);
+
+        assert_eq!(
+            env_value(&command, "PATH"),
+            Some(OsString::from("/repo/.hermit/bin:/repo/bin:/usr/bin"))
+        );
+        assert_eq!(
+            env_value(&command, "CUSTOM_DIR_ENV"),
+            Some(OsString::from("forwarded"))
+        );
+        assert_eq!(env_value(&command, "STALE_VAR"), None);
+    }
+
+    #[test]
+    fn lite_git_env_strips_inherited_git_vars_without_overriding_path() {
+        let inherited_key = format!("GIT_GOOSE_TEST_{}", std::process::id());
+        std::env::set_var(&inherited_key, "unsafe");
+        struct EnvGuard(String);
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                std::env::remove_var(&self.0);
+            }
+        }
+        let _guard = EnvGuard(inherited_key.clone());
+
+        let mut command = TokioCommand::new("git");
+        apply_lite_git_env(&mut command);
+
+        assert_eq!(env_value(&command, "PATH"), None);
+        assert!(env_is_removed(&command, &inherited_key));
+    }
+
+    #[tokio::test]
+    async fn captured_env_failure_falls_back_to_lite_env() {
+        let inherited_key = format!("GIT_GOOSE_CAPTURE_FALLBACK_TEST_{}", std::process::id());
+        std::env::set_var(&inherited_key, "unsafe");
+        struct EnvGuard(String);
+        impl Drop for EnvGuard {
+            fn drop(&mut self) {
+                std::env::remove_var(&self.0);
+            }
+        }
+        let _guard = EnvGuard(inherited_key.clone());
+        let temp = tempfile::tempdir().expect("temp dir");
+        let missing_dir = temp.path().join("missing");
+
+        let mut command = TokioCommand::new("git");
+        apply_git_environment(
+            &mut command,
+            &missing_dir,
+            EnvSource::Captured,
+            Duration::from_millis(50),
+        )
+        .await;
+
+        assert!(env_is_removed(&command, &inherited_key));
+        assert_eq!(env_value(&command, "PATH"), None);
+        assert_eq!(
+            env_value(&command, "GIT_TERMINAL_PROMPT"),
+            Some(OsString::from("0"))
+        );
+    }
+
+    #[test]
+    fn env_source_policy_uses_captured_for_hook_sensitive_mutations() {
+        assert_eq!(
+            env_source_for_git_args(&["switch", "main"]),
+            EnvSource::Captured
+        );
+        assert_eq!(env_source_for_git_args(&["stash"]), EnvSource::Captured);
+        assert_eq!(env_source_for_git_args(&["init"]), EnvSource::Captured);
+        assert_eq!(
+            env_source_for_git_args(&["fetch", "--prune"]),
+            EnvSource::Captured
+        );
+        assert_eq!(
+            env_source_for_git_args(&["pull", "--ff-only"]),
+            EnvSource::Captured
+        );
+        assert_eq!(
+            env_source_for_git_args(&["worktree", "add", "../repo-worktrees/foo", "main"]),
+            EnvSource::Captured
+        );
+    }
+
+    #[test]
+    fn env_source_policy_uses_smart_for_read_and_status_probes() {
+        assert_eq!(
+            env_source_for_git_args(&["rev-parse", "--show-toplevel"]),
+            EnvSource::Smart
+        );
+        assert_eq!(
+            env_source_for_git_args(&["status", "--porcelain"]),
+            EnvSource::Smart
+        );
+        assert_eq!(
+            env_source_for_git_args(&["worktree", "list", "--porcelain"]),
+            EnvSource::Smart
+        );
+        assert_eq!(
+            env_source_for_git_args(&["for-each-ref", "refs/heads"]),
+            EnvSource::Smart
+        );
+    }
+
+    #[test]
+    fn retry_predicate_skips_missing_ref_object_and_revision_errors() {
+        assert!(is_missing_ref_or_object_error(
+            "fatal: Needed a single revision"
+        ));
+        assert!(is_missing_ref_or_object_error(
+            "fatal: ambiguous argument 'origin/foo': unknown revision or path not in the working tree."
+        ));
+        assert!(is_missing_ref_or_object_error(
+            "fatal: Not a valid object name origin/foo"
+        ));
+        assert!(is_missing_ref_or_object_error(
+            "fatal: no upstream configured for branch 'main'"
+        ));
+        assert!(is_missing_ref_or_object_error(
+            "fatal: Not a valid commit name origin/foo"
+        ));
+        assert!(is_missing_ref_or_object_error(
+            "fatal: bad revision 'origin/foo'"
+        ));
+        assert!(is_missing_ref_or_object_error("fatal: bad object HEAD"));
+    }
+
+    #[test]
+    fn retry_predicate_treats_spawn_not_found_as_env_sensitive() {
+        assert!(should_retry_with_captured_error(&GitRunError::Spawn(
+            io::Error::new(io::ErrorKind::NotFound, "git")
+        )));
+        assert!(!should_retry_with_captured_error(&GitRunError::Spawn(
+            io::Error::new(io::ErrorKind::PermissionDenied, "git")
+        )));
+        assert!(!should_retry_with_captured_error(&GitRunError::TimedOut));
+    }
+
+    #[cfg(unix)]
+    fn failed_output(stderr: &str) -> Output {
+        use std::os::unix::process::ExitStatusExt;
+
+        Output {
+            status: std::process::ExitStatus::from_raw(1),
+            stdout: Vec::new(),
+            stderr: stderr.as_bytes().to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn smart_retry_skips_env_independent_git_failures() {
+        assert!(!should_retry_with_captured_output(&failed_output(
+            "fatal: not a git repository (or any of the parent directories): .git"
+        )));
+        assert!(!should_retry_with_captured_output(&failed_output(
+            "fatal: bad revision 'origin/foo'"
+        )));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn smart_retry_retries_unrecognized_git_failures() {
+        assert!(should_retry_with_captured_output(&failed_output(
+            "git-lfs: command not found"
+        )));
+    }
+
+    #[test]
+    fn force_non_interactive_sets_git_prompt_ssh_and_locale_defaults() {
+        let mut command = TokioCommand::new("git");
+
+        force_non_interactive(&mut command);
+        pin_c_locale(&mut command);
+
+        assert_eq!(
+            env_value(&command, "GIT_TERMINAL_PROMPT"),
+            Some(OsString::from("0"))
+        );
+        assert_eq!(
+            env_value(&command, "GIT_SSH_COMMAND"),
+            Some(OsString::from("ssh -o BatchMode=yes -o ConnectTimeout=10"))
+        );
+        assert_eq!(env_value(&command, "LC_ALL"), Some(OsString::from("C")));
+        assert_eq!(env_value(&command, "LANG"), Some(OsString::from("C")));
+    }
+
+    #[test]
+    fn force_non_interactive_respects_captured_git_ssh_command() {
+        let mut command = TokioCommand::new("git");
+        let env = HashMap::from([(
+            "GIT_SSH_COMMAND".to_string(),
+            "/usr/local/bin/company-ssh".to_string(),
+        )]);
+
+        apply_captured_git_env(&mut command, &env);
+        force_non_interactive(&mut command);
+
+        assert_eq!(
+            env_value(&command, "GIT_SSH_COMMAND"),
+            Some(OsString::from("/usr/local/bin/company-ssh"))
+        );
+    }
 }
