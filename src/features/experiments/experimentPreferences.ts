@@ -293,11 +293,12 @@ function resolveExperimentState(
     typeof storedPreference?.enabled === "boolean"
       ? storedPreference.enabled
       : undefined;
-  const autoEnable = getExperimentAutoEnable();
+  const autoEnabled =
+    definition.defaultEnabled ?? getExperimentAutoEnable().enabled;
 
   return {
     id: definition.id,
-    enabled: explicitEnabled ?? autoEnable.enabled,
+    enabled: explicitEnabled ?? autoEnabled,
     enabledSource: explicitEnabled === undefined ? "auto" : "explicit",
     config,
   };

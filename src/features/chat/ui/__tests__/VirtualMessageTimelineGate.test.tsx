@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import {
@@ -63,6 +63,33 @@ describe("VirtualMessageTimelineGate", () => {
     localStorage.removeItem(EXPERIMENT_PREFERENCES_STORAGE_KEY);
     mocks.legacyTimelineSpy.mockClear();
     mocks.virtualTimelineSpy.mockClear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses the virtual timeline by default in production builds", () => {
+    vi.stubEnv("DEV", false);
+
+    render(
+      <VirtualMessageTimelineGate
+        sessionId="session-1"
+        messages={[message("user-1")]}
+      />,
+    );
+
+    expect(screen.getByTestId("virtual-message-timeline")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("legacy-message-timeline"),
+    ).not.toBeInTheDocument();
+    expect(mocks.virtualTimelineSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: "session-1",
+        messages: [expect.objectContaining({ id: "user-1" })],
+      }),
+    );
+    expect(mocks.legacyTimelineSpy).not.toHaveBeenCalled();
   });
 
   it("uses the legacy timeline while the virtual renderer experiment is explicitly disabled", () => {

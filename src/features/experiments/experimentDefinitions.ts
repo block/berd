@@ -46,6 +46,8 @@ export interface ExperimentDefinition {
   id: string;
   titleKey: string;
   descriptionKey: string;
+  /** Default state for users without an explicit per-experiment override. */
+  defaultEnabled?: boolean;
   config?: Record<string, ExperimentConfigControl>;
 }
 
@@ -105,6 +107,7 @@ export const EXPERIMENT_DEFINITIONS = [
     id: TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID,
     titleKey: "experiments.transcriptVirtualRenderer.title",
     descriptionKey: "experiments.transcriptVirtualRenderer.description",
+    defaultEnabled: true,
   },
   {
     id: GOOSECTL_EXPERIMENT_ID,

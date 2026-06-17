@@ -52,6 +52,15 @@ const testRegistry = [
   },
 ] as const satisfies readonly ExperimentDefinition[];
 
+const defaultEnabledRegistry = [
+  {
+    id: "default-enabled-experiment",
+    titleKey: "experiments.title",
+    descriptionKey: "experiments.description",
+    defaultEnabled: true,
+  },
+] as const satisfies readonly ExperimentDefinition[];
+
 function storedPreferences() {
   return JSON.parse(
     localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "",
@@ -128,6 +137,19 @@ describe("experimentPreferences", () => {
     });
   });
 
+  it("uses per-experiment default-enabled overrides in production builds", () => {
+    vi.stubEnv("DEV", false);
+
+    expect(
+      getExperiment("default-enabled-experiment", defaultEnabledRegistry),
+    ).toEqual({
+      id: "default-enabled-experiment",
+      enabled: true,
+      enabledSource: "auto",
+      config: {},
+    });
+  });
+
   it("uses stored auto-enable instead of the build default", () => {
     vi.stubEnv("DEV", false);
     localStorage.setItem(
@@ -165,6 +187,22 @@ describe("experimentPreferences", () => {
     setExperimentEnabled("test-experiment", false, testRegistry);
 
     expect(getExperiment("test-experiment", testRegistry)).toMatchObject({
+      enabled: false,
+      enabledSource: "explicit",
+    });
+  });
+
+  it("lets explicit enabled false win over a per-experiment default-enabled override", () => {
+    vi.stubEnv("DEV", false);
+    setExperimentEnabled(
+      "default-enabled-experiment",
+      false,
+      defaultEnabledRegistry,
+    );
+
+    expect(
+      getExperiment("default-enabled-experiment", defaultEnabledRegistry),
+    ).toMatchObject({
       enabled: false,
       enabledSource: "explicit",
     });
