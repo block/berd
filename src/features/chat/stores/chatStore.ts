@@ -176,6 +176,7 @@ interface ChatStoreActions {
   getSessionRuntime: (sessionId: string) => SessionChatRuntime;
   setStreamingMessageId: (sessionId: string, id: string | null) => void;
   setActiveRunId: (sessionId: string, runId: string | null) => void;
+  setRunCancellationPending: (sessionId: string, pending: boolean) => void;
   setPendingInterventionBoundary: (
     sessionId: string,
     boundary: SessionChatRuntime["pendingInterventionBoundary"],
@@ -400,6 +401,18 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           ...(state.sessionStateById[sessionId] ??
             createInitialSessionRuntime()),
           activeRunId,
+        },
+      },
+    })),
+
+  setRunCancellationPending: (sessionId, isRunCancellationPending) =>
+    set((state) => ({
+      sessionStateById: {
+        ...state.sessionStateById,
+        [sessionId]: {
+          ...(state.sessionStateById[sessionId] ??
+            createInitialSessionRuntime()),
+          isRunCancellationPending,
         },
       },
     })),

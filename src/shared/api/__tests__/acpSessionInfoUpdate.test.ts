@@ -92,6 +92,10 @@ describe("ACP session info updates", () => {
   });
 
   it("stores the active run id from Goose session metadata", async () => {
+    useChatStore
+      .getState()
+      .setRunCancellationPending("goose-session-active-run", true);
+
     await handleSessionNotification({
       sessionId: "goose-session-active-run",
       update: {
@@ -108,6 +112,10 @@ describe("ACP session info updates", () => {
       useChatStore.getState().getSessionRuntime("goose-session-active-run")
         .activeRunId,
     ).toBe("run-123");
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-active-run")
+        .isRunCancellationPending,
+    ).toBe(true);
 
     await handleSessionNotification({
       sessionId: "goose-session-active-run",
@@ -125,6 +133,10 @@ describe("ACP session info updates", () => {
       useChatStore.getState().getSessionRuntime("goose-session-active-run")
         .activeRunId,
     ).toBeNull();
+    expect(
+      useChatStore.getState().getSessionRuntime("goose-session-active-run")
+        .isRunCancellationPending,
+    ).toBe(false);
   });
 
   it("stores the active run id from alternate ACP meta field shape", async () => {

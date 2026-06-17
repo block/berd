@@ -193,6 +193,36 @@ describe("useChat compaction", () => {
     ).toBe("idle");
   });
 
+  it("skips compaction while a backend run is still active", async () => {
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let compactResult!: unknown;
+    await act(async () => {
+      compactResult = await result.current.compactConversation();
+    });
+
+    expect(compactResult).toBe("skipped");
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    expect(mockAcpLoadSession).not.toHaveBeenCalled();
+  });
+
+  it("skips compaction while run cancellation is pending", async () => {
+    useChatStore.getState().setRunCancellationPending("session-1", true);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    let compactResult!: unknown;
+    await act(async () => {
+      compactResult = await result.current.compactConversation();
+    });
+
+    expect(compactResult).toBe("skipped");
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    expect(mockAcpLoadSession).not.toHaveBeenCalled();
+  });
+
   it("ignores a second compact request while the first one is still in flight", async () => {
     const compactDeferred = createDeferredPromise();
     mockAcpSendMessage.mockImplementation(

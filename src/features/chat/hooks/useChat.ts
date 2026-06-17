@@ -154,8 +154,12 @@ export function useChat(
       const currentChatState = useChatStore
         .getState()
         .getSessionRuntime(sessionId).chatState;
+      const isRunCancellationPending = useChatStore
+        .getState()
+        .getSessionRuntime(sessionId).isRunCancellationPending;
       if (
         (!text.trim() && !hasAttachments && !hasAssistantPrompt) ||
+        isRunCancellationPending ||
         currentChatState === "streaming" ||
         currentChatState === "thinking" ||
         currentChatState === "compacting"
@@ -188,6 +192,7 @@ export function useChat(
           chips: sendOptions?.chips,
           providerId,
           systemPrompt,
+          signal: abort.signal,
           prepare: () =>
             ensurePreparedForPrompt(
               options?.ensurePrepared,
@@ -302,12 +307,25 @@ export function useChat(
 
   const stopGeneration = useCallback(() => {
     abortRef.current?.abort();
-    const runtime = useChatStore.getState().getSessionRuntime(sessionId);
+    const chatStore = useChatStore.getState();
+    const runtime = chatStore.getSessionRuntime(sessionId);
     const activeStreamingMessageId = runtime.streamingMessageId;
+    const shouldClearPendingAfterCancel =
+      runtime.chatState === "thinking" && runtime.activeRunId === null;
+    const clearPendingIfNoActiveRun = () => {
+      const latestStore = useChatStore.getState();
+      const latestRuntime = latestStore.getSessionRuntime(sessionId);
+      if (
+        latestRuntime.isRunCancellationPending &&
+        latestRuntime.activeRunId === null
+      ) {
+        latestStore.setRunCancellationPending(sessionId, false);
+      }
+    };
 
+    chatStore.setRunCancellationPending(sessionId, true);
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
-    useChatStore.getState().setActiveRunId(sessionId, null);
     setPendingAssistantProvider(sessionId, null);
     // Cancel the backend ACP session to stop orphaned streaming/tool events. We
     // send cancellation even while still "thinking" before ACP has created a
@@ -318,9 +336,22 @@ export function useChat(
         if (wasCancelled && activeStreamingMessageId) {
           markMessageStopped(sessionId, activeStreamingMessageId);
         }
+        if (!wasCancelled || shouldClearPendingAfterCancel) {
+          clearPendingIfNoActiveRun();
+        }
         return wasCancelled;
       })
-      .catch(() => false);
+      .catch((err) => {
+        const errorMessage = formatAcpErrorMessage(err);
+        const latestStore = useChatStore.getState();
+        latestStore.addMessage(
+          sessionId,
+          createSystemNotificationMessage(errorMessage, "error"),
+        );
+        latestStore.setError(sessionId, errorMessage);
+        clearPendingIfNoActiveRun();
+        return false;
+      });
 
     return cancellation;
   }, [
@@ -334,6 +365,7 @@ export function useChat(
     abortRef.current?.abort();
     clearMessages(sessionId);
     resetPersonaHandoff(sessionId);
+    useChatStore.getState().setRunCancellationPending(sessionId, false);
     setChatState(sessionId, "idle");
     setStreamingMessageId(sessionId, null);
     useChatStore.getState().setActiveRunId(sessionId, null);
@@ -356,10 +388,14 @@ export function useChat(
 
   const compactConversation = useCallback(
     async (overridePersona?: { id: string; name?: string }) => {
-      const currentChatState = useChatStore
+      const currentRuntime = useChatStore
         .getState()
-        .getSessionRuntime(sessionId).chatState;
-      if (currentChatState !== "idle") {
+        .getSessionRuntime(sessionId);
+      if (
+        currentRuntime.chatState !== "idle" ||
+        currentRuntime.activeRunId !== null ||
+        currentRuntime.isRunCancellationPending
+      ) {
         return "skipped" as CompactConversationResult;
       }
 
@@ -460,6 +496,7 @@ export function useChat(
     error,
     streamingMessageId,
     activeRunId: runtime.activeRunId,
+    isRunCancellationPending: runtime.isRunCancellationPending,
     sendMessage,
     steerMessage,
     stopGeneration,

@@ -250,7 +250,7 @@
       "description": "Queue follow-ups while Goose responds or steer the current run. Press Cmd+Enter to do the opposite for one message.",
       "label": "Follow-up behavior",
       "queue": "Queue",
-      "steer": "Steer"
+      "steer": "Steer (Goose harness only)"
     },
     "terminalFallback": {
       "change": "Change",

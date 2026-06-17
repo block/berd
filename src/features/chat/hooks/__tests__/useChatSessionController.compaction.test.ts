@@ -2,6 +2,8 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
+import type { ChatState } from "@/shared/types/chat";
+import type { Message } from "@/shared/types/messages";
 import { useChatStore } from "../../stores/chatStore";
 import { useChatSessionStore } from "../../stores/chatSessionStore";
 
@@ -12,6 +14,10 @@ const mockResolveSessionCwd = vi.fn();
 const mockHandleProviderChange = vi.fn();
 const mockHandleModelChange = vi.fn();
 let mockSelectedAgentId = "goose";
+let mockMessages: Message[] = [];
+let mockChatState: ChatState = "idle";
+let mockActiveRunId: string | null = null;
+let mockRunCancellationPending = false;
 const INITIAL_TOKEN_STATE = {
   inputTokens: 0,
   outputTokens: 0,
@@ -32,8 +38,8 @@ let capturedQueuedSend:
 
 vi.mock("../useChat", () => ({
   useChat: () => ({
-    messages: [],
-    chatState: "idle",
+    messages: mockMessages,
+    chatState: mockChatState,
     tokenState: mockTokenState,
     sendMessage: (...args: unknown[]) => mockSendMessage(...args),
     steerMessage: vi.fn(),
@@ -41,7 +47,8 @@ vi.mock("../useChat", () => ({
       mockCompactConversation(...args),
     stopStreaming: vi.fn(),
     streamingMessageId: null,
-    activeRunId: null,
+    activeRunId: mockActiveRunId,
+    isRunCancellationPending: mockRunCancellationPending,
   }),
 }));
 
@@ -111,6 +118,10 @@ describe("useChatSessionController compaction behavior", () => {
     mockTokenState = { ...INITIAL_TOKEN_STATE };
     capturedQueuedSend = null;
     mockSelectedAgentId = "goose";
+    mockMessages = [];
+    mockChatState = "idle";
+    mockActiveRunId = null;
+    mockRunCancellationPending = false;
 
     useAgentStore.setState({
       personas: [],
@@ -235,6 +246,62 @@ describe("useChatSessionController compaction behavior", () => {
       .getSessionRuntime("__home_pending__");
     expect(runtime.hasUsageSnapshot).toBe(false);
     expect(runtime.tokenState).toEqual(INITIAL_TOKEN_STATE);
+  });
+
+  it("enables manual compaction when idle and no backend run is blocking sends", () => {
+    mockMessages = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        created: 0,
+        content: [{ type: "text", text: "hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      },
+    ];
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.canCompactContext).toBe(true);
+  });
+
+  it("disables manual compaction while a backend run is still active", () => {
+    mockMessages = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        created: 0,
+        content: [{ type: "text", text: "hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      },
+    ];
+    mockActiveRunId = "run-1";
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.canCompactContext).toBe(false);
+  });
+
+  it("disables manual compaction while stop cancellation is pending", () => {
+    mockMessages = [
+      {
+        id: "assistant-1",
+        role: "assistant",
+        created: 0,
+        content: [{ type: "text", text: "hello" }],
+        metadata: { userVisible: true, agentVisible: true },
+      },
+    ];
+    mockRunCancellationPending = true;
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.canCompactContext).toBe(false);
   });
 
   it("auto-compacts goose sessions before sending when the threshold is exceeded", async () => {

@@ -53,11 +53,20 @@ export interface SendCoreOptions {
    * through the shared error path.
    */
   prepare?: () => Promise<void>;
+  signal?: AbortSignal;
   /**
    * Fires synchronously after the user message and title patch are committed
    * to the stores, before any awaits.
    */
   onUserMessageCommitted?: () => void;
+}
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) {
+    return;
+  }
+
+  throw new DOMException("The operation was aborted.", "AbortError");
 }
 
 /**
@@ -88,6 +97,7 @@ export async function dispatchPrompt(
     persona,
     prepare,
     providerId,
+    signal,
     systemPrompt,
   } = opts;
   const images = buildAcpImages(attachments);
@@ -155,9 +165,12 @@ export async function dispatchPrompt(
   onUserMessageCommitted?.();
 
   try {
+    throwIfAborted(signal);
     await prepare?.();
+    throwIfAborted(signal);
 
     setChatState(sessionId, "streaming");
+    throwIfAborted(signal);
     const promptWithPaths = appendAttachmentPaths(
       background ? text : text.trim(),
       attachments,

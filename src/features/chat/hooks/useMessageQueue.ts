@@ -51,6 +51,7 @@ export function useMessageQueue(
     sendOptions?: ChatSendOptions,
   ) => boolean | Promise<boolean>,
   readOnly = false,
+  isSendBlocked = false,
 ) {
   const queuedMessage = useChatStore(
     (s) => s.queuedMessageBySession[sessionId] ?? null,
@@ -97,6 +98,7 @@ export function useMessageQueue(
     if (
       chatState !== "idle" ||
       readOnly ||
+      isSendBlocked ||
       !queuedMessage ||
       !queuedMessageKey ||
       hasReachedRetryLimit ||
@@ -157,6 +159,7 @@ export function useMessageQueue(
     }
   }, [
     chatState,
+    isSendBlocked,
     queuedMessage,
     queuedMessageKey,
     readOnly,

@@ -72,6 +72,27 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeDefined();
   });
 
+  it("waits to auto-send while sending is blocked", () => {
+    const sendMessage = vi.fn();
+    useChatStore.getState().enqueueMessage("s1", { text: "queued" });
+
+    const { rerender } = renderHook(
+      ({ isSendBlocked }: { isSendBlocked: boolean }) =>
+        useMessageQueue("s1", "idle", sendMessage, false, isSendBlocked),
+      { initialProps: { isSendBlocked: true } },
+    );
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+      text: "queued",
+    });
+
+    rerender({ isSendBlocked: false });
+
+    expect(sendMessage).toHaveBeenCalledWith("queued", undefined, undefined);
+    expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
+  });
+
   it("dismiss clears the queued message without sending", () => {
     const sendMessage = vi.fn();
     useChatStore.getState().enqueueMessage("s1", { text: "queued" });

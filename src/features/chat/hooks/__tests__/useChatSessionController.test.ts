@@ -26,8 +26,10 @@ const mockDeletePersonaSource = vi.fn();
 const mockUseChatRuntime = {
   chatState: "idle",
   activeRunId: null as string | null,
+  isRunCancellationPending: false,
 };
 const mockPickerState = {
+  selectedAgentId: "goose",
   pickerAgents: [{ id: "goose", label: "Goose" }],
   availableModels: [] as Array<{
     id: string;
@@ -112,6 +114,7 @@ vi.mock("../useChat", () => ({
       stopStreaming: vi.fn(),
       streamingMessageId: null,
       activeRunId: mockUseChatRuntime.activeRunId,
+      isRunCancellationPending: mockUseChatRuntime.isRunCancellationPending,
     };
   },
 }));
@@ -132,6 +135,7 @@ vi.mock("@/features/agents/hooks/useProviderSelection", () => ({
   useProviderSelection: () => ({
     providers: [
       { id: "goose", label: "Goose" },
+      { id: "codex-acp", label: "Codex" },
       { id: "openai", label: "OpenAI" },
       { id: "anthropic", label: "Anthropic" },
     ],
@@ -159,7 +163,7 @@ vi.mock("../useAgentModelPickerState", () => ({
       providerId?: string;
     }) => void;
   }) => ({
-    selectedAgentId: "goose",
+    selectedAgentId: mockPickerState.selectedAgentId,
     pickerAgents: mockPickerState.pickerAgents,
     availableModels: mockPickerState.availableModels,
     modelsLoading: mockPickerState.modelsLoading,
@@ -185,7 +189,13 @@ import { useChatSessionController } from "../useChatSessionController";
 function latestMessageQueueArgs() {
   const call = mockUseMessageQueue.mock.calls.at(-1);
   expect(call).toBeDefined();
-  return call as [string, string, unknown];
+  return call as [
+    string,
+    string,
+    unknown,
+    boolean | undefined,
+    boolean | undefined,
+  ];
 }
 
 function patchReasoningEffort(sessionId: string, currentValue = "off") {
@@ -247,6 +257,16 @@ describe("useChatSessionController", () => {
         setupMethod: "single_api_key",
         group: "default",
       },
+      {
+        id: "codex-acp",
+        displayName: "Codex",
+        category: "agent",
+        description: "OpenAI's coding agent",
+        setupMethod: "cli_auth",
+        binaryName: "codex-acp",
+        group: "default",
+        aliases: ["codex-acp", "codex_cli", "codex-cli", "codex"],
+      },
     ]);
     mockAcpPrepareSession.mockResolvedValue(undefined);
     mockAcpSetModel.mockResolvedValue(undefined);
@@ -262,12 +282,14 @@ describe("useChatSessionController", () => {
       path: "/Users/x/.agents/agents/draft-from-chat.md",
       slug: "draft-from-chat",
     });
+    mockPickerState.selectedAgentId = "goose";
     mockPickerState.pickerAgents = [{ id: "goose", label: "Goose" }];
     mockPickerState.availableModels = [];
     mockPickerState.modelsLoading = false;
     mockPickerState.modelStatusMessage = null;
     mockUseChatRuntime.chatState = "idle";
     mockUseChatRuntime.activeRunId = null;
+    mockUseChatRuntime.isRunCancellationPending = false;
 
     useAgentStore.setState({
       personas: [],
@@ -446,6 +468,55 @@ describe("useChatSessionController", () => {
     expect(queueChatState).toBe("idle");
   });
 
+  it("blocks queued sends while a stopped backend run is still active", () => {
+    mockUseChatRuntime.chatState = "idle";
+    mockUseChatRuntime.activeRunId = "run-1";
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const [, , , , isSendBlocked] = latestMessageQueueArgs();
+    expect(isSendBlocked).toBe(true);
+  });
+
+  it("blocks queued sends while stop cancellation is pending without run metadata", () => {
+    mockUseChatRuntime.chatState = "idle";
+    mockUseChatRuntime.activeRunId = null;
+    mockUseChatRuntime.isRunCancellationPending = true;
+
+    renderHook(() => useChatSessionController({ sessionId: "session-1" }));
+
+    const [, , , , isSendBlocked] = latestMessageQueueArgs();
+    expect(isSendBlocked).toBe(true);
+  });
+
+  it("queues sends while stop cancellation is pending without run metadata", () => {
+    mockUseChatRuntime.chatState = "idle";
+    mockUseChatRuntime.activeRunId = null;
+    mockUseChatRuntime.isRunCancellationPending = true;
+    const enqueue = vi.fn();
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: null,
+      enqueue,
+      dismiss: vi.fn(),
+    }));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend("next poem");
+    });
+
+    expect(enqueue).toHaveBeenCalledWith(
+      "next poem",
+      undefined,
+      undefined,
+      undefined,
+    );
+    expect(mockUseChatSendMessage).not.toHaveBeenCalled();
+  });
+
   it("keeps a queued message when steer is not accepted", async () => {
     const dismiss = vi.fn();
     mockUseChatSteerMessage.mockResolvedValue(false);
@@ -513,6 +584,42 @@ describe("useChatSessionController", () => {
     );
 
     expect(result.current.canSteerQueuedMessage).toBe(true);
+  });
+
+  it("does not offer steering for external agent harnesses", async () => {
+    mockUseChatRuntime.chatState = "streaming";
+    mockPickerState.selectedAgentId = "codex-acp";
+    useAgentStore.setState({ selectedProvider: "codex-acp" });
+    useChatSessionStore.getState().patchSession("session-1", {
+      providerId: "codex-acp",
+      modelId: "gpt-5.4",
+      modelName: "GPT-5.4",
+    });
+    const dismiss = vi.fn();
+    mockUseMessageQueue.mockImplementation(() => ({
+      queuedMessage: { text: "a little shorter" },
+      enqueue: vi.fn(),
+      dismiss,
+    }));
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.canSteerMessage).toBe(false);
+    expect(result.current.canSteerQueuedMessage).toBe(false);
+
+    let draftAccepted: boolean | undefined;
+    let queuedAccepted: boolean | undefined;
+    await act(async () => {
+      draftAccepted = await result.current.steerDraftMessage("make it shorter");
+      queuedAccepted = await result.current.steerQueuedMessage();
+    });
+
+    expect(draftAccepted).toBe(false);
+    expect(queuedAccepted).toBe(false);
+    expect(mockUseChatSteerMessage).not.toHaveBeenCalled();
+    expect(dismiss).not.toHaveBeenCalled();
   });
 
   it("handleCreatePersona calls the AppShell-provided callback", () => {

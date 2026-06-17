@@ -250,7 +250,7 @@
       "description": "Pon seguimientos en cola mientras Goose responde o guía la ejecucion actual. Pulsa Cmd+Enter para hacer lo opuesto en un mensaje.",
       "label": "Comportamiento de seguimiento",
       "queue": "Cola",
-      "steer": "Guiar"
+      "steer": "Guiar (solo arnés de Goose)"
     },
     "terminalFallback": {
       "change": "Cambiar",

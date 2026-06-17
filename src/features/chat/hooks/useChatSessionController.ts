@@ -67,6 +67,7 @@ interface UseChatSessionControllerOptions {
 const PENDING_HOME_SESSION_ID = "__home_pending__";
 const EMPTY_SKILL_DRAFTS: ChatSkillDraft[] = [];
 const AGENT_BUILDER_MENTION_INVOCATION = /^@agent-builder\s*$/i;
+const STEERING_SUPPORTED_AGENT_ID = "goose";
 
 function isAgentBuilderMentionOnlyDraft(text: string): boolean {
   return AGENT_BUILDER_MENTION_INVOCATION.test(text.trim());
@@ -683,6 +684,7 @@ export function useChatSessionController({
       stateSessionId,
     ],
   );
+  const supportsSteering = selectedAgentId === STEERING_SUPPORTED_AGENT_ID;
 
   const prevWorkspaceRef = useRef(activeWorkspace);
   useEffect(() => {
@@ -990,6 +992,8 @@ export function useChatSessionController({
     compactConversation,
     stopStreaming,
     streamingMessageId,
+    activeRunId,
+    isRunCancellationPending,
   } = useChat(
     stateSessionId,
     selectedProvider,
@@ -1006,6 +1010,7 @@ export function useChatSessionController({
   const supportsCompactionControls =
     supportsContextCompactionControls(selectedAgentId);
   const isCompactingContext = chatState === "compacting";
+  const isQueuedSendBlocked = activeRunId !== null || isRunCancellationPending;
   const resolveAutoCompactAgentId = useCallback(
     (overridePersona?: { id: string; name?: string }): string | null => {
       if (!overridePersona?.id) {
@@ -1088,6 +1093,10 @@ export function useChatSessionController({
       const shouldPassSendOptions =
         Boolean(sendOptions) || nextSendOptions.assistantPrompt != null;
 
+      if (isQueuedSendBlocked) {
+        return false;
+      }
+
       if (!canAutoCompactBeforeSend(overridePersona)) {
         if (shouldPassSendOptions) {
           void sendMessage(text, overridePersona, attachments, nextSendOptions);
@@ -1115,6 +1124,7 @@ export function useChatSessionController({
       artifactFolderInstructions,
       canAutoCompactBeforeSend,
       compactConversation,
+      isQueuedSendBlocked,
       sendMessage,
       session,
     ],
@@ -1138,6 +1148,7 @@ export function useChatSessionController({
     queueChatState,
     sendWithAutoCompact,
     readOnly,
+    isQueuedSendBlocked,
   );
   const pendingBuilderActivationRef = useRef<
     Record<string, Promise<ChatSession | null>>
@@ -1266,7 +1277,10 @@ export function useChatSessionController({
             return false;
           }
 
-          if (chatState !== "idle" && !queue.queuedMessage) {
+          if (
+            (chatState !== "idle" || isQueuedSendBlocked) &&
+            !queue.queuedMessage
+          ) {
             queue.enqueue(text, personaId, attachments, sendOptions);
             return true;
           }
@@ -1281,7 +1295,10 @@ export function useChatSessionController({
         })();
       }
 
-      if (chatState !== "idle" && !queue.queuedMessage) {
+      if (
+        (chatState !== "idle" || isQueuedSendBlocked) &&
+        !queue.queuedMessage
+      ) {
         queue.enqueue(text, personaId, attachments, sendOptions);
         return true;
       }
@@ -1292,6 +1309,7 @@ export function useChatSessionController({
       chatState,
       ensureCurrentSessionIsAgentBuilder,
       handlePersonaChange,
+      isQueuedSendBlocked,
       queue,
       readOnly,
       session?.intent,
@@ -1303,7 +1321,7 @@ export function useChatSessionController({
 
   const steerQueuedMessage = useCallback(async () => {
     const queuedMessage = queue.queuedMessage;
-    if (!queuedMessage || !sessionId || readOnly) {
+    if (!supportsSteering || !queuedMessage || !sessionId || readOnly) {
       return false;
     }
 
@@ -1316,7 +1334,7 @@ export function useChatSessionController({
       queue.dismiss();
     }
     return accepted;
-  }, [queue, readOnly, sessionId, steerMessage]);
+  }, [queue, readOnly, sessionId, steerMessage, supportsSteering]);
 
   const steerDraftMessage = useCallback(
     async (
@@ -1328,6 +1346,7 @@ export function useChatSessionController({
       if (
         !sessionId ||
         readOnly ||
+        !supportsSteering ||
         (chatState !== "thinking" && chatState !== "streaming")
       ) {
         return false;
@@ -1335,7 +1354,7 @@ export function useChatSessionController({
 
       return steerMessage(text, attachments, sendOptions);
     },
-    [chatState, readOnly, sessionId, steerMessage],
+    [chatState, readOnly, sessionId, steerMessage, supportsSteering],
   );
 
   useEffect(() => {
@@ -1653,7 +1672,10 @@ export function useChatSessionController({
     streamingMessageId,
     compactConversation,
     canCompactContext:
-      supportsCompactionControls && messages.length > 0 && chatState === "idle",
+      supportsCompactionControls &&
+      messages.length > 0 &&
+      chatState === "idle" &&
+      !isQueuedSendBlocked,
     isCompactingContext,
     supportsAutoCompactContext,
     supportsCompactionControls,
@@ -1666,11 +1688,13 @@ export function useChatSessionController({
     canSteerMessage: Boolean(
       sessionId &&
         !readOnly &&
+        supportsSteering &&
         (chatState === "thinking" || chatState === "streaming"),
     ),
     canSteerQueuedMessage: Boolean(
       sessionId &&
         !readOnly &&
+        supportsSteering &&
         (chatState === "thinking" || chatState === "streaming") &&
         queue.queuedMessage &&
         (queue.queuedMessage.text.trim() ||

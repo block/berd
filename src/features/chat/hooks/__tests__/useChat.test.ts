@@ -150,6 +150,130 @@ describe("useChat", () => {
     expect(message.metadata?.completionStatus).toBe("stopped");
   });
 
+  it("keeps the active run id after the cancel request returns", async () => {
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    act(() => {
+      useChatStore.getState().setActiveRunId("session-1", "run-1");
+      useChatStore.getState().setChatState("session-1", "streaming");
+    });
+
+    let cancellation!: Promise<boolean>;
+    act(() => {
+      cancellation = result.current.stopGeneration();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("idle");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("run-1");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+
+    await act(async () => {
+      cancelDeferred.resolve(true);
+      await cancellation;
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").activeRunId,
+    ).toBe("run-1");
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+  });
+
+  it("keeps cancellation pending after stopping a streaming run without active run metadata", async () => {
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() => useChat("session-1"));
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "streaming");
+    });
+
+    let cancellation!: Promise<boolean>;
+    act(() => {
+      cancellation = result.current.stopGeneration();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+
+    await act(async () => {
+      cancelDeferred.resolve(true);
+      await cancellation;
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+  });
+
+  it("clears cancellation pending after stopping before the ACP prompt starts", async () => {
+    const prepareDeferred = createDeferredPromise<boolean | undefined>();
+    const cancelDeferred = createDeferredPromise<boolean>();
+    mockAcpCancelSession.mockReturnValue(cancelDeferred.promise);
+
+    const { result } = renderHook(() =>
+      useChat("session-1", undefined, undefined, undefined, {
+        ensurePrepared: () => prepareDeferred.promise,
+      }),
+    );
+
+    let sendPromise!: Promise<void>;
+    await act(async () => {
+      sendPromise = result.current.sendMessage("wait for it");
+      await Promise.resolve();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("thinking");
+
+    let cancellation!: Promise<boolean>;
+    act(() => {
+      cancellation = result.current.stopGeneration();
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(true);
+
+    await act(async () => {
+      cancelDeferred.resolve(true);
+      await cancellation;
+    });
+
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .isRunCancellationPending,
+    ).toBe(false);
+
+    await act(async () => {
+      prepareDeferred.resolve(undefined);
+      await sendPromise;
+    });
+
+    expect(mockAcpSendMessage).not.toHaveBeenCalled();
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1").chatState,
+    ).toBe("idle");
+  });
+
   it("steers the active run without changing chat state", async () => {
     useChatStore.getState().setActiveRunId("session-1", "run-1");
     const { result } = renderHook(() => useChat("session-1"));

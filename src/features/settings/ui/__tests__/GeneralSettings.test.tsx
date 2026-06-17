@@ -175,17 +175,18 @@ describe("GeneralSettings appearance section", () => {
       "true",
     );
 
-    await user.click(screen.getByRole("button", { name: "Steer" }));
+    await user.click(
+      screen.getByRole("button", { name: "Steer (Goose harness only)" }),
+    );
 
     await waitFor(() => {
       expect(localStorage.getItem(STREAMING_SHORTCUT_MODE_STORAGE_KEY)).toBe(
         "enter-steers",
       );
     });
-    expect(screen.getByRole("button", { name: "Steer" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(
+      screen.getByRole("button", { name: "Steer (Goose harness only)" }),
+    ).toHaveAttribute("aria-pressed", "true");
 
     await user.click(screen.getByRole("button", { name: "Queue" }));
 

@@ -27,14 +27,13 @@ export function handleSessionInfoUpdate(
       : {};
   const gooseMeta = isRecord(meta.goose) ? meta.goose : null;
   if (gooseMeta && "activeRunId" in gooseMeta) {
-    useChatStore
-      .getState()
-      .setActiveRunId(
-        sessionId,
-        typeof gooseMeta.activeRunId === "string"
-          ? gooseMeta.activeRunId
-          : null,
-      );
+    const activeRunId =
+      typeof gooseMeta.activeRunId === "string" ? gooseMeta.activeRunId : null;
+    const chatStore = useChatStore.getState();
+    chatStore.setActiveRunId(sessionId, activeRunId);
+    if (activeRunId === null) {
+      chatStore.setRunCancellationPending(sessionId, false);
+    }
   }
 
   const session = sessionStore.getSession(sessionId);
