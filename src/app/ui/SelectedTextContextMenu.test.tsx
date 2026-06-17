@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanup,
   fireEvent,
@@ -22,9 +22,21 @@ function createFragment(html: string): DocumentFragment {
   return template.content;
 }
 
+async function flushFocusScopeUnmount(): Promise<void> {
+  // Radix FocusScope dispatches its unmount autofocus event in setTimeout(0).
+  // Keep it inside this test's jsdom realm so dispatchEvent sees a jsdom Event.
+  if (vi.isFakeTimers()) {
+    await vi.advanceTimersByTimeAsync(0);
+    return;
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 describe("SelectedTextContextMenu helpers", () => {
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    await flushFocusScopeUnmount();
     window.getSelection()?.removeAllRanges();
     document.body.innerHTML = "";
   });
