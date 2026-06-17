@@ -6,7 +6,7 @@
 //! `wire.rs` walks the same contract to map ArgMatches back onto the wire,
 //! so the two sides cannot disagree about a flag's name or type.
 
-use clap::{Arg, ArgAction, Command};
+use clap::{builder::PossibleValue, builder::PossibleValuesParser, Arg, ArgAction, Command};
 
 use crate::contract::{Contract, Field, Noun, Verb};
 
@@ -23,7 +23,7 @@ goosectl talks to the running Goose desktop app and acts on what the user
 sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
-                                  clear-project, archive
+                                  send, clear-project, archive
   project   projects             create, list, get, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
@@ -43,6 +43,10 @@ Examples:
   goosectl info harnesses --json
   goosectl session create --prompt \"Summarize open code reviews\" \\
     --harness-id claude-acp
+
+  # Send a follow-up into an existing session without opening it
+  goosectl session send --session-id <session-id> \\
+    --prompt \"Check the latest CI failure\" --if-running queue
 
 Exit codes:
   0  success — the JSON result is on stdout
@@ -162,6 +166,10 @@ fn built_arg(field: &Field) -> Arg {
             };
         }
         arg = arg.value_parser(parser);
+    } else if let Some(values) = &field.values {
+        arg = arg.value_parser(PossibleValuesParser::new(
+            values.iter().cloned().map(PossibleValue::new),
+        ));
     }
     arg
 }

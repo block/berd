@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { getReplayCreated, getReplayMessageId } from "../acpReplayMetadata";
+import {
+  getReplayCreated,
+  getReplayMessageId,
+  getReplayUserMetadata,
+} from "../acpReplayMetadata";
 
 describe("getReplayMessageId", () => {
   it("returns messageId from top-level field", () => {
@@ -113,5 +117,23 @@ describe("getReplayCreated", () => {
       _meta: { goose: [{ created: 1_700_000_000 }] },
     };
     expect(getReplayCreated(source)).toBeUndefined();
+  });
+});
+
+describe("getReplayUserMetadata", () => {
+  it("restores known goosectl cross-session origin metadata", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: { goose: { origin: "goosectl_cross_session" } },
+      }),
+    ).toEqual({ origin: "goosectl_cross_session" });
+  });
+
+  it("ignores unknown origins", () => {
+    expect(
+      getReplayUserMetadata({
+        _meta: { goose: { origin: "some_future_origin" } },
+      }),
+    ).toBeUndefined();
   });
 });

@@ -9,6 +9,7 @@ export type ReplayAssistantMetadata = Pick<
   MessageMetadata,
   "personaId" | "personaName"
 >;
+export type ReplayUserMetadata = Pick<MessageMetadata, "origin">;
 
 export function getReplayMessageId(
   source: ReplayMetadataSource,
@@ -50,6 +51,19 @@ export function getReplayAssistantMetadata(
     ...(personaId ? { personaId } : {}),
     ...(personaName ? { personaName } : {}),
   };
+}
+
+export function getReplayUserMetadata(
+  source: ReplayMetadataSource,
+): ReplayUserMetadata | undefined {
+  const goose = getGooseReplayMeta(source);
+  if (!goose) {
+    return undefined;
+  }
+
+  return goose.origin === "goosectl_cross_session"
+    ? { origin: "goosectl_cross_session" }
+    : undefined;
 }
 
 function getGooseReplayMeta(

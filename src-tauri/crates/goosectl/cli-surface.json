@@ -3,12 +3,17 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, open, list, get, rename, move, clear project, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, clear project, archive",
       "verbs": {
         "create": {
           "action": "create",
           "about": "Create a new chat session and send a prompt in it (fire-and-forget)",
           "afterHelp": "Example:\n  goosectl session create --prompt \"Triage the failing nightly build\" \\\n    --harness-id claude-acp --json\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"harness_id\": \"...\",\n   \"send_status\": \"dispatched\"}\n  The session runs in the background; the user's view does not change. Check\n  progress later with `goosectl session get --session-id <session_id>`."
+        },
+        "send": {
+          "action": "send",
+          "about": "Send a prompt into an existing chat session",
+          "afterHelp": "Example:\n  goosectl session send --session-id <session-id> \\\n    --prompt \"Check the latest CI failure\" --if-running queue --json\n\nResult:\n  {\"session_id\": \"...\", \"send_status\": \"dispatched\"|\"steered\"|\"queued\"}\n  The user's current view does not change."
         },
         "open": {
           "action": "open",

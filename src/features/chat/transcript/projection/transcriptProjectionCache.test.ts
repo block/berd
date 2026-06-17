@@ -483,6 +483,23 @@ describe("transcript projection cache", () => {
     expect(second.heightRevision).toBe(first.heightRevision);
   });
 
+  it("includes user message origin in render and height revisions", () => {
+    const original = message("user-1", "user", "same", utc(2026, 6, 4, 10));
+    const withOrigin = {
+      ...original,
+      metadata: {
+        ...original.metadata,
+        origin: "goosectl_cross_session" as const,
+      },
+    };
+
+    const first = buildMessageRevisions(original);
+    const second = buildMessageRevisions(withOrigin);
+
+    expect(second.renderRevision).not.toBe(first.renderRevision);
+    expect(second.heightRevision).not.toBe(first.heightRevision);
+  });
+
   it("classifies active tool rows as estimate-only keepalive candidates", () => {
     const cache = createTranscriptProjectionCache();
     const toolRequest: ToolRequestContent = {

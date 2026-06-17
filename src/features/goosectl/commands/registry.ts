@@ -20,6 +20,7 @@ import { listSkillsCommand } from "./impl/listSkills";
 import { moveSessionCommand } from "./impl/moveSession";
 import { openSessionCommand } from "./impl/openSession";
 import { renameSessionCommand } from "./impl/renameSession";
+import { sendSessionCommand } from "./impl/sendSession";
 import { commandBridgeTimeoutMs } from "./timeouts";
 import { CommandError, type CommandContext, type ToolGroup } from "./types";
 
@@ -43,13 +44,14 @@ export const TOOL_GROUPS = {
   sessions: {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
-      "installed agent harness), open, list, get, rename, move, clear project, archive.",
+      "installed agent harness), send, open, list, get, rename, move, clear project, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, open, list, get, rename, move, clear project, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, archive",
       verbs: {
         create: "create",
+        send: "send",
         open: "open",
         list: "list",
         get: "get",
@@ -61,6 +63,7 @@ export const TOOL_GROUPS = {
     },
     actions: {
       create: createSessionCommand,
+      send: sendSessionCommand,
       open: openSessionCommand,
       list: listSessionsCommand,
       get: getSessionCommand,

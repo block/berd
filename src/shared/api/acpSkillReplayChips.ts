@@ -6,6 +6,7 @@ import {
 import type {
   ImageContent,
   MessageChip,
+  MessageMetadata,
   TextContent,
 } from "@/shared/types/messages";
 
@@ -48,6 +49,7 @@ export function handleReplayUserMessageChunk(
   messageId: string,
   content: TextContent | ImageContent,
   created?: number,
+  metadata?: Pick<MessageMetadata, "origin">,
 ): void {
   const buffer = ensureReplayBuffer(sessionId);
   const existing = getBufferedMessage(sessionId, messageId);
@@ -71,12 +73,19 @@ export function handleReplayUserMessageChunk(
       metadata: {
         userVisible: true,
         agentVisible: true,
+        ...metadata,
         ...(chips.length > 0 ? { chips } : {}),
       },
     });
   } else {
     if (created !== undefined) {
       existing.created = created;
+    }
+    if (metadata) {
+      existing.metadata = {
+        ...existing.metadata,
+        ...metadata,
+      };
     }
     existing.content.push(contentBlock);
     attachReplayChips(sessionId, messageId, existing, chips);

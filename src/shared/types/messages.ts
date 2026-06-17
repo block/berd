@@ -225,6 +225,7 @@ export interface MessageMetadata {
   userVisible?: boolean;
   agentVisible?: boolean;
   delivery?: "steer";
+  origin?: "goosectl_cross_session";
   attachments?: MessageAttachment[];
   chips?: MessageChip[];
   personaId?: string;

@@ -37,6 +37,8 @@ type FieldSpec = {
   /** Must be present on the wire — a zod .default() field is NOT required. */
   required: boolean;
   kind: "string" | "number" | "boolean";
+  /** Allowed string values for z.enum fields. */
+  values?: string[];
   /** Field documentation, from the zod .describe(); the CLI renders it as
    *  the flag's --help text. */
   description: string;
@@ -94,7 +96,7 @@ const API_COMMENT =
   "protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies " +
   "(goosectl and plugin crate tests pin them equal). Per action: " +
   "description, fields " +
-  "(flat wire model: name, required, kind, description, bounds), and schema " +
+  "(flat wire model: name, required, kind, values, description, bounds), and schema " +
   "(JSON Schema 2020-12 of the args object, minus the action discriminator). " +
   "Derived from the authoritative zod schemas in the colocated command " +
   "modules (src/features/goosectl/commands/impl/*.ts); the renderer " +
@@ -162,6 +164,16 @@ function describeField(
     if (current.minLength !== null) base.min = current.minLength;
     if (current.maxLength !== null) base.max = current.maxLength;
     return base;
+  }
+  if (current instanceof z.ZodEnum) {
+    const values = [...current.options];
+    if (!values.every((value): value is string => typeof value === "string")) {
+      throw new Error(
+        `${group}.${action}.${name}: numeric z.enum values are not supported; ` +
+          "use string enum values so goosectl can expose them as CLI possible values",
+      );
+    }
+    return { ...base, values };
   }
   if (current instanceof z.ZodNumber) {
     base.kind = "number";

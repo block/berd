@@ -83,8 +83,10 @@ the doc has the whys and the enforcement map):
 4. Help is hand-authored in the command module (summary, description,
    helpFooter, `.describe()` per field); `cargo test -p goosectl` fails on
    empty/TODO prose.
-5. Reversible, UI-visible verbs only — anything else reopens the auth
-   decision as a design review, not a PR.
+5. UI-visible verbs only; prefer reversible mutations, but one-way visible
+   product actions like creating a session or sending a prompt are allowed.
+   Delete, bulk, silent, or invisible work reopens the auth decision as a
+   design review, not a PR.
 6. Reviewers identify breaking wire reshapes and bump `protocolVersion` in
    both discovery.rs copies and the contract.ts mirror; tests pin only that
    the constants are equal.

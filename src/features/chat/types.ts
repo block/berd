@@ -1,7 +1,11 @@
 import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { Persona } from "@/shared/types/agents";
-import type { ChatAttachmentDraft, MessageChip } from "@/shared/types/messages";
+import type {
+  ChatAttachmentDraft,
+  MessageChip,
+  MessageMetadata,
+} from "@/shared/types/messages";
 import type { ChatSessionReasoningEffortConfig } from "./stores/chatSessionStore";
 
 export interface ModelOption {
@@ -39,6 +43,8 @@ export interface ChatSendOptions {
   displayText?: string;
   assistantPrompt?: string;
   chips?: MessageChip[];
+  userMessageMetadata?: Partial<MessageMetadata>;
+  acpGooseMetadata?: Record<string, unknown>;
 }
 
 export type ChatInputSendHandler = (

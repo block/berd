@@ -6,13 +6,11 @@ import {
   type ChatAttachmentDraft,
   type Message,
   createSystemNotificationMessage,
-  createUserMessage,
 } from "@/shared/types/messages";
 import type { ChatState, TokenState } from "@/shared/types/chat";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import {
   acpSendMessage,
-  acpSteerMessage,
   acpCancelSession,
   acpLoadSession,
 } from "@/shared/api/acp";
@@ -20,15 +18,11 @@ import { resetPersonaHandoff } from "@/shared/api/acpPersonaHandoff";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { dispatchPrompt } from "../lib/sendCore";
 import { perfLog } from "@/shared/lib/perfLog";
-import {
-  appendAttachmentPaths,
-  buildAcpImages,
-  buildMessageAttachments,
-} from "../lib/attachments";
 import { sanitizeReplayMessages } from "../lib/replaySanitizer";
 import { i18n } from "@/shared/i18n";
 import type { ChatSendOptions } from "../types";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
+import { steerPromptInSession } from "../lib/steerCore";
 
 // TODO: Remove this fallback once goose2 has first-class /-commands.
 const MANUAL_COMPACT_TRIGGER = "/compact";
@@ -76,13 +70,6 @@ function markMessageStopped(sessionId: string, messageId: string) {
       ),
     };
   });
-}
-
-function formatSteerErrorMessage(error: unknown): string {
-  const message = formatAcpErrorMessage(error);
-  return message.toLowerCase().includes("method not found")
-    ? i18n.t("chat:errors.steeringBackendUnavailable")
-    : message;
 }
 
 /**
@@ -228,81 +215,9 @@ export function useChat(
       attachments?: ChatAttachmentDraft[],
       sendOptions?: ChatSendOptions,
     ) => {
-      const images = buildAcpImages(attachments);
-      const hasAttachments = (attachments?.length ?? 0) > 0;
-      const activeRunId = useChatStore
-        .getState()
-        .getSessionRuntime(sessionId).activeRunId;
-
-      if (!text.trim() && !hasAttachments) {
-        return false;
-      }
-
-      const userMessage = createUserMessage(
-        sendOptions?.displayText ?? text,
-        buildMessageAttachments(attachments),
-        sendOptions?.chips,
-      );
-      userMessage.metadata = {
-        ...userMessage.metadata,
-        delivery: "steer",
-      };
-
-      if (images && images.length > 0) {
-        for (const img of images) {
-          userMessage.content.push({
-            type: "image",
-            data: img.base64,
-            mimeType: img.mimeType,
-          });
-        }
-      }
-
-      const promptWithPaths = appendAttachmentPaths(text.trim(), attachments);
-      const acpPrompt =
-        promptWithPaths || (images?.length ? " " : promptWithPaths);
-      addMessage(sessionId, userMessage);
-      useChatStore.getState().setPendingInterventionBoundary(sessionId, {
-        interventionMessageId: userMessage.id,
-      });
-
-      try {
-        const steeredRunId = await acpSteerMessage(
-          sessionId,
-          activeRunId,
-          acpPrompt,
-          {
-            ...(sendOptions?.assistantPrompt
-              ? { assistantPrompt: sendOptions.assistantPrompt }
-              : {}),
-            images: images?.map(
-              (img) => [img.base64, img.mimeType] as [string, string],
-            ),
-          },
-        );
-        useChatStore.getState().setActiveRunId(sessionId, steeredRunId);
-        useChatSessionStore.getState().patchSession(sessionId, {
-          updatedAt: new Date().toISOString(),
-        });
-        return true;
-      } catch (err) {
-        const chatStore = useChatStore.getState();
-        chatStore.removeMessage(sessionId, userMessage.id);
-        if (
-          chatStore.getSessionRuntime(sessionId).pendingInterventionBoundary
-            ?.interventionMessageId === userMessage.id
-        ) {
-          chatStore.setPendingInterventionBoundary(sessionId, null);
-        }
-        const errorMessage = formatSteerErrorMessage(err);
-        chatStore.addMessage(
-          sessionId,
-          createSystemNotificationMessage(errorMessage, "error"),
-        );
-        return false;
-      }
+      return steerPromptInSession(sessionId, text, attachments, sendOptions);
     },
-    [addMessage, sessionId],
+    [sessionId],
   );
 
   const stopGeneration = useCallback(() => {

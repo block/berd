@@ -529,6 +529,35 @@ describe("acpNotificationHandler", () => {
     });
   });
 
+  it("restores replayed user message origin metadata", async () => {
+    markSessionReplayLoading();
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "user_message_chunk",
+        content: {
+          type: "text",
+          text: "Cross-session prompt",
+        },
+        _meta: {
+          goose: {
+            messageId: "user-replay-1",
+            origin: "goosectl_cross_session",
+          },
+        },
+      },
+    } as never);
+
+    expect(getReplayMessage()).toMatchObject({
+      id: "user-replay-1",
+      role: "user",
+      metadata: {
+        origin: "goosectl_cross_session",
+      },
+    });
+  });
+
   it("does not let a stale backend model snapshot overwrite a pending selected model", async () => {
     useChatSessionStore.getState().addSession({
       id: "acp-session",

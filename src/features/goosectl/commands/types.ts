@@ -68,6 +68,7 @@ export const COMMAND_ERROR_CODES = [
   "unknown_action",
   "invalid_args",
   "target_session_running",
+  "queue_full",
   "session_not_found",
   "project_not_found",
   "agent_not_found",

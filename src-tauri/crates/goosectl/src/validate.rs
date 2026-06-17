@@ -140,6 +140,32 @@ fn validate_field(group: &str, action: &str, field: &Field, errors: &mut Vec<Str
              carry (non-integer or negative); adjust the zod bounds"
         ));
     }
+    if let Some(values) = &field.values {
+        if field.kind != "string" {
+            errors.push(format!(
+                "`{group}.{action}.{name}` declares enum values but has wire kind `{}`, \
+                 which cannot be represented as string possible values",
+                field.kind
+            ));
+        }
+        if values.is_empty() {
+            errors.push(format!(
+                "`{group}.{action}.{name}` declares an empty enum values list"
+            ));
+        }
+        let mut seen = std::collections::HashSet::new();
+        for value in values {
+            if value.is_empty() {
+                errors.push(format!(
+                    "`{group}.{action}.{name}` declares an empty enum value"
+                ));
+            } else if !seen.insert(value) {
+                errors.push(format!(
+                    "`{group}.{action}.{name}` declares duplicate enum value `{value}`"
+                ));
+            }
+        }
+    }
     if !matches!(field.kind.as_str(), "string" | "number") {
         errors.push(format!(
             "`{group}.{action}.{name}` has wire kind `{}`, which the generated \
@@ -302,6 +328,36 @@ mod tests {
             errors
                 .iter()
                 .any(|error| error.contains("non-integer or negative")),
+            "got: {errors:#?}"
+        );
+    }
+
+    #[test]
+    fn invalid_enum_field_shapes_are_reported() {
+        let api = MINIMAL_API.replace(
+            r#"{"name": "query", "required": false, "kind": "string",
+                             "description": "Title substring to match"}"#,
+            r#"{"name": "query", "required": false, "kind": "number",
+                             "values": ["refuse", "refuse", ""],
+                             "description": "Title substring to match"}"#,
+        );
+        let errors = errors_for(&api, MINIMAL_SURFACE);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("declares enum values but has wire kind `number`")),
+            "got: {errors:#?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("duplicate enum value `refuse`")),
+            "got: {errors:#?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("declares an empty enum value")),
             "got: {errors:#?}"
         );
     }

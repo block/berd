@@ -11,8 +11,10 @@ validation, TS input types, CLI help, and generated contract JSON. Background:
 
 ## Rules
 
-- Verbs must be reversible and UI-visible. Delete, bulk, silent, or invisible
-  work requires auth/confirmation design review.
+- Verbs must be UI-visible. Prefer reversible mutations, but one-way visible
+  product actions like creating a session or sending a prompt are allowed.
+  Delete, bulk, silent, invisible, or broadly destructive work requires
+  auth/confirmation design review.
 - Put bounds in zod; clap mirrors them.
 - Keep descriptors import-pure. Import stores, Tauri APIs, navigation,
   providers, and caches only inside `execute`/`precheck`.
@@ -34,9 +36,9 @@ validation, TS input types, CLI help, and generated contract JSON. Background:
 - Run `pnpm generate:goosectl-contract`,
   `pnpm vitest run src/features/goosectl`, and `cargo test -p goosectl` from
   `src-tauri/`.
-- Before review, confirm the verb is reversible/UI-visible, help is complete,
-  error messages name the fixing command, artifacts are regenerated, and tests
-  cover the behavior.
+- Before review, confirm the verb is UI-visible and either reversible or a
+  direct visible product action, help is complete, error messages name the
+  fixing command, artifacts are regenerated, and tests cover the behavior.
 
 Keep CLI shapes expressible by the generated field walker. If a requested
 operation needs an explicit null or another shape that generic flags cannot

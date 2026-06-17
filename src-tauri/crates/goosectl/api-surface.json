@@ -1,9 +1,9 @@
 {
-  "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:goosectl-contract`. Client-neutral wire surface of the Goose desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the goosectl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (goosectl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/goosectl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/goosectl/__tests__/apiSurface.test.ts).",
+  "$comment": "GENERATED FILE — do not hand-edit; run `pnpm generate:goosectl-contract`. Client-neutral wire surface of the Goose desktop app's control API: POST /v1/call {\"command\": \"<group>\", \"args\": {\"action\": \"<action>\", ...fields}} against the loopback endpoint in the goosectl discovery file. protocolVersion mirrors PROTOCOL_VERSION in both discovery.rs copies (goosectl and plugin crate tests pin them equal). Per action: description, fields (flat wire model: name, required, kind, values, description, bounds), and schema (JSON Schema 2020-12 of the args object, minus the action discriminator). Derived from the authoritative zod schemas in the colocated command modules (src/features/goosectl/commands/impl/*.ts); the renderer registry's strict zod parse — not this file — is the trust boundary. vitest asserts freshness (src/features/goosectl/__tests__/apiSurface.test.ts).",
   "protocolVersion": 1,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), open, list, get, rename, move, clear project, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
@@ -69,6 +69,56 @@
               }
             },
             "required": ["prompt"],
+            "additionalProperties": false
+          }
+        },
+        "send": {
+          "description": "Send a prompt into an existing chat session without opening or focusing it. Idle sends are fire-and-forget and visibly add a user message marked as sent by Goose from another session. Running sessions are refused by default; use --if-running steer to add context to the active run, or --if-running queue to send one follow-up after the current run finishes.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the existing session to send the prompt into."
+            },
+            {
+              "name": "prompt",
+              "required": true,
+              "kind": "string",
+              "description": "The message to send in the existing session (1-50000 chars).",
+              "min": 1,
+              "max": 50000
+            },
+            {
+              "name": "if_running",
+              "required": false,
+              "kind": "string",
+              "description": "What to do if the target session is running: refuse, steer, or queue.",
+              "values": ["refuse", "steer", "queue"]
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the existing session to send the prompt into.",
+                "type": "string"
+              },
+              "prompt": {
+                "description": "The message to send in the existing session (1-50000 chars).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 50000
+              },
+              "if_running": {
+                "description": "What to do if the target session is running: refuse, steer, or queue.",
+                "default": "refuse",
+                "type": "string",
+                "enum": ["refuse", "steer", "queue"]
+              }
+            },
+            "required": ["session_id", "prompt"],
             "additionalProperties": false
           }
         },

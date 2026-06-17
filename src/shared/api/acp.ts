@@ -29,6 +29,7 @@ export interface AcpSendMessageOptions {
   assistantPrompt?: string;
   personaId?: string;
   personaName?: string;
+  goose?: Record<string, unknown>;
   /** Image attachments as [base64Data, mimeType] pairs. */
   images?: [string, string][];
 }
@@ -81,8 +82,14 @@ export async function acpSendMessage(
   prompt: string,
   options: AcpSendMessageOptions = {},
 ): Promise<void> {
-  const { systemPrompt, assistantPrompt, personaId, personaName, images } =
-    options;
+  const {
+    systemPrompt,
+    assistantPrompt,
+    personaId,
+    personaName,
+    goose,
+    images,
+  } = options;
   const sid = sessionId.slice(0, 8);
   const tStart = performance.now();
 
@@ -159,6 +166,7 @@ export async function acpSendMessage(
   const tPrompt = performance.now();
   const meta: Record<string, unknown> = {};
   if (personaId) meta.personaId = personaId;
+  if (goose && Object.keys(goose).length > 0) meta.goose = goose;
   try {
     await directAcp.prompt(
       sessionId,
@@ -179,9 +187,12 @@ export async function acpSteerMessage(
   sessionId: string,
   expectedRunId: string | null,
   prompt: string,
-  options: Pick<AcpSendMessageOptions, "assistantPrompt" | "images"> = {},
+  options: Pick<
+    AcpSendMessageOptions,
+    "assistantPrompt" | "goose" | "images"
+  > = {},
 ): Promise<string> {
-  const { assistantPrompt, images } = options;
+  const { assistantPrompt, goose, images } = options;
   const content: ContentBlock[] = [];
   const assistantText = assistantPrompt?.trim();
   if (assistantText) {
@@ -198,7 +209,12 @@ export async function acpSteerMessage(
     }
   }
 
-  return directAcp.steerSession(sessionId, content, expectedRunId);
+  return directAcp.steerSession(
+    sessionId,
+    content,
+    expectedRunId,
+    goose && Object.keys(goose).length > 0 ? { goose } : undefined,
+  );
 }
 
 /** Prepare or warm an ACP session ahead of the first prompt. */

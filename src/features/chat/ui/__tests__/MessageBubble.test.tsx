@@ -186,6 +186,42 @@ describe("MessageBubble", () => {
     expect(label.closest(".bg-message-user-bg")).not.toHaveClass("py-2.5");
   });
 
+  it("labels goosectl cross-session user messages", () => {
+    const message = userMessage("from another session");
+    message.metadata = {
+      ...message.metadata,
+      origin: "goosectl_cross_session",
+    };
+
+    render(<MessageBubble message={message} />);
+
+    const label = screen.getByText("Sent by Goose from another session");
+    expect(label).toBeInTheDocument();
+    expect(label).toHaveAttribute(
+      "data-role",
+      "goosectl-cross-session-message-label",
+    );
+    expect(label.closest(".bg-message-user-bg")).toHaveTextContent(
+      "from another session",
+    );
+  });
+
+  it("renders provenance and steer labels together", () => {
+    const message = userMessage("steered from another session");
+    message.metadata = {
+      ...message.metadata,
+      delivery: "steer",
+      origin: "goosectl_cross_session",
+    };
+
+    render(<MessageBubble message={message} />);
+
+    expect(
+      screen.getByText("Sent by Goose from another session"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Steered")).toBeInTheDocument();
+  });
+
   it("renders compaction notifications as centered success messages", () => {
     const { container } = render(
       <MessageBubble

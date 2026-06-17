@@ -8,6 +8,7 @@ import {
 } from "@/features/goosectl/commands/types";
 
 const createSessionSchema = TOOL_GROUPS.sessions.actions.create.schema;
+const sendSessionSchema = TOOL_GROUPS.sessions.actions.send.schema;
 const getSessionSchema = TOOL_GROUPS.sessions.actions.get.schema;
 const listSessionsSchema = TOOL_GROUPS.sessions.actions.list.schema;
 const renameSessionSchema = TOOL_GROUPS.sessions.actions.rename.schema;
@@ -28,6 +29,32 @@ describe("goosectl command schema bounds", () => {
         project_id: "p1",
         agent_id: "a1",
         model_id: "m1",
+      }).success,
+    ).toBe(true);
+  });
+
+  it("sessions.send bounds prompt and defaults if_running to refuse", () => {
+    expect(sendSessionSchema.safeParse({ session_id: "s1" }).success).toBe(
+      false,
+    );
+    expect(
+      sendSessionSchema.safeParse({ session_id: "s1", prompt: "" }).success,
+    ).toBe(false);
+    expect(
+      sendSessionSchema.safeParse({
+        session_id: "s1",
+        prompt: "hi",
+        if_running: "later",
+      }).success,
+    ).toBe(false);
+    expect(
+      sendSessionSchema.parse({ session_id: "s1", prompt: "hi" }).if_running,
+    ).toBe("refuse");
+    expect(
+      sendSessionSchema.safeParse({
+        session_id: "s1",
+        prompt: "hi",
+        if_running: "queue",
       }).success,
     ).toBe(true);
   });

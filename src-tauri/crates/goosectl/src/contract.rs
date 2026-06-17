@@ -54,6 +54,8 @@ pub struct Field {
     /// "string" | "number"; anything else fails validation until the
     /// generated CLI learns that shape.
     pub kind: String,
+    /// Allowed values for enum-backed string fields.
+    pub values: Option<Vec<String>>,
     /// Field documentation (the zod `.describe()`); rendered as the flag's
     /// --help text.
     pub description: String,

@@ -15,6 +15,7 @@ import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import { perfLog } from "@/shared/lib/perfLog";
 import {
   type ChatAttachmentDraft,
+  type MessageMetadata,
   type MessageChip,
   createSystemNotificationMessage,
   createUserMessage,
@@ -36,6 +37,10 @@ export interface SendCoreOptions {
   displayText?: string;
   /** User-visible chips stored on the user message's metadata. */
   chips?: MessageChip[];
+  /** Extra renderer-only metadata to stamp on the local user message. */
+  userMessageMetadata?: Partial<MessageMetadata>;
+  /** Extra metadata persisted through ACP under `_meta.goose`. */
+  acpGooseMetadata?: Record<string, unknown>;
   /** Pending-assistant provider; defaults to the active agent's provider. */
   providerId?: string;
   /**
@@ -89,6 +94,7 @@ export async function dispatchPrompt(
   const tSendStart = performance.now();
   const {
     assistantPrompt,
+    acpGooseMetadata,
     attachments,
     background,
     chips,
@@ -99,6 +105,7 @@ export async function dispatchPrompt(
     providerId,
     signal,
     systemPrompt,
+    userMessageMetadata,
   } = opts;
   const images = buildAcpImages(attachments);
 
@@ -126,6 +133,12 @@ export async function dispatchPrompt(
       ...userMessage.metadata,
       targetPersonaId: persona.id,
       targetPersonaName: persona.name,
+    };
+  }
+  if (userMessageMetadata) {
+    userMessage.metadata = {
+      ...userMessage.metadata,
+      ...userMessageMetadata,
     };
   }
   // Embed image content blocks into the user message for local display.
@@ -188,6 +201,7 @@ export async function dispatchPrompt(
       ...(assistantPrompt ? { assistantPrompt } : {}),
       personaId: persona?.id,
       personaName: persona?.name,
+      goose: acpGooseMetadata,
       images: images?.map(
         (img) => [img.base64, img.mimeType] as [string, string],
       ),

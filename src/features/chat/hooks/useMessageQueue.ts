@@ -33,6 +33,17 @@ function getQueuedMessageKey(
   });
 }
 
+function isGoosectlCrossSessionQueuedMessage(
+  queuedMessage: {
+    sendOptions?: ChatSendOptions;
+  } | null,
+): boolean {
+  return (
+    queuedMessage?.sendOptions?.userMessageMetadata?.origin ===
+    "goosectl_cross_session"
+  );
+}
+
 /**
  * Single-slot message queue that holds one pending message while the agent is
  * busy and auto-sends it when the chat transitions back to idle.
@@ -101,6 +112,7 @@ export function useMessageQueue(
       isSendBlocked ||
       !queuedMessage ||
       !queuedMessageKey ||
+      isGoosectlCrossSessionQueuedMessage(queuedMessage) ||
       hasReachedRetryLimit ||
       alreadyAttemptedThisIdleCycle
     ) {

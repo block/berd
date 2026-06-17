@@ -33,7 +33,10 @@ import { getTextContent } from "@/shared/types/messages";
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
   acpListSessionsPage: vi.fn(),
+  acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
+  acpSetModel: vi.fn(),
+  acpSteerMessage: vi.fn(),
   discoverAcpProviders: vi.fn(),
   runDoctor: vi.fn(),
   readinessFromReport: vi.fn(),
@@ -54,7 +57,10 @@ vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
+  acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
   acpSendMessage: (...args: unknown[]) => mocks.acpSendMessage(...args),
+  acpSetModel: (...args: unknown[]) => mocks.acpSetModel(...args),
+  acpSteerMessage: (...args: unknown[]) => mocks.acpSteerMessage(...args),
   discoverAcpProviders: (...args: unknown[]) =>
     mocks.discoverAcpProviders(...args),
 }));
@@ -283,7 +289,10 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.resolveSessionCwd.mockResolvedValue("/resolved/cwd");
   mocks.acpCreateSession.mockResolvedValue({ sessionId: "session-new" });
+  mocks.acpPrepareSession.mockResolvedValue(undefined);
   mocks.acpSendMessage.mockResolvedValue(undefined);
+  mocks.acpSetModel.mockResolvedValue(undefined);
+  mocks.acpSteerMessage.mockResolvedValue("run-steered");
   mocks.discoverAcpProviders.mockResolvedValue([
     { id: "goose", label: "Goose (Default)" },
     { id: "claude-acp", label: "Claude Code" },
@@ -423,6 +432,7 @@ describe("action schemas", () => {
   it("every action schema rejects unknown keys (derived from the registry)", () => {
     const validArgs: Record<string, Record<string, unknown>> = {
       "sessions.create": { prompt: "hi" },
+      "sessions.send": { session_id: "s1", prompt: "hi" },
       "sessions.open": { session_id: "s1" },
       "sessions.list": {},
       "sessions.get": { session_id: "s1" },
@@ -769,6 +779,229 @@ describe("sessions.create", () => {
     );
     expect(mocks.acpCreateSession).not.toHaveBeenCalled();
     nowSpy.mockRestore();
+  });
+});
+
+describe("sessions.send", () => {
+  it("prepares the target session, records provenance, sends in the background, and does not navigate", async () => {
+    const project = makeProject({ id: "project-1" });
+    mocks.listProjects.mockResolvedValue([project]);
+    mocks.listPersonas.mockResolvedValue([
+      {
+        id: "agent-7",
+        displayName: "Reviewer",
+        systemPrompt: "Review the work carefully.",
+        isBuiltin: false,
+        writable: true,
+      },
+    ]);
+    useChatSessionStore.setState({
+      activeWorkspaceBySession: {
+        "session-1": { path: "/workspace/target", branch: "main" },
+      },
+    });
+    mockSessionFound({
+      providerId: "codex-acp",
+      modelId: "gpt-6",
+      personaId: "agent-7",
+      projectId: "project-1",
+      workingDir: "/session/cwd",
+    });
+    useAgentStore.setState({
+      agents: [
+        {
+          id: "fg-agent",
+          name: "Foreground",
+          provider: "claude-acp",
+          model: "claude",
+          connectionType: "acp",
+          status: "online",
+          isBuiltin: false,
+          createdAt: "2026-04-01T00:00:00.000Z",
+          updatedAt: "2026-04-01T00:00:00.000Z",
+        },
+      ],
+      activeAgentId: "fg-agent",
+    });
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "what changed in ci?",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      session_id: "session-1",
+      send_status: "dispatched",
+    });
+    expect(mocks.resolveSessionCwd).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "project-1" }),
+      "/workspace/target",
+    );
+    expect(mocks.acpPrepareSession).toHaveBeenCalledWith(
+      "session-1",
+      "codex-acp",
+      "/resolved/cwd",
+    );
+    expect(mocks.acpSetModel).toHaveBeenCalledWith("session-1", "gpt-6");
+    expect(controller.openSession).not.toHaveBeenCalled();
+
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toHaveLength(1);
+    expect(getTextContent(messages[0])).toBe("what changed in ci?");
+    expect(messages[0]?.metadata).toMatchObject({
+      origin: "goosectl_cross_session",
+      targetPersonaId: "agent-7",
+      targetPersonaName: "Reviewer",
+    });
+    expect(
+      useChatStore.getState().getSessionRuntime("session-1")
+        .pendingAssistantProviderId,
+    ).toBe("codex-acp");
+    await vi.waitFor(() => {
+      expect(mocks.acpSendMessage).toHaveBeenCalledWith(
+        "session-1",
+        "what changed in ci?",
+        expect.objectContaining({
+          personaId: "agent-7",
+          personaName: "Reviewer",
+          systemPrompt: "Review the work carefully.",
+          goose: { origin: "goosectl_cross_session" },
+        }),
+      );
+    });
+  });
+
+  it("refuses a running target by default", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "follow up",
+        },
+        ctx,
+      ),
+      "target_session_running",
+    );
+
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses pop-out target sessions even when steering or queueing is requested", async () => {
+    for (const ifRunning of ["steer", "queue"] as const) {
+      mockSessionFound();
+      useSessionWindowStore
+        .getState()
+        .setSnapshot([{ sessionId: "session-1", windowLabel: "session" }]);
+
+      await expectCommandError(
+        dispatchCommand(
+          "sessions",
+          {
+            action: "send",
+            session_id: "session-1",
+            prompt: "follow up",
+            if_running: ifRunning,
+          },
+          ctx,
+        ),
+        "target_session_running",
+      );
+      useSessionWindowStore.getState().setSnapshot([]);
+    }
+  });
+
+  it("steers a running target with provenance metadata", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setActiveRunId("session-1", "run-1");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "make it shorter",
+        if_running: "steer",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      session_id: "session-1",
+      send_status: "steered",
+    });
+    const messages = useChatStore.getState().messagesBySession["session-1"];
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.metadata).toMatchObject({
+      delivery: "steer",
+      origin: "goosectl_cross_session",
+    });
+    expect(mocks.acpSteerMessage).toHaveBeenCalledWith(
+      "session-1",
+      "run-1",
+      "make it shorter",
+      expect.objectContaining({
+        goose: { origin: "goosectl_cross_session" },
+      }),
+    );
+    expect(mocks.acpPrepareSession).not.toHaveBeenCalled();
+    expect(mocks.acpSendMessage).not.toHaveBeenCalled();
+  });
+
+  it("queues one running-target prompt and reports queue_full for a second", async () => {
+    mockSessionFound();
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    const result = await dispatchCommand(
+      "sessions",
+      {
+        action: "send",
+        session_id: "session-1",
+        prompt: "next prompt",
+        if_running: "queue",
+      },
+      ctx,
+    );
+
+    expect(result).toEqual({
+      session_id: "session-1",
+      send_status: "queued",
+    });
+    expect(useChatStore.getState().queuedMessageBySession["session-1"]).toEqual(
+      {
+        text: "next prompt",
+        sendOptions: {
+          userMessageMetadata: { origin: "goosectl_cross_session" },
+          acpGooseMetadata: { origin: "goosectl_cross_session" },
+        },
+      },
+    );
+
+    mockSessionFound();
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        {
+          action: "send",
+          session_id: "session-1",
+          prompt: "another prompt",
+          if_running: "queue",
+        },
+        ctx,
+      ),
+      "queue_full",
+    );
   });
 });
 

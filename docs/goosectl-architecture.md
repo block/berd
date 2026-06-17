@@ -88,16 +88,19 @@ belongs in error messages, not generic help text.
 ## Safety model
 
 v1 has no auth tokens and no confirmation dialogs. That remains acceptable only
-while commands are reversible and visible in the UI.
+while mutations are visible in the UI and either reversible or direct
+user-requested product actions, such as creating a session or sending a prompt.
 
 Required command properties:
 
 - no destructive commands
 - no invisible non-read mutations
 - mutations are visible immediately or discoverable in normal app UI
+- one-way verbs are limited to visible product actions the caller explicitly
+  asked for, such as creating a session or sending a prompt
 - broker protects app availability with in-flight caps and timeouts
 
-The first delete, bulk, silent, or otherwise irreversible/invisible verb requires
+The first delete, bulk, silent, invisible, or broadly destructive verb requires
 reopening the auth/confirmation design before implementation. Do not add
 piecemeal auth in a command PR.
 

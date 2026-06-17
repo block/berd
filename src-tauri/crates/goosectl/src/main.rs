@@ -268,6 +268,7 @@ mod tests {
     fn minimal_invocation(noun: &str, verb: &str) -> Option<Vec<&'static str>> {
         Some(match (noun, verb) {
             ("session", "create") => vec!["--prompt", "hi"],
+            ("session", "send") => vec!["--session-id", "s", "--prompt", "hi"],
             ("session", "open") => vec!["--session-id", "s"],
             ("session", "list") => vec![],
             ("session", "get") => vec!["--session-id", "s"],
@@ -377,6 +378,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn session_send_maps_every_flag_onto_the_wire() {
+        let (command, args) = wire_of(&[
+            "goosectl",
+            "session",
+            "send",
+            "--session-id",
+            "s",
+            "--prompt",
+            "hi",
+            "--if-running",
+            "queue",
+        ]);
+        assert_eq!(command, "sessions");
+        assert_eq!(
+            Value::Object(args),
+            serde_json::json!({
+                "action": "send",
+                "session_id": "s",
+                "prompt": "hi",
+                "if_running": "queue",
+            })
+        );
+    }
+
     /// Second pin of the contract-driven wire path, covering numeric flags:
     /// --messages must reach the wire as a JSON number, not a string.
     #[test]
@@ -448,6 +474,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn enum_values_are_enforced_client_side() {
+        assert!(
+            try_parse(&[
+                "goosectl",
+                "session",
+                "send",
+                "--session-id",
+                "s",
+                "--prompt",
+                "hi",
+                "--if-running",
+                "later",
+            ])
+            .is_err(),
+            "--if-running later must be rejected"
+        );
+        assert!(
+            try_parse(&[
+                "goosectl",
+                "session",
+                "send",
+                "--session-id",
+                "s",
+                "--prompt",
+                "hi",
+                "--if-running",
+                "steer",
+            ])
+            .is_ok(),
+            "--if-running steer must parse"
+        );
+    }
+
     fn rendered_long_help(path: &[&str]) -> String {
         let mut cmd = cli();
         cmd.build();
@@ -475,7 +535,7 @@ goosectl talks to the running Goose desktop app and acts on what the user
 sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
-                                  clear-project, archive
+                                  send, clear-project, archive
   project   projects             create, list, get, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
@@ -488,8 +548,8 @@ which app-control condition to check.
 Usage: goosectl [OPTIONS] <COMMAND>
 
 Commands:
-  session  Manage chat sessions: create, open, list, get, rename, move, clear
-           project, archive
+  session  Manage chat sessions: create, send, open, list, get, rename, move,
+           clear project, archive
   project  Manage projects: create, list, get, archive
   agent    Manage agents (personas): create, list
   skill    Manage skills: create, list, get
@@ -517,6 +577,10 @@ Examples:
   goosectl info harnesses --json
   goosectl session create --prompt "Summarize open code reviews" \
     --harness-id claude-acp
+
+  # Send a follow-up into an existing session without opening it
+  goosectl session send --session-id <session-id> \
+    --prompt "Check the latest CI failure" --if-running queue
 
 Exit codes:
   0  success — the JSON result is on stdout

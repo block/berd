@@ -39,6 +39,7 @@ import {
   getReplayAssistantMetadata,
   getReplayCreated,
   getReplayMessageId,
+  getReplayUserMetadata,
 } from "./acpReplayMetadata";
 import { handleSessionInfoUpdate } from "./acpSessionInfoUpdate";
 import {
@@ -491,6 +492,7 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
         messageId,
         update.content,
         getReplayCreated(update),
+        getReplayUserMetadata(update),
       );
       break;
     }

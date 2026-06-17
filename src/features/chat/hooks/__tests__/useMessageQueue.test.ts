@@ -93,6 +93,34 @@ describe("useMessageQueue", () => {
     expect(useChatStore.getState().queuedMessageBySession.s1).toBeUndefined();
   });
 
+  it("leaves goosectl-origin queued messages for the goosectl drain", () => {
+    const sendMessage = vi.fn();
+    useChatStore.getState().enqueueMessage("s1", {
+      text: "queued from goosectl",
+      sendOptions: {
+        userMessageMetadata: { origin: "goosectl_cross_session" },
+        acpGooseMetadata: { origin: "goosectl_cross_session" },
+      },
+    });
+
+    const { rerender } = renderHook(
+      ({ chatState }: { chatState: ChatState }) =>
+        useMessageQueue("s1", chatState, sendMessage),
+      { initialProps: { chatState: "streaming" as ChatState } },
+    );
+
+    rerender({ chatState: "idle" as const });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(useChatStore.getState().queuedMessageBySession.s1).toEqual({
+      text: "queued from goosectl",
+      sendOptions: {
+        userMessageMetadata: { origin: "goosectl_cross_session" },
+        acpGooseMetadata: { origin: "goosectl_cross_session" },
+      },
+    });
+  });
+
   it("dismiss clears the queued message without sending", () => {
     const sendMessage = vi.fn();
     useChatStore.getState().enqueueMessage("s1", { text: "queued" });

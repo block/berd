@@ -12,6 +12,7 @@ import {
 } from "@/features/goosectl/bridge/runtimeContext";
 import { GOOSECTL_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useGoosectlQueuedMessageDrain } from "./useGoosectlQueuedMessageDrain";
 
 /**
  * Null-rendering bridge between the goosectl broker (Rust plugin) and the
@@ -24,6 +25,8 @@ export function GoosectlBridge() {
   const experiment = useExperiment(GOOSECTL_EXPERIMENT_ID);
   const enabled = experiment?.enabled ?? false;
   const queryClient = useQueryClient();
+
+  useGoosectlQueuedMessageDrain();
 
   // Share the app's react-query cache with the command layer (doctor report).
   useEffect(() => {

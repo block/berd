@@ -256,6 +256,7 @@
     "mcpAppLoading": "Cargando MCP App…",
     "mcpAppRenderError": "No se pudo renderizar MCP App en línea.",
     "redactedThinking": "(pensamiento redactado)",
+    "goosectlCrossSessionLabel": "Enviado por Goose desde otra sesión",
     "steerLabel": "Guiado"
   },
   "persona": {

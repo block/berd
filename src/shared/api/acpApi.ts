@@ -359,6 +359,7 @@ export async function steerSession(
   sessionId: string,
   content: ContentBlock[],
   expectedRunId: string | null,
+  meta?: Record<string, unknown>,
 ): Promise<string> {
   const client = await getClient();
   const steer = async (runId: string) => {
@@ -366,6 +367,7 @@ export async function steerSession(
       sessionId,
       prompt: content,
       expectedRunId: runId,
+      ...(meta ? { _meta: meta } : {}),
     });
     return typeof response.runId === "string" ? response.runId : runId;
   };
