@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
   type ProfilerOnRenderCallback,
   type ReactNode,
   type Ref,
@@ -43,6 +44,7 @@ import type {
 } from "../transcript/virtual";
 import {
   useTranscriptVirtualTimeline,
+  type TranscriptVirtualTimelineRowStateControls,
   type TranscriptVirtualTimelineFallbackReason,
   type TranscriptVirtualTimelineMeasurementStats,
   type TranscriptVirtualTimelineMode,
@@ -71,6 +73,8 @@ const FOOTER_DOCK_OVERLAP_PX = 28;
 const FOOTER_DOCK_CLEARANCE_PX = 32;
 const STREAMING_MESSAGE_TOP_OFFSET_PX = 16;
 const STREAMING_BOTTOM_FOLLOW_MAX_STEP_PX = 48;
+const SCROLL_TARGET_MOUNT_RETRY_FRAMES = 24;
+const SCROLL_TARGET_VISIBLE_SETTLE_FRAMES = 2;
 
 export const VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT =
   "goose:virtual-message-timeline-diagnostics";
@@ -92,9 +96,17 @@ export interface VirtualMessageTimelineDiagnostics {
   totalRows: number;
   mountedRows: number;
   virtualRangeMountedRows: number;
+  offscreenRealMountedRows: number;
   offscreenShellMountedRows: number;
   protectedRows: number;
   protectedOffscreenRows: number;
+  forcedProtectedRowCount: number;
+  mcpCandidateCount: number;
+  mcpProtectedRowCount: number;
+  recentCandidateCount: number;
+  recentProtectedRowCount: number;
+  evictedMcpRowCount: number;
+  evictedRecentRowCount: number;
   descriptorChurn: number;
   fragmentRowCount: number;
   completedFragmentRowCount: number;
@@ -194,6 +206,7 @@ interface VirtualMessageTimelineProps extends MessageTimelineBubbleCallbacks {
   searchBackendRef?: RefObject<TranscriptSearchBackend | null>;
   onDiagnostics?: (diagnostics: VirtualMessageTimelineDiagnostics) => void;
   onTranscriptDiagnostics?: (diagnostics: TranscriptDiagnostics) => void;
+  virtualTimelineControlsRef?: MutableRefObject<TranscriptVirtualTimelineRowStateControls | null>;
   className?: string;
   tailPaddingPx?: number;
   footer?: ReactNode;
@@ -211,6 +224,11 @@ interface OffscreenShellMeasurementRow {
   previousRowKind?: TranscriptRowDescriptor["kind"];
   row: TranscriptRowDescriptor;
   measurementPlan: TranscriptShellMeasurementPlanForRow;
+}
+
+interface OffscreenRealMeasurementRow {
+  index: number;
+  row: TranscriptRowDescriptor;
 }
 
 interface LiveStreamingTailSplit {
@@ -320,6 +338,39 @@ function TranscriptOffscreenShellMeasurementHost({
   );
 }
 
+function TranscriptOffscreenRealMeasurementHost({
+  children,
+  rowCount,
+}: {
+  children: ReactNode;
+  rowCount: number;
+}) {
+  if (rowCount === 0) {
+    return null;
+  }
+
+  return (
+    <div
+      aria-hidden="true"
+      data-transcript-search-skip=""
+      data-testid="virtual-offscreen-real-measurement-host"
+      data-virtual-offscreen-real-row-count={rowCount}
+      style={{
+        contain: "layout style paint",
+        insetInlineStart: 0,
+        pointerEvents: "none",
+        position: "absolute",
+        top: 0,
+        transform: "translateY(-100000px)",
+        visibility: "hidden",
+        width: "100%",
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function TranscriptOffscreenShellMeasurementBlock({
   row,
   onMeasureShellRow,
@@ -354,6 +405,7 @@ function TranscriptOffscreenShellMeasurementBlock({
       data-virtual-row-offscreen-shell-id={row.row.rowId}
       data-virtual-row-height-revision={row.row.heightRevision}
       data-virtual-row-render-revision={row.row.renderRevision}
+      data-virtual-row-shell-unique-token={`offscreen-shell-token-${row.row.messageId ?? row.row.rowId}`}
       data-virtual-row-shell-estimated-block-size={
         row.measurementPlan.estimatedBlockSize
       }
@@ -902,6 +954,7 @@ export function VirtualMessageTimeline({
   onOpenContextPanel,
   onDiagnostics,
   onTranscriptDiagnostics,
+  virtualTimelineControlsRef,
   className,
   tailPaddingPx,
   footer,
@@ -1055,9 +1108,24 @@ export function VirtualMessageTimeline({
     measureOffscreenShellElement,
     remeasureVisibleRowsSync,
     scrollToBottom: scrollVirtualToBottom,
+    measureOffscreenRealElement,
     scrollToRow: scrollVirtualToRow,
     syncViewportFromDom,
   } = virtualTimeline;
+  useEffect(() => {
+    if (!virtualTimelineControlsRef) {
+      return;
+    }
+
+    virtualTimelineControlsRef.current = virtualTimeline.rowStateControls;
+    return () => {
+      if (
+        virtualTimelineControlsRef.current === virtualTimeline.rowStateControls
+      ) {
+        virtualTimelineControlsRef.current = null;
+      }
+    };
+  }, [virtualTimeline.rowStateControls, virtualTimelineControlsRef]);
   const isBoundedVirtualMode =
     virtualTimelineSnapshot.mode === "bounded-controller";
 
@@ -1097,6 +1165,48 @@ export function VirtualMessageTimeline({
     stableRows,
     stableMessageByRowId,
   );
+  const offscreenRealMeasurementRows = useMemo(() => {
+    if (!isBoundedVirtualMode) {
+      return [];
+    }
+
+    const renderRange = virtualTimelineSnapshot.range.renderRange;
+    const renderedRowIds = new Set(
+      virtualTimelineSnapshot.range.renderedRowIds,
+    );
+    const startIndex = Math.max(
+      0,
+      renderRange.startIndex - OFFSCREEN_MEASUREMENT_LOOKAHEAD_ROWS,
+    );
+    const endIndex = Math.min(
+      virtualRows.length - 1,
+      renderRange.endIndex + OFFSCREEN_MEASUREMENT_LOOKAHEAD_ROWS,
+    );
+    const rows: OffscreenRealMeasurementRow[] = [];
+
+    for (let index = startIndex; index <= endIndex; index += 1) {
+      const row = virtualRows[index];
+      if (!row || renderedRowIds.has(row.rowId)) {
+        continue;
+      }
+
+      if (
+        row.measurementPolicy !== "measure-real" ||
+        !row.capabilities.canOffscreenRenderReal
+      ) {
+        continue;
+      }
+
+      rows.push({ index, row });
+    }
+
+    return rows;
+  }, [
+    isBoundedVirtualMode,
+    virtualRows,
+    virtualTimelineSnapshot.range.renderRange,
+    virtualTimelineSnapshot.range.renderedRowIds,
+  ]);
   const offscreenShellMeasurementRows = useMemo(() => {
     if (!isBoundedVirtualMode) {
       return [];
@@ -1147,9 +1257,11 @@ export function VirtualMessageTimeline({
     virtualTimelineSnapshot.range.renderRange,
     virtualTimelineSnapshot.range.renderedRowIds,
   ]);
+  const offscreenRealMountedRows = offscreenRealMeasurementRows.length;
   const offscreenShellMountedRows = offscreenShellMeasurementRows.length;
   const mountedRows = isBoundedVirtualMode
     ? virtualRangeMountedRows +
+      offscreenRealMountedRows +
       offscreenShellMountedRows +
       liveStreamingTailRows.length
     : stableRows.length;
@@ -1194,7 +1306,29 @@ export function VirtualMessageTimeline({
           virtualRangeMountedRows,
           offscreenShellMountedRows,
           protectedRows: virtualTimelineSnapshot.range.protectedRowIds.length,
+          offscreenRealMountedRows,
           protectedOffscreenRows: virtualProtectedOffscreenRows,
+          forcedProtectedRowCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .forcedProtectedRowCount ?? 0,
+          mcpCandidateCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .mcpCandidateCount ?? 0,
+          mcpProtectedRowCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .mcpProtectedRowCount ?? 0,
+          recentCandidateCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .recentCandidateCount ?? 0,
+          recentProtectedRowCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .recentProtectedRowCount ?? 0,
+          evictedMcpRowCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .evictedMcpRowCount ?? 0,
+          evictedRecentRowCount:
+            virtualTimelineSnapshot.keepAliveDecision?.diagnostics
+              .evictedRecentRowCount ?? 0,
           descriptorChurn: structuralDescriptorChurn,
           fragmentRowCount: snapshot.fragmentRowCount,
           completedFragmentRowCount: snapshot.completedFragmentRowCount,
@@ -1337,6 +1471,7 @@ export function VirtualMessageTimeline({
       mountedRows,
       offscreenShellMountedRows,
       sessionEpoch,
+      offscreenRealMountedRows,
       sessionId,
       snapshot.fragmentRowCount,
       snapshot.completedFragmentRowCount,
@@ -2099,30 +2234,93 @@ export function VirtualMessageTimeline({
       stickyScrollUntilRef.current = 0;
     }
 
-    const currentTarget = messageRefs.current[resolvedScrollTargetMessageId];
     const targetRowId = snapshot.rowByMessageId.get(
       resolvedScrollTargetMessageId,
     );
-    if (!currentTarget && targetRowId) {
-      scrollVirtualToRow(targetRowId, "center");
-    } else if (!currentTarget) {
+    const scrollMountedTargetIntoView = (target: HTMLElement | null) => {
+      if (!target) {
+        return false;
+      }
+      if (typeof target.scrollIntoView === "function") {
+        target.scrollIntoView({
+          behavior: "auto",
+          block: "center",
+          inline: "nearest",
+        });
+        return true;
+      }
+
+      const container = containerRef.current;
+      if (!container) {
+        return false;
+      }
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetCenterOffset =
+        targetRect.top -
+        containerRect.top -
+        (container.clientHeight - targetRect.height) / 2;
+      container.scrollTop = Math.max(
+        0,
+        container.scrollTop + targetCenterOffset,
+      );
+      return true;
+    };
+    const scrollTargetByBestAvailablePath = () => {
+      if (targetRowId && scrollVirtualToRow(targetRowId, "center")) {
+        return true;
+      }
+      return scrollMountedTargetIntoView(
+        messageRefs.current[resolvedScrollTargetMessageId],
+      );
+    };
+
+    if (!scrollTargetByBestAvailablePath()) {
       return;
     }
 
-    const frame = requestAnimationFrame(() => {
-      const target = messageRefs.current[resolvedScrollTargetMessageId];
-      if (!target) {
-        return;
+    const frames: number[] = [];
+    const isTargetVisible = (target: HTMLElement) => {
+      const container = containerRef.current;
+      if (!container) {
+        return false;
       }
-      target.scrollIntoView({
-        block: "center",
-        behavior: "smooth",
-      });
-      setPulsingMessageId(resolvedScrollTargetMessageId);
-      onScrollTargetHandled?.(resolvedScrollTargetMessageId);
-    });
+      const containerRect = container.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      return (
+        targetRect.bottom > containerRect.top + 1 &&
+        targetRect.top < containerRect.bottom - 1
+      );
+    };
+    const tryScrollToTarget = (remainingFrames: number, visibleFrames = 0) => {
+      const frame = requestAnimationFrame(() => {
+        const target = messageRefs.current[resolvedScrollTargetMessageId];
+        if (!target || !isTargetVisible(target)) {
+          if (remainingFrames > 0 && scrollTargetByBestAvailablePath()) {
+            tryScrollToTarget(remainingFrames - 1, 0);
+          }
+          return;
+        }
 
-    return () => cancelAnimationFrame(frame);
+        if (visibleFrames < SCROLL_TARGET_VISIBLE_SETTLE_FRAMES) {
+          scrollTargetByBestAvailablePath();
+          tryScrollToTarget(remainingFrames, visibleFrames + 1);
+          return;
+        }
+
+        setPulsingMessageId(resolvedScrollTargetMessageId);
+        onScrollTargetHandled?.(resolvedScrollTargetMessageId);
+      });
+      frames.push(frame);
+    };
+
+    tryScrollToTarget(SCROLL_TARGET_MOUNT_RETRY_FRAMES);
+
+    return () => {
+      for (const frame of frames) {
+        cancelAnimationFrame(frame);
+      }
+    };
   }, [
     latestMessageId,
     onScrollTargetHandled,
@@ -2131,7 +2329,6 @@ export function VirtualMessageTimeline({
     setDetachedFromLatest,
     snapshot.rowByMessageId,
   ]);
-
   useEffect(() => {
     if (!pulsingMessageId) {
       return;
@@ -2499,6 +2696,31 @@ export function VirtualMessageTimeline({
       registerMessageElement={registerMessageElement}
     />
   );
+  const renderOffscreenRealRow = ({
+    index,
+    row,
+  }: OffscreenRealMeasurementRow) => (
+    <VirtualTranscriptRow
+      key={`offscreen-real:${row.reactKey}`}
+      row={row}
+      index={index}
+      previousRowKind={stableRows[index - 1]?.kind}
+      layoutMode="virtual"
+      offscreenMeasurementKind="real"
+      measurementPlan={measurementPlanByRowId.get(row.rowId)}
+      dateLabel={formatDateSeparator(snapshot, index, {
+        today: t("timeline.today"),
+        yesterday: t("timeline.yesterday"),
+        formatDate,
+      })}
+      message={row.messageId ? stableMessageByRowId.get(row.rowId) : undefined}
+      isStreaming={false}
+      measureRowElement={measureOffscreenRealElement}
+    />
+  );
+  const renderedOffscreenRealRows = offscreenRealMeasurementRows.map(
+    renderOffscreenRealRow,
+  );
   const renderedVirtualRows = isBoundedVirtualMode
     ? virtualTimelineSnapshot.range.virtualItems.map((virtualItem) =>
         renderRow(virtualItem.row, virtualItem.index, virtualItem),
@@ -2663,6 +2885,7 @@ export function VirtualMessageTimeline({
       }
       data-virtual-mounted-rows={mountedRows}
       data-virtual-range-mounted-rows={virtualRangeMountedRows}
+      data-virtual-offscreen-real-mounted-rows={offscreenRealMountedRows}
       data-virtual-offscreen-shell-mounted-rows={offscreenShellMountedRows}
       data-virtual-protected-rows={
         virtualTimelineSnapshot.range.protectedRowIds.length
@@ -2695,6 +2918,11 @@ export function VirtualMessageTimeline({
           data-virtual-history-rows={virtualRows.length}
           style={virtualHistoryStyle}
         >
+          <TranscriptOffscreenRealMeasurementHost
+            rowCount={offscreenRealMountedRows}
+          >
+            {renderedOffscreenRealRows}
+          </TranscriptOffscreenRealMeasurementHost>
           <TranscriptOffscreenShellMeasurementHost
             rows={offscreenShellMeasurementRows}
             onMeasureShellRow={measureOffscreenShellElement}

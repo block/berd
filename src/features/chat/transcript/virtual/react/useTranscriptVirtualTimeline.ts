@@ -17,6 +17,8 @@ import type { TranscriptRowDescriptor } from "../../projection";
 import {
   createTranscriptRowStateRegistry,
   type TranscriptKeepAliveDecision,
+  type TranscriptMcpActivityKind,
+  type TranscriptOpenOverlayKind,
   type TranscriptRowStateRegistry,
 } from "../../row-state";
 import {
@@ -50,6 +52,7 @@ export type TranscriptVirtualTimelineFallbackReason =
 export interface TranscriptVirtualTimelineMeasurementStats {
   visibleMeasurementAttempts: number;
   offscreenShellMeasurementAttempts: number;
+  offscreenRealMeasurementAttempts: number;
   acceptedOffscreenShellMeasurements: number;
   acceptedOffscreenRealMeasurements: number;
   acceptedVisibleMeasurements: number;
@@ -94,6 +97,46 @@ export interface TranscriptVirtualRowStateProviderConfig {
   onRowStateChange: () => void;
 }
 
+export interface TranscriptVirtualTimelineRowStateControls {
+  setRowFocused: (
+    rowId: string,
+    focused: boolean,
+    options?: {
+      focusTargetId?: string;
+      sourceId?: string;
+      nowMs?: number;
+    },
+  ) => void;
+  setRowOpenOverlay: (
+    rowId: string,
+    open: boolean,
+    options: {
+      overlayKind: TranscriptOpenOverlayKind;
+      overlayId?: string;
+      nowMs?: number;
+    },
+  ) => void;
+  setRowMcpActivity: (
+    rowId: string,
+    active: boolean,
+    options: {
+      kind: TranscriptMcpActivityKind;
+      sourceId?: string;
+      ttlMs?: number;
+      nowMs?: number;
+    },
+  ) => void;
+  markRowInteracted: (
+    rowId: string,
+    options?: {
+      sourceId?: string;
+      ttlMs?: number;
+      nowMs?: number;
+    },
+  ) => void;
+  clearSessionRowState: () => void;
+}
+
 interface UseTranscriptVirtualTimelineInput {
   sessionId: string;
   sessionEpoch: number;
@@ -121,6 +164,7 @@ const SUPPORTED_ROW_KINDS = new Set<TranscriptRowDescriptor["kind"]>([
 const EMPTY_MEASUREMENT_STATS: TranscriptVirtualTimelineMeasurementStats = {
   visibleMeasurementAttempts: 0,
   offscreenShellMeasurementAttempts: 0,
+  offscreenRealMeasurementAttempts: 0,
   acceptedOffscreenShellMeasurements: 0,
   acceptedOffscreenRealMeasurements: 0,
   acceptedVisibleMeasurements: 0,
@@ -150,6 +194,7 @@ const EMPTY_MEASUREMENT_STATS: TranscriptVirtualTimelineMeasurementStats = {
 interface LocalMeasurementCounters {
   visibleMeasurementAttempts: number;
   offscreenShellMeasurementAttempts: number;
+  offscreenRealMeasurementAttempts: number;
   skippedZeroMeasurements: number;
   reservedMeasurementsDeferred: number;
   controllerUpdateBatchMaxSize: number;
@@ -158,6 +203,7 @@ interface LocalMeasurementCounters {
 const EMPTY_LOCAL_MEASUREMENT_COUNTERS: LocalMeasurementCounters = {
   visibleMeasurementAttempts: 0,
   offscreenShellMeasurementAttempts: 0,
+  offscreenRealMeasurementAttempts: 0,
   skippedZeroMeasurements: 0,
   reservedMeasurementsDeferred: 0,
   controllerUpdateBatchMaxSize: 0,
@@ -217,6 +263,9 @@ export function useTranscriptVirtualTimeline({
     new Map<string, HTMLElement>(),
   );
   const pendingOffscreenShellMeasurementElementsRef = useRef(
+    new Map<string, HTMLElement>(),
+  );
+  const pendingOffscreenRealMeasurementElementsRef = useRef(
     new Map<string, HTMLElement>(),
   );
   // All currently mounted visible row elements, kept so a width change can
@@ -653,6 +702,7 @@ export function useTranscriptVirtualTimeline({
         measurementFlushScheduledRef.current = false;
         pendingVisibleMeasurementElementsRef.current.clear();
         pendingOffscreenShellMeasurementElementsRef.current.clear();
+        pendingOffscreenRealMeasurementElementsRef.current.clear();
         if (visibleMeasurementFrameRef.current !== null) {
           cancelAnimationFrame(visibleMeasurementFrameRef.current);
           visibleMeasurementFrameRef.current = null;
@@ -712,6 +762,7 @@ export function useTranscriptVirtualTimeline({
     if (!controller) {
       pendingVisibleMeasurementElementsRef.current.clear();
       pendingOffscreenShellMeasurementElementsRef.current.clear();
+      pendingOffscreenRealMeasurementElementsRef.current.clear();
       return;
     }
 
@@ -719,6 +770,7 @@ export function useTranscriptVirtualTimeline({
     if (!scheduler) {
       pendingVisibleMeasurementElementsRef.current.clear();
       pendingOffscreenShellMeasurementElementsRef.current.clear();
+      pendingOffscreenRealMeasurementElementsRef.current.clear();
       return;
     }
 
@@ -728,8 +780,12 @@ export function useTranscriptVirtualTimeline({
     const offscreenEntries = Array.from(
       pendingOffscreenShellMeasurementElementsRef.current,
     );
+    const offscreenRealEntries = Array.from(
+      pendingOffscreenRealMeasurementElementsRef.current,
+    );
     pendingVisibleMeasurementElementsRef.current.clear();
     pendingOffscreenShellMeasurementElementsRef.current.clear();
+    pendingOffscreenRealMeasurementElementsRef.current.clear();
 
     let queuedSinceFlush = 0;
     let shouldCommitSnapshot = false;
@@ -894,6 +950,58 @@ export function useTranscriptVirtualTimeline({
       }
     }
 
+    for (const [rowId, element] of offscreenRealEntries) {
+      if (!element.isConnected) {
+        continue;
+      }
+
+      const plan = scheduler.planOffscreenMeasurement(rowId);
+      if (plan.kind !== "offscreen-real") {
+        continue;
+      }
+
+      const measuredBlockSize = Math.ceil(
+        element.getBoundingClientRect().height,
+      );
+      if (measuredBlockSize <= 0) {
+        continue;
+      }
+
+      const tokenKey = getMeasurementTokenKey(plan.token);
+      if (
+        isStableMeasurementHeight(
+          offscreenMeasuredHeightByTokenRef.current.get(tokenKey),
+          measuredBlockSize,
+        )
+      ) {
+        continue;
+      }
+
+      offscreenMeasuredHeightByTokenRef.current.set(
+        tokenKey,
+        measuredBlockSize,
+      );
+      localMeasurementCountersRef.current = {
+        ...localMeasurementCountersRef.current,
+        offscreenRealMeasurementAttempts:
+          localMeasurementCountersRef.current.offscreenRealMeasurementAttempts +
+          1,
+      };
+
+      const result = scheduler.recordOffscreenMeasurement({
+        token: plan.token,
+        height: measuredBlockSize,
+        source: "offscreen-real",
+      });
+      if (result.status === "accepted") {
+        cachedHeightAppliedByTokenRef.current.set(
+          tokenKey,
+          result.entry.height,
+        );
+        markControllerUpdateQueued();
+      }
+    }
+
     flushQueuedUpdates();
     if (shouldCommitSnapshot) {
       commitSnapshot();
@@ -996,6 +1104,19 @@ export function useTranscriptVirtualTimeline({
     [scheduleMeasurementFlush],
   );
 
+  const measureOffscreenRealElement = useCallback(
+    (rowId: string, element: HTMLElement | null) => {
+      if (!element) {
+        pendingOffscreenRealMeasurementElementsRef.current.delete(rowId);
+        return;
+      }
+
+      pendingOffscreenRealMeasurementElementsRef.current.set(rowId, element);
+      scheduleMeasurementFlush();
+    },
+    [scheduleMeasurementFlush],
+  );
+
   const scrollToRow = useCallback(
     (rowId: string, align: TranscriptScrollAlign = "auto") => {
       const controller = controllerRef.current;
@@ -1068,30 +1189,99 @@ export function useTranscriptVirtualTimeline({
     [applyCorrection, commitSnapshot, containerRef, footerHeight],
   );
 
-  const setRowFocused = useCallback(
-    (rowId: string, focused: boolean, focusTargetId?: string) => {
+  const setRowFocused = useCallback<
+    TranscriptVirtualTimelineRowStateControls["setRowFocused"]
+  >(
+    (rowId, focused, options = {}) => {
       rowStateRegistryRef.current.setFocusedRow({
         sessionId,
         sessionEpoch,
         rowId,
         focused,
-        focusTargetId,
+        focusTargetId: options.focusTargetId,
+        sourceId: options.sourceId,
+        nowMs: options.nowMs,
       });
       commitSnapshot();
     },
     [commitSnapshot, sessionEpoch, sessionId],
   );
 
-  const markRowInteracted = useCallback(
-    (rowId: string) => {
-      rowStateRegistryRef.current.markRowInteracted({
+  const setRowOpenOverlay = useCallback<
+    TranscriptVirtualTimelineRowStateControls["setRowOpenOverlay"]
+  >(
+    (rowId, open, options) => {
+      rowStateRegistryRef.current.setOpenOverlay({
         sessionId,
         sessionEpoch,
         rowId,
+        open,
+        overlayKind: options.overlayKind,
+        overlayId: options.overlayId,
+        nowMs: options.nowMs,
       });
       commitSnapshot();
     },
     [commitSnapshot, sessionEpoch, sessionId],
+  );
+
+  const setRowMcpActivity = useCallback<
+    TranscriptVirtualTimelineRowStateControls["setRowMcpActivity"]
+  >(
+    (rowId, active, options) => {
+      rowStateRegistryRef.current.setMcpActivity({
+        sessionId,
+        sessionEpoch,
+        rowId,
+        active,
+        kind: options.kind,
+        sourceId: options.sourceId,
+        ttlMs: options.ttlMs,
+        nowMs: options.nowMs,
+      });
+      commitSnapshot();
+    },
+    [commitSnapshot, sessionEpoch, sessionId],
+  );
+
+  const markRowInteracted = useCallback<
+    TranscriptVirtualTimelineRowStateControls["markRowInteracted"]
+  >(
+    (rowId, options = {}) => {
+      rowStateRegistryRef.current.markRowInteracted({
+        sessionId,
+        sessionEpoch,
+        rowId,
+        sourceId: options.sourceId,
+        ttlMs: options.ttlMs,
+        nowMs: options.nowMs,
+      });
+      commitSnapshot();
+    },
+    [commitSnapshot, sessionEpoch, sessionId],
+  );
+
+  const clearSessionRowState = useCallback(() => {
+    rowStateRegistryRef.current.cleanupSession(sessionId);
+    commitSnapshot();
+  }, [commitSnapshot, sessionId]);
+
+  const rowStateControls = useMemo(
+    () =>
+      ({
+        setRowFocused,
+        setRowOpenOverlay,
+        setRowMcpActivity,
+        markRowInteracted,
+        clearSessionRowState,
+      }) satisfies TranscriptVirtualTimelineRowStateControls,
+    [
+      clearSessionRowState,
+      markRowInteracted,
+      setRowFocused,
+      setRowMcpActivity,
+      setRowOpenOverlay,
+    ],
   );
 
   const rowStateProvider = useMemo(
@@ -1108,8 +1298,10 @@ export function useTranscriptVirtualTimeline({
   return {
     snapshot,
     rowStateProvider,
+    rowStateControls,
     measureRowElement,
     measureOffscreenShellElement,
+    measureOffscreenRealElement,
     remeasureVisibleRowsSync,
     syncViewportFromDom,
     scrollToRow,
@@ -1185,6 +1377,8 @@ function getMeasurementStats(
     visibleMeasurementAttempts: localCounters.visibleMeasurementAttempts,
     offscreenShellMeasurementAttempts:
       localCounters.offscreenShellMeasurementAttempts,
+    offscreenRealMeasurementAttempts:
+      localCounters.offscreenRealMeasurementAttempts,
     acceptedOffscreenShellMeasurements:
       diagnostics.offscreenShellMeasurementsAccepted,
     acceptedOffscreenRealMeasurements:

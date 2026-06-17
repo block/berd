@@ -167,6 +167,31 @@ export type TranscriptHarnessOperation =
       fromSessionId: string;
       toSessionId: string;
       pendingAsyncWork: readonly string[];
+    }
+  | {
+      kind: "mcpFocus" | "mcpOverlay";
+      atMs: number;
+      messageId: string;
+      active?: boolean;
+      sourceId?: string;
+      nowMs?: number;
+    }
+  | {
+      kind:
+        | "mcpHostWork"
+        | "mcpNestedToolWork"
+        | "mcpRecentMessage"
+        | "mcpRecentResize";
+      atMs: number;
+      messageId: string;
+      active?: boolean;
+      sourceId?: string;
+      nowMs?: number;
+      ttlMs?: number;
+    }
+  | {
+      kind: "mcpClearProtections";
+      atMs: number;
     };
 
 export interface TranscriptFixtureFragmentRow {

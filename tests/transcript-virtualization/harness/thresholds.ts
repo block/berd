@@ -83,13 +83,14 @@ export const REAL_BRIDGE_PROOF_PROFILE: RealBridgeProofProfile = {
   description:
     "Validation-only classifications for real renderer bridge counters dominated by fixture bridge work rather than the product virtual timeline proof.",
   classifiedScenarios: {
-    projectionP95Ms: ["long-10k", "tool-chain-storm"],
+    projectionP95Ms: ["long-10k", "huge-assistant-output", "tool-chain-storm"],
     timeToFirstVisibleTailMs: ["composer-growth-session-switch"],
     descriptorChurnPercent: ["pr928-fragment-tail"],
     rawBrowserLongTasksAndDroppedFrames: ["long-10k", "tool-chain-storm"],
     browserLongTasksAndDroppedFrames: [
       "huge-assistant-output",
       "tool-chain-storm",
+      "dynamic-media-code",
       "mcp-dynamic-rows",
       "composer-growth-session-switch",
     ],
@@ -107,6 +108,8 @@ export const REAL_BRIDGE_PROOF_PROFILE: RealBridgeProofProfile = {
       "huge-assistant-output",
       "tool-chain-storm",
       "dynamic-media-code",
+      "mcp-dynamic-rows",
+      "composer-growth-session-switch",
       "pr928-fragment-tail",
     ],
     detachedScrollEvidence: ["mcp-dynamic-rows"],

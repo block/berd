@@ -193,6 +193,17 @@ function mockTranscriptElementMeasurements() {
         );
       }
 
+      if (this.hasAttribute("data-virtual-row-offscreen-real-id")) {
+        const measuredDescendant = this.querySelector("[data-mock-row-height]");
+        return createDomRect(
+          readNumericAttribute(
+            measuredDescendant,
+            "data-mock-row-height",
+            144,
+          ) + readMockPaddingBlockSize(this),
+        );
+      }
+
       if (
         this.getAttribute("data-testid")?.startsWith("virtual-transcript-row-")
       ) {
@@ -218,6 +229,18 @@ function readNumericAttribute(
 
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function readMockPaddingBlockSize(element: HTMLElement): number {
+  if (element.classList.contains("pt-6")) {
+    return 24;
+  }
+
+  if (element.classList.contains("pt-4")) {
+    return 16;
+  }
+
+  return 0;
 }
 
 function createDomRect(height: number): DOMRect {
@@ -574,6 +597,50 @@ describe("VirtualMessageTimeline", () => {
     ).toBe(16);
   });
 
+  it("includes row spacing in offscreen real measurement rows", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = Array.from({ length: 80 }, (_, index) => ({
+      ...textMessage(
+        `message-${index}`,
+        index % 2 === 0 ? "user" : "assistant",
+        `Message ${index}`,
+      ),
+      created:
+        index < 40
+          ? Date.UTC(2026, 5, 4, 12, 0, 0)
+          : Date.UTC(2026, 5, 5, 12, 0, 0),
+    }));
+
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="message-79"
+      />,
+    );
+
+    const offscreenRealHost = await screen.findByTestId(
+      "virtual-offscreen-real-measurement-host",
+    );
+    await waitFor(() => {
+      const offscreenRealRows = Array.from(
+        offscreenRealHost.querySelectorAll<HTMLElement>(
+          "[data-virtual-row-offscreen-real-id]",
+        ),
+      );
+      expect(offscreenRealRows.length).toBeGreaterThan(0);
+      const spacedRows = offscreenRealRows.filter(
+        (row) =>
+          row.classList.contains("pt-4") || row.classList.contains("pt-6"),
+      );
+      expect(spacedRows.length).toBeGreaterThan(0);
+      for (const row of offscreenRealRows) {
+        expect(row).not.toHaveClass("mt-4");
+        expect(row).not.toHaveClass("mt-6");
+      }
+    });
+  });
+
   it("applies footer clearance to the virtual list height without extra padding", async () => {
     renderWithProviders(
       <VirtualMessageTimeline
@@ -744,6 +811,64 @@ describe("VirtualMessageTimeline", () => {
     fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
 
     expect(scroller.scrollTop).toBe(4700);
+  });
+
+  it("falls back to the mounted live tail element for active streaming scroll targets", async () => {
+    mockTranscriptElementMeasurements();
+    const originalScrollIntoView = Element.prototype.scrollIntoView;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      writable: true,
+      value: scrollIntoView,
+    });
+
+    try {
+      renderWithProviders(
+        <VirtualMessageTimeline
+          sessionId="session-1"
+          messages={[
+            textMessage("user-1", "user", "Question"),
+            textMessage(
+              "assistant-1",
+              "assistant",
+              `${longText("streaming target", 120)}\n[height:650]`,
+            ),
+          ]}
+          streamingMessageId="assistant-1"
+          scrollTargetMessageId="assistant-1"
+        />,
+      );
+
+      const streamingRow = await screen.findByTestId(
+        "virtual-transcript-row-message:assistant-1",
+      );
+      expect(
+        screen.getByTestId("virtual-message-timeline-live-tail"),
+      ).toContainElement(streamingRow);
+
+      await waitFor(() =>
+        expect(scrollIntoView).toHaveBeenCalledWith({
+          behavior: "auto",
+          block: "center",
+          inline: "nearest",
+        }),
+      );
+    } finally {
+      if (originalScrollIntoView) {
+        Object.defineProperty(Element.prototype, "scrollIntoView", {
+          configurable: true,
+          writable: true,
+          value: originalScrollIntoView,
+        });
+      } else {
+        delete (
+          Element.prototype as {
+            scrollIntoView?: Element["scrollIntoView"];
+          }
+        ).scrollIntoView;
+      }
+    }
   });
 
   it("does not auto-scroll again for the same latest user message after detaching", async () => {
@@ -957,13 +1082,19 @@ describe("VirtualMessageTimeline", () => {
     const offscreenShellMountedRows = Number(
       list.getAttribute("data-virtual-offscreen-shell-mounted-rows"),
     );
+    const offscreenRealMountedRows = Number(
+      list.getAttribute("data-virtual-offscreen-real-mounted-rows"),
+    );
     const liveTailRows = Number(
       list.getAttribute("data-virtual-live-tail-rows"),
     );
     expect(mountedRows).toBeGreaterThan(0);
     expect(mountedRows).toBeLessThan(82);
     expect(mountedRows).toBe(
-      virtualRangeMountedRows + offscreenShellMountedRows + liveTailRows,
+      virtualRangeMountedRows +
+        offscreenRealMountedRows +
+        offscreenShellMountedRows +
+        liveTailRows,
     );
 
     const assistantRow = screen.getByTestId(
@@ -993,6 +1124,7 @@ describe("VirtualMessageTimeline", () => {
           mode: "bounded-controller",
           sessionId: "session-1",
           totalRows: 82,
+          offscreenRealMountedRows,
           offscreenShellMountedRows,
           virtualUnmountingEnabled: true,
         }),
@@ -1009,9 +1141,14 @@ describe("VirtualMessageTimeline", () => {
         diagnosticEvents.at(-1)?.measurement.acceptedOffscreenShellMeasurements,
       ).toBeGreaterThan(0),
     );
+    await waitFor(() =>
+      expect(
+        diagnosticEvents.at(-1)?.measurement.acceptedOffscreenRealMeasurements,
+      ).toBeGreaterThan(0),
+    );
     expect(
-      diagnosticEvents.at(-1)?.measurement.acceptedOffscreenRealMeasurements,
-    ).toBe(0);
+      screen.getByTestId("virtual-offscreen-real-measurement-host"),
+    ).toHaveAttribute("aria-hidden", "true");
     expect(
       screen.getByTestId("virtual-offscreen-measurement-host"),
     ).toHaveAttribute("aria-hidden", "true");
@@ -1118,9 +1255,12 @@ describe("VirtualMessageTimeline", () => {
       ),
     ).toBeNull();
     expect(
-      latestTimelineDiagnostics(diagnosticsSpy)?.measurement
-        .acceptedOffscreenRealMeasurements,
-    ).toBe(0);
+      screen
+        .queryByTestId("virtual-offscreen-real-measurement-host")
+        ?.querySelector(
+          '[data-virtual-row-offscreen-real-id="message:active-tool:tool-chain"]',
+        ) ?? null,
+    ).toBeNull();
   });
 
   it("unions row-state protected rows into the rendered range", async () => {

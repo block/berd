@@ -140,6 +140,12 @@ interface TranscriptHarnessWindow extends Window {
   __GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__?: TranscriptVirtualTimelineDiagnosticsInput;
 }
 
+const TRANSCRIPT_SCROLL_STABILITY_EPSILON_PX = 1;
+const TRANSCRIPT_SCROLL_STABILITY_FRAMES = 2;
+const TRANSCRIPT_SCROLL_STABILITY_MAX_FRAMES = 12;
+const TRANSCRIPT_FILLED_VIEWPORT_STABILITY_FRAMES = 2;
+const TRANSCRIPT_FILLED_VIEWPORT_MAX_FRAMES = 30;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value != null && !Array.isArray(value);
 }
@@ -261,7 +267,7 @@ export async function playTranscriptOperations(
       Math.max(0, operation.atMs - scheduledClock.elapsedMs),
     );
     const beforeClock = await readTranscriptBrowserMetricsClock(page);
-    const before = await collectTranscriptScrollSnapshot(page, selectors);
+    const before = await waitForStableTranscriptScrollSnapshot(page, selectors);
 
     const applyTiming = await page.evaluate(
       async ({ nextOperation, viewportSelectors }) => {
@@ -403,7 +409,7 @@ export async function playTranscriptOperations(
     );
 
     await settleTranscriptRendererAfterOperation(page);
-    const after = await collectTranscriptScrollSnapshot(page, selectors);
+    const after = await waitForStableTranscriptScrollSnapshot(page, selectors);
     const afterClock = await readTranscriptBrowserMetricsClock(page);
     operationEvidence.push({
       operationIndex,
@@ -577,6 +583,82 @@ export async function collectTranscriptScrollSnapshot(
   );
 }
 
+export async function waitForStableTranscriptScrollSnapshot(
+  page: Page,
+  selectors: TranscriptViewportSelectors = DEFAULT_TRANSCRIPT_VIEWPORT_SELECTORS,
+): Promise<TranscriptScrollSnapshot> {
+  let previous = await collectTranscriptScrollSnapshot(page, selectors);
+  let stableFrames = 0;
+
+  for (
+    let frame = 0;
+    frame < TRANSCRIPT_SCROLL_STABILITY_MAX_FRAMES;
+    frame += 1
+  ) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    const next = await collectTranscriptScrollSnapshot(page, selectors);
+    if (areTranscriptScrollSnapshotsStable(previous, next)) {
+      stableFrames += 1;
+      if (stableFrames >= TRANSCRIPT_SCROLL_STABILITY_FRAMES) {
+        return next;
+      }
+    } else {
+      stableFrames = 0;
+    }
+    previous = next;
+  }
+
+  return previous;
+}
+
+function areTranscriptScrollSnapshotsStable(
+  previous: TranscriptScrollSnapshot,
+  next: TranscriptScrollSnapshot,
+): boolean {
+  return (
+    Math.abs(next.scrollTop - previous.scrollTop) <=
+      TRANSCRIPT_SCROLL_STABILITY_EPSILON_PX &&
+    Math.abs(next.scrollHeight - previous.scrollHeight) <=
+      TRANSCRIPT_SCROLL_STABILITY_EPSILON_PX &&
+    Math.abs(next.clientHeight - previous.clientHeight) <=
+      TRANSCRIPT_SCROLL_STABILITY_EPSILON_PX
+  );
+}
+
+export async function waitForFilledTranscriptViewport(
+  page: Page,
+  selectors: TranscriptViewportSelectors = DEFAULT_TRANSCRIPT_VIEWPORT_SELECTORS,
+): Promise<TranscriptViewportEvidence> {
+  let previous = await collectTranscriptViewportEvidence(page, selectors);
+  let stableFrames = previous.blankViewportPixels <= 0 ? 1 : 0;
+
+  for (
+    let frame = 0;
+    frame < TRANSCRIPT_FILLED_VIEWPORT_MAX_FRAMES;
+    frame += 1
+  ) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    const next = await collectTranscriptViewportEvidence(page, selectors);
+    if (next.blankViewportPixels <= 0 && previous.blankViewportPixels <= 0) {
+      stableFrames += 1;
+      if (stableFrames >= TRANSCRIPT_FILLED_VIEWPORT_STABILITY_FRAMES) {
+        return next;
+      }
+    } else {
+      stableFrames = next.blankViewportPixels <= 0 ? 1 : 0;
+    }
+    previous = next;
+  }
+
+  return previous;
+}
+
 export async function collectTranscriptVirtualTimelineDomCounters(
   page: Page,
   selectors: TranscriptViewportSelectors = DEFAULT_TRANSCRIPT_VIEWPORT_SELECTORS,
@@ -691,7 +773,7 @@ export async function runTranscriptRendererHarness(
   const metrics = await stopTranscriptBrowserMetrics(page);
   const bridgeTimingExclusionWindows = operationEvidence.map((evidence) => ({
     startTime: metrics.startTime + evidence.applyStartedElapsedMs,
-    endTime: metrics.startTime + evidence.applyEndedElapsedMs,
+    endTime: metrics.startTime + evidence.afterElapsedMs,
     reason: `fixture-operation:${evidence.operation.kind}`,
   }));
   const productionTimingMetrics =
@@ -701,7 +783,7 @@ export async function runTranscriptRendererHarness(
     );
   const harnessOperationTimingMetrics =
     await collectTranscriptOperationTimingMetrics(page);
-  const viewport = await collectTranscriptViewportEvidence(page, selectors);
+  const viewport = await waitForFilledTranscriptViewport(page, selectors);
   const productionDiagnostics =
     await collectProductionTranscriptRendererDiagnostics(page);
   const diagnostics = await collectTranscriptRendererDiagnostics(page);

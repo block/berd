@@ -86,6 +86,7 @@ export interface TranscriptDiagnostics
   totalScrollHeight?: number;
   virtualUnmountingEnabled?: boolean;
   blockerIds?: readonly string[];
+  offscreenRealMountedRows?: number;
   offscreenShellMountedRows?: number;
   staleAnchorsDropped?: number;
   missingAnchorsDropped?: number;
@@ -146,6 +147,7 @@ export interface TranscriptVirtualTimelineDiagnosticsInput {
   totalRows?: number;
   logicalRows?: number;
   mountedRows?: number;
+  offscreenRealMountedRows?: number;
   offscreenShellMountedRows?: number;
   protectedRows?: number;
   descriptorChurn?: number;
@@ -436,6 +438,9 @@ export function createTranscriptDiagnosticsFromVirtualTimelineDiagnostics(
     ),
     virtualUnmountingEnabled: input.virtualUnmountingEnabled,
     blockerIds: input.blockerIds ?? input.blockers,
+    offscreenRealMountedRows: finiteNumberOrUndefined(
+      input.offscreenRealMountedRows,
+    ),
     offscreenShellMountedRows: finiteNumberOrUndefined(
       input.offscreenShellMountedRows,
     ),

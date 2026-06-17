@@ -51,6 +51,7 @@ interface VirtualTranscriptRowProps {
     TranscriptVirtualItem,
     "end" | "protected" | "size" | "start" | "visible"
   >;
+  offscreenMeasurementKind?: "real";
   measurementPlan?: TranscriptShellMeasurementPlan;
   isStreaming?: boolean;
   isPulsing?: boolean;
@@ -72,6 +73,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   dateLabel,
   layoutMode = "flow",
   virtualItem,
+  offscreenMeasurementKind,
   measurementPlan,
   isStreaming,
   isPulsing,
@@ -108,15 +110,23 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     previousRowKind,
     layoutMode,
   });
+  const isOffscreenRealMeasurement = offscreenMeasurementKind === "real";
+  const rowTestId = isOffscreenRealMeasurement
+    ? `virtual-offscreen-real-row-${row.rowId}`
+    : `virtual-transcript-row-${row.rowId}`;
   const rowDiagnostics = {
-    "data-virtual-row-id": row.rowId,
+    "data-virtual-row-id": isOffscreenRealMeasurement ? undefined : row.rowId,
     "data-virtual-row-kind": row.kind,
-    "data-virtual-row-message-id": row.messageId,
-    "data-transcript-message-id": row.fragment
-      ? row.fragment.messageScrollTarget
-        ? row.messageId
-        : undefined
+    "data-virtual-row-message-id": isOffscreenRealMeasurement
+      ? undefined
       : row.messageId,
+    "data-transcript-message-id": isOffscreenRealMeasurement
+      ? undefined
+      : row.fragment
+        ? row.fragment.messageScrollTarget
+          ? row.messageId
+          : undefined
+        : row.messageId,
     "data-virtual-row-fragment-id": row.fragment?.fragmentId,
     "data-virtual-row-fragment-index": row.fragment?.fragmentIndex,
     "data-virtual-row-fragment-count": row.fragment?.fragmentCount,
@@ -134,6 +144,8 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     "data-virtual-row-virtual-start": virtualItem?.start,
     "data-virtual-row-virtual-size": virtualItem?.size,
     "data-virtual-row-virtual-end": virtualItem?.end,
+    "data-virtual-row-offscreen-real-id":
+      offscreenMeasurementKind === "real" ? row.rowId : undefined,
     "data-virtual-row-visible": virtualItem
       ? String(virtualItem.visible)
       : undefined,
@@ -230,7 +242,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(spacingClassName)}
@@ -246,7 +258,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(
@@ -278,7 +290,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(
@@ -294,7 +306,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(spacingClassName)}
@@ -306,7 +318,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         data-virtual-row-unsupported="true"
         style={rowStyle}
@@ -317,7 +329,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     rowContent = (
       <div
         ref={registerElement}
-        data-testid={`virtual-transcript-row-${row.rowId}`}
+        data-testid={rowTestId}
         {...rowDiagnostics}
         style={rowStyle}
         className={cn(
@@ -379,6 +391,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.previousRowKind === next.previousRowKind &&
     previous.dateLabel === next.dateLabel &&
     previous.layoutMode === next.layoutMode &&
+    previous.offscreenMeasurementKind === next.offscreenMeasurementKind &&
     previous.measurementPlan === next.measurementPlan &&
     previous.isStreaming === next.isStreaming &&
     previous.isPulsing === next.isPulsing &&

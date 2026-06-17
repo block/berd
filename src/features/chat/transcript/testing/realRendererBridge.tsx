@@ -22,6 +22,7 @@ import {
 import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
 import { VirtualMessageTimeline } from "@/features/chat/ui/VirtualMessageTimeline";
 import type { Message } from "@/shared/types/messages";
+import type { TranscriptVirtualTimelineRowStateControls } from "../virtual/react/useTranscriptVirtualTimeline";
 import type {
   TranscriptFixture,
   TranscriptFixtureSession,
@@ -372,6 +373,10 @@ function scrollToMessageOffset(messageId: string, offsetPx: number) {
   }
 }
 
+function rowIdForMessageId(messageId: string): string {
+  return `message:${messageId}`;
+}
+
 function isNearBottom(): boolean {
   const scroller = getScroller();
   if (!scroller) {
@@ -540,6 +545,8 @@ function RealRendererBridgeApp() {
   const backgroundStreamingTasksRef = useRef(
     new Map<string, BackgroundStreamingTask>(),
   );
+  const virtualTimelineControlsRef =
+    useRef<TranscriptVirtualTimelineRowStateControls | null>(null);
   const pendingScrollPositionRef = useRef<"tail" | "top" | "middle" | null>(
     null,
   );
@@ -888,6 +895,14 @@ function RealRendererBridgeApp() {
           break;
         }
         case "resizeMcpApp":
+          virtualTimelineControlsRef.current?.setRowMcpActivity(
+            rowIdForMessageId(operation.messageId),
+            true,
+            {
+              kind: "recent-resize",
+              sourceId: `mcp-resize:${operation.messageId}`,
+            },
+          );
           for (const height of operation.heights) {
             metricsRef.current.measurementAcceptedCount += 1;
             await commitState((previous) =>
@@ -905,6 +920,91 @@ function RealRendererBridgeApp() {
               ),
             );
           }
+          break;
+        case "mcpFocus":
+          virtualTimelineControlsRef.current?.setRowFocused(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              focusTargetId: operation.messageId,
+              sourceId:
+                operation.sourceId ?? `mcp-focus:${operation.messageId}`,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpOverlay":
+          virtualTimelineControlsRef.current?.setRowOpenOverlay(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              overlayKind: "popover",
+              overlayId:
+                operation.sourceId ?? `mcp-overlay:${operation.messageId}`,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpHostWork":
+          virtualTimelineControlsRef.current?.setRowMcpActivity(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              kind: "host-request",
+              sourceId: operation.sourceId ?? `mcp-host:${operation.messageId}`,
+              ttlMs: operation.ttlMs,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpNestedToolWork":
+          virtualTimelineControlsRef.current?.setRowMcpActivity(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              kind: "nested-tool-request",
+              sourceId:
+                operation.sourceId ?? `mcp-nested:${operation.messageId}`,
+              ttlMs: operation.ttlMs,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpRecentMessage":
+          virtualTimelineControlsRef.current?.setRowMcpActivity(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              kind: "recent-message",
+              sourceId:
+                operation.sourceId ?? `mcp-message:${operation.messageId}`,
+              ttlMs: operation.ttlMs,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpRecentResize":
+          virtualTimelineControlsRef.current?.setRowMcpActivity(
+            rowIdForMessageId(operation.messageId),
+            operation.active !== false,
+            {
+              kind: "recent-resize",
+              sourceId:
+                operation.sourceId ?? `mcp-resize:${operation.messageId}`,
+              ttlMs: operation.ttlMs,
+              nowMs: operation.nowMs,
+            },
+          );
+          await nextFrame();
+          break;
+        case "mcpClearProtections":
+          virtualTimelineControlsRef.current?.clearSessionRowState();
+          await nextFrame();
           break;
         case "imageLoad":
           metricsRef.current.measurementAcceptedCount += 1;
@@ -1147,6 +1247,7 @@ function RealRendererBridgeApp() {
         }}
         footer={footer}
         className={timelineClassName}
+        virtualTimelineControlsRef={virtualTimelineControlsRef}
       />
     ) : (
       <MessageTimeline
