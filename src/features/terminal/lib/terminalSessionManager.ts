@@ -53,10 +53,53 @@ const MIN_COLS = 20;
 const MIN_ROWS = 5;
 const DEFAULT_COLS = 80;
 const DEFAULT_ROWS = 24;
+const MAX_BUFFERED_OUTPUT_CHARS = 1_000_000;
+const MAX_OUTPUT_WRITE_CHARS_PER_FRAME = 64 * 1024;
+const TERMINAL_PARKING_ROOT_ID = "goose-terminal-parking-root";
 
 const sessions = new Map<string, TerminalSession>();
 const queuedCommands = new Map<string, string[]>();
 const statusListeners = new Map<string, Set<TerminalSessionStatusListener>>();
+let renderingSuspended = false;
+
+function createTerminalHostElement(): HTMLDivElement {
+  const element = document.createElement("div");
+  element.style.height = "100%";
+  element.style.minHeight = "0";
+  element.style.overflow = "hidden";
+  element.style.width = "100%";
+  return element;
+}
+
+function getTerminalParkingRoot(): HTMLDivElement | null {
+  if (typeof document === "undefined") {
+    return null;
+  }
+
+  const existing = document.getElementById(TERMINAL_PARKING_ROOT_ID);
+  if (existing instanceof HTMLDivElement) {
+    return existing;
+  }
+
+  const element = document.createElement("div");
+  element.id = TERMINAL_PARKING_ROOT_ID;
+  element.setAttribute("aria-hidden", "true");
+  element.style.display = "none";
+  document.body.appendChild(element);
+  return element;
+}
+
+function parkTerminalHostElement(element: HTMLDivElement): void {
+  // xterm owns the terminal DOM after open(); `terminal.element` is its
+  // containing element, and open() must run against a visible/measured parent:
+  // https://xtermjs.org/docs/api/terminal/classes/terminal/#element
+  // https://xtermjs.org/docs/api/terminal/classes/terminal/#open
+  //
+  // Park the stable host outside React's unmounting subtree so switching
+  // sessions does not make React synchronously tear down xterm's scrollback and
+  // renderer surface. The next attach moves this same host back into view.
+  getTerminalParkingRoot()?.appendChild(element);
+}
 
 function clearQueuedCommands(sessionKey: string): void {
   queuedCommands.delete(sessionKey);
@@ -107,7 +150,12 @@ export class TerminalSession {
   private pendingBackendRows: number | null = null;
   private fontReadyToken = 0;
   private animationFrame = 0;
+  private queuedOutput = "";
+  private outputAnimationFrame = 0;
+  private outputWriteInFlight = false;
+  private outputWriteToken = 0;
   private fitDeferred = false;
+  private hostElement: HTMLDivElement | null = null;
   private attachedContainer: HTMLDivElement | null = null;
   private disposed = false;
   private listeners = new Set<TerminalSessionListener>();
@@ -168,18 +216,17 @@ export class TerminalSession {
 
     this.attachedContainer = container;
     container.textContent = "";
-    if (this.terminal.element) {
-      // Tab switching intentionally reparents the existing xterm DOM element
-      // so the live session and scrollback survive panel unmounts. The
-      // reattach test covers this path; revisit if xterm renderers/addons
-      // change how the terminal owns its element.
-      container.appendChild(this.terminal.element);
-    } else {
-      this.terminal.open(container);
+    const hostElement = this.hostElement ?? createTerminalHostElement();
+    this.hostElement = hostElement;
+    container.appendChild(hostElement);
+    if (!this.terminal.element) {
+      // First open only: xterm measures its parent during open(), so this must
+      // happen after the host is in the visible panel, not while parked.
+      this.terminal.open(hostElement);
     }
-    this.terminal.focus();
     this.refreshAfterFontsReady();
     this.scheduleFitAndResize();
+    this.scheduleOutputDrain();
 
     this.resizeObserver?.disconnect();
     this.resizeObserver = new ResizeObserver(() => {
@@ -188,20 +235,30 @@ export class TerminalSession {
     this.resizeObserver.observe(container);
 
     return () => {
-      if (this.attachedContainer === container) {
-        this.attachedContainer = null;
-      }
-      this.resizeObserver?.disconnect();
-      this.resizeObserver = null;
-      if (this.animationFrame) {
-        window.cancelAnimationFrame(this.animationFrame);
-        this.animationFrame = 0;
-      }
+      this.detach(container);
     };
   }
 
+  detach(container: HTMLDivElement): void {
+    if (this.disposed || this.attachedContainer !== container) {
+      return;
+    }
+
+    this.attachedContainer = null;
+    if (this.hostElement) {
+      parkTerminalHostElement(this.hostElement);
+    }
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    if (this.animationFrame) {
+      window.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = 0;
+    }
+    this.cancelOutputDrain();
+  }
+
   focusAndResize(): void {
-    if (this.disposed) {
+    if (this.disposed || renderingSuspended) {
       return;
     }
 
@@ -229,9 +286,26 @@ export class TerminalSession {
 
     this.fitDeferred = false;
     this.scheduleFitAndResize();
-    if (focus) {
+    if (focus && !renderingSuspended) {
       this.terminal.focus();
     }
+  }
+
+  suspendRendering(): void {
+    if (this.animationFrame) {
+      window.cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = 0;
+    }
+    this.cancelOutputDrain();
+  }
+
+  resumeRendering(): void {
+    if (this.disposed || renderingSuspended || !this.attachedContainer) {
+      return;
+    }
+
+    this.scheduleFitAndResize();
+    this.scheduleOutputDrain();
   }
 
   runCommand(command: string): void {
@@ -269,6 +343,7 @@ export class TerminalSession {
     if (terminalId) {
       void stopTerminal(terminalId);
     }
+    this.clearQueuedOutput();
     this.terminal.clear();
     this.start();
   }
@@ -282,12 +357,16 @@ export class TerminalSession {
     sessions.delete(this.key);
     clearQueuedCommands(this.key);
     this.startupToken = null;
+    this.hostElement?.remove();
+    this.attachedContainer = null;
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
     if (this.animationFrame) {
       window.cancelAnimationFrame(this.animationFrame);
       this.animationFrame = 0;
     }
+    this.cancelOutputDrain();
+    this.clearQueuedOutput();
     if (writeStopped) {
       this.terminal.writeln("");
       this.terminal.writeln(`[${this.labels.stopped}]`);
@@ -337,7 +416,7 @@ export class TerminalSession {
 
         this.terminalId = terminalId;
         this.setStatus("running", "start");
-        this.fitAndResize();
+        this.scheduleFitAndResize();
       })
       .catch((error) => {
         if (this.disposed || this.startupToken !== startupToken) {
@@ -356,10 +435,10 @@ export class TerminalSession {
       case "started":
         this.terminalId = event.data.terminalId;
         this.setStatus("running", "start");
-        this.fitAndResize();
+        this.scheduleFitAndResize();
         break;
       case "output":
-        this.terminal.write(event.data.data);
+        this.enqueueOutput(event.data.data);
         break;
       case "exited":
         this.terminalId = null;
@@ -384,7 +463,7 @@ export class TerminalSession {
   }
 
   private scheduleFitAndResize(): void {
-    if (this.fitDeferred) {
+    if (this.fitDeferred || renderingSuspended) {
       return;
     }
 
@@ -397,10 +476,83 @@ export class TerminalSession {
     });
   }
 
+  private enqueueOutput(data: string): void {
+    if (this.disposed || !data) {
+      return;
+    }
+
+    this.queuedOutput += data;
+    if (this.queuedOutput.length > MAX_BUFFERED_OUTPUT_CHARS) {
+      this.queuedOutput = this.queuedOutput.slice(-MAX_BUFFERED_OUTPUT_CHARS);
+    }
+    this.scheduleOutputDrain();
+  }
+
+  private scheduleOutputDrain(): void {
+    // Backend output can arrive while the user is clicking between sessions.
+    // Keep xterm parsing/rendering out of the event callback, cap each frame's
+    // work, and do not render parked terminals until they are visible again.
+    if (
+      this.disposed ||
+      renderingSuspended ||
+      this.outputAnimationFrame ||
+      this.outputWriteInFlight ||
+      !this.attachedContainer ||
+      !this.queuedOutput
+    ) {
+      return;
+    }
+
+    this.outputAnimationFrame = window.requestAnimationFrame(() => {
+      this.outputAnimationFrame = 0;
+      this.writeNextOutputChunk();
+    });
+  }
+
+  private writeNextOutputChunk(): void {
+    if (
+      this.disposed ||
+      renderingSuspended ||
+      this.outputWriteInFlight ||
+      !this.attachedContainer ||
+      !this.queuedOutput
+    ) {
+      return;
+    }
+
+    const output = this.queuedOutput.slice(0, MAX_OUTPUT_WRITE_CHARS_PER_FRAME);
+    this.queuedOutput = this.queuedOutput.slice(output.length);
+    this.outputWriteInFlight = true;
+    const token = this.outputWriteToken;
+    this.terminal.write(output, () => {
+      if (this.disposed || token !== this.outputWriteToken) {
+        return;
+      }
+
+      this.outputWriteInFlight = false;
+      this.scheduleOutputDrain();
+    });
+  }
+
+  private clearQueuedOutput(): void {
+    this.queuedOutput = "";
+    this.outputWriteInFlight = false;
+    this.cancelOutputDrain();
+    this.outputWriteToken += 1;
+  }
+
+  private cancelOutputDrain(): void {
+    if (this.outputAnimationFrame) {
+      window.cancelAnimationFrame(this.outputAnimationFrame);
+      this.outputAnimationFrame = 0;
+    }
+  }
+
   private fitAndResize(): void {
     const container = this.attachedContainer;
     if (
       this.disposed ||
+      renderingSuspended ||
       !container ||
       container.clientWidth <= 0 ||
       container.clientHeight <= 0
@@ -470,6 +622,10 @@ export class TerminalSession {
     const fontReadyToken = this.fontReadyToken;
     void document.fonts.ready.then(() => {
       if (this.disposed || this.fontReadyToken !== fontReadyToken) {
+        return;
+      }
+
+      if (renderingSuspended) {
         return;
       }
 
@@ -582,6 +738,28 @@ export function subscribeTerminalSessionStatus(
       statusListeners.delete(sessionKey);
     }
   };
+}
+
+export function getTerminalSessionStatus(
+  sessionKey: string,
+): TerminalStatus | null {
+  return sessions.get(sessionKey)?.status ?? null;
+}
+
+export function setTerminalRenderingSuspended(suspended: boolean): void {
+  if (renderingSuspended === suspended) {
+    return;
+  }
+
+  renderingSuspended = suspended;
+
+  for (const session of sessions.values()) {
+    if (suspended) {
+      session.suspendRendering();
+    } else {
+      session.resumeRendering();
+    }
+  }
 }
 
 export function getOrCreateTerminalSession(

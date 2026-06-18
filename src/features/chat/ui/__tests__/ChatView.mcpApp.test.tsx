@@ -70,6 +70,13 @@ vi.mock("@/shared/lib/platform", () => ({
   getPlatform: () => "linux",
 }));
 
+vi.mock("@/app/lib/scheduleAfterNextPaint", () => ({
+  scheduleAfterNextPaint: (callback: () => void) => {
+    callback();
+    return vi.fn();
+  },
+}));
+
 vi.mock("../VirtualMessageTimelineGate", () => ({
   VirtualMessageTimelineGate: (props: {
     messages: Array<{
@@ -1071,10 +1078,7 @@ describe("ChatView MCP app messaging", () => {
 
     await user.click(screen.getByRole("button", { name: "toggle terminal" }));
 
-    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
-      "data-collapsed",
-      "true",
-    );
+    expect(screen.queryByTestId("terminal-panel")).toBeNull();
     expect(
       screen.getByRole("button", { name: "terminal.expand" }),
     ).toBeInTheDocument();

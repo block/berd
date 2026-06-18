@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { FeedbackDialog } from "@/features/feedback/FeedbackDialog";
@@ -57,6 +64,7 @@ import {
   areAppNavigationLocationsEqual,
   getAppNavigationLocation,
 } from "./lib/appNavigationLocation";
+import { useStagedAppContentLocation } from "./lib/useStagedAppContentLocation";
 import { loadStoredHomeSessionId } from "./lib/homeSessionStorage";
 import { resolveSupportedSessionModelPreference } from "./lib/resolveSupportedSessionModelPreference";
 import {
@@ -94,6 +102,7 @@ import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowS
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
+import { setTerminalRenderingSuspended } from "@/features/terminal/lib/terminalSessionManager";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { toChatSkillDraft } from "@/features/skills/lib/skillChatPrompt";
@@ -607,9 +616,51 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const homeSession = homeSessionId
     ? sessions.find((session) => session.id === homeSessionId)
     : undefined;
+  const targetLocation = useMemo(
+    () =>
+      getAppNavigationLocation(
+        activeView,
+        activeSessionId,
+        activeSettingsSection,
+        skillsSkillId,
+        agentsPersonaId,
+        automationsRoute,
+        builderbotRoute,
+        activeDesignSystemSection,
+      ),
+    [
+      activeDesignSystemSection,
+      activeSessionId,
+      activeSettingsSection,
+      activeView,
+      agentsPersonaId,
+      automationsRoute,
+      builderbotRoute,
+      skillsSkillId,
+    ],
+  );
+  const { renderedLocation, isPreparingContent } =
+    useStagedAppContentLocation(targetLocation);
+  const renderedSession =
+    renderedLocation.view === "chat" && renderedLocation.sessionId
+      ? sessions.find((session) => session.id === renderedLocation.sessionId)
+      : undefined;
   const contextPanelLabel = isContextPanelOpen
     ? t("context.closePanel")
     : t("context.openPanel");
+
+  useEffect(() => {
+    perfLog(
+      `[perf:nav] target selected location=${JSON.stringify(targetLocation)}`,
+    );
+  }, [targetLocation]);
+
+  useLayoutEffect(() => {
+    setTerminalRenderingSuspended(isPreparingContent);
+    return () => {
+      setTerminalRenderingSuspended(false);
+    };
+  }, [isPreparingContent]);
 
   const updateNavigationAvailability = useCallback(() => {
     const history = navigationHistoryRef.current;
@@ -641,16 +692,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   useEffect(() => {
     const history = navigationHistoryRef.current;
-    const location = getAppNavigationLocation(
-      activeView,
-      activeSessionId,
-      activeSettingsSection,
-      skillsSkillId,
-      agentsPersonaId,
-      automationsRoute,
-      builderbotRoute,
-      activeDesignSystemSection,
-    );
+    const location = targetLocation;
     const currentLocation = history.entries[history.index];
 
     if (history.isApplying) {
@@ -685,17 +727,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     history.entries = nextEntries;
     history.index = nextEntries.length - 1;
     updateNavigationAvailability();
-  }, [
-    activeSessionId,
-    activeDesignSystemSection,
-    activeSettingsSection,
-    activeView,
-    agentsPersonaId,
-    automationsRoute,
-    builderbotRoute,
-    skillsSkillId,
-    updateNavigationAvailability,
-  ]);
+  }, [targetLocation, updateNavigationAvailability]);
 
   useHomeSessionStateSync({
     homeSessionId,
@@ -2242,8 +2274,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     !forceStartupLoading &&
     !startupIssue &&
     children == null &&
-    activeView !== "chat" &&
-    !(activeView === "automations" && automationsRoute.surface === "builder");
+    !isPreparingContent &&
+    renderedLocation.view !== "chat" &&
+    !(
+      renderedLocation.view === "automations" &&
+      renderedLocation.route.surface === "builder"
+    );
 
   const requestGlobalComposerFocus = useCallback(() => {
     if (showGlobalComposer) {
@@ -2254,6 +2290,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     pendingGlobalComposerFocusViewRef.current = "home";
   }, [showGlobalComposer]);
 
+  const canDeferGlobalComposerFocus = children == null && isPreparingContent;
   useEffect(() => {
     const pendingView = pendingGlobalComposerFocusViewRef.current;
     if (!pendingView) {
@@ -2262,14 +2299,23 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
     // Only bridge the Cmd+N unmount gap. If Home lands without the composer,
     // drop the request so a later unrelated composer-visible route won't steal focus.
-    if (activeView !== pendingView || !showGlobalComposer) {
+    if (activeView !== pendingView) {
+      pendingGlobalComposerFocusViewRef.current = null;
+      return;
+    }
+
+    if (!showGlobalComposer) {
+      if (canDeferGlobalComposerFocus) {
+        return;
+      }
+
       pendingGlobalComposerFocusViewRef.current = null;
       return;
     }
 
     pendingGlobalComposerFocusViewRef.current = null;
     setGlobalComposerFocusRequest((request) => request + 1);
-  }, [activeView, showGlobalComposer]);
+  }, [activeView, canDeferGlobalComposerFocus, showGlobalComposer]);
 
   const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
     switch (activeView) {
@@ -2632,18 +2678,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         {children ?? (
           <>
             <AppShellContent
-              activeView={activeView}
-              activeSettingsSection={activeSettingsSection}
+              targetLocation={targetLocation}
+              renderedLocation={renderedLocation}
+              isPreparingContent={isPreparingContent}
               activeConnectionsTab={activeConnectionsTab}
-              activeSkillsSkillId={skillsSkillId}
-              activeAgentsPersonaId={agentsPersonaId}
-              activeAutomationsRoute={automationsRoute}
-              activeBuilderbotRoute={builderbotRoute}
-              activeDesignSystemSection={activeDesignSystemSection}
-              activeSession={activeSession}
+              renderedSession={renderedSession}
               homeSessionId={homeSessionId}
               homeViewportLeftOcclusionPx={
-                activeView === "home" ? sidebarOuterWidth : 0
+                renderedLocation.view === "home" ? sidebarOuterWidth : 0
               }
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}
@@ -2700,7 +2742,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                   modelId: homeSession?.modelId,
                 }}
                 suggestedPersonaId={
-                  activeView === "agents" ? agentsPersonaId : null
+                  renderedLocation.view === "agents"
+                    ? renderedLocation.personaId
+                    : null
                 }
               />
             ) : null}

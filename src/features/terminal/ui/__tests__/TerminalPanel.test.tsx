@@ -1,6 +1,6 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrCreateTerminalSession } from "../../lib/terminalSessionManager";
 import { TerminalPanel } from "../TerminalPanel";
 
@@ -14,11 +14,22 @@ const mocks = vi.hoisted(() => ({
   resolvedTheme: "light" as "dark" | "light",
   sessionStatus: "running",
   stop: vi.fn(),
-  subscriptionListener: null as (() => void) | null,
+  statusListener: null as (() => void) | null,
+  subscribeTerminalSessionStatus: vi.fn(
+    (_sessionKey: string, listener: () => void) => {
+      mocks.statusListener = listener;
+      return vi.fn();
+    },
+  ),
+  scheduleAfterNextPaint: vi.fn((callback: () => void) => {
+    const frameId = window.requestAnimationFrame(() => callback());
+    return () => window.cancelAnimationFrame(frameId);
+  }),
   subscribe: vi.fn((listener: () => void) => {
     mocks.subscriptionListener = listener;
     return vi.fn();
   }),
+  subscriptionListener: null as (() => void) | null,
   t: vi.fn((key: string) => key),
 }));
 
@@ -30,7 +41,13 @@ vi.mock("@/shared/theme/ThemeProvider", () => ({
   useTheme: () => ({ resolvedTheme: mocks.resolvedTheme }),
 }));
 
+vi.mock("@/app/lib/scheduleAfterNextPaint", () => ({
+  scheduleAfterNextPaint: (callback: () => void) =>
+    mocks.scheduleAfterNextPaint(callback),
+}));
+
 vi.mock("../../lib/terminalSessionManager", () => ({
+  getTerminalSessionStatus: vi.fn(() => mocks.sessionStatus),
   getOrCreateTerminalSession: vi.fn(() => ({
     attach: mocks.attach.mockImplementation(() => mocks.detach),
     deferResize: mocks.deferResize,
@@ -41,15 +58,50 @@ vi.mock("../../lib/terminalSessionManager", () => ({
       return mocks.sessionStatus;
     },
     stop: mocks.stop,
-    subscribe: mocks.subscribe,
     updateLabels: vi.fn(),
   })),
+  subscribeTerminalSessionStatus: (sessionKey: string, listener: () => void) =>
+    mocks.subscribeTerminalSessionStatus(sessionKey, listener),
 }));
 
 const getOrCreateTerminalSessionMock = vi.mocked(getOrCreateTerminalSession);
 
+function mockAnimationFrames() {
+  let nextFrameId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  const requestAnimationFrameSpy = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      const frameId = nextFrameId;
+      nextFrameId += 1;
+      callbacks.set(frameId, callback);
+      return frameId;
+    });
+  const cancelAnimationFrameSpy = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation((frameId) => {
+      callbacks.delete(frameId);
+    });
+
+  return {
+    restore: () => {
+      requestAnimationFrameSpy.mockRestore();
+      cancelAnimationFrameSpy.mockRestore();
+    },
+    runAll: () => {
+      for (const [frameId, callback] of Array.from(callbacks)) {
+        callbacks.delete(frameId);
+        callback(performance.now());
+      }
+    },
+  };
+}
+
 describe("TerminalPanel", () => {
+  let frames: ReturnType<typeof mockAnimationFrames>;
+
   beforeEach(() => {
+    frames = mockAnimationFrames();
     mocks.attach.mockClear();
     mocks.detach.mockClear();
     mocks.deferResize.mockClear();
@@ -59,6 +111,9 @@ describe("TerminalPanel", () => {
     mocks.resolvedTheme = "light";
     mocks.sessionStatus = "running";
     mocks.stop.mockClear();
+    mocks.statusListener = null;
+    mocks.scheduleAfterNextPaint.mockClear();
+    mocks.subscribeTerminalSessionStatus.mockClear();
     mocks.subscriptionListener = null;
     mocks.subscribe.mockClear();
     mocks.t.mockClear();
@@ -73,6 +128,11 @@ describe("TerminalPanel", () => {
     document.documentElement.style.removeProperty("--accent");
   });
 
+  afterEach(() => {
+    frames.restore();
+    vi.useRealTimers();
+  });
+
   it("does not defer terminal resize when mounted expanded", () => {
     render(
       <TerminalPanel
@@ -84,6 +144,10 @@ describe("TerminalPanel", () => {
         onClose={vi.fn()}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     expect(mocks.deferResize).not.toHaveBeenCalled();
     expect(mocks.resumeResize).not.toHaveBeenCalled();
@@ -100,6 +164,10 @@ describe("TerminalPanel", () => {
         onClose={vi.fn()}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     screen
       .getByRole("region", { name: "terminal.title" })
@@ -128,6 +196,10 @@ describe("TerminalPanel", () => {
         onClose={vi.fn()}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     expect(getOrCreateTerminalSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -158,6 +230,10 @@ describe("TerminalPanel", () => {
       />,
     );
 
+    act(() => {
+      frames.runAll();
+    });
+
     expect(getOrCreateTerminalSessionMock).toHaveBeenCalledWith(
       expect.objectContaining({
         theme: expect.objectContaining({
@@ -187,6 +263,13 @@ describe("TerminalPanel", () => {
           onClose={vi.fn()}
         />,
       );
+
+      expect(mocks.deferResize).not.toHaveBeenCalled();
+      expect(mocks.resumeResize).not.toHaveBeenCalled();
+
+      act(() => {
+        frames.runAll();
+      });
 
       expect(mocks.deferResize).toHaveBeenCalledTimes(1);
       expect(mocks.resumeResize).not.toHaveBeenCalled();
@@ -231,6 +314,14 @@ describe("TerminalPanel", () => {
     expect(
       screen.queryByRole("button", { name: "terminal.collapse" }),
     ).toBeNull();
+    expect(getOrCreateTerminalSessionMock).not.toHaveBeenCalled();
+    expect(mocks.attach).not.toHaveBeenCalled();
+
+    act(() => {
+      frames.runAll();
+    });
+
+    expect(getOrCreateTerminalSessionMock).toHaveBeenCalledTimes(1);
     expect(mocks.attach).toHaveBeenCalledTimes(1);
   });
 
@@ -243,6 +334,10 @@ describe("TerminalPanel", () => {
         showHeader={false}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     expect(mocks.attach).toHaveBeenCalledTimes(1);
 
@@ -257,6 +352,10 @@ describe("TerminalPanel", () => {
         showHeader={false}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     expect(mocks.attach).toHaveBeenCalledTimes(2);
   });
@@ -273,7 +372,29 @@ describe("TerminalPanel", () => {
     );
 
     expect(screen.getByText("terminal.status.exited")).toBeInTheDocument();
+    act(() => {
+      frames.runAll();
+    });
     expect(mocks.attach).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates terminal status through the external store subscription", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:tab-1"
+        cwd="/Users/test/repo"
+        collapsed={false}
+      />,
+    );
+
+    expect(screen.getByText("terminal.status.running")).toBeInTheDocument();
+
+    mocks.sessionStatus = "exited";
+    act(() => {
+      mocks.statusListener?.();
+    });
+
+    expect(screen.getByText("terminal.status.exited")).toBeInTheDocument();
   });
 
   it("toggles when the header background is clicked", async () => {
@@ -331,6 +452,10 @@ describe("TerminalPanel", () => {
       />,
     );
 
+    act(() => {
+      frames.runAll();
+    });
+
     await user.click(screen.getByRole("button", { name: "terminal.restart" }));
     expect(mocks.restart).toHaveBeenCalledTimes(1);
     expect(onCollapse).not.toHaveBeenCalled();
@@ -375,6 +500,10 @@ describe("TerminalPanel", () => {
         onClose={vi.fn()}
       />,
     );
+
+    act(() => {
+      frames.runAll();
+    });
 
     await user.click(screen.getByRole("button", { name: "terminal.restart" }));
 

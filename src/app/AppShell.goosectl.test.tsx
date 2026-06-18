@@ -124,51 +124,58 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
 
 vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: (({
-    activeView,
-    activeAutomationsRoute,
+    targetLocation,
     onNavigateAutomations,
     onAutomationBuilderLeaveActionChange,
     onCreatePersona,
     onArchiveChat,
-  }) => (
-    <section>
-      <div data-testid="active-view">{activeView}</div>
-      <button type="button" onClick={() => onArchiveChat("session-1")}>
-        Archive session
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onNavigateAutomations({
-            surface: "builder",
-            automationId: "automation-1",
-          })
-        }
-      >
-        Open automation builder
-      </button>
-      {activeView === "automations" &&
-      activeAutomationsRoute.surface === "builder" ? (
+  }) => {
+    const activeView = targetLocation.view;
+    const activeAutomationsRoute =
+      targetLocation.view === "automations"
+        ? targetLocation.route
+        : { surface: "overview" };
+
+    return (
+      <section>
+        <div data-testid="active-view">{activeView}</div>
+        <button type="button" onClick={() => onArchiveChat("session-1")}>
+          Archive session
+        </button>
         <button
           type="button"
           onClick={() =>
-            onAutomationBuilderLeaveActionChange?.({
-              hasUnsavedChanges: true,
-              save: async () => true,
-              discard: () => {},
+            onNavigateAutomations({
+              surface: "builder",
+              automationId: "automation-1",
             })
           }
         >
-          Mark automation edits unsaved
+          Open automation builder
         </button>
-      ) : null}
-      {activeView === "agents" ? (
-        <button type="button" onClick={onCreatePersona}>
-          Create agent
-        </button>
-      ) : null}
-    </section>
-  )) satisfies typeof AppShellContentType,
+        {activeView === "automations" &&
+        activeAutomationsRoute.surface === "builder" ? (
+          <button
+            type="button"
+            onClick={() =>
+              onAutomationBuilderLeaveActionChange?.({
+                hasUnsavedChanges: true,
+                save: async () => true,
+                discard: () => {},
+              })
+            }
+          >
+            Mark automation edits unsaved
+          </button>
+        ) : null}
+        {activeView === "agents" ? (
+          <button type="button" onClick={onCreatePersona}>
+            Create agent
+          </button>
+        ) : null}
+      </section>
+    );
+  }) satisfies typeof AppShellContentType,
 }));
 
 function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {

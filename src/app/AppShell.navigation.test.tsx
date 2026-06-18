@@ -43,6 +43,9 @@ const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockAfterNextPaint = vi.hoisted(() => ({
+  callbacks: [] as Array<{ callback: () => void; cancelled: boolean }>,
+}));
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -72,6 +75,15 @@ function mockVisibleRegionRects() {
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
     rect(),
   );
+}
+
+function flushAfterNextPaintCallbacks() {
+  const entries = mockAfterNextPaint.callbacks.splice(0);
+  for (const entry of entries) {
+    if (!entry.cancelled) {
+      entry.callback();
+    }
+  }
 }
 
 function appShellWithTheme(children?: ReactNode) {
@@ -211,14 +223,22 @@ vi.mock("@/features/providers/hooks/useAgentProviderStatus", () => ({
   }),
 }));
 
+vi.mock("./lib/scheduleAfterNextPaint", () => ({
+  scheduleAfterNextPaint: (callback: () => void) => {
+    const entry = { callback, cancelled: false };
+    mockAfterNextPaint.callbacks.push(entry);
+    return () => {
+      entry.cancelled = true;
+    };
+  },
+}));
+
 vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: (({
-    activeView,
-    activeSettingsSection,
-    activeSkillsSkillId,
-    activeAgentsPersonaId,
-    activeAutomationsRoute,
-    activeBuilderbotRoute,
+    targetLocation,
+    renderedLocation,
+    isPreparingContent,
+    renderedSession,
     onNavigateSkills,
     onNavigateAgents,
     onNavigateAutomations,
@@ -233,127 +253,158 @@ vi.mock("./ui/AppShellContent", () => ({
     onArchiveChat,
     onOpenAgent,
     onSelectSession,
-  }) => (
-    <section>
-      <div data-testid="active-view">{activeView}</div>
-      <div data-testid="settings-section">{activeSettingsSection}</div>
-      <div data-testid="skill-route">{activeSkillsSkillId ?? "list"}</div>
-      <div data-testid="agent-route">{activeAgentsPersonaId ?? "list"}</div>
-      <div data-testid="automation-route">
-        {JSON.stringify(activeAutomationsRoute)}
-      </div>
-      <div data-testid="builderbot-route">
-        {JSON.stringify(activeBuilderbotRoute)}
-      </div>
-      <button
-        type="button"
-        onClick={() => {
-          onSkillsBreadcrumbLabelChange?.("Code Review");
-          onNavigateSkills("skill-1");
-        }}
-      >
-        Open skill detail
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onAgentsBreadcrumbLabelChange?.("Reviewer");
-          onNavigateAgents("persona-1");
-        }}
-      >
-        Open agent detail
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onAutomationsBreadcrumbLabelChange?.("History");
-          onNavigateAutomations({ surface: "history", selectedRun: null });
-        }}
-      >
-        Open automation history
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onAutomationsBreadcrumbLabelChange?.("Add automation");
-          onNavigateAutomations({
-            surface: "builder",
-            automationId: "automation-1",
-          });
-        }}
-      >
-        Open automation builder
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onBuilderbotBreadcrumbLabelChange?.("TASK-1");
-          onNavigateBuilderbot({ surface: "task", taskKey: "TASK-1" });
-        }}
-      >
-        Open builderbot task
-      </button>
-      <button
-        type="button"
-        onClick={() => {
-          onBuilderbotBreadcrumbLabelChange?.("Daily docs");
-          onNavigateBuilderbot({
-            surface: "automation",
-            automationId: "daily-docs",
-          });
-        }}
-      >
-        Open builderbot automation
-      </button>
-      {activeView === "automations" &&
-      activeAutomationsRoute.surface === "builder" ? (
+  }) => {
+    const activeView = targetLocation.view;
+    const activeSettingsSection =
+      targetLocation.view === "settings"
+        ? targetLocation.settingsSection
+        : "general";
+    const activeSkillsSkillId =
+      targetLocation.view === "skills" ? targetLocation.skillId : null;
+    const activeAgentsPersonaId =
+      targetLocation.view === "agents" ? targetLocation.personaId : null;
+    const activeAutomationsRoute =
+      targetLocation.view === "automations"
+        ? targetLocation.route
+        : { surface: "overview" };
+    const activeBuilderbotRoute =
+      targetLocation.view === "builderbot"
+        ? targetLocation.route
+        : { surface: "overview" };
+
+    return (
+      <section>
+        <div data-testid="active-view">{activeView}</div>
+        <div data-testid="rendered-view">{renderedLocation.view}</div>
+        <div data-testid="preparing-content">{String(isPreparingContent)}</div>
+        <div data-testid="rendered-session-id">
+          {renderedSession?.id ?? "none"}
+        </div>
+        <div data-testid="settings-section">{activeSettingsSection}</div>
+        <div data-testid="skill-route">{activeSkillsSkillId ?? "list"}</div>
+        <div data-testid="agent-route">{activeAgentsPersonaId ?? "list"}</div>
+        <div data-testid="automation-route">
+          {JSON.stringify(activeAutomationsRoute)}
+        </div>
+        <div data-testid="builderbot-route">
+          {JSON.stringify(activeBuilderbotRoute)}
+        </div>
         <button
           type="button"
-          onClick={() =>
-            onAutomationBuilderLeaveActionChange?.({
-              hasUnsavedChanges: true,
-              save: async () => {
-                mockAutomationBuilderSave();
-                return true;
-              },
-              discard: () => {},
-            })
-          }
+          onClick={() => {
+            onSkillsBreadcrumbLabelChange?.("Code Review");
+            onNavigateSkills("skill-1");
+          }}
         >
-          Mark automation edits unsaved
+          Open skill detail
         </button>
-      ) : null}
-      <button type="button" onClick={() => onOpenAgent?.("persona-resolves")}>
-        Start chat with resolving agent
-      </button>
-      <button type="button" onClick={() => onOpenAgent?.("persona-unresolved")}>
-        Start chat with unresolved agent
-      </button>
-      <button
-        type="button"
-        onClick={() => onSelectSession?.("missing-session")}
-      >
-        Open missing session
-      </button>
-      <button type="button" onClick={() => onSelectSession?.("session-1")}>
-        Open session 1
-      </button>
-      <button type="button" onClick={() => onArchiveChat("session-1")}>
-        Archive session 1
-      </button>
-      {activeView === "agents" ? (
-        <button type="button" onClick={onCreatePersona}>
-          Create agent
+        <button
+          type="button"
+          onClick={() => {
+            onAgentsBreadcrumbLabelChange?.("Reviewer");
+            onNavigateAgents("persona-1");
+          }}
+        >
+          Open agent detail
         </button>
-      ) : null}
-      {activeView === "search" ? (
-        <button type="button" onClick={onExitSearch}>
-          Exit search
+        <button
+          type="button"
+          onClick={() => {
+            onAutomationsBreadcrumbLabelChange?.("History");
+            onNavigateAutomations({ surface: "history", selectedRun: null });
+          }}
+        >
+          Open automation history
         </button>
-      ) : null}
-      <input aria-label="Mock search input" />
-    </section>
-  )) satisfies typeof AppShellContentType,
+        <button
+          type="button"
+          onClick={() => {
+            onAutomationsBreadcrumbLabelChange?.("Add automation");
+            onNavigateAutomations({
+              surface: "builder",
+              automationId: "automation-1",
+            });
+          }}
+        >
+          Open automation builder
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onBuilderbotBreadcrumbLabelChange?.("TASK-1");
+            onNavigateBuilderbot({ surface: "task", taskKey: "TASK-1" });
+          }}
+        >
+          Open builderbot task
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            onBuilderbotBreadcrumbLabelChange?.("Daily docs");
+            onNavigateBuilderbot({
+              surface: "automation",
+              automationId: "daily-docs",
+            });
+          }}
+        >
+          Open builderbot automation
+        </button>
+        {activeView === "automations" &&
+        activeAutomationsRoute.surface === "builder" ? (
+          <button
+            type="button"
+            onClick={() =>
+              onAutomationBuilderLeaveActionChange?.({
+                hasUnsavedChanges: true,
+                save: async () => {
+                  mockAutomationBuilderSave();
+                  return true;
+                },
+                discard: () => {},
+              })
+            }
+          >
+            Mark automation edits unsaved
+          </button>
+        ) : null}
+        <button type="button" onClick={() => onOpenAgent?.("persona-resolves")}>
+          Start chat with resolving agent
+        </button>
+        <button
+          type="button"
+          onClick={() => onOpenAgent?.("persona-unresolved")}
+        >
+          Start chat with unresolved agent
+        </button>
+        <button
+          type="button"
+          onClick={() => onSelectSession?.("missing-session")}
+        >
+          Open missing session
+        </button>
+        <button type="button" onClick={() => onSelectSession?.("session-1")}>
+          Open session 1
+        </button>
+        <button type="button" onClick={() => onSelectSession?.("session-2")}>
+          Open session 2
+        </button>
+        <button type="button" onClick={() => onArchiveChat("session-1")}>
+          Archive session 1
+        </button>
+        {activeView === "agents" ? (
+          <button type="button" onClick={onCreatePersona}>
+            Create agent
+          </button>
+        ) : null}
+        {activeView === "search" ? (
+          <button type="button" onClick={onExitSearch}>
+            Exit search
+          </button>
+        ) : null}
+        <input aria-label="Mock search input" />
+      </section>
+    );
+  }) satisfies typeof AppShellContentType,
 }));
 
 function enableBuilderbotExperiment() {
@@ -374,6 +425,7 @@ describe("AppShell global navigation", () => {
     window.localStorage.clear();
     mockGetPlatform.mockReturnValue("mac");
     mockDesignSystemExplorerEnabled.mockReturnValue(false);
+    mockAfterNextPaint.callbacks = [];
     resetAgentBuilderSourceLifecycleForTests();
     useShortcutsDialogStore.setState({ open: false });
     document.documentElement.removeAttribute("data-global-composer-visible");
@@ -604,6 +656,73 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("renders the target chat immediately without app-level staging", async () => {
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("preparing-content")).toHaveTextContent("false");
+    expect(screen.getByTestId("rendered-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+      "session-1",
+    );
+
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
+
+    expect(screen.getByTestId("preparing-content")).toHaveTextContent("false");
+    expect(screen.getByTestId("rendered-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+      "session-1",
+    );
+  });
+
+  it("renders session-to-session chat changes immediately", async () => {
+    const user = userEvent.setup();
+    const sessionBase = {
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    } satisfies Partial<ChatSession>;
+    useChatSessionStore.setState({
+      sessions: [
+        { ...sessionBase, id: "session-1", title: "First chat" },
+        { ...sessionBase, id: "session-2", title: "Second chat" },
+      ] as ChatSession[],
+      activeSessionId: "session-1",
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 2" }));
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("preparing-content")).toHaveTextContent("false");
+    expect(screen.getByTestId("rendered-view")).toHaveTextContent("chat");
+    expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+      "session-2",
+    );
+  });
+
   it("cleans up archive UI optimistically and rolls back archivedAt on backend failure", async () => {
     const user = userEvent.setup();
     const archive = deferred<void>();
@@ -703,6 +822,9 @@ describe("AppShell global navigation", () => {
     await waitFor(() => {
       expect(screen.getByTestId("active-view")).toHaveTextContent("home");
     });
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
     const textbox = await screen.findByPlaceholderText("Start a conversation");
     await waitFor(() => {
       expect(textbox).toHaveFocus();
@@ -728,6 +850,9 @@ describe("AppShell global navigation", () => {
       expect(useChatSessionStore.getState().activeSessionId).toBeNull();
     });
     rerender(appShellWithTheme());
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
 
     const textbox = await screen.findByPlaceholderText("Start a conversation");
     expect(textbox).not.toHaveFocus();

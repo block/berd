@@ -1,3 +1,4 @@
+import { useEffect, type ReactNode } from "react";
 import { HomeScreen } from "@/features/home/ui/HomeScreen";
 import { HomeView } from "@/features/home/ui/HomeView";
 import { ChatView } from "@/features/chat/ui/ChatView";
@@ -22,24 +23,22 @@ import type { ConnectionsTab } from "@/features/connections/ui/ConnectionsSettin
 import type { AgentSourceEntry } from "@/shared/api/agents";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type {
+  AppNavigationLocation,
   AppNavigationUpdateOptions,
-  AppView,
   AutomationNavigationRoute,
   BuilderbotNavigationRoute,
 } from "../types/appNavigation";
-import type { SectionId } from "@/features/settings/ui/settingsSections";
-import type { DesignSystemSection } from "@/features/design-system/ui/designSystemSections";
+import { perfLog } from "@/shared/lib/perfLog";
+import { cn } from "@/shared/lib/cn";
+import { AppContentPlaceholder } from "./AppContentPlaceholder";
+import { scheduleAfterNextPaint } from "../lib/scheduleAfterNextPaint";
 
 interface AppShellContentProps {
-  activeView: AppView;
-  activeSettingsSection: SectionId;
+  targetLocation: AppNavigationLocation;
+  renderedLocation: AppNavigationLocation;
+  isPreparingContent: boolean;
   activeConnectionsTab: ConnectionsTab;
-  activeSkillsSkillId: string | null;
-  activeAgentsPersonaId: string | null;
-  activeAutomationsRoute: AutomationNavigationRoute;
-  activeBuilderbotRoute: BuilderbotNavigationRoute;
-  activeDesignSystemSection: DesignSystemSection;
-  activeSession?: ChatSession;
+  renderedSession?: ChatSession;
   homeSessionId: string | null;
   homeViewportLeftOcclusionPx?: number;
   onNavigateSkills: (
@@ -101,15 +100,11 @@ interface AppShellContentProps {
 }
 
 export function AppShellContent({
-  activeView,
-  activeSettingsSection,
+  targetLocation,
+  renderedLocation,
+  isPreparingContent,
   activeConnectionsTab,
-  activeSkillsSkillId,
-  activeAgentsPersonaId,
-  activeAutomationsRoute,
-  activeBuilderbotRoute,
-  activeDesignSystemSection,
-  activeSession,
+  renderedSession,
   homeSessionId,
   homeViewportLeftOcclusionPx = 0,
   onNavigateSkills,
@@ -147,6 +142,12 @@ export function AppShellContent({
   onReturnToAgentDraft,
 }: AppShellContentProps) {
   const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
+  useNavigationPerfLogging({
+    isPreparingContent,
+    renderedLocation,
+    targetLocation,
+  });
+
   const homeContent = (
     <HomeView
       onOpenProject={onStartChatFromProjectId}
@@ -171,15 +172,168 @@ export function AppShellContent({
     />
   );
 
-  switch (activeView) {
+  const routeContent = renderRouteContent({
+    activeConnectionsTab,
+    builderbotEnabled: Boolean(builderbotExperiment?.enabled),
+    homeContent,
+    homeSessionId,
+    location: renderedLocation,
+    onActivateHomeSession,
+    onAgentBuilderClose,
+    onAgentBuilderSaved,
+    onAgentsBreadcrumbLabelChange,
+    onArchiveChat,
+    onAutomationBuilderLeaveActionChange,
+    onAutomationsBreadcrumbLabelChange,
+    onBuilderbotBreadcrumbLabelChange,
+    onConnectionsTabChange,
+    onCreatePersona,
+    onCreateProject,
+    onExitSearch,
+    onNavigateAgents,
+    onNavigateAutomations,
+    onNavigateBuilderbot,
+    onNavigateSkills,
+    onOpenAgent,
+    onOpenAutomation,
+    onOpenExtension,
+    onOpenProjectSettings,
+    onOpenSkill,
+    onRenameChat,
+    onReturnToAgentDraft,
+    onSelectSearchResult,
+    onSelectSession,
+    onSkillsBreadcrumbLabelChange,
+    onStartAgentBuilderSession,
+    onStartChatFromProject,
+    onStartChatWithSkill,
+    onStartProviderTroubleshootingChat,
+    renderedSession,
+  });
+
+  return (
+    <AppStagedContentFrame isPreparing={isPreparingContent}>
+      <AppRouteLayer inert={isPreparingContent} hidden={isPreparingContent}>
+        {routeContent}
+      </AppRouteLayer>
+      {isPreparingContent ? (
+        <div className="absolute inset-0 z-10 min-h-0">
+          <AppContentPlaceholder location={targetLocation} />
+        </div>
+      ) : null}
+    </AppStagedContentFrame>
+  );
+}
+
+interface RenderRouteContentOptions {
+  activeConnectionsTab: ConnectionsTab;
+  builderbotEnabled: boolean;
+  homeContent: ReactNode;
+  homeSessionId: string | null;
+  location: AppNavigationLocation;
+  onNavigateSkills: (
+    skillId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onNavigateAgents: (
+    personaId: string | null,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onNavigateAutomations: (
+    route: AutomationNavigationRoute,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onNavigateBuilderbot: (
+    route: BuilderbotNavigationRoute,
+    options?: AppNavigationUpdateOptions,
+  ) => void;
+  onConnectionsTabChange: (tab: ConnectionsTab) => void;
+  onSkillsBreadcrumbLabelChange?: (label: string | null) => void;
+  onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
+  onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
+  onBuilderbotBreadcrumbLabelChange?: (label: string | null) => void;
+  onAutomationBuilderLeaveActionChange?: (
+    action: AutomationBuilderLeaveAction | null,
+  ) => void;
+  onCreatePersona: () => void;
+  onAgentBuilderSaved?: (source: AgentSourceEntry) => void;
+  onAgentBuilderClose?: () => void;
+  onStartAgentBuilderSession: (args?: { path?: string; slug?: string }) => void;
+  onArchiveChat: (sessionId: string) => Promise<void>;
+  onCreateProject: (options?: {
+    initialWorkingDir?: string | null;
+    onCreated?: (projectId: string) => void;
+  }) => void;
+  onOpenProjectSettings: (projectId: string) => void;
+  onActivateHomeSession: (sessionId: string) => void;
+  onRenameChat: (sessionId: string, nextTitle: string) => void;
+  onSelectSession: (sessionId: string) => void;
+  onSelectSearchResult: (
+    sessionId: string,
+    messageId?: string,
+    query?: string,
+  ) => void;
+  onStartChatFromProject: (project: ProjectInfo) => void;
+  onStartChatWithSkill: (skill: SkillInfo, projectId?: string | null) => void;
+  onExitSearch: () => void;
+  onOpenExtension: (entry: ExtensionEntry) => void;
+  onOpenAgent: (agentId: string) => void;
+  onOpenAutomation: (automationId: string) => void;
+  onOpenSkill: (skill: SkillInfo) => void;
+  onStartProviderTroubleshootingChat: (
+    request: AgentSetupTroubleshootingRequest,
+  ) => void;
+  onReturnToAgentDraft?: () => void;
+  renderedSession?: ChatSession;
+}
+
+function renderRouteContent({
+  activeConnectionsTab,
+  builderbotEnabled,
+  homeContent,
+  homeSessionId,
+  location,
+  onActivateHomeSession,
+  onAgentBuilderClose,
+  onAgentBuilderSaved,
+  onAgentsBreadcrumbLabelChange,
+  onArchiveChat,
+  onAutomationBuilderLeaveActionChange,
+  onAutomationsBreadcrumbLabelChange,
+  onBuilderbotBreadcrumbLabelChange,
+  onConnectionsTabChange,
+  onCreatePersona,
+  onCreateProject,
+  onExitSearch,
+  onNavigateAgents,
+  onNavigateAutomations,
+  onNavigateBuilderbot,
+  onNavigateSkills,
+  onOpenAgent,
+  onOpenAutomation,
+  onOpenExtension,
+  onOpenProjectSettings,
+  onOpenSkill,
+  onRenameChat,
+  onReturnToAgentDraft,
+  onSelectSearchResult,
+  onSelectSession,
+  onSkillsBreadcrumbLabelChange,
+  onStartAgentBuilderSession,
+  onStartChatFromProject,
+  onStartChatWithSkill,
+  onStartProviderTroubleshootingChat,
+  renderedSession,
+}: RenderRouteContentOptions) {
+  switch (location.view) {
     case "design-system":
       return isDesignSystemExplorerEnabled() ? (
-        <DesignSystemView activeSection={activeDesignSystemSection} />
+        <DesignSystemView activeSection={location.designSystemSection} />
       ) : null;
     case "settings":
       return (
         <SettingsView
-          activeSection={activeSettingsSection}
+          activeSection={location.settingsSection}
           activeConnectionsTab={activeConnectionsTab}
           onConnectionsTabChange={onConnectionsTabChange}
           onStartTroubleshootingChat={onStartProviderTroubleshootingChat}
@@ -189,16 +343,16 @@ export function AppShellContent({
     case "automations":
       return (
         <AutomationsWorkbench
-          route={activeAutomationsRoute}
+          route={location.route}
           onRouteChange={onNavigateAutomations}
           onBreadcrumbLabelChange={onAutomationsBreadcrumbLabelChange}
           onBuilderLeaveActionChange={onAutomationBuilderLeaveActionChange}
         />
       );
     case "builderbot":
-      return builderbotExperiment?.enabled ? (
+      return builderbotEnabled ? (
         <BuilderbotView
-          route={activeBuilderbotRoute}
+          route={location.route}
           onRouteChange={onNavigateBuilderbot}
           onBreadcrumbLabelChange={onBuilderbotBreadcrumbLabelChange}
         />
@@ -208,7 +362,7 @@ export function AppShellContent({
     case "skills":
       return (
         <SkillsView
-          activeSkillId={activeSkillsSkillId}
+          activeSkillId={location.skillId}
           onActiveSkillIdChange={onNavigateSkills}
           onBreadcrumbLabelChange={onSkillsBreadcrumbLabelChange}
           onStartChatWithSkill={onStartChatWithSkill}
@@ -217,7 +371,7 @@ export function AppShellContent({
     case "agents":
       return (
         <AgentsView
-          activePersonaId={activeAgentsPersonaId}
+          activePersonaId={location.personaId}
           onActivePersonaIdChange={onNavigateAgents}
           onBreadcrumbLabelChange={onAgentsBreadcrumbLabelChange}
           onStartAgentBuilderSession={onStartAgentBuilderSession}
@@ -247,11 +401,11 @@ export function AppShellContent({
         />
       );
     case "chat":
-      return activeSession ? (
+      return renderedSession ? (
         <ChatView
-          key={activeSession.clientSessionId ?? activeSession.id}
-          sessionId={activeSession.id}
-          activeSession={activeSession}
+          key={renderedSession.clientSessionId ?? renderedSession.id}
+          sessionId={renderedSession.id}
+          activeSession={renderedSession}
           onCreatePersona={onCreatePersona}
           onAgentBuilderSaved={onAgentBuilderSaved}
           onAgentBuilderClose={onAgentBuilderClose}
@@ -269,4 +423,76 @@ export function AppShellContent({
     case "home":
       return homeContent;
   }
+}
+
+function AppStagedContentFrame({
+  children,
+  isPreparing,
+}: {
+  children: ReactNode;
+  isPreparing: boolean;
+}) {
+  return (
+    <div
+      className="relative h-full min-h-0 w-full overflow-hidden"
+      data-app-content-preparing={isPreparing || undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+function AppRouteLayer({
+  children,
+  hidden,
+  inert,
+}: {
+  children: ReactNode;
+  hidden: boolean;
+  inert: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "h-full min-h-0 w-full",
+        inert && "pointer-events-none",
+        hidden && "absolute inset-0 opacity-0",
+      )}
+      aria-hidden={hidden || undefined}
+      inert={inert || undefined}
+    >
+      {children}
+    </div>
+  );
+}
+
+function appNavigationLocationKey(location: AppNavigationLocation): string {
+  return JSON.stringify(location);
+}
+
+function useNavigationPerfLogging({
+  isPreparingContent,
+  renderedLocation,
+  targetLocation,
+}: {
+  isPreparingContent: boolean;
+  renderedLocation: AppNavigationLocation;
+  targetLocation: AppNavigationLocation;
+}) {
+  const targetKey = appNavigationLocationKey(targetLocation);
+  const renderedKey = appNavigationLocationKey(renderedLocation);
+
+  useEffect(() => {
+    if (!isPreparingContent) {
+      perfLog(`[perf:nav] real content commit location=${renderedKey}`);
+      return;
+    }
+
+    perfLog(
+      `[perf:nav] placeholder commit target=${targetKey} rendered=${renderedKey}`,
+    );
+    return scheduleAfterNextPaint(() => {
+      perfLog(`[perf:nav] first frame target=${targetKey}`);
+    });
+  }, [isPreparingContent, renderedKey, targetKey]);
 }

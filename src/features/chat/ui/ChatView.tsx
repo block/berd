@@ -928,9 +928,10 @@ export function ChatView({
       </p>
     </div>
   );
+  const timelineSessionId = effectiveSession?.id ?? sessionId;
   const messageTimeline = (
     <VirtualMessageTimelineGate
-      sessionId={effectiveSession?.id ?? sessionId}
+      sessionId={timelineSessionId}
       messages={controller.messages}
       streamingMessageId={controller.streamingMessageId}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
@@ -1245,31 +1246,33 @@ export function ChatView({
                     !terminalExpanded && "hidden",
                   )}
                 >
-                  {terminalTabs.map((tab) => {
-                    const selected = tab.id === activeTerminalTab?.id;
-                    return (
-                      <div
-                        key={tab.id}
-                        id={terminalTabPanelId(tab.id)}
-                        role="tabpanel"
-                        aria-labelledby={terminalTabButtonId(tab.id)}
-                        tabIndex={selected ? 0 : undefined}
-                        hidden={!selected}
-                        className="h-full min-h-0"
-                      >
-                        {selected ? (
-                          <TerminalPanel
+                  {terminalExpanded
+                    ? terminalTabs.map((tab) => {
+                        const selected = tab.id === activeTerminalTab?.id;
+                        return (
+                          <div
                             key={tab.id}
-                            sessionKey={`${sessionId}:${tab.id}`}
-                            cwd={tab.cwd}
-                            collapsed={!terminalExpanded}
-                            showHeader={false}
-                            className="h-full bg-card"
-                          />
-                        ) : null}
-                      </div>
-                    );
-                  })}
+                            id={terminalTabPanelId(tab.id)}
+                            role="tabpanel"
+                            aria-labelledby={terminalTabButtonId(tab.id)}
+                            tabIndex={selected ? 0 : undefined}
+                            hidden={!selected}
+                            className="h-full min-h-0"
+                          >
+                            {selected ? (
+                              <TerminalPanel
+                                key={tab.id}
+                                sessionKey={`${sessionId}:${tab.id}`}
+                                cwd={tab.cwd}
+                                collapsed={false}
+                                showHeader={false}
+                                className="h-full bg-card"
+                              />
+                            ) : null}
+                          </div>
+                        );
+                      })
+                    : null}
                 </div>
               </div>
             </div>

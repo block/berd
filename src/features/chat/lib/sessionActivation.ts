@@ -199,7 +199,6 @@ export async function loadSessionMessages(
       await resolveWorkingDirForSessionLoad(session, project);
     await acpLoadSession(sessionId, workingDir);
     const tFlush = performance.now();
-    useChatStore.getState().setSessionLoading(sessionId, false);
     const buffer = getAndDeleteReplayBuffer(sessionId);
     const replayMessages = buffer ? sanitizeReplayMessages(buffer) : undefined;
     const replayStats = getReplayPerf(sessionId);
@@ -255,6 +254,7 @@ export async function loadSessionMessages(
       pinnedLoadState: undefined,
       ...(missingCwdWarning ? { workingDir } : {}),
     });
+    chatStore.setSessionLoading(sessionId, false);
     const t2 = performance.now();
     perfLog(
       `[perf:load] ${sid} replay: notifs=${replayStats?.count ?? 0} span=${replayStats?.spanMs.toFixed(1) ?? "0"}ms msgs=${replayMessages?.length ?? 0} flush=${(t2 - tFlush).toFixed(1)}ms total=${(t2 - t0).toFixed(1)}ms`,

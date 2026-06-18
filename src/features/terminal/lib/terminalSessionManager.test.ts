@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   resizeTerminal: vi.fn(() => Promise.resolve()),
   startTerminal: vi.fn(),
   stopTerminal: vi.fn(() => Promise.resolve()),
+  terminalWriteCallbacks: [] as (() => void)[],
   writeTerminal: vi.fn(() => Promise.resolve()),
 }));
 
@@ -16,7 +17,7 @@ class FakeTerminal {
 
   clear() {}
   dispose() {}
-  focus() {}
+  focus = vi.fn();
   loadAddon(addon: { activate?: (terminal: FakeTerminal) => void }) {
     addon.activate?.(this);
   }
@@ -28,8 +29,12 @@ class FakeTerminal {
     container.appendChild(this.element);
   }
   refresh() {}
-  write() {}
-  writeln() {}
+  write = vi.fn((_data: string, callback?: () => void) => {
+    if (callback) {
+      mocks.terminalWriteCallbacks.push(callback);
+    }
+  });
+  writeln = vi.fn();
 }
 
 vi.mock("@tauri-apps/plugin-opener", () => ({
@@ -61,13 +66,44 @@ const labels = {
   stopped: "stopped",
 };
 
+function mockAnimationFrames() {
+  let nextId = 1;
+  const callbacks = new Map<number, FrameRequestCallback>();
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+    const id = nextId;
+    nextId += 1;
+    callbacks.set(id, callback);
+    return id;
+  });
+  vi.spyOn(window, "cancelAnimationFrame").mockImplementation((id) => {
+    callbacks.delete(id);
+  });
+
+  return {
+    runAll: () => {
+      while (callbacks.size > 0) {
+        const next = callbacks.entries().next().value;
+        if (!next) {
+          return;
+        }
+        const [id, callback] = next;
+        callbacks.delete(id);
+        callback(performance.now());
+      }
+    },
+  };
+}
+
 describe("terminalSessionManager", () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.resetModules();
     mocks.resizeTerminal.mockClear();
     mocks.startTerminal.mockReset();
     mocks.stopTerminal.mockClear();
+    mocks.terminalWriteCallbacks = [];
     mocks.writeTerminal.mockClear();
+    document.getElementById("goose-terminal-parking-root")?.remove();
   });
 
   it("clears queued commands when a starting terminal session is stopped", async () => {
@@ -283,5 +319,213 @@ describe("terminalSessionManager", () => {
       previousStatus: "running",
       source: "client-stop",
     });
+  });
+
+  it("parks a stable xterm host outside the unmounting container when detached", async () => {
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockResolvedValueOnce("terminal-1");
+    const firstContainer = document.createElement("div");
+    const secondContainer = document.createElement("div");
+    const session = getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+
+    const detach = session.attach(firstContainer);
+    const host = firstContainer.firstElementChild;
+    const element = host?.firstElementChild;
+    expect(host).toBeTruthy();
+    expect(element).toBeTruthy();
+
+    detach();
+
+    expect(firstContainer).toBeEmptyDOMElement();
+    expect(host?.parentElement).toBe(
+      document.getElementById("goose-terminal-parking-root"),
+    );
+
+    session.attach(secondContainer);
+
+    expect(secondContainer.firstElementChild).toBe(host);
+    expect(host?.firstElementChild).toBe(element);
+  });
+
+  it("does not focus xterm while attaching a visible terminal", async () => {
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockResolvedValueOnce("terminal-1");
+    const session = getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+
+    session.attach(document.createElement("div"));
+
+    expect(session.terminal.focus).not.toHaveBeenCalled();
+  });
+
+  it("returns terminal status snapshots", async () => {
+    const { getOrCreateTerminalSession, getTerminalSessionStatus } =
+      await import("./terminalSessionManager");
+    mocks.startTerminal.mockResolvedValueOnce("terminal-1");
+
+    expect(getTerminalSessionStatus("session:tab-1")).toBeNull();
+
+    getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+
+    expect(getTerminalSessionStatus("session:tab-1")).toBe("starting");
+
+    await Promise.resolve();
+
+    expect(getTerminalSessionStatus("session:tab-1")).toBe("running");
+  });
+
+  it("drains terminal output on animation frames after xterm parses the previous chunk", async () => {
+    const frames = mockAnimationFrames();
+    let emitTerminalEvent: (event: TerminalEvent) => void = () => undefined;
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockImplementationOnce(({ onEvent }) => {
+      emitTerminalEvent = onEvent;
+      return Promise.resolve("terminal-1");
+    });
+    const session = getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+    session.attach(document.createElement("div"));
+    await Promise.resolve();
+
+    emitTerminalEvent({
+      event: "output",
+      data: { terminalId: "terminal-1", data: "a" },
+    });
+    emitTerminalEvent({
+      event: "output",
+      data: { terminalId: "terminal-1", data: "b" },
+    });
+
+    expect(session.terminal.write).not.toHaveBeenCalled();
+
+    frames.runAll();
+
+    expect(session.terminal.write).toHaveBeenCalledTimes(1);
+    expect(session.terminal.write).toHaveBeenCalledWith(
+      "ab",
+      expect.anything(),
+    );
+
+    emitTerminalEvent({
+      event: "output",
+      data: { terminalId: "terminal-1", data: "c" },
+    });
+
+    frames.runAll();
+
+    expect(session.terminal.write).toHaveBeenCalledTimes(1);
+
+    mocks.terminalWriteCallbacks.shift()?.();
+
+    frames.runAll();
+
+    expect(session.terminal.write).toHaveBeenCalledTimes(2);
+    expect(session.terminal.write).toHaveBeenLastCalledWith(
+      "c",
+      expect.anything(),
+    );
+  });
+
+  it("queues terminal output while detached and resumes draining after attach", async () => {
+    const frames = mockAnimationFrames();
+    let emitTerminalEvent: (event: TerminalEvent) => void = () => undefined;
+    const { getOrCreateTerminalSession } = await import(
+      "./terminalSessionManager"
+    );
+    mocks.startTerminal.mockImplementationOnce(({ onEvent }) => {
+      emitTerminalEvent = onEvent;
+      return Promise.resolve("terminal-1");
+    });
+    const session = getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+    const detach = session.attach(document.createElement("div"));
+    await Promise.resolve();
+    detach();
+
+    emitTerminalEvent({
+      event: "output",
+      data: { terminalId: "terminal-1", data: "detached output" },
+    });
+    frames.runAll();
+
+    expect(session.terminal.write).not.toHaveBeenCalled();
+
+    session.attach(document.createElement("div"));
+    frames.runAll();
+
+    expect(session.terminal.write).toHaveBeenCalledWith(
+      "detached output",
+      expect.anything(),
+    );
+  });
+
+  it("buffers terminal output while rendering is suspended and resumes after", async () => {
+    const frames = mockAnimationFrames();
+    let emitTerminalEvent: (event: TerminalEvent) => void = () => undefined;
+    const { getOrCreateTerminalSession, setTerminalRenderingSuspended } =
+      await import("./terminalSessionManager");
+    mocks.startTerminal.mockImplementationOnce(({ onEvent }) => {
+      emitTerminalEvent = onEvent;
+      return Promise.resolve("terminal-1");
+    });
+    const session = getOrCreateTerminalSession({
+      key: "session:tab-1",
+      cwd: "/repo",
+      labels,
+      theme: {},
+      fontFamily: "monospace",
+    });
+    session.attach(document.createElement("div"));
+    await Promise.resolve();
+
+    setTerminalRenderingSuspended(true);
+    emitTerminalEvent({
+      event: "output",
+      data: { terminalId: "terminal-1", data: "suspended output" },
+    });
+    frames.runAll();
+
+    expect(session.terminal.write).not.toHaveBeenCalled();
+
+    setTerminalRenderingSuspended(false);
+    frames.runAll();
+
+    expect(session.terminal.write).toHaveBeenCalledWith(
+      "suspended output",
+      expect.anything(),
+    );
   });
 });

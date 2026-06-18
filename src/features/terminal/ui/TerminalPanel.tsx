@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { useTranslation } from "react-i18next";
 import type { ITheme } from "@xterm/xterm";
 import {
@@ -12,15 +19,24 @@ import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
+import { perfLog } from "@/shared/lib/perfLog";
+import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 import { useTheme } from "@/shared/theme/ThemeProvider";
 import {
+  getTerminalSessionStatus,
   getOrCreateTerminalSession,
+  subscribeTerminalSessionStatus,
   type TerminalSession,
   type TerminalSessionLabels,
   type TerminalStatus,
 } from "../lib/terminalSessionManager";
 
 const TERMINAL_EXPAND_RESIZE_FALLBACK_MS = 260;
+
+function shortTerminalSessionKey(sessionKey: string): string {
+  const [sessionId, tabId] = sessionKey.split(":");
+  return `${sessionId?.slice(0, 8) ?? "unknown"}:${tabId ?? "unknown"}`;
+}
 
 interface TerminalPanelProps {
   sessionKey: string;
@@ -217,6 +233,8 @@ export function TerminalPanel({
   const sectionRef = useRef<HTMLElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const previousCollapsedRef = useRef(collapsed);
+  const collapsedRef = useRef(collapsed);
+  const sessionRef = useRef<TerminalSession | null>(null);
   const displayPath = useMemo(() => shortenPath(cwd), [cwd]);
   const labels = useMemo<TerminalSessionLabels>(
     () => ({
@@ -226,8 +244,20 @@ export function TerminalPanel({
     }),
     [t],
   );
-  const [session, setSession] = useState<TerminalSession | null>(null);
-  const [status, setStatus] = useState<TerminalStatus>("starting");
+  const subscribeStatus = useCallback(
+    (onStoreChange: () => void) =>
+      subscribeTerminalSessionStatus(sessionKey, onStoreChange),
+    [sessionKey],
+  );
+  const getStatusSnapshot = useCallback(
+    (): TerminalStatus => getTerminalSessionStatus(sessionKey) ?? "starting",
+    [sessionKey],
+  );
+  const status = useSyncExternalStore(
+    subscribeStatus,
+    getStatusSnapshot,
+    () => "starting",
+  );
   const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
   const stopAndCloseLabel = t("terminal.stopAndCloseTab", {
     path: displayPath,
@@ -237,49 +267,63 @@ export function TerminalPanel({
   });
 
   useEffect(() => {
-    const nextSession = getOrCreateTerminalSession({
-      key: sessionKey,
-      cwd,
-      labels,
-      theme: resolveTerminalTheme(resolvedTheme),
-      fontFamily: terminalFontFamily(),
+    collapsedRef.current = collapsed;
+  }, [collapsed]);
+
+  useEffect(() => {
+    let nextSession: TerminalSession | null = null;
+    let detach: (() => void) | undefined;
+    let didCancel = false;
+    const shortKey = shortTerminalSessionKey(sessionKey);
+    const cancelAttach = scheduleAfterNextPaint(() => {
+      if (didCancel) {
+        return;
+      }
+
+      nextSession = getOrCreateTerminalSession({
+        key: sessionKey,
+        cwd,
+        labels,
+        theme: resolveTerminalTheme(resolvedTheme),
+        fontFamily: terminalFontFamily(),
+      });
+      nextSession.updateLabels(labels);
+      sessionRef.current = nextSession;
+      if (collapsedRef.current) {
+        nextSession.deferResize();
+      }
+
+      const container = containerRef.current;
+      const start = performance.now();
+      perfLog(`[perf:terminal] ${shortKey} attach deferred`);
+      detach = container ? nextSession.attach(container) : undefined;
+      perfLog(
+        `[perf:terminal] ${shortKey} attach complete ${(performance.now() - start).toFixed(1)}ms status=${nextSession.status} hasContainer=${Boolean(container)}`,
+      );
     });
-    nextSession.updateLabels(labels);
-    setSession(nextSession);
-    setStatus(nextSession.status);
+
+    return () => {
+      didCancel = true;
+      cancelAttach();
+      detach?.();
+      if (nextSession && sessionRef.current === nextSession) {
+        sessionRef.current = null;
+      }
+    };
   }, [cwd, labels, resolvedTheme, sessionKey]);
 
-  useEffect(() => {
-    if (!session) {
-      return;
-    }
-
-    setStatus(session.status);
-    return session.subscribe(() => setStatus(session.status));
-  }, [session]);
-
-  useEffect(() => {
-    if (!session) {
-      return;
-    }
-
-    const container = containerRef.current;
-    if (!container) return;
-    return session.attach(container);
-  }, [session]);
-
   const handleRestart = useCallback(() => {
-    session?.restart();
+    sessionRef.current?.restart();
     if (collapsed) {
       onExpand?.();
     }
-  }, [collapsed, onExpand, session]);
+  }, [collapsed, onExpand]);
 
   const handleStop = useCallback(() => {
-    session?.stop({ writeStopped: true });
+    sessionRef.current?.stop({ writeStopped: true });
     setStopConfirmOpen(false);
     onClose?.();
-  }, [onClose, session]);
+  }, [onClose]);
 
   const handleHeaderToggle = useCallback(() => {
     if (collapsed) {
@@ -291,7 +335,8 @@ export function TerminalPanel({
   }, [collapsed, onCollapse, onExpand]);
 
   useEffect(() => {
-    if (!session) {
+    const nextSession = sessionRef.current;
+    if (!nextSession) {
       return;
     }
 
@@ -299,7 +344,7 @@ export function TerminalPanel({
     previousCollapsedRef.current = collapsed;
 
     if (collapsed) {
-      session.deferResize();
+      nextSession.deferResize();
       return;
     }
 
@@ -311,23 +356,23 @@ export function TerminalPanel({
     // the beginning changes its measured content height/rows and creates a
     // visible mid-animation hitch; the transition-end listener below performs
     // the real fit once the shell has settled.
-    session.deferResize();
+    nextSession.deferResize();
     const fallback = window.setTimeout(() => {
-      session.resumeResize({ focus: true });
+      nextSession.resumeResize({ focus: true });
     }, TERMINAL_EXPAND_RESIZE_FALLBACK_MS);
 
     return () => window.clearTimeout(fallback);
-  }, [collapsed, session]);
+  }, [collapsed]);
 
   useEffect(() => {
     const container = containerRef.current?.closest("[data-terminal-panel]");
-    if (!container || !session) {
+    if (!container) {
       return;
     }
 
     const handleShellTransitionEnd = () => {
       if (!collapsed) {
-        session.resumeResize({ focus: true });
+        sessionRef.current?.resumeResize({ focus: true });
       }
     };
 
@@ -341,17 +386,17 @@ export function TerminalPanel({
         handleShellTransitionEnd,
       );
     };
-  }, [collapsed, session]);
+  }, [collapsed]);
 
   useEffect(() => {
     const section = sectionRef.current;
-    if (!section || !session) {
+    if (!section) {
       return;
     }
 
     const handleTerminalFocus = () => {
       if (!collapsed) {
-        session.focusAndResize();
+        sessionRef.current?.focusAndResize();
       }
     };
 
@@ -359,7 +404,7 @@ export function TerminalPanel({
     return () => {
       section.removeEventListener("goose-terminal-focus", handleTerminalFocus);
     };
-  }, [collapsed, session]);
+  }, [collapsed]);
 
   return (
     <section
