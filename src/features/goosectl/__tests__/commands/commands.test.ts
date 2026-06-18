@@ -196,8 +196,6 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: DEFAULT_PROJECT_ICON,
     color: DEFAULT_PROJECT_COLOR,
-    preferredProvider: null,
-    preferredModel: null,
     workingDirs: ["/projects/one"],
     useWorktrees: false,
     order: 0,
@@ -1550,8 +1548,6 @@ describe("projects", () => {
       "Be careful",
       DEFAULT_PROJECT_ICON,
       DEFAULT_PROJECT_COLOR,
-      null,
-      null,
       ["/work"],
       false,
     );

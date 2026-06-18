@@ -42,8 +42,6 @@ function makeProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "",
     color: "",
-    preferredProvider: null,
-    preferredModel: null,
     workingDirs: ["/missing/project"],
     useWorktrees: false,
     order: 0,

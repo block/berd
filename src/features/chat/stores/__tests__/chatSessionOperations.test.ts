@@ -79,8 +79,6 @@ function buildProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "",
     color: "#000000",
-    preferredProvider: null,
-    preferredModel: null,
     workingDirs: ["/tmp/project-new"],
     useWorktrees: false,
     order: 0,

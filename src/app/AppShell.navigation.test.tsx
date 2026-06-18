@@ -1502,8 +1502,6 @@ describe("AppShell global navigation", () => {
       prompt: "",
       icon: "folder",
       color: "blue",
-      preferredProvider: null,
-      preferredModel: null,
       workingDirs: [],
       useWorktrees: false,
       order: 0,

@@ -48,8 +48,6 @@ function projectInfo(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "Ship it",
     icon: "tabler:folder-code",
     color: "olive",
-    preferredProvider: null,
-    preferredModel: null,
     workingDirs: ["/tmp/launch"],
     useWorktrees: false,
     order: 0,
@@ -89,8 +87,6 @@ describe("projects API artifact metadata", () => {
       "Ship it",
       "tabler:folder-code",
       "olive",
-      null,
-      null,
       ["/tmp/launch"],
       false,
     );

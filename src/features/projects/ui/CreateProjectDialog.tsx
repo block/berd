@@ -10,19 +10,10 @@ import { Label } from "@/shared/ui/label";
 import { Sheet, SheetContent, SheetTitle } from "@/shared/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/shared/ui/select";
-import {
   createProject,
   updateProject,
   type ProjectInfo,
 } from "../api/projects";
-import { discoverAcpProviders, type AcpProvider } from "@/shared/api/acp";
-import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
 import { buildEditorText, parseEditorText } from "../lib/projectPromptText";
 import { useProjectIconSelection } from "../hooks/useProjectIconSelection";
 import { DEFAULT_PROJECT_ICON } from "../lib/projectIcons";
@@ -63,22 +54,8 @@ export function CreateProjectDialog({
   const [prompt, setPrompt] = useState("");
   const [workingDirs, setWorkingDirs] = useState<string[]>([]);
   const [color, setColor] = useState<string>(DEFAULT_PROJECT_COLOR);
-  const [preferredProvider, setPreferredProvider] = useState<string | null>(
-    null,
-  );
-  const preferredModel: string | null = null;
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [acpProviders, setAcpProviders] = useState<AcpProvider[]>([]);
-  const { readyAgentIds } = useAgentProviderStatus();
-  const selectableAcpProviders = useMemo(
-    () =>
-      acpProviders.filter(
-        (provider) =>
-          readyAgentIds.has(provider.id) || provider.id === preferredProvider,
-      ),
-    [acpProviders, preferredProvider, readyAgentIds],
-  );
   const {
     icon,
     iconCandidates,
@@ -99,12 +76,6 @@ export function CreateProjectDialog({
   const [missingDirs, setMissingDirs] = useState<string[]>([]);
 
   const isEditing = !!editingProject;
-
-  useEffect(() => {
-    discoverAcpProviders()
-      .then(setAcpProviders)
-      .catch(() => setAcpProviders([]));
-  }, []);
 
   // Re-check the configured folders against the filesystem whenever they
   // change while the dialog is open. All workingDirs are validated, not just
@@ -193,7 +164,6 @@ export function CreateProjectDialog({
       setWorkingDirs(editingProject.workingDirs);
       resetIcon(editingProject.icon || DEFAULT_PROJECT_ICON);
       setColor(editingProject.color || DEFAULT_PROJECT_COLOR);
-      setPreferredProvider(editingProject.preferredProvider ?? null);
       setWorkingDir(editingProject.workingDirs[0] ?? "");
       setError(null);
     } else {
@@ -203,7 +173,6 @@ export function CreateProjectDialog({
       setWorkingDirs(seedDir ? [seedDir] : []);
       resetIcon(DEFAULT_PROJECT_ICON);
       setColor(DEFAULT_PROJECT_COLOR);
-      setPreferredProvider(null);
       setWorkingDir(seedDir);
       setError(null);
     }
@@ -217,7 +186,6 @@ export function CreateProjectDialog({
     setWorkingDirs([]);
     resetIcon(DEFAULT_PROJECT_ICON);
     setColor(DEFAULT_PROJECT_COLOR);
-    setPreferredProvider(null);
     setWorkingDir("");
     setError(null);
     onClose();
@@ -247,8 +215,6 @@ export function CreateProjectDialog({
           prompt: parsedPrompt,
           icon,
           color,
-          preferredProvider: preferredProvider || null,
-          preferredModel,
           workingDirs: savedWorkingDirs,
           useWorktrees: editingProject.useWorktrees,
         });
@@ -259,8 +225,6 @@ export function CreateProjectDialog({
           parsedPrompt,
           icon,
           color,
-          preferredProvider || null,
-          preferredModel,
           savedWorkingDirs,
           false,
         );
@@ -331,24 +295,25 @@ export function CreateProjectDialog({
             </SheetTitle>
           </div>
 
-          {/* Hero stays transparent so the glass panel reveals whatever sits
- underneath instead of painting a fake backdrop. */}
-          <div className="relative h-[300px] shrink-0 overflow-hidden px-8 pb-4">
-            <ProjectArtifactPreview
-              input={previewInput}
-              className="h-full w-full"
-            />
-            <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
-              <ProjectColorPicker
-                value={color}
-                onChange={setColor}
-                variant="swatches"
-              />
-            </div>
-          </div>
-
-          {/* Scrollable form body. */}
+          {/* Scrollable content body. The project preview scrolls with the form;
+              only the sheet header/close button and footer remain fixed. */}
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-transparent px-6 py-5 sm:px-8">
+            {/* Hero stays transparent so the glass panel reveals whatever sits
+                underneath instead of painting a fake backdrop. */}
+            <div className="relative h-[300px] shrink-0 overflow-hidden pb-4">
+              <ProjectArtifactPreview
+                input={previewInput}
+                className="h-full w-full"
+              />
+              <div className="absolute bottom-6 left-1/2 z-10 -translate-x-1/2">
+                <ProjectColorPicker
+                  value={color}
+                  onChange={setColor}
+                  variant="swatches"
+                />
+              </div>
+            </div>
+
             <ProjectIconPicker
               icon={icon}
               color={color}
@@ -374,99 +339,66 @@ export function CreateProjectDialog({
               />
             </div>
 
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="group/field space-y-2">
-                <div className="flex items-center gap-1.5">
-                  <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
-                    {t("dialog.folderLabel")}
-                  </Label>
-                  {missingDirs.length > 0 ? (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          type="button"
-                          className="inline-flex items-center rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-destructive"
-                          aria-label={t("dialog.invalidFolderTooltip", {
-                            count: missingDirs.length,
-                          })}
-                        >
-                          <IconAlertTriangle
-                            className="size-3.5 text-destructive"
-                            aria-hidden="true"
-                          />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-[260px]">
-                        <p>
-                          {t("dialog.invalidFolderTooltip", {
-                            count: missingDirs.length,
-                          })}
-                        </p>
-                        <ul className="mt-1 list-disc pl-4">
-                          {missingDirs.map((directory) => (
-                            <li key={directory} className="break-all">
-                              {directory}
-                            </li>
-                          ))}
-                        </ul>
-                      </TooltipContent>
-                    </Tooltip>
-                  ) : null}
-                </div>
-                <button
-                  type="button"
-                  onClick={handleAddDirectory}
-                  className={cn(
-                    "h-[42px] rounded-sm border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
-                    "flex w-full items-center gap-2.5 text-left",
-                  )}
-                >
-                  <IconFolderPlus
-                    className="size-3 text-[#242424]"
-                    aria-hidden="true"
-                  />
-                  <span
-                    className={
-                      folderDisplay
-                        ? "truncate text-[#242424]"
-                        : "truncate text-[#242424]/30"
-                    }
-                  >
-                    {folderDisplay ?? t("dialog.folderPlaceholder")}
-                  </span>
-                </button>
-              </div>
-
-              <div className="group/field space-y-2">
+            <div className="group/field space-y-2">
+              <div className="flex items-center gap-1.5">
                 <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
-                  {t("dialog.modelLabel")}
+                  {t("dialog.folderLabel")}
                 </Label>
-                <Select
-                  value={preferredProvider ?? "__none__"}
-                  onValueChange={(v) =>
-                    setPreferredProvider(v === "__none__" ? null : v)
+                {missingDirs.length > 0 ? (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <button
+                        type="button"
+                        className="inline-flex items-center rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-destructive"
+                        aria-label={t("dialog.invalidFolderTooltip", {
+                          count: missingDirs.length,
+                        })}
+                      >
+                        <IconAlertTriangle
+                          className="size-3.5 text-destructive"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-[260px]">
+                      <p>
+                        {t("dialog.invalidFolderTooltip", {
+                          count: missingDirs.length,
+                        })}
+                      </p>
+                      <ul className="mt-1 list-disc pl-4">
+                        {missingDirs.map((directory) => (
+                          <li key={directory} className="break-all">
+                            {directory}
+                          </li>
+                        ))}
+                      </ul>
+                    </TooltipContent>
+                  </Tooltip>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={handleAddDirectory}
+                className={cn(
+                  "h-[42px] rounded-sm border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                  "flex w-full items-center gap-2.5 text-left",
+                )}
+              >
+                <IconFolderPlus
+                  className="size-3 text-[#242424]"
+                  aria-hidden="true"
+                />
+                <span
+                  className={
+                    folderDisplay
+                      ? "truncate text-[#242424]"
+                      : "truncate text-[#242424]/30"
                   }
                 >
-                  <SelectTrigger
-                    className={cn(
-                      "!h-[42px] min-h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
-                      "w-full",
-                    )}
-                  >
-                    <SelectValue placeholder={t("dialog.modelPlaceholder")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">
-                      {t("dialog.noneUseDefault")}
-                    </SelectItem>
-                    {selectableAcpProviders.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  {folderDisplay ?? t("dialog.folderPlaceholder")}
+                </span>
+              </button>
             </div>
 
             <div className="group/field space-y-2">
@@ -486,7 +418,7 @@ export function CreateProjectDialog({
           </div>
 
           {/* Footer: Cancel (left) + Save/Create (right). */}
-          <div className="flex shrink-0 items-center justify-end gap-3 bg-transparent px-6 pt-2 pb-7 sm:px-8">
+          <div className="flex shrink-0 items-center justify-end gap-3 bg-transparent px-6 py-3 sm:px-8">
             <Button
               type="button"
               variant="ghost"

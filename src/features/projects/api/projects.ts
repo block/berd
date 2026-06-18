@@ -15,8 +15,6 @@ export interface ProjectInfo {
   prompt: string;
   icon: string;
   color: string;
-  preferredProvider: string | null;
-  preferredModel: string | null;
   workingDirs: string[];
   useWorktrees: boolean;
   order: number;
@@ -58,8 +56,6 @@ function toProjectInfo(source: SourceEntry): ProjectInfo {
     prompt: source.content,
     icon: (p.icon as string) ?? "",
     color: (p.color as string) ?? "",
-    preferredProvider: (p.preferredProvider as string) ?? null,
-    preferredModel: (p.preferredModel as string) ?? null,
     workingDirs: (p.workingDirs as string[]) ?? [],
     useWorktrees: (p.useWorktrees as boolean) ?? false,
     order: (p.order as number) ?? 0,
@@ -72,8 +68,6 @@ interface ProjectMetadataFields {
   name: string;
   icon: string;
   color: string;
-  preferredProvider: string | null;
-  preferredModel: string | null;
   workingDirs: string[];
   useWorktrees: boolean;
   order: number;
@@ -86,8 +80,6 @@ function toProperties(info: ProjectMetadataFields): Record<string, unknown> {
   if (info.name) props.title = info.name;
   if (info.icon) props.icon = info.icon;
   if (info.color) props.color = info.color;
-  if (info.preferredProvider) props.preferredProvider = info.preferredProvider;
-  if (info.preferredModel) props.preferredModel = info.preferredModel;
   if (info.workingDirs?.length) props.workingDirs = info.workingDirs;
   if (info.useWorktrees) props.useWorktrees = info.useWorktrees;
   if (typeof info.order === "number") props.order = info.order;
@@ -159,8 +151,6 @@ export async function createProject(
   prompt: string,
   icon: string,
   color: string,
-  preferredProvider: string | null,
-  preferredModel: string | null,
   workingDirs: string[],
   useWorktrees: boolean,
 ): Promise<ProjectInfo> {
@@ -183,8 +173,6 @@ export async function createProject(
       name,
       icon,
       color,
-      preferredProvider,
-      preferredModel,
       workingDirs,
       useWorktrees,
       order: 0,
@@ -248,8 +236,6 @@ export async function updateProject(
       name: merged.name,
       icon: merged.icon,
       color: merged.color,
-      preferredProvider: merged.preferredProvider,
-      preferredModel: merged.preferredModel,
       workingDirs: merged.workingDirs,
       useWorktrees: merged.useWorktrees,
       order: merged.order,

@@ -1052,15 +1052,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           chatStore.setError(session.id, null);
           resetSessionCreation(session.id);
 
-          const providerId =
-            session.providerId ??
-            updatedProject.preferredProvider ??
-            selectedProvider ??
-            "goose";
+          const providerId = session.providerId ?? selectedProvider ?? "goose";
           const sessionModelPreference = resolveSupportedSessionModelPreference(
             providerId,
             undefined,
-            session.modelId ?? updatedProject.preferredModel ?? undefined,
+            session.modelId ?? undefined,
           ).then((preference) =>
             session.modelName && preference.modelId === session.modelId
               ? { ...preference, modelName: session.modelName }
@@ -1100,16 +1096,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       perfLog(
         `[perf:newtab] createNewTab start (project=${project?.id ?? "none"})`,
       );
-      const providerId =
-        options.providerId ??
-        project?.preferredProvider ??
-        selectedProvider ??
-        "goose";
+      const providerId = options.providerId ?? selectedProvider ?? "goose";
       const resolvedSessionModelPreference =
         await resolveSupportedSessionModelPreference(
           providerId,
           undefined,
-          options.modelId ?? project?.preferredModel ?? undefined,
+          options.modelId ?? undefined,
         );
       const sessionModelPreference =
         options.modelName &&
@@ -1300,11 +1292,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       perfLog(
         `[perf:newtab] createNewProjectDraft start (project=${project.id})`,
       );
-      const providerId =
-        options.providerId ??
-        project.preferredProvider ??
-        selectedProvider ??
-        "goose";
+      const providerId = options.providerId ?? selectedProvider ?? "goose";
       const sessionState = useChatSessionStore.getState();
       const chatState = useChatStore.getState();
       // New chats always start at the project default folder; worktree
@@ -1334,7 +1322,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       const sessionModelPreference = resolveSupportedSessionModelPreference(
         providerId,
         undefined,
-        options.modelId ?? project.preferredModel ?? undefined,
+        options.modelId ?? undefined,
       ).then((preference) =>
         options.modelName && preference.modelId === options.modelId
           ? { ...preference, modelName: options.modelName }

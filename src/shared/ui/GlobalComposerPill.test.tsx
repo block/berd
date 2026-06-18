@@ -115,8 +115,6 @@ function setProjectStore() {
         prompt: "",
         icon: "",
         color: "",
-        preferredProvider: null,
-        preferredModel: null,
         workingDirs: ["/workspace/project"],
         useWorktrees: false,
         order: 0,

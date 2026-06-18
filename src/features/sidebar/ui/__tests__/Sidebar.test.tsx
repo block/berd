@@ -49,8 +49,6 @@ function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
     prompt: "",
     icon: "",
     color: "",
-    preferredProvider: null,
-    preferredModel: null,
     workingDirs: [],
     useWorktrees: false,
     order: 0,

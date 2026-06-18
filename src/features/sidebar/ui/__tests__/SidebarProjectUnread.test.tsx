@@ -12,8 +12,6 @@ const PROJECT: ProjectInfo = {
   prompt: "",
   icon: "",
   color: "",
-  preferredProvider: null,
-  preferredModel: null,
   workingDirs: [],
   useWorktrees: false,
   order: 0,

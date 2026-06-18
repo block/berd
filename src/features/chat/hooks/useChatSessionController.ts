@@ -285,10 +285,7 @@ export function useChatSessionController({
     (s) => s.sessionStateById[stateSessionId]?.hasUsageSnapshot ?? false,
   );
   const selectedProvider =
-    pendingProviderId ??
-    session?.providerId ??
-    project?.preferredProvider ??
-    globalSelectedProvider;
+    pendingProviderId ?? session?.providerId ?? globalSelectedProvider;
   const selectedPersonaId =
     pendingPersonaId !== undefined
       ? pendingPersonaId

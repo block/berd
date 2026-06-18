@@ -51,8 +51,6 @@ export interface ProjectStore {
     prompt: string,
     icon: string,
     color: string,
-    preferredProvider: string | null,
-    preferredModel: string | null,
     workingDirs: string[],
     useWorktrees: boolean,
   ) => Promise<ProjectInfo>;
@@ -63,8 +61,6 @@ export interface ProjectStore {
     prompt: string,
     icon: string,
     color: string,
-    preferredProvider: string | null,
-    preferredModel: string | null,
     workingDirs: string[],
     useWorktrees: boolean,
   ) => Promise<ProjectInfo>;
@@ -101,8 +97,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     prompt,
     icon,
     color,
-    preferredProvider,
-    preferredModel,
     workingDirs,
     useWorktrees,
   ) => {
@@ -112,8 +106,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       prompt,
       icon,
       color,
-      preferredProvider,
-      preferredModel,
       workingDirs,
       useWorktrees,
     );
@@ -129,8 +121,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     prompt,
     icon,
     color,
-    preferredProvider,
-    preferredModel,
     workingDirs,
     useWorktrees,
   ) => {
@@ -142,8 +132,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       prompt,
       icon,
       color,
-      preferredProvider,
-      preferredModel,
       workingDirs,
       useWorktrees,
     });

@@ -49,8 +49,6 @@ Result:
         args.instructions ?? "",
         DEFAULT_PROJECT_ICON,
         DEFAULT_PROJECT_COLOR,
-        null,
-        null,
         args.working_dir ? [args.working_dir] : [],
         false,
       );
