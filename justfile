@@ -94,6 +94,10 @@ frontend-fmt-check:
 lint:
     pnpm lint
 
+# Run react-doctor static analysis as an advisory report (fully offline, no telemetry).
+react-doctor:
+    pnpm exec react-doctor --project goose-internal --no-score --blocking none
+
 # Check frontend i18n string conventions.
 i18n-check:
     pnpm check:i18n
