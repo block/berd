@@ -4,6 +4,7 @@ import {
   type ComponentRef,
   type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useEffect,
   useMemo,
   useRef,
@@ -1709,6 +1710,39 @@ function ArtifactScene({
   );
 }
 
+function TileResizeRecovery({
+  containerRef,
+  onResize,
+}: {
+  containerRef: RefObject<HTMLDivElement | null>;
+  onResize: () => void;
+}) {
+  useEffect(() => {
+    const root = containerRef.current;
+    if (!root) {
+      return;
+    }
+
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        if (root.clientWidth > 0 && root.clientHeight > 0) {
+          onResize();
+        }
+      });
+    });
+    observer.observe(root);
+
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [containerRef, onResize]);
+
+  return null;
+}
+
 export function ProjectArtifactRenderer({
   state,
   environmentUrl,
@@ -1758,10 +1792,21 @@ export function ProjectArtifactRenderer({
     setContextRecoveryKey((key) => key + 1);
     setLayoutEpoch((epoch) => epoch + 1);
   }, []);
+  const handleTileResize = useCallback(() => {
+    setLayoutEpoch((epoch) => epoch + 1);
+  }, []);
   const canvasKey = `${variant}-${
     hasTransparentBackground ? "transparent" : "opaque"
   }-${contextRecoveryKey}`;
-  const [isVisualReady, setIsVisualReady] = useState(false);
+  const getInitialVisualReady = () =>
+    variant === "tile" && projectArtifactTileHasRevealed;
+  const [isVisualReady, setIsVisualReady] = useState(getInitialVisualReady);
+  const [visualReadyVariant, setVisualReadyVariant] = useState(variant);
+
+  if (visualReadyVariant !== variant) {
+    setVisualReadyVariant(variant);
+    setIsVisualReady(getInitialVisualReady());
+  }
 
   useEffect(() => {
     const runtime = runtimeRef.current;
@@ -1783,39 +1828,10 @@ export function ProjectArtifactRenderer({
   }, [gestureFreezeActive, requestSoftRecovery, variant]);
 
   useEffect(() => {
-    if (variant !== "tile") {
-      return;
-    }
-
-    const root = containerRef.current;
-    if (!root) {
-      return;
-    }
-
-    let frame = 0;
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => {
-        if (root.clientWidth > 0 && root.clientHeight > 0) {
-          setLayoutEpoch((epoch) => epoch + 1);
-        }
-      });
-    });
-    observer.observe(root);
-
-    return () => {
-      cancelAnimationFrame(frame);
-      observer.disconnect();
-    };
-  }, [variant]);
-
-  useEffect(() => {
     if (variant === "tile" && projectArtifactTileHasRevealed) {
-      setIsVisualReady(true);
       return;
     }
 
-    setIsVisualReady(false);
     const frameIds: number[] = [];
     let frame = 0;
     const frameDelay =
@@ -1885,6 +1901,12 @@ export function ProjectArtifactRenderer({
       onPointerLeave={interactive ? handlePointerLeave : undefined}
       onPointerMove={interactive ? handlePointerMove : undefined}
     >
+      {variant === "tile" ? (
+        <TileResizeRecovery
+          containerRef={containerRef}
+          onResize={handleTileResize}
+        />
+      ) : null}
       {variant === "preview" ? (
         <div
           className="pointer-events-none absolute inset-[8%] opacity-30 transition-colors duration-700 ease-out"

@@ -358,10 +358,13 @@ export function WidgetPicker({
   const [activePanel, setActivePanel] = useState<WidgetCategory | null>(null);
   const [query, setQuery] = useState("");
   const [automations, setAutomations] = useState<AutomationTile[]>([]);
-  const [automationStatus, setAutomationStatus] = useState<
-    "idle" | "loading" | "error"
-  >("idle");
+  const [automationStatus, setAutomationStatus] = useState<"idle" | "error">(
+    "idle",
+  );
   const automationCacheLoadedRef = useRef(false);
+  const automationTilesPromiseRef = useRef<Promise<AutomationTile[]> | null>(
+    null,
+  );
   const lastChatLoadQueryRef = useRef<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -413,21 +416,32 @@ export function WidgetPicker({
       return;
     }
 
+    automationTilesPromiseRef.current ??= getAutomationTiles().then(
+      (response) => response.tiles,
+    );
+
     let cancelled = false;
-    setAutomationStatus("loading");
-    void getAutomationTiles()
-      .then((response) => {
-        if (!cancelled) {
-          setAutomations(response.tiles);
-          automationCacheLoadedRef.current = true;
-          setAutomationStatus("idle");
+    void automationTilesPromiseRef.current
+      .then((tiles) => {
+        if (cancelled) {
+          return;
         }
+
+        setAutomations(tiles);
+        automationCacheLoadedRef.current = true;
+        setAutomationStatus("idle");
       })
       .catch((error: unknown) => {
-        console.error("Failed to load automations", error);
-        if (!cancelled) {
-          setAutomationStatus("error");
+        // Clear the cached promise on any rejection — including after the panel
+        // closed — so the next open refetches instead of `??=` replaying this
+        // rejected promise (which would surface a stale error with no retry).
+        automationTilesPromiseRef.current = null;
+        if (cancelled) {
+          return;
         }
+
+        console.error("Failed to load automations", error);
+        setAutomationStatus("error");
       });
 
     return () => {
@@ -482,6 +496,9 @@ export function WidgetPicker({
   const selectCategory = (category: WidgetCategory) => {
     setActivePanel(category);
     setQuery("");
+    if (category === "automation" && !automationCacheLoadedRef.current) {
+      setAutomationStatus("idle");
+    }
   };
 
   const selectOption = (option: PickerOption) => {
@@ -499,7 +516,9 @@ export function WidgetPicker({
   const isAutomationPanel = activePanel === "automation";
   const isSkillPanel = activePanel === "skill";
   const isAutomationLoading =
-    isAutomationPanel && automationStatus === "loading";
+    isAutomationPanel &&
+    automationStatus !== "error" &&
+    !automationCacheLoadedRef.current;
   const isAutomationError = isAutomationPanel && automationStatus === "error";
   const isSkillLoading = isSkillPanel && skillsPending;
   const showEmpty =

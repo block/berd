@@ -149,7 +149,10 @@ export function useAutomationBuilderSession({
   onAutomationUpdated,
 }: UseAutomationBuilderSessionOptions = {}) {
   const isEditing = Boolean(automationId);
-  const [seedDraft, setSeedDraft] = useState<AutomationDraft | null>(null);
+  const [seedDraftState, setSeedDraftState] = useState<{
+    automationId: string;
+    draft: AutomationDraft | null;
+  } | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [status, setStatus] = useState<AutomationBuilderStatus>("initialized");
@@ -200,6 +203,10 @@ export function useAutomationBuilderSession({
     () => findAutomationDraftState(messages),
     [messages],
   );
+  const seedDraft =
+    automationId && seedDraftState?.automationId === automationId
+      ? seedDraftState.draft
+      : null;
   // In edit mode, fall back to the seed draft (synthesized from the existing
   // tile) until the chat emits its own draft via a tool call.
   const draftState = useMemo<AutomationDraftState>(() => {
@@ -242,7 +249,8 @@ export function useAutomationBuilderSession({
   }
   const activeDraftOverrides =
     activeDraftToolRequestId &&
-    draftOverrideState.toolRequestId === activeDraftToolRequestId
+    draftOverrideState.toolRequestId === activeDraftToolRequestId &&
+    !effectiveDraftState.created
       ? draftOverrideState.overrides
       : {};
   const hasActiveDraftOverrides = Object.keys(activeDraftOverrides).length > 0;
@@ -278,7 +286,6 @@ export function useAutomationBuilderSession({
   // Fetch the existing tile in edit mode and synthesize the seed draft.
   useEffect(() => {
     if (!automationId) {
-      setSeedDraft(null);
       return;
     }
     let cancelled = false;
@@ -287,7 +294,10 @@ export function useAutomationBuilderSession({
         const response = await getAutomationTile(automationId);
         if (cancelled) return;
         if (response.tileInfo) {
-          setSeedDraft(buildSeedDraftFromTile(response.tileInfo));
+          setSeedDraftState({
+            automationId,
+            draft: buildSeedDraftFromTile(response.tileInfo),
+          });
         }
       } catch (error) {
         if (cancelled) return;
@@ -299,15 +309,6 @@ export function useAutomationBuilderSession({
       cancelled = true;
     };
   }, [automationId]);
-
-  useEffect(() => {
-    if (mergedDraftState.created) {
-      setDraftOverrideState((current) => ({
-        ...current,
-        overrides: {},
-      }));
-    }
-  }, [mergedDraftState.created]);
 
   useEffect(() => {
     if (!mergedDraftState.created) return;

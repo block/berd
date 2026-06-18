@@ -1,5 +1,5 @@
 import { CheckIcon, ChevronsUpDownIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import {
   Command,
@@ -41,6 +41,8 @@ export function SearchableSelect({
   className,
 }: SearchableSelectProps) {
   const [open, setOpen] = useState(false);
+  const generatedListId = useId();
+  const listId = id ? `${id}-listbox` : generatedListId;
   const selectedOption = useMemo(
     () => options.find((option) => option.value === value),
     [options, value],
@@ -53,6 +55,7 @@ export function SearchableSelect({
           id={id}
           type="button"
           role="combobox"
+          aria-controls={listId}
           aria-expanded={open}
           aria-haspopup="listbox"
           disabled={disabled}
@@ -72,7 +75,7 @@ export function SearchableSelect({
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
         <Command>
           <CommandInput placeholder={searchPlaceholder} />
-          <CommandList>
+          <CommandList id={listId}>
             <CommandEmpty>{emptyLabel}</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (

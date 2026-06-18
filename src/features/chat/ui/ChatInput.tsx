@@ -299,19 +299,24 @@ export function ChatInput({
   const selectedMessageChipsRef = useRef(selectedMessageChips);
   selectedMessageChipsRef.current = selectedMessageChips;
 
-  useEffect(() => {
+  // Reconcile mentioned personas inline when the active persona changes,
+  // instead of in an effect, so the chips never render a stale selection for a
+  // frame.
+  const [previousSelectedPersonaId, setPreviousSelectedPersonaId] =
+    useState(selectedPersonaId);
+  if (previousSelectedPersonaId !== selectedPersonaId) {
+    setPreviousSelectedPersonaId(selectedPersonaId);
     if (!selectedPersonaId) {
       setMentionedPersonas([]);
-      return;
+    } else {
+      setMentionedPersonas((current) =>
+        current.length > 0 &&
+        !current.some((persona) => persona.id === selectedPersonaId)
+          ? []
+          : current,
+      );
     }
-
-    setMentionedPersonas((current) =>
-      current.length > 0 &&
-      !current.some((persona) => persona.id === selectedPersonaId)
-        ? []
-        : current,
-    );
-  }, [selectedPersonaId]);
+  }
 
   const handlePersonaMentionAdded = useCallback((persona: Persona) => {
     setMentionedPersonas((current) => {

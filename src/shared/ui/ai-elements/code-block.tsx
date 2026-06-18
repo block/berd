@@ -192,6 +192,11 @@ const getTokensCacheKey = (code: string, language: BundledLanguage) => {
   return `${language}:${code.length}:${start}:${end}`;
 };
 
+const getCachedTokenizedCodeForInput = (
+  code: string,
+  language: BundledLanguage,
+) => tokensCache.get(getTokensCacheKey(code, language)) ?? null;
+
 const getHighlighter = (
   language: BundledLanguage,
 ): Promise<HighlighterGeneric<BundledLanguage, BundledTheme>> => {
@@ -441,21 +446,31 @@ export const CodeBlockContent = ({
 }) => {
   // Memoized raw tokens for immediate display
   const rawTokens = useMemo(() => createRawTokens(code), [code]);
+  const cacheKey = useMemo(
+    () => getTokensCacheKey(code, language),
+    [code, language],
+  );
+  const cachedTokens = useMemo(
+    () => getCachedTokenizedCodeForInput(code, language),
+    [code, language],
+  );
 
   // Async highlighting result (populated after shiki loads)
-  const [highlightedTokens, setHighlightedTokens] =
-    useState<TokenizedCode | null>(null);
-  const [isHighlighting, setIsHighlighting] = useState(true);
-  const keyRef = useRef({ code, language });
-
-  // Invalidate stale tokens synchronously during render
-  if (keyRef.current.code !== code || keyRef.current.language !== language) {
-    keyRef.current = { code, language };
-    setHighlightedTokens(null);
-    setIsHighlighting(true);
-  }
+  const [highlightState, setHighlightState] = useState<{
+    cacheKey: string;
+    isHighlighting: boolean;
+    tokens: TokenizedCode | null;
+  }>(() => ({
+    cacheKey,
+    isHighlighting: cachedTokens == null,
+    tokens: cachedTokens,
+  }));
 
   useEffect(() => {
+    if (cachedTokens) {
+      return;
+    }
+
     let cancelled = false;
 
     const cached = highlightCode(
@@ -463,28 +478,48 @@ export const CodeBlockContent = ({
       language,
       (result) => {
         if (!cancelled) {
-          setHighlightedTokens(result);
-          setIsHighlighting(false);
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: result,
+          });
         }
       },
       () => {
         if (!cancelled) {
-          setIsHighlighting(false);
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: null,
+          });
         }
       },
     );
     if (cached) {
-      setHighlightedTokens(cached);
-      setIsHighlighting(false);
-      return;
+      queueMicrotask(() => {
+        if (!cancelled) {
+          setHighlightState({
+            cacheKey,
+            isHighlighting: false,
+            tokens: cached,
+          });
+        }
+      });
     }
-    setIsHighlighting(true);
 
     return () => {
       cancelled = true;
     };
-  }, [code, language]);
+  }, [cacheKey, cachedTokens, code, language]);
 
+  const highlightedTokens =
+    cachedTokens ??
+    (highlightState.cacheKey === cacheKey ? highlightState.tokens : null);
+  const isHighlighting =
+    highlightedTokens == null &&
+    (highlightState.cacheKey === cacheKey
+      ? highlightState.isHighlighting
+      : true);
   const tokenized = highlightedTokens ?? rawTokens;
 
   return (

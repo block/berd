@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown } from "lucide-react";
 import { IconPlayerPlayFilled } from "@tabler/icons-react";
@@ -93,6 +93,7 @@ function SoundSelect({
 }) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
+  const soundListId = useId();
   const soundOptions: SoundOption[] = [
     ...NOTIFICATION_SOUNDS.map((sound) => ({
       id: sound.id,
@@ -118,6 +119,7 @@ function SoundSelect({
           variant="outline"
           className="h-9 w-full justify-between rounded-sm px-3"
           role="combobox"
+          aria-controls={soundListId}
           aria-expanded={open}
           aria-label={ariaLabel}
           rightIcon={<ChevronDown aria-hidden="true" />}
@@ -126,7 +128,7 @@ function SoundSelect({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-56 p-1">
-        <fieldset className="space-y-0.5">
+        <fieldset id={soundListId} className="space-y-0.5">
           <legend className="sr-only">{ariaLabel}</legend>
           {soundOptions.map((sound) => {
             const selected = sound.id === value;

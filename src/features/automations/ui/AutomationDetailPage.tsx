@@ -184,24 +184,16 @@ export function AutomationDetailPage({
     instructionsDraftRef.current = instructionsDraft;
   }, [instructionsDraft]);
 
-  useEffect(() => {
-    if (instructionsSaveState === "requested" && isSaving) {
-      setInstructionsSaveState("saving");
-      return;
-    }
-
-    if (instructionsSaveState !== "saving" || isSaving) {
-      return;
-    }
-
+  if (instructionsSaveState === "requested" && isSaving) {
+    setInstructionsSaveState("saving");
+  } else if (instructionsSaveState === "saving" && !isSaving) {
     if (mutationError) {
       setInstructionsSaveState("idle");
-      return;
+    } else {
+      setInstructionsSaveState("savedPendingRefresh");
+      setIsEditingInstructions(false);
     }
-
-    setInstructionsSaveState("savedPendingRefresh");
-    setIsEditingInstructions(false);
-  }, [instructionsSaveState, isSaving, mutationError]);
+  }
 
   const baseUpdateRequest = (): UpdateAutomationTileRequest | null => {
     if (!tile.id) return null;

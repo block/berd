@@ -95,8 +95,9 @@ lint:
     pnpm lint
 
 # Run react-doctor static analysis as an advisory report (fully offline, no telemetry).
-react-doctor:
-    pnpm exec react-doctor --project goose-internal --no-score --blocking none
+# Forwards extra flags, e.g. `just react-doctor --verbose` or `just react-doctor --json`.
+react-doctor *ARGS:
+    pnpm exec react-doctor --project goose-internal --no-score --blocking none {{ ARGS }}
 
 # Check frontend i18n string conventions.
 i18n-check:

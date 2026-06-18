@@ -171,6 +171,11 @@ export function AgentModelPicker({
     useState<PopoverContentAlign>("start");
   const [latchedReasoningEffortConfig, setLatchedReasoningEffortConfig] =
     useState<ReasoningEffortConfig | null>(null);
+  const [previousLatchInputs, setPreviousLatchInputs] = useState<{
+    open: boolean;
+    hasLive: boolean;
+    config: ReasoningEffortConfig | undefined;
+  }>({ open: false, hasLive: false, config: undefined });
   const selectedAgentLabel =
     agents.find((agent) => agent.id === selectedAgentId)?.label ??
     formatProviderLabel(selectedAgentId);
@@ -231,6 +236,26 @@ export function AgentModelPicker({
   const hasLiveReasoningEffort =
     Boolean(reasoningEffortConfig?.configId) &&
     (reasoningEffortConfig?.options.length ?? 0) > 1;
+  // Latch (or release) the reasoning-effort config inline as its live inputs
+  // change, instead of in an effect, so the picker never paints a stale column.
+  // The transient transition-clear (open with no live config) stays in the
+  // effect below because it is a timer, not a synchronous state adjustment.
+  if (
+    previousLatchInputs.open !== open ||
+    previousLatchInputs.hasLive !== hasLiveReasoningEffort ||
+    previousLatchInputs.config !== reasoningEffortConfig
+  ) {
+    setPreviousLatchInputs({
+      open,
+      hasLive: hasLiveReasoningEffort,
+      config: reasoningEffortConfig,
+    });
+    if (hasLiveReasoningEffort && reasoningEffortConfig) {
+      setLatchedReasoningEffortConfig(reasoningEffortConfig);
+    } else if (!open) {
+      setLatchedReasoningEffortConfig(null);
+    }
+  }
   const isReasoningEffortPending =
     open && !reasoningEffortConfig && Boolean(latchedReasoningEffortConfig);
   const displayReasoningEffortConfig =
@@ -256,25 +281,17 @@ export function AgentModelPicker({
       : latchedReasoningEffortConfig;
 
   useEffect(() => {
-    if (hasLiveReasoningEffort && reasoningEffortConfig) {
-      setLatchedReasoningEffortConfig(reasoningEffortConfig);
+    if (!open || hasLiveReasoningEffort || !reasoningEffortConfig) {
       return;
     }
 
-    if (!open) {
+    const clearLatchedConfig = window.setTimeout(() => {
       setLatchedReasoningEffortConfig(null);
-      return;
-    }
+    }, REASONING_EFFORT_COLUMN_TRANSITION_MS);
 
-    if (reasoningEffortConfig) {
-      const clearLatchedConfig = window.setTimeout(() => {
-        setLatchedReasoningEffortConfig(null);
-      }, REASONING_EFFORT_COLUMN_TRANSITION_MS);
-
-      return () => {
-        window.clearTimeout(clearLatchedConfig);
-      };
-    }
+    return () => {
+      window.clearTimeout(clearLatchedConfig);
+    };
   }, [hasLiveReasoningEffort, open, reasoningEffortConfig]);
 
   const handleAgentSelect = (agent: AgentPickerOption) => {

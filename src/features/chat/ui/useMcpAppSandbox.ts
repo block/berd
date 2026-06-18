@@ -1,5 +1,5 @@
 import type { AppRendererProps, McpUiHostContext } from "@mcp-ui/client";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import type {
   McpAppResourceCsp,
   RenderableMcpAppDocument,
@@ -53,41 +53,35 @@ export function useMcpAppSandbox({
   renderableDocument: Pick<RenderableMcpAppDocument, "csp"> | null;
   colorScheme: HostColorScheme;
 }): Sandbox | null {
-  const [sandboxState, setSandboxState] = useState<{
-    signature: string;
-    sandbox: Sandbox;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!hostInfo || !renderableDocument) {
-      setSandboxState(null);
-      return;
+  const httpBaseUrl = hostInfo?.httpBaseUrl;
+  const secretKey = hostInfo?.secretKey;
+  const csp = renderableDocument?.csp;
+  const signature = useMemo(() => {
+    if (!httpBaseUrl || !secretKey || !renderableDocument) {
+      return null;
     }
 
-    const signature = JSON.stringify({
-      httpBaseUrl: hostInfo.httpBaseUrl,
-      secretKey: hostInfo.secretKey,
-      csp: renderableDocument.csp,
+    return JSON.stringify({
+      httpBaseUrl,
+      secretKey,
+      csp,
     });
+  }, [csp, httpBaseUrl, renderableDocument, secretKey]);
 
-    setSandboxState((current) => {
-      if (current?.signature === signature) {
-        return current;
-      }
+  // `colorScheme` is intentionally captured at build time and excluded from the
+  // dependency list: the proxy URL — and therefore the iframe — must stay stable
+  // across theme changes. Live theme updates flow through `hostContext.theme`, so
+  // rebuilding the URL here would needlessly reload the embedded app.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: colorScheme is deliberately baked in once; see comment above.
+  const sandbox = useMemo<Sandbox | null>(() => {
+    if (!httpBaseUrl || !secretKey || !signature) {
+      return null;
+    }
 
-      return {
-        signature,
-        sandbox: {
-          url: buildProxyUrl(
-            hostInfo.httpBaseUrl,
-            hostInfo.secretKey,
-            renderableDocument.csp,
-            colorScheme,
-          ),
-        },
-      };
-    });
-  }, [hostInfo, renderableDocument, colorScheme]);
+    return {
+      url: buildProxyUrl(httpBaseUrl, secretKey, csp ?? null, colorScheme),
+    };
+  }, [csp, httpBaseUrl, secretKey, signature]);
 
-  return sandboxState?.sandbox ?? null;
+  return sandbox;
 }

@@ -293,6 +293,20 @@ export function useChatSessionController({
   const selectedPersona = personas.find(
     (persona) => persona.id === selectedPersonaId,
   );
+  // On the home composer the selected persona is driven by pendingPersonaId.
+  // If that persona no longer exists, drop the pending selection inline (it is
+  // self-guarded by `pendingPersonaId !== undefined`) rather than in an effect,
+  // so the picker never shows a deleted persona for a frame. The session-backed
+  // case is a store mutation and stays in the effect below.
+  if (
+    !sessionId &&
+    pendingPersonaId !== undefined &&
+    selectedPersonaId !== null &&
+    personas.length > 0 &&
+    !selectedPersona
+  ) {
+    setPendingPersonaId(undefined);
+  }
   const sessionCwd =
     activeWorkspace?.path ??
     session?.workingDir ??
@@ -929,17 +943,14 @@ export function useChatSessionController({
 
   useEffect(() => {
     if (
+      sessionId &&
       selectedPersonaId !== null &&
       personas.length > 0 &&
       !personas.find((persona) => persona.id === selectedPersonaId)
     ) {
-      if (sessionId) {
-        useChatSessionStore
-          .getState()
-          .patchSession(sessionId, { personaId: undefined });
-      } else {
-        setPendingPersonaId(undefined);
-      }
+      useChatSessionStore
+        .getState()
+        .patchSession(sessionId, { personaId: undefined });
     }
   }, [personas, selectedPersonaId, sessionId]);
 

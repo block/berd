@@ -73,6 +73,11 @@ type DesignSystemInspectorProps = {
   inspectModeToggleRequest?: number;
 };
 
+type InspectModeState = {
+  active: boolean;
+  lastToggleRequest: number;
+};
+
 const INSPECTOR_EDGE_OFFSET = 16;
 const INSPECTOR_KEYBOARD_STEP = 12;
 const INSPECTOR_DRAG_THRESHOLD = 4;
@@ -114,7 +119,11 @@ export function DesignSystemInspector({
   const inspectModeBindings = useShortcutBindings(
     "view.toggleDesignSystemInspectorMode",
   );
-  const [active, setActive] = useState(false);
+  const [{ active, lastToggleRequest }, setInspectModeState] =
+    useState<InspectModeState>({
+      active: false,
+      lastToggleRequest: 0,
+    });
   const [hovered, setHovered] = useState<DesignSystemInspection | null>(null);
   const [selectedPath, setSelectedPath] = useState<DesignSystemInspection[]>(
     [],
@@ -134,7 +143,6 @@ export function DesignSystemInspector({
   const panelDragStateRef = useRef<DragState | null>(null);
   const panelResizeStateRef = useRef<PanelResizeState | null>(null);
   const suppressNextToggleRef = useRef(false);
-  const lastInspectModeToggleRequestRef = useRef(0);
 
   const selected = selectedPath[selectedPath.length - 1] ?? null;
   const visibleInspection = hovered ?? selected;
@@ -174,6 +182,14 @@ export function DesignSystemInspector({
     setSelectedPath((current) => (current.length ? [] : current));
     setSelectedRect(null);
   }, [blurInspectionFocus]);
+
+  const setActive = useCallback((nextActive: boolean) => {
+    setInspectModeState((current) =>
+      current.active === nextActive
+        ? current
+        : { ...current, active: nextActive },
+    );
+  }, []);
 
   const selectInspection = useCallback(
     (inspection: DesignSystemInspection) => {
@@ -219,27 +235,17 @@ export function DesignSystemInspector({
     setActive(false);
     clearHover();
     clearSelection();
-  }, [clearHover, clearSelection]);
+  }, [clearHover, clearSelection, setActive]);
 
-  useEffect(() => {
-    if (
-      inspectModeToggleRequest === 0 ||
-      inspectModeToggleRequest === lastInspectModeToggleRequestRef.current
-    ) {
-      return;
-    }
-
-    lastInspectModeToggleRequestRef.current = inspectModeToggleRequest;
-    setActive((current) => {
-      if (current) {
-        clearHover();
-        clearSelection();
-        return false;
-      }
-
-      return true;
-    });
-  }, [clearHover, clearSelection, inspectModeToggleRequest]);
+  if (
+    inspectModeToggleRequest !== 0 &&
+    inspectModeToggleRequest !== lastToggleRequest
+  ) {
+    setInspectModeState((current) => ({
+      active: !current.active,
+      lastToggleRequest: inspectModeToggleRequest,
+    }));
+  }
 
   const refreshRects = useCallback(() => {
     setHoverRect(getElementRect(hovered?.element ?? null));

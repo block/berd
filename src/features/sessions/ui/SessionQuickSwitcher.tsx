@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
@@ -68,14 +68,16 @@ export function SessionQuickSwitcher({
 }: SessionQuickSwitcherProps) {
   const { t } = useTranslation(["sessions", "common"]);
   const [query, setQuery] = useState("");
+  const [previousOpen, setPreviousOpen] = useState(open);
 
   // Clear the query whenever the dialog closes, including closes triggered
   // outside this component (e.g. the Cmd+P toggle in AppShell).
-  useEffect(() => {
+  if (previousOpen !== open) {
+    setPreviousOpen(open);
     if (!open) {
       setQuery("");
     }
-  }, [open]);
+  }
 
   const sessions = useChatSessionStore((state) => state.sessions);
   const messagesBySession = useChatStore((state) => state.messagesBySession);

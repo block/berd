@@ -993,6 +993,8 @@ export function VirtualMessageTimeline({
   const [liveTailScrollHeightFloorPx, setLiveTailScrollHeightFloorPx] =
     useState(0);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
+  const [transientStateSessionId, setTransientStateSessionId] =
+    useState(sessionId);
 
   if (!projectionCacheRef.current) {
     projectionCacheRef.current = createTranscriptProjectionCache();
@@ -1026,6 +1028,19 @@ export function VirtualMessageTimeline({
     lastLatestUserAutoScrollKeyRef.current = null;
     diagnosticsStartMsRef.current = getDiagnosticsNowMs();
     diagnosticsAccumulatorRef.current = createTimelineDiagnosticsAccumulator();
+  }
+
+  // Reset transient timeline UI state inline when the session changes, using a
+  // `prev`-prop guard (concurrency-safe, unlike folding these into the
+  // ref-guarded block above), so a switched-to session never paints the
+  // previous one's scroll affordances for a frame.
+  if (transientStateSessionId !== sessionId) {
+    setTransientStateSessionId(sessionId);
+    setUserDetached(false);
+    setShowJumpToLatest(false);
+    setResponseStartHintMessageId(null);
+    setLiveTailScrollHeightFloorPx(0);
+    setPulsingMessageId(null);
   }
 
   const sessionEpoch = sessionLifecycleRef.current.sessionEpoch;
@@ -1580,15 +1595,6 @@ export function VirtualMessageTimeline({
     },
     [sessionId],
   );
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reset signal for transient timeline UI state.
-  useEffect(() => {
-    setUserDetached(false);
-    setShowJumpToLatest(false);
-    setResponseStartHintMessageId(null);
-    setLiveTailScrollHeightFloorPx(0);
-    setPulsingMessageId(null);
-  }, [sessionId]);
 
   const hasRealScrollableOverflow = useCallback((container: HTMLDivElement) => {
     return hasTimelineRealScrollableOverflow({

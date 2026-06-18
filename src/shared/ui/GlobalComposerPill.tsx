@@ -170,7 +170,9 @@ export function GlobalComposerPill({
   const [containerElement, setContainerElement] =
     useState<HTMLDivElement | null>(null);
   const lastFocusRequestRef = useRef(focusRequest);
-  const routePersonaIdRef = useRef<string | null>(suggestedPersonaId);
+  const [previousSuggestedPersonaId, setPreviousSuggestedPersonaId] = useState<
+    string | null
+  >(suggestedPersonaId);
   const personaSelectionSourceRef = useRef<"none" | "route" | "user">("none");
   const userTouchedRoutePersonaRef = useRef(false);
   // True when the current provider/model overrides were seeded from the
@@ -241,35 +243,38 @@ export function GlobalComposerPill({
       !personaOverrideActiveRef.current);
   const canSend = hasSendableContent && !attachmentWorkPending;
 
-  useEffect(() => {
-    if (routePersonaIdRef.current !== suggestedPersonaId) {
-      routePersonaIdRef.current = suggestedPersonaId;
-      userTouchedRoutePersonaRef.current = false;
-    }
+  // Adopt the route-suggested persona inline as the route, draft, or selection
+  // changes — instead of in an effect — so the composer never paints a stale
+  // persona for a frame. A `prev`-prop comparison resets the user-touched flag
+  // when the route changes; the adoption itself is self-guarded by the
+  // `selectedPersonaId` checks so it converges and re-applies safely even if a
+  // render is discarded.
+  if (previousSuggestedPersonaId !== suggestedPersonaId) {
+    setPreviousSuggestedPersonaId(suggestedPersonaId);
+    userTouchedRoutePersonaRef.current = false;
+  }
 
-    if (!suggestedPersonaId) {
-      if (personaSelectionSourceRef.current === "route" && !hasDraftContent) {
+  if (!suggestedPersonaId) {
+    if (personaSelectionSourceRef.current === "route" && !hasDraftContent) {
+      if (selectedPersonaId !== null) {
         setSelectedPersonaId(null);
-        personaSelectionSourceRef.current = "none";
       }
-      return;
+      personaSelectionSourceRef.current = "none";
     }
-
-    if (
-      !hasDraftContent &&
-      !userTouchedRoutePersonaRef.current &&
-      selectedPersonaId !== suggestedPersonaId
-    ) {
-      setSelectedPersonaId(suggestedPersonaId);
-      personaSelectionSourceRef.current = "route";
-    }
-  }, [hasDraftContent, selectedPersonaId, suggestedPersonaId]);
+  } else if (
+    !hasDraftContent &&
+    !userTouchedRoutePersonaRef.current &&
+    selectedPersonaId !== suggestedPersonaId
+  ) {
+    setSelectedPersonaId(suggestedPersonaId);
+    personaSelectionSourceRef.current = "route";
+  }
 
   // Seed the provider/model overrides from the selected persona so the picker
   // display and the send payload reflect the persona's configured provider and
   // model — mirroring useChatSessionController.handlePersonaChange. Both entry
-  // points that adopt a persona (the route effect above and handlePersonaChange)
-  // flow through this single effect.
+  // points that adopt a persona (the route adoption block above and
+  // handlePersonaChange) flow through this single effect.
   useEffect(() => {
     if (!selectedPersonaId) {
       if (personaOverrideActiveRef.current) {

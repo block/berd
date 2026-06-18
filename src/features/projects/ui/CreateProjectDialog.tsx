@@ -76,27 +76,32 @@ export function CreateProjectDialog({
   const [missingDirs, setMissingDirs] = useState<string[]>([]);
 
   const isEditing = !!editingProject;
+  const dirsToValidate = useMemo(
+    () =>
+      isOpen
+        ? workingDirs
+            .map((directory) => directory?.trim())
+            .filter((directory): directory is string => Boolean(directory))
+        : [],
+    [isOpen, workingDirs],
+  );
+
+  if (dirsToValidate.length === 0 && missingDirs.length > 0) {
+    setMissingDirs([]);
+  }
 
   // Re-check the configured folders against the filesystem whenever they
   // change while the dialog is open. All workingDirs are validated, not just
   // the first, so a missing secondary folder is still surfaced.
   useEffect(() => {
-    if (!isOpen) {
-      setMissingDirs([]);
-      return;
-    }
-    const dirs = workingDirs
-      .map((directory) => directory?.trim())
-      .filter((directory): directory is string => Boolean(directory));
-    if (dirs.length === 0) {
-      setMissingDirs([]);
+    if (dirsToValidate.length === 0) {
       return;
     }
     let cancelled = false;
     (async () => {
       try {
         const resolved = await Promise.all(
-          dirs.map((directory) =>
+          dirsToValidate.map((directory) =>
             resolvePath({ parts: [directory] }).then((result) => result.path),
           ),
         );
@@ -105,7 +110,9 @@ export function CreateProjectDialog({
         // Report the user's original folder strings rather than the resolved
         // absolute paths, since those are what they recognize.
         setMissingDirs(
-          dirs.filter((_, index) => missing.includes(resolved[index])),
+          dirsToValidate.filter((_, index) =>
+            missing.includes(resolved[index]),
+          ),
         );
       } catch {
         if (!cancelled) setMissingDirs([]);
@@ -114,7 +121,7 @@ export function CreateProjectDialog({
     return () => {
       cancelled = true;
     };
-  }, [isOpen, workingDirs]);
+  }, [dirsToValidate]);
 
   const handleAddDirectory = async () => {
     try {

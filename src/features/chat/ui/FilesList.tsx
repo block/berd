@@ -226,13 +226,6 @@ export function FilesList({ projectWorkingDirs }: FilesListProps) {
     setSelectedPath(undefined);
   }
 
-  useEffect(() => {
-    const nextRoots = rootsKey ? rootsKey.split("\n") : [];
-    for (const root of nextRoots) {
-      loadDirectory(root);
-    }
-  }, [loadDirectory, rootsKey]);
-
   const handleExpandedChange = useCallback(
     (nextExpanded: Set<string>) => {
       const normalizedExpanded = new Set(nextExpanded);
