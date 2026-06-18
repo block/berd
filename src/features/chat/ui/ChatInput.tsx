@@ -47,6 +47,10 @@ import {
 import type { MessageChip } from "@/shared/types/messages";
 import type { Persona } from "@/shared/types/agents";
 
+const DOCKED_TEXTAREA_MIN_HEIGHT_PX = 140;
+const DOCKED_TEXTAREA_MAX_HEIGHT_PX = 220;
+const DOCKED_TEXTAREA_VIEWPORT_RATIO = 0.24;
+
 export function ChatInput({
   composerActions,
   initialValue = "",
@@ -190,18 +194,25 @@ export function ChatInput({
   );
 
   // Cap how tall the textarea grows before it scrolls internally. The docked
-  // chat composer can consume most of the chat panel; the floating Home pill
-  // stays compact. Keep this in sync with the textarea's max-h-* class.
+  // composer scales down on shorter windows so it doesn't crowd the transcript;
+  // the Home pill keeps its fixed cap. Keep this in sync with the textarea's
+  // max-h-* class.
   const getTextareaMaxHeightPx = useCallback(() => {
     if (surface !== "bare") {
       return 200;
     }
 
     if (typeof window === "undefined") {
-      return 480;
+      return DOCKED_TEXTAREA_MAX_HEIGHT_PX;
     }
 
-    return Math.max(184, window.innerHeight - 260);
+    return Math.min(
+      DOCKED_TEXTAREA_MAX_HEIGHT_PX,
+      Math.max(
+        DOCKED_TEXTAREA_MIN_HEIGHT_PX,
+        Math.floor(window.innerHeight * DOCKED_TEXTAREA_VIEWPORT_RATIO),
+      ),
+    );
   }, [surface]);
 
   const resizeTextarea = useCallback(() => {
@@ -970,14 +981,12 @@ export function ChatInput({
                   disabled={disabled}
                   rows={1}
                   className={cn(
-                    "mb-3 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer placeholder:opacity-100 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
+                    "mb-2 min-h-[36px] w-full resize-none overflow-x-hidden overflow-y-auto bg-transparent px-1 text-sm font-normal leading-relaxed text-foreground placeholder:text-placeholder-composer placeholder:opacity-100 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 disabled:opacity-60",
                     // Backstop for the JS auto-resize cap.
                     surface === "bare"
-                      ? "max-h-[calc(100dvh-16rem)]"
+                      ? "max-h-[clamp(140px,24dvh,220px)]"
                       : "max-h-[200px]",
-                    // The composer text scrolls with the cursor, but never shows
-                    // its own scrollbar.
-                    "scrollbar-none overscroll-contain",
+                    "scrollbar-subtle overscroll-contain",
                   )}
                   aria-label={t("input.ariaLabel")}
                   aria-controls={mentionOpen ? mentionListboxId : undefined}

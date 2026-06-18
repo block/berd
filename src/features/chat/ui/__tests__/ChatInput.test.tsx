@@ -1674,13 +1674,21 @@ describe("ChatInput", () => {
     expect(screen.getByRole("textbox")).not.toBeDisabled();
   });
 
-  it("hides the native scrollbar for long composer drafts", () => {
+  it("uses the shared subtle scrollbar for long composer drafts", () => {
     render(<ChatInput onSend={vi.fn()} />);
 
     const input = screen.getByRole("textbox");
 
-    expect(input).toHaveClass("scrollbar-none", "overscroll-contain");
-    expect(input).not.toHaveClass("scrollbar-subtle");
+    expect(input).toHaveClass("scrollbar-subtle", "overscroll-contain");
+    expect(input).not.toHaveClass("scrollbar-none");
+  });
+
+  it("keeps the docked composer responsively bounded before content scrolls internally", () => {
+    render(<ChatInput onSend={vi.fn()} surface="bare" />);
+
+    expect(screen.getByRole("textbox")).toHaveClass(
+      "max-h-[clamp(140px,24dvh,220px)]",
+    );
   });
 
   it("shows send button instead of stop when streaming with text entered", async () => {
