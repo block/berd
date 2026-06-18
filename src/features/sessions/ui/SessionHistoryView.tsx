@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { History } from "lucide-react";
-import { IconUpload } from "@tabler/icons-react";
+import { IconCheck, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
@@ -14,10 +14,14 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { cn } from "@/shared/lib/cn";
 import { BottomFade } from "@/shared/ui/BottomFade";
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
 import { Button } from "@/shared/ui/button";
 import { ConfirmDialog } from "@/shared/ui/confirm-dialog";
 import { SearchBar } from "@/shared/ui/SearchBar";
+import { ToastActionButton } from "@/shared/ui/sonner";
+import { Spinner } from "@/shared/ui/spinner";
 import { SessionCard } from "./SessionCard";
+import { acpSessionToChatSession } from "@/features/chat/lib/acpSessionMapping";
 import { groupSessionsByDate } from "../lib/groupSessionsByDate";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import {
@@ -30,7 +34,11 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
-import { acpExportSession, acpImportSession } from "@/shared/api/acp";
+import {
+  acpExportSession,
+  acpImportSession,
+  type AcpSessionInfo,
+} from "@/shared/api/acp";
 import { formatAcpErrorMessage } from "@/shared/api/acpErrors";
 import {
   saveExportedSessionFile,
@@ -73,6 +81,83 @@ interface SessionHistoryViewProps {
 }
 
 const LOAD_MORE_VIEWPORT_THRESHOLD_RATIO = 0.75;
+const MAX_APP_IMPORT_FILE_BYTES = 15 * 1024 * 1024;
+
+type ImportPhase = "reading" | "importing" | "refreshing";
+
+type ImportNotice =
+  | {
+      kind: "loading";
+      phase: ImportPhase;
+      fileName: string;
+      fileSize: number;
+    }
+  | {
+      kind: "success";
+      sessionId: string;
+      title: string;
+      messageCount: number;
+    }
+  | {
+      kind: "error";
+      fileName: string;
+      message: string;
+      command?: string;
+    };
+
+function formatImportFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function shellQuote(value: string): string {
+  return `"${value.replace(/["\\$`]/g, "\\$&")}"`;
+}
+
+function isAbsoluteImportPath(path: string): boolean {
+  return (
+    path.startsWith("/") ||
+    path.startsWith("\\\\") ||
+    /^[A-Za-z]:[\\/]/.test(path)
+  );
+}
+
+function importCommandForFile(file: File): string | undefined {
+  const path =
+    "path" in file && typeof file.path === "string" ? file.path : file.name;
+  if (!isAbsoluteImportPath(path)) {
+    return undefined;
+  }
+  return `goose session import ${shellQuote(path)}`;
+}
+
+function importedSessionTitle(
+  imported: AcpSessionInfo,
+  defaultSessionTitle: string,
+): string {
+  return imported.title
+    ? getDisplaySessionTitle(imported.title, defaultSessionTitle)
+    : defaultSessionTitle;
+}
+
+function formatImportErrorMessage({
+  disconnectedMessage,
+  error,
+  fallback,
+}: {
+  disconnectedMessage: string;
+  error: unknown;
+  fallback: string;
+}): string {
+  const message = formatAcpErrorMessage(error, fallback);
+  if (!/\bacp connection closed\b/i.test(message)) {
+    return message;
+  }
+
+  return disconnectedMessage;
+}
 
 function isNearLoadMoreThreshold(scrollElement: HTMLDivElement): boolean {
   if (scrollElement.clientHeight <= 0) {
@@ -109,6 +194,8 @@ export function SessionHistoryView({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
+  const [importNotice, setImportNotice] = useState<ImportNotice | null>(null);
+  const [copiedImportCommand, setCopiedImportCommand] = useState(false);
   const sessions = useChatSessionStore(selectSessions);
   const messagesBySession = useChatStore(selectMessagesBySession);
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
@@ -117,6 +204,7 @@ export function SessionHistoryView({
     (s) => s.isLoadingMoreSessions,
   );
   const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
+  const addSession = useChatSessionStore((s) => s.addSession);
   const removeSession = useChatSessionStore((s) => s.removeSession);
   const sessionWindowSupport = useSessionWindowSupport();
   const isMultiWindowEnabled = sessionWindowSupport.supported;
@@ -588,29 +676,122 @@ export function SessionHistoryView({
     }
   }, [activeSessions, clearSelection, selectedSessionIds]);
 
+  const handleOpenImportedSession = useCallback(
+    (sessionId: string) => {
+      onSelectSession?.(sessionId);
+    },
+    [onSelectSession],
+  );
+
   const handleImportSession = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
+      if (file.size > MAX_APP_IMPORT_FILE_BYTES) {
+        setImportNotice({
+          kind: "error",
+          fileName: file.name,
+          message: t("history.importTooLarge"),
+          command: importCommandForFile(file),
+        });
+        if (fileInputRef.current) {
+          fileInputRef.current.value = "";
+        }
+        return;
+      }
+
+      setImportNotice({
+        kind: "loading",
+        phase: "reading",
+        fileName: file.name,
+        fileSize: file.size,
+      });
+
+      let phase: ImportPhase = "reading";
+
       try {
         const text = await file.text();
-        await acpImportSession(text);
+        phase = "importing";
+        setImportNotice({
+          kind: "loading",
+          phase,
+          fileName: file.name,
+          fileSize: file.size,
+        });
+        const imported = await acpImportSession(text);
+        addSession(acpSessionToChatSession(imported));
+        phase = "refreshing";
+        setImportNotice({
+          kind: "loading",
+          phase,
+          fileName: file.name,
+          fileSize: file.size,
+        });
         await loadSessions();
+
+        const title = importedSessionTitle(imported, defaultSessionTitle);
+        setImportNotice({
+          kind: "success",
+          sessionId: imported.sessionId,
+          title,
+          messageCount: imported.messageCount,
+        });
+        toast.success(t("history.importSuccess", { title }), {
+          action: onSelectSession ? (
+            <ToastActionButton
+              onClick={() => handleOpenImportedSession(imported.sessionId)}
+            >
+              {t("common:actions.open")}
+            </ToastActionButton>
+          ) : undefined,
+        });
       } catch (error) {
+        const message = formatImportErrorMessage({
+          disconnectedMessage: t("history.importDisconnectedError", {
+            fileSize: formatImportFileSize(file.size),
+            phase: t(`history.importPhaseDescription.${phase}`),
+          }),
+          error,
+          fallback: t("history.importFailedFallback"),
+        });
         console.error("Import failed:", error);
+        setImportNotice({
+          kind: "error",
+          fileName: file.name,
+          message,
+          command: importCommandForFile(file),
+        });
+        toast.error(t("history.importFailed"), { description: message });
       } finally {
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
       }
     },
-    [loadSessions],
+    [
+      addSession,
+      defaultSessionTitle,
+      handleOpenImportedSession,
+      loadSessions,
+      onSelectSession,
+      t,
+    ],
   );
 
   const setTopBarActions = useSetTopBarActions();
+  const isImporting = importNotice?.kind === "loading";
   const handleTriggerImport = useCallback(() => {
+    if (isImporting) return;
     fileInputRef.current?.click();
+  }, [isImporting]);
+  const handleDismissImportNotice = useCallback(() => {
+    if (!isImporting) setImportNotice(null);
+  }, [isImporting]);
+  const handleCopyImportCommand = useCallback(async (command: string) => {
+    await navigator.clipboard.writeText(command);
+    setCopiedImportCommand(true);
+    window.setTimeout(() => setCopiedImportCommand(false), 1500);
   }, []);
 
   useEffect(() => {
@@ -621,12 +802,15 @@ export function SessionHistoryView({
         size="xs"
         onClick={handleTriggerImport}
         leftIcon={<IconUpload />}
+        feedbackState={isImporting ? "loading" : "idle"}
+        loadingLabel={t("history.importingButton")}
+        preserveWidth
       >
         {t("common:actions.import")}
       </Button>,
     );
     return () => setTopBarActions(null);
-  }, [setTopBarActions, t, handleTriggerImport]);
+  }, [setTopBarActions, t, handleTriggerImport, isImporting]);
 
   const handleSelectResult = useCallback(
     (sessionId: string, messageId?: string) => {
@@ -808,6 +992,118 @@ export function SessionHistoryView({
               />
             </div>
           </div>
+
+          {importNotice && (
+            <Alert
+              variant="default"
+              role={importNotice.kind === "loading" ? "status" : "alert"}
+              aria-live="polite"
+              className={cn(
+                "col-span-full",
+                importNotice.kind === "error" && "border-destructive/30",
+              )}
+            >
+              {importNotice.kind === "loading" && (
+                <Spinner className="size-4" aria-hidden="true" />
+              )}
+              <AlertTitle>
+                {importNotice.kind === "loading"
+                  ? t(`history.importPhase.${importNotice.phase}`)
+                  : importNotice.kind === "success"
+                    ? t("history.importComplete")
+                    : t("history.importFailed")}
+              </AlertTitle>
+              <AlertDescription>
+                {importNotice.kind === "loading" && (
+                  <p>
+                    {t("history.importProgressDescription", {
+                      fileName: importNotice.fileName,
+                      fileSize: formatImportFileSize(importNotice.fileSize),
+                    })}
+                  </p>
+                )}
+                {importNotice.kind === "success" && (
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span>
+                      {t("history.importCompleteDescription", {
+                        title: importNotice.title,
+                        count: importNotice.messageCount,
+                        displayCount: importNotice.messageCount,
+                      })}
+                    </span>
+                    {onSelectSession && (
+                      <Button
+                        type="button"
+                        variant="alert-action"
+                        size="xxs"
+                        onClick={() =>
+                          handleOpenImportedSession(importNotice.sessionId)
+                        }
+                      >
+                        {t("common:actions.open")}
+                      </Button>
+                    )}
+                    <Button
+                      type="button"
+                      variant="alert-action"
+                      size="xxs"
+                      onClick={handleDismissImportNotice}
+                    >
+                      {t("common:actions.close")}
+                    </Button>
+                  </div>
+                )}
+                {importNotice.kind === "error" && (
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pr-8 text-sm text-muted-foreground">
+                    <span>
+                      {t("history.importFailedDescription", {
+                        fileName: importNotice.fileName,
+                        message: importNotice.message,
+                      })}
+                    </span>
+                    {importNotice.command && (
+                      <>
+                        <span>{t("history.importCommandIntro")}</span>
+                        <span className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted/50 px-2 py-1 align-middle">
+                          <code className="min-w-0 truncate font-mono text-xs text-foreground">
+                            {importNotice.command}
+                          </code>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon-xs"
+                            aria-label={t("history.copyImportCommand")}
+                            title={t("history.copyImportCommand")}
+                            onClick={() => {
+                              if (importNotice.command) {
+                                void handleCopyImportCommand(
+                                  importNotice.command,
+                                );
+                              }
+                            }}
+                          >
+                            {copiedImportCommand ? <IconCheck /> : <IconCopy />}
+                          </Button>
+                        </span>
+                        <span>{t("history.importCommandRefresh")}</span>
+                      </>
+                    )}
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-xs"
+                      className="absolute right-3 top-3"
+                      aria-label={t("common:actions.close")}
+                      title={t("common:actions.close")}
+                      onClick={handleDismissImportNotice}
+                    >
+                      <IconX />
+                    </Button>
+                  </div>
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
 
           {searchError && (
             <p className="text-xs text-destructive">

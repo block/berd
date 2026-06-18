@@ -435,6 +435,95 @@ describe("SessionHistoryView", () => {
     });
   });
 
+  it("shows progress and success feedback while importing a session", async () => {
+    const loadSessions = vi.fn().mockResolvedValue(undefined);
+    let resolveImport!: (value: unknown) => void;
+    mocks.acpImportSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolveImport = resolve;
+      }),
+    );
+    setSessionStoreState({
+      sessions: [],
+      loadSessions,
+    });
+
+    renderHistory();
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    if (!input) throw new Error("Missing file input");
+
+    const file = new File(['{"conversation":[]}'], "imported-session.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue('{"conversation":[]}'),
+    });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    expect(await screen.findByText("Importing session")).toBeInTheDocument();
+    expect(screen.getByText(/imported-session\.json/)).toBeInTheDocument();
+
+    resolveImport({
+      sessionId: "imported-session",
+      title: "Imported Session",
+      updatedAt: "2026-04-09T12:02:00.000Z",
+      createdAt: "2026-04-09T12:02:00.000Z",
+      archivedAt: null,
+      userSetName: true,
+      messageCount: 3,
+      subtitle: null,
+      workingDir: null,
+      projectId: null,
+      providerId: null,
+      modelId: null,
+      personaId: null,
+    });
+
+    await waitFor(() => {
+      expect(loadSessions).toHaveBeenCalledOnce();
+      expect(screen.getByRole("alert")).toHaveTextContent("Import complete");
+      expect(screen.getByText("Imported Session")).toBeInTheDocument();
+      expect(mocks.toastSuccess).toHaveBeenCalledWith(
+        "Imported Imported Session",
+        expect.objectContaining({ action: undefined }),
+      );
+    });
+  });
+
+  it("shows import errors in the page and toast", async () => {
+    mocks.acpImportSession.mockRejectedValue(new Error("invalid export"));
+    setSessionStoreState({
+      sessions: [],
+      loadSessions: vi.fn(),
+    });
+
+    renderHistory();
+
+    const input =
+      document.querySelector<HTMLInputElement>('input[type="file"]');
+    expect(input).not.toBeNull();
+    if (!input) throw new Error("Missing file input");
+
+    const file = new File(["not-json"], "broken.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: vi.fn().mockResolvedValue("not-json"),
+    });
+    fireEvent.change(input, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Import failed");
+      expect(screen.getByRole("alert")).toHaveTextContent("invalid export");
+      expect(mocks.toastError).toHaveBeenCalledWith("Import failed", {
+        description: "invalid export",
+      });
+    });
+  });
+
   it("reports the renamed file from the native export save path", async () => {
     mocks.acpExportSession.mockResolvedValue('{"messages":[]}');
     vi.mocked(saveExportedSessionFile).mockResolvedValue(
