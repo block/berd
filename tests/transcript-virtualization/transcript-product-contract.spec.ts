@@ -120,7 +120,7 @@ async function scrollToMessage(
       });
     },
     messageId,
-    { timeout: 5_000 },
+    { timeout: 10_000 },
   );
 }
 

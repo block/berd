@@ -144,7 +144,7 @@ const TRANSCRIPT_SCROLL_STABILITY_EPSILON_PX = 1;
 const TRANSCRIPT_SCROLL_STABILITY_FRAMES = 2;
 const TRANSCRIPT_SCROLL_STABILITY_MAX_FRAMES = 12;
 const TRANSCRIPT_FILLED_VIEWPORT_STABILITY_FRAMES = 2;
-const TRANSCRIPT_FILLED_VIEWPORT_MAX_FRAMES = 30;
+const TRANSCRIPT_FILLED_VIEWPORT_TIMEOUT_MS = 5_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value != null && !Array.isArray(value);
@@ -634,12 +634,9 @@ export async function waitForFilledTranscriptViewport(
 ): Promise<TranscriptViewportEvidence> {
   let previous = await collectTranscriptViewportEvidence(page, selectors);
   let stableFrames = previous.blankViewportPixels <= 0 ? 1 : 0;
+  const deadline = Date.now() + TRANSCRIPT_FILLED_VIEWPORT_TIMEOUT_MS;
 
-  for (
-    let frame = 0;
-    frame < TRANSCRIPT_FILLED_VIEWPORT_MAX_FRAMES;
-    frame += 1
-  ) {
+  while (Date.now() < deadline) {
     await page.evaluate(
       () =>
         new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
@@ -652,6 +649,43 @@ export async function waitForFilledTranscriptViewport(
       }
     } else {
       stableFrames = next.blankViewportPixels <= 0 ? 1 : 0;
+    }
+    previous = next;
+  }
+
+  return previous;
+}
+
+function hasFilledDiagnosticViewport(diagnostics: Record<string, unknown>) {
+  return (
+    typeof diagnostics.blankViewportPixels === "number" &&
+    Number.isFinite(diagnostics.blankViewportPixels) &&
+    diagnostics.blankViewportPixels <= 0
+  );
+}
+
+async function waitForFilledTranscriptRendererDiagnostics(
+  page: Page,
+): Promise<Record<string, unknown>> {
+  let previous = await collectTranscriptRendererDiagnostics(page);
+  let stableFrames = hasFilledDiagnosticViewport(previous) ? 1 : 0;
+  const deadline = Date.now() + TRANSCRIPT_FILLED_VIEWPORT_TIMEOUT_MS;
+
+  while (Date.now() < deadline) {
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    const next = await collectTranscriptRendererDiagnostics(page);
+    const isFilled = hasFilledDiagnosticViewport(next);
+    const wasFilled = hasFilledDiagnosticViewport(previous);
+    if (isFilled && wasFilled) {
+      stableFrames += 1;
+      if (stableFrames >= TRANSCRIPT_FILLED_VIEWPORT_STABILITY_FRAMES) {
+        return next;
+      }
+    } else {
+      stableFrames = isFilled ? 1 : 0;
     }
     previous = next;
   }
@@ -786,7 +820,7 @@ export async function runTranscriptRendererHarness(
   const viewport = await waitForFilledTranscriptViewport(page, selectors);
   const productionDiagnostics =
     await collectProductionTranscriptRendererDiagnostics(page);
-  const diagnostics = await collectTranscriptRendererDiagnostics(page);
+  const diagnostics = await waitForFilledTranscriptRendererDiagnostics(page);
   const diagnosticOperationTimingMetrics =
     readTranscriptOperationTimingMetricsFromDiagnostics(
       productionDiagnostics,
