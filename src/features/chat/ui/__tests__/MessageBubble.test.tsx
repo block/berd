@@ -182,6 +182,8 @@ describe("MessageBubble", () => {
     expect(label).toHaveAttribute("data-role", "steer-message-label");
     expect(label).not.toHaveAttribute("data-slot", "badge");
     expect(label).toHaveClass("leading-4");
+    expect(label.parentElement).toHaveClass("items-start");
+    expect(label.parentElement).not.toHaveClass("items-end");
     expect(label.closest(".bg-message-user-bg")).toHaveClass("py-2");
     expect(label.closest(".bg-message-user-bg")).not.toHaveClass("py-2.5");
   });

@@ -668,7 +668,7 @@ export const MessageBubble = memo(function MessageBubble({
           onClick={handleContentClick}
         >
           {isGoosectlCrossSessionMessage || isSteeredMessage ? (
-            <div className="mb-1 flex flex-col items-end gap-0.5 text-xs font-normal leading-4 text-muted-foreground">
+            <div className="mb-1 flex flex-col items-start gap-0.5 text-xs font-normal leading-4 text-muted-foreground">
               {isGoosectlCrossSessionMessage ? (
                 <span
                   data-role="goosectl-cross-session-message-label"
