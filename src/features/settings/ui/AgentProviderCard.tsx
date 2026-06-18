@@ -102,6 +102,7 @@ export function AgentProviderCard({
   const lineCounterRef = useRef(0);
   const isMountedRef = useRef(true);
   const unlistenRef = useRef<(() => void) | null>(null);
+  const lastSetupActionRef = useRef<"install" | "update" | "auth" | null>(null);
 
   const icon = getProviderIcon(provider.id, "size-6");
   const isActive = setupPhase !== "idle";
@@ -120,8 +121,8 @@ export function AgentProviderCard({
     resolvedReadiness === "ready" || resolvedReadiness === "not_ready";
 
   // Version / update / partial-install readout from the shared report. Derived
-  // here (above the setup handlers) so the handlers and the single top-right
-  // indicator share one source of truth.
+  // here (above the setup handlers) so the handlers and rendered actions share
+  // one source of truth.
   const versionDisplay = versionCheck
     ? describeAgentVersion(versionCheck)
     : null;
@@ -189,21 +190,33 @@ export function AgentProviderCard({
     setSetupOutput(trimmed);
   }, []);
 
-  async function handleConnect() {
+  const resetSetupState = useCallback(() => {
     setSetupError(null);
     setSetupFailureAnalysis(null);
     setSetupOutput([]);
     setupOutputLinesRef.current = [];
     lineCounterRef.current = 0;
+  }, []);
 
-    if (supportsInstall && resolvedReadiness === "not_installed") {
-      // Pass the pending updates so a partial install with stale binaries
-      // (the "Fix" state) is brought fully current in one pass; for a plain
-      // "Install" this list is empty and the loop is a no-op.
-      await runInstall(actionableReadouts);
-    } else if (supportsAuth) {
-      await runAuth();
-    }
+  async function handleInstallOnly() {
+    lastSetupActionRef.current = "install";
+    resetSetupState();
+    // Pass the pending updates so a partial install with stale binaries (the
+    // "Fix" state) is brought fully current in one pass; for a plain "Install"
+    // this list is empty and the loop is a no-op.
+    await runInstall(actionableReadouts);
+  }
+
+  async function handleUpdateOnly() {
+    lastSetupActionRef.current = "update";
+    resetSetupState();
+    await runUpdates(actionableReadouts);
+  }
+
+  async function handleAuthOnly() {
+    lastSetupActionRef.current = "auth";
+    resetSetupState();
+    await runAuth();
   }
 
   async function runInstall(updateReadouts: AgentBinaryReadout[] = []) {
@@ -268,13 +281,6 @@ export function AgentProviderCard({
       clearListener();
       if (!isMountedRef.current) return;
 
-      // The binary may now be present; refresh every surface from one report.
-      // Use `rerunDoctorReport` (not bare `invalidateDoctorReport`) so the
-      // freshness pass re-runs and version/install-source/update badges
-      // repopulate — invalidation alone refetches through the fast,
-      // freshness-off `runDoctor` queryFn and blanks them out.
-      void rerunDoctorReport(queryClient);
-
       if (hasBinary && provider.binaryName) {
         setSetupPhase("checking");
         const installed = await refreshInstallStatus();
@@ -292,13 +298,18 @@ export function AgentProviderCard({
         }
       }
 
-      if (supportsAuth) {
-        await runAuth();
-      } else {
-        if (!isMountedRef.current) return;
+      // The binary may now be present; refresh every surface from one report.
+      // Use `rerunDoctorReport` (not bare `invalidateDoctorReport`) so the
+      // freshness pass re-runs and version/install-source/update badges
+      // repopulate — invalidation alone refetches through the fast,
+      // freshness-off `runDoctor` queryFn and blanks them out.
+      await rerunDoctorReport(queryClient);
+      if (!isMountedRef.current) return;
+
+      if (!supportsAuth) {
         onProviderReady?.(provider.id);
-        setSetupPhase("idle");
       }
+      setSetupPhase("idle");
     } catch (err) {
       clearListener();
       if (!isMountedRef.current) return;
@@ -314,8 +325,6 @@ export function AgentProviderCard({
   async function runAuth() {
     if (!supportsAuth) return;
     setSetupPhase("authenticating");
-    setSetupOutput([]);
-    setupOutputLinesRef.current = [];
 
     clearListener();
     const unlisten = await onAgentSetupOutput(provider.id, appendOutput);
@@ -367,11 +376,6 @@ export function AgentProviderCard({
   // the agent is already set up; we're only refreshing binaries.
   async function runUpdates(readouts: AgentBinaryReadout[]) {
     if (readouts.length === 0) return;
-    setSetupError(null);
-    setSetupFailureAnalysis(null);
-    setSetupOutput([]);
-    setupOutputLinesRef.current = [];
-    lineCounterRef.current = 0;
     setSetupPhase("installing");
 
     clearListener();
@@ -412,9 +416,16 @@ export function AgentProviderCard({
   }
 
   function handleRetry() {
-    setSetupError(null);
-    setSetupFailureAnalysis(null);
-    void handleConnect();
+    switch (lastSetupActionRef.current) {
+      case "auth":
+        void handleAuthOnly();
+        return;
+      case "update":
+        void handleUpdateOnly();
+        return;
+      default:
+        void handleInstallOnly();
+    }
   }
 
   function getSetupFailureMessage() {
@@ -446,13 +457,11 @@ export function AgentProviderCard({
   const isReady = isBuiltIn || resolvedReadiness === "ready";
   const needsAuth = resolvedReadiness === "not_ready" && supportsAuth;
   const needsInstall = resolvedReadiness === "not_installed" && supportsInstall;
+  const needsSetupAction = needsInstall || hasActionableUpdate;
 
   if (provider.showOnlyWhenInstalled && !isInstalled) return null;
 
-  // The single top-right call-to-action shared by the Install / Update / Fix
-  // states: an attention-colored outline button that resolves every
-  // outstanding install/update issue for the agent in one click. The green
-  // ready tick takes this slot once nothing is left to do.
+  // Shared setup call-to-action style for Install / Update / Fix states.
   function renderActionButton(
     label: string,
     ariaLabel: string,
@@ -472,6 +481,52 @@ export function AgentProviderCard({
         {label}
       </Button>
     );
+  }
+
+  function renderSignInButton() {
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="xs"
+        onClick={() => void handleAuthOnly()}
+        className="flex-shrink-0 text-muted-foreground"
+        aria-label={t("providers.agents.signInLabel", {
+          name: provider.displayName,
+        })}
+      >
+        {t("providers.agents.signIn")}
+      </Button>
+    );
+  }
+
+  function renderSetupActionButton() {
+    if (needsInstall) {
+      return hasActionableUpdate
+        ? renderActionButton(
+            t("providers.agents.fix"),
+            t("providers.agents.fixLabel", { name: provider.displayName }),
+            <IconTool aria-hidden="true" />,
+            () => void handleInstallOnly(),
+          )
+        : renderActionButton(
+            t("providers.agents.install"),
+            t("providers.agents.installLabel", { name: provider.displayName }),
+            <IconPlus aria-hidden="true" />,
+            () => void handleInstallOnly(),
+          );
+    }
+
+    if (hasActionableUpdate) {
+      return renderActionButton(
+        t("providers.agents.applyUpdates"),
+        t("providers.agents.updateLabel", { name: provider.displayName }),
+        <ArrowUpCircle aria-hidden="true" />,
+        () => void handleUpdateOnly(),
+      );
+    }
+
+    return null;
   }
 
   function renderStatusIndicator() {
@@ -508,18 +563,22 @@ export function AgentProviderCard({
       );
     }
 
+    const setupActionButton = renderSetupActionButton();
+
+    if (needsAuth && needsSetupAction && setupActionButton) {
+      return (
+        <div className="flex flex-shrink-0 items-center gap-1.5">
+          {setupActionButton}
+          {renderSignInButton()}
+        </div>
+      );
+    }
+
     // Installed and usable: a green tick when nothing is pending, otherwise the
     // amber Update button takes the tick's slot (one click runs every
     // actionable per-readout update command).
     if (isReady) {
-      if (hasActionableUpdate) {
-        return renderActionButton(
-          t("providers.agents.applyUpdates"),
-          t("providers.agents.updateLabel", { name: provider.displayName }),
-          <ArrowUpCircle aria-hidden="true" />,
-          () => void runUpdates(actionableReadouts),
-        );
-      }
+      if (setupActionButton) return setupActionButton;
       return (
         <div className="flex h-6 flex-shrink-0 items-center">
           <IconCheck className="size-4 text-success duration-200 motion-safe:animate-in motion-safe:fade-in" />
@@ -527,43 +586,16 @@ export function AgentProviderCard({
       );
     }
 
-    if (needsAuth && !isActive) {
-      return (
-        <Button
-          type="button"
-          variant="ghost"
-          size="xs"
-          onClick={() => void handleConnect()}
-          className="flex-shrink-0 text-muted-foreground"
-          aria-label={t("providers.agents.signInLabel", {
-            name: provider.displayName,
-          })}
-        >
-          {t("providers.agents.signIn")}
-        </Button>
-      );
+    if (needsAuth) {
+      return renderSignInButton();
     }
 
     // Missing one or more required tools: "Install" when only an install is
     // needed, or "Fix" when the agent is *also* out of date (e.g. Codex's main
     // CLI is on PATH with a pending update but the codex-acp bridge isn't
-    // installed). Both run the install and apply any pending updates in one
-    // pass via handleConnect -> runInstall.
-    if (needsInstall && !isActive) {
-      return hasActionableUpdate
-        ? renderActionButton(
-            t("providers.agents.fix"),
-            t("providers.agents.fixLabel", { name: provider.displayName }),
-            <IconTool aria-hidden="true" />,
-            () => void handleConnect(),
-          )
-        : renderActionButton(
-            t("providers.agents.install"),
-            t("providers.agents.installLabel", { name: provider.displayName }),
-            <IconPlus aria-hidden="true" />,
-            () => void handleConnect(),
-          );
-    }
+    // installed). The setup action still resolves install/update issues in one
+    // click, but sign-in is intentionally separate.
+    if (setupActionButton) return setupActionButton;
 
     return null;
   }
@@ -591,24 +623,12 @@ export function AgentProviderCard({
           ? t("providers.waitingForSignIn")
           : t("providers.agents.progress.verifyingInstallation");
 
-    const stepInfo =
-      setupPhase === "installing" && supportsAuth
-        ? t("providers.agents.progress.step", { step: 1, total: 2 })
-        : setupPhase === "authenticating" && supportsInstall
-          ? t("providers.agents.progress.step", { step: 2, total: 2 })
-          : null;
-
     return (
       <div className="mt-3 space-y-2 border-t pt-3">
         <div className="flex items-center gap-2">
           <Spinner className="size-3.5 text-primary" />
           <div className="min-w-0 flex-1">
             <span className="text-xs font-medium">{phaseLabel}</span>
-            {stepInfo && (
-              <span className="ml-2 text-xxs text-muted-foreground">
-                {stepInfo}
-              </span>
-            )}
           </div>
         </div>
 

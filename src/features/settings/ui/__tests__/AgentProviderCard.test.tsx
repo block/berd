@@ -153,7 +153,11 @@ describe("AgentProviderCard", () => {
     expect(checkAgentInstalled).not.toHaveBeenCalled();
   });
 
-  it("renders sign in for an installed-but-unauthenticated agent", () => {
+  it("signs in an installed-but-unauthenticated agent", async () => {
+    const user = userEvent.setup();
+    authenticateAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+
     renderCard(
       <AgentProviderCard
         provider={createProvider({
@@ -173,6 +177,13 @@ describe("AgentProviderCard", () => {
     expect(
       screen.queryByRole("button", { name: /install claude/i }),
     ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("claude-acp");
+    });
+    expect(installAgent).not.toHaveBeenCalled();
   });
 
   it("offers install when the report reports the binary missing", () => {
@@ -193,6 +204,39 @@ describe("AgentProviderCard", () => {
     expect(
       screen.getByRole("button", { name: /install claude/i }),
     ).toBeInTheDocument();
+  });
+
+  it("offers install without sign in when the agent is not installed", async () => {
+    const user = userEvent.setup();
+    installAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          status: "not_installed",
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+        statusLoading={false}
+        readiness={"not_installed" satisfies AgentProviderReadiness}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /install claude/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /sign in to claude/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /install claude/i }));
+
+    await waitFor(() => {
+      expect(installAgent).toHaveBeenCalledWith("claude-acp", "command");
+    });
+    expect(authenticateAgent).not.toHaveBeenCalled();
   });
 
   it("verifies install through the local CLI check and reports failure when the binary is still missing", async () => {
@@ -365,13 +409,72 @@ describe("AgentProviderCard", () => {
     expect(invalidateDoctorReport).not.toHaveBeenCalled();
   });
 
-  it("offers Fix (no tick, no plain Update) when the ACP bridge is missing and the main CLI is out of date", () => {
+  it("renders update and sign in as separate actions for an unauthenticated stale agent", async () => {
+    const user = userEvent.setup();
+    updateAgent.mockResolvedValue(undefined);
+    authenticateAgent.mockResolvedValue(undefined);
+    checkAgentInstalled.mockResolvedValue(true);
+
+    renderCard(
+      <AgentProviderCard
+        provider={createProvider({
+          supportsInstall: true,
+          supportsAuth: true,
+          supportsAuthStatus: true,
+        })}
+        statusLoading={false}
+        readiness={"not_ready" satisfies AgentProviderReadiness}
+        versionCheck={createVersionCheck({
+          installSource: "npm",
+          installedVersion: "1.2.3",
+          latestVersion: "1.3.0",
+          updateAvailable: true,
+          main: {
+            installSource: "npm",
+            installedVersion: "1.2.3",
+            latestVersion: "1.3.0",
+            updateAvailable: true,
+            selfUpdating: null,
+            updateCommand: "npm install -g @anthropic-ai/claude-code@latest",
+            updateFixType: "updateMain",
+          },
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: /update claude/i }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /sign in to claude/i }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /update claude/i }));
+
+    await waitFor(() => {
+      expect(updateAgent).toHaveBeenCalledWith(
+        "claude-acp",
+        "updateMain",
+        "npm install -g @anthropic-ai/claude-code@latest",
+      );
+    });
+    expect(authenticateAgent).not.toHaveBeenCalled();
+
+    await user.click(
+      await screen.findByRole("button", { name: /sign in to claude/i }),
+    );
+
+    await waitFor(() => {
+      expect(authenticateAgent).toHaveBeenCalledWith("claude-acp");
+    });
+  });
+
+  it("offers Fix without sign in when the ACP bridge is missing and the main CLI is out of date", () => {
     // Codex's main CLI is installed via Homebrew with an update available, but
     // the codex-acp bridge is absent. The shared report resolves this to
     // not_installed (fixType="bridge") *and* an update is pending, so the
-    // single top-right action becomes "Fix" — not a ready tick, and not the
-    // plain "Update" affordance (one click both installs the bridge and brings
-    // the CLI current).
+    // setup action becomes "Fix" without the Sign in action; it is not a ready
+    // tick, and not the plain "Update" affordance.
     const { container } = renderCard(
       <AgentProviderCard
         provider={createProvider({
@@ -412,6 +515,9 @@ describe("AgentProviderCard", () => {
     expect(
       screen.getByRole("button", { name: /fix codex/i }),
     ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /sign in to codex/i }),
+    ).not.toBeInTheDocument();
     // The success/ready tick (the only `.text-success` element) is absent.
     expect(container.querySelector(".text-success")).toBeNull();
     // No bare "Update" affordance — the combined action is "Fix", not Update.
@@ -433,8 +539,8 @@ describe("AgentProviderCard", () => {
           displayName: "Codex",
           binaryName: "codex-acp",
           supportsInstall: true,
-          supportsAuth: false,
-          supportsAuthStatus: false,
+          supportsAuth: true,
+          supportsAuthStatus: true,
         })}
         statusLoading={false}
         readiness={"not_installed" satisfies AgentProviderReadiness}
@@ -479,9 +585,10 @@ describe("AgentProviderCard", () => {
         "brew upgrade codex",
       );
     });
+    expect(authenticateAgent).not.toHaveBeenCalled();
   });
 
-  it("installs both binaries of a from-scratch two-binary agent in one click", async () => {
+  it("installs both binaries of a from-scratch two-binary agent without chaining into auth", async () => {
     const user = userEvent.setup();
     installAgent.mockResolvedValue(undefined);
     authenticateAgent.mockResolvedValue(undefined);
@@ -523,10 +630,7 @@ describe("AgentProviderCard", () => {
     });
     expect(installAgent).toHaveBeenNthCalledWith(1, "codex-acp", "command");
     expect(installAgent).toHaveBeenNthCalledWith(2, "codex-acp", "bridge");
-    // The chain then proceeds into auth as before.
-    await waitFor(() => {
-      expect(authenticateAgent).toHaveBeenCalledWith("codex-acp");
-    });
+    expect(authenticateAgent).not.toHaveBeenCalled();
   });
 
   it("installs a single-binary agent in one pass without a spurious bridge call", async () => {
