@@ -690,11 +690,17 @@ describe("VirtualMessageTimeline", () => {
       />,
     );
 
-    expect(
-      await screen.findByTestId(
-        "virtual-transcript-row-message:fragmented:block-2",
-      ),
-    ).toHaveAttribute("data-virtual-row-kind", "assistant-content-fragment");
+    const fragmentedRow = await screen.findByTestId(
+      "virtual-transcript-row-message:fragmented:block-2",
+    );
+    expect(fragmentedRow).toHaveAttribute(
+      "data-virtual-row-kind",
+      "assistant-content-fragment",
+    );
+    expect(fragmentedRow.style.top).toBe(
+      `${fragmentedRow.getAttribute("data-virtual-row-virtual-start")}px`,
+    );
+    expect(fragmentedRow.style.transform).toBe("");
     expect(screen.queryByTestId("bubble-message-0")).not.toBeInTheDocument();
 
     const list = screen.getByTestId("virtual-message-timeline-list");

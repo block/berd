@@ -173,6 +173,8 @@ The source palette is a semantic token system backed by a gray scale and small s
 
 **The Theme Provider Rule.** `ThemeProvider` may apply light/dark mode, density, and the explicit primary color override. It should not generate or overwrite the full shadcn token palette at runtime.
 
+**The Raw-CSS Token Rule.** Some surfaces cannot be styled with a utility class on an element: pseudo-elements (`::selection`, `::-webkit-scrollbar-thumb`), the CSS Custom Highlight API, filters, and opacities. These keep a `:root`/dark semantic token (with both light and dark values) and are consumed with `var(...)` directly in `globals.css`. Do not bridge them into `@theme inline`, because no utility class could use the generated color. See [Tokens Consumed In Raw CSS](/docs/color-token-mapping.md#tokens-consumed-in-raw-css).
+
 **The State Color Rule.** Red, green, blue, and yellow are for state, not decoration. If a color does not communicate status or selected context, remove it.
 
 **The Neutral Migration Rule.** Current tokens include pure `#ffffff` and `#000000`. Future token work may tint those neutrals, but new surfaces should not introduce raw white or black outside the token layer.

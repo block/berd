@@ -101,6 +101,42 @@ The current sidebar value is intentionally slightly off-white/translucent, not p
 
 Use `quiet` for icon-only chrome buttons that should be gray by default and black on hover without a hover fill. Use `ghost` when the hover should show the shared gray fill.
 
+## Tokens Consumed In Raw CSS
+
+Most color tokens are consumed through Tailwind utility classes (`bg-accent`,
+`text-foreground`). Those tokens need an `@theme inline` bridge entry
+(`--color-x: var(--x)`) so Tailwind can generate the utility.
+
+Some surfaces cannot be styled with a utility class on an element: pseudo-element
+selectors (`::selection`, `::-webkit-scrollbar-thumb`), the CSS Custom Highlight
+API (`::highlight(...)`), and non-color CSS properties (filters, opacities).
+These are styled directly in `globals.css` and read their token with `var(...)`.
+
+The rule:
+
+- Bridge a token into `@theme inline` **only when a component authors the color
+  through a `bg-*` / `text-*` / `border-*` class.** Bridging a token that no
+  utility class can ever use creates dead surface, so do not do it.
+- Otherwise, define the token in `:root` + the dark block (with both light and
+  dark values) and consume it with `var(--token)` in the same `globals.css`
+  rule. These are still first-class semantic tokens; they simply skip the
+  Tailwind bridge.
+- Name these tokens for their product meaning and anatomy, not the CSS hook they
+  happen to use.
+
+These raw-`var()` tokens are not yet validated by `pnpm design-system:tokens`,
+which only inspects the Tailwind bridge. Keep them listed here so they stay
+discoverable and tracked.
+
+| Token | Where it is applied | Why it is not bridged |
+| --- | --- | --- |
+| `text-selection-bg`, `text-selection-fg` | `::selection` | Pseudo-element; a `bg-*` class cannot target selected text. Lighter primary tint with normal foreground text so selection reads as a quiet highlight, not an inverted fill. |
+| `chat-search-match-bg`, `chat-search-match-fg`, `chat-search-match-active-bg`, `chat-search-match-active-fg` | `::highlight(chat-search-match[-active])` | CSS Custom Highlight API ranges; not element-class styleable. |
+| `scrollbar-thumb`, `scrollbar-thumb-hover` | `::-webkit-scrollbar-thumb` | Scrollbar pseudo-element. |
+| `filter-chat-responding-goose` | `filter` property | Non-color CSS property, not a color utility. |
+| `app-top-bar-control-hover-opacity` | `opacity` via `hover:opacity-[var(...)]` | Opacity value, consumed through an arbitrary-value utility. |
+| `chat-context-panel-*` | `.chat-context-panel-surface` scoped block | Scoped palette applied through a class, not per-element color utilities. |
+
 ## Decision Tree
 
 | Question | Token choice |
@@ -114,3 +150,4 @@ Use `quiet` for icon-only chrome buttons that should be gray by default and blac
 | Is this a focus outline? | `ring` |
 | Is this a form/control border? | `input` |
 | Is this a Goose-only product surface or identity chip? | Use the smallest Goose extension token that names that product job. |
+| Is this a pseudo-element, highlight, filter, or opacity that no utility class can target? | Define a `:root`/dark token and consume it with `var(...)`. See [Tokens Consumed In Raw CSS](#tokens-consumed-in-raw-css). |

@@ -1729,8 +1729,6 @@ export const designSystemComponentManifest = [
       "focus-visible:border-ring",
       "hover:border-ring",
       "placeholder:text-muted-foreground",
-      "selection:bg-primary",
-      "selection:text-primary-foreground",
       "text-foreground",
     ],
     stateClasses: [
@@ -1755,8 +1753,6 @@ export const designSystemComponentManifest = [
       "focus-visible:border-ring",
       "hover:border-ring",
       "placeholder:text-muted-foreground",
-      "selection:bg-primary",
-      "selection:text-primary-foreground",
       "text-foreground",
     ],
   },

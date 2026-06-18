@@ -104,8 +104,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           : 0,
         position: "absolute",
         right: 0,
-        top: 0,
-        transform: `translateY(${virtualItem.start}px)`,
+        top: `${virtualItem.start}px`,
       }
     : undefined;
   const spacingClassName = getVirtualTranscriptRowSpacingClassName({

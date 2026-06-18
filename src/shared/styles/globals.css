@@ -250,6 +250,8 @@
   --border: var(--color-gray-200);
   --input: var(--color-gray-300);
   --ring: var(--color-gray-400);
+  --text-selection-bg: color-mix(in oklab, var(--primary) 18%, transparent);
+  --text-selection-fg: var(--foreground);
   --scrollbar-size: 12px;
   --scrollbar-thumb-inset: 1px;
   --scrollbar-thumb-alpha: 14%;
@@ -678,6 +680,8 @@
   --border: var(--color-gray-700);
   --input: var(--color-gray-700);
   --ring: var(--color-gray-400);
+  --text-selection-bg: color-mix(in oklab, var(--primary) 30%, transparent);
+  --text-selection-fg: var(--foreground);
   --scrollbar-thumb-alpha: 16%;
   --scrollbar-thumb-hover-alpha: 26%;
   --scrollbar-thumb: color-mix(
@@ -1553,8 +1557,8 @@ body,
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--primary) 60%, transparent);
-    color: var(--primary-foreground);
+    background: var(--text-selection-bg);
+    color: var(--text-selection-fg);
   }
 
   /* Chat transcript find-in-page tints, painted via the CSS Custom
