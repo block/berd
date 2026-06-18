@@ -129,6 +129,7 @@ export type TranscriptHarnessOperation =
       atMs: number;
       sessionId: string;
       messageId: string;
+      waitForVisible?: boolean;
     }
   | {
       kind: "scrollToRowOffset";

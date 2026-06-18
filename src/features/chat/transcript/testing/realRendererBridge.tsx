@@ -32,6 +32,7 @@ import type {
 import "@/shared/styles/globals.css";
 
 const BOTTOM_SCROLL_THRESHOLD_PX = 8;
+const SCROLL_TARGET_VISIBLE_TIMEOUT_MS = 10_000;
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -356,9 +357,43 @@ function scrollToMessage(messageId: string) {
   const scroller = getScroller();
 
   if (row instanceof HTMLElement && scroller) {
-    scroller.scrollTop = Math.max(0, row.offsetTop - 96);
+    const virtualStart = Number(row.dataset.virtualRowVirtualStart);
+    const rowTop = Number.isFinite(virtualStart) ? virtualStart : row.offsetTop;
+    scroller.scrollTop = Math.max(0, rowTop - 96);
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
   }
+}
+
+function isMessageVisible(messageId: string): boolean {
+  const row = getMessageRow(messageId);
+  const scroller = getScroller();
+  if (!row || !scroller) {
+    return false;
+  }
+
+  const rowRect = row.getBoundingClientRect();
+  const scrollerRect = scroller.getBoundingClientRect();
+  return (
+    rowRect.bottom > scrollerRect.top + 1 &&
+    rowRect.top < scrollerRect.bottom - 1
+  );
+}
+
+async function waitForMessageVisible(messageId: string) {
+  const startedAt = performance.now();
+
+  while (performance.now() - startedAt < SCROLL_TARGET_VISIBLE_TIMEOUT_MS) {
+    if (isMessageVisible(messageId)) {
+      return;
+    }
+
+    scrollToMessage(messageId);
+    await nextFrame();
+  }
+
+  throw new Error(
+    `timed out waiting for controlled scroll target ${messageId} to become visible`,
+  );
 }
 
 function scrollToMessageOffset(messageId: string, offsetPx: number) {
@@ -720,6 +755,9 @@ function RealRendererBridgeApp() {
             ...previous,
             scrollTargetMessageId: operation.messageId,
           }));
+          if (operation.waitForVisible) {
+            await waitForMessageVisible(operation.messageId);
+          }
           break;
         case "scrollToRowOffset":
           scrollToMessageOffset(operation.messageId, operation.offsetPx);

@@ -29,6 +29,7 @@ interface TranscriptHarnessWindow extends Window {
       sourceId?: string;
       nowMs?: number;
       ttlMs?: number;
+      waitForVisible?: boolean;
     }) => void | Promise<void>;
     collectDiagnostics?: () =>
       | Record<string, unknown>
@@ -83,6 +84,7 @@ async function scrollToMessage(
     atMs: 0,
     sessionId: fixture.activeSessionId,
     messageId,
+    waitForVisible: true,
   });
   await page.waitForFunction(
     (targetMessageId) => {
@@ -156,6 +158,7 @@ async function applyHarnessOperation(
     sourceId?: string;
     nowMs?: number;
     ttlMs?: number;
+    waitForVisible?: boolean;
   },
 ) {
   await page.evaluate(async (nextOperation) => {
