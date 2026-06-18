@@ -450,18 +450,12 @@ describe("AutomationsView", () => {
     );
   });
 
-  it("edits instructions with explicit save and cancel controls", async () => {
-    const user = userEvent.setup();
-    renderAutomationsView();
-
-    await user.click(
-      await screen.findByRole("button", { name: "Daily revenue digest" }),
-    );
-
+  it("cancels instruction edits without saving", async () => {
+    const { user } = await renderDailyRevenueDigestDetails();
     await user.click(
       await screen.findByRole("button", { name: "Edit instructions" }),
     );
-    const instructionsEditor = screen.getByRole("textbox", {
+    const instructionsEditor = await screen.findByRole("textbox", {
       name: "Instructions",
     });
     await user.clear(instructionsEditor);
@@ -472,16 +466,24 @@ describe("AutomationsView", () => {
 
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(
-      screen.getByText(/Pull revenue\s+Send a summary/),
+      await screen.findByText(/Pull revenue\s+Send a summary/),
     ).toBeInTheDocument();
+  });
 
-    await user.click(screen.getByRole("button", { name: "Edit instructions" }));
-    const reopenedEditor = screen.getByRole("textbox", {
+  it("saves instruction edits with explicit save", async () => {
+    const { user } = await renderDailyRevenueDigestDetails();
+    await user.click(
+      await screen.findByRole("button", { name: "Edit instructions" }),
+    );
+    const instructionsEditor = await screen.findByRole("textbox", {
       name: "Instructions",
     });
-    await user.clear(reopenedEditor);
-    await user.type(reopenedEditor, "Pull revenue{enter}Send a chart");
-    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await user.clear(instructionsEditor);
+    await user.type(instructionsEditor, "Pull revenue{enter}Send a chart");
+
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    await user.click(saveButton);
 
     await waitFor(() =>
       expect(updateAutomationTile).toHaveBeenCalledWith(
