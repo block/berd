@@ -9,20 +9,71 @@ interface PromptEditorProps {
   ariaLabel?: string;
 }
 
-function renderLines(text: string): string {
-  return text
-    .split("\n")
-    .map((line) => {
-      // We visually highlight include lines anywhere in the editor, even though
-      // only the leading include block is treated as working directory metadata.
-      const match = line.match(INCLUDE_RE);
-      if (match) {
-        return `<div><span class="bg-info/10 text-info rounded px-1.5 py-0.5 font-mono text-xs">${escapeHtml(line)}</span></div>`;
-      }
-      // Use <br> inside empty divs so the line is still editable
-      return `<div>${line === "" ? "<br>" : escapeHtml(line)}</div>`;
-    })
-    .join("");
+const INCLUDE_LINE_CLASS_NAME =
+  "bg-info/10 text-info rounded px-1.5 py-0.5 font-mono text-xs";
+
+function createLineNode(line: string): HTMLDivElement {
+  const div = document.createElement("div");
+
+  // We visually highlight include lines anywhere in the editor, even though
+  // only the leading include block is treated as working directory metadata.
+  if (INCLUDE_RE.test(line)) {
+    const span = document.createElement("span");
+    span.className = INCLUDE_LINE_CLASS_NAME;
+    span.textContent = line;
+    div.append(span);
+    return div;
+  }
+
+  // Use <br> inside empty divs so the line is still editable.
+  if (line === "") {
+    div.append(document.createElement("br"));
+  } else {
+    div.textContent = line;
+  }
+
+  return div;
+}
+
+function createLineNodes(text: string): HTMLDivElement[] {
+  return text === "" ? [] : text.split("\n").map(createLineNode);
+}
+
+function renderLinesInto(el: HTMLElement, text: string) {
+  el.replaceChildren(...createLineNodes(text));
+}
+
+// Check whether an already-rendered line matches what createLineNode would
+// produce, by inspecting the live node instead of allocating one to compare.
+function lineMatches(node: ChildNode | null, line: string): boolean {
+  if (!(node instanceof HTMLDivElement)) return false;
+
+  if (INCLUDE_RE.test(line)) {
+    const span = node.firstChild;
+    return (
+      node.childNodes.length === 1 &&
+      span instanceof HTMLSpanElement &&
+      span.className === INCLUDE_LINE_CLASS_NAME &&
+      span.textContent === line
+    );
+  }
+
+  if (line === "") {
+    return (
+      node.childNodes.length === 1 && node.firstChild instanceof HTMLBRElement
+    );
+  }
+
+  return node.childElementCount === 0 && node.textContent === line;
+}
+
+function renderedLinesMatch(el: HTMLElement, text: string): boolean {
+  const lines = text === "" ? [] : text.split("\n");
+  if (el.childNodes.length !== lines.length) return false;
+
+  return lines.every((line, index) =>
+    lineMatches(el.childNodes.item(index), line),
+  );
 }
 
 /** Return the caret position as {line, col} relative to the div-per-line structure. */
@@ -96,14 +147,6 @@ function setCaretPosition(el: HTMLElement, pos: { line: number; col: number }) {
   sel.addRange(range);
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
 export function PromptEditor({
   value,
   onChange,
@@ -114,13 +157,13 @@ export function PromptEditor({
   const lastPushedValue = useRef<string | null>(null);
   const isComposing = useRef(false);
 
-  // Sync HTML when value changes externally (including initial mount)
+  // Sync rendered lines when value changes externally (including initial mount).
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
     if (value !== lastPushedValue.current) {
       lastPushedValue.current = value;
-      el.innerHTML = value === "" ? "" : renderLines(value);
+      renderLinesInto(el, value);
     }
   }, [value]);
 
@@ -132,10 +175,9 @@ export function PromptEditor({
     const normalized = text.replace(/\n$/, "");
     lastPushedValue.current = normalized;
 
-    const expectedHtml = normalized === "" ? "" : renderLines(normalized);
-    if (!skipRerender && el.innerHTML !== expectedHtml) {
+    if (!skipRerender && !renderedLinesMatch(el, normalized)) {
       const caret = getCaretPosition(el);
-      el.innerHTML = expectedHtml;
+      renderLinesInto(el, normalized);
       setCaretPosition(el, caret);
     }
 

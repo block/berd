@@ -181,6 +181,18 @@ describe("StickyNoteWidget", () => {
     expect(editor).toHaveValue("***Old*** note");
   });
 
+  it("renders edit decorations without parsing note text as HTML", () => {
+    const { container } = render(<StickyNoteWidget {...baseProps} />);
+    const payload =
+      '**<img src=x onerror="alert(1)">**\n# <script>alert(1)</script>';
+
+    fireEvent.change(getEditor(), { target: { value: payload } });
+
+    expect(container.querySelector("img,script")).toBeNull();
+    expect(container).toHaveTextContent('**<img src=x onerror="alert(1)">**');
+    expect(container).toHaveTextContent("# <script>alert(1)</script>");
+  });
+
   it("hides inline formatting buttons in preview mode", () => {
     render(
       <StickyNoteWidget

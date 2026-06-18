@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Bold,
@@ -233,26 +233,30 @@ const NOTE_MARKDOWN_PROSE = cn(
   "[&_table]:my-1.5 [&_table]:w-full [&_th]:border [&_th]:border-current/20 [&_th]:px-1.5 [&_th]:py-0.5 [&_th]:text-left [&_td]:border [&_td]:border-current/20 [&_td]:px-1.5 [&_td]:py-0.5",
 );
 
-function escapeHtml(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
-// Decorate one line of markdown into HTML for the edit overlay. Markers are
+// Decorate one line of markdown for the edit overlay. Markers are
 // always kept; only weight/style/decoration change, which preserves the
 // monospace advance width so the transparent textarea's caret stays aligned.
-function decorateInlineMarkdown(text: string): string {
-  let out = "";
+function decorateInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
   let i = 0;
+  const appendText = (value: string) => {
+    const previous = nodes.at(-1);
+    if (typeof previous === "string") {
+      nodes[nodes.length - 1] = previous + value;
+    } else {
+      nodes.push(value);
+    }
+  };
+
   while (i < text.length) {
     if (text.startsWith("**", i)) {
       const end = text.indexOf("**", i + 2);
       if (end !== -1) {
-        out += `<span class="font-bold">**${escapeHtml(text.slice(i + 2, end))}**</span>`;
+        nodes.push(
+          <span key={`${keyPrefix}-${i}`} className="font-bold">
+            **{text.slice(i + 2, end)}**
+          </span>,
+        );
         i = end + 2;
         continue;
       }
@@ -260,7 +264,11 @@ function decorateInlineMarkdown(text: string): string {
     if (text.startsWith("~~", i)) {
       const end = text.indexOf("~~", i + 2);
       if (end !== -1) {
-        out += `<span class="line-through">~~${escapeHtml(text.slice(i + 2, end))}~~</span>`;
+        nodes.push(
+          <span key={`${keyPrefix}-${i}`} className="line-through">
+            ~~{text.slice(i + 2, end)}~~
+          </span>,
+        );
         i = end + 2;
         continue;
       }
@@ -268,7 +276,11 @@ function decorateInlineMarkdown(text: string): string {
     if (text[i] === "*") {
       const end = text.indexOf("*", i + 1);
       if (end !== -1) {
-        out += `<span class="italic">*${escapeHtml(text.slice(i + 1, end))}*</span>`;
+        nodes.push(
+          <span key={`${keyPrefix}-${i}`} className="italic">
+            *{text.slice(i + 1, end)}*
+          </span>,
+        );
         i = end + 1;
         continue;
       }
@@ -276,31 +288,45 @@ function decorateInlineMarkdown(text: string): string {
     if (text[i] === "~") {
       const end = text.indexOf("~", i + 1);
       if (end !== -1) {
-        out += `<span class="line-through">~${escapeHtml(text.slice(i + 1, end))}~</span>`;
+        nodes.push(
+          <span key={`${keyPrefix}-${i}`} className="line-through">
+            ~{text.slice(i + 1, end)}~
+          </span>,
+        );
         i = end + 1;
         continue;
       }
     }
-    out += escapeHtml(text[i]);
+    appendText(text[i]);
     i += 1;
   }
-  return out;
+  return nodes;
 }
 
-function decorateLineMarkdown(line: string): string {
+function decorateLineMarkdown(line: string, lineIndex: number): ReactNode[] {
   // H1–H4: a run of 1–4 "#" followed by whitespace. Keep the markers, render
   // the whole line bold + uppercase at the body size.
   if (/^#{1,4}\s/.test(line)) {
-    return `<span class="font-bold uppercase">${escapeHtml(line)}</span>`;
+    return [
+      <span key={`line-${lineIndex}`} className="font-bold uppercase">
+        {line}
+      </span>,
+    ];
   }
-  return decorateInlineMarkdown(line);
+  return decorateInlineMarkdown(line, `line-${lineIndex}`);
 }
 
-function decorateMarkdownToHtml(text: string): string {
+function decorateMarkdownForEditBackdrop(text: string): ReactNode[] {
   if (text.length === 0) {
-    return "";
+    return [];
   }
-  return text.split("\n").map(decorateLineMarkdown).join("\n");
+
+  return text
+    .split("\n")
+    .flatMap((line, index) => [
+      ...(index === 0 ? [] : ["\n"]),
+      ...decorateLineMarkdown(line, index),
+    ]);
 }
 
 export function StickyNoteWidget({
@@ -428,11 +454,9 @@ export function StickyNoteWidget({
                   "pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words font-mono text-sticky-note-foreground",
                   fontSizeBodyClassName(fontSize),
                 )}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: every text segment is escaped in decorateMarkdownToHtml; only fixed style spans are injected.
-                dangerouslySetInnerHTML={{
-                  __html: decorateMarkdownToHtml(draft),
-                }}
-              />
+              >
+                {decorateMarkdownForEditBackdrop(draft)}
+              </div>
               <textarea
                 ref={textareaRef}
                 value={draft}
