@@ -6,8 +6,8 @@ import {
   getCurrentLocale,
   getLocaleDisplayName,
   getLocalePreference,
-  setLocalePreference,
 } from "./locale";
+import { setLocalePreference } from "./localePreference";
 
 export function useLocale() {
   const { i18n } = useTranslation();

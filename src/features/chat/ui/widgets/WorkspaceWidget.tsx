@@ -14,7 +14,8 @@ import { cn } from "@/shared/lib/cn";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { WorkspaceActionsMenu } from "./WorkspaceActionsMenu";
-import { WorkingContextPicker, shortenPath } from "./WorkingContextPicker";
+import { WorkingContextPicker } from "./WorkingContextPicker";
+import { shortenPath } from "./workspacePath";
 
 interface WorkspaceWidgetProps {
   projectId?: string;

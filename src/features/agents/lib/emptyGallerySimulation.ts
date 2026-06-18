@@ -9,8 +9,7 @@
  *
  * Has no effect in production builds.
  */
-export const EMPTY_AGENTS_GALLERY_SIMULATION_KEY =
-  "goose:dev:emptyAgentsGallery";
+const EMPTY_AGENTS_GALLERY_SIMULATION_KEY = "goose:dev:emptyAgentsGallery";
 
 export function isEmptyAgentsGallerySimulated(): boolean {
   if (!import.meta.env.DEV || typeof window === "undefined") {

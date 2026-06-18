@@ -47,7 +47,7 @@ const FocusRegionContext = createContext<FocusRegionContextValue | null>(null);
 const PANE_JUMP_TIMEOUT_MS = 2500;
 /** Layers (modals, radix poppers) that own the keyboard while open;
     global shortcuts should not fire from inside them. */
-export const KEYBOARD_OWNING_LAYER_SELECTOR = [
+const KEYBOARD_OWNING_LAYER_SELECTOR = [
   '[role="dialog"]',
   '[role="alertdialog"]',
   "[data-radix-popper-content-wrapper]",
@@ -55,7 +55,7 @@ export const KEYBOARD_OWNING_LAYER_SELECTOR = [
   "[data-radix-dropdown-menu-content]",
   "[data-radix-context-menu-content]",
 ].join(",");
-export const DEFAULT_PANE_JUMP_SHORTCUT = "ctrl+;";
+const DEFAULT_PANE_JUMP_SHORTCUT = "ctrl+;";
 
 export function normalizePaneJumpShortcut(shortcut: unknown): KeyboardShortcut {
   return normalizeKeyboardShortcut(shortcut, DEFAULT_PANE_JUMP_SHORTCUT);
@@ -74,7 +74,7 @@ function centerOf(rect: DOMRect) {
   };
 }
 
-export function isVisibleFocusRegion(
+function isVisibleFocusRegion(
   registration: FocusRegionRegistration,
 ): registration is FocusRegionRegistration & { element: HTMLElement } {
   const { element } = registration;

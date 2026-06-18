@@ -26,6 +26,7 @@ import type { GitState } from "@/shared/types/git";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { WorkspaceCreateDialog } from "./WorkspaceCreateDialog";
 import { formatErrorMessage } from "./formatError";
+import { shortenPath } from "./workspacePath";
 
 interface WorkingContextPickerProps {
   currentProjectPath: string | null;
@@ -39,18 +40,6 @@ interface WorkingContextPickerProps {
     name: string,
     baseBranch: string,
   ) => Promise<void>;
-}
-
-export function shortenPath(fullPath: string): string {
-  const home =
-    typeof window !== "undefined"
-      ? fullPath.replace(/^\/Users\/[^/]+/, "~")
-      : fullPath;
-  const parts = home.split("/");
-  if (parts.length > 3) {
-    return `…/${parts.slice(-2).join("/")}`;
-  }
-  return home;
 }
 
 function worktreeName(fullPath: string): string {

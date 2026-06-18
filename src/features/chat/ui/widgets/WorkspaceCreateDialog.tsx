@@ -23,7 +23,7 @@ import {
 } from "@/shared/ui/select";
 import type { ActiveWorkspace } from "../../stores/chatSessionStore";
 import { formatErrorMessage } from "./formatError";
-import { shortenPath } from "./WorkingContextPicker";
+import { shortenPath } from "./workspacePath";
 
 const UNSET_SELECT_VALUE = "__unset__";
 const WORKTREE_SELECT_CONTENT_CLASS = "z-[80] max-h-64";

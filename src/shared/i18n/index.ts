@@ -28,6 +28,6 @@ export {
   getStoredLocalePreference,
   normalizeLocale,
   resolveLocalePreference,
-  setLocalePreference,
 } from "./locale";
+export { setLocalePreference } from "./localePreference";
 export { useLocale } from "./useLocale";

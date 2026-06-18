@@ -66,25 +66,6 @@ export function getInitialLocale(): AppLocale {
   return resolveLocalePreference(getLocalePreference());
 }
 
-export async function setLocalePreference(
-  preference: LocalePreference,
-): Promise<void> {
-  if (typeof window !== "undefined") {
-    try {
-      if (preference === SYSTEM_LOCALE) {
-        window.localStorage.removeItem(LOCALE_STORAGE_KEY);
-      } else {
-        window.localStorage.setItem(LOCALE_STORAGE_KEY, preference);
-      }
-    } catch {
-      // localStorage may be unavailable
-    }
-  }
-
-  const { i18n } = await import("./i18n");
-  await i18n.changeLanguage(resolveLocalePreference(preference));
-}
-
 export function getCurrentLocale(): AppLocale {
   return (
     normalizeLocale(
