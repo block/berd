@@ -41,4 +41,6 @@ technical changelog. Don't overexplain features.
   - No commit SHAs, PR numbers, or author names.
   - Use bold sparingly — at most a short lead-in label per bullet (e.g. **Quick session switching:**); no mid-sentence emphasis.
   - Put keyboard shortcuts and UI commands in backticks (e.g. `Cmd+P`), not bold.
+- Clearly mark experimental features with `Experimental` as a prefix.
+  - Experimental features should be at the end of the list.
 - Output Markdown only — no preamble, no commentary.
