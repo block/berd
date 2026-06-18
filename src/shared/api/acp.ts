@@ -9,7 +9,7 @@ import {
 import {
   setActiveMessageId,
   clearActiveMessageId,
-} from "./acpNotificationHandler";
+} from "./acpActiveMessageTracking";
 import { searchSessionsViaExports } from "./sessionSearch";
 import {
   claimPersonaHandoff,

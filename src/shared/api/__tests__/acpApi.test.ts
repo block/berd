@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
+import {
+  clearSessionConfigSnapshotHandlers,
+  setSessionConfigSnapshotHandlers,
+} from "../acpSessionConfigSnapshots";
 
 const mocks = vi.hoisted(() => ({
   getClient: vi.fn(),
@@ -357,15 +360,7 @@ describe("provider wire translation", () => {
     });
     mocks.newSession.mockResolvedValue({ sessionId: "session-9" });
     mocks.setSessionConfigOption.mockResolvedValue(undefined);
-    useChatSessionStore.setState({
-      sessions: [],
-      activeSessionId: null,
-      isLoading: false,
-      hasHydratedSessions: true,
-      isContextPanelOpen: false,
-      activeWorkspaceBySession: {},
-      modelSelectionIntentBySession: {},
-    });
+    clearSessionConfigSnapshotHandlers();
   });
 
   it("sends the default model provider when newSession is given the goose sentinel", async () => {
@@ -428,16 +423,12 @@ describe("provider wire translation", () => {
     });
   });
 
-  it("hydrates reasoning effort from the set config response", async () => {
-    useChatSessionStore.getState().addSession({
-      id: "session-9",
-      title: "Chat",
-      providerId: "anthropic",
-      modelId: "claude-opus-4-8",
-      modelName: "Claude Opus 4.8",
-      createdAt: "2026-04-20T00:00:00.000Z",
-      updatedAt: "2026-04-20T00:00:00.000Z",
-      messageCount: 0,
+  it("applies config snapshots from the set config response", async () => {
+    const applyModelConfigSnapshot = vi.fn();
+    const applyReasoningEffortConfigSnapshot = vi.fn();
+    setSessionConfigSnapshotHandlers({
+      applyModelConfigSnapshot,
+      applyReasoningEffortConfigSnapshot,
     });
     mocks.setSessionConfigOption.mockResolvedValueOnce(
       createConfigOptionsResponse(),
@@ -447,12 +438,13 @@ describe("provider wire translation", () => {
 
     await setModel("session-9", "claude-opus-4-8");
 
-    expect(
-      useChatSessionStore.getState().getSession("session-9"),
-    ).toMatchObject({
+    expect(applyModelConfigSnapshot).toHaveBeenCalledWith("session-9", {
       modelId: "claude-opus-4-8",
       modelName: "Claude Opus 4.8",
-      reasoningEffort: {
+    });
+    expect(applyReasoningEffortConfigSnapshot).toHaveBeenCalledWith(
+      "session-9",
+      {
         configId: "thinking_effort",
         currentValue: "high",
         options: [
@@ -461,6 +453,28 @@ describe("provider wire translation", () => {
           { id: "high", name: "High" },
         ],
       },
-    });
+    );
+  });
+
+  it("warns instead of silently dropping snapshots when no handlers are registered", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mocks.setSessionConfigOption.mockResolvedValueOnce(
+      createConfigOptionsResponse(),
+    );
+
+    const { setModel } = await import("../acpApi");
+
+    await setModel("session-9", "claude-opus-4-8");
+
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Dropped ACP model config snapshot"),
+      { sessionId: "session-9".slice(0, 8) },
+    );
+    expect(warn).toHaveBeenCalledWith(
+      expect.stringContaining("Dropped ACP reasoningEffort config snapshot"),
+      { sessionId: "session-9".slice(0, 8) },
+    );
+
+    warn.mockRestore();
   });
 });

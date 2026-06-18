@@ -54,7 +54,7 @@ vi.mock("../acpApi", () => ({
   cancelSession: vi.fn(),
 }));
 
-vi.mock("../acpNotificationHandler", () => ({
+vi.mock("../acpActiveMessageTracking", () => ({
   setActiveMessageId: vi.fn(),
   clearActiveMessageId: vi.fn(),
 }));

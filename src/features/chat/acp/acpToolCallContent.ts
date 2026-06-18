@@ -5,7 +5,7 @@ import {
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
 import type { McpAppContent, MessageContent } from "@/shared/types/messages";
-import { buildMcpAppPayloadFromToolUpdate } from "./mcpAppToolUpdate";
+import { buildMcpAppPayloadFromToolUpdate } from "@/shared/api/mcpAppToolUpdate";
 
 export function findReplayMessageWithToolCall(
   sessionId: string,

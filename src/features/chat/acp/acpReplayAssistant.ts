@@ -3,7 +3,7 @@ import {
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
 import type { Message } from "@/shared/types/messages";
-import type { ReplayAssistantMetadata } from "./acpReplayMetadata";
+import type { ReplayAssistantMetadata } from "@/shared/api/acpReplayMetadata";
 
 const replayAssistantMessageIds = new Map<string, string>();
 

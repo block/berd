@@ -185,7 +185,7 @@ export async function loadSessionMessages(
     const [{ acpLoadSession }, { getReplayPerf, clearReplayPerf }] =
       await Promise.all([
         import("@/shared/api/acp"),
-        import("@/shared/api/acpNotificationHandler"),
+        import("@/features/chat/acp/acpNotificationHandler"),
       ]);
     const t1 = performance.now();
     perfLog(`[perf:load] ${sid} import in ${(t1 - t0).toFixed(1)}ms`);

@@ -7,9 +7,9 @@ import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
   clearMessageTracking,
   handleSessionNotification,
-  setActiveMessageId,
 } from "../acpNotificationHandler";
-import { registerPreparedSession } from "../acpSessionRegistry";
+import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
+import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
 
 describe("ACP tool call status handling", () => {
   beforeEach(() => {

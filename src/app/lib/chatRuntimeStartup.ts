@@ -11,7 +11,8 @@ import { useProviderModelCacheStore } from "@/features/providers/stores/provider
 import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AcpProvider } from "@/shared/api/acp";
 import { getClient, setNotificationHandler } from "@/shared/api/acpConnection";
-import notificationHandler from "@/shared/api/acpNotificationHandler";
+import notificationHandler from "@/features/chat/acp/acpNotificationHandler";
+import { registerChatSessionConfigSnapshotHandlers } from "@/features/chat/acp/sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 
@@ -36,6 +37,7 @@ export function filterStartupProvidersForDistro(
 
 export async function runChatRuntimeStartup(): Promise<void> {
   const tConn = performance.now();
+  registerChatSessionConfigSnapshotHandlers();
   setNotificationHandler(notificationHandler);
   await getClient();
   perfLog(

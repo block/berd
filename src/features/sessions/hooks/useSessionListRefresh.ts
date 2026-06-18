@@ -10,7 +10,7 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
  * restart, because `loadSessions()` is only called at startup
  * (`chatRuntimeStartup.ts`) and `session_info_update` notifications are
  * dropped on the floor for sessions that are not already in the store
- * (`acpSessionInfoUpdate.ts`).
+ * (`features/chat/acp/acpSessionInfoUpdate.ts`).
  *
  * Mirrors the periodic + focus pattern used by `usePersonas` for persona
  * disk refresh.

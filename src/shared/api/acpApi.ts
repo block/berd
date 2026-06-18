@@ -10,7 +10,7 @@ import { messageSnippet } from "@/features/chat/lib/messageSnippet";
 import { getCuratedAgentProviders } from "@/features/providers/curatedProviders";
 import { toWireProviderId } from "./acpPersonaHandoff";
 import { getClient } from "./acpConnection";
-import { applySessionConfigOptionsSnapshot } from "./acpNotificationHandler";
+import { applySessionConfigOptionsSnapshot } from "./acpSessionConfigSnapshots";
 import { perfLog } from "@/shared/lib/perfLog";
 
 export interface AcpProvider {

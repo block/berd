@@ -18,9 +18,9 @@ import type { McpAppPayload } from "@/shared/types/messages";
 import {
   clearMessageTracking,
   handleSessionNotification,
-  setActiveMessageId,
 } from "../acpNotificationHandler";
-import { registerPreparedSession } from "../acpSessionRegistry";
+import { setActiveMessageId } from "@/shared/api/acpActiveMessageTracking";
+import { registerPreparedSession } from "@/shared/api/acpSessionRegistry";
 
 function createMcpAppPayload(): McpAppPayload {
   return {

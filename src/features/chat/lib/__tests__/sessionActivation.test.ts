@@ -28,7 +28,7 @@ vi.mock("@/shared/api/pathResolver", () => ({
   checkDirectoriesExist: (...args: unknown[]) => checkDirectoriesExist(...args),
 }));
 
-vi.mock("@/shared/api/acpNotificationHandler", () => ({
+vi.mock("@/features/chat/acp/acpNotificationHandler", () => ({
   getReplayPerf: () => undefined,
   clearReplayPerf: vi.fn(),
 }));

@@ -3,10 +3,7 @@ import type {
   SessionUpdate,
 } from "@agentclientprotocol/sdk";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import {
-  useChatSessionStore,
-  type ChatSessionReasoningEffortConfig,
-} from "@/features/chat/stores/chatSessionStore";
+import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import { getBufferedMessage } from "@/features/chat/hooks/replayBuffer";
 import { SNIPPET_SCAN_LIMIT } from "@/features/chat/lib/messageSnippet";
 import type {
@@ -18,7 +15,13 @@ import type {
 } from "@/shared/types/messages";
 import { isTextContent } from "@/shared/types/messages";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import type { AcpNotificationHandler } from "./acpConnection";
+import {
+  clearActiveMessageId,
+  clearActiveMessageTracking,
+  getActiveMessagePreset,
+  recordLiveAgentMessageChunk,
+} from "@/shared/api/acpActiveMessageTracking";
+import type { AcpNotificationHandler } from "@/shared/api/acpConnection";
 import {
   clearSkillReplayChips,
   handleReplayUserMessageChunk,
@@ -40,35 +43,22 @@ import {
   getReplayCreated,
   getReplayMessageId,
   getReplayUserMetadata,
-} from "./acpReplayMetadata";
+} from "@/shared/api/acpReplayMetadata";
 import { handleSessionInfoUpdate } from "./acpSessionInfoUpdate";
 import {
   getToolCallIdentity,
   getToolChainSummary,
-} from "./acpToolCallIdentity";
+} from "@/shared/api/acpToolCallIdentity";
+import { applyChatSessionConfigOptionsSnapshot } from "./sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
 
-interface ActiveMessagePreset {
-  messageId: string;
-  metadata?: Pick<MessageMetadata, "personaId" | "personaName">;
-}
-
-// Pre-set message details for the next live stream per session.
-const activeMessagePresets = new Map<string, ActiveMessagePreset>();
-
-// Per-session perf counters for replay/live streaming.
+// Per-session perf counters for replay streaming.
 interface ReplayPerf {
   firstAt: number;
   lastAt: number;
   count: number;
 }
 const replayPerf = new Map<string, ReplayPerf>();
-interface LivePerf {
-  sendStartedAt: number;
-  firstChunkAt: number | null;
-  chunkCount: number;
-}
-const livePerf = new Map<string, LivePerf>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -116,258 +106,6 @@ function toolCallUpdatePatch(
   };
 }
 
-interface ModelConfigSnapshot {
-  modelId: string;
-  modelName: string;
-}
-
-interface SelectConfigOption {
-  id: string;
-  name?: string;
-  description?: string;
-  currentValue: string;
-  options: Array<{ id: string; name: string }>;
-}
-
-function getStringProperty(
-  record: Record<string, unknown>,
-  key: string,
-): string | undefined {
-  const value = record[key];
-  return typeof value === "string" ? value : undefined;
-}
-
-function getSelectOptions(
-  options: unknown,
-): Array<{ id: string; name: string }> {
-  if (Array.isArray(options)) {
-    return options.flatMap((value) => {
-      if (!isRecord(value)) {
-        return [];
-      }
-      const id = getStringProperty(value, "value");
-      if (id) {
-        return [{ id, name: getStringProperty(value, "name") ?? id }];
-      }
-      if (!Array.isArray(value.options)) {
-        return [];
-      }
-      return getSelectOptions(value.options);
-    });
-  }
-
-  if (!isRecord(options)) {
-    return [];
-  }
-
-  const type = getStringProperty(options, "type");
-  if (type === "ungrouped") {
-    const values = options.values;
-    if (!Array.isArray(values)) {
-      return [];
-    }
-    return values.flatMap((value) => {
-      if (!isRecord(value)) {
-        return [];
-      }
-      const id = getStringProperty(value, "value");
-      if (!id) {
-        return [];
-      }
-      return [{ id, name: getStringProperty(value, "name") ?? id }];
-    });
-  }
-
-  if (type !== "grouped" || !Array.isArray(options.groups)) {
-    return [];
-  }
-
-  return options.groups.flatMap((group) => {
-    if (!isRecord(group) || !Array.isArray(group.options)) {
-      return [];
-    }
-    return group.options.flatMap((value) => {
-      if (!isRecord(value)) {
-        return [];
-      }
-      const id = getStringProperty(value, "value");
-      if (!id) {
-        return [];
-      }
-      return [{ id, name: getStringProperty(value, "name") ?? id }];
-    });
-  });
-}
-
-function getConfigOptions(source: unknown): unknown[] | null {
-  if (!isRecord(source)) {
-    return null;
-  }
-  const configUpdate = source as {
-    options?: unknown;
-    configOptions?: unknown;
-  };
-  const options = Array.isArray(configUpdate.configOptions)
-    ? configUpdate.configOptions
-    : configUpdate.options;
-  return Array.isArray(options) ? options : null;
-}
-
-function getSelectConfigOption(
-  source: unknown,
-  predicate: (option: Record<string, unknown>) => boolean,
-): SelectConfigOption | null {
-  const options = getConfigOptions(source);
-  if (!options) {
-    return null;
-  }
-
-  const configOption = options.find(
-    (option) => isRecord(option) && predicate(option),
-  );
-  if (!isRecord(configOption)) {
-    return null;
-  }
-
-  const select = isRecord(configOption.kind) ? configOption.kind : configOption;
-  if (select.type !== "select") {
-    return null;
-  }
-
-  const id = getStringProperty(configOption, "id");
-  const currentValue = getStringProperty(select, "currentValue");
-  if (!id || !currentValue) {
-    return null;
-  }
-
-  return {
-    id,
-    name: getStringProperty(configOption, "name"),
-    description: getStringProperty(configOption, "description"),
-    currentValue,
-    options: getSelectOptions(select.options),
-  };
-}
-
-function getModelConfigSnapshot(source: unknown): ModelConfigSnapshot | null {
-  const modelOption = getSelectConfigOption(
-    source,
-    (option) => option.category === "model",
-  );
-  if (!modelOption) {
-    return null;
-  }
-
-  const modelName =
-    modelOption.options.find((model) => model.id === modelOption.currentValue)
-      ?.name ?? modelOption.currentValue;
-
-  return { modelId: modelOption.currentValue, modelName };
-}
-
-function getReasoningEffortConfigSnapshot(
-  source: unknown,
-): ChatSessionReasoningEffortConfig | null {
-  const option = getSelectConfigOption(
-    source,
-    (candidate) =>
-      candidate.category === "thought_level" ||
-      candidate.id === "thinking_effort",
-  );
-  if (!option) {
-    return null;
-  }
-
-  return {
-    configId: option.id,
-    currentValue: option.currentValue,
-    options: option.options,
-  };
-}
-
-function handleModelConfigSnapshot(
-  sessionId: string,
-  snapshot: ModelConfigSnapshot,
-): void {
-  const sessionStore = useChatSessionStore.getState();
-  const session = sessionStore.getSession(sessionId);
-  const intent = sessionStore.getModelSelectionIntent(sessionId);
-  const localModelId = session?.modelId;
-  const snapshotMatchesLocalModel = localModelId === snapshot.modelId;
-  const snapshotMatchesPendingIntent =
-    intent?.kind === "model" && intent.modelId === snapshot.modelId;
-
-  // Backend config snapshots can arrive out of order around a user-triggered
-  // model switch. Once the UI has a local model, only accept snapshots that
-  // confirm the local state or the active intent; otherwise a stale snapshot can
-  // flip the picker back and re-trigger preference/bootstrap churn.
-  if (
-    snapshotMatchesLocalModel ||
-    snapshotMatchesPendingIntent ||
-    (!localModelId && !intent)
-  ) {
-    sessionStore.patchSession(sessionId, {
-      modelId: snapshot.modelId,
-      modelName: snapshot.modelName,
-    });
-    return;
-  }
-
-  console.warn("Dropped divergent ACP model config snapshot", {
-    sessionId: sessionId.slice(0, 8),
-    localModelId,
-    snapshotModelId: snapshot.modelId,
-    intentKind: intent?.kind,
-    intentModelId: intent?.modelId,
-  });
-}
-
-export function applySessionConfigOptionsSnapshot(
-  sessionId: string,
-  source: unknown,
-): void {
-  const snapshot = getModelConfigSnapshot(source);
-  if (snapshot) {
-    handleModelConfigSnapshot(sessionId, snapshot);
-  }
-  const reasoningEffort = getReasoningEffortConfigSnapshot(source);
-  if (reasoningEffort) {
-    useChatSessionStore.getState().patchSession(sessionId, {
-      reasoningEffort,
-    });
-  }
-}
-
-export function setActiveMessageId(
-  sessionId: string,
-  messageId: string,
-  metadata?: ActiveMessagePreset["metadata"],
-): void {
-  activeMessagePresets.set(sessionId, { messageId, metadata });
-  livePerf.set(sessionId, {
-    sendStartedAt: performance.now(),
-    firstChunkAt: null,
-    chunkCount: 0,
-  });
-}
-
-export function clearActiveMessageId(sessionId: string): void {
-  activeMessagePresets.delete(sessionId);
-  const perf = livePerf.get(sessionId);
-  if (perf) {
-    const sid = sessionId.slice(0, 8);
-    const total = performance.now() - perf.sendStartedAt;
-    const ttft =
-      perf.firstChunkAt !== null
-        ? (perf.firstChunkAt - perf.sendStartedAt).toFixed(1)
-        : "n/a";
-    perfLog(
-      `[perf:stream] ${sid} stream ended — ttft=${ttft}ms total=${total.toFixed(1)}ms chunks=${perf.chunkCount}`,
-    );
-    livePerf.delete(sessionId);
-  }
-}
-
 export async function handleSessionNotification(
   notification: SessionNotification,
 ): Promise<void> {
@@ -388,16 +126,8 @@ export async function handleSessionNotification(
     perf.count += 1;
     handleReplay(sessionId, update);
   } else {
-    const perf = livePerf.get(sessionId);
-    if (perf && update.sessionUpdate === "agent_message_chunk") {
-      perf.chunkCount += 1;
-      if (perf.firstChunkAt === null) {
-        perf.firstChunkAt = performance.now();
-        const sid = sessionId.slice(0, 8);
-        perfLog(
-          `[perf:stream] ${sid} first agent_message_chunk at ttft=${(perf.firstChunkAt - perf.sendStartedAt).toFixed(1)}ms`,
-        );
-      }
+    if (update.sessionUpdate === "agent_message_chunk") {
+      recordLiveAgentMessageChunk(sessionId);
     }
     handleLive(sessionId, update);
   }
@@ -816,7 +546,7 @@ function handleShared(sessionId: string, update: SessionUpdate): void {
     }
 
     case "config_option_update": {
-      applySessionConfigOptionsSnapshot(sessionId, update);
+      applyChatSessionConfigOptionsSnapshot(sessionId, update);
       break;
     }
 
@@ -872,7 +602,7 @@ function ensureLiveAssistantMessage(
   const store = useChatStore.getState();
   const existingStreamingMessageId = findStreamingMessageId(sessionId);
   const messages = store.messagesBySession[sessionId] ?? [];
-  const activePreset = activeMessagePresets.get(sessionId);
+  const activePreset = getActiveMessagePreset(sessionId);
 
   if (
     existingStreamingMessageId &&
@@ -919,7 +649,7 @@ function ensureLiveAssistantMessage(
 }
 
 export function clearMessageTracking(): void {
-  activeMessagePresets.clear();
+  clearActiveMessageTracking();
   clearReplayAssistantTracking();
   clearSkillReplayChips();
 }
