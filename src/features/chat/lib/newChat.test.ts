@@ -78,7 +78,7 @@ describe("findExistingDraft", () => {
     ).toBeUndefined();
   });
 
-  it("does not reuse the active empty draft without content", () => {
+  it("reuses the active empty draft without content", () => {
     const draft = makeSession("alpha-draft", {
       projectId: "alpha",
       providerId: "goose",
@@ -93,6 +93,26 @@ describe("findExistingDraft", () => {
         request: {
           title: "New Chat",
           projectId: "alpha",
+        },
+      }),
+    ).toEqual(draft);
+  });
+
+  it("does not reuse the active empty draft for a different project", () => {
+    const draft = makeSession("alpha-draft", {
+      projectId: "alpha",
+      providerId: "goose",
+    });
+
+    expect(
+      findExistingDraft({
+        sessions: [draft],
+        activeSessionId: "alpha-draft",
+        draftsBySession: {},
+        messagesBySession: {},
+        request: {
+          title: "New Chat",
+          projectId: "beta",
         },
       }),
     ).toBeUndefined();

@@ -5,3 +5,6 @@ export const selectMessagesBySession = (state: ChatStore) =>
 
 export const selectSessionStateById = (state: ChatStore) =>
   state.sessionStateById;
+
+export const selectDraftsBySession = (state: ChatStore) =>
+  state.draftsBySession;

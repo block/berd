@@ -1,6 +1,6 @@
 import type { Message } from "@/shared/types/messages";
 import type { ChatSession } from "../stores/chatSessionStore";
-import { DEFAULT_CHAT_TITLE } from "./sessionTitle";
+import { isDefaultChatTitle } from "./sessionTitle";
 
 interface NewChatRequest {
   title: string;
@@ -40,7 +40,7 @@ export function findExistingDraft({
   messagesBySession,
   request,
 }: FindExistingDraftArgs): ChatSession | undefined {
-  if (request.title !== DEFAULT_CHAT_TITLE) {
+  if (!isDefaultChatTitle(request.title)) {
     return undefined;
   }
 
@@ -52,6 +52,13 @@ export function findExistingDraft({
 
   if (candidates.length === 0) {
     return undefined;
+  }
+
+  const activeCandidate = candidates.find(
+    (session) => session.id === activeSessionId,
+  );
+  if (activeCandidate) {
+    return activeCandidate;
   }
 
   const withContent = candidates.filter(

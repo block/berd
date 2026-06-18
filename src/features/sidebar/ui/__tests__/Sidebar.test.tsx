@@ -34,6 +34,7 @@ type MockSession = {
 
 type SidebarProps = ComponentProps<typeof Sidebar>;
 const mockSessions: MockSession[] = [];
+let mockDraftsBySession: Record<string, string> = {};
 let mockHasMoreSessions = false;
 let mockIsLoadingMoreSessions = false;
 let mockSessionPageCursor: string | null = null;
@@ -161,16 +162,24 @@ async function clickViewMore(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("button", { name: "View more chats" }));
 }
 
+function renderedSessionIds() {
+  return Array.from(document.querySelectorAll("[data-session-id]")).map(
+    (element) => element.getAttribute("data-session-id"),
+  );
+}
+
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
       selector({
         messagesBySession: {},
+        draftsBySession: mockDraftsBySession,
         sessionStateById: {},
       }),
     {
       getState: () => ({
         messagesBySession: {},
+        draftsBySession: mockDraftsBySession,
         sessionStateById: {},
       }),
     },
@@ -226,6 +235,7 @@ vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
 describe("Sidebar", () => {
   beforeEach(() => {
     seedSessions();
+    mockDraftsBySession = {};
     mockHasMoreSessions = false;
     mockIsLoadingMoreSessions = false;
     mockSessionPageCursor = null;
@@ -565,6 +575,173 @@ describe("Sidebar", () => {
 
     expect(screen.queryByText("New Chat")).not.toBeInTheDocument();
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
+  });
+
+  it("shows the active zero-message chat in recents", () => {
+    seedSessions(
+      {
+        id: "active-new-chat",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 0,
+      },
+      {
+        id: "abandoned-new-chat",
+        title: "Abandoned chat",
+        updatedAt: "2026-04-09T11:00:00.000Z",
+        messageCount: 0,
+      },
+    );
+
+    renderSidebar({ activeSessionId: "active-new-chat" });
+
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.queryByText("Abandoned chat")).not.toBeInTheDocument();
+  });
+
+  it("shows the active zero-message chat under its project", async () => {
+    seedSessions({
+      id: "active-project-chat",
+      title: "New chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 0,
+      projectId: "project-1",
+    });
+
+    renderSidebar({
+      activeSessionId: "active-project-chat",
+      projects: [mockProject()],
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Project One" }),
+      ).toHaveAttribute("aria-expanded", "true");
+    });
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+  });
+
+  it("keeps a zero-message chat visible when it has a composer draft", async () => {
+    seedSessions(
+      {
+        id: "project-one-draft",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 0,
+        projectId: "project-1",
+      },
+      {
+        id: "project-two-active",
+        title: "New chat",
+        updatedAt: "2026-04-09T12:01:00.000Z",
+        messageCount: 0,
+        projectId: "project-2",
+      },
+    );
+    mockDraftsBySession = {
+      "project-one-draft": "unsent thought",
+    };
+
+    renderSidebar({
+      activeSessionId: "project-two-active",
+      projects: [
+        mockProject(),
+        mockProject({
+          id: "project-2",
+          path: "/tmp/project-2",
+          name: "Project Two",
+        }),
+      ],
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Project Two" }),
+      ).toHaveAttribute("aria-expanded", "true");
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(screen.getAllByText("New chat")).toHaveLength(2);
+  });
+
+  it("keeps a drafted zero-message chat visible past the recents cap", () => {
+    seedSessions(
+      {
+        id: "old-draft",
+        title: "New chat",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        messageCount: 0,
+      },
+      ...Array.from({ length: 21 }, (_, index) => ({
+        id: `recent-${index}`,
+        title: `Recent Chat ${index}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+      })),
+    );
+    mockDraftsBySession = {
+      "old-draft": "saved but unsent",
+    };
+
+    renderSidebar();
+
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText("Recent Chat 20")).toBeInTheDocument();
+    expect(screen.queryByText("Recent Chat 0")).not.toBeInTheDocument();
+    expect(renderedSessionIds()[0]).toBe("old-draft");
+  });
+
+  it("keeps an active zero-message chat above newer standalone chats", () => {
+    seedSessions(
+      {
+        id: "active-new-chat",
+        title: "New chat",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        messageCount: 0,
+      },
+      {
+        id: "newer-chat",
+        title: "Newer Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    renderSidebar({ activeSessionId: "active-new-chat" });
+
+    expect(renderedSessionIds()).toEqual(["active-new-chat", "newer-chat"]);
+  });
+
+  it("keeps a project draft visible past the collapsed project chat limit", async () => {
+    seedSessions(
+      {
+        id: "old-project-draft",
+        title: "New chat",
+        updatedAt: "2026-04-09T10:00:00.000Z",
+        messageCount: 0,
+        projectId: "project-1",
+      },
+      ...Array.from({ length: 6 }, (_, index) => ({
+        id: `project-recent-${index}`,
+        title: `Project Recent ${index}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+        projectId: "project-1",
+      })),
+    );
+    mockDraftsBySession = {
+      "old-project-draft": "saved project thought",
+    };
+
+    renderSidebar({ projects: [mockProject()] });
+
+    await userEvent.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(screen.getByText("New chat")).toBeInTheDocument();
+    expect(screen.getByText("Project Recent 5")).toBeInTheDocument();
+    expect(screen.queryByText("Project Recent 0")).not.toBeInTheDocument();
+    expect(renderedSessionIds()[0]).toBe("old-project-draft");
   });
 
   it("renders an automations button in main navigation", async () => {

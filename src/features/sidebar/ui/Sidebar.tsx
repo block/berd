@@ -28,6 +28,7 @@ import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useChatStore } from "@/features/chat/stores/chatStore";
 import {
+  selectDraftsBySession,
   selectMessagesBySession,
   selectSessionStateById,
 } from "@/features/chat/stores/chatSelectors";
@@ -238,6 +239,7 @@ function getSidebarSessionGroups(
   visibleSessions: ChatSession[],
   projectIds: ReadonlySet<string>,
   sessionStateById: Record<string, SessionChatRuntime>,
+  placeholderSessionIds: ReadonlySet<string>,
 ): SidebarSessionGroups {
   const byProject: Record<string, SidebarSessionItem[]> = {};
   const standalone: SidebarSessionItem[] = [];
@@ -254,14 +256,72 @@ function getSidebarSessionGroups(
   }
 
   for (const chats of Object.values(byProject)) {
-    chats.sort(compareSessionsByUpdatedAtDesc);
+    chats.sort((a, b) => compareSidebarSessions(a, b, placeholderSessionIds));
   }
+
+  const sortedStandalone = standalone.sort((a, b) =>
+    compareSidebarSessions(a, b, placeholderSessionIds),
+  );
+  const standalonePlaceholders = sortedStandalone.filter((session) =>
+    placeholderSessionIds.has(session.id),
+  );
+  const standaloneRecents = sortedStandalone
+    .filter((session) => !placeholderSessionIds.has(session.id))
+    .slice(0, MAX_RECENTS);
 
   return {
     byProject,
-    standalone: standalone
-      .sort(compareSessionsByUpdatedAtDesc)
-      .slice(0, MAX_RECENTS),
+    standalone: [...standalonePlaceholders, ...standaloneRecents],
+  };
+}
+
+function compareSidebarSessions(
+  a: SidebarSessionItem,
+  b: SidebarSessionItem,
+  placeholderSessionIds: ReadonlySet<string>,
+): number {
+  const aIsPlaceholder = placeholderSessionIds.has(a.id);
+  const bIsPlaceholder = placeholderSessionIds.has(b.id);
+  if (aIsPlaceholder !== bIsPlaceholder) {
+    return aIsPlaceholder ? -1 : 1;
+  }
+
+  return compareSessionsByUpdatedAtDesc(a, b);
+}
+
+function includeSidebarPlaceholderSessions(
+  visibleSessions: ChatSession[],
+  sessions: ChatSession[],
+  draftsBySession: Record<string, string>,
+  activeSessionId?: string | null,
+): {
+  sessions: ChatSession[];
+  placeholderSessionIds: ReadonlySet<string>;
+} {
+  const visibleSessionIds = new Set(
+    visibleSessions.map((session) => session.id),
+  );
+  const additionalSessions = sessions.filter((session) => {
+    if (visibleSessionIds.has(session.id) || session.archivedAt) {
+      return false;
+    }
+
+    return (
+      session.id === activeSessionId ||
+      (draftsBySession[session.id] ?? "").length > 0
+    );
+  });
+  const placeholderSessionIds = new Set(
+    additionalSessions.map((session) => session.id),
+  );
+
+  if (additionalSessions.length === 0) {
+    return { sessions: visibleSessions, placeholderSessionIds };
+  }
+
+  return {
+    sessions: [...additionalSessions, ...visibleSessions],
+    placeholderSessionIds,
   };
 }
 
@@ -421,6 +481,7 @@ export function Sidebar({
     () => new Set(),
   );
   const messagesBySession = useChatStore(selectMessagesBySession);
+  const draftsBySession = useChatStore(selectDraftsBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
   const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
@@ -429,11 +490,17 @@ export function Sidebar({
     [projects],
   );
   const visibleSessions = useMemo(
-    () => getVisibleSessions(sessions, messagesBySession),
-    [messagesBySession, sessions],
+    () =>
+      includeSidebarPlaceholderSessions(
+        getVisibleSessions(sessions, messagesBySession),
+        sessions,
+        draftsBySession,
+        activeSessionId,
+      ),
+    [activeSessionId, draftsBySession, messagesBySession, sessions],
   );
   const activeSessions = useMemo(
-    () => visibleSessions.filter((session) => !session.archivedAt),
+    () => visibleSessions.sessions.filter((session) => !session.archivedAt),
     [visibleSessions],
   );
   const activeSessionIds = useMemo(
@@ -592,7 +659,12 @@ export function Sidebar({
 
   const projectSessions = useMemo(
     () =>
-      getSidebarSessionGroups(visibleSessions, projectIds, sessionStateById),
+      getSidebarSessionGroups(
+        visibleSessions.sessions,
+        projectIds,
+        sessionStateById,
+        visibleSessions.placeholderSessionIds,
+      ),
     [projectIds, sessionStateById, visibleSessions],
   );
 

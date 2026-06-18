@@ -903,6 +903,30 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("reuses the active blank chat when the sidebar new chat action is repeated", async () => {
+    const pendingSession = deferred<{ sessionId: string }>();
+    mockAcpCreateSession.mockReturnValueOnce(pendingSession.promise);
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+    });
+    const draftSessionId = useChatSessionStore.getState().activeSessionId;
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    expect(useChatSessionStore.getState().activeSessionId).toBe(draftSessionId);
+    expect(useChatSessionStore.getState().sessions).toHaveLength(1);
+    expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      pendingSession.resolve({ sessionId: "created-session" });
+    });
+  });
+
   it("shows ACP error data when draft session creation fails", async () => {
     const error = new Error("Internal error") as Error & { data: string };
     error.name = "RequestError";
