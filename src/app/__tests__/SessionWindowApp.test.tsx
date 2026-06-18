@@ -98,6 +98,16 @@ const textMessage = (id: string, text: string): Message => ({
   content: [{ type: "text", text }],
 });
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, reject, resolve };
+}
+
 function seedSession() {
   useChatSessionStore.setState({
     sessions: [session],
@@ -198,6 +208,26 @@ describe("SessionWindowApp", () => {
       "Finishing current response...",
     );
     expect(loadSessionMessages).not.toHaveBeenCalled();
+  });
+
+  it("mounts owned chat windows while persisted history is still loading", async () => {
+    seedSession();
+    const historyLoad = deferred<boolean>();
+    vi.mocked(loadSessionMessages).mockReturnValueOnce(historyLoad.promise);
+
+    renderSessionWindow();
+
+    expect(await screen.findByTestId("chat-view")).toHaveAttribute(
+      "data-read-only-status",
+      "",
+    );
+    expect(loadSessionMessages).toHaveBeenCalledWith("session-1", {
+      force: undefined,
+    });
+
+    act(() => {
+      historyLoad.resolve(true);
+    });
   });
 
   it("applies handoff snapshots pulled from rust", async () => {

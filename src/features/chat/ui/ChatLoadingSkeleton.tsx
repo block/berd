@@ -1,6 +1,9 @@
 import { useTranslation } from "react-i18next";
 import { Skeleton } from "@/shared/ui/skeleton";
 
+const CHAT_LOADING_SKELETON_CLASS =
+  "[&_[data-slot=skeleton]]:bg-muted-foreground/15 dark:[&_[data-slot=skeleton]]:bg-muted-foreground/35";
+
 /**
  * Placeholder skeleton shown while session history is being replayed
  * from the backend. Mimics the visual rhythm of a real conversation
@@ -10,7 +13,7 @@ export function ChatLoadingSkeleton() {
   const { t } = useTranslation("chat");
   return (
     <div
-      className="flex flex-1 items-start overflow-hidden"
+      className={`flex flex-1 items-start overflow-hidden ${CHAT_LOADING_SKELETON_CLASS}`}
       role="status"
       aria-label={t("skeleton.loadingConversation")}
     >

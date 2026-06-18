@@ -47,6 +47,8 @@ const mocks = vi.hoisted(() => ({
     string,
     { path: string; branch: string | null }
   >,
+  afterNextPaintCallbacks: [] as Array<() => void>,
+  autoFlushAfterNextPaint: true,
 }));
 
 vi.mock("motion/react", () => ({
@@ -72,7 +74,11 @@ vi.mock("@/shared/lib/platform", () => ({
 
 vi.mock("@/app/lib/scheduleAfterNextPaint", () => ({
   scheduleAfterNextPaint: (callback: () => void) => {
-    callback();
+    if (mocks.autoFlushAfterNextPaint) {
+      callback();
+      return vi.fn();
+    }
+    mocks.afterNextPaintCallbacks.push(callback);
     return vi.fn();
   },
 }));
@@ -276,6 +282,13 @@ function emitTerminalStatus(
   }
 }
 
+function flushAfterNextPaintCallbacks() {
+  const callbacks = mocks.afterNextPaintCallbacks.splice(0);
+  for (const callback of callbacks) {
+    callback();
+  }
+}
+
 function chatSessionWithWorkingDir(workingDir: string): ChatSession {
   return {
     id: "session-1",
@@ -305,6 +318,8 @@ describe("ChatView MCP app messaging", () => {
     mocks.unpinFromHome.mockClear();
     mocks.isContextPanelOpen = false;
     mocks.activeWorkspaceBySession = {};
+    mocks.afterNextPaintCallbacks = [];
+    mocks.autoFlushAfterNextPaint = true;
     window.localStorage.clear();
     mockMatchMedia(false);
     mocks.usePinToHomeWidget.mockReturnValue({
@@ -488,6 +503,51 @@ describe("ChatView MCP app messaging", () => {
       showPlaceholder?: boolean;
     };
     expect(timelineProps.showPlaceholder).toBe(true);
+  });
+
+  it("defers cached transcript rendering for one frame while keeping the terminal mounted", () => {
+    mocks.autoFlushAfterNextPaint = false;
+    window.localStorage.setItem(
+      terminalStorageKey,
+      JSON.stringify({
+        tabs: [{ id: "tab-1", cwd: "/Users/test/app" }],
+        activeTabId: "tab-1",
+        expanded: true,
+      }),
+    );
+
+    render(
+      <ChatView
+        sessionId="session-1"
+        activeSession={chatSessionWithWorkingDir("/Users/test/app")}
+      />,
+    );
+
+    expect(screen.getByTestId("chat-loading-skeleton")).toBeTruthy();
+    expect(screen.queryByText("Hello")).toBeNull();
+    expect(screen.getByTestId("terminal-panel")).toHaveAttribute(
+      "data-cwd",
+      "/Users/test/app",
+    );
+
+    let timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      messages?: unknown[];
+      showPlaceholder?: boolean;
+    };
+    expect(timelineProps.messages).toEqual([]);
+    expect(timelineProps.showPlaceholder).toBe(true);
+
+    act(() => {
+      flushAfterNextPaintCallbacks();
+    });
+
+    expect(screen.getByText("Hello")).toBeTruthy();
+    timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      messages?: unknown[];
+      showPlaceholder?: boolean;
+    };
+    expect(timelineProps.messages).toHaveLength(1);
+    expect(timelineProps.showPlaceholder).toBe(false);
   });
 
   it("surfaces pin-to-home as a chat top-bar action", async () => {

@@ -195,7 +195,7 @@ export function SessionWindowApp({
       }
 
       setInitialMirrorVersion(0);
-      await loadOwnedSession();
+      void loadOwnedSession();
       if (!cancelled) setPhase("ready");
     }
 
@@ -300,8 +300,10 @@ export function SessionWindowApp({
       .catch((error) => {
         console.error("Failed to recover session handoff:", error);
       })
-      .then(() => loadOwnedSession({ force: true }))
-      .then(() => setPhase("ready"));
+      .then(() => {
+        void loadOwnedSession({ force: true });
+        setPhase("ready");
+      });
   }, [loadOwnedSession, sessionId]);
 
   if (phase === "missing") {

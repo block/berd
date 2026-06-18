@@ -56,6 +56,7 @@ import { getTextContent } from "@/shared/types/messages";
 import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRegistry";
 import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
+import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -221,6 +222,13 @@ function terminalTabButtonId(tabId: string): string {
 
 function terminalTabPanelId(tabId: string): string {
   return `terminal-tabpanel-${tabId}`;
+}
+
+function shouldStageInitialTranscript(
+  messages: readonly unknown[],
+  isLoadingHistory: boolean,
+): boolean {
+  return messages.length > 0 && !isLoadingHistory;
 }
 
 function validateTerminalWorkspaceState(
@@ -666,8 +674,6 @@ export function ChatView({
     controller.chatState === "streaming" ||
     controller.chatState === "waiting" ||
     controller.chatState === "compacting";
-  const shouldShowLoadingIndicator =
-    showIndicator && !controller.isLoadingHistory;
   const loadingChatState = controller.chatState as
     | "thinking"
     | "streaming"
@@ -676,6 +682,53 @@ export function ChatView({
   const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
   const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
   const isReadOnly = Boolean(readOnlyStatus);
+  const shouldStageTranscript = shouldStageInitialTranscript(
+    controller.messages,
+    controller.isLoadingHistory,
+  );
+  const [initialTranscriptGate, setInitialTranscriptGate] = useState(() => ({
+    sessionId,
+    pending: shouldStageTranscript,
+  }));
+  const isPreparingInitialTranscript =
+    initialTranscriptGate.sessionId === sessionId
+      ? initialTranscriptGate.pending
+      : shouldStageTranscript;
+  const showTimelineLoading =
+    controller.isLoadingHistory || isPreparingInitialTranscript;
+  const shouldShowLoadingIndicator = showIndicator && !showTimelineLoading;
+  const timelineMessages = isPreparingInitialTranscript
+    ? []
+    : controller.messages;
+
+  // Only gate the first render for a session. Later live updates should stream
+  // into the mounted timeline without showing the skeleton again.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: sessionId is the reset signal for the initial transcript gate.
+  useEffect(() => {
+    const pending = shouldStageInitialTranscript(
+      controller.messages,
+      controller.isLoadingHistory,
+    );
+
+    setInitialTranscriptGate((current) =>
+      current.sessionId === sessionId && current.pending === pending
+        ? current
+        : { sessionId, pending },
+    );
+
+    if (!pending) {
+      return;
+    }
+
+    return scheduleAfterNextPaint(() => {
+      setInitialTranscriptGate((current) =>
+        current.sessionId === sessionId && current.pending
+          ? { sessionId, pending: false }
+          : current,
+      );
+    });
+  }, [sessionId]);
+
   let sendDisabledReason: string | undefined;
   if (readOnlyStatus) {
     sendDisabledReason = readOnlyStatus;
@@ -901,7 +954,7 @@ export function ChatView({
     </div>
   );
 
-  const conversationPlaceholder = controller.isLoadingHistory ? (
+  const conversationPlaceholder = showTimelineLoading ? (
     <ChatLoadingSkeleton />
   ) : (
     <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
@@ -932,7 +985,7 @@ export function ChatView({
   const messageTimeline = (
     <VirtualMessageTimelineGate
       sessionId={timelineSessionId}
-      messages={controller.messages}
+      messages={timelineMessages}
       streamingMessageId={controller.streamingMessageId}
       scrollTargetMessageId={controller.scrollTarget?.messageId ?? null}
       scrollTargetQuery={controller.scrollTarget?.query ?? null}
@@ -949,7 +1002,7 @@ export function ChatView({
         // agent-builder sessions, so opening it would silently no-op.
         isAgentBuilderSession ? undefined : handleOpenContextPanel
       }
-      showPlaceholder={controller.isLoadingHistory}
+      showPlaceholder={showTimelineLoading}
       placeholder={conversationPlaceholder}
       footer={composerFooter}
       footerStatus={footerStatus}
@@ -982,7 +1035,7 @@ export function ChatView({
 
   return (
     <ArtifactPolicyProvider
-      messages={controller.messages}
+      messages={timelineMessages}
       sessionCwd={controller.sessionArtifactCwd}
     >
       <div
