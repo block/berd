@@ -34,8 +34,10 @@ log = "0.4.29"
 mime_guess = "2"
 futures-util = "0.3"
 nucleo-matcher = "0.3"
+plist = "1"
 portable-pty = "0.9.0"
 reqwest = { version = "0.13.3", default-features = false, features = ["json", "multipart", "rustls", "stream"] }
+semver = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml = "0.9"
@@ -61,8 +63,8 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem"] }
-objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSObject", "NSProcessInfo", "NSString"] }
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSMenu", "NSMenuItem", "NSAlert", "NSButton", "NSControl", "NSCell", "NSResponder", "NSView"] }
+objc2-foundation = { version = "0.3.2", features = ["NSDictionary", "NSError", "NSFileManager", "NSObject", "NSProcessInfo", "NSString", "NSURL"] }
 objc2-user-notifications = "0.3.2"
 
 

@@ -117,6 +117,13 @@ pub fn run() {
 
     builder
         .setup(|app| {
+            // Before any heavier startup work, offer to move into
+            // /Applications when launched from installer media (DMG, a
+            // read-only/translocated location, or another non-installed
+            // download). Accepting relaunches the installed copy and exits.
+            #[cfg(target_os = "macos")]
+            services::installer_media::maybe_prompt_move_to_applications(app.handle());
+
             services::diagnostic_log::record_event(
                 services::diagnostic_log::DiagnosticLevel::Info,
                 services::diagnostic_log::DiagnosticCategory::Startup,

@@ -7,6 +7,8 @@ pub(crate) mod dir_env;
 pub mod distro_bundle;
 pub(crate) mod goose_config;
 pub(crate) mod goosectl_discovery;
+#[cfg(target_os = "macos")]
+pub(crate) mod installer_media;
 pub(crate) mod kgoose;
 pub(crate) mod log_export;
 pub(crate) mod log_redaction;
