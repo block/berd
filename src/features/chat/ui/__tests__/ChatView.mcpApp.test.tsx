@@ -119,7 +119,12 @@ vi.mock("../VirtualMessageTimelineGate", () => ({
 vi.mock("../ChatInput", () => ({
   ChatInput: (props: unknown) => {
     mocks.chatInputSpy(props);
-    return <div data-testid="chat-input" />;
+    return (
+      <div data-testid="chat-input">
+        {/* Mirror the real composer textarea so focus-return assertions work. */}
+        <textarea data-testid="chat-composer" />
+      </div>
+    );
   },
 }));
 
@@ -189,6 +194,7 @@ vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
     cwd: string;
     collapsed?: boolean;
     showHeader?: boolean;
+    focusRequest?: number;
   }) => (
     <div
       data-testid="terminal-panel"
@@ -196,6 +202,7 @@ vi.mock("@/features/terminal/ui/TerminalPanel", () => ({
       data-cwd={props.cwd}
       data-collapsed={String(props.collapsed)}
       data-show-header={String(props.showHeader)}
+      data-focus-request={String(props.focusRequest)}
     >
       <span>{props.cwd}</span>
     </div>
@@ -1068,6 +1075,101 @@ describe("ChatView MCP app messaging", () => {
     render(<ChatView sessionId="session-1" activeSession={activeSession} />);
 
     expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+  });
+
+  it("does not auto-focus the terminal when restoring an already-open one", async () => {
+    window.localStorage.setItem(
+      terminalStorageKey,
+      JSON.stringify({
+        tabs: [{ id: "tab-1", cwd: "/Users/test/repo" }],
+        activeTabId: "tab-1",
+        expanded: true,
+      }),
+    );
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    // focusRequest stays at its initial 0 so reload does not steal focus.
+    expect(await screen.findByTestId("terminal-panel")).toHaveAttribute(
+      "data-focus-request",
+      "0",
+    );
+  });
+
+  it("requests terminal focus when opening the terminal", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+
+    const panel = await screen.findByTestId("terminal-panel");
+    expect(panel).toHaveAttribute("data-collapsed", "false");
+    // A user-initiated open bumps focusRequest above its initial 0.
+    expect(panel.getAttribute("data-focus-request")).not.toBe("0");
+  });
+
+  it("returns focus to the chat composer when collapsing the terminal", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "terminal.collapse" }));
+
+    expect(screen.getByTestId("chat-composer")).toHaveFocus();
+  });
+
+  it("returns focus to the chat composer when closing the last terminal tab", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    expect(await screen.findByTestId("terminal-panel")).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "terminal.stopAndCloseTab" }),
+    );
+    await user.click(screen.getByRole("button", { name: "terminal.stop" }));
+
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("chat-composer")).toHaveFocus();
+  });
+
+  it("does not steal focus when the last terminal exits on its own", async () => {
+    const user = userEvent.setup();
+    const activeSession = chatSessionWithWorkingDir("/Users/test/repo");
+
+    render(<ChatView sessionId="session-1" activeSession={activeSession} />);
+
+    await user.click(screen.getByRole("button", { name: "toggle terminal" }));
+    const sessionKey = (
+      await screen.findByTestId("terminal-panel")
+    ).getAttribute("data-session-key");
+    if (!sessionKey) {
+      throw new Error("expected active terminal session key");
+    }
+
+    // Move focus somewhere other than the composer, then let the shell exit
+    // on its own (backend-exit, not a user close).
+    const toggleButton = screen.getByRole("button", {
+      name: "toggle terminal",
+    });
+    toggleButton.focus();
+
+    act(() => emitTerminalStatus(sessionKey));
+
+    expect(screen.queryByTestId("terminal-panel")).not.toBeInTheDocument();
+    // A background exit must not yank focus to the composer.
+    expect(screen.getByTestId("chat-composer")).not.toHaveFocus();
+    expect(toggleButton).toHaveFocus();
   });
 
   it("migrates legacy terminal workspace state into tabs", async () => {

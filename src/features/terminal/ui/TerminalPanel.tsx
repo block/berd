@@ -47,6 +47,13 @@ interface TerminalPanelProps {
   onCollapse?: () => void;
   onExpand?: () => void;
   onClose?: () => void;
+  /**
+   * Monotonic counter bumped by the parent each time a user action opens or
+   * brings the terminal forward. A change moves focus into the terminal.
+   * Starts at 0, which is treated as "no user request yet" so restoring an
+   * already-open terminal on reload does not steal focus.
+   */
+  focusRequest?: number;
 }
 
 function shortenPath(path: string): string {
@@ -227,6 +234,7 @@ export function TerminalPanel({
   onCollapse,
   onExpand,
   onClose,
+  focusRequest = 0,
 }: TerminalPanelProps) {
   const { t } = useTranslation("chat");
   const { resolvedTheme } = useTheme();
@@ -405,6 +413,33 @@ export function TerminalPanel({
       section.removeEventListener("goose-terminal-focus", handleTerminalFocus);
     };
   }, [collapsed]);
+
+  // A user action (button, Cmd+J, tab switch) bumps focusRequest; move the
+  // cursor into the terminal so it is ready to type. 0 means "no request yet"
+  // so restoring an already-open terminal on reload does not steal focus.
+  // While the session is still "starting" the underlying xterm is not settled
+  // and an early focus does not stick, so we defer until it is "running" and
+  // only handle each request once (so a later restart does not steal focus).
+  const handledFocusRequestRef = useRef(0);
+  useEffect(() => {
+    if (
+      focusRequest === 0 ||
+      collapsed ||
+      handledFocusRequestRef.current === focusRequest
+    ) {
+      return;
+    }
+
+    if (status !== "running") {
+      return;
+    }
+
+    const cancel = scheduleAfterNextPaint(() => {
+      handledFocusRequestRef.current = focusRequest;
+      sessionRef.current?.focusAndResize();
+    });
+    return cancel;
+  }, [collapsed, focusRequest, status]);
 
   return (
     <section

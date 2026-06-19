@@ -438,6 +438,23 @@ export function ChatView({
   const terminalVisible = terminalTabs.length > 0;
   const terminalExpanded = terminalWorkspaceState.expanded;
 
+  // Bumped whenever a user action opens/brings the terminal forward, so the
+  // panel moves the cursor into the terminal ready to type. Not bumped when an
+  // already-open terminal is merely restored on reload.
+  const [terminalFocusRequest, setTerminalFocusRequest] = useState(0);
+  const requestTerminalFocus = useCallback(() => {
+    setTerminalFocusRequest((value) => value + 1);
+  }, []);
+
+  // When a user action closes/collapses the terminal there is nowhere else
+  // meaningful to land focus, so return it to the chat composer.
+  const focusChatComposer = useCallback(() => {
+    const composer = document.querySelector<HTMLTextAreaElement>(
+      "[data-testid='chat-composer']:not(:disabled)",
+    );
+    composer?.focus();
+  }, []);
+
   const toggleTerminal = useCallback(() => {
     if (!terminalCwd) {
       toast.message(t("terminal.noWorkspace"));
@@ -447,16 +464,31 @@ export function ChatView({
     commitTerminalWorkspaceState((state) => {
       const defaultTab = findDefaultTerminalTab(state.tabs, terminalCwd);
       if (!defaultTab) {
+        requestTerminalFocus();
         return appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
+      }
+
+      const nextExpanded =
+        state.activeTabId === defaultTab.id ? !state.expanded : true;
+      if (nextExpanded) {
+        requestTerminalFocus();
+      } else {
+        focusChatComposer();
       }
 
       return {
         ...state,
         activeTabId: defaultTab.id,
-        expanded: state.activeTabId === defaultTab.id ? !state.expanded : true,
+        expanded: nextExpanded,
       };
     });
-  }, [commitTerminalWorkspaceState, terminalCwd, t]);
+  }, [
+    commitTerminalWorkspaceState,
+    focusChatComposer,
+    requestTerminalFocus,
+    terminalCwd,
+    t,
+  ]);
 
   useEffect(() => {
     const ms = (performance.now() - mountStart.current).toFixed(1);
@@ -477,10 +509,11 @@ export function ChatView({
       return;
     }
 
+    requestTerminalFocus();
     commitTerminalWorkspaceState((state) => {
       return appendActiveTerminalTab(state, createTerminalTab(terminalCwd));
     });
-  }, [commitTerminalWorkspaceState, terminalCwd, t]);
+  }, [commitTerminalWorkspaceState, requestTerminalFocus, terminalCwd, t]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -514,39 +547,68 @@ export function ChatView({
 
   const handleSelectTerminalTab = useCallback(
     (tabId: string) => {
-      commitTerminalWorkspaceState((state) =>
-        state.tabs.some((tab) => tab.id === tabId)
-          ? { ...state, activeTabId: tabId, expanded: true }
-          : state,
-      );
+      commitTerminalWorkspaceState((state) => {
+        if (!state.tabs.some((tab) => tab.id === tabId)) {
+          return state;
+        }
+        requestTerminalFocus();
+        return { ...state, activeTabId: tabId, expanded: true };
+      });
     },
-    [commitTerminalWorkspaceState],
+    [commitTerminalWorkspaceState, requestTerminalFocus],
   );
 
   const handleCollapseTerminal = useCallback(() => {
-    commitTerminalWorkspaceState((state) =>
-      state.expanded ? { ...state, expanded: false } : state,
-    );
-  }, [commitTerminalWorkspaceState]);
+    commitTerminalWorkspaceState((state) => {
+      if (!state.expanded) {
+        return state;
+      }
+      focusChatComposer();
+      return { ...state, expanded: false };
+    });
+  }, [commitTerminalWorkspaceState, focusChatComposer]);
 
   const handleExpandTerminal = useCallback(() => {
-    commitTerminalWorkspaceState((state) =>
-      state.tabs.length > 0 ? { ...state, expanded: true } : state,
-    );
-  }, [commitTerminalWorkspaceState]);
+    commitTerminalWorkspaceState((state) => {
+      if (state.tabs.length === 0) {
+        return state;
+      }
+      requestTerminalFocus();
+      return { ...state, expanded: true };
+    });
+  }, [commitTerminalWorkspaceState, requestTerminalFocus]);
 
   const handleRemoveTerminalTab = useCallback(
-    (tabId: string) => {
+    // userInitiated distinguishes a user closing a tab from a process exiting
+    // on its own (backend-exit). Only a user action should move focus, so a
+    // background exit never steals focus away from wherever the user is.
+    (
+      tabId: string,
+      { userInitiated = false }: { userInitiated?: boolean } = {},
+    ) => {
       setClosingTerminalTabId(null);
-      commitTerminalWorkspaceState((state) => removeTerminalTab(state, tabId));
+      commitTerminalWorkspaceState((state) => {
+        const nextState = removeTerminalTab(state, tabId);
+        if (!userInitiated) {
+          return nextState;
+        }
+        if (nextState.tabs.length === 0) {
+          // Closed the last tab: the terminal is gone, return to the composer.
+          focusChatComposer();
+        } else if (nextState.activeTabId !== state.activeTabId) {
+          // Focus shifted to a neighboring tab; keep the cursor in it.
+          requestTerminalFocus();
+        }
+        return nextState;
+      });
     },
-    [commitTerminalWorkspaceState],
+    [commitTerminalWorkspaceState, focusChatComposer, requestTerminalFocus],
   );
 
   const handleCloseTerminal = useCallback(
     (tabId: string) => {
       stopTerminalSession(`${sessionId}:${tabId}`, { writeStopped: true });
-      handleRemoveTerminalTab(tabId);
+      handleRemoveTerminalTab(tabId, { userInitiated: true });
     },
     [handleRemoveTerminalTab, sessionId],
   );
@@ -1319,6 +1381,7 @@ export function ChatView({
                                 cwd={tab.cwd}
                                 collapsed={false}
                                 showHeader={false}
+                                focusRequest={terminalFocusRequest}
                                 className="h-full bg-card"
                               />
                             ) : null}

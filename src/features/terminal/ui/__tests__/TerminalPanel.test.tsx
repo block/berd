@@ -176,6 +176,128 @@ describe("TerminalPanel", () => {
     expect(mocks.focusAndResize).toHaveBeenCalledOnce();
   });
 
+  it("does not focus on mount when focusRequest is still zero", () => {
+    render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        focusRequest={0}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    expect(mocks.focusAndResize).not.toHaveBeenCalled();
+  });
+
+  it("focuses the terminal when focusRequest increments", () => {
+    const { rerender } = render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        focusRequest={0}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+    expect(mocks.focusAndResize).not.toHaveBeenCalled();
+
+    rerender(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        focusRequest={1}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    expect(mocks.focusAndResize).toHaveBeenCalledOnce();
+  });
+
+  it("defers focus until a starting session becomes running", () => {
+    mocks.sessionStatus = "starting";
+    const { rerender } = render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        focusRequest={0}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    // User opens the terminal while it is still starting up.
+    rerender(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed={false}
+        focusRequest={1}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    // Too early: xterm is not settled, so focus is held back.
+    expect(mocks.focusAndResize).not.toHaveBeenCalled();
+
+    // Session finishes starting and notifies subscribers.
+    mocks.sessionStatus = "running";
+    act(() => {
+      mocks.statusListener?.();
+    });
+    act(() => {
+      frames.runAll();
+    });
+
+    expect(mocks.focusAndResize).toHaveBeenCalledOnce();
+  });
+
+  it("does not focus on a focusRequest while collapsed", () => {
+    const { rerender } = render(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed
+        focusRequest={0}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    rerender(
+      <TerminalPanel
+        sessionKey="session:/repo"
+        cwd="/Users/test/repo"
+        collapsed
+        focusRequest={1}
+      />,
+    );
+
+    act(() => {
+      frames.runAll();
+    });
+
+    expect(mocks.focusAndResize).not.toHaveBeenCalled();
+  });
+
   it("passes the app scrollbar opacity tokens to xterm", () => {
     document.documentElement.style.setProperty(
       "--scrollbar-thumb-alpha",
