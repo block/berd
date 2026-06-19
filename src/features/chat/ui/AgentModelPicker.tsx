@@ -6,7 +6,7 @@ import {
   useState,
   type ComponentProps,
 } from "react";
-import { IconCheck, IconChevronDown } from "@tabler/icons-react";
+import { IconAiAgents, IconCheck, IconChevronDown } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { requestOpenSettings } from "@/features/settings/lib/settingsEvents";
 import { cn } from "@/shared/lib/cn";
@@ -45,6 +45,7 @@ interface AgentModelPickerProps {
   isCompact?: boolean;
   showSelectedModelInTrigger?: boolean;
   triggerTabIndex?: number;
+  triggerIconOnly?: boolean;
   onOpen?: () => void;
   onOpenChange?: (open: boolean) => void;
   reasoningEffort?: ChatInputReasoningEffort;
@@ -156,6 +157,7 @@ export function AgentModelPicker({
   isCompact = false,
   showSelectedModelInTrigger = true,
   triggerTabIndex,
+  triggerIconOnly = false,
   onOpen,
   onOpenChange,
   reasoningEffort,
@@ -232,6 +234,10 @@ export function AgentModelPicker({
     : selectedAgentLabel;
   const triggerTitle =
     triggerLabel ?? (loading ? t("toolbar.loading") : undefined);
+  const triggerButtonSize = triggerIconOnly ? "icon-pill-sm" : "sm";
+  const triggerProviderIcon =
+    getProviderIcon(selectedAgentId, "size-4") ??
+    (triggerIconOnly ? <IconAiAgents className="size-4" /> : null);
   const reasoningEffortConfig = reasoningEffort?.config;
   const hasLiveReasoningEffort =
     Boolean(reasoningEffortConfig?.configId) &&
@@ -364,30 +370,39 @@ export function AgentModelPicker({
           ref={triggerRef}
           type="button"
           variant="composer-action"
-          size="sm"
+          size={triggerButtonSize}
           aria-label={t("toolbar.chooseAgentModel")}
           title={triggerTitle}
           tabIndex={triggerTabIndex}
           disabled={loading && !selectedAgentLabel}
-          leftIcon={getProviderIcon(selectedAgentId, "size-4")}
-          rightIcon={<IconChevronDown className="opacity-50" />}
-          className="chat-composer-selector-trigger min-w-0 max-w-full"
+          leftIcon={triggerProviderIcon}
+          rightIcon={
+            triggerIconOnly ? undefined : (
+              <IconChevronDown className="opacity-50" />
+            )
+          }
+          className={cn(
+            "chat-composer-selector-trigger",
+            triggerIconOnly ? "shrink-0" : "min-w-0 max-w-full",
+          )}
         >
-          <span
-            className={cn(
-              "chat-composer-selector-label flex min-w-0 items-baseline gap-1.5 truncate",
-              isCompact ? "max-w-32" : "max-w-56",
-            )}
-          >
-            <span className="min-w-0 truncate">
-              {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
-            </span>
-            {showReasoningEffort && selectedReasoningEffortLabel ? (
-              <span className="shrink-0 text-muted-foreground/70">
-                {selectedReasoningEffortLabel}
+          {triggerIconOnly ? null : (
+            <span
+              className={cn(
+                "chat-composer-selector-label flex min-w-0 items-baseline gap-1.5 truncate",
+                isCompact ? "max-w-32" : "max-w-56",
+              )}
+            >
+              <span className="min-w-0 truncate">
+                {triggerLabel ?? (loading ? t("toolbar.loading") : null)}
               </span>
-            ) : null}
-          </span>
+              {showReasoningEffort && selectedReasoningEffortLabel ? (
+                <span className="shrink-0 text-muted-foreground/70">
+                  {selectedReasoningEffortLabel}
+                </span>
+              ) : null}
+            </span>
+          )}
         </Button>
       </PopoverTrigger>
       <PopoverContent

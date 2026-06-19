@@ -37,6 +37,26 @@ describe("AgentModelPicker", () => {
     ).toHaveTextContent("GPT-4o");
   });
 
+  it("uses a fallback icon for unknown compact icon-only providers", () => {
+    render(
+      <AgentModelPicker
+        agents={[{ id: "custom-provider", label: "Custom Provider" }]}
+        selectedAgentId="custom-provider"
+        onAgentChange={vi.fn()}
+        availableModels={[]}
+        onModelChange={vi.fn()}
+        triggerIconOnly
+      />,
+    );
+
+    const trigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    expect(trigger).toHaveTextContent("");
+    expect(trigger).toHaveAttribute("title", "Custom Provider");
+    expect(trigger.querySelector("svg")).not.toBeNull();
+  });
+
   it("uses the selected agent label while a raw model id is unresolved", () => {
     render(
       <AgentModelPicker

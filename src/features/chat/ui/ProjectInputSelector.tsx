@@ -15,6 +15,7 @@ interface ProjectInputSelectorProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   triggerTabIndex?: number;
+  triggerIconOnly?: boolean;
   triggerVariant?: "default" | "toolbar";
   triggerSize?: "default" | "sm";
   contentWidth?: "trigger" | "wide";
@@ -37,6 +38,7 @@ export function ProjectInputSelector({
   contentSide,
   contentAlign,
   disabled,
+  triggerIconOnly,
 }: ProjectInputSelectorProps) {
   const { t } = useTranslation("chat");
   const selectedProject =
@@ -77,6 +79,7 @@ export function ProjectInputSelector({
       open={open}
       onOpenChange={onOpenChange}
       triggerTabIndex={triggerTabIndex}
+      triggerIconOnly={triggerIconOnly}
       triggerVariant={triggerVariant}
       triggerSize={triggerSize}
       menuLabel={t("toolbar.chooseProject")}

@@ -34,6 +34,7 @@ interface ChatInputSelectorProps {
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   triggerTabIndex?: number;
+  triggerIconOnly?: boolean;
   triggerVariant?: "default" | "toolbar";
   triggerSize?: "default" | "sm";
   menuLabel?: string;
@@ -63,8 +64,13 @@ export function ChatInputSelector({
   contentSide,
   contentAlign = "start",
   disabled,
+  triggerIconOnly = false,
 }: ChatInputSelectorProps) {
-  const buttonSize = triggerSize === "sm" ? "xs" : "sm";
+  const buttonSize = triggerIconOnly
+    ? "icon-pill-sm"
+    : triggerSize === "sm"
+      ? "xs"
+      : "sm";
 
   return (
     <DropdownMenu open={open} onOpenChange={onOpenChange}>
@@ -78,17 +84,21 @@ export function ChatInputSelector({
           tabIndex={triggerTabIndex}
           disabled={disabled}
           leftIcon={icon}
-          rightIcon={<ChevronDown />}
+          rightIcon={triggerIconOnly ? undefined : <ChevronDown />}
           className={cn(
-            "min-w-0",
             "chat-composer-selector-trigger",
-            triggerVariant === "default" && "justify-between",
-            triggerVariant === "toolbar" && "max-w-40",
+            triggerIconOnly ? "shrink-0" : "min-w-0",
+            triggerVariant === "default" &&
+              !triggerIconOnly &&
+              "justify-between",
+            triggerVariant === "toolbar" && !triggerIconOnly && "max-w-40",
           )}
         >
-          <span className="chat-composer-selector-label truncate">
-            {triggerLabel}
-          </span>
+          {triggerIconOnly ? null : (
+            <span className="chat-composer-selector-label truncate">
+              {triggerLabel}
+            </span>
+          )}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent

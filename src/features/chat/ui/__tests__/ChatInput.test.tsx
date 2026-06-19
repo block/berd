@@ -1908,6 +1908,56 @@ describe("ChatInput", () => {
     expect(mockVoiceDictation.stopRecording).not.toHaveBeenCalled();
   });
 
+  it("uses icon-only picker triggers in compact toolbar layout", () => {
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [{ id: "goose", label: "Goose" }],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [{ id: "gpt-4o", name: "GPT-4o" }],
+        }}
+        projectPicker={{
+          selectedProjectId: "project-1",
+          availableProjects: [
+            {
+              id: "project-1",
+              name: "Goose Internal",
+              workingDirs: ["/workspace/goose"],
+            },
+          ],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+        }}
+        isCompact
+      />,
+    );
+
+    const modelTrigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+    const projectTrigger = screen.getByRole("button", {
+      name: /select project/i,
+    });
+
+    expect(modelTrigger).toHaveTextContent("");
+    expect(projectTrigger).toHaveTextContent("");
+    expect(modelTrigger).toHaveClass("h-8", "w-10");
+    expect(projectTrigger).toHaveClass("h-8", "w-10");
+    expect(modelTrigger).toHaveAttribute("title", "GPT-4o");
+    expect(projectTrigger).toHaveAttribute(
+      "title",
+      "Goose Internal - /workspace/goose",
+    );
+  });
+
   it("keeps the mic toggle enabled while recording even if voice input becomes unavailable", () => {
     render(
       <ChatInputToolbar

@@ -245,6 +245,7 @@ export function ChatInputToolbar({
               onOpen={onPickerOpen}
               loading={providersLoading}
               isCompact={isCompact}
+              triggerIconOnly={isCompact}
               reasoningEffort={reasoningEffort}
             />
           )}
@@ -255,6 +256,7 @@ export function ChatInputToolbar({
             availableProjects={availableProjects}
             onProjectChange={onProjectChange}
             onCreateProject={onCreateProject}
+            triggerIconOnly={isCompact}
           />
         ) : null}
       </div>
