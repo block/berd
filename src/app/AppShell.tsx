@@ -48,7 +48,7 @@ import {
   selectSessionsLoading,
 } from "@/features/chat/stores/chatSessionSelectors";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
-import { selectSelectedProvider } from "@/features/agents/stores/agentSelectors";
+import { useProviderSelection } from "@/features/agents/hooks/useProviderSelection";
 import { resolvePersonaProvider } from "@/features/agents/lib/resolvePersonaProvider";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -431,7 +431,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   useCompletionNotifications(handleNavigateToSession);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
-  const selectedProvider = useAgentStore(selectSelectedProvider);
+  const { selectedProvider } = useProviderSelection();
+  const selectedProviderRef = useRef(selectedProvider);
+  selectedProviderRef.current = selectedProvider;
   const projects = useProjectStore(selectProjects);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
   const reorderProjects = useProjectStore((s) => s.reorderProjects);
@@ -748,8 +750,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     }
 
     const request = (async () => {
-      const currentProvider = () =>
-        useAgentStore.getState().selectedProvider ?? "goose";
+      const currentProvider = () => selectedProviderRef.current ?? "goose";
 
       // Resolve the provider to use after an async gap. If the user changed
       // their selection while we were awaiting (liveProvider differs from what

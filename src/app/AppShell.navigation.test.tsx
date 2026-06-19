@@ -508,6 +508,55 @@ describe("AppShell global navigation", () => {
     ).toBe("transparent");
   });
 
+  it("starts general chats with the resolved provider when a stored agent is unavailable", async () => {
+    useAgentStore.setState({
+      providers: [
+        { id: "goose", label: "Goose" },
+        { id: "codex-acp", label: "Codex" },
+      ],
+      selectedProvider: "codex-acp",
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "~/goose artifacts",
+      {
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
+  });
+
+  it("starts general chats with goose when the stored provider is unknown", async () => {
+    useAgentStore.setState({
+      providers: [{ id: "goose", label: "Goose" }],
+      selectedProvider: "ghost-provider",
+    });
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+    expect(mockAcpCreateSession).toHaveBeenCalledWith(
+      "goose",
+      "~/goose artifacts",
+      {
+        modelId: undefined,
+        projectId: undefined,
+      },
+    );
+  });
+
   it("opens pane jump mode and focuses app regions by badge key", () => {
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
       function (this: HTMLElement) {
