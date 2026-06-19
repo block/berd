@@ -68,6 +68,7 @@ import {
   MessageTimelineEmptyState,
   MessageTimelineFooterControlRow,
   MessageTimelineJumpToLatestButton,
+  MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   type MessageBubbleCallbacks,
   type MessageTimelineBubbleCallbacks,
@@ -92,6 +93,9 @@ const STREAMING_BOTTOM_FOLLOW_MAX_STEP_PX = 48;
 const SCROLL_TARGET_MOUNT_RETRY_FRAMES = 24;
 const SCROLL_TARGET_VISIBLE_SETTLE_FRAMES = 2;
 const RESPONSE_START_HINT_VIEWPORT_SLOP_PX = 16;
+// How far an assistant message's top must scroll above the viewport edge
+// before the floating gutter chevron offers to jump back to its start.
+const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 
 export const VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT =
   "goose:virtual-message-timeline-diagnostics";
@@ -2272,6 +2276,93 @@ export function VirtualMessageTimeline({
   }, [stableMessageByRowId, stableRows]);
   const latestAssistantMessageId = latestAssistantMessage?.id ?? null;
 
+  // Derive which assistant message the floating gutter chevron should jump to.
+  // The chevron floats near the bottom of the transcript (just above the
+  // composer), so it must refer to the message sitting *at that bottom anchor
+  // line* (not the topmost one) — otherwise it points at a message far above
+  // where it's drawn. We only offer the jump once that message's start has
+  // scrolled above the top edge, so there is genuinely somewhere to jump back
+  // to. This reads the virtual snapshot (row offsets) rather than DOM rects so
+  // it stays correct even when a long reply's first fragment row has unmounted
+  // far above the viewport.
+  const gutterResponseStartMessageId = useMemo<string | null>(() => {
+    const { scrollTop, viewportHeight } =
+      virtualTimelineSnapshot.controllerState;
+    // Anchor at the visible bottom edge, lifted above the composer overlay so
+    // it targets the message the reader is actually finishing. The button is
+    // drawn a little higher than this line (see GUTTER_RESPONSE_START_LIFT_RATIO
+    // in the shared component), but the target stays bottom-anchored.
+    const anchorOffset =
+      scrollTop +
+      viewportHeight -
+      messageListBottomPaddingPx -
+      GUTTER_RESPONSE_START_THRESHOLD_PX;
+
+    // Find the rendered row whose vertical span contains the anchor line.
+    const anchorItem = virtualTimelineSnapshot.range.virtualItems.find(
+      (item) => item.start <= anchorOffset && item.end > anchorOffset,
+    );
+    if (!anchorItem) {
+      return null;
+    }
+
+    const anchorRow = stableRows[anchorItem.index];
+    if (!anchorRow?.messageId) {
+      return null;
+    }
+    if (
+      anchorRow.kind !== "message" &&
+      anchorRow.kind !== "assistant-content-fragment" &&
+      anchorRow.kind !== "tool-chain" &&
+      anchorRow.kind !== "tool-chain-detail"
+    ) {
+      return null;
+    }
+    const message = stableMessageByRowId.get(anchorRow.rowId);
+    if (message?.role !== "assistant") {
+      return null;
+    }
+    if (anchorRow.messageId === streamingMessageId) {
+      return null;
+    }
+
+    // Resolve the top of the whole message (its first row). Once that top has
+    // scrolled above the viewport edge, the shared gutter button handles the
+    // fade as a regular CSS visibility transition.
+    const startRowId = snapshot.rowByMessageId.get(anchorRow.messageId);
+    const startIndex = startRowId
+      ? snapshot.rowIndexById.get(startRowId)
+      : undefined;
+    const startItem =
+      startIndex != null
+        ? virtualTimelineSnapshot.range.virtualItems.find(
+            (item) => item.index === startIndex,
+          )
+        : undefined;
+    // The start row is mounted: compare its offset to the scroll position.
+    if (startItem) {
+      return scrollTop - startItem.start > GUTTER_RESPONSE_START_THRESHOLD_PX
+        ? anchorRow.messageId
+        : null;
+    }
+    // The start row has scrolled out of the rendered window above us, so the
+    // message's top is definitively above the viewport.
+    if (startIndex != null && startIndex < anchorItem.index) {
+      return anchorRow.messageId;
+    }
+
+    return null;
+  }, [
+    messageListBottomPaddingPx,
+    snapshot.rowByMessageId,
+    snapshot.rowIndexById,
+    stableMessageByRowId,
+    stableRows,
+    streamingMessageId,
+    virtualTimelineSnapshot.controllerState,
+    virtualTimelineSnapshot.range.virtualItems,
+  ]);
+
   const isResponseStartHintEligible = useCallback(
     (messageId: string) => {
       const container = containerRef.current;
@@ -2978,6 +3069,10 @@ export function VirtualMessageTimeline({
   );
 
   const jumpToLatestLabel = t("timeline.jumpToLatest");
+  const jumpToResponseStartLabel = t("message.jumpToResponseStart");
+  const jumpToFloatingResponseStartLabel = t(
+    "message.jumpToFloatingResponseStart",
+  );
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestButton = showJumpToLatest ? (
     <MessageTimelineJumpToLatestButton
@@ -3372,6 +3467,16 @@ export function VirtualMessageTimeline({
             {jumpToLatestButton}
           </div>
         ) : null}
+        <MessageTimelineJumpToResponseStartGutterButton
+          label={jumpToResponseStartLabel}
+          ariaLabel={jumpToFloatingResponseStartLabel}
+          bottomOffsetPx={
+            footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8
+          }
+          visible={gutterResponseStartMessageId != null}
+          messageId={gutterResponseStartMessageId}
+          onJump={handleJumpToResponseStart}
+        />
       </div>
     </Profiler>
   );

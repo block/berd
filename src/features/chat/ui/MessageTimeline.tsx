@@ -32,6 +32,7 @@ import {
   MessageTimelineEmptyState,
   MessageTimelineFooterControlRow,
   MessageTimelineJumpToLatestButton,
+  MessageTimelineJumpToResponseStartGutterButton,
   REDUCED_MOTION_QUERY,
   type MessageTimelineBubbleCallbacks,
 } from "./messageTimelineShared";
@@ -50,6 +51,9 @@ import {
 
 const FOOTER_DOCK_CLEARANCE_PX = 32;
 const RESPONSE_START_HINT_VIEWPORT_SLOP_PX = 16;
+// How far an assistant message's top must scroll above the viewport edge
+// before the floating gutter chevron offers to jump back to its start.
+const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 
 interface MessageTimelineProps extends MessageTimelineBubbleCallbacks {
   messages: Message[];
@@ -163,6 +167,11 @@ export function MessageTimeline({
   const responseStartHintSeenMessageIdsRef = useRef(new Set<string>());
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  // The assistant message whose top has scrolled above the viewport — i.e. the
+  // long reply the reader is currently scrolled inside. Drives the floating
+  // gutter chevron that jumps back to that message's start.
+  const [gutterResponseStartMessageId, setGutterResponseStartMessageId] =
+    useState<string | null>(null);
   const [responseStartHintMessageId, setResponseStartHintMessageId] = useState<
     string | null
   >(null);
@@ -172,14 +181,18 @@ export function MessageTimeline({
     ? FOOTER_DOCK_CLEARANCE_PX
     : (tailPaddingPx ?? 16);
   messageListBottomPaddingPxRef.current = messageListBottomPaddingPx;
-  const visibleMessages = messages.filter(
-    (m) =>
-      m.metadata?.userVisible !== false &&
-      !(
-        m.role === "assistant" &&
-        m.content.length === 0 &&
-        m.metadata?.completionStatus === "inProgress"
+  const visibleMessages = useMemo(
+    () =>
+      messages.filter(
+        (m) =>
+          m.metadata?.userVisible !== false &&
+          !(
+            m.role === "assistant" &&
+            m.content.length === 0 &&
+            m.metadata?.completionStatus === "inProgress"
+          ),
       ),
+    [messages],
   );
   const resolvedScrollTargetMessageId = useMemo(() => {
     if (scrollTargetMessageId) {
@@ -243,6 +256,66 @@ export function MessageTimeline({
     return null;
   }, [visibleMessages]);
   const latestAssistantMessageId = latestAssistantMessage?.id ?? null;
+
+  // Decide which assistant message the floating gutter chevron should jump to.
+  // The chevron floats near the bottom of the transcript (just above the
+  // composer), so it must refer to the message sitting *at that bottom anchor
+  // line* (not the topmost one), or it would point at a message far above where
+  // it's drawn. We only offer the jump once that message's top has scrolled
+  // above the container's top edge, so there is genuinely somewhere to jump
+  // back to.
+  const syncGutterResponseStartVisibility = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) {
+      setGutterResponseStartMessageId(null);
+      return;
+    }
+
+    const containerRect = container.getBoundingClientRect();
+    // Anchor at the visible bottom edge, lifted above the composer padding so
+    // it targets the message the reader is actually finishing. The button is
+    // drawn a little higher than this line (see GUTTER_RESPONSE_START_LIFT_RATIO
+    // in the shared component), but the target stays bottom-anchored.
+    const anchorY =
+      containerRect.bottom -
+      messageListBottomPaddingPxRef.current -
+      GUTTER_RESPONSE_START_THRESHOLD_PX;
+    let candidateId: string | null = null;
+    for (let index = visibleMessages.length - 1; index >= 0; index -= 1) {
+      const message = visibleMessages[index];
+      if (
+        !message ||
+        message.role !== "assistant" ||
+        message.id === streamingMessageId
+      ) {
+        continue;
+      }
+      const target = messageRefs.current[message.id];
+      if (!target) {
+        continue;
+      }
+      const rect = target.getBoundingClientRect();
+      // The message must straddle the bottom anchor line where the chevron
+      // floats.
+      const coversAnchor = rect.top <= anchorY && rect.bottom > anchorY;
+      if (!coversAnchor) {
+        continue;
+      }
+      // The message must already be above the viewport's top edge so there is
+      // somewhere useful to jump back to.
+      const topAboveViewport =
+        rect.top < containerRect.top - GUTTER_RESPONSE_START_THRESHOLD_PX;
+      if (coversAnchor && topAboveViewport) {
+        candidateId = message.id;
+        break;
+      }
+    }
+    setGutterResponseStartMessageId(candidateId);
+  }, [streamingMessageId, visibleMessages]);
+
+  useLayoutEffect(() => {
+    syncGutterResponseStartVisibility();
+  }, [syncGutterResponseStartVisibility]);
 
   const setTimelineScrollTop = useCallback(
     (container: HTMLDivElement, scrollTop: number) => {
@@ -456,6 +529,7 @@ export function MessageTimeline({
       lastScrollTopRef.current = scrollTop;
       userScrollIntentRef.current = false;
       setDetachedFromLatest(false);
+      setGutterResponseStartMessageId(null);
     },
     [setDetachedFromLatest],
   );
@@ -1025,6 +1099,7 @@ export function MessageTimeline({
     }
     lastScrollTopRef.current = scrollTop;
     userScrollIntentRef.current = false;
+    syncGutterResponseStartVisibility();
   };
 
   const handleWheel = (event: WheelEvent<HTMLDivElement>) => {
@@ -1125,6 +1200,10 @@ export function MessageTimeline({
 
   const hasFooterStatus = footerStatus != null;
   const jumpToLatestLabel = t("timeline.jumpToLatest");
+  const jumpToResponseStartLabel = t("message.jumpToResponseStart");
+  const jumpToFloatingResponseStartLabel = t(
+    "message.jumpToFloatingResponseStart",
+  );
   const jumpToLatestButton = showJumpToLatest ? (
     <MessageTimelineJumpToLatestButton
       compact={hasFooterStatus}
@@ -1271,6 +1350,14 @@ export function MessageTimeline({
           {jumpToLatestButton}
         </div>
       ) : null}
+      <MessageTimelineJumpToResponseStartGutterButton
+        label={jumpToResponseStartLabel}
+        ariaLabel={jumpToFloatingResponseStartLabel}
+        bottomOffsetPx={footer ? footerHeightPx + 8 : (tailPaddingPx ?? 16) + 8}
+        visible={gutterResponseStartMessageId != null}
+        messageId={gutterResponseStartMessageId}
+        onJump={handleJumpToResponseStart}
+      />
     </div>
   );
 }

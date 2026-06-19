@@ -253,6 +253,7 @@
     "copied": "Copied",
     "defaultImageAlt": "Attached",
     "jumpToResponseStart": "Jump to response start",
+    "jumpToFloatingResponseStart": "Jump to current response start",
     "jumpToResponseStartHint": "For long replies, this takes you back to the top.",
     "jumpToResponseStartHintDismiss": "Dismiss response start tip",
     "mcpApp": "MCP App",

@@ -253,6 +253,7 @@
     "copied": "Copiado",
     "defaultImageAlt": "Adjunto",
     "jumpToResponseStart": "Ir al inicio de la respuesta",
+    "jumpToFloatingResponseStart": "Ir al inicio de la respuesta actual",
     "jumpToResponseStartHint": "En respuestas largas, esto te lleva de vuelta al inicio.",
     "jumpToResponseStartHintDismiss": "Descartar consejo de inicio de respuesta",
     "mcpApp": "MCP App",

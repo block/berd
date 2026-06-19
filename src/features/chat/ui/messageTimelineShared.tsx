@@ -1,8 +1,14 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { IconChevronsDown } from "@tabler/icons-react";
+import { IconChevronsDown, IconChevronsUp } from "@tabler/icons-react";
 import type { RunCommandOptions } from "@/shared/ui/ai-elements/runnable-code-block";
 import { Button } from "@/shared/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/shared/ui/tooltip";
 import { cn } from "@/shared/lib/cn";
 import { SIDEBAR_GROUP_LABEL_TEXT_CLASS } from "@/shared/ui/sidebar-tokens";
 import type { McpAppMessageHandler } from "./mcpAppTypes";
@@ -88,6 +94,89 @@ export function MessageTimelineJumpToLatestButton({
     >
       {label}
     </Button>
+  );
+}
+
+/** How far up from the composer the gutter chevron floats, as a fraction of the
+ * visible transcript height. The targeting anchor stays bottom-aligned; this is
+ * only a visual lift so the button is easier to notice without feeling centered. */
+export const GUTTER_RESPONSE_START_LIFT_RATIO = 0.18;
+
+/** Floating chevron pinned in the transcript's left gutter, a little above the
+ * composer, that jumps back to the top of the agent message the reader is
+ * currently scrolled inside. It reuses the exact "jump to response start"
+ * handler from the message action row, so the scroll feel and target stay
+ * identical — it's just always within reach while reading a long reply.
+ *
+ * Scroll decides whether the button should be visible; CSS handles a matched
+ * fade in/out. The target is retained across visibility changes so delayed
+ * events never resolve against a missing message id. */
+export function MessageTimelineJumpToResponseStartGutterButton({
+  label,
+  ariaLabel,
+  bottomOffsetPx,
+  visible,
+  messageId,
+  onJump,
+}: {
+  label: string;
+  ariaLabel: string;
+  bottomOffsetPx: number;
+  visible: boolean;
+  /** Target message; retained via the ref below so the button still resolves a
+   * valid target while it is fading out. */
+  messageId: string | null;
+  onJump: (messageId: string) => void;
+}) {
+  const lastMessageIdRef = useRef<string | null>(messageId);
+  if (messageId) {
+    lastMessageIdRef.current = messageId;
+  }
+
+  return (
+    <div
+      className="pointer-events-none absolute inset-x-0 z-20 flex justify-center"
+      style={{
+        bottom: `calc(${bottomOffsetPx}px + ${GUTTER_RESPONSE_START_LIFT_RATIO * 100}%)`,
+      }}
+    >
+      <div className="flex w-full max-w-[var(--chat-transcript-container-max-width)] justify-start px-1.5">
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                type="button"
+                variant="jump-to-latest"
+                size="icon-sm"
+                // Matched fade in/out. Scroll only controls the visible state;
+                // CSS owns the transition so short messages still get a clear
+                // entrance and exit.
+                className={cn(
+                  "motion-safe:transition-opacity motion-safe:duration-[450ms] motion-safe:ease-in-out motion-reduce:transition-none",
+                  visible
+                    ? "pointer-events-auto opacity-100"
+                    : "pointer-events-none opacity-0",
+                )}
+                aria-hidden={!visible}
+                tabIndex={visible ? undefined : -1}
+                onClick={() => {
+                  const target = lastMessageIdRef.current;
+                  if (target) {
+                    onJump(target);
+                  }
+                }}
+                aria-label={ariaLabel}
+              >
+                <IconChevronsUp aria-hidden="true" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{label}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      </div>
+    </div>
   );
 }
 
