@@ -16,7 +16,7 @@ pub struct GooseServeHostInfo {
 #[tauri::command]
 pub async fn get_goose_serve_url(app_handle: tauri::AppHandle) -> Result<String, String> {
     if let Some(url) = configured_goose_serve_url() {
-        return Ok(url);
+        return configured_goose_serve_url_with_token(&url);
     }
     let process = GooseServeProcess::get(app_handle).await?;
     Ok(process.ws_url())
@@ -46,6 +46,35 @@ fn configured_goose_serve_url() -> Option<String> {
         .ok()
         .map(|url| url.trim().to_string())
         .filter(|url| !url.is_empty())
+}
+
+fn configured_goose_serve_url_with_token(goose_serve_url: &str) -> Result<String, String> {
+    goose_serve_url_with_resolved_token(goose_serve_url, configured_goose_serve_secret_key)
+}
+
+fn goose_serve_url_with_resolved_token(
+    goose_serve_url: &str,
+    resolve_secret_key: impl FnOnce() -> Result<String, String>,
+) -> Result<String, String> {
+    let mut parsed = parse_goose_serve_url(goose_serve_url)?;
+
+    if parsed.query_pairs().any(|(key, _)| key == "token") {
+        return Ok(parsed.to_string());
+    }
+
+    let secret_key = resolve_secret_key()?;
+    parsed.query_pairs_mut().append_pair("token", &secret_key);
+    Ok(parsed.to_string())
+}
+
+#[cfg(test)]
+fn goose_serve_url_with_token(goose_serve_url: &str, secret_key: &str) -> Result<String, String> {
+    goose_serve_url_with_resolved_token(goose_serve_url, || Ok(secret_key.to_string()))
+}
+
+fn parse_goose_serve_url(goose_serve_url: &str) -> Result<reqwest::Url, String> {
+    reqwest::Url::parse(goose_serve_url)
+        .map_err(|error| format!("Invalid {GOOSE_SERVE_URL_ENV}: {error}"))
 }
 
 fn configured_goose_serve_secret_key() -> Result<String, String> {
@@ -162,13 +191,17 @@ fn goose_serve_url_is_loopback(goose_serve_url: &str) -> Result<bool, String> {
 mod tests {
     use super::{
         ensure_configured_goose_serve_supports_inline_apps, goose_serve_http_base_url,
-        goose_serve_url_is_loopback,
+        goose_serve_url_is_loopback, goose_serve_url_with_token,
     };
 
     #[test]
     fn derives_http_base_url_from_websocket_url() {
         assert_eq!(
             goose_serve_http_base_url("ws://127.0.0.1:12345/acp").unwrap(),
+            "http://127.0.0.1:12345"
+        );
+        assert_eq!(
+            goose_serve_http_base_url("ws://127.0.0.1:12345/acp?token=abc").unwrap(),
             "http://127.0.0.1:12345"
         );
         assert_eq!(
@@ -194,6 +227,27 @@ mod tests {
         assert_eq!(
             goose_serve_http_base_url("http://localhost:3000").unwrap(),
             "http://localhost:3000"
+        );
+    }
+
+    #[test]
+    fn appends_token_to_configured_websocket_url() {
+        assert_eq!(
+            goose_serve_url_with_token("ws://127.0.0.1:12345/acp", "secret key").unwrap(),
+            "ws://127.0.0.1:12345/acp?token=secret+key"
+        );
+        assert_eq!(
+            goose_serve_url_with_token("ws://127.0.0.1:12345/acp?foo=bar", "secret").unwrap(),
+            "ws://127.0.0.1:12345/acp?foo=bar&token=secret"
+        );
+    }
+
+    #[test]
+    fn preserves_existing_configured_websocket_token() {
+        assert_eq!(
+            goose_serve_url_with_token("ws://127.0.0.1:12345/acp?token=existing", "secret")
+                .unwrap(),
+            "ws://127.0.0.1:12345/acp?token=existing"
         );
     }
 

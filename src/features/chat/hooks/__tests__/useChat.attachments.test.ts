@@ -106,7 +106,7 @@ describe("useChat attachments", () => {
     ]);
   });
 
-  it("keeps image attachments in ACP images while preserving path metadata", async () => {
+  it("keeps local image attachments in ACP images while also passing their paths", async () => {
     const { result } = renderHook(() => useChat("session-1"));
     const attachments = [
       {
@@ -142,6 +142,35 @@ describe("useChat attachments", () => {
         mimeType: "image/png",
       },
     ]);
+    expect(mockAcpSendMessage).toHaveBeenCalledWith(
+      "session-1",
+      "/tmp/diagram.png",
+      {
+        systemPrompt: undefined,
+        personaId: undefined,
+        personaName: undefined,
+        images: [["abc123", "image/png"]],
+      },
+    );
+  });
+
+  it("keeps pathless pasted images working as ACP image content blocks", async () => {
+    const { result } = renderHook(() => useChat("session-1"));
+    const attachments = [
+      {
+        id: "image-1",
+        kind: "image" as const,
+        name: "pasted.png",
+        mimeType: "image/png",
+        base64: "abc123",
+        previewUrl: "blob:pasted",
+      },
+    ];
+
+    await act(async () => {
+      await result.current.sendMessage("", undefined, attachments);
+    });
+
     expect(mockAcpSendMessage).toHaveBeenCalledWith("session-1", " ", {
       systemPrompt: undefined,
       personaId: undefined,
@@ -150,7 +179,7 @@ describe("useChat attachments", () => {
     });
   });
 
-  it("includes file/directory paths in the prompt for mixed sends; images flow through ACP image content blocks only", async () => {
+  it("includes all available attachment paths in the prompt for mixed sends while images still flow through ACP image blocks", async () => {
     const { result } = renderHook(() => useChat("session-1"));
     const attachments = [
       {
@@ -187,7 +216,7 @@ describe("useChat attachments", () => {
 
     expect(mockAcpSendMessage).toHaveBeenCalledWith(
       "session-1",
-      "can you see the attachments i attached? /tmp/mobile-confirmation.html /tmp/neighborhood block",
+      "can you see the attachments i attached? /tmp/mobile-confirmation.html /tmp/neighborhood block /tmp/Screenshot.png",
       {
         systemPrompt: undefined,
         personaId: undefined,

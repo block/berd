@@ -8,8 +8,8 @@ export function appendAttachmentPaths(
   attachments: ChatAttachmentDraft[] | undefined,
 ): string {
   const paths = (attachments ?? [])
-    .filter((attachment) => attachment.kind !== "image" && attachment.path)
-    .map((attachment) => attachment.path as string);
+    .map((attachment) => attachment.path)
+    .filter((path): path is string => Boolean(path));
 
   if (paths.length === 0) {
     return text;

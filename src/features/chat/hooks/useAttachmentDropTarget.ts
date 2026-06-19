@@ -15,6 +15,9 @@ interface UseAttachmentDropTargetOptions {
   onDropPaths: (paths: string[]) => void;
 }
 
+const NATIVE_DROP_EXPECTED_MS = 1000;
+const NATIVE_DROP_HANDLED_SUPPRESSION_MS = 500;
+
 function hasDraggedFiles(dataTransfer: DataTransfer) {
   return (
     Array.from(dataTransfer.items).some((item) => item.kind === "file") ||
@@ -103,7 +106,7 @@ export function useAttachmentDropTarget({
   const [isAttachmentDragOver, setIsAttachmentDragOver] = useState(false);
   const dragDepthRef = useRef(0);
   const tauriDropHandledAtRef = useRef(0);
-
+  const nativeDropExpectedUntilRef = useRef(0);
   const handleDragEnter = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       const draggedFiles = hasDraggedFiles(event.dataTransfer);
@@ -156,7 +159,23 @@ export function useAttachmentDropTarget({
         return;
       }
 
-      if (Date.now() - tauriDropHandledAtRef.current < 250) {
+      if (
+        Date.now() - tauriDropHandledAtRef.current <
+        NATIVE_DROP_HANDLED_SUPPRESSION_MS
+      ) {
+        return;
+      }
+
+      if (!isInTauriEnvironment()) {
+        onDropFiles(files);
+        return;
+      }
+
+      // In Tauri, local file drops can arrive through both DOM File objects
+      // and native webview drag/drop events. If we have already seen a native
+      // drag event over the composer, let the native path drop win. Otherwise
+      // keep the browser fallback immediate so ordinary DOM drops still work.
+      if (nativeDropExpectedUntilRef.current > Date.now()) {
         return;
       }
 
@@ -182,6 +201,7 @@ export function useAttachmentDropTarget({
 
           if (payload.type === "leave") {
             setIsAttachmentDragOver(false);
+            nativeDropExpectedUntilRef.current = 0;
             return;
           }
 
@@ -189,20 +209,31 @@ export function useAttachmentDropTarget({
 
           if (payload.type === "drop") {
             setIsAttachmentDragOver(false);
+            const nativeDropWasExpected =
+              nativeDropExpectedUntilRef.current > Date.now();
             if (
-              !hitTest.inside ||
+              (!hitTest.inside && !nativeDropWasExpected) ||
               disabled ||
               isStreaming ||
               payload.paths.length === 0
             ) {
               return;
             }
+            nativeDropExpectedUntilRef.current = 0;
             tauriDropHandledAtRef.current = Date.now();
             onDropPaths(payload.paths);
             return;
           }
 
-          setIsAttachmentDragOver(hitTest.inside && !disabled && !isStreaming);
+          const nativeDropIsOverTarget =
+            hitTest.inside && !disabled && !isStreaming;
+          if (nativeDropIsOverTarget) {
+            nativeDropExpectedUntilRef.current =
+              Date.now() + NATIVE_DROP_EXPECTED_MS;
+          } else {
+            nativeDropExpectedUntilRef.current = 0;
+          }
+          setIsAttachmentDragOver(nativeDropIsOverTarget);
         }),
       )
       .then((fn) => {
