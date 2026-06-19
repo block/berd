@@ -38,7 +38,9 @@ Result:
       view: context.view,
       active_session_id: context.activeSessionId,
       active_project_id: context.activeProjectId,
-      app_version: packageJson.version,
+      // Match telemetry's resolution: prefer the build-injected version
+      // (git-derived for non-release builds), fall back to package.json.
+      app_version: import.meta.env.VITE_APP_VERSION ?? packageJson.version,
     };
   },
 });

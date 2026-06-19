@@ -142,9 +142,23 @@ ci: check tauri-fmt-check tauri-check tauri-test clippy test build
 
 # Stage the pinned Goose backend and goosectl CLI into src-tauri/binaries and build bundles.
 bundle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
-    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" pnpm tauri build --features goosectl
+
+    # Derive a git-based version so non-release bundles don't ship the 0.1.0
+    # placeholder. Injected via a temp --config overlay to keep the tree clean.
+    eval "$(./scripts/resolve-app-version.sh)"
+    echo "Building Goose ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
+    VERSION_CONFIG="$(mktemp -t goose-tauri-version.XXXXXX.json)"
+    trap 'rm -f "$VERSION_CONFIG"' EXIT
+    jq -n --arg v "$GOOSE_APP_VERSION" '{ version: $v }' > "$VERSION_CONFIG"
+
+    CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+      VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH" \
+      pnpm tauri build --features goosectl --config "$VERSION_CONFIG"
 
 # Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
 bundle-debug:
@@ -154,12 +168,18 @@ bundle-debug:
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
 
-    # Use a temporary config overlay so normal release bundles keep devtools disabled.
+    # Use a temporary config overlay so normal release bundles keep devtools
+    # disabled, and fold in the git-derived version so the bundle doesn't ship
+    # the 0.1.0 placeholder.
+    eval "$(./scripts/resolve-app-version.sh)"
+    echo "Building Goose ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
     DEBUG_CONFIG="$(mktemp -t goose-tauri-debug.XXXXXX.json)"
     trap 'rm -f "$DEBUG_CONFIG"' EXIT
-    jq '.app.windows[0].devtools = true' src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
+    jq --arg v "$GOOSE_APP_VERSION" '.version = $v | .app.windows[0].devtools = true' \
+      src-tauri/tauri.conf.json > "$DEBUG_CONFIG"
 
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
+      VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH" \
       pnpm tauri build --features goosectl,devtools --config "$DEBUG_CONFIG"
 
 # ── Test ─────────────────────────────────────────────────────
@@ -198,6 +218,13 @@ dev:
     export CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}"
     echo "Using Tauri Cargo target dir: ${CARGO_TARGET_DIR}"
 
+    # Derive a git-based version so dev builds don't report the 0.1.0
+    # placeholder. The rich string carries the telemetry/agent-context version;
+    # the numeric one is injected into Tauri's config below.
+    eval "$(./scripts/resolve-app-version.sh)"
+    export VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH"
+    echo "Using app version: ${GOOSE_APP_VERSION} (${GOOSE_APP_VERSION_RICH})"
+
     # tauri dev only builds the root package; the goosectl CLI workspace
     # member needs an explicit build, resolved at runtime via GOOSECTL_BIN
     # because tauri.dev.conf.json blanks externalBin.
@@ -227,6 +254,7 @@ dev:
     fi
 
     EXTRA_CONFIG_ARGS=(--config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
+    EXTRA_CONFIG_ARGS+=(--config "{\"version\":\"${GOOSE_APP_VERSION}\"}")
 
     ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
     mkdir -p "$ICON_DIR"
