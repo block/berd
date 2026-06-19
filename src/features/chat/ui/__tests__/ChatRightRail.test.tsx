@@ -79,6 +79,10 @@ vi.mock("@/shared/api/agents", () => ({
   listPersonas: () => mocks.listPersonas(),
 }));
 
+vi.mock("../../hooks/useGitStateAutoRefresh", () => ({
+  useGitStateAutoRefreshOnChatSettled: vi.fn(),
+}));
+
 vi.mock("../ChatContextPanel", () => ({
   CP_TOTAL_W: 339,
   ChatContextPanel: () => <div data-testid="chat-context-panel" />,

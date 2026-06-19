@@ -1,0 +1,162 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, renderHook } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  CHAT_GIT_AUTO_REFRESH_DELAY_MS,
+  useGitStateAutoRefreshOnChatSettled,
+} from "../useGitStateAutoRefresh";
+import { useChatSessionStore } from "../../stores/chatSessionStore";
+import { useChatStore } from "../../stores/chatStore";
+
+function resetStores() {
+  useChatStore.setState({
+    messagesBySession: {},
+    sessionStateById: {},
+    queuedMessageBySession: {},
+    draftsBySession: {},
+    skillDraftsBySession: {},
+    activeSessionId: null,
+    recentMessageSessionIds: [],
+    isViewingActiveSession: false,
+    isConnected: false,
+    loadingSessionIds: new Set(),
+    scrollTargetMessageBySession: {},
+  });
+
+  useChatSessionStore.setState({
+    sessions: [],
+    activeSessionId: null,
+    isLoading: false,
+    isLoadingMoreSessions: false,
+    hasHydratedSessions: false,
+    sessionPageCursor: null,
+    hasMoreSessions: false,
+    isContextPanelOpen: false,
+    activeWorkspaceBySession: {},
+    modelSelectionIntentBySession: {},
+    archiveMutationBySessionId: {},
+  });
+}
+
+function createWrapper(queryClient: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+  };
+}
+
+describe("useGitStateAutoRefreshOnChatSettled", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    resetStores();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("invalidates git queries for the current workspace after a chat settles", async () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    useChatSessionStore.getState().setActiveWorkspace("session-1", {
+      path: "/Users/test/project-worktree",
+      branch: "feature",
+    });
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setStreamingMessageId("session-1", "message-1");
+
+    renderHook(
+      () =>
+        useGitStateAutoRefreshOnChatSettled({
+          sessionId: "session-1",
+          sessionWorkingDir: "/Users/test/project",
+          projectWorkingDirs: ["/Users/test/project-default"],
+        }),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+      useChatStore.getState().setStreamingMessageId("session-1", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["git-state", "/Users/test/project-worktree"],
+      exact: true,
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: ["changed-files", "/Users/test/project-worktree"],
+      exact: true,
+    });
+  });
+
+  it("coalesces rapid settle/work/settle transitions", async () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    useChatStore.getState().setChatState("session-1", "streaming");
+    useChatStore.getState().setStreamingMessageId("session-1", "message-1");
+
+    renderHook(
+      () =>
+        useGitStateAutoRefreshOnChatSettled({
+          sessionId: "session-1",
+          sessionWorkingDir: "/Users/test/project",
+        }),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+      useChatStore.getState().setStreamingMessageId("session-1", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS - 100);
+    });
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "streaming");
+      useChatStore.getState().setStreamingMessageId("session-1", "message-2");
+    });
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
+
+    act(() => {
+      useChatStore.getState().setChatState("session-1", "idle");
+      useChatStore.getState().setStreamingMessageId("session-1", null);
+    });
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS);
+    });
+
+    expect(invalidateSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not refresh on initial idle render", () => {
+    const queryClient = new QueryClient();
+    const invalidateSpy = vi.spyOn(queryClient, "invalidateQueries");
+
+    renderHook(
+      () =>
+        useGitStateAutoRefreshOnChatSettled({
+          sessionId: "session-1",
+          sessionWorkingDir: "/Users/test/project",
+        }),
+      { wrapper: createWrapper(queryClient) },
+    );
+
+    act(() => {
+      vi.advanceTimersByTime(CHAT_GIT_AUTO_REFRESH_DELAY_MS);
+    });
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
+});

@@ -7,6 +7,7 @@ import {
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { listPersonas, type AgentSourceEntry } from "@/shared/api/agents";
 import { cn } from "@/shared/lib/cn";
+import { useGitStateAutoRefreshOnChatSettled } from "../hooks/useGitStateAutoRefresh";
 import {
   useChatSessionStore,
   type ChatSession,
@@ -48,6 +49,11 @@ export function ChatRightRail({
 }: ChatRightRailProps) {
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const patchSession = useChatSessionStore((s) => s.patchSession);
+  useGitStateAutoRefreshOnChatSettled({
+    sessionId: session?.id,
+    sessionWorkingDir,
+    projectWorkingDirs: project?.workingDirs,
+  });
   const handleDraftPromoted = useCallback(
     (source: AgentSourceEntry) => {
       if (!session?.id) {
