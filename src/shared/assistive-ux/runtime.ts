@@ -63,6 +63,28 @@ export function recordAssistiveMomentAccepted(id: AssistiveUxMomentId): void {
   }));
 }
 
+export function recordAssistiveMomentDismissed(
+  id: AssistiveUxMomentId,
+): number {
+  const rule = getAssistiveUxRule(id);
+  const dismissedAt = nowIsoString();
+  let dismissedCount = 0;
+
+  updateAssistiveUxMoment(id, (moment) => {
+    dismissedCount = (moment?.shownCount ?? 0) + 1;
+    return {
+      type: rule.type,
+      shownCount: dismissedCount,
+      acceptedAt: moment?.acceptedAt,
+      lastShownAt: dismissedAt,
+      retiredAt: moment?.retiredAt,
+      retiredReason: moment?.retiredReason,
+    };
+  });
+
+  return dismissedCount;
+}
+
 export function recordAssistiveMomentRetired(
   id: AssistiveUxMomentId,
   reason: AssistiveUxRetiredReason,

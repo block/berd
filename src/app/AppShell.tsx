@@ -1720,6 +1720,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     const handleOpenSettingsEvent = (event: Event) => {
       const detail = (event as CustomEvent<OpenSettingsEventDetail>).detail;
       const section = detail?.section;
+      if (detail?.connectionsTab) {
+        setActiveConnectionsTab(detail.connectionsTab);
+      }
       setAgentBuilderSettingsReturnTarget(
         detail?.returnTarget?.type === "agent-builder-provider-setup"
           ? detail.returnTarget

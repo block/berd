@@ -6,6 +6,7 @@ import { onOpenUrl } from "@tauri-apps/plugin-deep-link";
 import { toast } from "sonner";
 import { IconCheck, IconExternalLink } from "@tabler/icons-react";
 import {
+  CONNECTIONS_QUERY_KEY,
   type Connection,
   listConnections,
 } from "@/features/connections/api/connections";
@@ -13,6 +14,11 @@ import {
   OAUTH_PROVIDERS,
   type OAuthProviderEntry,
 } from "@/features/connections/catalog";
+import {
+  CONNECTION_STATUS_PRIORITY,
+  type ConnectionStatus,
+  resolveConnectionStatus,
+} from "@/features/connections/lib/connectionStatus";
 import { ExtensionsSettings } from "@/features/extensions/ui/ExtensionsSettings";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -20,8 +26,6 @@ import { SettingsPage } from "@/shared/ui/SettingsPage";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs";
 
 const CONNECTIONS_REFETCH_INTERVAL_MS = 5_000;
-const SECONDS_IN_DAY = 86_400;
-const EXPIRY_WARNING_WINDOW_MS = 7 * SECONDS_IN_DAY * 1000;
 
 const DEFAULT_G2_BASE_URL = "https://g2.sqprod.co";
 const G2_BASE_URL =
@@ -33,47 +37,6 @@ export type ConnectionsTab = "companyManaged" | "custom" | "gooseCapabilities";
 interface ConnectionsSettingsProps {
   activeTab: ConnectionsTab;
   onActiveTabChange: (tab: ConnectionsTab) => void;
-}
-
-type ConnectionStatus =
-  | { kind: "active" }
-  | { kind: "expiring"; daysUntilExpiry: number }
-  | { kind: "expired" }
-  | { kind: "disconnected" };
-
-const STATUS_PRIORITY: Record<ConnectionStatus["kind"], number> = {
-  expired: 0,
-  expiring: 1,
-  active: 2,
-  disconnected: 3,
-};
-
-function resolveStatus(
-  connection: Connection | undefined,
-  nowMs: number,
-): ConnectionStatus {
-  if (!connection) return { kind: "disconnected" };
-  const expiresAtEpochS = connection.expiresAtEpochS;
-  const expiresAtMs =
-    expiresAtEpochS !== undefined ? expiresAtEpochS * 1000 : undefined;
-  if (
-    connection.previouslyConnected === true &&
-    (expiresAtMs === undefined || expiresAtMs <= nowMs)
-  ) {
-    return { kind: "expired" };
-  }
-  if (expiresAtEpochS === undefined || expiresAtMs === undefined) {
-    return { kind: "active" };
-  }
-  if (expiresAtMs <= nowMs) return { kind: "expired" };
-  if (expiresAtMs - nowMs <= EXPIRY_WARNING_WINDOW_MS) {
-    const nowSeconds = Math.floor(nowMs / 1000);
-    const daysUntilExpiry = Math.floor(
-      (expiresAtEpochS - nowSeconds) / SECONDS_IN_DAY,
-    );
-    return { kind: "expiring", daysUntilExpiry };
-  }
-  return { kind: "active" };
 }
 
 function buildConnectUrl(extensionName: string): string {
@@ -175,7 +138,7 @@ export function ConnectionsSettings({
   const queryClient = useQueryClient();
 
   const { data: connectionsData } = useQuery({
-    queryKey: ["connections"],
+    queryKey: CONNECTIONS_QUERY_KEY,
     queryFn: listConnections,
     refetchInterval: CONNECTIONS_REFETCH_INTERVAL_MS,
   });
@@ -184,7 +147,7 @@ export function ConnectionsSettings({
     let unlisten: (() => void) | undefined;
     let cancelled = false;
     onOpenUrl(() => {
-      queryClient.invalidateQueries({ queryKey: ["connections"] });
+      queryClient.invalidateQueries({ queryKey: CONNECTIONS_QUERY_KEY });
     }).then((fn) => {
       if (cancelled) {
         fn();
@@ -211,11 +174,15 @@ export function ConnectionsSettings({
   const sortedRows = OAUTH_PROVIDERS.filter((entry) => entry.hidden !== true)
     .map((entry) => ({
       entry,
-      status: resolveStatus(connectionsByName.get(entry.provider), nowMs),
+      status: resolveConnectionStatus(
+        connectionsByName.get(entry.provider),
+        nowMs,
+      ),
     }))
     .sort((a, b) => {
       const bucketDiff =
-        STATUS_PRIORITY[a.status.kind] - STATUS_PRIORITY[b.status.kind];
+        CONNECTION_STATUS_PRIORITY[a.status.kind] -
+        CONNECTION_STATUS_PRIORITY[b.status.kind];
       if (bucketDiff !== 0) return bucketDiff;
       return a.entry.displayName.localeCompare(b.entry.displayName);
     });

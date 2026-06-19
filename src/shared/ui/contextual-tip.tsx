@@ -11,6 +11,7 @@ interface ContextualTipProps extends React.ComponentProps<"div"> {
   iconClassName?: string;
   onAction?: () => void;
   onDismiss: () => void;
+  state?: "open" | "closed";
 }
 
 function ContextualTip({
@@ -22,14 +23,16 @@ function ContextualTip({
   iconClassName,
   onAction,
   onDismiss,
+  state = "open",
   ...props
 }: ContextualTipProps) {
   return (
     <div
       role="status"
       aria-live="polite"
+      data-state={state}
       className={cn(
-        "inline-flex min-h-8 w-fit max-w-full origin-bottom items-center gap-1.5 rounded-sm border border-border/80 bg-background px-1.5 py-1 text-xs text-foreground shadow-mini transition-[box-shadow,border-color] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-1 motion-safe:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none",
+        "inline-flex min-h-8 w-fit max-w-full origin-bottom items-center gap-1.5 rounded-sm border border-border/80 bg-background px-1.5 py-1 text-xs text-foreground shadow-mini transition-[box-shadow,border-color] motion-safe:data-[state=closed]:animate-out motion-safe:data-[state=closed]:fade-out-0 motion-safe:data-[state=closed]:slide-out-to-bottom-1 motion-safe:data-[state=closed]:zoom-out-95 motion-safe:data-[state=open]:animate-in motion-safe:data-[state=open]:fade-in-0 motion-safe:data-[state=open]:slide-in-from-bottom-1 motion-safe:data-[state=open]:zoom-in-95 motion-safe:duration-200 motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)] motion-reduce:animate-none",
         className,
       )}
       {...props}

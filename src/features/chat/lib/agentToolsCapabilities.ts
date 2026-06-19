@@ -1,68 +1,67 @@
-import type { SkillMentionItem } from "../ui/mentionDetection";
+import { OAUTH_PROVIDERS } from "@/features/connections/catalog";
 import { escapeRegExp } from "@/shared/lib/escapeRegExp";
+import type { SkillMentionItem } from "../ui/mentionDetection";
 
 export interface AgentToolsCapabilityTip {
   id: string;
   label: string;
+  provider: string;
 }
 
 interface AgentToolsCapability {
   id: string;
   label: string;
+  provider: string;
   aliases: string[];
 }
 
 const AGENT_TOOLS_SKILL_NAMES = new Set(["sq-agent-tools", "sq agent-tools"]);
 
-const AGENT_TOOLS_CAPABILITIES: AgentToolsCapability[] = [
-  { id: "slack", label: "Slack", aliases: ["slack"] },
-  { id: "linear", label: "Linear", aliases: ["linear"] },
-  {
-    id: "google-drive",
-    label: "Google Drive",
-    aliases: ["google drive", "google-drive", "gdrive", "google docs"],
-  },
-  {
-    id: "google-calendar",
-    label: "Google Calendar",
-    aliases: ["google calendar", "google-calendar"],
-  },
-  { id: "gmail", label: "Gmail", aliases: ["gmail", "email"] },
-  { id: "jira", label: "Jira", aliases: ["jira"] },
-  { id: "sourcegraph", label: "Sourcegraph", aliases: ["sourcegraph"] },
-  { id: "datadog", label: "Datadog", aliases: ["datadog"] },
-  {
-    id: "launchdarkly",
-    label: "LaunchDarkly",
-    aliases: ["launchdarkly", "launch darkly"],
-  },
-  { id: "pagerduty", label: "PagerDuty", aliases: ["pagerduty", "pager duty"] },
-  { id: "workday", label: "Workday", aliases: ["workday"] },
-  { id: "notion", label: "Notion", aliases: ["notion"] },
-  { id: "asana", label: "Asana", aliases: ["asana"] },
-  { id: "airtable", label: "Airtable", aliases: ["airtable"] },
-  { id: "bugsnag", label: "Bugsnag", aliases: ["bugsnag"] },
-  { id: "sentry", label: "Sentry", aliases: ["sentry"] },
-  {
-    id: "salesforce",
-    label: "Salesforce",
-    aliases: ["salesforce", "salesforce sq", "salesforce-sq"],
-  },
-  { id: "greenhouse", label: "Greenhouse", aliases: ["greenhouse"] },
-  { id: "todoist", label: "Todoist", aliases: ["todoist"] },
-  { id: "contentful", label: "Contentful", aliases: ["contentful"] },
-  { id: "looker", label: "Looker", aliases: ["looker", "looker-oncall"] },
-  {
-    id: "query-expert",
-    label: "Query Expert",
-    aliases: ["query expert", "query-expert", "snowflake"],
-  },
-  {
-    id: "incidentio",
-    label: "Incident.io",
-    aliases: ["incidentio", "incident.io", "incident io"],
-  },
-];
+const AGENT_TOOLS_PROVIDER_ALIASES: Record<string, string[]> = {
+  "block-data": ["block data", "block-data"],
+  "block-uid": ["block uid", "block user identity", "block identity"],
+  "google-calendar": ["google calendar", "google-calendar", "gcal", "calendar"],
+  "google-drive": [
+    "google drive",
+    "google-drive",
+    "gdrive",
+    "google docs",
+    "google sheets",
+    "google slides",
+    "docs",
+    "sheets",
+    "slides",
+  ],
+  gmail: ["gmail", "email"],
+  jira: ["jira"],
+  pagerduty: ["pagerduty", "pager duty"],
+  "query-expert": ["query expert", "query-expert", "snowflake"],
+  sales: ["sales", "salesforce"],
+  "salesforce-sq": ["salesforce square", "salesforce sq", "salesforce-sq"],
+};
+
+const AGENT_TOOLS_CAPABILITIES: AgentToolsCapability[] = OAUTH_PROVIDERS.filter(
+  (provider) => provider.hidden !== true,
+).map((entry) => ({
+  id: entry.provider,
+  label: entry.displayName,
+  provider: entry.provider,
+  aliases: uniqueAliases([
+    entry.provider,
+    entry.displayName,
+    ...(AGENT_TOOLS_PROVIDER_ALIASES[entry.provider] ?? []),
+  ]),
+}));
+
+function uniqueAliases(aliases: string[]): string[] {
+  return Array.from(
+    new Set(
+      aliases
+        .map((alias) => alias.trim().toLowerCase())
+        .filter((alias) => alias.length > 0),
+    ),
+  );
+}
 
 export function hasAgentToolsSkill(skills: SkillMentionItem[]): boolean {
   return skills.some((skill) => {
@@ -75,35 +74,80 @@ export function hasAgentToolsSkill(skills: SkillMentionItem[]): boolean {
   });
 }
 
+export function resolveAgentToolsCapabilityTips(
+  text: string,
+  skills: SkillMentionItem[],
+): AgentToolsCapabilityTip[] {
+  if (!hasAgentToolsSkill(skills)) {
+    return [];
+  }
+
+  const normalizedText = text.toLowerCase();
+  const matchesByCapability = new Map<
+    string,
+    {
+      capability: AgentToolsCapability;
+      index: number;
+      length: number;
+    }
+  >();
+
+  for (const capability of AGENT_TOOLS_CAPABILITIES) {
+    for (const alias of capability.aliases) {
+      const match = findAliasMatch(normalizedText, alias);
+      const existingMatch = matchesByCapability.get(capability.id);
+      if (
+        match &&
+        (!existingMatch ||
+          match.index > existingMatch.index ||
+          (match.index === existingMatch.index &&
+            match.length > existingMatch.length))
+      ) {
+        matchesByCapability.set(capability.id, { capability, ...match });
+      }
+    }
+  }
+
+  return Array.from(matchesByCapability.values())
+    .sort((a, b) => a.index - b.index || a.length - b.length)
+    .map(({ capability }) => ({
+      id: capability.id,
+      label: capability.label,
+      provider: capability.provider,
+    }));
+}
+
 export function resolveAgentToolsCapabilityTip(
   text: string,
   skills: SkillMentionItem[],
 ): AgentToolsCapabilityTip | null {
-  if (!hasAgentToolsSkill(skills)) {
-    return null;
-  }
-
-  const normalizedText = text.toLowerCase();
-  for (const capability of AGENT_TOOLS_CAPABILITIES) {
-    if (
-      capability.aliases.some((alias) => containsAlias(normalizedText, alias))
-    ) {
-      return { id: capability.id, label: capability.label };
-    }
-  }
-
-  return null;
+  return resolveAgentToolsCapabilityTips(text, skills).at(-1) ?? null;
 }
 
 const ALIAS_SUFFIX_PATTERN = "(?:s|ed|ing|er)?";
 
-function containsAlias(text: string, alias: string): boolean {
+function findAliasMatch(
+  text: string,
+  alias: string,
+): { index: number; length: number } | null {
   const normalizedAlias = escapeRegExp(alias.toLowerCase()).replace(
     /[-\s]+/g,
     "[-\\s]+",
   );
-  return new RegExp(
-    `(^|[^a-z0-9])${normalizedAlias}${ALIAS_SUFFIX_PATTERN}($|[^a-z0-9])`,
-    "i",
-  ).test(text);
+  const pattern = new RegExp(
+    `(^|[^a-z0-9])(${normalizedAlias}${ALIAS_SUFFIX_PATTERN})($|[^a-z0-9])`,
+    "gi",
+  );
+
+  let bestMatch: { index: number; length: number } | null = null;
+  for (const match of text.matchAll(pattern)) {
+    const prefix = match[1] ?? "";
+    const matchedAlias = match[2] ?? "";
+    bestMatch = {
+      index: match.index + prefix.length,
+      length: matchedAlias.length,
+    };
+  }
+
+  return bestMatch;
 }

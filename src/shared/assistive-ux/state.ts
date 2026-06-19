@@ -63,7 +63,8 @@ function isRetiredReason(value: unknown): value is AssistiveUxRetiredReason {
     value === "dismissed" ||
     value === "expired" ||
     value === "settingsChanged" ||
-    value === "manualSettingChange"
+    value === "manualSettingChange" ||
+    value === "autoApplied"
   );
 }
 

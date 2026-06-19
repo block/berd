@@ -9,9 +9,11 @@
     "view": "Ver adjunto {{index}}"
   },
   "agentToolsTip": {
-    "available": "{{tool}} está disponible a través de sq agent tools",
-    "dismiss": "Descartar consejo",
-    "turnOff": "Desactivar"
+    "connect": "Conectar",
+    "connected": "{{tool}} está conectado",
+    "disconnected_one": "{{tools}} está desconectado",
+    "disconnected_other": "{{tools}} están desconectados",
+    "dismiss": "Descartar consejo"
   },
   "context": {
     "closePanel": "Cerrar panel de contexto",

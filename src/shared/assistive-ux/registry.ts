@@ -5,14 +5,16 @@ export type AssistiveUxMomentType = "discover" | "suggest" | "autoApply";
 
 export type AssistiveUxMomentId =
   | "notifications.changeSound"
-  | "chat.jumpToResponseStart";
+  | "chat.jumpToResponseStart"
+  | "chat.agentToolsConnectionTips";
 
 export type AssistiveUxRetiredReason =
   | "accepted"
   | "dismissed"
   | "expired"
   | "settingsChanged"
-  | "manualSettingChange";
+  | "manualSettingChange"
+  | "autoApplied";
 
 export interface AssistiveUxRuleDefinition {
   id: AssistiveUxMomentId;
@@ -30,6 +32,10 @@ export const ASSISTIVE_UX_RULES = {
     id: "chat.jumpToResponseStart",
     type: "discover",
     maxShows: 4,
+  },
+  chatAgentToolsConnectionTips: {
+    id: "chat.agentToolsConnectionTips",
+    type: "autoApply",
   },
 } as const satisfies Record<string, AssistiveUxRuleDefinition>;
 

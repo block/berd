@@ -3,6 +3,7 @@ import { ASSISTIVE_UX_STORAGE_KEY, ASSISTIVE_UX_RULES } from "./registry";
 import {
   hasAssistiveMomentBeenShown,
   recordAssistiveMomentAccepted,
+  recordAssistiveMomentDismissed,
   recordAssistiveMomentRetired,
   recordAssistiveMomentShown,
   shouldShowAssistiveMoment,
@@ -10,6 +11,7 @@ import {
 
 const changeSoundId = ASSISTIVE_UX_RULES.notificationsChangeSound.id;
 const responseStartId = ASSISTIVE_UX_RULES.chatJumpToResponseStart.id;
+const agentToolsTipsId = ASSISTIVE_UX_RULES.chatAgentToolsConnectionTips.id;
 
 describe("Assistive UX runtime", () => {
   beforeEach(() => {
@@ -88,6 +90,20 @@ describe("Assistive UX runtime", () => {
       JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
         .moments[changeSoundId].retiredReason,
     ).toBe("settingsChanged");
+  });
+
+  it("counts dismissals without retiring until the caller auto-applies", () => {
+    expect(recordAssistiveMomentDismissed(agentToolsTipsId)).toBe(1);
+    expect(recordAssistiveMomentDismissed(agentToolsTipsId)).toBe(2);
+    expect(shouldShowAssistiveMoment(agentToolsTipsId)).toBe(true);
+
+    recordAssistiveMomentRetired(agentToolsTipsId, "autoApplied");
+
+    expect(shouldShowAssistiveMoment(agentToolsTipsId)).toBe(false);
+    expect(
+      JSON.parse(window.localStorage.getItem(ASSISTIVE_UX_STORAGE_KEY) ?? "{}")
+        .moments[agentToolsTipsId].retiredReason,
+    ).toBe("autoApplied");
   });
 
   it("falls back safely when stored state is invalid", () => {

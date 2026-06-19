@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { ChatInput } from "./chatInputTestUtils";
+import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { ChatSkillDraft } from "../../types";
 
 if (!HTMLElement.prototype.scrollIntoView) {
@@ -61,6 +68,25 @@ vi.mock("@/features/skills/api/skills", () => ({
   listSkills: (projectDirs?: string[]) => mockListSkills(projectDirs),
 }));
 
+type ConnectionFixture = {
+  name: string;
+  expiresAtEpochS?: number;
+  previouslyConnected?: boolean;
+};
+const mockListConnections = vi.fn<
+  () => Promise<{ connections: ConnectionFixture[] }>
+>(async () => ({ connections: [] }));
+vi.mock("@/features/connections/api/connections", async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import("@/features/connections/api/connections")
+    >();
+  return {
+    ...actual,
+    listConnections: () => mockListConnections(),
+  };
+});
+
 const CODE_REVIEW_SKILL = {
   id: "global:/skills/code-review",
   name: "code-review",
@@ -73,6 +99,8 @@ describe("ChatInput skill mentions", () => {
     localStorage.clear();
     mockListSkills.mockClear();
     mockListSkills.mockResolvedValue([]);
+    mockListConnections.mockClear();
+    mockListConnections.mockResolvedValue({ connections: [] });
     lastVoiceDictationOptions = null;
     mockVoiceDictation.isStarting.mockReset();
     mockVoiceDictation.isStarting.mockReturnValue(false);
@@ -221,7 +249,7 @@ describe("ChatInput skill mentions", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
-  it("shows and dismisses Agent Tools availability tips", async () => {
+  it("shows and dismisses connected Agent Tools availability tips", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([
       {
@@ -232,6 +260,9 @@ describe("ChatInput skill mentions", () => {
         sourceLabel: "Personal",
       },
     ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }],
+    });
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -239,20 +270,17 @@ describe("ChatInput skill mentions", () => {
       expect(mockListSkills).toHaveBeenCalled();
     });
 
-    await user.type(screen.getByRole("textbox"), "send this to slack");
+    const input = screen.getByRole("textbox");
+    await user.type(input, "send this to slack");
 
-    expect(
-      await screen.findByText("Slack is available through sq agent tools"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("Slack is connected")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Dismiss tip" }));
 
-    expect(
-      screen.queryByText("Slack is available through sq agent tools"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Slack is connected")).not.toBeInTheDocument();
   });
 
-  it("turns off Agent Tools availability tips from the composer", async () => {
+  it("auto-dismisses connected Agent Tools availability tips without disabling them", async () => {
     const user = userEvent.setup();
     mockListSkills.mockResolvedValue([
       {
@@ -263,6 +291,9 @@ describe("ChatInput skill mentions", () => {
         sourceLabel: "Personal",
       },
     ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }],
+    });
 
     render(<ChatInput onSend={vi.fn()} />);
 
@@ -270,15 +301,320 @@ describe("ChatInput skill mentions", () => {
       expect(mockListSkills).toHaveBeenCalled();
     });
 
-    await user.type(screen.getByRole("textbox"), "send this to slack");
-    await user.click(await screen.findByRole("button", { name: "Turn off" }));
+    const input = screen.getByRole("textbox");
+    await user.type(input, "send this to slack");
+
+    expect(await screen.findByText("Slack is connected")).toBeInTheDocument();
+
+    await waitFor(
+      () => {
+        expect(
+          screen.queryByText("Slack is connected"),
+        ).not.toBeInTheDocument();
+      },
+      { timeout: 6_000 },
+    );
+
+    await user.type(input, " slack");
+    expect(screen.queryByText("Slack is connected")).not.toBeInTheDocument();
+    expect(localStorage.getItem("goose:agent-tools-tips-enabled")).not.toBe(
+      "false",
+    );
+  }, 8_000);
+
+  it("auto-disables Agent Tools availability tips after repeated dismissals", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }, { name: "gmail" }],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+
+    await user.type(input, "send this to slack");
+    expect(await screen.findByText("Slack is connected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss tip" }));
+
+    await user.clear(input);
+    await user.type(input, "email this summary");
+    expect(await screen.findByText("Gmail is connected")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss tip" }));
+
+    await user.clear(input);
+    await user.type(input, "send this to linear");
+    expect(
+      await screen.findByText("Linear is disconnected"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss tip" }));
 
     expect(localStorage.getItem("goose:agent-tools-tips-enabled")).toBe(
       "false",
     );
+  });
+
+  it("uses the latest matching Agent Tool when multiple tools are in the composer", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    await user.type(input, "slack");
+    expect(await screen.findByText("Slack is connected")).toBeInTheDocument();
+
+    await user.type(input, " asana");
+
     expect(
-      screen.queryByText("Slack is available through sq agent tools"),
+      await screen.findByText("Asana is disconnected"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Slack is connected")).not.toBeInTheDocument();
+
+    await user.type(input, " slack");
+    expect(screen.queryByText("Slack is connected")).not.toBeInTheDocument();
+  });
+
+  it("shows the latest matching Agent Tool while text is typed", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "linear slack");
+
+    expect(await screen.findByText("Slack is connected")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Linear is disconnected"),
     ).not.toBeInTheDocument();
+  });
+
+  it("aggregates disconnected Agent Tools when text is pasted", async () => {
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [{ name: "slack" }],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    const input = screen.getByRole("textbox");
+    fireEvent.paste(input, {
+      clipboardData: {
+        getData: () => "slack linear asana",
+        items: [],
+      },
+    });
+    fireEvent.change(input, { target: { value: "slack linear asana" } });
+
+    expect(
+      await screen.findByText("Linear and Asana are disconnected"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Slack is connected")).not.toBeInTheDocument();
+  });
+
+  it("opens company-managed connection settings when a matching Agent Tool is disconnected", async () => {
+    const user = userEvent.setup();
+    const openSettingsListener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({ connections: [] });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to linear");
+
+    expect(
+      await screen.findByText("Linear is disconnected"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(openSettingsListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: {
+          section: "connections",
+          connectionsTab: "companyManaged",
+        },
+      }),
+    );
+    expect(screen.queryByRole("button", { name: "Turn off" })).toBeNull();
+
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+  });
+
+  it("opens company-managed connection settings when a matching Agent Tool is expired", async () => {
+    const user = userEvent.setup();
+    const openSettingsListener = vi.fn();
+    window.addEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [
+        {
+          name: "linear",
+          expiresAtEpochS: Math.floor(Date.now() / 1000) - 60,
+          previouslyConnected: true,
+        },
+      ],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to linear");
+
+    expect(
+      await screen.findByText("Linear is disconnected"),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    expect(openSettingsListener).toHaveBeenCalledWith(
+      expect.objectContaining({
+        detail: {
+          section: "connections",
+          connectionsTab: "companyManaged",
+        },
+      }),
+    );
+
+    window.removeEventListener(OPEN_SETTINGS_EVENT, openSettingsListener);
+  });
+
+  it("does not show Agent Tools availability tips while connection status is loading", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockReturnValue(new Promise(() => undefined));
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to slack");
+
+    await waitFor(() => {
+      expect(mockListConnections).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByText(/Slack/)).not.toBeInTheDocument();
+  });
+
+  it("shows expiring Agent Tools availability tips as connected for now", async () => {
+    const user = userEvent.setup();
+    mockListSkills.mockResolvedValue([
+      {
+        id: "global:/skills/sq-agent-tools",
+        name: "sq-agent-tools",
+        description:
+          "Use to interact with Block's internal tools via sq agent-tools",
+        sourceLabel: "Personal",
+      },
+    ]);
+    mockListConnections.mockResolvedValue({
+      connections: [
+        {
+          name: "linear",
+          expiresAtEpochS: Math.floor(Date.now() / 1000) + 60,
+        },
+      ],
+    });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(mockListSkills).toHaveBeenCalled();
+    });
+
+    await user.type(screen.getByRole("textbox"), "send this to linear");
+
+    expect(await screen.findByText("Linear is connected")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
   });
 
   it("expands selected skill chips before sending", async () => {
