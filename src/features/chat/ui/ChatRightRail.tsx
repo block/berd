@@ -31,6 +31,7 @@ interface ChatRightRailProps {
   onDraftPromoted?: (source: AgentSourceEntry) => void;
   onAgentBuilderClose?: () => void;
   terminalOpen?: boolean;
+  contextPanelLeftViewportOcclusionPx?: number;
   onRequestCloseContextPanel?: () => void;
   onToggleTerminal?: () => void;
 }
@@ -44,6 +45,7 @@ export function ChatRightRail({
   onDraftPromoted,
   onAgentBuilderClose,
   terminalOpen = false,
+  contextPanelLeftViewportOcclusionPx = 0,
   onRequestCloseContextPanel,
   onToggleTerminal,
 }: ChatRightRailProps) {
@@ -200,6 +202,7 @@ export function ChatRightRail({
       project={project}
       sessionWorkingDir={sessionWorkingDir}
       terminalOpen={terminalOpen}
+      leftViewportOcclusionPx={contextPanelLeftViewportOcclusionPx}
       onRequestClose={onRequestCloseContextPanel}
       onToggleTerminal={onToggleTerminal}
     />

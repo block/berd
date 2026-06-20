@@ -97,8 +97,9 @@ describe("TopBar", () => {
     expect(
       screen.getByRole("button", { name: /feedback/i }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /details/i }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /details/i })).toHaveAttribute(
+      "data-context-panel-toggle",
+      "true",
+    );
   });
 });

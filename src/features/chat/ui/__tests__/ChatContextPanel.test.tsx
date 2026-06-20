@@ -1,7 +1,13 @@
 import type { ReactNode } from "react";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ChatContextPanel } from "../ChatContextPanel";
+import {
+  CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH,
+  CHAT_CONTEXT_PANEL_COMPACT_QUERY,
+  ChatContextPanel,
+  getChatContextPanelCompactQuery,
+  useChatContextPanelCompactViewport,
+} from "../ChatContextPanel";
 
 vi.mock("motion/react", () => ({
   AnimatePresence: ({ children }: { children: ReactNode }) => children,
@@ -35,6 +41,48 @@ function mockMatchMedia(matches: boolean) {
 describe("ChatContextPanel", () => {
   beforeEach(() => {
     mockMatchMedia(false);
+  });
+
+  it("switches to compact overlay mode at 800px and below", () => {
+    const matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === CHAT_CONTEXT_PANEL_COMPACT_QUERY,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: matchMedia,
+    });
+
+    const { result } = renderHook(() => useChatContextPanelCompactViewport());
+
+    expect(CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH).toBe(800);
+    expect(CHAT_CONTEXT_PANEL_COMPACT_QUERY).toBe("(max-width: 800px)");
+    expect(result.current).toBe(true);
+    expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 800px)");
+  });
+
+  it("moves the compact breakpoint wider when the left nav occupies viewport width", () => {
+    const compactQuery = getChatContextPanelCompactQuery(212);
+    const matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === compactQuery,
+      media: query,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    }));
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: matchMedia,
+    });
+
+    const { result } = renderHook(() =>
+      useChatContextPanelCompactViewport(212),
+    );
+
+    expect(compactQuery).toBe("(max-width: 1012px)");
+    expect(result.current).toBe(true);
+    expect(window.matchMedia).toHaveBeenCalledWith("(max-width: 1012px)");
   });
 
   it("hugs content height without overlay shadow in inline mode", () => {
@@ -76,6 +124,7 @@ describe("ChatContextPanel", () => {
     const frame = container.querySelector("aside")?.parentElement;
     const panel = container.querySelector("aside");
 
+    expect(frame).toHaveClass("absolute");
     expect(frame).toHaveClass(
       "max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))]",
     );
@@ -104,5 +153,28 @@ describe("ChatContextPanel", () => {
 
     fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
     expect(onRequestClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not request close on the context panel toggle in compact overlay mode", () => {
+    mockMatchMedia(true);
+    const onRequestClose = vi.fn();
+    render(
+      <>
+        <button type="button" data-context-panel-toggle="true">
+          Toggle context
+        </button>
+        <ChatContextPanel
+          activeSessionId="session-1"
+          isOpen
+          onRequestClose={onRequestClose}
+        />
+      </>,
+    );
+
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Toggle context" }),
+    );
+
+    expect(onRequestClose).not.toHaveBeenCalled();
   });
 });

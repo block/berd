@@ -292,6 +292,7 @@ interface ChatViewProps {
     onCreated?: (projectId: string) => void;
   }) => void;
   onOpenProjectSettings?: (projectId: string) => void;
+  leftViewportOcclusionPx?: number;
 }
 
 export function ChatView({
@@ -303,6 +304,7 @@ export function ChatView({
   onAgentBuilderClose,
   onCreateProject,
   onOpenProjectSettings,
+  leftViewportOcclusionPx = 0,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
@@ -331,7 +333,9 @@ export function ChatView({
     onCreatePersonaRequested: onCreatePersona,
   });
   const effectiveSession = controller.session ?? activeSession ?? null;
-  const isContextPanelCompactViewport = useChatContextPanelCompactViewport();
+  const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
+    leftViewportOcclusionPx,
+  );
   const isContextPanelOpen = useChatSessionStore((s) => s.isContextPanelOpen);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const terminalWorkspacePath = useChatSessionStore((s) =>
@@ -1406,6 +1410,7 @@ export function ChatView({
           }
           builderColumnStyle={agentBuilderRailColumnStyle}
           terminalOpen={activeWorkspaceHasTerminal}
+          contextPanelLeftViewportOcclusionPx={leftViewportOcclusionPx}
           onRequestCloseContextPanel={handleCloseContextPanel}
           onToggleTerminal={toggleTerminal}
         />

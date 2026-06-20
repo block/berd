@@ -41,6 +41,7 @@ interface AppShellContentProps {
   renderedSession?: ChatSession;
   homeSessionId: string | null;
   homeViewportLeftOcclusionPx?: number;
+  chatViewportLeftOcclusionPx?: number;
   onNavigateSkills: (
     skillId: string | null,
     options?: AppNavigationUpdateOptions,
@@ -107,6 +108,7 @@ export function AppShellContent({
   renderedSession,
   homeSessionId,
   homeViewportLeftOcclusionPx = 0,
+  chatViewportLeftOcclusionPx = 0,
   onNavigateSkills,
   onNavigateAgents,
   onNavigateAutomations,
@@ -175,6 +177,7 @@ export function AppShellContent({
   const routeContent = renderRouteContent({
     activeConnectionsTab,
     builderbotEnabled: Boolean(builderbotExperiment?.enabled),
+    chatViewportLeftOcclusionPx,
     homeContent,
     homeSessionId,
     location: renderedLocation,
@@ -228,6 +231,7 @@ export function AppShellContent({
 interface RenderRouteContentOptions {
   activeConnectionsTab: ConnectionsTab;
   builderbotEnabled: boolean;
+  chatViewportLeftOcclusionPx: number;
   homeContent: ReactNode;
   homeSessionId: string | null;
   location: AppNavigationLocation;
@@ -290,6 +294,7 @@ interface RenderRouteContentOptions {
 function renderRouteContent({
   activeConnectionsTab,
   builderbotEnabled,
+  chatViewportLeftOcclusionPx,
   homeContent,
   homeSessionId,
   location,
@@ -411,6 +416,7 @@ function renderRouteContent({
           onAgentBuilderClose={onAgentBuilderClose}
           onCreateProject={onCreateProject}
           onOpenProjectSettings={onOpenProjectSettings}
+          leftViewportOcclusionPx={chatViewportLeftOcclusionPx}
         />
       ) : (
         <HomeScreen

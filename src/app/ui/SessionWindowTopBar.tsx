@@ -62,6 +62,7 @@ export function SessionWindowTopBar({
             onClick={onToggleContextPanel}
             aria-label={contextPanelLabel}
             title={contextPanelLabel}
+            data-context-panel-toggle="true"
           >
             <ContextPanelIcon aria-hidden="true" />
           </Button>

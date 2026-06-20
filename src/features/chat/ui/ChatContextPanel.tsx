@@ -2,6 +2,8 @@ import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -14,20 +16,36 @@ const CP_PANEL_W = 315;
 export const CP_TOTAL_W = CP_PANEL_W;
 const CP_FADE_S = 0.15;
 const CP_REFLOW_MS = 200;
-export const CHAT_CONTEXT_PANEL_COMPACT_QUERY = "(max-width: 900px)";
+export const CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH = 800;
 
-export function useChatContextPanelCompactViewport() {
+export function getChatContextPanelCompactQuery(leftViewportOcclusionPx = 0) {
+  const compactWidth =
+    CHAT_CONTEXT_PANEL_COMPACT_BASE_WIDTH +
+    Math.max(0, Math.round(leftViewportOcclusionPx));
+  return `(max-width: ${compactWidth}px)`;
+}
+
+export const CHAT_CONTEXT_PANEL_COMPACT_QUERY =
+  getChatContextPanelCompactQuery();
+
+export function useChatContextPanelCompactViewport(
+  leftViewportOcclusionPx = 0,
+) {
+  const compactQuery = useMemo(
+    () => getChatContextPanelCompactQuery(leftViewportOcclusionPx),
+    [leftViewportOcclusionPx],
+  );
   const [isCompactViewport, setIsCompactViewport] = useState(() => {
     if (typeof window === "undefined" || !window.matchMedia) {
       return false;
     }
-    return window.matchMedia(CHAT_CONTEXT_PANEL_COMPACT_QUERY).matches;
+    return window.matchMedia(compactQuery).matches;
   });
 
   useEffect(() => {
     if (!window.matchMedia) return;
 
-    const mediaQuery = window.matchMedia(CHAT_CONTEXT_PANEL_COMPACT_QUERY);
+    const mediaQuery = window.matchMedia(compactQuery);
     setIsCompactViewport(mediaQuery.matches);
 
     const handleChange = (event: MediaQueryListEvent) => {
@@ -36,7 +54,7 @@ export function useChatContextPanelCompactViewport() {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, []);
+  }, [compactQuery]);
 
   return isCompactViewport;
 }
@@ -53,6 +71,7 @@ interface ChatContextPanelProps {
   } | null;
   sessionWorkingDir?: string | null;
   terminalOpen?: boolean;
+  leftViewportOcclusionPx?: number;
   onRequestClose?: () => void;
   onToggleTerminal?: () => void;
 }
@@ -63,13 +82,19 @@ export function ChatContextPanel({
   project,
   sessionWorkingDir,
   terminalOpen = false,
+  leftViewportOcclusionPx = 0,
   onRequestClose,
   onToggleTerminal,
 }: ChatContextPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null);
   const shouldReduceMotion = useReducedMotion();
-  const isCompactViewport = useChatContextPanelCompactViewport();
+  const isCompactViewport = useChatContextPanelCompactViewport(
+    leftViewportOcclusionPx,
+  );
+  const previousCompactViewportRef = useRef(isCompactViewport);
+  const dockingTimerRef = useRef<number | null>(null);
+  const [panelElement, setPanelElement] = useState<HTMLDivElement | null>(null);
+  const [isDockingFromCompact, setIsDockingFromCompact] = useState(false);
   const fadeTransition = { duration: shouldReduceMotion ? 0 : CP_FADE_S };
   const reflowDuration = shouldReduceMotion ? 0 : CP_REFLOW_MS;
   const handlePanelRef = useCallback((node: HTMLDivElement | null) => {
@@ -89,6 +114,52 @@ export function ChatContextPanel({
   });
 
   useEffect(() => {
+    return () => {
+      if (dockingTimerRef.current !== null) {
+        window.clearTimeout(dockingTimerRef.current);
+      }
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    const wasCompactViewport = previousCompactViewportRef.current;
+    previousCompactViewportRef.current = isCompactViewport;
+
+    if (!isOpen || isCompactViewport) {
+      if (dockingTimerRef.current !== null) {
+        window.clearTimeout(dockingTimerRef.current);
+        dockingTimerRef.current = null;
+      }
+      setIsDockingFromCompact(false);
+      return;
+    }
+
+    if (!wasCompactViewport) {
+      return;
+    }
+
+    if (reflowDuration === 0) {
+      setIsDockingFromCompact(false);
+      return;
+    }
+
+    setIsDockingFromCompact(true);
+    if (dockingTimerRef.current !== null) {
+      window.clearTimeout(dockingTimerRef.current);
+    }
+    dockingTimerRef.current = window.setTimeout(() => {
+      dockingTimerRef.current = null;
+      setIsDockingFromCompact(false);
+    }, reflowDuration);
+  }, [isCompactViewport, isOpen, reflowDuration]);
+
+  const frameMode = isCompactViewport
+    ? "compact"
+    : isDockingFromCompact
+      ? "docking"
+      : "docked";
+
+  useEffect(() => {
     if (!isOpen || !onRequestClose || !isCompactViewport) {
       return;
     }
@@ -105,7 +176,7 @@ export function ChatContextPanel({
       if (
         target instanceof Element &&
         target.closest(
-          "[data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-dropdown-menu-content]",
+          "[data-context-panel-toggle], [data-radix-popper-content-wrapper], [data-radix-select-content], [data-radix-dropdown-menu-content]",
         )
       ) {
         return;
@@ -124,7 +195,8 @@ export function ChatContextPanel({
     <div
       className={cn(
         "shrink-0",
-        isCompactViewport ? "overflow-visible" : "overflow-hidden",
+        frameMode === "docking" && "relative",
+        frameMode === "docked" ? "overflow-hidden" : "overflow-visible",
       )}
       style={
         {
@@ -141,12 +213,13 @@ export function ChatContextPanel({
             key="context-panel"
             className={cn(
               "flex self-start",
-              isCompactViewport
-                ? "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]"
-                : "max-h-full",
+              frameMode === "compact" &&
+                "absolute right-3 top-[var(--spacing-app-panel-gutter-top)] z-10 max-h-[calc(100%-var(--spacing-app-panel-gutter-top)-var(--spacing-app-panel-gutter-bottom))] w-[min(var(--context-panel-width),calc(100%-1.5rem))]",
+              frameMode === "docking" && "absolute right-0 top-0 max-h-full",
+              frameMode === "docked" && "max-h-full",
             )}
             style={
-              isCompactViewport
+              frameMode === "compact"
                 ? ({
                     "--context-panel-width": `${CP_PANEL_W}px`,
                   } as CSSProperties)

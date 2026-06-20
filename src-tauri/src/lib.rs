@@ -455,16 +455,29 @@ fn attach_main_window_lifecycle(app: &tauri::App) {
 
 #[cfg(target_os = "macos")]
 pub(crate) fn attach_traffic_light_management(window: &WebviewWindow) {
+    use std::sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    };
+
     schedule_traffic_light_position_refresh(window);
 
     let window_for_events = window.clone();
-    window.on_window_event(move |event| {
-        if matches!(
-            event,
-            WindowEvent::Resized(_)
-                | WindowEvent::ScaleFactorChanged { .. }
-                | WindowEvent::Focused(true)
-        ) {
+    let resize_generation = Arc::new(AtomicU64::new(0));
+    window.on_window_event(move |event| match event {
+        WindowEvent::Resized(_) => {
+            let generation = resize_generation.fetch_add(1, Ordering::Relaxed) + 1;
+            let delayed_window = window_for_events.clone();
+            let delayed_generation = resize_generation.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+                if delayed_generation.load(Ordering::Relaxed) == generation {
+                    schedule_traffic_light_position_refresh(&delayed_window);
+                }
+            });
+        }
+        WindowEvent::ScaleFactorChanged { .. } | WindowEvent::Focused(true) => {
+            resize_generation.fetch_add(1, Ordering::Relaxed);
             schedule_traffic_light_position_refresh(&window_for_events);
 
             let delayed_window = window_for_events.clone();
@@ -473,6 +486,7 @@ pub(crate) fn attach_traffic_light_management(window: &WebviewWindow) {
                 schedule_traffic_light_position_refresh(&delayed_window);
             });
         }
+        _ => {}
     });
 }
 

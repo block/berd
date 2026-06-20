@@ -117,8 +117,12 @@ describe("AppShellLayout", () => {
   });
 
   it("does not animate the reserved sidebar width while resizing", () => {
-    const { sidebarSlot } = renderLayout({ isResizing: true });
+    const { container, sidebarSlot } = renderLayout({ isResizing: true });
 
+    expect(container.firstElementChild).toHaveAttribute(
+      "data-app-shell-root",
+      "true",
+    );
     expect(sidebarSlot.style.transition).toBe("none");
   });
 });

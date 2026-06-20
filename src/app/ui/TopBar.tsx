@@ -74,7 +74,10 @@ function useTopBarBreadcrumbDisplay() {
 
   useEffect(() => {
     const handleResize = () => {
-      setDisplay(getTopBarBreadcrumbDisplay());
+      const nextDisplay = getTopBarBreadcrumbDisplay();
+      setDisplay((currentDisplay) =>
+        currentDisplay === nextDisplay ? currentDisplay : nextDisplay,
+      );
     };
 
     handleResize();
@@ -240,6 +243,7 @@ export function TopBar({
             aria-pressed={contextPanelOpen}
             aria-label={contextPanelLabel}
             title={contextPanelLabel}
+            data-context-panel-toggle="true"
           >
             <ContextPanelIcon aria-hidden="true" />
           </Button>

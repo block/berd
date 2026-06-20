@@ -156,6 +156,7 @@ export function AppShellLayout({
   return (
     <div
       className="relative flex h-screen w-screen flex-col overflow-hidden bg-dot-grid text-foreground"
+      data-app-shell-root="true"
       style={shellStyle}
     >
       <TopBar

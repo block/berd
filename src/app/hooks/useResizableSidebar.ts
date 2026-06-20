@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -23,6 +24,7 @@ const MIN_MAIN_CONTENT_WIDTH = 532;
 const MIN_WINDOW_HEIGHT = 600;
 const COLLAPSED_WINDOW_MIN_WIDTH =
   APP_SHELL_HORIZONTAL_CHROME_WIDTH + MIN_MAIN_CONTENT_WIDTH;
+const WINDOW_RESIZE_SETTLE_MS = 120;
 
 type SidebarLayoutPreference = {
   width: number;
@@ -129,6 +131,23 @@ function getDefaultSidebarLayout(): SidebarLayoutPreference {
   };
 }
 
+function getInitialSidebarLayout(): SidebarLayoutPreference {
+  const defaults = getDefaultSidebarLayout();
+  if (typeof window === "undefined") return defaults;
+
+  try {
+    const stored = window.localStorage.getItem(SIDEBAR_LAYOUT_STORAGE_KEY);
+    if (!stored) return defaults;
+    return validateSidebarLayoutPreference(JSON.parse(stored), defaults);
+  } catch {
+    return defaults;
+  }
+}
+
+function shouldCollapseSidebarForViewport(viewportWidth: number) {
+  return getMaxSidebarWidthForViewport(viewportWidth) < SIDEBAR_MIN_WIDTH;
+}
+
 function getFiniteNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -182,14 +201,19 @@ async function syncWindowMinimumSize() {
 }
 
 export function useResizableSidebar() {
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [initialSidebarLayout] = useState(getInitialSidebarLayout);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() =>
+    shouldCollapseSidebarForViewport(getViewportWidth()),
+  );
   const [viewportWidth, setViewportWidth] = useState(getViewportWidth);
   const [sidebarLayout, setSidebarLayout] = usePersistedState(
     SIDEBAR_LAYOUT_STORAGE_KEY,
-    getDefaultSidebarLayout(),
+    initialSidebarLayout,
     validateSidebarLayoutPreference,
   );
   const [isResizing, setIsResizing] = useState(false);
+  const [isWindowResizing, setIsWindowResizing] = useState(false);
+  const windowResizeSettleTimerRef = useRef<number | null>(null);
   const preferredSidebarWidth = sidebarLayout.width;
   const sidebarWidth = getResponsiveSidebarWidth(
     preferredSidebarWidth,
@@ -198,7 +222,18 @@ export function useResizableSidebar() {
   const sidebarHeight = sidebarLayout.height;
   const patchSidebarLayout = useCallback(
     (patch: Partial<SidebarLayoutPreference>) => {
-      setSidebarLayout((layout) => ({ ...layout, ...patch }));
+      setSidebarLayout((layout) => {
+        const entries = Object.entries(patch) as [
+          keyof SidebarLayoutPreference,
+          SidebarLayoutPreference[keyof SidebarLayoutPreference],
+        ][];
+
+        if (entries.every(([key, value]) => layout[key] === value)) {
+          return layout;
+        }
+
+        return { ...layout, ...patch };
+      });
     },
     [setSidebarLayout],
   );
@@ -347,30 +382,51 @@ export function useResizableSidebar() {
   }, []);
 
   useEffect(() => {
-    const handleWindowResize = () => {
+    const syncWindowResizeState = (markResizeActive: boolean) => {
       const nextViewportWidth = getViewportWidth();
-      setViewportWidth(nextViewportWidth);
-      if (
-        !sidebarCollapsed &&
-        getMaxSidebarWidthForViewport(nextViewportWidth) < SIDEBAR_MIN_WIDTH
-      ) {
-        setSidebarCollapsed(true);
+      setViewportWidth((currentViewportWidth) =>
+        currentViewportWidth === nextViewportWidth
+          ? currentViewportWidth
+          : nextViewportWidth,
+      );
+      setSidebarCollapsed((currentCollapsed) => {
+        if (currentCollapsed) return currentCollapsed;
+        return shouldCollapseSidebarForViewport(nextViewportWidth);
+      });
+
+      if (!markResizeActive) return;
+      setIsWindowResizing(true);
+      if (windowResizeSettleTimerRef.current !== null) {
+        window.clearTimeout(windowResizeSettleTimerRef.current);
+      }
+      windowResizeSettleTimerRef.current = window.setTimeout(() => {
+        windowResizeSettleTimerRef.current = null;
+        setIsWindowResizing(false);
+      }, WINDOW_RESIZE_SETTLE_MS);
+    };
+    const handleWindowResize = () => syncWindowResizeState(true);
+
+    syncWindowResizeState(false);
+    window.addEventListener("resize", handleWindowResize);
+    return () => {
+      window.removeEventListener("resize", handleWindowResize);
+      if (windowResizeSettleTimerRef.current !== null) {
+        window.clearTimeout(windowResizeSettleTimerRef.current);
       }
     };
-
-    handleWindowResize();
-    window.addEventListener("resize", handleWindowResize);
-    return () => window.removeEventListener("resize", handleWindowResize);
-  }, [sidebarCollapsed]);
+  }, []);
 
   useEffect(() => {
     const handleWindowResize = () => {
-      setSidebarLayout((layout) => ({
-        ...layout,
-        height: layout.heightCustomized
+      setSidebarLayout((layout) => {
+        const nextHeight = layout.heightCustomized
           ? clampSidebarHeight(layout.height)
-          : getDefaultSidebarHeight(),
-      }));
+          : getDefaultSidebarHeight();
+
+        return nextHeight === layout.height
+          ? layout
+          : { ...layout, height: nextHeight };
+      });
     };
 
     handleWindowResize();
@@ -387,7 +443,7 @@ export function useResizableSidebar() {
     handleResizeDoubleClick,
     handleResizeStart,
     isCollapsed: sidebarCollapsed,
-    isResizing,
+    isResizing: isResizing || isWindowResizing,
     resizeHandleHeight: SIDEBAR_RESIZE_HANDLE_HEIGHT,
     resizeHandleWidth: SIDEBAR_RESIZE_HANDLE_WIDTH,
     sidebarCollapsed,

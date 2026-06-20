@@ -252,6 +252,7 @@ export function ChatInput({
   const [isCompact, setIsCompact] = useState(false);
   const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const resizeTextareaFrameRef = useRef<number | null>(null);
   const pendingCursorOffsetRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const {
@@ -316,6 +317,16 @@ export function ChatInput({
     textarea.style.height = "auto";
     textarea.style.height = `${Math.min(textarea.scrollHeight, getTextareaMaxHeightPx())}px`;
   }, [getTextareaMaxHeightPx]);
+  const scheduleResizeTextarea = useCallback(() => {
+    if (resizeTextareaFrameRef.current !== null) {
+      return;
+    }
+
+    resizeTextareaFrameRef.current = window.requestAnimationFrame(() => {
+      resizeTextareaFrameRef.current = null;
+      resizeTextarea();
+    });
+  }, [resizeTextarea]);
 
   const resetTextarea = useCallback(() => {
     if (textareaRef.current) {
@@ -342,9 +353,15 @@ export function ChatInput({
       return;
     }
 
-    window.addEventListener("resize", resizeTextarea);
-    return () => window.removeEventListener("resize", resizeTextarea);
-  }, [resizeTextarea, surface]);
+    window.addEventListener("resize", scheduleResizeTextarea);
+    return () => {
+      window.removeEventListener("resize", scheduleResizeTextarea);
+      if (resizeTextareaFrameRef.current !== null) {
+        window.cancelAnimationFrame(resizeTextareaFrameRef.current);
+        resizeTextareaFrameRef.current = null;
+      }
+    };
+  }, [scheduleResizeTextarea, surface]);
 
   const hasQueuedMessage = queuedMessage !== null;
   const hasDraftContext =
@@ -505,7 +522,10 @@ export function ChatInput({
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        setIsCompact(entry.contentRect.width < 580);
+        const nextIsCompact = entry.contentRect.width < 580;
+        setIsCompact((current) =>
+          current === nextIsCompact ? current : nextIsCompact,
+        );
       }
     });
     observer.observe(element);

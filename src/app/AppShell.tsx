@@ -2691,6 +2691,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               homeViewportLeftOcclusionPx={
                 renderedLocation.view === "home" ? sidebarOuterWidth : 0
               }
+              chatViewportLeftOcclusionPx={
+                renderedLocation.view === "chat" ? sidebarOuterWidth : 0
+              }
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}
               onNavigateAutomations={navigateAutomations}

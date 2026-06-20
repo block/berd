@@ -1,9 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useResizableSidebar } from "./useResizableSidebar";
 
 type ResizableSidebar = ReturnType<typeof useResizableSidebar>;
+let restoreLocalStorageSetItem: (() => void) | null = null;
 
 function setWindowWidth(width: number) {
   Object.defineProperty(window, "innerWidth", {
@@ -56,6 +57,13 @@ describe("useResizableSidebar", () => {
     );
   });
 
+  afterEach(() => {
+    restoreLocalStorageSetItem?.();
+    restoreLocalStorageSetItem = null;
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
   it("starts expanded at the default width", () => {
     const { result } = renderHook(() => useResizableSidebar());
 
@@ -69,6 +77,15 @@ describe("useResizableSidebar", () => {
     expect(result.current.sidebarOuterHeight).toBe(
       result.current.sidebarHeight,
     );
+  });
+
+  it("starts collapsed when the minimum sidebar width does not fit", () => {
+    setWindowWidth(740);
+
+    const { result } = renderHook(() => useResizableSidebar());
+
+    expect(result.current.isCollapsed).toBe(true);
+    expect(result.current.sidebarOuterWidth).toBe(0);
   });
 
   it("exposes a fully-collapsed state when toggled closed", () => {
@@ -282,6 +299,63 @@ describe("useResizableSidebar", () => {
     await waitFor(() => {
       expect(result.current.isCollapsed).toBe(true);
     });
+  });
+
+  it("treats OS window resize as transient resizing state", () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useResizableSidebar());
+
+    act(() => {
+      setWindowWidth(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(result.current.isResizing).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(119);
+    });
+    expect(result.current.isResizing).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(result.current.isResizing).toBe(false);
+  });
+
+  it("does not persist height layout again during width-only window resize", async () => {
+    const originalSetItem = window.localStorage.setItem.bind(
+      window.localStorage,
+    );
+    const setItemSpy = vi.fn(originalSetItem);
+    Object.defineProperty(window.localStorage, "setItem", {
+      configurable: true,
+      value: setItemSpy,
+    });
+    restoreLocalStorageSetItem = () => {
+      Object.defineProperty(window.localStorage, "setItem", {
+        configurable: true,
+        value: originalSetItem,
+      });
+    };
+    const { result } = renderHook(() => useResizableSidebar());
+    const initialHeight = result.current.sidebarHeight;
+
+    await waitFor(() =>
+      expect(result.current.sidebarHeight).toBeGreaterThan(0),
+    );
+    setItemSpy.mockClear();
+
+    act(() => {
+      setWindowWidth(900);
+      window.dispatchEvent(new Event("resize"));
+    });
+
+    expect(result.current.sidebarHeight).toBe(initialHeight);
+    expect(setItemSpy).not.toHaveBeenCalledWith(
+      "goose:sidebar:layout",
+      expect.any(String),
+    );
   });
 
   it("uses app chrome tokens for the maximum sidebar height", () => {

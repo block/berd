@@ -1475,6 +1475,11 @@
     background-image 240ms ease;
 }
 
+[data-app-shell-root="true"].bg-dot-grid {
+  /* Fixed attachment makes WKWebView repaint newly exposed resize regions late. */
+  background-attachment: scroll;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .bg-dot-grid {
     transition: none;
@@ -1487,6 +1492,7 @@ body,
 #root {
   height: 100%;
   overflow: hidden;
+  background-color: var(--canvas-base);
 }
 
 @layer base {
@@ -1514,7 +1520,7 @@ body,
   }
 
   body {
-    @apply bg-background text-foreground;
+    @apply bg-canvas-base text-foreground;
     font-family: var(--font-sans);
     font-feature-settings:
       "rlig" 1,
