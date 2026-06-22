@@ -36,7 +36,7 @@ export function AgentBuilderLeaveDraftDialog({
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={onCancel}>
+          <Button type="button" variant="ghost" onClick={onCancel}>
             {t("builderRail.leaveDraftCancel")}
           </Button>
           <Button type="button" variant="destructive" onClick={onDiscard}>

@@ -45,7 +45,7 @@ export function AutomationBuilderLeaveDialog({
         <DialogFooter>
           <Button
             type="button"
-            variant="outline"
+            variant="ghost"
             disabled={isSaving}
             onClick={onCancel}
           >
