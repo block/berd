@@ -50,6 +50,7 @@ export function MentionAutocomplete({
   onSelectPersona,
   onSelectSkill,
   onSelectFile,
+  onClose,
   selectedIndex: controlledIndex,
   listboxId = "mention-autocomplete-listbox",
   atCategory = "agents",
@@ -61,6 +62,37 @@ export function MentionAutocomplete({
   const [internalIndex, setInternalIndex] = useState(0);
   const selectedIndex = controlledIndex ?? internalIndex;
   const itemRefs = useRef<Map<number, HTMLButtonElement>>(new Map());
+  const contentRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!isOpen) {
+      return;
+    }
+
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (contentRef.current?.contains(target)) {
+        return;
+      }
+      if (
+        target instanceof HTMLElement &&
+        target.closest("textarea, input, [contenteditable='true']")
+      ) {
+        return;
+      }
+      onCloseRef.current?.();
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+    };
+  }, [isOpen]);
 
   // Scroll the active item into view when selectedIndex changes
   useEffect(() => {
@@ -149,14 +181,17 @@ export function MentionAutocomplete({
 
   return (
     <PopoverContent
+      ref={contentRef}
       side="top"
       align="start"
       sideOffset={4}
       className="w-72 p-2"
       onOpenAutoFocus={(e) => e.preventDefault()}
       onCloseAutoFocus={(e) => e.preventDefault()}
-      onEscapeKeyDown={(e) => e.preventDefault()}
-      onInteractOutside={(e) => e.preventDefault()}
+      onEscapeKeyDown={(e) => {
+        e.preventDefault();
+        onClose?.();
+      }}
     >
       <Tabs
         value={atCategory}
@@ -191,7 +226,7 @@ export function MentionAutocomplete({
           role="listbox"
           id={listboxId}
           aria-label={t("mention.ariaLabel")}
-          className="pb-2"
+          className="space-y-0.5 pb-2"
         >
           {visibleFiles.map((file, i) => {
             const globalIndex = i;
@@ -211,7 +246,7 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent",
                 )}
                 onClick={() => handleSelect({ type: "file", file })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}
@@ -252,7 +287,7 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent",
                 )}
                 onClick={() => handleSelect({ type: "persona", persona })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}
@@ -293,7 +328,7 @@ export function MentionAutocomplete({
                   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left transition-colors",
                   globalIndex === selectedIndex
                     ? "bg-accent text-foreground"
-                    : "text-foreground hover:bg-accent/50",
+                    : "text-foreground hover:bg-accent",
                 )}
                 onClick={() => handleSelect({ type: "skill", skill })}
                 onMouseEnter={() => setInternalIndex(globalIndex)}

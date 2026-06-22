@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Fragment, useRef, type ReactNode } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import {
@@ -66,6 +66,7 @@ export function ChatInputSelector({
   disabled,
   triggerIconOnly = false,
 }: ChatInputSelectorProps) {
+  const skipCloseAutoFocusRef = useRef(false);
   const buttonSize = triggerIconOnly
     ? "icon-pill-sm"
     : triggerSize === "sm"
@@ -105,6 +106,16 @@ export function ChatInputSelector({
         align={contentAlign}
         side={contentSide}
         className={cn(contentWidth === "wide" ? "w-72" : "w-56")}
+        onInteractOutside={() => {
+          skipCloseAutoFocusRef.current = true;
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!skipCloseAutoFocusRef.current) {
+            return;
+          }
+          skipCloseAutoFocusRef.current = false;
+          event.preventDefault();
+        }}
       >
         {menuLabel ? (
           <>
@@ -114,53 +125,63 @@ export function ChatInputSelector({
             <DropdownMenuSeparator />
           </>
         ) : null}
-        {sections.map((section, sectionIndex) => (
-          <DropdownMenuGroup
-            key={
-              section.label ??
-              `${ariaLabel}-${section.items.map((item) => item.value).join("|")}`
-            }
-          >
-            {section.label ? (
-              <DropdownMenuLabel>{section.label}</DropdownMenuLabel>
-            ) : null}
-            {section.items.map((item) => (
-              <DropdownMenuItem
-                key={item.value}
-                disabled={item.disabled}
-                onSelect={() => onValueChange(item.value)}
-                className="justify-between gap-2"
-              >
-                <div
-                  className={cn(
-                    "min-w-0 flex flex-1 gap-2",
-                    item.description ? "items-start" : "items-center",
-                  )}
-                >
-                  {item.icon ? (
-                    <span className="shrink-0">{item.icon}</span>
-                  ) : null}
-                  <div className="min-w-0 flex-1">
-                    <span className="block truncate font-normal">
-                      {item.label}
-                    </span>
-                    {item.description ? (
-                      <span className="block truncate text-xs text-muted-foreground">
-                        {item.description}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                {item.value === value ? (
-                  <Check className="size-4 shrink-0 self-center text-muted-foreground" />
+        {sections.map((section, sectionIndex) => {
+          const sectionKey =
+            section.label ??
+            `${ariaLabel}-${section.items.map((item) => item.value).join("|")}`;
+
+          return (
+            <Fragment key={sectionKey}>
+              <DropdownMenuGroup className="space-y-0.5">
+                {section.label ? (
+                  <DropdownMenuLabel>{section.label}</DropdownMenuLabel>
                 ) : null}
-              </DropdownMenuItem>
-            ))}
-            {sectionIndex < sections.length - 1 ? (
-              <DropdownMenuSeparator />
-            ) : null}
-          </DropdownMenuGroup>
-        ))}
+                {section.items.map((item) => {
+                  const isSelected = item.value === value;
+
+                  return (
+                    <DropdownMenuItem
+                      key={item.value}
+                      disabled={item.disabled}
+                      onSelect={() => onValueChange(item.value)}
+                      className={cn(
+                        "justify-between gap-2",
+                        isSelected && "bg-accent",
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          "min-w-0 flex flex-1 gap-2",
+                          item.description ? "items-start" : "items-center",
+                        )}
+                      >
+                        {item.icon ? (
+                          <span className="shrink-0">{item.icon}</span>
+                        ) : null}
+                        <div className="min-w-0 flex-1">
+                          <span className="block truncate font-normal">
+                            {item.label}
+                          </span>
+                          {item.description ? (
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {item.description}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                      {isSelected ? (
+                        <Check className="size-4 shrink-0 self-center text-muted-foreground" />
+                      ) : null}
+                    </DropdownMenuItem>
+                  );
+                })}
+              </DropdownMenuGroup>
+              {sectionIndex < sections.length - 1 ? (
+                <DropdownMenuSeparator />
+              ) : null}
+            </Fragment>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );

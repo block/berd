@@ -1958,6 +1958,56 @@ describe("ChatInput", () => {
     );
   });
 
+  it("keeps the model picker open when clicked after the project picker", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <ChatInputToolbar
+        agentModelPicker={{
+          providers: [{ id: "goose", label: "Goose" }],
+          selectedProvider: "goose",
+          onProviderChange: vi.fn(),
+          availableModels: [{ id: "gpt-4o", name: "GPT-4o" }],
+        }}
+        projectPicker={{
+          selectedProjectId: "project-1",
+          availableProjects: [
+            {
+              id: "project-1",
+              name: "Goose Internal",
+              workingDirs: ["/workspace/goose"],
+            },
+          ],
+        }}
+        contextUsage={{
+          contextTokens: 0,
+          contextLimit: 0,
+        }}
+        composerActions={{
+          canSend: false,
+          isStreaming: false,
+          onSend: vi.fn(),
+        }}
+        isCompact={false}
+      />,
+    );
+
+    const modelPickerTrigger = screen.getByRole("button", {
+      name: /choose agent and model/i,
+    });
+
+    await user.click(screen.getByRole("button", { name: /select project/i }));
+    expect(screen.getByText("Choose a project")).toBeInTheDocument();
+
+    fireEvent.pointerDown(modelPickerTrigger);
+    fireEvent.pointerUp(modelPickerTrigger);
+    fireEvent.click(modelPickerTrigger);
+
+    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.queryByText("Choose a project")).not.toBeInTheDocument();
+  });
+
   it("keeps the mic toggle enabled while recording even if voice input becomes unavailable", () => {
     render(
       <ChatInputToolbar

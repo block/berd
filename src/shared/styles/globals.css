@@ -671,9 +671,12 @@
   --primary-foreground: var(--color-black);
   --secondary: var(--color-gray-700);
   --secondary-foreground: var(--foreground);
-  --muted: var(--color-gray-800);
+  /* Keep quiet and interactive fills one step lighter than card/popover so
+     selected tabs, hover rows, and active picker items do not disappear in dark
+     surfaces. */
+  --muted: var(--color-gray-700);
   --muted-foreground: var(--color-gray-500);
-  --accent: var(--color-gray-800);
+  --accent: var(--color-gray-700);
   --accent-foreground: var(--foreground);
   --destructive: var(--color-red-400);
   --destructive-foreground: var(--color-black);
