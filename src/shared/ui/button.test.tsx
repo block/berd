@@ -101,6 +101,14 @@ describe("Button", () => {
     expect(screen.getByTestId("icon")).toHaveClass("size-4");
   });
 
+  it("keeps the jump-to-latest label unselectable", () => {
+    render(<Button variant="jump-to-latest">Jump to latest</Button>);
+
+    expect(screen.getByRole("button", { name: "Jump to latest" })).toHaveClass(
+      "select-none",
+    );
+  });
+
   it("preserves explicit child icon class size on icon-only buttons", () => {
     render(
       <Button size="icon-sm" aria-label="Jump to latest">

@@ -61,6 +61,10 @@ export interface TranscriptVirtualEngine {
     align?: TranscriptScrollAlign,
   ): TranscriptScrollToRowResult;
   scrollToEnd?(options?: { behavior?: ScrollBehavior }): void;
+  // Suspend/resume DOM scrollTop writes (used to stop fighting browser-owned
+  // auto-scroll during a drag-select). When suspended the engine still computes
+  // ranges/anchors; it just does not assert scrollTop on the scroll element.
+  setScrollWritesSuspended?(suspended: boolean): void;
   getRange(): TranscriptVirtualRangeSnapshot;
   getState(): TranscriptVirtualControllerState;
   getDiagnostics(): TranscriptVirtualDiagnostics;

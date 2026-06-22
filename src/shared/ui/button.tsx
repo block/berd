@@ -49,7 +49,7 @@ const buttonVariants = cva(
         "composer-action":
           "bg-surface-composer-action text-foreground shadow-none hover:bg-surface-composer-action-hover hover:text-foreground active:bg-surface-composer-action-active active:text-foreground data-[state=open]:bg-surface-composer-action-hover data-[state=open]:text-foreground aria-expanded:bg-surface-composer-action-hover aria-expanded:text-foreground",
         "jump-to-latest":
-          "bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] hover:opacity-90",
+          "select-none bg-surface-chat-responding-pill-bg text-surface-chat-responding-pill-fg shadow-[var(--shadow-chat)] hover:opacity-90",
         "page-header":
           "bg-background text-muted-foreground shadow-none hover:bg-background hover:text-foreground focus-visible:text-foreground active:text-foreground",
         back: "justify-start text-muted-foreground hover:text-foreground",

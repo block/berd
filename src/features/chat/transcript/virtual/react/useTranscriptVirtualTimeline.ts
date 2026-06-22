@@ -40,6 +40,43 @@ import {
   type TranscriptMeasurementSchedulerDiagnostics,
 } from "../measurement";
 
+function hasNonCollapsedTranscriptSelection(container: HTMLElement): boolean {
+  const selection = container.ownerDocument.getSelection();
+  if (!selection || selection.rangeCount === 0 || selection.isCollapsed) {
+    return false;
+  }
+  const { anchorNode, focusNode } = selection;
+  return Boolean(
+    (anchorNode && container.contains(anchorNode)) ||
+      (focusNode && container.contains(focusNode)),
+  );
+}
+
+// Row roots carry this attribute (set by useTranscriptRowStateBinding in
+// transcriptRowStateContext.tsx), so a selection endpoint node can be mapped
+// back to the row that owns it.
+const VIRTUAL_ROW_STATE_ROW_ID_ATTRIBUTE = "data-virtual-row-state-row-id";
+
+// Resolve the transcript row that owns a selection endpoint node. Returns null
+// when the node is outside the transcript container or is not inside any row
+// (e.g. padding/spacers), so the caller can leave such an endpoint unpinned.
+function resolveSelectionEndpointRowId(
+  node: Node | null,
+  container: HTMLElement,
+): string | null {
+  if (!node || !container.contains(node)) {
+    return null;
+  }
+  const element =
+    node.nodeType === Node.ELEMENT_NODE
+      ? (node as Element)
+      : node.parentElement;
+  const rowElement = element?.closest(
+    `[${VIRTUAL_ROW_STATE_ROW_ID_ATTRIBUTE}]`,
+  );
+  return rowElement?.getAttribute(VIRTUAL_ROW_STATE_ROW_ID_ATTRIBUTE) ?? null;
+}
+
 export type TranscriptVirtualTimelineMode =
   | "bounded-controller"
   | "safe-degraded";
@@ -153,6 +190,15 @@ interface SyncViewportOptions {
   preserveScrollPosition?: boolean;
 }
 
+interface DeferredTranscriptCorrection {
+  correction: TranscriptScrollCorrection;
+  source: string;
+}
+
+interface QueueCachedMeasurementsOptions {
+  preserveLiveViewport?: boolean;
+}
+
 const SUPPORTED_ROW_KINDS = new Set<TranscriptRowDescriptor["kind"]>([
   "assistant-content-fragment",
   "date-separator",
@@ -258,7 +304,9 @@ export function useTranscriptVirtualTimeline({
   // here instead of being written to the DOM, then applied after the snapshot
   // commits so scrollTop and row layout change in the same paint.
   const deferDomCorrectionsRef = useRef(false);
-  const deferredCorrectionRef = useRef<TranscriptScrollCorrection | null>(null);
+  const deferredCorrectionRef = useRef<DeferredTranscriptCorrection | null>(
+    null,
+  );
   const pendingVisibleMeasurementElementsRef = useRef(
     new Map<string, HTMLElement>(),
   );
@@ -275,6 +323,73 @@ export function useTranscriptVirtualTimeline({
     new Map<string, HTMLElement>(),
   );
 
+  // Selection-endpoint pinning. While a non-collapsed selection is active inside
+  // the transcript, the rows that own its anchor/focus endpoints are forced into
+  // the protected set so virtualization never unmounts them mid-drag — unmounting
+  // an in-use endpoint is what corrupts the live Range (the browser collapses it
+  // onto whatever DOM survives), making the highlight shrink and jump. The two
+  // endpoints are tracked separately so a row that stays mounted keeps its pin
+  // even across a frame where the other end momentarily fails to resolve, and
+  // the combined list lets the selectionchange listener re-commit only when the
+  // pinned set actually changes.
+  const selectionAnchorRowIdRef = useRef<string | undefined>(undefined);
+  const selectionFocusRowIdRef = useRef<string | undefined>(undefined);
+  const selectionPinnedRowIdsRef = useRef<readonly string[]>(
+    EMPTY_PROTECTED_ROW_IDS,
+  );
+
+  // Secondary selection guards. Pinning the endpoints (above) keeps the in-use
+  // Range mounted, but scrollTop writes can still move the viewport under a live
+  // drag, so while a drag-select gesture is in progress all three writers are
+  // frozen:
+  //   1. The measurement-flush path (see flushPendingMeasurements): committing
+  //      still-settling row heights mid-drag changes content height above the
+  //      viewport, the browser clamps scrollTop, and the engine fires a
+  //      follow-up correction.
+  //   2. The engine's own scrollTop writes (TanStack adapter): every viewport
+  //      sync re-anchors by writing the scroll element, and a synchronous burst
+  //      of those compounds and walks the viewport. Frozen via the engine's
+  //      setScrollWritesSuspended.
+  //   3. The hook's direct correction write (see applyCorrection): dropped while
+  //      the gesture is active so it cannot move the viewport once the engine's
+  //      own write is suspended.
+  // dragSelectActive gates those writes for a real drag-select. It is keyed on
+  // the drag *gesture*, NOT on the instantaneous non-collapsed selection state,
+  // because native auto-scroll momentarily collapses the Range mid-drag (an
+  // endpoint row unmounts and the browser recomputes it).
+  // dragSelectActive latches on when a non-collapsed in-transcript selection
+  // appears while the pointer is down and only clears on pointer release
+  // (endDragSelect), so a transient collapse no longer lifts the freeze.
+  //
+  // selectionClearActive covers a plain click that clears an already-held
+  // transcript selection while the pointer is down, before dragSelectActive can
+  // latch. Freeze it only for the pointerdown->pointerup clear gesture; a held
+  // selection after release still lets streaming measurements settle.
+  //
+  // selectionActive still tracks the non-collapsed selection — it drives endpoint
+  // pinning, which must persist for any held Range, even after release.
+  // measurementFlushDeferred records that a flush is owed; endDragSelect resumes
+  // engine writes and reconciles once on release (through
+  // runDeferredMeasurementFlush, a ref because the listener is declared above
+  // scheduleMeasurementFlush, or a direct commit when no flush was deferred — a
+  // still-held selection doesn't change the pinned set, so no pin-commit fires).
+  const selectionActiveRef = useRef(false);
+  const measurementFlushDeferredRef = useRef(false);
+  const runDeferredMeasurementFlushRef = useRef<(() => void) | null>(null);
+  // Drag-select gesture tracking. dragSelectPointerDown is true between a
+  // pointerdown inside the transcript and the matching pointerup/pointercancel;
+  // dragSelectActive latches on when a non-collapsed in-transcript selection is
+  // observed during that window and gates the three writers above. Tying the
+  // freeze to the gesture (not the live collapsed state) is what survives a
+  // transient mid-drag collapse; see the block comment above.
+  const dragSelectPointerDownRef = useRef(false);
+  const dragSelectActiveRef = useRef(false);
+  const selectionClearActiveRef = useRef(false);
+  const isSelectionScrollFreezeActive = useCallback(
+    () => dragSelectActiveRef.current || selectionClearActiveRef.current,
+    [],
+  );
+
   rowsRef.current = rows;
   normalizedProtectedRowIdsRef.current = normalizedProtectedRowIds;
 
@@ -286,6 +401,7 @@ export function useTranscriptVirtualTimeline({
       container,
       footerHeight,
       protectedRowIds: normalizedProtectedRowIds,
+      scrollWritesSuspended: isSelectionScrollFreezeActive(),
     });
     controller.setRows(rows);
     controllerRef.current = controller;
@@ -318,13 +434,25 @@ export function useTranscriptVirtualTimeline({
   snapshotRef.current = snapshot;
 
   const applyCorrection = useCallback(
-    (correction: TranscriptScrollCorrection | null | undefined) => {
+    (
+      correction: TranscriptScrollCorrection | null | undefined,
+      source = "unknown",
+    ) => {
       if (!correction) {
         return;
       }
 
+      // While a text-selection pointer gesture is in progress, the browser owns
+      // the viewport: drag auto-scroll should extend the selection, and a click
+      // that clears an existing selection should not be moved by row-anchor
+      // reconciliation before pointerup. This pairs with suspending the engine's
+      // own scrollTop writes; the reconcile happens once on pointer release.
+      if (isSelectionScrollFreezeActive()) {
+        return;
+      }
+
       if (deferDomCorrectionsRef.current) {
-        deferredCorrectionRef.current = correction;
+        deferredCorrectionRef.current = { correction, source };
         return;
       }
 
@@ -345,7 +473,7 @@ export function useTranscriptVirtualTimeline({
         container.scrollTop = syncResult.correction.nextScrollTop;
       }
     },
-    [containerRef, footerHeight],
+    [containerRef, footerHeight, isSelectionScrollFreezeActive],
   );
 
   const invalidateWidthScopedMeasurementReplay = useCallback(() => {
@@ -402,7 +530,10 @@ export function useTranscriptVirtualTimeline({
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
       }
-      applyCorrection(viewportResult.correction);
+      applyCorrection(
+        viewportResult.correction,
+        "sync-controller-from-live-viewport",
+      );
     },
     [
       applyCorrection,
@@ -440,7 +571,7 @@ export function useTranscriptVirtualTimeline({
           };
         }
         for (const correction of result.corrections) {
-          applyCorrection(correction);
+          applyCorrection(correction, "measurement-batch");
         }
 
         aggregateResult = aggregateResult
@@ -468,7 +599,10 @@ export function useTranscriptVirtualTimeline({
   );
 
   const queueCachedMeasurementsForController = useCallback(
-    (controller: TranscriptVirtualEngine) => {
+    (
+      controller: TranscriptVirtualEngine,
+      options: QueueCachedMeasurementsOptions = {},
+    ) => {
       const scheduler = syncMeasurementScheduler(controller);
       if (!scheduler) {
         return false;
@@ -511,11 +645,57 @@ export function useTranscriptVirtualTimeline({
       }
 
       if (queued) {
-        flushMeasurementBatch(controller);
+        if (options.preserveLiveViewport) {
+          // Controller rebuilds start from estimates; cached replay is an
+          // internal warm-up, so recapture the browser's live viewport instead
+          // of replaying estimate-based row-anchor corrections into the DOM.
+          const wasDeferringCorrections = deferDomCorrectionsRef.current;
+          const previousDeferredCorrection = deferredCorrectionRef.current;
+
+          deferDomCorrectionsRef.current = true;
+          deferredCorrectionRef.current = null;
+          controller.setScrollWritesSuspended?.(true);
+          try {
+            flushMeasurementBatch(controller);
+          } finally {
+            deferDomCorrectionsRef.current = wasDeferringCorrections;
+            deferredCorrectionRef.current = previousDeferredCorrection;
+            controller.setScrollWritesSuspended?.(
+              isSelectionScrollFreezeActive(),
+            );
+          }
+
+          const previousWidthScope = controller.getState().widthScope;
+          const viewportResult = controller.syncViewport(
+            readViewportGeometry(containerRef.current, footerHeight),
+            {
+              source: "browser",
+              userScrollIntent: true,
+              preserveScrollPosition: true,
+            },
+          );
+          if (controller.getState().widthScope !== previousWidthScope) {
+            invalidateWidthScopedMeasurementReplay();
+          }
+          applyCorrection(
+            viewportResult.correction,
+            "cached-measurement-replay-live-viewport",
+          );
+        } else {
+          flushMeasurementBatch(controller);
+        }
       }
       return queued;
     },
-    [flushMeasurementBatch, syncMeasurementScheduler],
+    [
+      applyCorrection,
+      containerRef,
+      flushMeasurementBatch,
+      footerHeight,
+      invalidateWidthScopedMeasurementReplay,
+      isSelectionScrollFreezeActive,
+      syncMeasurementScheduler,
+    ],
   );
 
   const commitSnapshot = useCallback(() => {
@@ -545,6 +725,7 @@ export function useTranscriptVirtualTimeline({
     const protectedRowIds = normalizeProtectedRowIds(rowsRef.current, [
       ...normalizedProtectedRowIdsRef.current,
       ...(nextSnapshot.keepAliveDecision?.protectedRowIds ?? []),
+      ...selectionPinnedRowIdsRef.current,
     ]);
     const nextProtectedRowKey = protectedRowIds.join("\u0000");
     if (nextProtectedRowKey !== protectedRowKeyRef.current) {
@@ -556,6 +737,7 @@ export function useTranscriptVirtualTimeline({
         footerHeight: state.footerHeight,
         protectedRowIds,
         state,
+        scrollWritesSuspended: isSelectionScrollFreezeActive(),
       });
       controllerRef.current = replacement;
       controllerScrollElementRef.current = containerRef.current;
@@ -592,13 +774,15 @@ export function useTranscriptVirtualTimeline({
           preserveScrollPosition,
         });
       } else {
-        applyCorrection(rowsResult.correction);
+        applyCorrection(rowsResult.correction, "protected-rows-setRows");
       }
       protectedRowKeyRef.current = nextProtectedRowKey;
       cachedMeasurementReplayRef.current = null;
       cachedHeightAppliedByTokenRef.current.clear();
       syncMeasurementScheduler(replacement);
-      queueCachedMeasurementsForController(replacement);
+      queueCachedMeasurementsForController(replacement, {
+        preserveLiveViewport: true,
+      });
       nextSnapshot = buildSnapshot({
         controller: replacement,
         registry,
@@ -621,6 +805,7 @@ export function useTranscriptVirtualTimeline({
     applyCorrection,
     containerRef,
     footerHeight,
+    isSelectionScrollFreezeActive,
     queueCachedMeasurementsForController,
     sessionEpoch,
     sessionId,
@@ -649,7 +834,7 @@ export function useTranscriptVirtualTimeline({
       if (controller.getState().widthScope !== previousWidthScope) {
         invalidateWidthScopedMeasurementReplay();
       }
-      applyCorrection(result.correction);
+      applyCorrection(result.correction, "sync-viewport-from-dom");
       return commitSnapshot();
     },
     [
@@ -679,6 +864,7 @@ export function useTranscriptVirtualTimeline({
         footerHeight,
         protectedRowIds: normalizedProtectedRowIds,
         state: previousState,
+        scrollWritesSuspended: isSelectionScrollFreezeActive(),
       });
       controllerScrollElementRef.current = container;
       measurementSchedulerRef.current = createTranscriptMeasurementScheduler({
@@ -703,6 +889,14 @@ export function useTranscriptVirtualTimeline({
         pendingVisibleMeasurementElementsRef.current.clear();
         pendingOffscreenShellMeasurementElementsRef.current.clear();
         pendingOffscreenRealMeasurementElementsRef.current.clear();
+        selectionAnchorRowIdRef.current = undefined;
+        selectionFocusRowIdRef.current = undefined;
+        selectionPinnedRowIdsRef.current = EMPTY_PROTECTED_ROW_IDS;
+        selectionActiveRef.current = false;
+        dragSelectPointerDownRef.current = false;
+        dragSelectActiveRef.current = false;
+        selectionClearActiveRef.current = false;
+        measurementFlushDeferredRef.current = false;
         if (visibleMeasurementFrameRef.current !== null) {
           cancelAnimationFrame(visibleMeasurementFrameRef.current);
           visibleMeasurementFrameRef.current = null;
@@ -729,8 +923,12 @@ export function useTranscriptVirtualTimeline({
           preserveScrollPosition,
         },
       ).correction,
+      "layout-sync-viewport",
     );
-    applyCorrection(currentController.setRows(rows).correction);
+    applyCorrection(
+      currentController.setRows(rows).correction,
+      "layout-setRows",
+    );
     syncMeasurementScheduler(currentController);
     commitSnapshot();
   }, [
@@ -738,6 +936,7 @@ export function useTranscriptVirtualTimeline({
     commitSnapshot,
     containerRef,
     footerHeight,
+    isSelectionScrollFreezeActive,
     normalizedProtectedRowIds,
     preserveScrollPosition,
     rows,
@@ -753,6 +952,187 @@ export function useTranscriptVirtualTimeline({
     },
     [sessionId],
   );
+
+  // Selection-endpoint pinning (the fix for the drag-select jump). A multi-row
+  // drag-select keeps its anchor in one row and its focus in another; when the
+  // viewport moves under the drag — native auto-scroll, or scroll-height churn
+  // from still-settling measurements — an endpoint row that leaves the render
+  // window unmounts and the browser collapses the live Range onto whatever DOM
+  // survives, so the highlight visibly shrinks and jumps. Resolve the rows that
+  // own the live selection's endpoints and force them into the protected set
+  // (merged in commitSnapshot) so virtualization keeps them mounted; native
+  // auto-scroll then just extends the selection as the browser intends. The
+  // endpoints are captured while still mounted and retained per-endpoint, so a
+  // pinned row stays protected for the life of the selection even after it would
+  // otherwise scroll out of the window. Bound on the document (the only target
+  // that fires selectionchange); the listener reads the live container and refs
+  // each event, so a single binding survives container rebinds.
+  useLayoutEffect(() => {
+    if (typeof document === "undefined") {
+      return;
+    }
+
+    const onSelectionChange = () => {
+      const container = containerRef.current;
+      if (!container) {
+        return;
+      }
+
+      const selection = container.ownerDocument.getSelection();
+      let nextAnchor: string | undefined;
+      let nextFocus: string | undefined;
+      let active = false;
+      if (selection && selection.rangeCount > 0 && !selection.isCollapsed) {
+        const anchorInside = Boolean(
+          selection.anchorNode && container.contains(selection.anchorNode),
+        );
+        const focusInside = Boolean(
+          selection.focusNode && container.contains(selection.focusNode),
+        );
+        // A non-collapsed selection with at least one endpoint inside the
+        // transcript is what both guards key off: its endpoints get pinned, and
+        // the measurement-flush path defers until the selection clears.
+        active = anchorInside || focusInside;
+        // Retain the prior endpoint when it can't be resolved this frame
+        // (transient gap, or a node briefly inside the container but outside any
+        // row): a pinned row stays mounted, so the next event re-resolves it.
+        if (anchorInside) {
+          nextAnchor =
+            resolveSelectionEndpointRowId(selection.anchorNode, container) ??
+            selectionAnchorRowIdRef.current;
+        }
+        if (focusInside) {
+          nextFocus =
+            resolveSelectionEndpointRowId(selection.focusNode, container) ??
+            selectionFocusRowIdRef.current;
+        }
+      }
+
+      selectionAnchorRowIdRef.current = nextAnchor;
+      selectionFocusRowIdRef.current = nextFocus;
+
+      const wasActive = selectionActiveRef.current;
+      selectionActiveRef.current = active;
+
+      // Latch the drag-select gesture: once a non-collapsed in-transcript
+      // selection appears while the pointer is down, the gesture is active and
+      // stays active until pointer release (endDragSelect), even across a
+      // transient mid-drag collapse. Never cleared here.
+      if (active && dragSelectPointerDownRef.current) {
+        dragSelectActiveRef.current = true;
+      }
+      if (wasActive && !active && dragSelectPointerDownRef.current) {
+        selectionClearActiveRef.current = true;
+      }
+
+      // Suspend the engine's own scrollTop writes for the life of the gesture.
+      // This is the load-bearing guard: the TanStack adapter writes scrollTop
+      // directly inside syncViewport, so the hook's applyCorrection write only
+      // ever echoes a position the adapter already reached. Freezing the
+      // adapter's writes stops the re-anchor burst from walking the viewport out
+      // from under the live drag.
+      // Keyed on the latched gesture (not `active`) so a transient mid-drag
+      // collapse keeps writes suspended instead of resuming them and yanking the
+      // viewport; resumed once in endDragSelect on release. Idempotent across the
+      // repeated selectionchange events a drag fires.
+      controllerRef.current?.setScrollWritesSuspended?.(
+        isSelectionScrollFreezeActive(),
+      );
+      // Fallback reconcile: if an in-transcript selection clears while NO drag
+      // gesture is active (a keyboard/programmatic selection, or a pointer
+      // release we somehow missed), run any owed measurement flush now so the
+      // settled heights commit in one pass and re-anchor against the final
+      // position. During an active drag this is intentionally skipped — the flush
+      // stays deferred until pointer release (endDragSelect), so a transient
+      // mid-drag collapse can't reconcile and jump the viewport.
+      if (
+        wasActive &&
+        !active &&
+        !isSelectionScrollFreezeActive() &&
+        measurementFlushDeferredRef.current
+      ) {
+        measurementFlushDeferredRef.current = false;
+        measurementFlushScheduledRef.current = false;
+        runDeferredMeasurementFlushRef.current?.();
+      }
+
+      const nextPinned =
+        nextAnchor === undefined && nextFocus === undefined
+          ? EMPTY_PROTECTED_ROW_IDS
+          : Array.from(
+              new Set(
+                [nextAnchor, nextFocus].filter(
+                  (rowId): rowId is string => rowId !== undefined,
+                ),
+              ),
+            );
+      const pinnedChanged = !areStringArraysEqual(
+        nextPinned,
+        selectionPinnedRowIdsRef.current,
+      );
+
+      if (pinnedChanged) {
+        selectionPinnedRowIdsRef.current = nextPinned;
+        commitSnapshot();
+      }
+    };
+
+    // Drag-select gesture boundary. A drag-select always begins with a
+    // pointerdown inside the transcript; gating on the container avoids arming
+    // the freeze for unrelated page drags.
+    const onPointerDown = (event: Event) => {
+      const container = containerRef.current;
+      const target = event.target;
+      if (container && target instanceof Node && container.contains(target)) {
+        dragSelectPointerDownRef.current = true;
+        if (hasNonCollapsedTranscriptSelection(container)) {
+          selectionClearActiveRef.current = true;
+          controllerRef.current?.setScrollWritesSuspended?.(true);
+        }
+      }
+    };
+
+    // Pointer release or a window-level cancel ends the gesture (pointer release
+    // is bound on the document, not the container — auto-scroll can carry the
+    // release outside). Resume the engine's scroll writes and reconcile once
+    // against the final viewport: the single correction after the freeze. If a
+    // measurement flush was deferred during the drag, re-running it commits the
+    // settled heights and its viewport sync re-anchors; otherwise commit a
+    // snapshot directly, since a still-held selection doesn't change the pinned
+    // set (no pin-commit fires here).
+    const endDragSelect = () => {
+      const wasScrollFreezeActive = isSelectionScrollFreezeActive();
+      dragSelectPointerDownRef.current = false;
+      if (!wasScrollFreezeActive) {
+        return;
+      }
+      dragSelectActiveRef.current = false;
+      selectionClearActiveRef.current = false;
+      controllerRef.current?.setScrollWritesSuspended?.(false);
+      if (measurementFlushDeferredRef.current) {
+        measurementFlushDeferredRef.current = false;
+        measurementFlushScheduledRef.current = false;
+        runDeferredMeasurementFlushRef.current?.();
+      } else {
+        commitSnapshot();
+      }
+    };
+
+    const doc = containerRef.current?.ownerDocument ?? document;
+    const win = doc.defaultView;
+    doc.addEventListener("selectionchange", onSelectionChange);
+    doc.addEventListener("pointerdown", onPointerDown);
+    doc.addEventListener("pointerup", endDragSelect);
+    doc.addEventListener("pointercancel", endDragSelect);
+    win?.addEventListener("blur", endDragSelect);
+    return () => {
+      doc.removeEventListener("selectionchange", onSelectionChange);
+      doc.removeEventListener("pointerdown", onPointerDown);
+      doc.removeEventListener("pointerup", endDragSelect);
+      doc.removeEventListener("pointercancel", endDragSelect);
+      win?.removeEventListener("blur", endDragSelect);
+    };
+  }, [commitSnapshot, containerRef, isSelectionScrollFreezeActive]);
 
   const flushPendingMeasurementsInner = useCallback(() => {
     measurementFlushScheduledRef.current = false;
@@ -1009,6 +1389,20 @@ export function useTranscriptVirtualTimeline({
   }, [commitSnapshot, flushMeasurementBatch, syncMeasurementScheduler]);
 
   const flushPendingMeasurements = useCallback(() => {
+    const takeDeferredCorrection = (): DeferredTranscriptCorrection | null => {
+      const deferredCorrection = deferredCorrectionRef.current;
+      deferredCorrectionRef.current = null;
+      return deferredCorrection;
+    };
+    // While a text-selection pointer gesture is frozen, defer the measurement
+    // commit so settling row heights cannot move the viewport under the gesture.
+    // The pending elements stay queued, and the flush re-runs on pointer release.
+    if (isSelectionScrollFreezeActive()) {
+      measurementFlushDeferredRef.current = true;
+      measurementFlushScheduledRef.current = true;
+      return;
+    }
+
     // Measurement-driven scroll corrections must hit the DOM in the same
     // paint as the re-rendered row positions. Defer the scrollTop writes
     // while the controller updates run, commit the snapshot synchronously,
@@ -1023,12 +1417,18 @@ export function useTranscriptVirtualTimeline({
       deferDomCorrectionsRef.current = false;
     }
 
-    const deferredCorrection = deferredCorrectionRef.current;
-    deferredCorrectionRef.current = null;
+    const deferredCorrection = takeDeferredCorrection();
     if (deferredCorrection) {
-      applyCorrection(deferredCorrection);
+      applyCorrection(
+        deferredCorrection.correction,
+        `${deferredCorrection.source}:deferred`,
+      );
     }
-  }, [applyCorrection, flushPendingMeasurementsInner]);
+  }, [
+    applyCorrection,
+    flushPendingMeasurementsInner,
+    isSelectionScrollFreezeActive,
+  ]);
 
   const scheduleMeasurementFlush = useCallback(() => {
     if (measurementFlushScheduledRef.current) {
@@ -1040,6 +1440,11 @@ export function useTranscriptVirtualTimeline({
       flushPendingMeasurements,
     );
   }, [flushPendingMeasurements]);
+
+  // Expose scheduleMeasurementFlush to the selectionchange listener (declared
+  // above it) so a flush deferred during a selection can be re-armed once the
+  // selection clears. Assigned during render like rowsRef above; idempotent.
+  runDeferredMeasurementFlushRef.current = scheduleMeasurementFlush;
 
   const measureRowElement = useCallback(
     (rowId: string, element: HTMLElement | null) => {
@@ -1125,7 +1530,7 @@ export function useTranscriptVirtualTimeline({
       }
 
       const result = controller.scrollToRow(rowId, align);
-      applyCorrection(result.correction);
+      applyCorrection(result.correction, "scroll-to-row");
       commitSnapshot();
       return result.found;
     },
@@ -1182,7 +1587,7 @@ export function useTranscriptVirtualTimeline({
         },
         { source: "browser" },
       );
-      applyCorrection(result.correction);
+      applyCorrection(result.correction, "scroll-to-bottom-sync");
       commitSnapshot();
       return true;
     },
@@ -1416,6 +1821,7 @@ function createController({
   footerHeight,
   protectedRowIds,
   state,
+  scrollWritesSuspended,
 }: {
   sessionId: string;
   sessionEpoch: number;
@@ -1423,6 +1829,7 @@ function createController({
   footerHeight: number;
   protectedRowIds: readonly string[];
   state?: TranscriptVirtualControllerState;
+  scrollWritesSuspended?: boolean;
 }) {
   return createTranscriptTanStackVirtualAdapter(
     {
@@ -1443,6 +1850,10 @@ function createController({
       overscanAfterPx: TANSTACK_UI_OVERSCAN_AFTER_PX,
       scrollElement: container,
       viewportWidth: container?.clientWidth,
+      // A controller rebuilt mid-drag (e.g. the endpoint-pin set changing) must
+      // start with scroll writes already suspended so its constructor sync and
+      // first viewport reconcile don't snap the browser-owned drag scroll.
+      scrollWritesSuspended,
     },
   );
 }
