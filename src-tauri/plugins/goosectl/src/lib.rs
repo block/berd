@@ -21,16 +21,18 @@ pub use discovery::{discovery_file_path, owner_pid_from_discovery_file_name, DIS
 
 #[cfg(feature = "server")]
 mod plugin {
-    use crate::bridge::{Bridge, BridgeResult};
+    use crate::bridge::{Bridge, BridgeError, BridgeRequest, BridgeResult};
     use crate::discovery;
     use crate::server::{
         self, BridgeDispatcher, ServerContext, ServerHandle, TimeoutStore, IN_FLIGHT_LIMIT,
     };
     use serde::Serialize;
     use std::collections::HashMap;
+    use std::fmt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
     use tauri::plugin::TauriPlugin;
     use tauri::{AppHandle, Manager, RunEvent, Runtime, State};
 
@@ -38,6 +40,31 @@ mod plugin {
     pub struct StartedEndpoint {
         pub port: u16,
     }
+
+    #[derive(Debug, PartialEq, Eq)]
+    pub enum AppCommandDispatchError {
+        PluginNotInitialized,
+        BridgeUnavailable,
+        RendererDropped,
+        Timeout,
+        Command { code: String, message: String },
+    }
+
+    impl fmt::Display for AppCommandDispatchError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                Self::PluginNotInitialized => write!(f, "goosectl plugin is not initialized"),
+                Self::BridgeUnavailable => write!(f, "app window unavailable"),
+                Self::RendererDropped => write!(f, "renderer dropped goosectl command"),
+                Self::Timeout => write!(f, "renderer timed out handling goosectl command"),
+                Self::Command { code, message } => {
+                    write!(f, "goosectl command failed ({code}): {message}")
+                }
+            }
+        }
+    }
+
+    impl std::error::Error for AppCommandDispatchError {}
 
     pub struct GoosectlState {
         bridge: Arc<Bridge>,
@@ -65,6 +92,47 @@ mod plugin {
             if let Some(path) = self.discovery_file.lock().unwrap().take() {
                 discovery::remove_discovery_file(&path);
             }
+        }
+    }
+
+    /// Dispatch an app command through the same renderer registry that backs
+    /// the goosectl CLI, without going through the loopback HTTP broker.
+    pub async fn dispatch_app_command<R: Runtime>(
+        app: AppHandle<R>,
+        command: String,
+        args: serde_json::Value,
+        timeout_override: Option<Duration>,
+    ) -> Result<serde_json::Value, AppCommandDispatchError> {
+        let Some(state) = app.try_state::<GoosectlState>() else {
+            return Err(AppCommandDispatchError::PluginNotInitialized);
+        };
+        let timeout = state
+            .timeouts
+            .command_timeout(&command, timeout_override.map(|t| t.as_millis() as u64));
+        let req = BridgeRequest {
+            id: uuid::Uuid::new_v4().to_string(),
+            command,
+            args,
+            timeout_ms: timeout.as_millis() as u64,
+        };
+        resolve_dispatch_result(state.bridge.dispatch(&app, req, timeout).await)
+    }
+
+    fn resolve_dispatch_result(
+        result: Result<BridgeResult, BridgeError>,
+    ) -> Result<serde_json::Value, AppCommandDispatchError> {
+        match result {
+            Ok(result) if result.ok => Ok(result.data.unwrap_or(serde_json::Value::Null)),
+            Ok(result) => {
+                let (code, message) = result
+                    .error
+                    .map(|err| (err.code, err.message))
+                    .unwrap_or_else(|| ("error".to_string(), "Command failed".to_string()));
+                Err(AppCommandDispatchError::Command { code, message })
+            }
+            Err(BridgeError::Emit(_)) => Err(AppCommandDispatchError::BridgeUnavailable),
+            Err(BridgeError::RendererDropped) => Err(AppCommandDispatchError::RendererDropped),
+            Err(BridgeError::Timeout) => Err(AppCommandDispatchError::Timeout),
         }
     }
 
@@ -170,7 +238,83 @@ mod plugin {
             })
             .build()
     }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use crate::bridge::BridgeErrorBody;
+        use serde_json::json;
+
+        fn ok_result(data: Option<serde_json::Value>) -> BridgeResult {
+            BridgeResult {
+                id: "request-id".to_string(),
+                ok: true,
+                data,
+                error: None,
+            }
+        }
+
+        fn error_result(error: Option<BridgeErrorBody>) -> BridgeResult {
+            BridgeResult {
+                id: "request-id".to_string(),
+                ok: false,
+                data: None,
+                error,
+            }
+        }
+
+        #[test]
+        fn resolves_successful_dispatch_result_data() {
+            assert_eq!(
+                resolve_dispatch_result(Ok(ok_result(Some(json!({ "ok": true }))))),
+                Ok(json!({ "ok": true }))
+            );
+            assert_eq!(
+                resolve_dispatch_result(Ok(ok_result(None))),
+                Ok(serde_json::Value::Null)
+            );
+        }
+
+        #[test]
+        fn maps_command_dispatch_errors() {
+            assert_eq!(
+                resolve_dispatch_result(Ok(error_result(Some(BridgeErrorBody {
+                    code: "session_not_found".to_string(),
+                    message: "No session".to_string(),
+                })))),
+                Err(AppCommandDispatchError::Command {
+                    code: "session_not_found".to_string(),
+                    message: "No session".to_string(),
+                })
+            );
+            assert_eq!(
+                resolve_dispatch_result(Ok(error_result(None))),
+                Err(AppCommandDispatchError::Command {
+                    code: "error".to_string(),
+                    message: "Command failed".to_string(),
+                })
+            );
+            assert_eq!(
+                resolve_dispatch_result(Err(BridgeError::RendererDropped)),
+                Err(AppCommandDispatchError::RendererDropped)
+            );
+            assert_eq!(
+                resolve_dispatch_result(Err(BridgeError::Timeout)),
+                Err(AppCommandDispatchError::Timeout)
+            );
+        }
+
+        #[test]
+        fn maps_emit_failure_to_bridge_unavailable() {
+            assert_eq!(
+                resolve_dispatch_result(Err(BridgeError::Emit(tauri::Error::Io(
+                    std::io::Error::other("emit failed"),
+                )))),
+                Err(AppCommandDispatchError::BridgeUnavailable)
+            );
+        }
+    }
 }
 
 #[cfg(feature = "server")]
-pub use plugin::init;
+pub use plugin::{dispatch_app_command, init, AppCommandDispatchError};

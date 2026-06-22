@@ -24,6 +24,7 @@ dependencies = [
  "objc2-app-kit",
  "objc2-foundation",
  "objc2-user-notifications",
+ "percent-encoding",
  "plist",
  "portable-pty",
  "reqwest",
@@ -49,6 +50,7 @@ dependencies = [
  "tauri-plugin-window-state",
  "tempfile",
  "tokio",
+ "url",
  "uuid",
  "zip 2.4.2",
 ]

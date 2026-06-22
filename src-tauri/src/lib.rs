@@ -1,4 +1,5 @@
 mod commands;
+mod deep_links;
 mod services;
 mod types;
 
@@ -14,7 +15,6 @@ use tauri::menu::{AboutMetadataBuilder, MenuBuilder, SubmenuBuilder};
 use tauri::{Manager, RunEvent};
 #[cfg(target_os = "macos")]
 use tauri::{WebviewWindow, WindowEvent};
-use tauri_plugin_deep_link::DeepLinkExt;
 use tauri_plugin_window_state::StateFlags;
 
 #[cfg(target_os = "macos")]
@@ -141,15 +141,7 @@ pub fn run() {
                 }
             }
 
-            let deep_link_app = app.handle().clone();
-            app.deep_link().on_open_url(move |event| {
-                for url in event.urls() {
-                    log::info!("Received deep link: {url}");
-                }
-                if let Some(window) = deep_link_app.get_webview_window("main") {
-                    let _ = window.set_focus();
-                }
-            });
+            deep_links::install(app);
 
             // Register the updater plugin only when a signing public key is
             // configured (i.e. release builds that include tauri.release.conf.json).

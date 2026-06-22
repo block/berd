@@ -94,6 +94,10 @@ impl TimeoutStore {
     pub fn timeout_for(&self, command: &str) -> Option<Duration> {
         self.timeouts.read().unwrap().get(command).copied()
     }
+
+    pub fn command_timeout(&self, command: &str, request_timeout_ms: Option<u64>) -> Duration {
+        command_timeout(request_timeout_ms, self.timeout_for(command))
+    }
 }
 
 pub struct ServerContext<D> {
