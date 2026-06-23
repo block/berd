@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import {
@@ -62,25 +62,6 @@ function isSamePath(
 
 function includesSearch(value: string | null | undefined, query: string) {
   return Boolean(value?.toLowerCase().includes(query));
-}
-
-function IconWithActiveDot({
-  active,
-  children,
-  className,
-}: {
-  active: boolean;
-  children: ReactNode;
-  className?: string;
-}) {
-  return (
-    <span className={cn("relative inline-flex size-4 shrink-0", className)}>
-      {children}
-      {active ? (
-        <span className="absolute -bottom-0.5 -right-0.5 size-1.5 rounded-full bg-success ring-1 ring-background" />
-      ) : null}
-    </span>
-  );
 }
 
 export function WorkingContextPicker({
@@ -289,12 +270,12 @@ export function WorkingContextPicker({
   const pickerRowClassName = cn(
     "group flex w-full items-start gap-3 rounded-xs px-2 py-2.5 text-left",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none",
+    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none aria-[current=true]:bg-sidebar-accent aria-[current=true]:text-sidebar-foreground",
   );
   const branchRowClassName = cn(
     "group flex w-full items-center gap-3 rounded-xs px-2 py-2.5 text-left",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
-    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none",
+    "hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-foreground focus-visible:outline-none aria-[current=true]:bg-sidebar-accent aria-[current=true]:text-sidebar-foreground",
   );
 
   return (
@@ -348,7 +329,7 @@ export function WorkingContextPicker({
 
             <div className="chat-context-dropdown-results">
               <div
-                className="chat-context-dropdown-results-scroll pb-[2px]"
+                className="chat-context-dropdown-results-scroll scrollbar-none pb-[2px]"
                 data-scrolled={worktreeResultsScrolled ? "true" : "false"}
                 onScroll={(event) =>
                   setWorktreeResultsScrolled(event.currentTarget.scrollTop > 0)
@@ -370,12 +351,7 @@ export function WorkingContextPicker({
                             handleWorktreeSelect(worktree.path, worktree.branch)
                           }
                         >
-                          <IconWithActiveDot
-                            active={isCurrentWorktree}
-                            className="mt-0.5"
-                          >
-                            <IconFolder className="size-4 text-foreground" />
-                          </IconWithActiveDot>
+                          <IconFolder className="mt-0.5 size-4 shrink-0 text-foreground" />
                           <div className="min-w-0 flex-1">
                             <span className="block truncate font-normal text-foreground">
                               {worktreeName(worktree.path)}
@@ -458,7 +434,7 @@ export function WorkingContextPicker({
             </div>
             <div className="chat-context-dropdown-results">
               <div
-                className="chat-context-dropdown-results-scroll pb-[2px]"
+                className="chat-context-dropdown-results-scroll scrollbar-none pb-[2px]"
                 data-scrolled={branchResultsScrolled ? "true" : "false"}
                 onScroll={(event) =>
                   setBranchResultsScrolled(event.currentTarget.scrollTop > 0)
@@ -483,6 +459,7 @@ export function WorkingContextPicker({
                           key={branch}
                           type="button"
                           disabled={isDisabled}
+                          aria-current={isCurrentBranch ? "true" : undefined}
                           className={cn(
                             branchRowClassName,
                             "disabled:cursor-default disabled:opacity-100",
@@ -493,9 +470,7 @@ export function WorkingContextPicker({
                             handleBranchSelect(branch, currentPath ?? null)
                           }
                         >
-                          <IconWithActiveDot active={isCurrentBranch}>
-                            <IconGitBranch className="size-4 text-foreground" />
-                          </IconWithActiveDot>
+                          <IconGitBranch className="size-4 shrink-0 text-foreground" />
                           <div className="min-w-0 flex-1">
                             <span className="block truncate text-foreground">
                               {branch}
