@@ -574,11 +574,33 @@ function handleShared(sessionId: string, update: SessionUpdate): void {
     }
 
     case "usage_update": {
-      const usage = update as SessionUpdate & { sessionUpdate: "usage_update" };
+      const usage = update as SessionUpdate & {
+        sessionUpdate: "usage_update";
+        cost?: { amount?: number | null } | null;
+      };
+
+      // The standard ACP usage_update carries cumulative session cost (USD)
+      // in `cost.amount`. Distinguish three cases so we don't drop a
+      // previously-displayed cost when the backend simply omits cost on a
+      // later usage update:
+      //   - `cost` omitted (undefined)        -> preserve existing value
+      //   - explicit `cost: null` / null amount -> clear (no pricing)
+      //   - finite amount                      -> update
+      // Only including `accumulatedCost` in the partial when cost is present
+      // lets the store's preserve-on-`undefined` behavior kick in.
+      let accumulatedCost: number | null | undefined;
+      if (usage.cost === undefined) {
+        accumulatedCost = undefined;
+      } else if (typeof usage.cost?.amount === "number") {
+        accumulatedCost = usage.cost.amount;
+      } else {
+        accumulatedCost = null;
+      }
 
       useChatStore.getState().updateTokenState(sessionId, {
         accumulatedTotal: usage.used,
         contextLimit: usage.size,
+        ...(accumulatedCost !== undefined ? { accumulatedCost } : {}),
       });
       break;
     }

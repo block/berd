@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { Mic, ArrowUp, File, FolderOpen, Settings2, Plus } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useLocaleFormatting } from "@/shared/i18n";
+import { SESSION_COST_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { IconPlayerStopFilled } from "@tabler/icons-react";
 import { cn } from "@/shared/lib/cn";
 import { ContextRing } from "./ContextRing";
@@ -92,6 +94,7 @@ export function ChatInputToolbar({
   const {
     contextTokens = 0,
     contextLimit = 0,
+    accumulatedCost = null,
     isContextUsageReady,
     supportsCompactionControls,
     canCompactContext = false,
@@ -162,6 +165,28 @@ export function ChatInputToolbar({
       compactDisplay: "short",
       maximumFractionDigits: value < 10_000 ? 1 : 0,
     });
+  // Per-session cost display is opt-in (default off). Users enable it from
+  // Settings → Experiments. Gated here so the cost number never shows unless
+  // the user explicitly turned it on.
+  const sessionCostExperiment = useExperiment(SESSION_COST_EXPERIMENT_ID);
+  const showSessionCost = sessionCostExperiment?.enabled ?? false;
+  const hasCost =
+    typeof accumulatedCost === "number" && Number.isFinite(accumulatedCost);
+  const formatCurrency = (value: number) =>
+    formatNumber(value, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+  // A nonzero cost that rounds below one cent (e.g. $0.004) would otherwise
+  // render as "$0.00" and read as free. Show it as "<$0.01" so a real cost is
+  // never displayed as zero.
+  const costLabel = !hasCost
+    ? null
+    : (accumulatedCost as number) > 0 && (accumulatedCost as number) < 0.005
+      ? `<${formatCurrency(0.01)}`
+      : formatCurrency(accumulatedCost as number);
 
   const handleCompactContext = () => {
     if (!canCompactContext || isCompactingContext || !onCompactContext) {
@@ -285,13 +310,24 @@ export function ChatInputToolbar({
                         "group rounded-sm bg-transparent text-foreground/80 shadow-none hover:bg-transparent hover:text-foreground data-[state=open]:bg-transparent data-[state=open]:text-foreground",
                         isCompact ? "px-0" : "px-2.5",
                       )}
-                      aria-label={t("toolbar.contextUsage")}
+                      aria-label={
+                        showSessionCost && costLabel
+                          ? t("toolbar.contextUsageWithCost", {
+                              cost: costLabel,
+                            })
+                          : t("toolbar.contextUsage")
+                      }
                     >
                       <ContextRing
                         tokens={contextTokens}
                         limit={contextLimit}
                         size={16}
                       />
+                      {!isCompact && showSessionCost && costLabel ? (
+                        <span className="ml-1.5 text-xs tabular-nums">
+                          {costLabel}
+                        </span>
+                      ) : null}
                     </Button>
                   </PopoverTrigger>
                 </TooltipTrigger>
@@ -325,6 +361,14 @@ export function ChatInputToolbar({
                     </div>
                     <div className="shrink-0">{usedPercentLabel}</div>
                   </div>
+                  {showSessionCost && costLabel ? (
+                    <div className="flex items-center justify-between gap-3 text-xs text-foreground">
+                      <div className="truncate text-muted-foreground">
+                        {t("toolbar.sessionCost")}
+                      </div>
+                      <div className="shrink-0 tabular-nums">{costLabel}</div>
+                    </div>
+                  ) : null}
                   {compactionControlsSupported ? (
                     <div className="flex items-center gap-1 pt-0.5">
                       <Button

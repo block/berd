@@ -16,6 +16,9 @@ export interface TokenState {
   accumulatedOutput: number;
   accumulatedTotal: number;
   contextLimit: number;
+  // Engine-computed estimated session cost in USD (from the ACP usage_update).
+  // Null when the provider/model has no resolvable pricing.
+  accumulatedCost: number | null;
 }
 
 export const INITIAL_TOKEN_STATE: TokenState = {
@@ -26,6 +29,7 @@ export const INITIAL_TOKEN_STATE: TokenState = {
   accumulatedOutput: 0,
   accumulatedTotal: 0,
   contextLimit: 0,
+  accumulatedCost: null,
 };
 
 export interface SessionChatRuntime {

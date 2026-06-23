@@ -1732,4 +1732,46 @@ describe("acpNotificationHandler", () => {
       count: 4,
     });
   });
+
+  describe("usage_update cost handling", () => {
+    const sessionId = "acp-session";
+
+    const sendUsage = (cost: unknown) =>
+      handleSessionNotification({
+        sessionId,
+        update: {
+          sessionUpdate: "usage_update",
+          used: 100,
+          size: 1000,
+          ...(cost === "omit" ? {} : { cost }),
+        },
+      } as never);
+
+    const readCost = () =>
+      useChatStore.getState().sessionStateById[sessionId]?.tokenState
+        ?.accumulatedCost;
+
+    it("updates the accumulated cost when a finite amount is present", async () => {
+      await sendUsage({ amount: 0.42 });
+      expect(readCost()).toBe(0.42);
+    });
+
+    it("preserves the previous cost when cost is omitted on a later update", async () => {
+      await sendUsage({ amount: 0.42 });
+      await sendUsage("omit");
+      expect(readCost()).toBe(0.42);
+    });
+
+    it("clears the cost when an explicit null cost arrives", async () => {
+      await sendUsage({ amount: 0.42 });
+      await sendUsage(null);
+      expect(readCost()).toBeNull();
+    });
+
+    it("clears the cost when the amount is null (no pricing)", async () => {
+      await sendUsage({ amount: 0.42 });
+      await sendUsage({ amount: null });
+      expect(readCost()).toBeNull();
+    });
+  });
 });

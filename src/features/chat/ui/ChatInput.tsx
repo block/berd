@@ -193,6 +193,7 @@ export function ChatInput({
   const {
     contextTokens = 0,
     contextLimit = 0,
+    accumulatedCost = null,
     isContextUsageReady,
     onCompactContext,
     canCompactContext = false,
@@ -1360,6 +1361,7 @@ export function ChatInput({
                 contextUsage={{
                   contextTokens,
                   contextLimit,
+                  accumulatedCost,
                   isContextUsageReady,
                   onCompactContext,
                   canCompactContext,

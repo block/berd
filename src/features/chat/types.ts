@@ -122,6 +122,8 @@ export interface ChatInputContextUsage {
   contextTokens?: number;
   contextLimit?: number;
   isContextUsageReady?: boolean;
+  // Estimated session cost in USD from the engine; null when unavailable.
+  accumulatedCost?: number | null;
   onCompactContext?: () => Promise<unknown> | undefined;
   canCompactContext?: boolean;
   isCompactingContext?: boolean;

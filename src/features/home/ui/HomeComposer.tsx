@@ -78,6 +78,7 @@ export function HomeComposer({
       contextUsage={{
         contextTokens: controller.tokenState.accumulatedTotal,
         contextLimit: controller.tokenState.contextLimit,
+        accumulatedCost: controller.tokenState.accumulatedCost,
         isContextUsageReady: controller.isContextUsageReady,
       }}
     />

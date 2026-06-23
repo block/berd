@@ -26,6 +26,7 @@ const INITIAL_TOKEN_STATE = {
   accumulatedOutput: 0,
   accumulatedTotal: 0,
   contextLimit: 0,
+  accumulatedCost: null,
 };
 let mockTokenState = { ...INITIAL_TOKEN_STATE };
 let capturedQueuedSend:

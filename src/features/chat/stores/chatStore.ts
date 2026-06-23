@@ -909,6 +909,10 @@ const createChatStore: StateCreator<
         current.accumulatedOutput + (partial.outputTokens ?? 0);
       const accumulatedTotal =
         partial.accumulatedTotal ?? accumulatedInput + accumulatedOutput;
+      const accumulatedCost =
+        partial.accumulatedCost !== undefined
+          ? partial.accumulatedCost
+          : current.accumulatedCost;
       return {
         sessionStateById: {
           ...state.sessionStateById,
@@ -923,6 +927,7 @@ const createChatStore: StateCreator<
               accumulatedOutput,
               accumulatedTotal,
               contextLimit: partial.contextLimit ?? current.contextLimit,
+              accumulatedCost,
             },
             hasUsageSnapshot: true,
           },
