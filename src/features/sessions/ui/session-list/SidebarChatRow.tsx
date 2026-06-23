@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type MouseEvent, useEffect, useRef, useState } from "react";
 import {
   Archive,
   ExternalLink,
@@ -14,6 +14,8 @@ import {
   getEditableSessionTitle,
   isSessionTitleUnchanged,
 } from "@/features/chat/lib/sessionTitle";
+import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
+import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
 import {
   focusSessionWindow,
   openSessionWindow,
@@ -22,15 +24,17 @@ import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowS
 import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore";
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
+import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
-  SIDEBAR_CHAT_ROW_PADDING_CLASS,
+  SIDEBAR_CHAT_ROW_DENSITY_CLASSES,
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
   SIDEBAR_ROW_HEIGHT_CLASS,
   SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
   SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+  type SidebarChatRowDensity,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import {
@@ -42,6 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/shared/ui/dropdown-menu";
 import { Input } from "@/shared/ui/input";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import { ActiveChatGooseIndicator } from "@/shared/ui/SessionActivityIndicator";
 import { SidebarUnreadDot } from "./SidebarUnreadDot";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
@@ -74,8 +79,13 @@ interface SidebarChatRowProps {
   selectedSessionIds?: Set<string>;
   className?: string;
   nested?: boolean;
+  density?: SidebarChatRowDensity;
+  flatProjectName?: string;
+  flatProjectIcon?: string | null;
+  flatProjectColor?: string | null;
   /** Project the chat currently lives in, or null when it sits in Recents. */
   currentProjectId?: string | null;
+  onEditProject?: (projectId: string) => void;
   onSelect?: (id: string) => void;
   onSelectionClear?: () => void;
   onSelectionChange?: (id: string, selected: boolean) => void;
@@ -103,7 +113,12 @@ export function SidebarChatRow({
   selectedSessionIds,
   className,
   nested = false,
+  density = "default",
+  flatProjectName,
+  flatProjectIcon,
+  flatProjectColor,
   currentProjectId = null,
+  onEditProject,
   onSelect,
   onSelectionClear,
   onSelectionChange,
@@ -120,8 +135,10 @@ export function SidebarChatRow({
   const { t } = useTranslation(["sidebar", "common"]);
   const { beginSessionDrag, endSessionDrag } = useSidebarChatDrag();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [flatProjectTooltipOpen, setFlatProjectTooltipOpen] = useState(false);
   const [editing, setEditing] = useState(false);
   const [dragging, setDragging] = useState(false);
+  const cancelDeferredEditProjectRef = useRef<(() => void) | null>(null);
   const {
     isPinned: isPinnedToHome,
     isPinning: isPinningToHome,
@@ -143,8 +160,10 @@ export function SidebarChatRow({
   // Only render the subtitle line when there's a real snippet — older or
   // tool-only sessions keep the single-line layout they have today.
   const trimmedSubtitle = subtitle?.trim() ?? "";
-  const hasSubtitle = trimmedSubtitle.length > 0;
-  const rowPaddingClass = nested ? "pl-9" : SIDEBAR_CHAT_ROW_PADDING_CLASS;
+  const hasFlatProjectColumn = flatProjectName != null;
+  const hasSubtitle = trimmedSubtitle.length > 0 && !hasFlatProjectColumn;
+  const densityClasses = SIDEBAR_CHAT_ROW_DENSITY_CLASSES[density];
+  const rowPaddingClass = nested ? "pl-9" : densityClasses.contentPadding;
   const selectionCount = selectedSessionIds?.size ?? 0;
   const shouldApplyToSelection = selected && selectionCount > 1;
   const isOpenInWindow = useSessionWindowStore((s) =>
@@ -161,10 +180,83 @@ export function SidebarChatRow({
     "flex size-4 shrink-0 items-center justify-center",
     hasSubtitle && "mt-0.5 self-start",
   );
+  const flatActivityIndicator = isRunning ? (
+    <span
+      className="flex size-4 shrink-0 items-center justify-center"
+      role="status"
+      aria-label={t("status.chatActive")}
+    >
+      <ActiveChatGooseIndicator size={16} />
+    </span>
+  ) : hasUnread ? (
+    <span
+      className="flex size-4 shrink-0 items-center justify-center"
+      role="status"
+      aria-label={t("status.unreadMessages")}
+    >
+      <SidebarUnreadDot />
+    </span>
+  ) : null;
+  const hasClickableFlatProject =
+    hasFlatProjectColumn && currentProjectId != null && onEditProject != null;
+  const flatProjectGlyph = currentProjectId ? (
+    <ProjectIcon
+      icon={flatProjectIcon}
+      color={flatProjectColor}
+      projectId={currentProjectId}
+      className="size-[18px]"
+      imageClassName="size-[18px] rounded-[4px]"
+    />
+  ) : (
+    <SidebarNavChatsIcon className="size-4" />
+  );
+
+  const handleRowClick = (event: MouseEvent<HTMLButtonElement>) => {
+    if (isMultiSelectModifier(event)) {
+      onSelectionChange?.(id, !selected);
+      return;
+    }
+    if (selectionEnabled) {
+      onSelectionClear?.();
+    }
+    if (isOpenInWindow) {
+      focusExistingWindow();
+      return;
+    }
+    onSelect?.(id);
+  };
+
+  const handleRowDoubleClick = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    startRename();
+  };
+
+  const handleEditFlatProject = (event: MouseEvent<HTMLButtonElement>) => {
+    if (!currentProjectId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.blur();
+    setFlatProjectTooltipOpen(false);
+
+    const projectId = currentProjectId;
+    cancelDeferredEditProjectRef.current?.();
+    cancelDeferredEditProjectRef.current = scheduleAfterNextPaint(() => {
+      cancelDeferredEditProjectRef.current = null;
+      onEditProject?.(projectId);
+    });
+  };
 
   useEffect(() => {
     setDraftTitle(editableTitle);
   }, [editableTitle]);
+
+  useEffect(() => {
+    return () => {
+      cancelDeferredEditProjectRef.current?.();
+      cancelDeferredEditProjectRef.current = null;
+    };
+  }, []);
 
   useEffect(() => {
     if (!editing) return;
@@ -280,89 +372,157 @@ export function SidebarChatRow({
           "bg-sidebar-accent",
         selected && SELECTED_CHAT_ROW_CLASS,
         dragging && "bg-sidebar-accent opacity-40",
+        hasFlatProjectColumn && densityClasses.flatProjectGap,
         className,
       )}
+      data-sidebar-chat-density={density}
     >
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        onClick={(event) => {
-          if (isMultiSelectModifier(event)) {
-            onSelectionChange?.(id, !selected);
-            return;
-          }
-          if (selectionEnabled) {
-            onSelectionClear?.();
-          }
-          if (isOpenInWindow) {
-            focusExistingWindow();
-            return;
-          }
-          onSelect?.(id);
-        }}
-        onDoubleClick={(event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          startRename();
-        }}
-        title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
-        className={cn(
-          "flex-1 min-w-0 justify-start rounded-sm pr-8",
-          hasSubtitle
-            ? "h-auto py-1.5"
-            : cn(SIDEBAR_ROW_HEIGHT_CLASS, SIDEBAR_ROW_VERTICAL_PADDING_CLASS),
-          SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
-          SIDEBAR_NAV_TEXT_CLASS,
-          rowPaddingClass,
-          rowButtonStateClass,
-        )}
-        aria-pressed={selectionEnabled ? selected : undefined}
-      >
-        {isRunning ? (
-          <span
-            className={leadingIconSlotClass}
-            role="status"
-            aria-label={t("status.chatActive")}
+      {hasFlatProjectColumn ? (
+        <>
+          {hasClickableFlatProject ? (
+            <Tooltip
+              open={flatProjectTooltipOpen}
+              onOpenChange={setFlatProjectTooltipOpen}
+            >
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-sidebar-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    densityClasses.flatProjectIconInset,
+                    densityClasses.flatProjectIconColumn,
+                  )}
+                  aria-label={t("actions.editProject", {
+                    name: flatProjectName,
+                  })}
+                  data-sidebar-flat-project-icon
+                  onClick={handleEditFlatProject}
+                >
+                  {flatProjectGlyph}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent side="right">{flatProjectName}</TooltipContent>
+            </Tooltip>
+          ) : (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "flex shrink-0 items-center justify-center rounded-sm text-muted-foreground/70",
+                    densityClasses.flatProjectIconInset,
+                    densityClasses.flatProjectIconColumn,
+                  )}
+                  role="img"
+                  aria-label={flatProjectName}
+                  data-sidebar-flat-project-icon
+                >
+                  {flatProjectGlyph}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="right">{flatProjectName}</TooltipContent>
+            </Tooltip>
+          )}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={handleRowClick}
+            onDoubleClick={handleRowDoubleClick}
+            title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
+            className={cn(
+              "min-w-0 flex-1 justify-start rounded-sm pl-0",
+              densityClasses.menuReserve,
+              flatActivityIndicator ? densityClasses.flatProjectGap : "gap-0",
+              SIDEBAR_ROW_HEIGHT_CLASS,
+              SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+              SIDEBAR_NAV_TEXT_CLASS,
+              rowButtonStateClass,
+            )}
+            aria-pressed={selectionEnabled ? selected : undefined}
           >
-            <ActiveChatGooseIndicator size={16} />
-          </span>
-        ) : hasUnread ? (
-          <span
-            className={leadingIconSlotClass}
-            role="status"
-            aria-label={t("status.unreadMessages")}
-          >
-            <SidebarUnreadDot />
-          </span>
-        ) : (
-          <span className={leadingIconSlotClass} aria-hidden="true">
-            <SidebarChatMenuIcon />
-          </span>
-        )}
-        {hasSubtitle ? (
-          <span className="flex min-w-0 flex-1 flex-col text-left">
-            <span className="truncate leading-snug">{displayTitle}</span>
-            <span className="truncate text-xs leading-snug text-muted-foreground">
-              {trimmedSubtitle}
+            {flatActivityIndicator}
+            <span className="min-w-0 truncate text-left">{displayTitle}</span>
+            {isMultiWindowEnabled && isOpenInWindow ? (
+              <span
+                className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+                role="img"
+                aria-label={openWindowLabel}
+                title={openWindowLabel}
+              >
+                <ExternalLink className="size-3" aria-hidden="true" />
+              </span>
+            ) : null}
+          </Button>
+        </>
+      ) : (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          onClick={handleRowClick}
+          onDoubleClick={handleRowDoubleClick}
+          title={isOpenInWindow ? openWindowLabel : t("actions.renameHint")}
+          className={cn(
+            "flex-1 min-w-0 justify-start rounded-sm",
+            densityClasses.menuReserve,
+            hasSubtitle
+              ? "h-auto py-1.5"
+              : cn(
+                  SIDEBAR_ROW_HEIGHT_CLASS,
+                  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+                ),
+            SIDEBAR_ROW_ICON_TEXT_GAP_CLASS,
+            SIDEBAR_NAV_TEXT_CLASS,
+            rowPaddingClass,
+            rowButtonStateClass,
+          )}
+          aria-pressed={selectionEnabled ? selected : undefined}
+        >
+          {isRunning ? (
+            <span
+              className={leadingIconSlotClass}
+              role="status"
+              aria-label={t("status.chatActive")}
+            >
+              <ActiveChatGooseIndicator size={16} />
             </span>
-          </span>
-        ) : (
-          <span className="flex-1 min-w-0 truncate text-left">
-            {displayTitle}
-          </span>
-        )}
-        {isMultiWindowEnabled && isOpenInWindow ? (
-          <span
-            className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
-            role="img"
-            aria-label={openWindowLabel}
-            title={openWindowLabel}
-          >
-            <ExternalLink className="size-3" aria-hidden="true" />
-          </span>
-        ) : null}
-      </Button>
+          ) : hasUnread ? (
+            <span
+              className={leadingIconSlotClass}
+              role="status"
+              aria-label={t("status.unreadMessages")}
+            >
+              <SidebarUnreadDot />
+            </span>
+          ) : (
+            <span className={leadingIconSlotClass} aria-hidden="true">
+              <SidebarChatMenuIcon />
+            </span>
+          )}
+          {hasSubtitle ? (
+            <span className="flex min-w-0 flex-1 flex-col text-left">
+              <span className="truncate leading-snug">{displayTitle}</span>
+              <span className="truncate text-xs leading-snug text-muted-foreground">
+                {trimmedSubtitle}
+              </span>
+            </span>
+          ) : (
+            <span className="flex-1 min-w-0 truncate text-left">
+              {displayTitle}
+            </span>
+          )}
+          {isMultiWindowEnabled && isOpenInWindow ? (
+            <span
+              className="flex size-4 shrink-0 items-center justify-center text-sidebar-foreground/60"
+              role="img"
+              aria-label={openWindowLabel}
+              title={openWindowLabel}
+            >
+              <ExternalLink className="size-3" aria-hidden="true" />
+            </span>
+          ) : null}
+        </Button>
+      )}
 
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
@@ -373,7 +533,8 @@ export function SidebarChatRow({
             aria-label={t("menu.optionsFor", { label: displayTitle })}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "absolute right-3 size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
+              "absolute size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",
+              densityClasses.menuInset,
               dragging
                 ? "invisible pointer-events-none opacity-0"
                 : menuOpen

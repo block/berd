@@ -143,6 +143,61 @@ export function SidebarNavChatsIcon({
   );
 }
 
+/** Blank sidebar message bubble with a plus mark for starting a chat. */
+export function SidebarNavChatPlusIcon({
+  className,
+  ...props
+}: SidebarNavIconProps) {
+  return (
+    <SidebarNavIcon className={className} {...props}>
+      <path
+        d="M11 10C11 10.2652 10.8946 10.5196 10.7071 10.7071C10.5196 10.8946 10.2652 11 10 11H4L2 13V5C2 4.73478 2.10536 4.48043 2.29289 4.29289C2.48043 4.10536 2.73478 4 3 4H10C10.2652 4 10.5196 4.10536 10.7071 4.29289C10.8946 4.48043 11 4.73478 11 5V10Z"
+        stroke="currentColor"
+        strokeWidth={STROKE_WIDTH}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M9.25 12.25H12.25"
+        stroke="currentColor"
+        strokeWidth={1.15}
+        strokeLinecap="round"
+      />
+      <path
+        d="M10.75 10.75V13.75"
+        stroke="currentColor"
+        strokeWidth={1.15}
+        strokeLinecap="round"
+      />
+    </SidebarNavIcon>
+  );
+}
+
+/** Sidebar project cube with a plus mark for creating a project. */
+export function SidebarNavProjectPlusIcon({
+  className,
+  ...props
+}: SidebarNavIconProps) {
+  return (
+    <SidebarNavIcon className={className} {...props}>
+      <g
+        transform="matrix(0.5 0 0 0.5 0.75 2)"
+        stroke="currentColor"
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M21 12.5v-4.509a1.98 1.98 0 0 0-1-1.717l-7-4.008a2.016 2.016 0 0 0-2 0l-7 4.007c-.619 .355-1 1.01-1 1.718v8.018c0 .709 .381 1.363 1 1.717l7 4.008a2.016 2.016 0 0 0 2 0" />
+        <path d="M12 22v-10" />
+        <path d="M12 12l8.73-5.04" />
+        <path d="M3.27 6.96l8.73 5.04" />
+        <path d="M16 19h6" />
+        <path d="M19 16v6" />
+      </g>
+    </SidebarNavIcon>
+  );
+}
+
 export function SidebarNavSettingsIcon({
   className,
   ...props

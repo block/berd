@@ -43,6 +43,15 @@ import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/menti
 import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { useProfileCapability } from "@/shared/profile/capabilities";
 import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
+import {
+  DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
+  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+} from "@/features/experiments/experimentDefinitions";
+import {
+  setExperimentConfigValue,
+  useExperiment,
+} from "@/features/experiments/experimentPreferences";
 
 interface AboutAppInfo {
   name: string;
@@ -113,6 +122,14 @@ export function GeneralSettings() {
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
+  const sidebarFlatChatListExperiment = useExperiment(
+    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  );
+  const groupChatsByProject = Boolean(
+    sidebarFlatChatListExperiment?.config[
+      SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
+    ] ?? DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
+  );
   const streamingShortcutPreference = useStreamingShortcutPreference();
   const {
     category: atMentionDefaultCategory,
@@ -200,6 +217,17 @@ export function GeneralSettings() {
       toast.error(t("storage.cachedMedia.error"));
     } finally {
       setClearingCache(false);
+    }
+  }
+
+  function handleSidebarChatGroupingChange(enabled: boolean) {
+    const didSave = setExperimentConfigValue(
+      SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+      SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+      enabled,
+    );
+    if (!didSave) {
+      toast.error(t("experiments.saveError"));
     }
   }
 
@@ -384,6 +412,19 @@ export function GeneralSettings() {
             />
           </SettingRow>
         ) : null}
+
+        {sidebarFlatChatListExperiment?.enabled && (
+          <SettingRow
+            label={t("general.groupChatsByProject.label")}
+            description={t("general.groupChatsByProject.description")}
+          >
+            <Switch
+              checked={groupChatsByProject}
+              onCheckedChange={handleSidebarChatGroupingChange}
+              aria-label={t("general.groupChatsByProject.label")}
+            />
+          </SettingRow>
+        )}
 
         <SettingRow
           label={t("shortcuts:settings.label")}

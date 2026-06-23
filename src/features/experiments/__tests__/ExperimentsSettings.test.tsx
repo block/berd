@@ -127,6 +127,20 @@ describe("ExperimentsSettings", () => {
         }),
       ),
     ).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", {
+        name: i18n.t("experiments.sidebarFlatChatList.title", {
+          ns: "settings",
+        }),
+      }),
+    ).not.toBeChecked();
+    expect(
+      screen.getByText(
+        i18n.t("experiments.sidebarFlatChatList.description", {
+          ns: "settings",
+        }),
+      ),
+    ).toBeInTheDocument();
   });
 
   it("points the pane jump shortcut control at keyboard shortcut settings", async () => {

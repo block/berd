@@ -192,6 +192,10 @@
       "description": "Muestra la superficie de tareas y automatizaciones de Builderbot.",
       "title": "Builderbot"
     },
+    "sidebarFlatChatList": {
+      "description": "Muestra el ajuste Agrupar chats por proyecto y permite una lista plana de chats en la barra lateral ordenada por actividad reciente.",
+      "title": "Lista plana de chats en barra lateral"
+    },
     "paneJumpNavigation": {
       "description": "Usa Ctrl+; para saltar entre paneles visibles con letras o h/j/k/l.",
       "shortcutDescription": "Elige el prefijo que abre el modo de navegación de paneles.",
@@ -263,6 +267,10 @@
     "sidebarBranchSubtitles": {
       "description": "Muestra la rama Git actual debajo de los títulos de chat en la barra lateral cuando esté disponible.",
       "label": "Mostrar ramas Git en la lista de chats"
+    },
+    "groupChatsByProject": {
+      "description": "Muestra grupos de proyectos en la barra lateral. Desactiva esto para tener una sola lista de chats ordenada por actividad.",
+      "label": "Agrupar chats por proyecto"
     },
     "terminalFallback": {
       "change": "Cambiar",

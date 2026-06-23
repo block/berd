@@ -32,6 +32,9 @@ export interface SidebarSessionItem {
   subtitle?: string;
   updatedAt: string;
   projectId?: string;
+  projectName?: string;
+  projectIcon?: string | null;
+  projectColor?: string | null;
   isRunning?: boolean;
   hasUnread?: boolean;
 }

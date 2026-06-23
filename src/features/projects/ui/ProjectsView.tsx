@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import {
   MessageSquare,
@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { SearchBar } from "@/shared/ui/SearchBar";
 import { Button, buttonVariants } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -87,6 +88,7 @@ interface ProjectsViewProps {
 export function ProjectsView({ onStartChat }: ProjectsViewProps) {
   const { t } = useTranslation(["projects", "common"]);
   const fetchProjects = useProjectStore((s) => s.fetchProjects);
+  const activeProjectId = useProjectStore((s) => s.activeProjectId);
   const [search, setSearch] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingProject, setEditingProject] = useState<ProjectInfo | undefined>(
@@ -97,6 +99,7 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
   const [deletingProject, setDeletingProject] = useState<ProjectInfo | null>(
     null,
   );
+  const activeProjectRef = useRef<HTMLDivElement | null>(null);
 
   const loadProjects = useCallback(async () => {
     try {
@@ -150,6 +153,14 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
       p.description.toLowerCase().includes(search.toLowerCase()),
   );
 
+  useEffect(() => {
+    if (!activeProjectId || loading) return;
+    activeProjectRef.current?.scrollIntoView?.({
+      block: "center",
+      behavior: "smooth",
+    });
+  }, [activeProjectId, loading]);
+
   return (
     <div className="flex flex-1 flex-col h-full min-h-0">
       <div className="flex-1 overflow-y-auto min-h-0">
@@ -190,7 +201,19 @@ export function ProjectsView({ onStartChat }: ProjectsViewProps) {
               {filtered.map((project) => (
                 <div
                   key={project.id}
-                  className="flex items-start justify-between gap-3 rounded-md border border-border px-4 py-3"
+                  ref={
+                    activeProjectId === project.id
+                      ? activeProjectRef
+                      : undefined
+                  }
+                  data-active-project={
+                    activeProjectId === project.id ? "true" : undefined
+                  }
+                  className={cn(
+                    "flex items-start justify-between gap-3 rounded-md border border-border px-4 py-3",
+                    activeProjectId === project.id &&
+                      "border-sidebar-border bg-sidebar-accent/60 ring-1 ring-inset ring-sidebar-ring",
+                  )}
                 >
                   <div className="min-w-0 flex-1 flex items-start gap-3">
                     <ProjectIcon

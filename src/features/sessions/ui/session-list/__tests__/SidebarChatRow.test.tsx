@@ -158,6 +158,103 @@ describe("SidebarChatRow", () => {
     expect(screen.queryByLabelText(/unread messages/i)).not.toBeInTheDocument();
   });
 
+  it("does not show the idle chat icon in flat project rows", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        flatProjectName="Project One"
+      />,
+    );
+
+    expect(screen.queryByTestId("sidebar-chat-menu-icon")).toBeNull();
+    expect(screen.queryByText("Project One")).not.toBeInTheDocument();
+    expect(screen.getByText("Idle Chat")).toBeInTheDocument();
+    const projectIcon = container.querySelector(
+      "[data-sidebar-flat-project-icon]",
+    );
+    expect(projectIcon?.tagName).toBe("SPAN");
+
+    if (!projectIcon) {
+      throw new Error("Flat project icon was not rendered");
+    }
+    await user.hover(projectIcon);
+    expect(await screen.findAllByText("Project One")).not.toHaveLength(0);
+  });
+
+  it("uses dense flat-row spacing when requested", () => {
+    const { container } = render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        density="dense"
+        flatProjectName="Project One"
+      />,
+    );
+
+    expect(container.querySelector("[data-sidebar-chat-row]")).toHaveAttribute(
+      "data-sidebar-chat-density",
+      "dense",
+    );
+    expect(container.querySelector("[data-sidebar-chat-row]")).toHaveClass(
+      "gap-1.5",
+    );
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass("pr-6");
+    expect(screen.getByLabelText("Project One")).toHaveClass("ml-1", "size-5");
+    expect(
+      screen.getByRole("button", { name: "Options for Idle Chat" }),
+    ).toHaveClass("right-1");
+  });
+
+  it("lets flat-row status take space only when visible", () => {
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Unread Chat"
+        isActive={false}
+        density="dense"
+        flatProjectName="Project One"
+        hasUnread
+      />,
+    );
+
+    expect(screen.getByTitle("Double-click to rename")).toHaveClass("gap-1.5");
+    expect(screen.getByLabelText(/unread messages/i)).toBeInTheDocument();
+  });
+
+  it("opens the flat row project editor without selecting the chat", async () => {
+    const user = userEvent.setup();
+    const onEditProject = vi.fn();
+    const onSelect = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Project Chat"
+        isActive={false}
+        density="dense"
+        flatProjectName="Project One"
+        flatProjectColor="sage"
+        currentProjectId="project-1"
+        onEditProject={onEditProject}
+        onSelect={onSelect}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit Project One" }));
+
+    await waitFor(() =>
+      expect(onEditProject).toHaveBeenCalledWith("project-1"),
+    );
+    expect(onSelect).not.toHaveBeenCalled();
+    expect(
+      document.querySelector('[data-project-color-swatch="project-1"]'),
+    ).toBeInTheDocument();
+  });
+
   it("does not advertise drag with the cursor", () => {
     const { container } = render(
       <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,

@@ -9,10 +9,17 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import {
+  BUILDERBOT_SURFACE_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+} from "@/features/experiments/experimentDefinitions";
+import {
+  setExperimentConfigValue,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import {
   SIDEBAR_CHAT_LIST_MAX_WIDTH_PX,
   SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
@@ -21,6 +28,7 @@ import {
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import { MAX_FLAT_SIDEBAR_CHATS } from "@/features/sidebar/lib/sidebarFlatChats";
 import { NavigationPanesView } from "../NavigationPanesView";
 
 const designSystemExplorer = vi.hoisted(() => ({
@@ -218,6 +226,15 @@ function renderedSessionIds() {
   );
 }
 
+function disableProjectGrouping() {
+  setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
+  setExperimentConfigValue(
+    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+    SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+    false,
+  );
+}
+
 vi.mock("@/features/chat/stores/chatStore", () => ({
   useChatStore: Object.assign(
     (selector: (state: unknown) => unknown) =>
@@ -381,6 +398,10 @@ describe("NavigationPanesView", () => {
 
     expect(screen.getByText("selected-workspace-branch")).toBeInTheDocument();
     expect(mockGetGitState).not.toHaveBeenCalled();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows an empty state when there are no projects or chats", async () => {
@@ -692,6 +713,415 @@ describe("NavigationPanesView", () => {
     expect(screen.getByText("Mismatched Directory Chat")).toBeInTheDocument();
   });
 
+  it("shows a recency-sorted flat chat list when project grouping is disabled", async () => {
+    const user = userEvent.setup();
+    disableProjectGrouping();
+    const longProjectName = "A Very Long Project Name That Needs Truncation";
+    const onCreateProject = vi.fn();
+    const onNewChat = vi.fn();
+    const onEditProject = vi.fn();
+    const onSelectSession = vi.fn();
+    seedSessions(
+      {
+        id: "old-project-chat",
+        title: "Old Project Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "general-chat",
+        title: "General Chat",
+        updatedAt: "2026-04-09T12:02:00.000Z",
+        messageCount: 3,
+      },
+      {
+        id: "new-project-chat",
+        title: "Newest Project Chat",
+        updatedAt: "2026-04-09T12:04:00.000Z",
+        messageCount: 3,
+        projectId: "project-2",
+      },
+    );
+
+    const { container } = renderSidebar({
+      onCreateProject,
+      onNewChat,
+      onEditProject,
+      onSelectSession,
+      projects: [
+        mockProject({ id: "project-1", name: longProjectName }),
+        mockProject({
+          id: "project-2",
+          name: "Project Two",
+          path: "/tmp/project-2",
+          order: 1,
+        }),
+      ],
+    });
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    expect(within(mainNavigation).queryByText("Projects")).toBeNull();
+    await user.click(
+      within(mainNavigation).getByRole("button", { name: "New project" }),
+    );
+    expect(onCreateProject).toHaveBeenCalledOnce();
+    await user.click(
+      within(mainNavigation).getByRole("button", { name: "New chat" }),
+    );
+    expect(onNewChat).toHaveBeenCalledOnce();
+    expect(
+      within(mainNavigation).queryByRole("button", { name: "Show all" }),
+    ).toBeNull();
+    expect(screen.getByText("Newest Project Chat")).toBeInTheDocument();
+    expect(screen.getByText("General Chat")).toBeInTheDocument();
+    expect(screen.getByText("Old Project Chat")).toBeInTheDocument();
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows.map((row) => row.dataset.sessionId)).toEqual([
+      "new-project-chat",
+      "general-chat",
+      "old-project-chat",
+    ]);
+    expect(rows.map((row) => row.dataset.sidebarChatDensity)).toEqual([
+      "dense",
+      "dense",
+      "dense",
+    ]);
+
+    const projectIcons = rows.map((row) =>
+      row.querySelector<HTMLElement>("[data-sidebar-flat-project-icon]"),
+    );
+    expect(projectIcons).toHaveLength(3);
+    expect(
+      rows[0].querySelector('[data-project-color-swatch="project-2"]'),
+    ).toBeInTheDocument();
+    expect(
+      rows[1].querySelector("[data-project-color-swatch]"),
+    ).not.toBeInTheDocument();
+    expect(
+      rows[2].querySelector('[data-project-color-swatch="project-1"]'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(longProjectName)).not.toBeInTheDocument();
+
+    if (!projectIcons[2]) {
+      throw new Error("Long-name project icon was not rendered");
+    }
+    await user.hover(projectIcons[2]);
+    expect(await screen.findAllByText(longProjectName)).not.toHaveLength(0);
+
+    await user.click(
+      within(rows[0]).getByRole("button", { name: "Edit Project Two" }),
+    );
+    await waitFor(() =>
+      expect(onEditProject).toHaveBeenCalledWith("project-2"),
+    );
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(within(rows[1]).queryByRole("button", { name: /edit/i })).toBeNull();
+  });
+
+  it("skips Git branch subtitle lookups in flat chat mode", async () => {
+    disableProjectGrouping();
+    localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
+    seedSessions({
+      id: "branch-chat",
+      title: "Branch Chat",
+      subtitle: "Latest message snippet",
+      workingDir: "/repo",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    renderSidebar({ projects: [mockProject()] });
+
+    expect(screen.getByText("Branch Chat")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Latest message snippet"),
+    ).not.toBeInTheDocument();
+
+    await waitForAnimationFrame();
+
+    expect(mockGetGitState).not.toHaveBeenCalled();
+  });
+
+  it("does not make stale flat project icons clickable", () => {
+    const onEditProject = vi.fn();
+    disableProjectGrouping();
+    seedSessions({
+      id: "missing-project-chat",
+      title: "Missing Project Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "missing-project",
+    });
+
+    const { container } = renderSidebar({ onEditProject });
+
+    const row = container.querySelector<HTMLElement>(
+      "[data-session-id='missing-project-chat']",
+    );
+    if (!row) {
+      throw new Error("Missing project chat row was not rendered");
+    }
+    expect(
+      row.querySelector("[data-sidebar-flat-project-icon]"),
+    ).toBeInTheDocument();
+    expect(
+      within(row).queryByRole("button", { name: "Edit No project" }),
+    ).toBeNull();
+    expect(onEditProject).not.toHaveBeenCalled();
+  });
+
+  it("keeps flat project icons editable when the project name is empty", async () => {
+    const user = userEvent.setup();
+    const onEditProject = vi.fn();
+    disableProjectGrouping();
+    seedSessions({
+      id: "unnamed-project-chat",
+      title: "Unnamed Project Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    const { container } = renderSidebar({
+      onEditProject,
+      projects: [mockProject({ name: "" })],
+    });
+
+    const row = container.querySelector<HTMLElement>(
+      "[data-session-id='unnamed-project-chat']",
+    );
+    const projectIcon = row?.querySelector<HTMLButtonElement>(
+      "[data-sidebar-flat-project-icon]",
+    );
+    if (!projectIcon) {
+      throw new Error("Flat project icon was not rendered as editable");
+    }
+
+    await user.click(projectIcon);
+
+    await waitFor(() =>
+      expect(onEditProject).toHaveBeenCalledWith("project-1"),
+    );
+  });
+
+  it("loads more flat chats before showing the history overflow link", async () => {
+    disableProjectGrouping();
+    mockHasMoreSessions = true;
+    seedSessions(
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `loaded-flat-chat-${index + 1}`,
+        title: `Loaded Flat Chat ${index + 1}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+      })),
+    );
+
+    renderSidebar();
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    expect(
+      within(mainNavigation).queryByRole("button", { name: "Show all" }),
+    ).toBeNull();
+    await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledOnce());
+  });
+
+  it("does not retry flat chat auto-load for the same pagination cursor", async () => {
+    disableProjectGrouping();
+    mockHasMoreSessions = true;
+    mockSessionPageCursor = "cursor-1";
+    seedSessions(
+      ...Array.from({ length: 20 }, (_, index) => ({
+        id: `loaded-flat-chat-${index + 1}`,
+        title: `Loaded Flat Chat ${index + 1}`,
+        updatedAt: `2026-04-09T12:${String(index).padStart(2, "0")}:00.000Z`,
+        messageCount: 3,
+      })),
+    );
+    const props = sidebarProps();
+
+    const { rerender } = renderWithQueryClient(
+      <NavigationPanesView {...props} />,
+    );
+
+    await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledOnce());
+
+    mockIsLoadingMoreSessions = true;
+    rerender(<NavigationPanesView {...props} />);
+    mockIsLoadingMoreSessions = false;
+    rerender(<NavigationPanesView {...props} />);
+
+    await waitForAnimationFrame();
+
+    expect(mockLoadMoreSessions).toHaveBeenCalledOnce();
+
+    mockSessionPageCursor = "cursor-2";
+    rerender(<NavigationPanesView {...props} />);
+
+    await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps project grouping when the flat chat list experiment is disabled", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, false);
+    seedSessions({
+      id: "project-chat",
+      title: "Project Chat",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    const { container } = renderSidebar({
+      projects: [mockProject()],
+    });
+
+    const mainNavigation = screen.getByRole("navigation", {
+      name: /main navigation/i,
+    });
+    expect(within(mainNavigation).getByText("Projects")).toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-flat-project-icon]"),
+    ).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    expect(screen.getByText("Project Chat")).toBeInTheDocument();
+  });
+
+  it("separates flat chats into unlabeled activity-age groups", () => {
+    disableProjectGrouping();
+    const now = Date.now();
+    const minutesAgo = (minutes: number) =>
+      new Date(now - minutes * 60 * 1000).toISOString();
+    seedSessions(
+      {
+        id: "recent-chat",
+        title: "Recent Chat",
+        updatedAt: minutesAgo(30),
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "today-chat",
+        title: "Today Chat",
+        updatedAt: minutesAgo(3 * 60),
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "older-chat",
+        title: "Older Chat",
+        updatedAt: minutesAgo(30 * 60),
+        messageCount: 3,
+        projectId: "project-1",
+      },
+    );
+
+    const { container } = renderSidebar({
+      projects: [mockProject()],
+    });
+
+    const groups = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-flat-chat-group]"),
+    );
+    expect(groups.map((group) => group.dataset.sidebarFlatChatGroup)).toEqual([
+      "last-hour",
+      "last-day",
+      "older",
+    ]);
+    expect(
+      groups.map((group) =>
+        Array.from(
+          group.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+        ).map((row) => row.dataset.sessionId),
+      ),
+    ).toEqual([["recent-chat"], ["today-chat"], ["older-chat"]]);
+    expect(groups[0]).not.toHaveClass("mt-2");
+    expect(groups[1]).toHaveClass("mt-2", "pt-2");
+    expect(groups[2]).toHaveClass("mt-2", "pt-2");
+    expect(screen.queryByText("last-hour")).not.toBeInTheDocument();
+    expect(screen.queryByText("last-day")).not.toBeInTheDocument();
+    expect(screen.queryByText("older")).not.toBeInTheDocument();
+  });
+
+  it("refreshes flat chat activity-age groups while flat mode is visible", () => {
+    const baseMs = Date.parse("2026-04-09T12:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(baseMs);
+    disableProjectGrouping();
+    seedSessions({
+      id: "almost-hour-old-chat",
+      title: "Almost Hour Old Chat",
+      updatedAt: new Date(baseMs - 59 * 60 * 1000).toISOString(),
+      messageCount: 3,
+      projectId: "project-1",
+    });
+
+    const { container } = renderSidebar({
+      projects: [mockProject()],
+    });
+
+    const getFlatGroupIds = () =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(
+          "[data-sidebar-flat-chat-group]",
+        ),
+      ).map((group) => group.dataset.sidebarFlatChatGroup);
+
+    expect(getFlatGroupIds()).toEqual(["last-hour"]);
+
+    act(() => {
+      vi.advanceTimersByTime(2 * 60 * 1000);
+    });
+
+    expect(getFlatGroupIds()).toEqual(["last-day"]);
+  });
+
+  it("caps the flat chat list to the most recent loaded sessions", () => {
+    disableProjectGrouping();
+    const baseMs = Date.parse("2026-04-09T12:00:00.000Z");
+    const loadedChatCount = MAX_FLAT_SIDEBAR_CHATS + 3;
+
+    seedSessions(
+      ...Array.from({ length: loadedChatCount }, (_, index) => ({
+        id: `flat-chat-${index + 1}`,
+        title: `Flat Chat ${index + 1}`,
+        updatedAt: new Date(baseMs - index * 60 * 1000).toISOString(),
+        messageCount: 3,
+        projectId: "project-1",
+      })),
+    );
+
+    const { container } = renderSidebar({
+      projects: [mockProject()],
+    });
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows).toHaveLength(MAX_FLAT_SIDEBAR_CHATS);
+    expect(rows.map((row) => row.dataset.sessionId)).toEqual(
+      Array.from(
+        { length: MAX_FLAT_SIDEBAR_CHATS },
+        (_, index) => `flat-chat-${index + 1}`,
+      ),
+    );
+    expect(
+      screen.queryByText(`Flat Chat ${MAX_FLAT_SIDEBAR_CHATS + 1}`),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Show all" }),
+    ).toBeInTheDocument();
+  });
   it("hides zero-message sessions from recents", () => {
     seedSessions(
       {

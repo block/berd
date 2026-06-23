@@ -16,6 +16,7 @@
     "markUnread": "Mark unread",
     "openInNewWindow": "Open in new window",
     "openInWindow": "Open in window",
+    "editProject": "Edit {{name}}",
     "openWindowFailed": "Couldn't open this chat in a new window.",
     "focusWindowFailed": "Couldn't focus this chat window.",
     "selectChat": "Select {{title}}",
@@ -38,6 +39,9 @@
   "empty": {
     "createProject": "Create a project",
     "startChat": "Start a chat"
+  },
+  "flat": {
+    "noProject": "No project"
   },
   "designSystem": {
     "inspector": "Inspector",

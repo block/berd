@@ -58,6 +58,38 @@ export const SIDEBAR_SECTION_HEADER_ROW_CLASS = `${SIDEBAR_SECTION_HEADER_PADDIN
 /** Standalone chat row left padding; aligns with section divider inset. */
 export const SIDEBAR_CHAT_ROW_PADDING_CLASS = "pl-3";
 
+/** Density variants for chat rows. Default preserves grouped sidebar rhythm. */
+export type SidebarChatRowDensity = "default" | "dense";
+
+export const SIDEBAR_CHAT_ROW_DENSITY_CLASSES = {
+  default: {
+    contentPadding: SIDEBAR_CHAT_ROW_PADDING_CLASS,
+    menuReserve: "pr-8",
+    menuInset: "right-3",
+    flatProjectGap: "gap-1",
+    flatProjectIconInset: "ml-3",
+    flatProjectIconColumn: "size-5",
+  },
+  dense: {
+    contentPadding: "pl-1",
+    menuReserve: "pr-6",
+    menuInset: "right-1",
+    flatProjectGap: "gap-1.5",
+    flatProjectIconInset: "ml-1",
+    flatProjectIconColumn: "size-5",
+  },
+} satisfies Record<
+  SidebarChatRowDensity,
+  {
+    contentPadding: string;
+    menuReserve: string;
+    menuInset: string;
+    flatProjectGap: string;
+    flatProjectIconInset: string;
+    flatProjectIconColumn: string;
+  }
+>;
+
 /** Bare unread dot; the parent owns positioning (e.g. a row's icon slot). */
 export const SIDEBAR_UNREAD_DOT_CLASS =
   "pointer-events-none h-[7px] w-[7px] rounded-full bg-success transition-opacity duration-200 ease-out animate-in fade-in-0";

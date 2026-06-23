@@ -7,6 +7,7 @@ import {
 } from "@tabler/icons-react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import type { FlatChatGroup } from "@/features/sidebar/lib/sidebarFlatChats";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
   SIDEBAR_SECTION_HEADER_ROW_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SidebarChatDragProvider } from "./SidebarChatDragContext";
+import { SidebarFlatChatsSection } from "./SidebarFlatChatsSection";
 import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
@@ -30,6 +32,9 @@ export interface SidebarProjectsSectionProps {
     standalone: SidebarSessionItem[];
   };
   hasVisibleChats: boolean;
+  flatChatGroups: FlatChatGroup[];
+  hasFlatChatOverflow: boolean;
+  groupChatsByProject: boolean;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -76,6 +81,9 @@ export function SidebarProjectsSection({
   projects,
   projectSessions,
   hasVisibleChats,
+  flatChatGroups,
+  hasFlatChatOverflow,
+  groupChatsByProject,
   expandedProjects,
   toggleProject,
   collapsed,
@@ -118,6 +126,39 @@ export function SidebarProjectsSection({
   const showCombinedEmptyState = showProjectsEmptyState && !hasVisibleChats;
   const showProjects = collapsed || projectsSectionOpen;
   const emptyActionClasses = `${SIDEBAR_ROW_HEIGHT_CLASS} w-full justify-start gap-2 ${SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS} text-sm text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground`;
+
+  if (!groupChatsByProject) {
+    return (
+      <SidebarFlatChatsSection
+        groups={flatChatGroups}
+        collapsed={collapsed}
+        labelTransition={labelTransition}
+        labelVisible={labelVisible}
+        activeSessionId={activeSessionId}
+        onNewChat={onNewChat}
+        onCreateProject={onCreateProject}
+        onNavigate={onNavigate}
+        onEditProject={onEditProject}
+        onSelectSession={onSelectSession}
+        onArchiveChat={onArchiveChat}
+        onRenameChat={onRenameChat}
+        onMarkChatRead={onMarkChatRead}
+        onMarkChatUnread={onMarkChatUnread}
+        selectedSessionIds={selectedSessionIds}
+        selectionEnabled={selectionEnabled}
+        selectionActionsDisabled={selectionActionsDisabled}
+        onSelectionClear={onSelectionClear}
+        onSelectionChange={onSelectionChange}
+        onArchiveSelected={onArchiveSelected}
+        onPinSelectedToHome={onPinSelectedToHome}
+        isPinningSelectedToHome={isPinningSelectedToHome}
+        onMarkSelectedRead={onMarkSelectedRead}
+        onMarkSelectedUnread={onMarkSelectedUnread}
+        showViewAllInHistory={hasFlatChatOverflow}
+        showTopDivider={showTopDivider}
+      />
+    );
+  }
 
   return (
     <SidebarChatDragProvider>

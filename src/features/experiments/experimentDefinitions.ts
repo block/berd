@@ -68,6 +68,10 @@ export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
   "sidebar-detachable-chats";
 
+export const SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID = "sidebar-flat-chat-list";
+export const SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY =
+  "groupChatsByProject";
+export const DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT = true;
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
 - Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
 - For simple answers or small changes, use plain sentences or a short list instead of heavy structure.
@@ -133,5 +137,18 @@ export const EXPERIMENT_DEFINITIONS = [
     id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
     titleKey: "experiments.sidebarDetachableChats.title",
     descriptionKey: "experiments.sidebarDetachableChats.description",
+  },
+  {
+    id: SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+    titleKey: "experiments.sidebarFlatChatList.title",
+    descriptionKey: "experiments.sidebarFlatChatList.description",
+    config: {
+      [SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY]: {
+        type: "boolean",
+        labelKey: "general.groupChatsByProject.label",
+        descriptionKey: "general.groupChatsByProject.description",
+        defaultValue: DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
+      },
+    },
   },
 ] as const satisfies readonly ExperimentDefinition[];

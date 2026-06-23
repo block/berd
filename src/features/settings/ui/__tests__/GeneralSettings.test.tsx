@@ -23,6 +23,14 @@ import type {
   RuntimeConfig,
   RuntimeConfigLoadResult,
 } from "@/shared/runtime-config/schema";
+import {
+  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+} from "@/features/experiments/experimentDefinitions";
+import {
+  EXPERIMENT_PREFERENCES_STORAGE_KEY,
+  setExperimentEnabled,
+} from "@/features/experiments/experimentPreferences";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -218,6 +226,44 @@ describe("GeneralSettings appearance section", () => {
       );
     });
     expect(switchControl).toBeChecked();
+  });
+
+  it("updates sidebar chat grouping", async () => {
+    const user = userEvent.setup();
+    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Group Chats by Project",
+    });
+
+    expect(switchControl).toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      const storedPreferences = JSON.parse(
+        localStorage.getItem(EXPERIMENT_PREFERENCES_STORAGE_KEY) ?? "{}",
+      );
+      expect(
+        storedPreferences.experiments[SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID]
+          .config[SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY],
+      ).toBe(false);
+    });
+    expect(switchControl).not.toBeChecked();
+  });
+
+  it("hides sidebar chat grouping when the flat chat list experiment is disabled", () => {
+    setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, false);
+
+    renderGeneralSettings();
+
+    expect(
+      screen.queryByRole("switch", {
+        name: "Group Chats by Project",
+      }),
+    ).toBeNull();
   });
 
   it("updates the follow-up behavior", async () => {

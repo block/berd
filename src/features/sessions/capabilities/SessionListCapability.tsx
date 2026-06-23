@@ -6,6 +6,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
@@ -34,6 +35,17 @@ import {
 } from "@/features/sessions/lib/sessionSelection";
 import { useSidebarBranchSubtitles } from "@/features/sidebar/hooks/useSidebarBranchSubtitles";
 import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import {
+  DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
+  SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY,
+} from "@/features/experiments/experimentDefinitions";
+import { useExperiment } from "@/features/experiments/experimentPreferences";
+import {
+  MAX_FLAT_SIDEBAR_CHATS,
+  groupFlatChatsByActivityAge,
+  limitFlatSidebarSessions,
+} from "@/features/sidebar/lib/sidebarFlatChats";
 import type { SessionChatRuntime } from "@/shared/types/chat";
 import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 import { usePersistedState } from "@/shared/hooks/usePersistedState";
@@ -45,6 +57,7 @@ import { SessionListSurface } from "./SessionListSurface";
 const EXPANDED_PROJECTS_STORAGE_KEY = "goose:sidebar:expanded-projects";
 const SECTION_VISIBILITY_STORAGE_KEY = "goose:sidebar:section-visibility";
 const MAX_RECENTS = 20;
+const FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS = 60 * 1000;
 
 type SessionListSectionVisibility = {
   projects: boolean;
@@ -59,6 +72,11 @@ const DEFAULT_SECTION_VISIBILITY: SessionListSectionVisibility = {
 type SessionListGroups = {
   byProject: Record<string, SidebarSessionItem[]>;
   standalone: SidebarSessionItem[];
+};
+
+const EMPTY_SESSION_LIST_GROUPS: SessionListGroups = {
+  byProject: {},
+  standalone: [],
 };
 
 type SessionListSurfaceOptions = {
@@ -132,6 +150,36 @@ function toSessionListItem(
     isRunning: isSessionRunning(runtime.chatState),
     hasUnread: runtime.hasUnread,
   };
+}
+
+function getFlatSessionListItems(
+  visibleSessions: ChatSession[],
+  projectsById: ReadonlyMap<string, ProjectInfo>,
+  sessionStateById: Record<string, SessionChatRuntime>,
+  placeholderSessionIds: ReadonlySet<string>,
+  branchNameBySessionId: ReadonlyMap<string, string>,
+): SidebarSessionItem[] {
+  const sessions = visibleSessions
+    .filter((session) => !session.archivedAt)
+    .map((session) => {
+      const project = session.projectId
+        ? projectsById.get(session.projectId)
+        : undefined;
+      const item = toSessionListItem(
+        session,
+        sessionStateById,
+        branchNameBySessionId,
+      );
+      return {
+        ...item,
+        projectName: project?.name,
+        projectIcon: project?.icon,
+        projectColor: project?.color,
+      };
+    })
+    .sort((a, b) => compareSessionListItems(a, b, placeholderSessionIds));
+
+  return sessions;
 }
 
 function getSessionListGroups(
@@ -299,9 +347,32 @@ export function SessionListCapability({
     (s) => s.activeWorkspaceBySession,
   );
   const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
+  const isLoadingMoreSessions = useChatSessionStore(
+    (s) => s.isLoadingMoreSessions,
+  );
+  const sessionPageCursor = useChatSessionStore((s) => s.sessionPageCursor);
+  const loadMoreSessions = useChatSessionStore((s) => s.loadMoreSessions);
   const gitBranchSubtitlePreference = useSidebarGitBranchSubtitlePreference();
+  const sidebarFlatChatListExperiment = useExperiment(
+    SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID,
+  );
+  const groupChatsByProject =
+    !sidebarFlatChatListExperiment?.enabled ||
+    Boolean(
+      sidebarFlatChatListExperiment.config[
+        SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT_CONFIG_KEY
+      ] ?? DEFAULT_SIDEBAR_FLAT_CHAT_LIST_GROUP_CHATS_BY_PROJECT,
+    );
+  const [flatChatGroupNowMs, setFlatChatGroupNowMs] = useState(() =>
+    Date.now(),
+  );
+  const attemptedFlatChatLoadMoreCursorRef = useRef<string | null>(null);
   const projectIds = useMemo(
     () => new Set(projects.map((project) => project.id)),
+    [projects],
+  );
+  const projectsById = useMemo(
+    () => new Map(projects.map((project) => [project.id, project])),
     [projects],
   );
   const visibleSessions = useMemo(
@@ -325,7 +396,7 @@ export function SessionListCapability({
   const branchNameBySessionId = useSidebarBranchSubtitles({
     sessions: visibleSessions.sessions,
     activeWorkspaceBySession,
-    enabled: gitBranchSubtitlePreference.enabled,
+    enabled: gitBranchSubtitlePreference.enabled && groupChatsByProject,
   });
   const selectedCount = selectedSessionIds.size;
   const clearSelection = () => setSelectedSessionIds(new Set());
@@ -398,17 +469,99 @@ export function SessionListCapability({
     });
   }, [activeSessionId, activeSessionIds]);
 
+  useEffect(() => {
+    if (groupChatsByProject) return;
+    setFlatChatGroupNowMs(Date.now());
+    const interval = window.setInterval(() => {
+      setFlatChatGroupNowMs(Date.now());
+    }, FLAT_CHAT_GROUP_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(interval);
+  }, [groupChatsByProject]);
+
+  useEffect(() => {
+    if (groupChatsByProject) {
+      attemptedFlatChatLoadMoreCursorRef.current = null;
+    }
+  }, [groupChatsByProject]);
+
   const projectSessions = useMemo(
     () =>
-      getSessionListGroups(
-        visibleSessions.sessions,
-        projectIds,
-        sessionStateById,
-        visibleSessions.placeholderSessionIds,
-        branchNameBySessionId,
-      ),
-    [branchNameBySessionId, projectIds, sessionStateById, visibleSessions],
+      groupChatsByProject
+        ? getSessionListGroups(
+            visibleSessions.sessions,
+            projectIds,
+            sessionStateById,
+            visibleSessions.placeholderSessionIds,
+            branchNameBySessionId,
+          )
+        : EMPTY_SESSION_LIST_GROUPS,
+    [
+      branchNameBySessionId,
+      groupChatsByProject,
+      projectIds,
+      sessionStateById,
+      visibleSessions,
+    ],
   );
+  const flatSessionCandidates = useMemo(() => {
+    if (groupChatsByProject) return [];
+    return getFlatSessionListItems(
+      visibleSessions.sessions,
+      projectsById,
+      sessionStateById,
+      visibleSessions.placeholderSessionIds,
+      branchNameBySessionId,
+    );
+  }, [
+    branchNameBySessionId,
+    groupChatsByProject,
+    projectsById,
+    sessionStateById,
+    visibleSessions,
+  ]);
+  const flatSessions = useMemo(
+    () => limitFlatSidebarSessions(flatSessionCandidates),
+    [flatSessionCandidates],
+  );
+  const flatChatGroups = useMemo(
+    () =>
+      groupChatsByProject
+        ? []
+        : groupFlatChatsByActivityAge(flatSessions, flatChatGroupNowMs),
+    [flatChatGroupNowMs, flatSessions, groupChatsByProject],
+  );
+  const hasFlatChatOverflow =
+    flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
+    (flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS && hasMoreSessions);
+  const flatChatLoadMoreCursorKey = sessionPageCursor ?? "__initial__";
+
+  useEffect(() => {
+    if (
+      surface.preview ||
+      groupChatsByProject ||
+      !hasMoreSessions ||
+      isLoadingMoreSessions ||
+      flatSessionCandidates.length >= MAX_FLAT_SIDEBAR_CHATS
+    ) {
+      return;
+    }
+    if (
+      attemptedFlatChatLoadMoreCursorRef.current === flatChatLoadMoreCursorKey
+    ) {
+      return;
+    }
+
+    attemptedFlatChatLoadMoreCursorRef.current = flatChatLoadMoreCursorKey;
+    void loadMoreSessions();
+  }, [
+    flatChatLoadMoreCursorKey,
+    flatSessionCandidates.length,
+    groupChatsByProject,
+    hasMoreSessions,
+    isLoadingMoreSessions,
+    loadMoreSessions,
+    surface.preview,
+  ]);
 
   const activeProjectId = useMemo(() => {
     if (!activeSessionId) return undefined;
@@ -473,6 +626,9 @@ export function SessionListCapability({
     projects,
     projectSessions,
     hasVisibleChats: activeSessions.length > 0,
+    flatChatGroups,
+    hasFlatChatOverflow,
+    groupChatsByProject,
     expandedProjects,
     toggleProject,
     collapsed,
