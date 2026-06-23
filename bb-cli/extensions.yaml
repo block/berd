@@ -1,0 +1,129 @@
+# Generated via `just update-extensions-catalog`, then curated manually.
+- name: advocatebot
+  about: Cash App Support Advocate tools — knowledge articles and case management.
+- name: ai-app-info
+  about: Block app metadata — owning team, Slack channel, and Kubernetes context.
+- name: airflow
+  about: Inspect DAGs and task runs across internal Airflow clusters (read-only).
+- name: airtable
+  about: Read and write Airtable bases, tables, and records.
+- name: appsecreporter
+  about: Security Command Center — manage issues and exceptions.
+- name: asana
+  about: Manage Asana projects and tasks.
+- name: bitdrift
+  about: Query detailed mobile telemetry captured when remote Bitdrift workflows trigger device uploads; setup is workflow config, not mobile code.
+- name: block-data
+  about: Query Block Metric Store data and related analytics.
+- name: bookshelf
+  about: Searches Square's public support-center articles (Bookshelf semantic search).
+- name: bugsnag
+  about: Browse and triage Bugsnag error reports for mobile and client apps.
+- name: builderbot
+  about: BuilderBot — Block's task orchestration system for engineering automation.
+- name: ci-results
+  about: Fetch CI build analysis and diagnose build failures.
+- name: clear
+  about: Convert event leads to Marketo-compliant CSV via AI-guided pipeline.
+- name: contentful
+  about: Read and write Contentful CMS content.
+- name: datadog
+  about: Query Datadog metrics, logs, monitors, and dashboards.
+- name: datadog-tidal
+  about: Datadog API access scoped to the Tidal org.
+- name: docebo
+  about: Search Block Academy courses and learning content.
+- name: emergetools
+  about: Compare mobile app build sizes and inspect build metadata via Emerge Tools for binary-size triage.
+- name: envoy
+  about: Make HTTP requests to Block internal services via Envoy.
+- name: epoch
+  about: Read-only access to company events in Epoch.
+- name: figma
+  about: Access your Figma files and design resources.
+- name: feature-flag-bot
+  about: List LaunchDarkly feature flags whose code references are eligible for automated removal (rolled-out, server-only, single-variation, still referenced).
+- name: glean
+  about: Search and read Block's internal knowledge base, and chat with Glean AI.
+- name: gmail
+  about: Search, read, and draft Gmail messages.
+- name: google-calendar
+  about: Read and manage events across your Google Calendars.
+- name: google-drive
+  about: Search, read, create, and edit Google Drive files.
+- name: greenhouse
+  about: Interact with the Greenhouse applicant tracking system.
+- name: incidentio
+  about: Manage Block incidents in Incident.io — list, view, and update.
+- name: intersect
+  about: Trigger and manage headless Goose jobs via Intersect.
+- name: iterable
+  about: Query and manage Iterable campaigns, lists, and users.
+- name: jira
+  about: Manage Jira issues, comments, and boards.
+- name: kds
+  about: KDS oncall debugging — look up chits by ID, bill, or order.
+- name: kds-reporting
+  about: KDS reporting oncall — search historical tickets and devices.
+- name: kds-sync-hub
+  about: KDS Sync Hub on-call tools — Sync Hub chit and audit-log lookups for sync-hub-rail investigations.
+- name: launchdarkly
+  about: Manage LaunchDarkly feature flags.
+- name: linear
+  about: Manage Linear issues, projects, and cycles.
+- name: lookout
+  about: Read Lookout release intelligence, Execution Review projects, and Blueprint source health.
+- name: looker-oncall
+  about: Looker API access for oncall triage.
+- name: maria
+  about: Interact with Maria, Square's internal marketing assistant.
+- name: marketingaihub
+  about: Browse Square Marketing AI tools, articles, and G2 tiles.
+- name: marketo
+  about: Access Marketo assets, leads, and bulk extract APIs.
+- name: marle
+  about: Square marketing legal compliance — AI-assisted review and guidance.
+- name: netsnap
+  about: Read-only access to on-premises network device data.
+- name: notion
+  about: Search, create, and manage pages, databases, views, and comments in Notion.
+- name: orders
+  about: Look up Square orders, bills, and payments.
+- name: oracle-scm
+  about: Oracle Supply Chain Management — inventory, POs, and logistics.
+- name: pagerduty
+  about: Manage PagerDuty on-call schedules, alerts, and incidents.
+- name: risk
+  about: Access Block Risk data and insights.
+- name: sales
+  about: Access Salesforce data and generate sales quotes.
+- name: salesforce-sq
+  about: Query Square Salesforce data with schema discovery.
+- name: slack
+  about: Search, read, and send Slack messages.
+- name: query-expert
+  about: Discover Snowflake tables, find data experts, and validate SQL.
+- name: regulator
+  about: "Query Regulator for Square merchant info: business, payments, hardware, and more"
+- name: release-owl
+  about: Read Block release trains, stages, schedules, and changelogs.
+- name: sentry
+  about: Query Sentry for error rates and system metrics.
+- name: sourcegraph
+  about: Search code and browse files across repositories via Sourcegraph.
+- name: support-agent-tools
+  about: Block employee tools for support and regulatory actions.
+- name: support-content
+  about: Semantic search over Cash App support articles.
+- name: testrack
+  about: Inspect and run commands on Testrack hardware nodes — limited to hw_testrack_users.
+- name: thehub
+  about: Employee experience tools — Loop, feedback, and org data.
+- name: todoist
+  about: Manage your Todoist tasks and projects.
+- name: ventana
+  about: Analyze calls, chats, and emails at scale for Moneybot, Square, and Managerbot.
+- name: websearch
+  about: Search the web for up-to-date information.
+- name: workday
+  about: Manage time off, inbox tasks, and org data in Workday.

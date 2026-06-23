@@ -1,0 +1,75 @@
+syntax = "proto2";
+package squareup;
+
+// DO NOT CHANGE THE PACKAGE OR OPTION NAMES WITHOUT ALSO UPDATING THE PROTOBUF RUNTIME
+// LIBRARIES (for example, protobuf-java).
+
+option java_package = "com.squareup.protos.common.pii";
+
+import "google/protobuf/descriptor.proto";
+
+// Reserved Ids: 22200 - 22299
+extend google.protobuf.FieldOptions {
+
+  /**
+   * Fields marked with redacted are not to be logged, generally for PCI or PII.
+   * The Java protobuf library automatically redacts these fields when outputting proto
+   * fields through TextFormat or AbstractMessage.toString.
+   */
+  optional bool redacted = 22200;
+
+  /**
+   * Fields marked as tokenizable, can be tokenized in lieu of being redacted.  An additional
+   * normalization strategy can be added to be applied in conjunction with tokenization.
+   */
+  optional bool tokenizable = 22201;
+
+  /**
+   * Fields marked with a normalization strategy, should have the requested normalization applied
+   * prior to other transformations (e.g. prior to tokenization).
+   */
+  optional NormalizationStrategy normalization = 22202;
+
+  // 22203, 22204, 22205 are reserved in other packages
+
+  /**
+   * Fields marked with a data sensitivity level should be used in conjection with `redacted`.
+   * The annotation gives more granulariyy into what kind of data is in the field.
+   */
+  optional DataSensitivityLevel data_sensitivity_level = 22206;
+}
+
+/**
+ * An enum for normalization strategies.  The values here correspond to those defined in
+ * {@link com.squareup.crypto.tokenization.NormalizationStrategy}.
+ */
+enum NormalizationStrategy {
+  DEFAULT = 1;
+  EMAIL = 2;
+}
+
+/**
+ * Used to indicate how sensitive data is in a field. The values here correspond to the PII levels
+ * defined in http://go/piisemantictypes.
+ * 
+ * The API Log inspector reads this enum and filters values that are not NONE or BASIC_PII. If the
+ * field is absent then we assume the value is NONE. For more detail, read the proposal doc:
+ * https://docs.google.com/document/d/1pMLUuYI-SxGnB85SDffBr95kC3UI4S_5xdRDsZgjkIA/edit#
+ */
+enum DataSensitivityLevel {
+ // Contains no sensitive data
+ NONE = 1;
+ // Basic PII information such as name, email, etc.
+ BASIC_PII = 2;
+ // Payment Card Industry (PCI) Information
+ PCI = 3;
+ // Secrets that should be considered highly confidential (password, access token, etc.)
+ SECRET = 4;
+ // Business information
+ BUSINESS_INFORMATION = 5;
+ // Non-Public Information
+ NPI = 6;
+ // Material Non-Public Information
+ MNPI = 7;
+}
+

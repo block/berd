@@ -1,0 +1,31 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+// DO NOT EDIT!!!
+// This file was auto-generated from https://github.com/squareup/dsl-framework/blob/ac75c6fa1371fe4950a4ec1b20e9b952d6265e91/rubrics/releases/for-dsl-engine/rubrics_v0.json using /script/EngineModelGenerator.py.
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+message PaymentCardData {
+  enum SemanticType {
+    DO_NOT_USE = 0;
+    // The full contents of track 1 or track 2 on the magnetic stripe, or the equivalent data on the chip.
+    CARD_TRACK = 1;
+    // The three-digit or four-digit verification code printed on the card.
+    CARD_VERIFICATION_CODE = 2;
+    // The (typically four digit) secret value known to the card holder.
+    CARD_PIN = 3;
+    // Primary Account Number (PAN) (more than defined by CARD_BIN and CARD_LAST_FOUR).
+    CARD_PAN = 4;
+    // Issuer Identification Number (IIN), aka Bank Identification Number (BIN). The first six or eight digits of the PAN (depends on the institution issuing the card), that identifies the financial institution that issued the card.
+    CARD_BIN = 5;
+    // Last four digits (or fewer) of a Primary Account Number.
+    CARD_LAST_FOUR = 6;
+    // Three-digit or four-digit value in the magnetic-stripe that follows the expiration date of the payment card on the track data. It is used for various things such as defining service attributes, differentiating between international and national interchange, or identifying usage restrictions.
+    CARD_SERVICE_CODE = 7;
+    // The expiration date associated with a payment card.
+    CARD_EXPIRY = 8;
+    // The name of a cardholder. May be an individual, business, or other given name written on the payment card.
+    CARDHOLDER_NAME = 9;
+  }
+}

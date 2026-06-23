@@ -140,6 +140,29 @@ tauri-test:
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check tauri-test clippy test build
 
+# ── BuilderBot CLI ───────────────────────────────────────────
+
+# Build the BuilderBot CLI crate.
+bb-cli-build:
+    cd bb-cli && cargo build --locked
+
+# Build the sq agent-tools package output.
+bb-cli-build-sq:
+    cd bb-cli && just build-sq
+
+# Check BuilderBot CLI formatting and clippy.
+bb-cli-lint:
+    cd bb-cli && cargo fmt --all -- --check
+    cd bb-cli && cargo clippy --locked --all-targets --all-features -- -D warnings
+
+# Run BuilderBot CLI tests.
+bb-cli-test:
+    cd bb-cli && cargo test --locked
+
+# Build BuilderBot CLI Linux release archives.
+bb-cli-package-bb-linux:
+    cd bb-cli && just package-bb-linux
+
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     #!/usr/bin/env bash

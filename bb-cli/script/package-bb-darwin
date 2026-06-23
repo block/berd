@@ -1,0 +1,537 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_NAME="BuilderBot"
+BUNDLE_ID="${BB_BUNDLE_ID:-com.squareup.builderbot}"
+VERSION="${VERSION:-}"
+DIST_DIR="${DIST_DIR:-dist}"
+APP_PATH="$DIST_DIR/$APP_NAME.app"
+ARCHS="${BB_DARWIN_ARCHS:-$(uname -m)}"
+APPLE_IDENTITY="${APPLE_IDENTITY:-}"
+VOL_NAME="${VOL_NAME:-$APP_NAME}"
+
+status() {
+  printf '>>> %s\n' "$*" >&2
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: script/package-bb-darwin [build-bb app zip dmg sign package]
+
+Environment:
+  VERSION           Version to stamp into the app bundle. Defaults to Cargo.toml package version.
+  BB_DARWIN_ARCHS   Space-separated archs: arm64 x86_64. Defaults to the host arch.
+  APPLE_IDENTITY    Developer ID signing identity. If unset, ad-hoc signing is used.
+  VOL_NAME          DMG volume name. Defaults to BuilderBot.
+  DIST_DIR          Output directory. Defaults to dist.
+USAGE
+  exit 1
+}
+
+version() {
+  if [[ -n "$VERSION" ]]; then
+    printf '%s\n' "$VERSION"
+  else
+    awk -F '"' '/^version = / { print $2; exit }' Cargo.toml
+  fi
+}
+
+rust_target_for_arch() {
+  case "$1" in
+    arm64|aarch64) printf 'aarch64-apple-darwin\n' ;;
+    x86_64|amd64) printf 'x86_64-apple-darwin\n' ;;
+    *) printf 'unsupported Darwin arch: %s\n' "$1" >&2; exit 1 ;;
+  esac
+}
+
+swift_target_for_arch() {
+  case "$1" in
+    arm64|aarch64) printf 'arm64-apple-macos13.0\n' ;;
+    x86_64|amd64) printf 'x86_64-apple-macos13.0\n' ;;
+    *) printf 'unsupported Darwin arch: %s\n' "$1" >&2; exit 1 ;;
+  esac
+}
+
+host_arch() {
+  case "$(uname -m)" in
+    arm64) printf 'arm64\n' ;;
+    x86_64) printf 'x86_64\n' ;;
+    *) uname -m ;;
+  esac
+}
+
+_build_bb() {
+  local outputs=()
+  mkdir -p "$DIST_DIR/darwin"
+
+  for arch in $ARCHS; do
+    local normalized="$arch"
+    [[ "$normalized" == "aarch64" ]] && normalized="arm64"
+    [[ "$normalized" == "amd64" ]] && normalized="x86_64"
+
+    status "Building bb for darwin $normalized"
+    if [[ "$normalized" == "$(host_arch)" ]]; then
+      cargo build --locked --release --bin bb
+      cp target/release/bb "$DIST_DIR/darwin/bb-$normalized"
+    else
+      local target
+      target="$(rust_target_for_arch "$normalized")"
+      cargo build --locked --release --target "$target" --bin bb
+      cp "target/$target/release/bb" "$DIST_DIR/darwin/bb-$normalized"
+    fi
+    chmod +x "$DIST_DIR/darwin/bb-$normalized"
+    outputs+=("$DIST_DIR/darwin/bb-$normalized")
+  done
+
+  if [[ "${#outputs[@]}" -gt 1 ]]; then
+    status "Creating universal bb"
+    lipo -create -output "$DIST_DIR/darwin/bb" "${outputs[@]}"
+  else
+    cp "${outputs[0]}" "$DIST_DIR/darwin/bb"
+  fi
+  chmod +x "$DIST_DIR/darwin/bb"
+}
+
+_build_app_executable() {
+  local outputs=()
+  mkdir -p "$DIST_DIR/darwin"
+
+  for arch in $ARCHS; do
+    local normalized="$arch"
+    [[ "$normalized" == "aarch64" ]] && normalized="arm64"
+    [[ "$normalized" == "amd64" ]] && normalized="x86_64"
+    local swift_target
+    swift_target="$(swift_target_for_arch "$normalized")"
+    local auth_helper_object="$DIST_DIR/darwin/AuthorizationHelper-$normalized.o"
+    status "Building app shell for $normalized"
+    /usr/bin/clang \
+      -target "$swift_target" \
+      -fobjc-arc \
+      -c app/bb-macos/AuthorizationHelper.m \
+      -o "$auth_helper_object"
+    swiftc \
+      -target "$swift_target" \
+      -O \
+      -parse-as-library \
+      -framework AppKit \
+      -framework Security \
+      "$auth_helper_object" \
+      -o "$DIST_DIR/darwin/$APP_NAME-$normalized" \
+      app/bb-macos/BuilderBot.swift
+    outputs+=("$DIST_DIR/darwin/$APP_NAME-$normalized")
+  done
+
+  mkdir -p "$APP_PATH/Contents/MacOS"
+  if [[ "${#outputs[@]}" -gt 1 ]]; then
+    lipo -create -output "$APP_PATH/Contents/MacOS/$APP_NAME" "${outputs[@]}"
+  else
+    cp "${outputs[0]}" "$APP_PATH/Contents/MacOS/$APP_NAME"
+  fi
+  chmod +x "$APP_PATH/Contents/MacOS/$APP_NAME"
+}
+
+_generate_completions() {
+  local bb="$DIST_DIR/darwin/bb"
+  local completions_dir="$APP_PATH/Contents/Resources/completions"
+  mkdir -p "$completions_dir"
+
+  if "$bb" completions zsh >"$completions_dir/_bb" 2>/dev/null; then
+    status "Generated zsh completions"
+  else
+    rm -f "$completions_dir/_bb"
+    status "Skipping completions; bb completions zsh is not available"
+  fi
+}
+
+_generate_app_icon() {
+  local icon_dir="$DIST_DIR/darwin/$APP_NAME.iconset"
+  local icon_path="$DIST_DIR/darwin/$APP_NAME.icns"
+  local generator="$DIST_DIR/darwin/generate-app-icon.swift"
+  mkdir -p "$icon_dir"
+
+  cat >"$generator" <<'SWIFT'
+import AppKit
+import Foundation
+
+let output = URL(fileURLWithPath: CommandLine.arguments[1])
+let pointSize = CGFloat(Double(CommandLine.arguments[2])!)
+let scale = CGFloat(Double(CommandLine.arguments[3])!)
+let pixels = Int(pointSize * scale)
+let canvas = NSSize(width: pixels, height: pixels)
+let image = NSImage(size: canvas)
+
+func color(_ hex: UInt32) -> NSColor {
+  NSColor(
+    calibratedRed: CGFloat((hex >> 16) & 0xff) / 255,
+    green: CGFloat((hex >> 8) & 0xff) / 255,
+    blue: CGFloat(hex & 0xff) / 255,
+    alpha: 1
+  )
+}
+
+image.lockFocus()
+NSGraphicsContext.current?.imageInterpolation = .high
+NSColor.clear.setFill()
+NSRect(origin: .zero, size: canvas).fill()
+
+let rect = NSRect(
+  x: canvas.width * 0.08,
+  y: canvas.height * 0.08,
+  width: canvas.width * 0.84,
+  height: canvas.height * 0.84
+)
+let radius = canvas.width * 0.19
+let base = NSBezierPath(roundedRect: rect, xRadius: radius, yRadius: radius)
+NSGradient(colors: [color(0x111827), color(0x1f2937)])!.draw(in: base, angle: -35)
+
+color(0x2dd4bf).withAlphaComponent(0.18).setFill()
+NSBezierPath(ovalIn: NSRect(x: canvas.width * 0.58, y: canvas.height * 0.56, width: canvas.width * 0.26, height: canvas.height * 0.26)).fill()
+
+let stroke = NSBezierPath(roundedRect: rect.insetBy(dx: canvas.width * 0.018, dy: canvas.height * 0.018), xRadius: radius * 0.9, yRadius: radius * 0.9)
+color(0xffffff).withAlphaComponent(0.14).setStroke()
+stroke.lineWidth = max(1, canvas.width * 0.016)
+stroke.stroke()
+
+let promptAttributes: [NSAttributedString.Key: Any] = [
+  .font: NSFont.monospacedSystemFont(ofSize: canvas.width * 0.30, weight: .heavy),
+  .foregroundColor: color(0x22c55e)
+]
+let textAttributes: [NSAttributedString.Key: Any] = [
+  .font: NSFont.monospacedSystemFont(ofSize: canvas.width * 0.34, weight: .bold),
+  .foregroundColor: NSColor.white
+]
+
+let prompt = NSString(string: ">")
+let label = NSString(string: "bb")
+let promptSize = prompt.size(withAttributes: promptAttributes)
+let labelSize = label.size(withAttributes: textAttributes)
+let totalWidth = promptSize.width + canvas.width * 0.035 + labelSize.width
+let baselineY = canvas.height * 0.47 - labelSize.height / 2
+let startX = (canvas.width - totalWidth) / 2
+prompt.draw(at: NSPoint(x: startX, y: baselineY - canvas.height * 0.01), withAttributes: promptAttributes)
+label.draw(at: NSPoint(x: startX + promptSize.width + canvas.width * 0.035, y: baselineY), withAttributes: textAttributes)
+
+image.unlockFocus()
+
+guard let tiff = image.tiffRepresentation,
+      let rep = NSBitmapImageRep(data: tiff),
+      let png = rep.representation(using: .png, properties: [:]) else {
+  fatalError("failed to render icon")
+}
+try png.write(to: output)
+SWIFT
+
+  local sizes=(16 32 128 256 512)
+  for size in "${sizes[@]}"; do
+    /usr/bin/swift "$generator" "$icon_dir/icon_${size}x${size}.png" "$size" 1
+    /usr/bin/swift "$generator" "$icon_dir/icon_${size}x${size}@2x.png" "$size" 2
+  done
+
+  /usr/bin/iconutil -c icns "$icon_dir" -o "$icon_path"
+}
+
+_generate_status_icons() {
+  local generator="$DIST_DIR/darwin/generate-status-icons.swift"
+  mkdir -p "$DIST_DIR/darwin"
+
+  cat >"$generator" <<'SWIFT'
+import AppKit
+import Foundation
+
+let output = URL(fileURLWithPath: CommandLine.arguments[1])
+let update = CommandLine.arguments.count > 2 && CommandLine.arguments[2] == "update"
+let canvas = NSSize(width: 36, height: 24)
+let image = NSImage(size: canvas)
+
+image.lockFocus()
+NSColor.clear.setFill()
+NSRect(origin: .zero, size: canvas).fill()
+
+let black = NSColor.black
+black.setFill()
+
+let promptAttributes: [NSAttributedString.Key: Any] = [
+  .font: NSFont.monospacedSystemFont(ofSize: 15, weight: .heavy),
+  .foregroundColor: black
+]
+let textAttributes: [NSAttributedString.Key: Any] = [
+  .font: NSFont.monospacedSystemFont(ofSize: 16, weight: .bold),
+  .foregroundColor: black
+]
+
+NSString(string: ">").draw(at: NSPoint(x: 2, y: 4), withAttributes: promptAttributes)
+NSString(string: "bb").draw(at: NSPoint(x: 13, y: 3), withAttributes: textAttributes)
+
+if update {
+  let badge = NSBezierPath(ovalIn: NSRect(x: 27, y: 2, width: 7, height: 7))
+  badge.fill()
+}
+
+image.unlockFocus()
+
+guard let tiff = image.tiffRepresentation,
+      let rep = NSBitmapImageRep(data: tiff),
+      let png = rep.representation(using: .png, properties: [:]) else {
+  fatalError("failed to render status icon")
+}
+try png.write(to: output)
+SWIFT
+
+  /usr/bin/swift "$generator" "$DIST_DIR/darwin/bbStatus.png"
+  /usr/bin/swift "$generator" "$DIST_DIR/darwin/bbStatusUpdate.png" update
+}
+
+_generate_dmg_background() {
+  local output="$1"
+  local generator="$DIST_DIR/darwin/generate-dmg-background.swift"
+  mkdir -p "$(dirname "$output")"
+
+  cat >"$generator" <<'SWIFT'
+import AppKit
+import Foundation
+
+let output = URL(fileURLWithPath: CommandLine.arguments[1])
+let canvas = NSSize(width: 800, height: 400)
+let image = NSImage(size: canvas)
+
+func color(_ hex: UInt32) -> NSColor {
+  NSColor(
+    calibratedRed: CGFloat((hex >> 16) & 0xff) / 255,
+    green: CGFloat((hex >> 8) & 0xff) / 255,
+    blue: CGFloat(hex & 0xff) / 255,
+    alpha: 1
+  )
+}
+
+image.lockFocus()
+NSColor.white.setFill()
+NSRect(origin: .zero, size: canvas).fill()
+
+let accent = color(0x22c55e)
+let dark = color(0x111827)
+
+let arrow = NSBezierPath()
+arrow.move(to: NSPoint(x: 326, y: 196))
+arrow.curve(to: NSPoint(x: 474, y: 196), controlPoint1: NSPoint(x: 374, y: 166), controlPoint2: NSPoint(x: 426, y: 166))
+arrow.lineCapStyle = .round
+arrow.lineJoinStyle = .round
+arrow.lineWidth = 8
+dark.setStroke()
+arrow.stroke()
+
+let head = NSBezierPath()
+head.move(to: NSPoint(x: 474, y: 196))
+head.line(to: NSPoint(x: 438, y: 168))
+head.move(to: NSPoint(x: 474, y: 196))
+head.line(to: NSPoint(x: 438, y: 224))
+head.lineCapStyle = .round
+head.lineJoinStyle = .round
+head.lineWidth = 8
+dark.setStroke()
+head.stroke()
+
+let chipOne = NSBezierPath(roundedRect: NSRect(x: 646, y: 256, width: 18, height: 30), xRadius: 4, yRadius: 4)
+let chipTwo = NSBezierPath(roundedRect: NSRect(x: 671, y: 248, width: 31, height: 18), xRadius: 4, yRadius: 4)
+dark.setStroke()
+chipOne.lineWidth = 5
+chipTwo.lineWidth = 5
+chipOne.stroke()
+chipTwo.stroke()
+accent.setFill()
+chipOne.fill()
+chipTwo.fill()
+
+image.unlockFocus()
+
+guard let tiff = image.tiffRepresentation,
+      let rep = NSBitmapImageRep(data: tiff),
+      let png = rep.representation(using: .png, properties: [:]) else {
+  fatalError("failed to render DMG background")
+}
+try png.write(to: output)
+SWIFT
+
+  /usr/bin/swift "$generator" "$output"
+}
+
+_detach_retry() {
+  local device="$1"
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if hdiutil detach "$device" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  hdiutil detach -force "$device" >/dev/null
+}
+
+_detach_existing_dmg_mounts() {
+  local mount
+  while IFS= read -r mount; do
+    [[ -n "$mount" ]] || continue
+    status "Detaching existing DMG mount $mount"
+    _detach_retry "$mount" || true
+  done < <(
+    find /Volumes -maxdepth 1 \( -name "$VOL_NAME" -o -name "$VOL_NAME *" \) -print 2>/dev/null || true
+  )
+}
+
+_run_with_timeout() {
+  local seconds="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout "$seconds" "$@"
+  else
+    "$@"
+  fi
+}
+
+_app() {
+  [[ -x "$DIST_DIR/darwin/bb" ]] || _build_bb
+
+  status "Creating $APP_PATH"
+  rm -rf "$APP_PATH"
+  mkdir -p "$APP_PATH/Contents/Resources"
+  _generate_app_icon
+  _generate_status_icons
+  cp app/bb-macos/Info.plist "$APP_PATH/Contents/Info.plist"
+  plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP_PATH/Contents/Info.plist"
+  plutil -replace CFBundleShortVersionString -string "$(version)" "$APP_PATH/Contents/Info.plist"
+  plutil -replace CFBundleVersion -string "$(version)" "$APP_PATH/Contents/Info.plist"
+  plutil -replace CFBundleIconFile -string "$APP_NAME" "$APP_PATH/Contents/Info.plist"
+
+  _build_app_executable
+  cp "$DIST_DIR/darwin/bb" "$APP_PATH/Contents/Resources/bb"
+  cp "$DIST_DIR/darwin/$APP_NAME.icns" "$APP_PATH/Contents/Resources/$APP_NAME.icns"
+  cp "$DIST_DIR/darwin/bbStatus.png" "$APP_PATH/Contents/Resources/bbStatus.png"
+  cp "$DIST_DIR/darwin/bbStatusUpdate.png" "$APP_PATH/Contents/Resources/bbStatusUpdate.png"
+  chmod +x "$APP_PATH/Contents/Resources/bb"
+  _generate_completions
+}
+
+_sign() {
+  if [[ -z "$APPLE_IDENTITY" ]]; then
+    status "APPLE_IDENTITY is unset; using ad-hoc code signing"
+    codesign -f -s - "$APP_PATH/Contents/Resources/bb"
+    codesign -f -s - "$APP_PATH/Contents/MacOS/$APP_NAME"
+    codesign -f -s - --deep "$APP_PATH"
+    return
+  fi
+
+  status "Signing $APP_NAME.app"
+  codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier "$BUNDLE_ID.bb" --options=runtime "$APP_PATH/Contents/Resources/bb"
+  codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier "$BUNDLE_ID" --options=runtime "$APP_PATH/Contents/MacOS/$APP_NAME"
+  codesign -f --timestamp -s "$APPLE_IDENTITY" --identifier "$BUNDLE_ID" --deep --options=runtime "$APP_PATH"
+}
+
+_zip() {
+  [[ -d "$APP_PATH" ]] || _app
+  rm -f "$DIST_DIR/$APP_NAME-darwin.zip"
+  status "Creating updater zip"
+  ditto -c -k --norsrc --keepParent "$APP_PATH" "$DIST_DIR/$APP_NAME-darwin.zip"
+}
+
+_dmg() {
+  [[ -d "$APP_PATH" ]] || _app
+  local dmg_root rw_dmg mount_output device mount_dir background_path applescript_path
+  _detach_existing_dmg_mounts
+  rm -rf "$DIST_DIR"/dmg-root*
+  dmg_root="$(mktemp -d "$DIST_DIR/dmg-root.XXXXXX")"
+  rm -f "$DIST_DIR/$APP_NAME.dmg"
+  cp -R "$APP_PATH" "$dmg_root/"
+  ln -s /Applications "$dmg_root/Applications"
+  background_path="$DIST_DIR/darwin/dmg-background.png"
+  _generate_dmg_background "$background_path"
+  mkdir -p "$dmg_root/.background"
+  cp "$background_path" "$dmg_root/.background/background.png"
+
+  rw_dmg="$DIST_DIR/rw-$APP_NAME.dmg"
+  rm -f "$rw_dmg"
+
+  status "Creating styled local DMG"
+  hdiutil create \
+    -volname "$VOL_NAME" \
+    -srcfolder "$dmg_root" \
+    -ov \
+    -format UDRW \
+    "$rw_dmg" >/dev/null
+
+  mount_output="$(hdiutil attach -readwrite -noverify -noautoopen -nobrowse "$rw_dmg")"
+  device="$(printf '%s\n' "$mount_output" | awk '/^\/dev\// { print $1; exit }')"
+  mount_dir="$(printf '%s\n' "$mount_output" | awk '/\/Volumes\// { for (i=3; i<=NF; i++) { printf "%s%s", (i==3 ? "" : " "), $i }; printf "\n"; exit }')"
+  if [[ -z "$device" || -z "$mount_dir" ]]; then
+    rm -rf "$dmg_root"
+    return 1
+  fi
+
+  /usr/bin/SetFile -a V "$mount_dir/.background" || true
+  cp "$DIST_DIR/darwin/$APP_NAME.icns" "$mount_dir/.VolumeIcon.icns"
+  /usr/bin/SetFile -c icnC "$mount_dir/.VolumeIcon.icns" || true
+  /usr/bin/SetFile -a C "$mount_dir" || true
+
+  applescript_path="$DIST_DIR/darwin/style-dmg.applescript"
+  cat >"$applescript_path" <<'APPLESCRIPT'
+on run argv
+  set mountPath to item 1 of argv
+  tell application "Finder"
+    set dmgRoot to POSIX file mountPath as alias
+    open dmgRoot
+    set dmgWindow to container window of dmgRoot
+    set current view of dmgWindow to icon view
+    set toolbar visible of dmgWindow to false
+    set statusbar visible of dmgWindow to false
+    set the bounds of dmgWindow to {200, 120, 1000, 520}
+    set opts to the icon view options of dmgWindow
+    set arrangement of opts to not arranged
+    set icon size of opts to 128
+    set text size of opts to 12
+    set background picture of opts to file ".background:background.png" of dmgRoot
+    set position of item "BuilderBot.app" of dmgRoot to {200, 205}
+    set position of item "Applications" of dmgRoot to {600, 205}
+    set the extension hidden of item "BuilderBot.app" of dmgRoot to true
+    delay 1
+    close dmgWindow
+  end tell
+end run
+APPLESCRIPT
+
+  if ! _run_with_timeout 30 /usr/bin/osascript "$applescript_path" "$mount_dir"; then
+    _detach_retry "$device" || true
+    rm -rf "$dmg_root"
+    return 1
+  fi
+
+  sync
+  _detach_retry "$device"
+  hdiutil convert "$rw_dmg" -format UDZO -imagekey zlib-level=9 -o "$DIST_DIR/$APP_NAME.dmg" >/dev/null
+  rm -f "$rw_dmg"
+  rm -rf "$dmg_root"
+}
+
+_package() {
+  _build_bb
+  _app
+  _sign
+  _zip
+  _dmg
+}
+
+if [[ "$#" -eq 0 ]]; then
+  _package
+  exit 0
+fi
+
+for cmd in "$@"; do
+  case "$cmd" in
+    build-bb) _build_bb ;;
+    app) _app ;;
+    sign) _sign ;;
+    zip) _zip ;;
+    dmg) _dmg ;;
+    package) _package ;;
+    *) usage ;;
+  esac
+done

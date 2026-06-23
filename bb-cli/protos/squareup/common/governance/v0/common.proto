@@ -1,0 +1,11 @@
+syntax = "proto2";
+package squareup.governance.v0;
+
+option java_package = "com.squareup.protos.common.governance.v0";
+
+message Common {
+  enum SemanticType {
+    UNKNOWN = 0;
+    NOT_IN_RUBRICS = 1;
+  }
+}

@@ -1,0 +1,16 @@
+skip_lfs: true
+output:
+  - success
+  - failure
+pre-push:
+  parallel: true
+  commands:
+    lint:
+      run: just lint
+    test:
+      run: just test
+pre-commit:
+  commands:
+    fmt:
+      run: just fmt
+      stage_fixed: true

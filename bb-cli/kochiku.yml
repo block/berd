@@ -1,0 +1,8 @@
+test_command: script/ci
+
+docker_compose:
+  kochiku_image: 932683182786.dkr.ecr.us-west-2.amazonaws.com/sq-containers-production/base/kochiku-oraclelinux8-production-default:stable
+
+targets:
+  - type: lint
+  - type: test

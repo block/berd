@@ -1,0 +1,55 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "squareup/cash/kgoose/api/v3/extension_messages.proto";
+import "squareup/cash/kgoose/api/v3/profile_messages.proto";
+
+// Controls which backend extensions are available to the agent.
+enum BackendExtensionAvailability {
+  // All registered extensions for the deployment are available.
+  // `allowed_backend_extensions` entries are only used for auto_picked settings
+  // (tool_names is ignored since all tools are available).
+  BACKEND_EXTENSION_AVAILABILITY_ALL = 0;
+  // Only extensions listed in `allowed_backend_extensions` are available
+  // (plus baseline extensions like platform/utils).
+  // Entries control availability, auto_picked, and tool_names filtering.
+  BACKEND_EXTENSION_AVAILABILITY_ALLOWLIST = 1;
+  // No backend extensions are used at all.
+  // `allowed_backend_extensions` must be empty.
+  BACKEND_EXTENSION_AVAILABILITY_NONE = 2;
+}
+
+// Configuration that controls which extensions are available to an agent and how they are selected.
+// Used by ExtensionRouting to determine the final set of extensions for an LLM call.
+//
+// This is the single source of truth for extension selection policy within an AgentConfig.
+// Runtime context (chat source, tenancy, feature flags, message history) remains outside this config
+// and is applied as an overlay by ExtensionRouting.
+message ExtensionSelectionConfig {
+  // Controls which backend extensions are available.
+  // See BackendExtensionAvailability enum for details on each mode.
+  optional BackendExtensionAvailability backend_extension_availability = 1;
+
+  // Backend extension configuration. Interpretation depends on `backend_extension_availability`.
+  repeated ExtensionTools allowed_backend_extensions = 2;
+
+  // Denylist of backend extensions and their tools. Applied after selection to
+  // remove specific extensions or tools. Empty tool_names means the entire
+  // extension is disabled.
+  //
+  // If a tool appears in both allowed and disabled lists, disabled wins.
+  repeated ExtensionTools disabled_backend_extensions = 3;
+
+  // Whether the LLM can dynamically enable extensions via the
+  // platform__enable_extensions tool. When false, all available extensions
+  // are enabled immediately. Defaults to true when absent.
+  optional bool enable_tool_picker = 4;
+
+  // Client-supplied extension definitions (tools handled by the client, not
+  // by backend MCP servers). Each entry is a full ExtensionConfig with tools,
+  // instructions, and auto_picked settings.
+  repeated ExtensionConfig client_extensions = 5;
+}

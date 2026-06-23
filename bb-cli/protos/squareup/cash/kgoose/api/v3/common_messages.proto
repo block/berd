@@ -1,0 +1,157 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+
+message OnBehalfOf {
+  optional string token = 1;
+  optional TokenType type = 2;
+}
+
+enum TokenType {
+  TOKEN_TYPE_DO_NOT_USER = 0;
+  TOKEN_TYPE_CASH_CUSTOMER = 1;
+  TOKEN_TYPE_SQUARE_CUSTOMER = 2;
+  TOKEN_TYPE_BLOCK_INTERNAL = 3;
+  // Deprecated. Use Block Internal instead and differentiate traffic using ChatContext.Source
+  TOKEN_TYPE_CASH_ADVOCATE = 4;
+}
+
+enum ModelProvider {
+  MODEL_PROVIDER_UNSPECIFIED = 0;
+  MODEL_PROVIDER_DATABRICKS = 1;
+  MODEL_PROVIDER_GROQ = 2;
+  MODEL_PROVIDER_CEREBRAS = 3;
+  MODEL_PROVIDER_OPENAI = 5;
+  MODEL_PROVIDER_GONDOLA = 6 [deprecated=true]; // Deprecated: Gondola provider is no longer supported
+  MODEL_PROVIDER_OPENROUTER = 7;
+  MODEL_PROVIDER_ANTHROPIC = 8;
+}
+
+message Model {
+  optional ModelProvider provider = 1;
+  optional string name = 2;
+}
+
+// Source in ChatContext
+enum Source {
+  SOURCE_UNSPECIFIED = 0;
+  SOURCE_REGULAR_CHAT = 1; // regular chat
+  SOURCE_CREATE_TILE = 2; // Tile creation
+  SOURCE_TILE_FOLLOW_UP_CHAT = 3; // Tile follow up chat
+  SOURCE_TASK_FORM_SUBMISSION = 4; // Form submission for Task tiles
+  SOURCE_CREATE_TILE_FROM_TILE = 5; // Tile creation from shared tile
+  SOURCE_CREATE_AUTOMATION = 6; // [deprecated] Automation creation
+  SOURCE_AUTOMATION_FOLLOW_UP_CHAT = 7; // [deprecated] Automation follow up chat
+  SOURCE_EDIT_TILE = 8; // Dedicated tile editing
+  SOURCE_EDIT_AUTOMATION = 9; // [deprecated] Dedicated automation editing
+  SOURCE_MONEYBOT_CHAT = 10; // Moneybot regular chat
+  SOURCE_TILE_REFRESH = 11; // Tile refresh
+  SOURCE_LANGFUSE_EXPERIMENT = 12; // Langfuse experiment
+  SOURCE_CREATE_SPACE_APP = 13; // Space-app creation
+  SOURCE_INSIGHT_FOLLOW_UP_CHAT = 14; // Insight follow up chat
+  SOURCE_CASHBOT = 15; // Cash support bot
+  SOURCE_PATHFINDER = 16; // Pathfinder (gen-ai supportcenter)
+  SOURCE_CASH_ADVOCATE_COPILOT = 17; // Cash advocate copilot
+  SOURCE_SQUARE_ADVOCATE_COPILOT = 18; // Square advocate copilot
+  SOURCE_CREATE_TASK_PLAN = 19;
+  SOURCE_SCRIPT_CONVERSION = 20; // Script conversion (e.g., English to Lua)
+  SOURCE_MANAGERBOT_CHAT = 21; // Managerbot regular chat
+  SOURCE_MANAGERBOT_EVERGREEN_METRICS = 22; // Managerbot evergreen metrics
+  SOURCE_MANAGERBOT_EMAILS = 23; // Managerbot linked email chats
+  SOURCE_CASHAPP_BUG_REPORTING = 24; // Cash App bug reporting
+  SOURCE_SQUAREBOT = 25; // Square support bot
+  SOURCE_SALESBOT = 26; // Sales bot for external chat
+  SOURCE_CASH_ADVOCATE_BOT = 27; // Cash Advocate Bot
+  SOURCE_APP_SEC_REPORTER = 28; // AppSecReporter AI-powered bundle summary and remediation guidance
+  SOURCE_BUILDERBOT = 29; // Builderbot
+  SOURCE_CUSTOMER_REENGAGEMENT = 30; // Customer reengagement workflow
+  SOURCE_SCHEDULED_TASK = 31 [deprecated = true]; // [deprecated] Scheduled task execution
+  SOURCE_RISK_DEMO = 32; // Risk demo
+  SOURCE_CLAUDIUS = 33; // Claudius
+  SOURCE_G2_APP = 34; // G2 Cloudflare-hosted app tool calls
+  SOURCE_MANAGERBOT_COACHMARK = 35; // Managerbot coachmark
+  SOURCE_MONEYBOT_DIRECT_EXECUTION = 36; // Moneybot direct tool execution from client (e.g., on-tap confirmation card)
+  SOURCE_MANAGERBOT_EDIT_WIDGET = 37;
+  SOURCE_KGOOSE_TOOL_CALL_ENDPOINTS_DEFAULT = 38; // Default source for programmatic tool calls via ToolEndpointService
+  SOURCE_MANAGERBOT_SMS = 39; // Managerbot SMS relay sessions
+  SOURCE_AFTERPAY_BOT = 40; // Afterpay support bot
+  SOURCE_GENIE = 41; // Genie server-driven UI generation
+  SOURCE_FILING_BROKER = 42; // Filing broker AI-powered investigation note generation
+  SOURCE_SQUARE_ADVOCATE_BOT = 43; // Square Advocate Bot
+  SOURCE_MANAGERBOT_DIRECT_EXECUTION = 44; // Managerbot direct tool execution from client
+  SOURCE_VERIFICATIONS_BOT = 45; // Verifications Bot
+  SOURCE_REGULATOR = 46; // Regulator compliance assistant
+  SOURCE_NEIGHBORHOODSBOT = 47; // Neighborhoodsbot — Neighborhoods worldview Slack bot
+  SOURCE_AM_HUB = 48; // Smart Hub AI for Square Account Managers
+  SOURCE_QUINN = 49; // Quinn conversational agent
+  SOURCE_SQ_AGENT_TOOLS = 50; // sq agent-tools CLI (squareup/sq-kgoose)
+}
+
+enum ActionStatus {
+  ACTION_STATUS_UNSPECIFIED = 0; // Default value, should not be used.
+  ACTION_STATUS_SUCCESS = 1;     // The action was completed successfully.
+  ACTION_STATUS_FAILED = 2;      // The action failed, but the flow completed.
+}
+
+message AccessLevelInfo {
+
+  // todo(trudolf): this access_level has the space-sharing-mode and access-level convoluted
+  oneof access_level {
+    bool owner = 1;
+    bool view_only = 2;
+    AccessDenied access_denied = 3;
+    bool preview_only = 4;
+    bool subscriber = 5;
+  }
+
+  message AccessDenied {
+    repeated AccessErrorInfo access_error_info = 1;
+
+    message AccessErrorInfo {
+      optional string connection_name = 1;
+      oneof error {
+        bool connection_not_enabled = 2;
+        bool connection_prohibited_from_sharing = 3;
+        // bad naming. the acl-check was successful and returned the user does not have access
+        AclCheckFailed acl_check_failed = 4;
+        // acl check was not successful, e.g. encountered a server error or couldn't read the response
+        bool acl_check_error = 5;
+      }
+
+      message AclCheckFailed {
+        repeated string object_ids = 1;
+      }
+    }
+  }
+}
+
+message AdminCapabilities {
+  optional bool can_manage_tiles = 1;
+  optional bool can_approve_changes = 2;
+  optional bool can_manage_admins = 3;
+  optional bool can_manage_space = 4;
+}
+
+// Represents the completion of a Square workflow.
+message SquareWorkflowUpdate {
+  // Unique identifier for the originating workflow/tool request.
+  optional string tool_request_id = 1;
+
+  // Customer identity token associated with the session.
+  optional string customer_token = 2;
+
+  // Target session ID in which the message should be inserted.
+  optional string session_id = 3;
+
+  // Natural language summary describing the outcome of the workflow.
+  optional string summary = 4;
+
+  // Optional workflow completion status.
+  optional ActionStatus action_status = 5;
+
+  // Optional error message if workflow failed.
+  optional string error_message = 6;
+}

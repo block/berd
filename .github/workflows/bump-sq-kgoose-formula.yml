@@ -1,0 +1,90 @@
+# When you push a bb-cli release tag to this repo, tell squareup/homebrew-formulas
+# to bump the version of sq-kgoose.rb.
+name: Bump sq-kgoose Formula
+
+on:
+  push:
+    tags:
+      - '[0-9]+.[0-9]+.[0-9]+'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Git tag
+        required: true
+
+concurrency:
+  group: bump-sq-kgoose-formula-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump-formula:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Validate tag against bb-cli/Cargo.toml
+        id: vars
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          tag="${INPUT_TAG:-$REF_NAME}"
+          if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "formula bump tags must be bare semver like 0.1.0; got: $tag" >&2
+            exit 1
+          fi
+
+          manifest_version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' bb-cli/Cargo.toml | head -n1)"
+          if [[ -z "$manifest_version" ]]; then
+            echo "failed to read version from bb-cli/Cargo.toml" >&2
+            exit 1
+          fi
+
+          if [[ "$tag" != "$manifest_version" ]]; then
+            echo "tag $tag does not match bb-cli/Cargo.toml version $manifest_version" >&2
+            exit 1
+          fi
+
+          echo "formula=sq-kgoose" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Check Homebrew bump secrets
+        env:
+          HOMEBREW_FORMULAS_APP_ID: ${{ secrets.HOMEBREW_FORMULAS_APP_ID }}
+          HOMEBREW_FORMULAS_PRIVATE_KEY: ${{ secrets.HOMEBREW_FORMULAS_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "$HOMEBREW_FORMULAS_APP_ID" ]]; then
+            echo "HOMEBREW_FORMULAS_APP_ID is not configured for this repository" >&2
+            exit 1
+          fi
+
+          if [[ -z "$HOMEBREW_FORMULAS_PRIVATE_KEY" ]]; then
+            echo "HOMEBREW_FORMULAS_PRIVATE_KEY is not configured for this repository" >&2
+            exit 1
+          fi
+
+      - name: Generate token
+        uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
+        id: generate_token
+        with:
+          app-id: ${{ secrets.HOMEBREW_FORMULAS_APP_ID }}
+          private-key: ${{ secrets.HOMEBREW_FORMULAS_PRIVATE_KEY }}
+          repositories: homebrew-formulas
+
+      - name: Dispatch formula bump
+        uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0
+        with:
+          token: ${{ steps.generate_token.outputs.token }}
+          repository: squareup/homebrew-formulas
+          event-type: bump_formula
+          client-payload: '{"repo":"${{ github.repository }}", "formula":"${{ steps.vars.outputs.formula }}", "tag":"${{ steps.vars.outputs.tag }}"}'

@@ -49,6 +49,23 @@ stage-sidecar`. Staging creates `src-tauri/binaries/goosed-<rust-host-triple>`,
 matching the `"externalBin": ["binaries/goosed"]` entry in
 `src-tauri/tauri.conf.json`.
 
+## BuilderBot CLI
+
+The BuilderBot and `sq agent-tools` CLI package lives in `bb-cli`. It remains an
+independent Rust crate with its own package-local release scripts, while root
+recipes delegate to it for local checks:
+
+```bash
+just bb-cli-build
+just bb-cli-test
+just bb-cli-lint
+just bb-cli-build-sq
+```
+
+The `sq` package artifact is still built at
+`bb-cli/sqbin/agent-tools.exoskeleton`, and `bb` archive packaging still writes
+under `bb-cli/dist/`.
+
 ## Adding an experiment
 
 Experiments are user-local preferences for unstable UI or workflow behavior.

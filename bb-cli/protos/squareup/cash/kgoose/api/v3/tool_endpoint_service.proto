@@ -1,0 +1,29 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "google/api/annotations.proto";
+import "squareup/cash/kgoose/api/v3/tool_endpoint_messages.proto";
+
+// Service for programmatic access to kgoose extensions and tools.
+// Enables CLI and other clients to discover and invoke tools dynamically.
+service ToolEndpointService {
+  // List all available extensions and their OAuth status for the calling user
+  rpc ListExtensions(ListExtensionsRequest) returns (ListExtensionsResponse);
+
+  // List all tools available in a specific extension
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+
+  // Invoke a specific tool in an extension with the given arguments
+  rpc CallTool(CallToolRequest) returns (CallToolResponse);
+
+  // Execute a tool directly from the Cash App client (e.g., on-tap confirmation card).
+  // Uses Cash App auth, writes chat activity for card updates, and extracts client_renderable.
+  rpc ExecuteTool(ExecuteToolRequest) returns (ExecuteToolResponse) {
+    option (google.api.http) = {
+      post: "/cash-app/goose-cash/v3/execute-tool"
+    };
+  }
+}

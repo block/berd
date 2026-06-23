@@ -14,6 +14,14 @@ steps:
     key: "rust"
     command: "scripts/buildkite/rust-checks.sh"
 
+  - label: ":terminal: BuilderBot CLI lint"
+    key: "bb-cli-lint"
+    command: "cd bb-cli && TEST_RUNNER=lint script/ci"
+
+  - label: ":terminal: BuilderBot CLI tests"
+    key: "bb-cli-test"
+    command: "cd bb-cli && TEST_RUNNER=test script/ci"
+
   - label: ":playwright: Transcript virtualization"
     key: "transcript-virtualization"
     command: "scripts/buildkite/transcript-virtualization.sh"

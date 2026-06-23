@@ -1,0 +1,200 @@
+syntax = "proto2";
+
+package squareup.cash.kgoose.api.v3;
+
+option java_package = "com.squareup.protos.cash.kgoose.api.v3";
+
+import "squareup/cash/kgoose/api/v3/common_messages.proto";
+import "squareup/cash/kgoose/api/v3/extension_selection_config.proto";
+
+// Lifecycle status of an AgentConfig version.
+enum AgentConfigStatus {
+  // Default/unknown.
+  AGENT_CONFIG_STATUS_UNSPECIFIED = 0;
+  // Can be targeted by PushMessages when referenced by name + version.
+  AGENT_CONFIG_STATUS_ACTIVE = 1;
+  // The singular default version for a config name. Used when PushMessages specifies a name
+  // but no version. At most one primary per config name.
+  AGENT_CONFIG_STATUS_PRIMARY = 2;
+  // Retired. Not expected to be used. Preserved for audit history.
+  AGENT_CONFIG_STATUS_INACTIVE = 3;
+}
+
+// A named, versioned set of settings that configure kgoose agent behavior.
+// This is the successor to ProfileConfig, unifying ServiceProfileConfig and UserProfileConfig
+// into a single configuration type.
+message AgentConfig {
+  // The preferred model to be used.
+  optional Model preferred_model = 1;
+
+  // Extension selection policy. Controls which extensions are available to the agent
+  // and how they are selected. When present, takes precedence over legacy extension
+  // fields in ServiceProfileConfig (e.g. preferred_backend_tools, no_backend_tools).
+  optional ExtensionSelectionConfig extension_selection_config = 2;
+}
+
+// A reference to a named AgentConfig, used on PushMessagesRequest to specify
+// which agent configuration to use.
+message AgentConfigReference {
+  // Required. The config name, e.g., "moneybot".
+  optional string name = 1;
+
+  // Optional version label. If omitted, the latest active version is used.
+  optional string version = 2;
+}
+
+// How a ClientConfiguration was sourced.
+enum ConfigSource {
+  CONFIG_SOURCE_UNSPECIFIED = 0;
+  // Configuration was provided by the client in the request body (agent_config_ref).
+  CONFIG_SOURCE_CLIENT = 1;
+  // Configuration was overridden via a request header (staging/playpen only).
+  CONFIG_SOURCE_HEADER = 2;
+}
+
+// Records the configuration that was specified before a Task begins.
+message ClientConfiguration {
+  // The name of the agent configuration, e.g., "managerbot"
+  optional string config_name = 1;
+
+  // The version label of the agent configuration, e.g., "3.2.1"
+  optional string config_version = 2;
+
+  // Deprecated: use config_source instead. Legacy string values: "client", "header", "default".
+  optional string source = 3 [deprecated = true];
+
+  // Full snapshot of the AgentConfig at the time of the request
+  optional AgentConfig config = 4;
+
+  // How the configuration was sourced.
+  optional ConfigSource config_source = 5;
+}
+
+// ===== CRUD Messages =====
+
+message CreateAgentConfigRequest {
+  // Required. Unique name for this configuration, e.g., "moneybot", "managerbot".
+  required string name = 1;
+
+  // Optional human-readable description of this configuration version.
+  optional string description = 2;
+
+  // Required. Human-friendly version label, e.g., "3.2.1".
+  // Must be unique within this config name.
+  optional string version_label = 3;
+
+  // Optional product grouping for admin UI filtering, e.g., "moneybot".
+  optional string product = 4;
+
+  // Optional freeform tags for categorization, e.g., ["production", "moneybot"].
+  repeated string tags = 5;
+
+  // Required. The agent configuration settings.
+  optional AgentConfig agent_config = 6;
+}
+
+message CreateAgentConfigResponse {
+  optional AgentConfigRecord record = 1;
+}
+
+message GetAgentConfigRequest {
+  // Required. The config name to fetch.
+  required string name = 1;
+
+  // Optional. If provided, fetches this specific version label.
+  // If omitted, returns the latest version.
+  optional string version_label = 2;
+}
+
+message GetAgentConfigResponse {
+  optional AgentConfigRecord record = 1;
+}
+
+message UpdateAgentConfigRequest {
+  // Required. The config name to update (creates a new version).
+  required string name = 1;
+
+  // Optional updated description.
+  optional string description = 2;
+
+  // Required. Human-friendly version label, e.g., "3.2.1".
+  // Must be unique within this config name.
+  optional string version_label = 3;
+
+  // Optional updated product.
+  optional string product = 4;
+
+  // Optional updated tags (replaces existing tags).
+  repeated string tags = 5;
+
+  // Required. The new agent configuration settings.
+  required AgentConfig agent_config = 6;
+}
+
+message UpdateAgentConfigResponse {
+  optional AgentConfigRecord record = 1;
+}
+
+message DeleteAgentConfigRequest {
+  // Required. The config name to soft-delete.
+  required string name = 1;
+}
+
+message DeleteAgentConfigResponse {}
+
+message ListAgentConfigsRequest {
+  // Optional. Filter by product.
+  optional string product = 1;
+}
+
+message ListAgentConfigsResponse {
+  repeated AgentConfigRecord records = 1;
+}
+
+// A stored agent configuration with metadata.
+message AgentConfigRecord {
+  // The config name.
+  optional string name = 1;
+
+  // Human-friendly version label.
+  optional string version_label = 2;
+
+  // Product grouping.
+  optional string product = 3;
+
+  // Freeform tags.
+  repeated string tags = 4;
+
+  // The agent configuration.
+  optional AgentConfig agent_config = 5;
+
+  // Who created this version.
+  optional string created_by = 6;
+
+  // When this version was created, in epoch millis.
+  optional int64 created_at = 7;
+
+  // Human-readable description.
+  optional string description = 8;
+
+  // Lifecycle status of this config version.
+  optional AgentConfigStatus status = 9;
+}
+
+// ===== SetConfigStatus Messages =====
+
+message SetConfigStatusRequest {
+  // Required. The config name.
+  optional string name = 1;
+
+  // Required. The version label identifying which version to transition.
+  // Must match a version_label previously set via CreateAgentConfig or UpdateAgentConfig.
+  optional string version_label = 2;
+
+  // Required. The target status.
+  optional AgentConfigStatus status = 3;
+}
+
+message SetConfigStatusResponse {
+  optional AgentConfigRecord record = 1;
+}
