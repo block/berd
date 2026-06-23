@@ -211,6 +211,10 @@
     },
     "resetToAuto": "Reset to auto",
     "saveError": "Couldn't save the experiment setting. Try again.",
+    "sidebarDetachableChats": {
+      "description": "Let the sidebar chats area detach from the main navigation and snap beside it while this layout is being tested.",
+      "title": "Detachable sidebar chats"
+    },
     "transcriptVirtualRenderer": {
       "description": "Routes chats through the virtual transcript renderer bridge for implementation testing.",
       "title": "Transcript virtual renderer"

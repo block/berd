@@ -59,7 +59,10 @@ import { useCompletionNotifications } from "@/shared/hooks/useCompletionNotifica
 import { useHomeSessionStateSync } from "./hooks/useHomeSessionStateSync";
 import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import { useProjectDialog } from "./hooks/useProjectDialog";
-import { useResizableSidebar } from "./hooks/useResizableSidebar";
+import {
+  getResponsiveSidebarWidth,
+  useResizableSidebar,
+} from "./hooks/useResizableSidebar";
 import {
   areAppNavigationLocationsEqual,
   getAppNavigationLocation,
@@ -131,8 +134,16 @@ import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/desi
 import {
   BUILDERBOT_SURFACE_EXPERIMENT_ID,
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
+  SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { usePaneDockingLayout } from "./layout/panes/usePaneDockingLayout";
+import {
+  getStackedNavigationPaneWidth,
+  resolveSideBySideNavigationPaneSizesForAvailableWidth,
+  resolveStackedNavigationPaneSizes,
+} from "./layout/panes/paneSizeRules";
+import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -268,10 +279,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     resizeHandleHeight,
     resizeHandleWidth,
     sidebarOuterHeight,
-    sidebarOuterWidth,
     sidebarPanelOuterWidth,
     sidebarWidth,
     toggleCollapse: toggleSidebar,
+    viewportWidth,
   } = useResizableSidebar();
   const isWindowFullscreen = useWindowFullscreenState();
   const platform = getPlatform();
@@ -310,6 +321,54 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const isPaneJumpNavigationEnabled = Boolean(
     paneJumpNavigationExperiment?.enabled,
   );
+  const detachableSidebarChatsExperiment = useExperiment(
+    SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
+  );
+  const isDetachableSidebarChatsEnabled = Boolean(
+    detachableSidebarChatsExperiment?.enabled,
+  );
+  const paneDockingLayout = usePaneDockingLayout({
+    baseNavigationWidth: sidebarWidth,
+    enabled: isDetachableSidebarChatsEnabled,
+  });
+  const sidebarOuterGutterWidth = Math.max(
+    0,
+    sidebarPanelOuterWidth - sidebarWidth,
+  );
+  const preferredSidebarDockedWidth =
+    isDetachableSidebarChatsEnabled && paneDockingLayout.chatListDock === "side"
+      ? paneDockingLayout.navigationPaneSizes.primaryNav +
+        SIDEBAR_DETACHED_PANEL_GAP_PX +
+        paneDockingLayout.navigationPaneSizes.chatList
+      : isDetachableSidebarChatsEnabled
+        ? getStackedNavigationPaneWidth(paneDockingLayout.navigationPaneSizes)
+        : sidebarWidth;
+  const responsiveSidebarDockedWidth = getResponsiveSidebarWidth(
+    preferredSidebarDockedWidth,
+    viewportWidth,
+  );
+  const visibleNavigationPaneSizes = isDetachableSidebarChatsEnabled
+    ? paneDockingLayout.chatListDock === "side"
+      ? resolveSideBySideNavigationPaneSizesForAvailableWidth(
+          paneDockingLayout.navigationPaneSizes,
+          responsiveSidebarDockedWidth,
+          SIDEBAR_DETACHED_PANEL_GAP_PX,
+        )
+      : resolveStackedNavigationPaneSizes(responsiveSidebarDockedWidth)
+    : paneDockingLayout.navigationPaneSizes;
+  const sidebarDockedWidth =
+    isDetachableSidebarChatsEnabled && paneDockingLayout.chatListDock === "side"
+      ? visibleNavigationPaneSizes.primaryNav +
+        SIDEBAR_DETACHED_PANEL_GAP_PX +
+        visibleNavigationPaneSizes.chatList
+      : isDetachableSidebarChatsEnabled
+        ? getStackedNavigationPaneWidth(visibleNavigationPaneSizes)
+        : sidebarWidth;
+  const sidebarDockedPanelOuterWidth =
+    sidebarDockedWidth + sidebarOuterGutterWidth;
+  const sidebarDockedOuterWidth = sidebarCollapsed
+    ? 0
+    : sidebarDockedPanelOuterWidth;
   const [skillsSkillId, setSkillsSkillId] = useState<string | null>(null);
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
@@ -2614,7 +2673,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           onFeedbackClick: handleFeedbackClick,
           onSearchClick: () => handleNavigate("search"),
         }}
-        sidebar={{
+        navigationPanes={{
           collapsed: false,
           width: sidebarWidth,
           isResizing,
@@ -2648,12 +2707,25 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           activeSettingsSection,
           activeDesignSystemSection,
           activeSessionId,
+          detachableSessionListEnabled: isDetachableSidebarChatsEnabled,
+          onPaneResizeBegin: paneDockingLayout.beginNavigationPaneResize,
+          onPaneResizeEnd: paneDockingLayout.endNavigationPaneResize,
+          onPaneResize: paneDockingLayout.resizeNavigationPane,
+          paneSizes: visibleNavigationPaneSizes,
+          sessionListDock: paneDockingLayout.chatListDock,
+          onSessionListDragRelease: paneDockingLayout.commitPaneDragRelease,
+          getSessionListDragPreviewDock:
+            paneDockingLayout.getPaneDragPreviewDock,
           projects,
           className: "h-full rounded-md",
         }}
         sidebarCollapsed={sidebarCollapsed}
-        sidebarOuterWidth={sidebarOuterWidth}
-        sidebarPanelOuterWidth={sidebarPanelOuterWidth}
+        sidebarDisableWidthTransition={
+          paneDockingLayout.suppressNavigationWidthTransition
+        }
+        sidebarResizeDisabled={isDetachableSidebarChatsEnabled}
+        sidebarOuterWidth={sidebarDockedOuterWidth}
+        sidebarPanelOuterWidth={sidebarDockedPanelOuterWidth}
         isResizing={isResizing}
         resizeHandleHeight={resizeHandleHeight}
         resizeHandleWidth={resizeHandleWidth}
@@ -2689,10 +2761,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               renderedSession={renderedSession}
               homeSessionId={homeSessionId}
               homeViewportLeftOcclusionPx={
-                renderedLocation.view === "home" ? sidebarOuterWidth : 0
+                renderedLocation.view === "home" ? sidebarDockedOuterWidth : 0
               }
               chatViewportLeftOcclusionPx={
-                renderedLocation.view === "chat" ? sidebarOuterWidth : 0
+                renderedLocation.view === "chat" ? sidebarDockedOuterWidth : 0
               }
               onNavigateSkills={navigateSkills}
               onNavigateAgents={navigateAgents}

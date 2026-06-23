@@ -4,7 +4,9 @@
     "backToMainNavigation": "Back",
     "back": "Back",
     "collapse": "Collapse sidebar",
+    "collapseNavigationPanel": "Collapse",
     "expand": "Expand sidebar",
+    "expandNavigationPanel": "Expand",
     "forward": "Forward",
     "search": "Search",
     "newChat": "New chat",
@@ -18,6 +20,12 @@
     "focusWindowFailed": "Couldn't focus this chat window.",
     "selectChat": "Select {{title}}",
     "deselectChat": "Deselect {{title}}",
+    "dockSessionListBelowNavigation": "Move projects and chats below navigation",
+    "dockSessionListBesideNavigation": "Move projects and chats beside navigation",
+    "dragSessionList": "Drag projects and chats",
+    "resizeNavigationPanel": "Resize navigation panel",
+    "resizeSidebarPanels": "Resize sidebar panels",
+    "resizeSessionListPanel": "Resize projects and chats panel",
     "renameHint": "Double-click to rename"
   },
   "bulk": {
@@ -42,6 +50,7 @@
     "gooseHome": "Goose home",
     "home": "Home",
     "main": "Main navigation",
+    "sessionList": "Projects and chats",
     "sessionHistory": "Session history",
     "skills": "Skills"
   },

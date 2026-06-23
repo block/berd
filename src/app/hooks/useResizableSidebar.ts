@@ -50,7 +50,7 @@ function getMaxSidebarWidthForViewport(viewportWidth: number) {
   );
 }
 
-function getResponsiveSidebarWidth(
+export function getResponsiveSidebarWidth(
   preferredWidth: number,
   viewportWidth: number,
 ) {
@@ -454,5 +454,6 @@ export function useResizableSidebar() {
     sidebarWidth,
     toggleCollapse: toggleSidebar,
     toggleSidebar,
+    viewportWidth,
   };
 }

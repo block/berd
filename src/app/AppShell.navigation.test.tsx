@@ -132,8 +132,8 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
   useDefaultModelGate: () => ({ status: "ok", retry: vi.fn() }),
 }));
 
-vi.mock("@/features/sidebar/ui/Sidebar", () => ({
-  Sidebar: ({
+vi.mock("@/app/views/NavigationPanesView", () => ({
+  NavigationPanesView: ({
     onNavigate,
     onNewChat,
     onSettingsClick,

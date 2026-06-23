@@ -6,7 +6,7 @@ import {
   type MouseEventHandler,
   type ReactNode,
 } from "react";
-import { Sidebar } from "@/features/sidebar/ui/Sidebar";
+import { NavigationPanesView } from "@/app/views/NavigationPanesView";
 import { CreateProjectDialog } from "@/features/projects/ui/CreateProjectDialog";
 import { DesignSystemInspector } from "@/features/design-system/inspector/DesignSystemInspector";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
@@ -41,8 +41,10 @@ interface AppShellLayoutProps {
   onResizeStart: MouseEventHandler<HTMLDivElement>;
   resizeHandleHeight: number;
   resizeHandleWidth: number;
-  sidebar: ComponentProps<typeof Sidebar>;
+  navigationPanes: ComponentProps<typeof NavigationPanesView>;
   sidebarCollapsed: boolean;
+  sidebarDisableWidthTransition?: boolean;
+  sidebarResizeDisabled?: boolean;
   sidebarOuterHeight: number;
   sidebarOuterWidth: number;
   /** Full slide panel width (content + gutter); stays constant while collapsing. */
@@ -80,8 +82,10 @@ export function AppShellLayout({
   onResizeStart,
   resizeHandleHeight,
   resizeHandleWidth,
-  sidebar,
+  navigationPanes,
   sidebarCollapsed,
+  sidebarDisableWidthTransition = false,
+  sidebarResizeDisabled = false,
   sidebarOuterHeight,
   sidebarOuterWidth,
   sidebarPanelOuterWidth,
@@ -103,9 +107,10 @@ export function AppShellLayout({
   const sidebarHandleFadeTransition = isResizing
     ? "none"
     : `opacity ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
-  const sidebarSpacerTransition = isResizing
-    ? "none"
-    : `width ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
+  const sidebarSpacerTransition =
+    isResizing || sidebarDisableWidthTransition
+      ? "none"
+      : `width ${SIDEBAR_COLLAPSE_TRANSITION_MS}ms ${SIDEBAR_COLLAPSE_TRANSITION_EASE}`;
 
   const sidebarSlotMaxHeight = contentUnderTopBar
     ? "calc(100% - var(--spacing-app-panel-gutter-bottom) - var(--spacing-app-top-bar))"
@@ -207,69 +212,78 @@ export function AppShellLayout({
             onMouseLeave={() => setSidebarHovered(false)}
           >
             <div className="relative h-full pt-[var(--spacing-app-panel-gutter-top)] pl-3">
-              <Sidebar {...sidebar} elevatedShadow={sidebarElevated} />
+              <NavigationPanesView
+                {...navigationPanes}
+                elevatedShadow={sidebarElevated}
+              />
             </div>
-            <div
-              onMouseDown={onResizeStart}
-              onDoubleClick={onResizeDoubleClick}
-              className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
-              style={{
-                width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
-                opacity: sidebarCollapsed ? 0 : 1,
-                transition: sidebarHandleFadeTransition,
-              }}
-              aria-hidden={sidebarCollapsed || undefined}
-            >
-              <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
-            </div>
-            <div
-              onMouseDown={onHeightResizeStart}
-              onDoubleClick={onHeightResizeDoubleClick}
-              className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-row-resize items-center justify-center overflow-hidden"
-              style={{
-                height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
-                opacity: sidebarCollapsed ? 0 : 1,
-                transition: sidebarHandleFadeTransition,
-              }}
-              aria-hidden={sidebarCollapsed || undefined}
-            >
-              <div className="h-px w-8 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-            </div>
-            <div
-              onMouseDown={onCornerResizeStart}
-              onDoubleClick={onCornerResizeDoubleClick}
-              className="group absolute right-0 bottom-0 z-20 translate-x-1/2 translate-y-1/2 cursor-nwse-resize overflow-hidden"
-              style={{
-                height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
-                width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
-                opacity: sidebarCollapsed ? 0 : 1,
-                transition: sidebarHandleFadeTransition,
-              }}
-              aria-hidden={sidebarCollapsed || undefined}
-            >
-              <div className="absolute top-1/2 left-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-              <div className="absolute top-1/2 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
-            </div>
+            {!sidebarResizeDisabled && (
+              <>
+                <div
+                  onMouseDown={onResizeStart}
+                  onDoubleClick={onResizeDoubleClick}
+                  className="sidebar-resize-rail group absolute top-0 right-0 bottom-0 z-10 flex translate-x-1/2 cursor-col-resize items-center justify-center overflow-hidden"
+                  style={{
+                    width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                    opacity: sidebarCollapsed ? 0 : 1,
+                    transition: sidebarHandleFadeTransition,
+                  }}
+                  aria-hidden={sidebarCollapsed || undefined}
+                >
+                  <div className="h-8 w-px rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                </div>
+                <div
+                  onMouseDown={onHeightResizeStart}
+                  onDoubleClick={onHeightResizeDoubleClick}
+                  className="group absolute right-0 bottom-0 left-3 z-10 flex translate-y-1/2 cursor-row-resize items-center justify-center overflow-hidden"
+                  style={{
+                    height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
+                    opacity: sidebarCollapsed ? 0 : 1,
+                    transition: sidebarHandleFadeTransition,
+                  }}
+                  aria-hidden={sidebarCollapsed || undefined}
+                >
+                  <div className="h-px w-8 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                </div>
+                <div
+                  onMouseDown={onCornerResizeStart}
+                  onDoubleClick={onCornerResizeDoubleClick}
+                  className="group absolute right-0 bottom-0 z-20 translate-x-1/2 translate-y-1/2 cursor-nwse-resize overflow-hidden"
+                  style={{
+                    height: sidebarCollapsed ? 0 : resizeHandleHeight * 2,
+                    width: sidebarCollapsed ? 0 : resizeHandleWidth * 2,
+                    opacity: sidebarCollapsed ? 0 : 1,
+                    transition: sidebarHandleFadeTransition,
+                  }}
+                  aria-hidden={sidebarCollapsed || undefined}
+                >
+                  <div className="absolute top-1/2 left-1/2 h-px w-3 -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                  <div className="absolute top-1/2 left-1/2 h-3 w-px -translate-x-1/2 -translate-y-1/2 rounded-full bg-transparent transition-colors group-hover:bg-border" />
+                </div>
+              </>
+            )}
           </div>
         </div>
 
-        <div
-          onMouseDown={onResizeStart}
-          onDoubleClick={onResizeDoubleClick}
-          className={cn(
-            "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-visible",
-            contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
-          )}
-          style={{
-            height: sidebarOuterHeight,
-            maxHeight: sidebarSlotMaxHeight,
-            width: 0,
-            opacity: sidebarCollapsed ? 0 : 1,
-            transition: sidebarHandleFadeTransition,
-            pointerEvents: sidebarCollapsed ? "none" : undefined,
-          }}
-          aria-hidden={sidebarCollapsed || undefined}
-        />
+        {!sidebarResizeDisabled && (
+          <div
+            onMouseDown={onResizeStart}
+            onDoubleClick={onResizeDoubleClick}
+            className={cn(
+              "relative z-20 flex flex-shrink-0 cursor-col-resize items-center justify-center overflow-visible",
+              contentUnderTopBar && "mt-[var(--spacing-app-top-bar)]",
+            )}
+            style={{
+              height: sidebarOuterHeight,
+              maxHeight: sidebarSlotMaxHeight,
+              width: 0,
+              opacity: sidebarCollapsed ? 0 : 1,
+              transition: sidebarHandleFadeTransition,
+              pointerEvents: sidebarCollapsed ? "none" : undefined,
+            }}
+            aria-hidden={sidebarCollapsed || undefined}
+          />
+        )}
 
         <main
           ref={setMainElement}

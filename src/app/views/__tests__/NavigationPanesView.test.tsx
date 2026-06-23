@@ -13,8 +13,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import {
+  SIDEBAR_CHAT_LIST_MAX_WIDTH_PX,
+  SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+  SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+} from "@/app/layout/panes/paneSizeRules";
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
-import { Sidebar } from "../Sidebar";
+import { NavigationPanesView } from "../NavigationPanesView";
 
 const designSystemExplorer = vi.hoisted(() => ({
   isEnabled: vi.fn(() => false),
@@ -35,7 +40,7 @@ type MockSession = {
   archivedAt?: string;
 };
 
-type SidebarProps = ComponentProps<typeof Sidebar>;
+type NavigationPanesViewProps = ComponentProps<typeof NavigationPanesView>;
 const mockSessions: MockSession[] = [];
 let mockDraftsBySession: Record<string, string> = {};
 let mockHasMoreSessions = false;
@@ -86,7 +91,9 @@ function seedProjectChats(count: number, overrides: Partial<MockSession> = {}) {
   );
 }
 
-function sidebarProps(props: Partial<SidebarProps> = {}): SidebarProps {
+function sidebarProps(
+  props: Partial<NavigationPanesViewProps> = {},
+): NavigationPanesViewProps {
   return {
     collapsed: false,
     width: 300,
@@ -116,8 +123,10 @@ function renderWithQueryClient(element: ReactElement) {
   });
 }
 
-function renderSidebar(props: Partial<SidebarProps> = {}) {
-  return renderWithQueryClient(<Sidebar {...sidebarProps(props)} />);
+function renderSidebar(props: Partial<NavigationPanesViewProps> = {}) {
+  return renderWithQueryClient(
+    <NavigationPanesView {...sidebarProps(props)} />,
+  );
 }
 
 function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
@@ -135,7 +144,7 @@ function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
   } as DOMRect);
 }
 
-function SidebarSelectionHarness({
+function NavigationPanesSelectionHarness({
   onSelectSession,
 }: {
   onSelectSession?: (sessionId: string) => void;
@@ -143,7 +152,7 @@ function SidebarSelectionHarness({
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
 
   return (
-    <Sidebar
+    <NavigationPanesView
       {...sidebarProps({
         activeView: "chat",
         activeSessionId,
@@ -265,7 +274,7 @@ vi.mock("@/features/design-system/lib/designSystemEnabled", () => ({
   isDesignSystemExplorerEnabled: () => designSystemExplorer.isEnabled(),
 }));
 
-describe("Sidebar", () => {
+describe("NavigationPanesView", () => {
   beforeEach(() => {
     seedSessions();
     mockDraftsBySession = {};
@@ -449,13 +458,13 @@ describe("Sidebar", () => {
       messageCount: 3,
     });
 
-    let activeView: SidebarProps["activeView"] = "home";
+    let activeView: NavigationPanesViewProps["activeView"] = "home";
     let rerenderSidebar: ReturnType<typeof render>["rerender"];
     const onNavigate = vi.fn(
-      (view: NonNullable<SidebarProps["activeView"]>) => {
+      (view: NonNullable<NavigationPanesViewProps["activeView"]>) => {
         activeView = view;
         rerenderSidebar(
-          <Sidebar {...sidebarProps({ activeView, onNavigate })} />,
+          <NavigationPanesView {...sidebarProps({ activeView, onNavigate })} />,
         );
       },
     );
@@ -983,6 +992,712 @@ describe("Sidebar", () => {
     expect(screen.getByText("Recovered Session")).toBeInTheDocument();
   });
 
+  it("keeps the session list stacked when detachable chats are disabled", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({ detachableSessionListEnabled: false });
+
+    expect(
+      screen.queryByTestId("sidebar-session-list-drag-handle"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("navigation", { name: "Projects and chats" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("navigation", { name: /main navigation/i }),
+      ).getByText("Recovered Session"),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the nav and chats as separate stacked panels when detachable chats are enabled", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({ detachableSessionListEnabled: true });
+
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toBeInTheDocument();
+    expect(
+      screen.getByTestId("sidebar-session-list-panel"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-root")).toHaveAttribute(
+      "style",
+      expect.stringContaining(
+        "height: calc(100vh - var(--spacing-app-top-bar) - var(--spacing-app-panel-gutter-top) - var(--spacing-app-panel-gutter-bottom))",
+      ),
+    );
+    expect(screen.getByTestId("sidebar-root")).not.toHaveClass(
+      "transition-[width]",
+    );
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).not.toHaveClass(
+      "h-full",
+    );
+    expect(
+      screen.getByTestId("sidebar-session-list-panel").parentElement,
+    ).toHaveClass("flex-1");
+    expect(
+      screen
+        .getByTestId("sidebar-session-list-drag-handle")
+        .querySelector("svg"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+    ).toBeEmptyDOMElement();
+    expect(screen.getByTestId("sidebar-session-list-drag-handle")).toHaveClass(
+      "h-2",
+    );
+    expect(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+    ).not.toHaveTextContent("Projects and chats");
+    expect(
+      screen.getByTestId("sidebar-pane-resize-navigationStack"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("sidebar-pane-resize-navigationStack"),
+    ).toHaveAttribute("title", "Resize sidebar panels");
+    expect(
+      screen.queryByTestId("sidebar-pane-resize-primaryNav"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-pane-resize-chatList"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-primary-nav-width-toggle"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveClass(
+      "hover:shadow-sidebar-panel-elevated",
+    );
+    expect(screen.getByTestId("sidebar-session-list-panel")).toHaveClass(
+      "hover:shadow-sidebar-panel-elevated",
+    );
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "Projects and chats" }),
+      ).getByText("Recovered Session"),
+    ).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("navigation", { name: /main navigation/i }),
+      ).queryByText("Recovered Session"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses the combined stacked width rule instead of collapsing nav to icons", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+        chatList: 160,
+      },
+      sessionListDock: "stacked",
+    });
+
+    expect(screen.getByTestId("sidebar-root")).toHaveStyle({
+      width: "200px",
+    });
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveStyle({
+      width: "200px",
+    });
+    expect(
+      screen.getByTestId("sidebar-session-list-panel").parentElement,
+    ).toHaveStyle({
+      width: "200px",
+    });
+    expect(screen.getByTestId("nav-home")).not.toHaveAttribute("title");
+    expect(screen.getByTestId("nav-home")).toHaveClass("gap-2");
+  });
+
+  it("applies independent widths as soon as a stacked chat pane previews side docking", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      getSessionListDragPreviewDock: () => "side",
+      paneSizes: {
+        primaryNav: SIDEBAR_CHAT_LIST_MAX_WIDTH_PX,
+        chatList: SIDEBAR_CHAT_LIST_MAX_WIDTH_PX,
+      },
+      sessionListDock: "stacked",
+    });
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+      {
+        button: 0,
+        clientX: 20,
+        clientY: 80,
+      },
+    );
+    fireEvent.mouseMove(document, { clientX: 260, clientY: 86 });
+
+    expect(
+      screen.getByTestId("sidebar-session-list-drop-side"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveStyle({
+      width: `${SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX}px`,
+    });
+    expect(
+      screen.getByTestId("sidebar-session-list-panel").parentElement,
+    ).toHaveStyle({
+      width: `${SIDEBAR_CHAT_LIST_MAX_WIDTH_PX}px`,
+    });
+
+    fireEvent.mouseUp(document, { clientX: 260, clientY: 86 });
+  });
+
+  it("does not move or offer a snap target until drag movement qualifies", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      getSessionListDragPreviewDock: () => null,
+      width: 200,
+    });
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+      {
+        button: 0,
+        clientX: 20,
+        clientY: 80,
+      },
+    );
+
+    expect(
+      screen.queryByTestId("sidebar-session-list-preview"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-session-list-drop-side"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-session-list-drop-stacked"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseMove(document, { clientX: 100, clientY: 86 });
+
+    expect(
+      screen.getByTestId("sidebar-session-list-preview"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-session-list-drop-side"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-session-list-drop-stacked"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseUp(document, { clientX: 100, clientY: 86 });
+  });
+
+  it("expands both panels to the app panel height when side docked", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      sessionListDock: "side",
+      width: 200,
+    });
+
+    expect(screen.getByTestId("sidebar-root")).toHaveAttribute(
+      "style",
+      expect.stringContaining(
+        "height: calc(100vh - var(--spacing-app-top-bar) - var(--spacing-app-panel-gutter-top) - var(--spacing-app-panel-gutter-bottom))",
+      ),
+    );
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveClass(
+      "h-full",
+    );
+    expect(screen.getByTestId("sidebar-session-list-panel")).toHaveClass(
+      "h-full",
+    );
+    expect(
+      screen.getByTestId("sidebar-primary-nav-width-toggle"),
+    ).toBeInTheDocument();
+  });
+
+  it("applies independent panel widths", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      paneSizes: {
+        primaryNav: 200,
+        chatList: 260,
+      },
+      sessionListDock: "side",
+    });
+
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveStyle({
+      width: "200px",
+    });
+    expect(
+      screen.getByTestId("sidebar-session-list-panel").parentElement,
+    ).toHaveStyle({
+      width: "260px",
+    });
+  });
+
+  it("toggles the full-height nav panel between expanded and compact widths", () => {
+    const onPaneResize = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    const { rerender } = renderSidebar({
+      detachableSessionListEnabled: true,
+      onPaneResize,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+        chatList: 260,
+      },
+      sessionListDock: "side",
+    });
+
+    expect(
+      within(screen.getByTestId("sidebar-primary-nav-width-toggle")).getByText(
+        "Collapse",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("sidebar-primary-nav-width-toggle"));
+
+    expect(onPaneResize).toHaveBeenLastCalledWith(
+      "primaryNav",
+      SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+    );
+
+    rerender(
+      <NavigationPanesView
+        {...sidebarProps({
+          detachableSessionListEnabled: true,
+          onPaneResize,
+          paneSizes: {
+            primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+            chatList: 260,
+          },
+          sessionListDock: "side",
+        })}
+      />,
+    );
+
+    expect(screen.getByTestId("sidebar-primary-nav-width-toggle")).toHaveClass(
+      "justify-center",
+    );
+    expect(
+      screen.getByTestId("sidebar-primary-nav-width-toggle"),
+    ).toHaveAttribute("title", "Expand");
+
+    fireEvent.click(screen.getByTestId("sidebar-primary-nav-width-toggle"));
+
+    expect(onPaneResize).toHaveBeenLastCalledWith(
+      "primaryNav",
+      SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+    );
+  });
+
+  it("renders the constrained compact nav width as icon-only", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+        chatList: 260,
+      },
+      sessionListDock: "side",
+    });
+
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveStyle({
+      width: `${SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX}px`,
+    });
+    expect(screen.getByTestId("nav-home")).toHaveAttribute("title", "Home");
+    expect(screen.getByTestId("nav-home")).toHaveClass("justify-center");
+    expect(screen.getByTestId("nav-home")).not.toHaveClass("gap-2");
+    expect(screen.queryByText("Pinned")).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("sidebar-session-list-panel").parentElement,
+    ).toHaveStyle({
+      width: "260px",
+    });
+  });
+
+  it("emits independent resize changes from each panel rail", () => {
+    const onPaneResizeBegin = vi.fn();
+    const onPaneResizeEnd = vi.fn();
+    const onPaneResize = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      onPaneResizeBegin,
+      onPaneResizeEnd,
+      onPaneResize,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+        chatList: 260,
+      },
+      sessionListDock: "side",
+    });
+
+    fireEvent.mouseDown(screen.getByTestId("sidebar-pane-resize-primaryNav"), {
+      button: 0,
+      clientX: SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
+    });
+    fireEvent.mouseMove(document, { clientX: 210 });
+    fireEvent.mouseUp(document, { clientX: 210 });
+
+    expect(onPaneResizeBegin).toHaveBeenCalledTimes(1);
+    expect(onPaneResize).toHaveBeenLastCalledWith("primaryNav", 210);
+    expect(onPaneResizeEnd).toHaveBeenCalledTimes(1);
+
+    fireEvent.mouseDown(screen.getByTestId("sidebar-pane-resize-chatList"), {
+      button: 0,
+      clientX: 260,
+    });
+    fireEvent.mouseMove(document, { clientX: 230 });
+    fireEvent.mouseUp(document, { clientX: 230 });
+
+    expect(onPaneResizeBegin).toHaveBeenCalledTimes(2);
+    expect(onPaneResize).toHaveBeenLastCalledWith("chatList", 230);
+    expect(onPaneResizeEnd).toHaveBeenCalledTimes(2);
+  });
+
+  it("emits a combined resize change from the stacked sidebar rail", () => {
+    const onPaneResizeBegin = vi.fn();
+    const onPaneResizeEnd = vi.fn();
+    const onPaneResize = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      onPaneResizeBegin,
+      onPaneResizeEnd,
+      onPaneResize,
+      paneSizes: {
+        primaryNav: SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
+        chatList: 160,
+      },
+      sessionListDock: "stacked",
+    });
+
+    expect(
+      screen.queryByTestId("sidebar-pane-resize-primaryNav"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("sidebar-pane-resize-chatList"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-pane-resize-navigationStack"),
+      {
+        button: 0,
+        clientX: 200,
+      },
+    );
+    fireEvent.mouseMove(document, { clientX: 240 });
+    fireEvent.mouseUp(document, { clientX: 240 });
+
+    expect(onPaneResizeBegin).toHaveBeenCalledTimes(1);
+    expect(onPaneResize).toHaveBeenLastCalledWith("navigationStack", 240);
+    expect(onPaneResizeEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("emits a chat list pane drag intent when dragged right", () => {
+    const onSessionListDragRelease = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      getSessionListDragPreviewDock: () => "side",
+      onSessionListDragRelease,
+      width: 200,
+    });
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+      {
+        button: 0,
+        clientX: 20,
+        clientY: 80,
+      },
+    );
+    fireEvent.mouseMove(document, { clientX: 100, clientY: 86 });
+
+    expect(
+      screen.getByTestId("sidebar-session-list-preview"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByTestId("sidebar-session-list-drop-side"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-root")).toHaveAttribute(
+      "style",
+      expect.stringContaining(
+        "height: calc(100vh - var(--spacing-app-top-bar) - var(--spacing-app-panel-gutter-top) - var(--spacing-app-panel-gutter-bottom))",
+      ),
+    );
+
+    fireEvent.mouseUp(document, { clientX: 100, clientY: 86 });
+
+    expect(onSessionListDragRelease).toHaveBeenCalledWith({
+      paneId: "chatList",
+      startClientX: 20,
+      startClientY: 80,
+      currentClientX: 100,
+      currentClientY: 86,
+      surfaceWidth: 200,
+      hasSeparated: true,
+    });
+    expect(
+      screen.queryByTestId("sidebar-session-list-preview"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers a keyboard path to dock the chat list beside navigation", () => {
+    const onSessionListDragRelease = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      onSessionListDragRelease,
+      width: 200,
+    });
+
+    fireEvent.keyDown(
+      screen.getByRole("button", {
+        name: "Move projects and chats beside navigation",
+      }),
+      { key: "Enter" },
+    );
+
+    expect(onSessionListDragRelease).toHaveBeenCalledWith({
+      paneId: "chatList",
+      startClientX: 0,
+      startClientY: 0,
+      currentClientX: 201,
+      currentClientY: 0,
+      surfaceWidth: 200,
+      hasSeparated: true,
+    });
+  });
+
+  it("moves the drag preview from the original panel position with the pointer delta", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      getSessionListDragPreviewDock: () => "side",
+      width: 200,
+    });
+
+    vi.spyOn(
+      screen.getByTestId("sidebar-session-list-panel"),
+      "getBoundingClientRect",
+    ).mockReturnValue({
+      x: 14,
+      y: 260,
+      top: 260,
+      bottom: 640,
+      left: 14,
+      right: 214,
+      width: 200,
+      height: 380,
+      toJSON: () => ({}),
+    } as DOMRect);
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+      {
+        button: 0,
+        clientX: 20,
+        clientY: 280,
+      },
+    );
+    fireEvent.mouseMove(document, { clientX: 90, clientY: 312 });
+
+    const preview = screen.getByTestId("sidebar-session-list-preview");
+    expect(preview.parentElement).toHaveStyle({
+      left: "14px",
+      top: "260px",
+      width: "200px",
+      height: "380px",
+      transform: "translate(70px, 32px)",
+    });
+
+    fireEvent.mouseUp(document, { clientX: 90, clientY: 312 });
+  });
+
+  it("emits a chat list pane drag intent from a side-docked session list", () => {
+    const onSessionListDragRelease = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      sessionListDock: "side",
+      getSessionListDragPreviewDock: () => "stacked",
+      onSessionListDragRelease,
+      width: 200,
+    });
+
+    expect(
+      within(
+        screen.getByRole("navigation", { name: "Projects and chats" }),
+      ).getByText("Recovered Session"),
+    ).toBeInTheDocument();
+    expect(
+      within(
+        screen.getByRole("navigation", { name: /main navigation/i }),
+      ).queryByText("Recovered Session"),
+    ).not.toBeInTheDocument();
+
+    fireEvent.mouseDown(
+      screen.getByTestId("sidebar-session-list-drag-handle"),
+      {
+        button: 0,
+        clientX: 220,
+        clientY: 80,
+      },
+    );
+    fireEvent.mouseMove(document, { clientX: 150, clientY: 86 });
+
+    expect(
+      screen.getByTestId("sidebar-session-list-drop-stacked"),
+    ).toBeInTheDocument();
+
+    fireEvent.mouseUp(document, { clientX: 150, clientY: 86 });
+
+    expect(onSessionListDragRelease).toHaveBeenCalledWith({
+      paneId: "chatList",
+      startClientX: 220,
+      startClientY: 80,
+      currentClientX: 150,
+      currentClientY: 86,
+      surfaceWidth: 200,
+      hasSeparated: true,
+    });
+  });
+
+  it("offers a keyboard path to dock the chat list below navigation", () => {
+    const onSessionListDragRelease = vi.fn();
+    seedSessions({
+      id: "session-1",
+      title: "Recovered Session",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar({
+      detachableSessionListEnabled: true,
+      sessionListDock: "side",
+      onSessionListDragRelease,
+      width: 200,
+    });
+
+    fireEvent.keyDown(
+      screen.getByRole("button", {
+        name: "Move projects and chats below navigation",
+      }),
+      { key: " " },
+    );
+
+    expect(onSessionListDragRelease).toHaveBeenCalledWith({
+      paneId: "chatList",
+      startClientX: 0,
+      startClientY: 0,
+      currentClientX: -201,
+      currentClientY: 0,
+      surfaceWidth: 200,
+      hasSeparated: true,
+    });
+  });
+
+  it("keeps stacked secondary navigation scrollable", () => {
+    renderSidebar({
+      activeView: "settings",
+      detachableSessionListEnabled: true,
+      width: 200,
+    });
+
+    expect(screen.getByTestId("sidebar-primary-nav-panel")).toHaveClass(
+      "max-h-full",
+    );
+    expect(
+      screen.getByRole("navigation", { name: "Settings navigation" }),
+    ).toHaveClass("overflow-y-auto");
+  });
+
   it("scrolls externally activated chats into view", async () => {
     const requestAnimationFrameSpy = vi
       .spyOn(window, "requestAnimationFrame")
@@ -1014,7 +1729,7 @@ describe("Sidebar", () => {
     const scrollTo = attachScrollTo(mainNavigation);
 
     rerender(
-      <Sidebar
+      <NavigationPanesView
         {...sidebarProps({ activeView: "chat", activeSessionId: "session-1" })}
       />,
     );
@@ -1042,7 +1757,7 @@ describe("Sidebar", () => {
     });
 
     renderWithQueryClient(
-      <SidebarSelectionHarness onSelectSession={onSelectSession} />,
+      <NavigationPanesSelectionHarness onSelectSession={onSelectSession} />,
     );
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,

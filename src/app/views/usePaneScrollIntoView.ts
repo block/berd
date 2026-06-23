@@ -1,6 +1,6 @@
 import { useEffect, type RefObject } from "react";
 
-interface UseSidebarScrollIntoViewOptions {
+interface UsePaneScrollIntoViewOptions {
   containerRef: RefObject<HTMLElement | null>;
   targetSelector: string | null;
   topOffsetPx?: number;
@@ -27,14 +27,14 @@ function scrollToTop(element: HTMLElement, top: number) {
   element.scrollTop = nextTop;
 }
 
-export function useSidebarScrollIntoView({
+export function usePaneScrollIntoView({
   containerRef,
   targetSelector,
   topOffsetPx = 0,
   bottomOffsetPx = 0,
   maxAttempts = 3,
   onAfterScroll,
-}: UseSidebarScrollIntoViewOptions) {
+}: UsePaneScrollIntoViewOptions) {
   useEffect(() => {
     if (!targetSelector) return;
 

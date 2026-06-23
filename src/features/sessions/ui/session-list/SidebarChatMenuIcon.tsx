@@ -1,4 +1,4 @@
-import { SidebarNavChatsIcon } from "./sidebarNavIcons";
+import { SidebarNavChatsIcon } from "@/features/navigation/ui/sidebarNavIcons";
 
 export function SidebarChatMenuIcon({ className }: { className?: string }) {
   return (

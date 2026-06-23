@@ -5,6 +5,9 @@ import {
   SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
   SIDEBAR_NAV_ROW_SPACING_CLASS,
   SIDEBAR_NAV_TEXT_CLASS,
+  SIDEBAR_ROW_HEIGHT_CLASS,
+  SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+  SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { getDesignSystemMetadata } from "@/shared/ui/design-system/metadata";
 
@@ -42,11 +45,20 @@ export function SidebarNavItem({
   trailingIcon,
   trailingLabel,
 }: SidebarNavItemProps) {
+  const rowSpacingClass = collapsed
+    ? cn(
+        SIDEBAR_ROW_HEIGHT_CLASS,
+        SIDEBAR_ROW_HORIZONTAL_PADDING_CLASS,
+        SIDEBAR_ROW_VERTICAL_PADDING_CLASS,
+        "justify-center",
+      )
+    : SIDEBAR_NAV_ROW_SPACING_CLASS;
+
   const className = cn(
     "flex items-center w-full rounded-sm outline-none focus-visible:ring-1 focus-visible:ring-sidebar-ring",
     SIDEBAR_MENU_HOVER_TRANSITION_CLASS,
     SIDEBAR_NAV_TEXT_CLASS,
-    SIDEBAR_NAV_ROW_SPACING_CLASS,
+    rowSpacingClass,
     isActive
       ? "bg-sidebar-accent text-sidebar-foreground"
       : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground",
@@ -59,7 +71,7 @@ export function SidebarNavItem({
       {...getDesignSystemMetadata({
         component: "SidebarNavItem",
         slot: "sidebar-nav-item",
-        source: "src/features/sidebar/ui/SidebarNavItem.tsx",
+        source: "src/features/navigation/ui/SidebarNavItem.tsx",
         props: {
           isActive,
           collapsed,

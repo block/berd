@@ -4,7 +4,9 @@
     "backToMainNavigation": "Atrás",
     "back": "Atrás",
     "collapse": "Contraer barra lateral",
+    "collapseNavigationPanel": "Contraer",
     "expand": "Expandir barra lateral",
+    "expandNavigationPanel": "Expandir",
     "forward": "Adelante",
     "search": "Buscar",
     "newChat": "Nuevo chat",
@@ -18,6 +20,12 @@
     "focusWindowFailed": "No se pudo enfocar esta ventana de chat.",
     "selectChat": "Seleccionar {{title}}",
     "deselectChat": "Deseleccionar {{title}}",
+    "dockSessionListBelowNavigation": "Mover proyectos y chats debajo de la navegación",
+    "dockSessionListBesideNavigation": "Mover proyectos y chats junto a la navegación",
+    "dragSessionList": "Arrastrar proyectos y chats",
+    "resizeNavigationPanel": "Cambiar tamaño del panel de navegación",
+    "resizeSidebarPanels": "Cambiar tamaño de los paneles laterales",
+    "resizeSessionListPanel": "Cambiar tamaño del panel de proyectos y chats",
     "renameHint": "Haz doble clic para renombrar"
   },
   "bulk": {
@@ -42,6 +50,7 @@
     "gooseHome": "Inicio de Goose",
     "home": "Inicio",
     "main": "Navegación principal",
+    "sessionList": "Proyectos y chats",
     "sessionHistory": "Historial de sesiones",
     "skills": "Habilidades"
   },

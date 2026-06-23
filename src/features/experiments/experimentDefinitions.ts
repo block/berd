@@ -63,6 +63,9 @@ export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
+export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
+  "sidebar-detachable-chats";
+
 export const DEFAULT_GOOSE_STYLE_GUIDELINES_PROMPT = `Response style:
 - Be concise, direct, and friendly; avoid unnecessary detail unless the user asks for it.
 - For simple answers or small changes, use plain sentences or a short list instead of heavy structure.
@@ -113,5 +116,10 @@ export const EXPERIMENT_DEFINITIONS = [
     id: GOOSECTL_EXPERIMENT_ID,
     titleKey: "experiments.goosectl.title",
     descriptionKey: "experiments.goosectl.description",
+  },
+  {
+    id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
+    titleKey: "experiments.sidebarDetachableChats.title",
+    descriptionKey: "experiments.sidebarDetachableChats.description",
   },
 ] as const satisfies readonly ExperimentDefinition[];

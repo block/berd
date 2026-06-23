@@ -2,8 +2,8 @@ import { render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { AppShellLayout } from "./AppShellLayout";
 
-vi.mock("@/features/sidebar/ui/Sidebar", () => ({
-  Sidebar: () => <aside>Sidebar</aside>,
+vi.mock("@/app/views/NavigationPanesView", () => ({
+  NavigationPanesView: () => <aside>Sidebar</aside>,
 }));
 
 vi.mock("@/features/projects/ui/CreateProjectDialog", () => ({
@@ -32,9 +32,13 @@ type TestLayoutProps = Omit<Parameters<typeof AppShellLayout>[0], "children">;
 function layoutProps({
   isResizing = false,
   sidebarCollapsed = false,
+  sidebarDisableWidthTransition = false,
+  sidebarResizeDisabled = false,
 }: {
   isResizing?: boolean;
   sidebarCollapsed?: boolean;
+  sidebarDisableWidthTransition?: boolean;
+  sidebarResizeDisabled?: boolean;
 } = {}) {
   const sidebarPanelOuterWidth = 212;
   const sidebarOuterWidth = sidebarCollapsed ? 0 : sidebarPanelOuterWidth;
@@ -44,12 +48,14 @@ function layoutProps({
       breadcrumbs: [],
       onFeedbackClick: noop,
     },
-    sidebar: {
+    navigationPanes: {
       collapsed: false,
       width: 200,
       projects: [],
     },
     sidebarCollapsed,
+    sidebarDisableWidthTransition,
+    sidebarResizeDisabled,
     sidebarOuterWidth,
     sidebarPanelOuterWidth,
     isResizing,
@@ -124,5 +130,21 @@ describe("AppShellLayout", () => {
       "true",
     );
     expect(sidebarSlot.style.transition).toBe("none");
+  });
+
+  it("does not animate the reserved sidebar width when transition suppression is requested", () => {
+    const { sidebarSlot } = renderLayout({
+      sidebarDisableWidthTransition: true,
+    });
+
+    expect(sidebarSlot.style.transition).toBe("none");
+  });
+
+  it("hides shell resize rails when sidebar resize is disabled", () => {
+    const { container } = renderLayout({
+      sidebarResizeDisabled: true,
+    });
+
+    expect(container.querySelector(".sidebar-resize-rail")).toBeNull();
   });
 });

@@ -23,7 +23,7 @@ import { SidebarProjectList } from "./SidebarProjectList";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
 import { SidebarRecentsSection } from "./SidebarRecentsSection";
 
-interface SidebarProjectsSectionProps {
+export interface SidebarProjectsSectionProps {
   projects: ProjectInfo[];
   projectSessions: {
     byProject: Record<string, SidebarSessionItem[]>;
@@ -64,6 +64,7 @@ interface SidebarProjectsSectionProps {
   recentsSectionOpen: boolean;
   onToggleProjectsSection: () => void;
   onToggleRecentsSection: () => void;
+  showTopDivider?: boolean;
 }
 
 const SECTION_HEADER_TEXT_CLASS = cn(
@@ -109,6 +110,7 @@ export function SidebarProjectsSection({
   recentsSectionOpen,
   onToggleProjectsSection,
   onToggleRecentsSection,
+  showTopDivider = true,
 }: SidebarProjectsSectionProps) {
   const { t } = useTranslation(["sidebar", "common"]);
   const showProjectsEmptyState = projects.length === 0;
@@ -130,14 +132,16 @@ export function SidebarProjectsSection({
               : "opacity-0 max-h-0 overflow-hidden",
         )}
       >
-        <div
-          className={cn(
-            SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
-            SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
-            "border-t border-border/80",
-          )}
-          aria-hidden
-        />
+        {showTopDivider && (
+          <div
+            className={cn(
+              SIDEBAR_SECTION_DIVIDER_INSET_CLASS,
+              SIDEBAR_SECTION_DIVIDER_TOP_CLASS,
+              "border-t border-border/80",
+            )}
+            aria-hidden
+          />
+        )}
         <div
           className={cn(
             "group/projects-header flex items-center",

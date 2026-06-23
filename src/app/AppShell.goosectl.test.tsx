@@ -47,8 +47,14 @@ vi.mock("@/features/migration/hooks/useDefaultModelGate", () => ({
   useDefaultModelGate: () => ({ status: "ok", retry: vi.fn() }),
 }));
 
-vi.mock("@/features/sidebar/ui/Sidebar", () => ({
-  Sidebar: ({ onNavigate }: { onNavigate?: (view: string) => void }) => (
+vi.mock("@/app/views/NavigationPanesView", () => ({
+  NavigationPanesView: ({
+    onNavigate,
+    onSettingsClick,
+  }: {
+    onNavigate?: (view: string) => void;
+    onSettingsClick?: () => void;
+  }) => (
     <nav aria-label="mock sidebar">
       <button type="button" onClick={() => onNavigate?.("skills")}>
         Sidebar skills
@@ -59,7 +65,7 @@ vi.mock("@/features/sidebar/ui/Sidebar", () => ({
       <button type="button" onClick={() => onNavigate?.("agents")}>
         Sidebar agents
       </button>
-      <button type="button" onClick={() => onNavigate?.("settings")}>
+      <button type="button" onClick={onSettingsClick}>
         Sidebar settings
       </button>
     </nav>
