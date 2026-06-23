@@ -1,7 +1,22 @@
 use percent_encoding::percent_decode_str;
+#[cfg(feature = "goosectl")]
+use serde::Serialize;
+#[cfg(feature = "goosectl")]
+use tauri::Emitter;
 use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_deep_link::DeepLinkExt;
 use url::Url;
+
+#[cfg(feature = "goosectl")]
+const SESSION_DEEP_LINK_ERROR_EVENT: &str = "goose:session-deep-link-error";
+
+#[cfg(feature = "goosectl")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SessionDeepLinkErrorPayload {
+    session_id: String,
+    message: String,
+}
 
 pub(crate) fn install<R: Runtime>(app: &tauri::App<R>) {
     // Handles link delivered while app is already running. TODO: cold start from link.
@@ -55,8 +70,9 @@ fn parse_session_deep_link(url: &Url) -> Option<String> {
 #[cfg(feature = "goosectl")]
 fn open_session<R: Runtime>(app: AppHandle<R>, session_id: String) -> bool {
     tauri::async_runtime::spawn(async move {
+        let requested_session_id = session_id.clone();
         let result = tauri_plugin_goosectl::dispatch_app_command(
-            app,
+            app.clone(),
             "sessions".to_string(),
             serde_json::json!({
                 "action": "open",
@@ -65,11 +81,45 @@ fn open_session<R: Runtime>(app: AppHandle<R>, session_id: String) -> bool {
             None,
         )
         .await;
-        if result.is_err() {
-            log::warn!("Failed to open session from deep link");
+        match result {
+            Ok(_) => {}
+            Err(error) => {
+                log::warn!("Failed to open session from deep link: {error}");
+                let payload = session_deep_link_error_payload(&requested_session_id, &error);
+                emit_session_deep_link_error(&app, payload);
+            }
         }
     });
     true
+}
+
+#[cfg(feature = "goosectl")]
+fn session_deep_link_error_payload(
+    session_id: &str,
+    error: &tauri_plugin_goosectl::AppCommandDispatchError,
+) -> SessionDeepLinkErrorPayload {
+    let message = match error {
+        tauri_plugin_goosectl::AppCommandDispatchError::Command { message, .. }
+            if !message.trim().is_empty() =>
+        {
+            message.clone()
+        }
+        _ => format!("Could not open session \"{session_id}\"."),
+    };
+    SessionDeepLinkErrorPayload {
+        session_id: session_id.to_string(),
+        message,
+    }
+}
+
+#[cfg(feature = "goosectl")]
+fn emit_session_deep_link_error<R: Runtime>(
+    app: &AppHandle<R>,
+    payload: SessionDeepLinkErrorPayload,
+) {
+    if let Err(error) = app.emit_to("main", SESSION_DEEP_LINK_ERROR_EVENT, payload) {
+        log::warn!("Failed to emit session deep link error event: {error}");
+    }
 }
 
 #[cfg(not(feature = "goosectl"))]
@@ -118,5 +168,50 @@ mod tests {
         assert_eq!(parse("goose-internal:///session/"), None);
         assert_eq!(parse("goose-internal://session/a/b"), None);
         assert_eq!(parse("goose-internal://session/%FF"), None);
+    }
+
+    #[cfg(feature = "goosectl")]
+    #[test]
+    fn builds_dispatch_error_payloads() {
+        assert_eq!(
+            session_deep_link_error_payload(
+                "missing-session",
+                &tauri_plugin_goosectl::AppCommandDispatchError::Command {
+                    code: "session_not_found".to_string(),
+                    message:
+                        "No session \"missing-session\"; list sessions with `goosectl session list`."
+                            .to_string(),
+                },
+            ),
+            SessionDeepLinkErrorPayload {
+                session_id: "missing-session".to_string(),
+                message:
+                    "No session \"missing-session\"; list sessions with `goosectl session list`."
+                        .to_string(),
+            }
+        );
+        assert_eq!(
+            session_deep_link_error_payload(
+                "missing-session",
+                &tauri_plugin_goosectl::AppCommandDispatchError::Command {
+                    code: "backend_read_failed".to_string(),
+                    message: "Backend down".to_string(),
+                },
+            ),
+            SessionDeepLinkErrorPayload {
+                session_id: "missing-session".to_string(),
+                message: "Backend down".to_string(),
+            }
+        );
+        assert_eq!(
+            session_deep_link_error_payload(
+                "missing-session",
+                &tauri_plugin_goosectl::AppCommandDispatchError::Timeout,
+            ),
+            SessionDeepLinkErrorPayload {
+                session_id: "missing-session".to_string(),
+                message: "Could not open session \"missing-session\".".to_string(),
+            }
+        );
     }
 }

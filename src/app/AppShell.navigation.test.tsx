@@ -45,6 +45,7 @@ const mockReadAgentSourceFile = vi.hoisted(() => vi.fn());
 const mockDeletePersonaSource = vi.hoisted(() => vi.fn());
 const mockAutomationBuilderSave = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockListenSessionDeepLinkErrors = vi.hoisted(() => vi.fn());
 const mockAfterNextPaint = vi.hoisted(() => ({
   callbacks: [] as Array<{ callback: () => void; cancelled: boolean }>,
 }));
@@ -205,6 +206,11 @@ vi.mock("sonner", () => ({
   toast: {
     error: (...args: unknown[]) => mockToastError(...args),
   },
+}));
+
+vi.mock("./lib/sessionDeepLinkErrors", () => ({
+  listenSessionDeepLinkErrors: (...args: unknown[]) =>
+    mockListenSessionDeepLinkErrors(...args),
 }));
 
 vi.mock("@/shared/api/agents", () => ({
@@ -450,6 +456,8 @@ describe("AppShell global navigation", () => {
     mockAcpLoadSession.mockReset();
     mockAcpLoadSession.mockResolvedValue(undefined);
     mockToastError.mockReset();
+    mockListenSessionDeepLinkErrors.mockReset();
+    mockListenSessionDeepLinkErrors.mockResolvedValue(vi.fn());
     mockCheckDirectoriesExist.mockReset();
     mockCheckDirectoriesExist.mockResolvedValue([]);
     mockCreatePersonaSource.mockReset();
@@ -718,6 +726,73 @@ describe("AppShell global navigation", () => {
       notificationType: "warning",
       action: { type: "openContextPanel" },
     });
+  });
+
+  it("shows a toast when a session deep link cannot open its target", async () => {
+    let handler:
+      | ((payload: { sessionId: string; message: string }) => void)
+      | undefined;
+    const unlisten = vi.fn();
+    mockListenSessionDeepLinkErrors.mockImplementation(
+      (nextHandler: typeof handler) => {
+        handler = nextHandler;
+        return Promise.resolve(unlisten);
+      },
+    );
+
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(handler).toBeDefined();
+    });
+
+    act(() => {
+      handler?.({
+        sessionId: "missing-session",
+        message: 'No session "missing-session".',
+      });
+    });
+
+    expect(mockToastError).toHaveBeenCalledWith(
+      'No session "missing-session".',
+    );
+  });
+
+  it("cleans up the session deep link error listener on unmount", async () => {
+    const unlisten = vi.fn();
+    mockListenSessionDeepLinkErrors.mockResolvedValue(unlisten);
+
+    const { unmount } = renderAppShell();
+
+    await waitFor(() => {
+      expect(mockListenSessionDeepLinkErrors).toHaveBeenCalled();
+    });
+    await act(async () => {});
+
+    unmount();
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
+  });
+
+  it("cleans up the session deep link error listener when setup finishes after unmount", async () => {
+    const listenDeferred = deferred<() => void>();
+    const unlisten = vi.fn();
+    mockListenSessionDeepLinkErrors.mockReturnValue(listenDeferred.promise);
+
+    const { unmount } = renderAppShell();
+
+    await waitFor(() => {
+      expect(mockListenSessionDeepLinkErrors).toHaveBeenCalled();
+    });
+
+    unmount();
+
+    await act(async () => {
+      listenDeferred.resolve(unlisten);
+      await listenDeferred.promise;
+    });
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
   it("renders the target chat immediately without app-level staging", async () => {

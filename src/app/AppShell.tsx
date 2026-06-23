@@ -71,6 +71,7 @@ import {
 import { useStagedAppContentLocation } from "./lib/useStagedAppContentLocation";
 import { loadStoredHomeSessionId } from "./lib/homeSessionStorage";
 import { resolveSupportedSessionModelPreference } from "./lib/resolveSupportedSessionModelPreference";
+import { listenSessionDeepLinkErrors } from "./lib/sessionDeepLinkErrors";
 import {
   clearSettingsSectionUrl,
   getInitialSettingsSection,
@@ -492,6 +493,29 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   );
 
   useCompletionNotifications(handleNavigateToSession);
+  useEffect(() => {
+    let didCancel = false;
+    let unlisten: (() => void) | null = null;
+
+    listenSessionDeepLinkErrors(({ message }) => {
+      toast.error(message);
+    })
+      .then((cleanup) => {
+        if (didCancel) {
+          cleanup();
+        } else {
+          unlisten = cleanup;
+        }
+      })
+      .catch((error) => {
+        console.error("Failed to listen for session deep link errors:", error);
+      });
+
+    return () => {
+      didCancel = true;
+      unlisten?.();
+    };
+  }, []);
   const setContextPanelOpen = useChatSessionStore((s) => s.setContextPanelOpen);
   const { selectedProvider } = useProviderSelection();
   const selectedProviderRef = useRef(selectedProvider);
