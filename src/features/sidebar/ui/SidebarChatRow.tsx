@@ -157,6 +157,10 @@ export function SidebarChatRow({
     : isActive
       ? ACTIVE_CHAT_ROW_CLASS
       : INACTIVE_CHAT_ROW_CLASS;
+  const leadingIconSlotClass = cn(
+    "flex size-4 shrink-0 items-center justify-center",
+    hasSubtitle && "mt-0.5 self-start",
+  );
 
   useEffect(() => {
     setDraftTitle(editableTitle);
@@ -317,7 +321,7 @@ export function SidebarChatRow({
       >
         {isRunning ? (
           <span
-            className="flex size-4 shrink-0 items-center justify-center"
+            className={leadingIconSlotClass}
             role="status"
             aria-label={t("status.chatActive")}
           >
@@ -325,17 +329,14 @@ export function SidebarChatRow({
           </span>
         ) : hasUnread ? (
           <span
-            className="flex size-4 shrink-0 items-center justify-center"
+            className={leadingIconSlotClass}
             role="status"
             aria-label={t("status.unreadMessages")}
           >
             <SidebarUnreadDot />
           </span>
         ) : (
-          <span
-            className="flex size-4 shrink-0 items-center justify-center"
-            aria-hidden="true"
-          >
+          <span className={leadingIconSlotClass} aria-hidden="true">
             <SidebarChatMenuIcon />
           </span>
         )}

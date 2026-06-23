@@ -78,6 +78,8 @@ import {
 } from "@/features/design-system/ui/designSystemSections";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import { useSidebarBranchSubtitles } from "@/features/sidebar/hooks/useSidebarBranchSubtitles";
 import { useSidebarScrollIntoView } from "./useSidebarScrollIntoView";
 
 type SidebarNavItemIcon = NonNullable<
@@ -222,12 +224,14 @@ function compareSessionsByUpdatedAtDesc(
 function toSidebarSessionItem(
   session: ChatSession,
   sessionStateById: Record<string, SessionChatRuntime>,
+  branchNameBySessionId: ReadonlyMap<string, string>,
 ): SidebarSessionItem {
   const runtime = sessionStateById[session.id] ?? INITIAL_SESSION_CHAT_RUNTIME;
+  const branchName = branchNameBySessionId.get(session.id);
   return {
     id: session.id,
     title: session.title,
-    subtitle: session.subtitle ?? undefined,
+    subtitle: branchName ?? session.subtitle ?? undefined,
     projectId: session.projectId ?? undefined,
     updatedAt: session.updatedAt,
     isRunning: isSessionRunning(runtime.chatState),
@@ -240,13 +244,18 @@ function getSidebarSessionGroups(
   projectIds: ReadonlySet<string>,
   sessionStateById: Record<string, SessionChatRuntime>,
   placeholderSessionIds: ReadonlySet<string>,
+  branchNameBySessionId: ReadonlyMap<string, string>,
 ): SidebarSessionGroups {
   const byProject: Record<string, SidebarSessionItem[]> = {};
   const standalone: SidebarSessionItem[] = [];
 
   for (const session of visibleSessions) {
     if (session.archivedAt) continue;
-    const item = toSidebarSessionItem(session, sessionStateById);
+    const item = toSidebarSessionItem(
+      session,
+      sessionStateById,
+      branchNameBySessionId,
+    );
     if (session.projectId && projectIds.has(session.projectId)) {
       byProject[session.projectId] ??= [];
       byProject[session.projectId].push(item);
@@ -484,7 +493,11 @@ export function Sidebar({
   const draftsBySession = useChatStore(selectDraftsBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
+  const activeWorkspaceBySession = useChatSessionStore(
+    (s) => s.activeWorkspaceBySession,
+  );
   const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
+  const gitBranchSubtitlePreference = useSidebarGitBranchSubtitlePreference();
   const projectIds = useMemo(
     () => new Set(projects.map((project) => project.id)),
     [projects],
@@ -507,6 +520,12 @@ export function Sidebar({
     () => new Set(activeSessions.map((session) => session.id)),
     [activeSessions],
   );
+  const branchNameBySessionId = useSidebarBranchSubtitles({
+    sessions: visibleSessions.sessions,
+    activeWorkspaceBySession,
+    enabled: gitBranchSubtitlePreference.enabled,
+  });
+
   const selectedCount = selectedSessionIds.size;
   const clearSelection = () => setSelectedSessionIds(new Set());
   useEffect(() => {
@@ -664,8 +683,9 @@ export function Sidebar({
         projectIds,
         sessionStateById,
         visibleSessions.placeholderSessionIds,
+        branchNameBySessionId,
       ),
-    [projectIds, sessionStateById, visibleSessions],
+    [branchNameBySessionId, projectIds, sessionStateById, visibleSessions],
   );
 
   const activeProjectId = useMemo(() => {

@@ -252,6 +252,10 @@
       "queue": "Cola",
       "steer": "Guiar (solo arnés de Goose)"
     },
+    "sidebarBranchSubtitles": {
+      "description": "Muestra la rama Git actual debajo de los títulos de chat en la barra lateral cuando esté disponible.",
+      "label": "Mostrar ramas Git en la lista de chats"
+    },
     "terminalFallback": {
       "change": "Cambiar",
       "chooseDialogTitle": "Elegir carpeta de reserva del terminal",

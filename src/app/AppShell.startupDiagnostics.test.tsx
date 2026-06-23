@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -84,6 +85,21 @@ vi.mock("./ui/AppShellContent", () => ({
   AppShellContent: () => <section data-testid="app-shell-content" />,
 }));
 
+function renderAppShell() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <AppShell />
+    </QueryClientProvider>,
+  );
+}
+
 describe("AppShell startup diagnostics", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -125,7 +141,7 @@ describe("AppShell startup diagnostics", () => {
     mocks.migrationState.status = "error";
     mocks.migrationState.error = new Error("default save failed");
 
-    render(<AppShell />);
+    renderAppShell();
 
     expect(screen.getByTestId("app-shell-content")).toBeInTheDocument();
     expect(mocks.defaultModelRepair).toHaveBeenCalledWith(true);
@@ -137,7 +153,7 @@ describe("AppShell startup diagnostics", () => {
   it("shows the bundled goose animation while app startup is loading", () => {
     mocks.startupState.ready = false;
 
-    const { container } = render(<AppShell />);
+    const { container } = renderAppShell();
 
     expect(
       screen.getByRole("status", { name: "Starting Goose" }),
@@ -155,7 +171,7 @@ describe("AppShell startup diagnostics", () => {
       "Failed to spawn goose serve (binary: goosed): denied",
     );
 
-    render(<AppShell />);
+    renderAppShell();
 
     expect(
       screen.getByRole("heading", { name: "Goose couldn't start" }),

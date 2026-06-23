@@ -252,6 +252,10 @@
       "queue": "Queue",
       "steer": "Steer (Goose harness only)"
     },
+    "sidebarBranchSubtitles": {
+      "description": "Show the current Git branch under chat titles in the sidebar when one is available.",
+      "label": "Show Git branches in chat list"
+    },
     "terminalFallback": {
       "change": "Change",
       "chooseDialogTitle": "Choose terminal fallback folder",

@@ -13,6 +13,7 @@ import {
 import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/terminalCwdPreference";
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
+import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
@@ -234,6 +235,26 @@ describe("GeneralSettings appearance section", () => {
       "aria-pressed",
       "true",
     );
+  });
+
+  it("toggles Git branch subtitles in the chat list", async () => {
+    const user = userEvent.setup();
+
+    renderGeneralSettings();
+
+    const switchControl = screen.getByRole("switch", {
+      name: "Show Git branches in chat list",
+    });
+    expect(switchControl).not.toBeChecked();
+
+    await user.click(switchControl);
+
+    await waitFor(() => {
+      expect(
+        localStorage.getItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY),
+      ).toBe("true");
+    });
+    expect(switchControl).toBeChecked();
   });
 
   it("updates the default artifact location", async () => {

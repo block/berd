@@ -1,4 +1,5 @@
-import { useState, type ComponentProps } from "react";
+import { useState, type ComponentProps, type ReactElement } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   act,
   fireEvent,
@@ -12,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { setExperimentEnabled } from "@/features/experiments/experimentPreferences";
+import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 import { Sidebar } from "../Sidebar";
 
 const designSystemExplorer = vi.hoisted(() => ({
@@ -29,6 +31,7 @@ type MockSession = {
   messageCount: number;
   projectId?: string;
   workingDir?: string | null;
+  subtitle?: string | null;
   archivedAt?: string;
 };
 
@@ -38,8 +41,13 @@ let mockDraftsBySession: Record<string, string> = {};
 let mockHasMoreSessions = false;
 let mockIsLoadingMoreSessions = false;
 let mockSessionPageCursor: string | null = null;
+let mockActiveWorkspaceBySession: Record<
+  string,
+  { path: string; branch: string | null }
+> = {};
 const mockLoadMoreSessions = vi.fn();
 const mockAcpSearchSessions = vi.fn();
+const mockGetGitState = vi.fn();
 
 function mockProject(overrides: Partial<ProjectInfo> = {}): ProjectInfo {
   return {
@@ -89,8 +97,27 @@ function sidebarProps(props: Partial<SidebarProps> = {}): SidebarProps {
   };
 }
 
+function createQueryClient() {
+  return new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+}
+
+function renderWithQueryClient(element: ReactElement) {
+  const queryClient = createQueryClient();
+  return render(element, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    ),
+  });
+}
+
 function renderSidebar(props: Partial<SidebarProps> = {}) {
-  return render(<Sidebar {...sidebarProps(props)} />);
+  return renderWithQueryClient(<Sidebar {...sidebarProps(props)} />);
 }
 
 function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
@@ -190,6 +217,10 @@ vi.mock("@/shared/api/acp", () => ({
   acpSearchSessions: (...args: unknown[]) => mockAcpSearchSessions(...args),
 }));
 
+vi.mock("@/shared/api/git", () => ({
+  getGitState: (...args: unknown[]) => mockGetGitState(...args),
+}));
+
 vi.mock("@/features/chat/stores/chatSessionStore", () => ({
   getVisibleSessions: (sessions: typeof mockSessions) =>
     sessions.filter((session) => session.messageCount > 0),
@@ -197,6 +228,7 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
     (selector: (state: unknown) => unknown) =>
       selector({
         sessions: mockSessions,
+        activeWorkspaceBySession: mockActiveWorkspaceBySession,
         hasMoreSessions: mockHasMoreSessions,
         isLoadingMoreSessions: mockIsLoadingMoreSessions,
         sessionPageCursor: mockSessionPageCursor,
@@ -205,6 +237,7 @@ vi.mock("@/features/chat/stores/chatSessionStore", () => ({
     {
       getState: () => ({
         sessions: mockSessions,
+        activeWorkspaceBySession: mockActiveWorkspaceBySession,
         hasMoreSessions: mockHasMoreSessions,
         isLoadingMoreSessions: mockIsLoadingMoreSessions,
         loadMoreSessions: mockLoadMoreSessions,
@@ -239,11 +272,91 @@ describe("Sidebar", () => {
     mockHasMoreSessions = false;
     mockIsLoadingMoreSessions = false;
     mockSessionPageCursor = null;
+    mockActiveWorkspaceBySession = {};
     mockLoadMoreSessions.mockReset();
     mockAcpSearchSessions.mockReset();
     mockAcpSearchSessions.mockResolvedValue([]);
+    mockGetGitState.mockReset();
+    mockGetGitState.mockResolvedValue({
+      isGitRepo: false,
+      currentBranch: null,
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: [],
+    });
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
+  });
+
+  it("keeps latest message snippets in chat rows by default", () => {
+    seedSessions({
+      id: "session-1",
+      title: "Branchable chat",
+      subtitle: "Latest message snippet",
+      workingDir: "/repo",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar();
+
+    expect(screen.getByText("Latest message snippet")).toBeInTheDocument();
+    expect(mockGetGitState).not.toHaveBeenCalled();
+  });
+
+  it("replaces latest message snippets with Git branches when enabled", async () => {
+    localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
+    mockGetGitState.mockResolvedValue({
+      isGitRepo: true,
+      currentBranch: "feature/sidebar-branch",
+      dirtyFileCount: 0,
+      incomingCommitCount: 0,
+      worktrees: [],
+      isWorktree: false,
+      mainWorktreePath: null,
+      localBranches: ["feature/sidebar-branch"],
+    });
+    seedSessions({
+      id: "session-1",
+      title: "Branchable chat",
+      subtitle: "Latest message snippet",
+      workingDir: "/repo",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar();
+
+    expect(
+      await screen.findByText("feature/sidebar-branch"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Latest message snippet"),
+    ).not.toBeInTheDocument();
+    expect(mockGetGitState).toHaveBeenCalledWith("/repo");
+  });
+
+  it("uses the selected workspace branch before reading Git state", () => {
+    localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
+    mockActiveWorkspaceBySession = {
+      "session-1": { path: "/repo", branch: "selected-workspace-branch" },
+    };
+    seedSessions({
+      id: "session-1",
+      title: "Workspace chat",
+      subtitle: "Latest message snippet",
+      workingDir: "/repo",
+      updatedAt: "2026-04-09T12:00:00.000Z",
+      messageCount: 3,
+    });
+
+    renderSidebar();
+
+    expect(screen.getByText("selected-workspace-branch")).toBeInTheDocument();
+    expect(mockGetGitState).not.toHaveBeenCalled();
   });
 
   it("shows an empty state when there are no projects or chats", async () => {
@@ -928,7 +1041,9 @@ describe("Sidebar", () => {
       messageCount: 3,
     });
 
-    render(<SidebarSelectionHarness onSelectSession={onSelectSession} />);
+    renderWithQueryClient(
+      <SidebarSelectionHarness onSelectSession={onSelectSession} />,
+    );
     const mainNavigation = screen.getByRole("navigation", {
       name: /main navigation/i,
     });

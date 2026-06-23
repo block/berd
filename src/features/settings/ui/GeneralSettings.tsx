@@ -40,6 +40,7 @@ import {
   type StreamingShortcutMode,
 } from "@/features/chat/lib/streamingShortcutPreference";
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
+import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
 
 interface AboutAppInfo {
   name: string;
@@ -117,6 +118,8 @@ export function GeneralSettings() {
   } = useAtMentionDefaultCategoryPreference();
   const animatedAvatarsPreference = useAnimatedAvatarsPreference();
   const homePinLabelsPreference = useHomePinLabelsPreference();
+  const sidebarGitBranchSubtitlePreference =
+    useSidebarGitBranchSubtitlePreference();
   const artifactRootPreference = useArtifactRootPreference();
   const terminalFallbackCwdPreference = useTerminalFallbackCwdPreference();
   const {
@@ -463,6 +466,17 @@ export function GeneralSettings() {
               {t("general.atMentionDefault.files")}
             </Button>
           </fieldset>
+        </SettingRow>
+
+        <SettingRow
+          label={t("general.sidebarBranchSubtitles.label")}
+          description={t("general.sidebarBranchSubtitles.description")}
+        >
+          <Switch
+            checked={sidebarGitBranchSubtitlePreference.enabled}
+            onCheckedChange={sidebarGitBranchSubtitlePreference.setEnabled}
+            aria-label={t("general.sidebarBranchSubtitles.label")}
+          />
         </SettingRow>
       </SettingsSection>
 
