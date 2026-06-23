@@ -3,14 +3,6 @@
 import { z } from 'zod';
 
 /**
- * Add an extension to an active session.
- */
-export const zAddExtensionRequestUnstable = z.object({
-    config: z.unknown().optional().default(null),
-    sessionId: z.string()
-});
-
-/**
  * Archive a session (soft delete).
  */
 export const zArchiveSessionRequestUnstable = z.object({
@@ -140,6 +132,10 @@ export const zCustomProviderUpdateRequestUnstable = z.object({
     ]).optional()
 });
 
+export const zDecodeRecipeRequestUnstable = z.object({
+    deeplink: z.string()
+});
+
 /**
  * Read Goose default provider and model configuration.
  */
@@ -165,6 +161,10 @@ export const zDefaultsSaveRequestUnstable = z.object({
         z.null()
     ]).optional(),
     providerId: z.string()
+});
+
+export const zDeleteRecipeRequestUnstable = z.object({
+    id: z.string()
 });
 
 /**
@@ -334,6 +334,10 @@ export const zDictationTranscribeResponseUnstable = z.object({
  */
 export const zEmptyResponse = z.record(z.unknown());
 
+export const zEncodeRecipeResponseUnstable = z.object({
+    deeplink: z.string()
+});
+
 /**
  * An environment variable to set when launching an MCP server.
  */
@@ -377,10 +381,6 @@ export const zGetConfigExtensionsRequestUnstable = z.record(z.unknown());
 
 export const zGetSessionExtensionsRequestUnstable = z.object({
     sessionId: z.string()
-});
-
-export const zGetSessionExtensionsResponseUnstable = z.object({
-    extensions: z.array(z.unknown())
 });
 
 /**
@@ -464,6 +464,8 @@ export const zImportSessionResponseUnstable = z.object({
 export const zListProvidersRequestUnstable = z.object({
     providerIds: z.array(z.string()).optional().default([])
 });
+
+export const zListRecipesRequestUnstable = z.record(z.unknown());
 
 /**
  * HTTP transport configuration for MCP.
@@ -589,7 +591,19 @@ export const zAddConfigExtensionRequestUnstable = z.object({
     extension: zGooseExtension
 });
 
+/**
+ * Add an extension to an active session.
+ */
+export const zAddSessionExtensionRequestUnstable = z.object({
+    extension: zGooseExtension,
+    sessionId: z.string()
+});
+
 export const zGetAvailableExtensionsResponseUnstable = z.object({
+    extensions: z.array(zGooseExtension)
+});
+
+export const zGetSessionExtensionsResponseUnstable = z.object({
     extensions: z.array(zGooseExtension)
 });
 
@@ -660,6 +674,10 @@ export const zOnboardingImportScanRequestUnstable = z.object({
 
 export const zOnboardingImportScanResponseUnstable = z.object({
     candidates: z.array(zOnboardingImportCandidate)
+});
+
+export const zParseRecipeRequestUnstable = z.object({
+    content: z.string()
 });
 
 export const zPreferenceKey = z.enum([
@@ -1003,6 +1021,208 @@ export const zReadResourceResponseUnstable = z.object({
     result: z.unknown().optional().default(null)
 });
 
+export const zRecipeAuthorDto = z.object({
+    contact: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    metadata: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zRecipeExtensionDto = z.union([
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        display_name: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        name: z.string(),
+        timeout: z.union([
+            z.number().int().gte(0),
+            z.null()
+        ]).optional(),
+        type: z.literal('builtin')
+    }),
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        display_name: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        name: z.string(),
+        type: z.literal('platform')
+    }),
+    z.object({
+        args: z.array(z.string()).optional(),
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        cmd: z.string(),
+        cwd: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        env_keys: z.array(z.string()).optional(),
+        envs: z.record(z.string()).optional(),
+        name: z.string(),
+        timeout: z.union([
+            z.number().int().gte(0),
+            z.null()
+        ]).optional(),
+        type: z.literal('stdio')
+    }),
+    z.object({
+        bundled: z.union([
+            z.boolean(),
+            z.null()
+        ]).optional(),
+        description: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        env_keys: z.array(z.string()).optional(),
+        envs: z.record(z.string()).optional(),
+        headers: z.record(z.string()).optional(),
+        name: z.string(),
+        socket: z.union([
+            z.string(),
+            z.null()
+        ]).optional(),
+        timeout: z.union([
+            z.number().int().gte(0),
+            z.null()
+        ]).optional(),
+        type: z.literal('streamable_http'),
+        uri: z.string()
+    })
+]);
+
+export const zRecipeParameterInputTypeDto = z.enum([
+    'string',
+    'number',
+    'boolean',
+    'date',
+    'file',
+    'select'
+]);
+
+export const zRecipeParameterRequirementDto = z.enum([
+    'required',
+    'optional',
+    'user_prompt'
+]);
+
+export const zRecipeParameterDto = z.object({
+    default: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    description: z.string(),
+    input_type: zRecipeParameterInputTypeDto,
+    key: z.string(),
+    options: z.union([
+        z.array(z.string()),
+        z.null()
+    ]).optional(),
+    requirement: zRecipeParameterRequirementDto
+});
+
+export const zRecipeParamsAction = z.enum(['submit', 'cancel']);
+
+export const zRecipeParamsResponseUnstable = z.object({
+    action: zRecipeParamsAction.optional().default('submit'),
+    values: z.record(z.string()).optional().default({})
+});
+
+export const zExtAgentResponse = z.union([
+    z.object({
+        id: z.string(),
+        result: z.union([
+            zRecipeParamsResponseUnstable,
+            z.unknown()
+        ]).optional()
+    }),
+    z.object({
+        error: z.object({
+            code: z.number().int(),
+            data: z.unknown().optional(),
+            message: z.string()
+        }),
+        id: z.string()
+    })
+]);
+
+export const zRecipeResponseDto = z.object({
+    json_schema: z.unknown().optional()
+});
+
+export const zRecipeSettingsDto = z.object({
+    goose_model: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    goose_provider: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    max_turns: z.union([
+        z.number().int().gte(0),
+        z.null()
+    ]).optional(),
+    temperature: z.union([
+        z.number(),
+        z.null()
+    ]).optional()
+});
+
+export const zRecipeSuccessCheckDto = z.object({
+    command: z.string(),
+    type: z.literal('shell')
+});
+
+export const zRecipeRetryConfigDto = z.object({
+    checks: z.array(zRecipeSuccessCheckDto).optional().default([]),
+    max_retries: z.number().int().gte(0),
+    on_failure: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    on_failure_timeout_seconds: z.union([
+        z.number().int().gte(0),
+        z.null()
+    ]).optional(),
+    timeout_seconds: z.union([
+        z.number().int().gte(0),
+        z.null()
+    ]).optional()
+});
+
+export const zRecipeToYamlResponseUnstable = z.object({
+    yaml: z.string()
+});
+
 /**
  * Trigger a background refresh of provider inventories.
  */
@@ -1062,7 +1282,7 @@ export const zRemoveConfigExtensionRequestUnstable = z.object({
 /**
  * Remove an extension from an active session.
  */
-export const zRemoveExtensionRequestUnstable = z.object({
+export const zRemoveSessionExtensionRequestUnstable = z.object({
     name: z.string(),
     sessionId: z.string()
 });
@@ -1073,6 +1293,23 @@ export const zRemoveExtensionRequestUnstable = z.object({
 export const zRenameSessionRequestUnstable = z.object({
     sessionId: z.string(),
     title: z.string()
+});
+
+export const zRequestRecipeParamsUnstable = z.object({
+    parameters: z.array(zRecipeParameterDto),
+    sessionId: z.string()
+});
+
+export const zExtAgentRequest = z.object({
+    id: z.string(),
+    method: z.string(),
+    params: z.union([
+        zRequestRecipeParamsUnstable,
+        z.union([
+            z.record(z.unknown()),
+            z.null()
+        ])
+    ]).optional()
 });
 
 /**
@@ -1170,6 +1407,24 @@ export const zResourceLink = z.object({
     uri: z.string()
 });
 
+export const zSaveRecipeResponseUnstable = z.object({
+    file_name: z.string(),
+    file_path: z.string(),
+    id: z.string()
+});
+
+export const zScanRecipeResponseUnstable = z.object({
+    has_security_warnings: z.boolean()
+});
+
+export const zScheduleRecipeRequestUnstable = z.object({
+    cron_schedule: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    id: z.string()
+});
+
 /**
  * A unique identifier for a conversation session between a client and agent.
  *
@@ -1233,6 +1488,14 @@ export const zSessionUsageUpdate = z.object({
 export const zSetConfigExtensionEnabledRequestUnstable = z.object({
     configKey: z.string(),
     enabled: z.boolean()
+});
+
+export const zSetRecipeSlashCommandRequestUnstable = z.object({
+    id: z.string(),
+    slash_command: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
 });
 
 /**
@@ -1429,6 +1692,113 @@ export const zSteerSessionResponseUnstable = z.object({
     runId: z.string()
 });
 
+export const zSubRecipeDto = z.object({
+    description: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    name: z.string(),
+    path: z.string(),
+    sequential_when_repeated: z.boolean().optional().default(false),
+    values: z.union([
+        z.record(z.string()),
+        z.null()
+    ]).optional()
+});
+
+export const zRecipeDto = z.object({
+    activities: z.union([
+        z.array(z.string()),
+        z.null()
+    ]).optional(),
+    author: z.union([
+        zRecipeAuthorDto,
+        z.null()
+    ]).optional(),
+    description: z.string(),
+    extensions: z.union([
+        z.array(zRecipeExtensionDto),
+        z.null()
+    ]).optional(),
+    instructions: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    parameters: z.union([
+        z.array(zRecipeParameterDto),
+        z.null()
+    ]).optional(),
+    prompt: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    response: z.union([
+        zRecipeResponseDto,
+        z.null()
+    ]).optional(),
+    retry: z.union([
+        zRecipeRetryConfigDto,
+        z.null()
+    ]).optional(),
+    settings: z.union([
+        zRecipeSettingsDto,
+        z.null()
+    ]).optional(),
+    sub_recipes: z.union([
+        z.array(zSubRecipeDto),
+        z.null()
+    ]).optional(),
+    title: z.string(),
+    version: z.string().optional().default('1.0.0')
+});
+
+export const zDecodeRecipeResponseUnstable = z.object({
+    recipe: zRecipeDto
+});
+
+export const zEncodeRecipeRequestUnstable = z.object({
+    recipe: zRecipeDto
+});
+
+export const zParseRecipeResponseUnstable = z.object({
+    recipe: zRecipeDto
+});
+
+export const zRecipeListEntryDto = z.object({
+    file_path: z.string(),
+    id: z.string(),
+    last_modified: z.string(),
+    recipe: zRecipeDto,
+    schedule_cron: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    slash_command: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+export const zListRecipesResponseUnstable = z.object({
+    recipes: z.array(zRecipeListEntryDto)
+});
+
+export const zRecipeToYamlRequestUnstable = z.object({
+    recipe: zRecipeDto
+});
+
+export const zSaveRecipeRequestUnstable = z.object({
+    id: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    recipe: zRecipeDto
+});
+
+export const zScanRecipeRequestUnstable = z.object({
+    recipe: zRecipeDto
+});
+
 /**
  * Text provided to or from an LLM.
  */
@@ -1527,6 +1897,14 @@ export const zSteerSessionRequestUnstable = z.object({
 });
 
 /**
+ * Truncate a session conversation from the given message timestamp onward.
+ */
+export const zTruncateSessionConversationRequestUnstable = z.object({
+    sessionId: z.string(),
+    truncateFrom: z.number().int()
+});
+
+/**
  * Unarchive a previously archived session.
  */
 export const zUnarchiveSessionRequestUnstable = z.object({
@@ -1595,6 +1973,13 @@ export const zExtResponse = z.union([
                 zOnboardingImportApplyResponseUnstable,
                 zExportSessionResponseUnstable,
                 zImportSessionResponseUnstable,
+                zEncodeRecipeResponseUnstable,
+                zDecodeRecipeResponseUnstable,
+                zScanRecipeResponseUnstable,
+                zListRecipesResponseUnstable,
+                zSaveRecipeResponseUnstable,
+                zParseRecipeResponseUnstable,
+                zRecipeToYamlResponseUnstable,
                 zGetSessionInfoResponseUnstable,
                 zCreateSourceResponseUnstable,
                 zListSourcesResponseUnstable,
@@ -1632,8 +2017,8 @@ export const zExtRequest = z.object({
     method: z.string(),
     params: z.union([
         z.union([
-            zAddExtensionRequestUnstable,
-            zRemoveExtensionRequestUnstable,
+            zAddSessionExtensionRequestUnstable,
+            zRemoveSessionExtensionRequestUnstable,
             zGetToolsRequestUnstable,
             zGooseToolCallRequestUnstable,
             zReadResourceRequestUnstable,
@@ -1671,7 +2056,18 @@ export const zExtRequest = z.object({
             zOnboardingImportApplyRequestUnstable,
             zExportSessionRequestUnstable,
             zImportSessionRequestUnstable,
+            zEncodeRecipeRequestUnstable,
+            zDecodeRecipeRequestUnstable,
+            zScanRecipeRequestUnstable,
+            zListRecipesRequestUnstable,
+            zDeleteRecipeRequestUnstable,
+            zScheduleRecipeRequestUnstable,
+            zSetRecipeSlashCommandRequestUnstable,
+            zSaveRecipeRequestUnstable,
+            zParseRecipeRequestUnstable,
+            zRecipeToYamlRequestUnstable,
             zGetSessionInfoRequestUnstable,
+            zTruncateSessionConversationRequestUnstable,
             zUpdateSessionProjectRequestUnstable,
             zRenameSessionRequestUnstable,
             zArchiveSessionRequestUnstable,

@@ -12,11 +12,8 @@ export type AddConfigExtensionRequestUnstable = {
 /**
  * Add an extension to an active session.
  */
-export type AddExtensionRequestUnstable = {
-    /**
-     * Extension configuration (see ExtensionConfig variants: Stdio, StreamableHttp, Builtin, Platform).
-     */
-    config?: unknown;
+export type AddSessionExtensionRequestUnstable = {
+    extension: GooseExtension;
     sessionId: string;
 };
 
@@ -227,6 +224,14 @@ export type CustomProviderUpdateResponseUnstable = {
     status: ProviderConfigStatusDto;
 };
 
+export type DecodeRecipeRequestUnstable = {
+    deeplink: string;
+};
+
+export type DecodeRecipeResponseUnstable = {
+    recipe: RecipeDto;
+};
+
 /**
  * Read Goose default provider and model configuration.
  */
@@ -245,6 +250,10 @@ export type DefaultsReadResponseUnstable = {
 export type DefaultsSaveRequestUnstable = {
     modelId?: string | null;
     providerId: string;
+};
+
+export type DeleteRecipeRequestUnstable = {
+    id: string;
 };
 
 /**
@@ -444,6 +453,14 @@ export type EmptyResponse = {
     [key: string]: unknown;
 };
 
+export type EncodeRecipeRequestUnstable = {
+    recipe: RecipeDto;
+};
+
+export type EncodeRecipeResponseUnstable = {
+    deeplink: string;
+};
+
 /**
  * An environment variable to set when launching an MCP server.
  */
@@ -495,6 +512,26 @@ export type ExportSourceResponseUnstable = {
     json: string;
 };
 
+export type ExtAgentRequest = {
+    id: string;
+    method: string;
+    params?: RequestRecipeParamsUnstable | {
+        [key: string]: unknown;
+    } | null;
+};
+
+export type ExtAgentResponse = {
+    id: string;
+    result?: RecipeParamsResponseUnstable | unknown;
+} | {
+    error: {
+        code: number;
+        data?: unknown;
+        message: string;
+    };
+    id: string;
+};
+
 export type ExtNotification = {
     method: string;
     params?: GooseSessionNotificationUnstable | {
@@ -505,14 +542,14 @@ export type ExtNotification = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddExtensionRequestUnstable | RemoveExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | GetSessionInfoRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
+    params?: AddSessionExtensionRequestUnstable | RemoveSessionExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | EncodeRecipeRequestUnstable | DecodeRecipeRequestUnstable | ScanRecipeRequestUnstable | ListRecipesRequestUnstable | DeleteRecipeRequestUnstable | ScheduleRecipeRequestUnstable | SetRecipeSlashCommandRequestUnstable | SaveRecipeRequestUnstable | ParseRecipeRequestUnstable | RecipeToYamlRequestUnstable | GetSessionInfoRequestUnstable | TruncateSessionConversationRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | SteerSessionResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | GetSessionInfoResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
+    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | SteerSessionResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | EncodeRecipeResponseUnstable | DecodeRecipeResponseUnstable | ScanRecipeResponseUnstable | ListRecipesResponseUnstable | SaveRecipeResponseUnstable | ParseRecipeResponseUnstable | RecipeToYamlResponseUnstable | GetSessionInfoResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
 } | {
     error: {
         code: number;
@@ -553,7 +590,7 @@ export type GetSessionExtensionsRequestUnstable = {
 };
 
 export type GetSessionExtensionsResponseUnstable = {
-    extensions: Array<unknown>;
+    extensions: Array<GooseExtension>;
 };
 
 /**
@@ -747,6 +784,14 @@ export type ListProvidersResponseUnstable = {
     entries: Array<ProviderInventoryEntryDto>;
 };
 
+export type ListRecipesRequestUnstable = {
+    [key: string]: unknown;
+};
+
+export type ListRecipesResponseUnstable = {
+    recipes: Array<RecipeListEntryDto>;
+};
+
 /**
  * List discovered sources.
  *
@@ -920,6 +965,14 @@ export type OnboardingImportScanResponseUnstable = {
  * Sources that onboarding knows how to discover and import.
  */
 export type OnboardingImportSourceKind = 'goose_config' | 'claude_desktop';
+
+export type ParseRecipeRequestUnstable = {
+    content: string;
+};
+
+export type ParseRecipeResponseUnstable = {
+    recipe: RecipeDto;
+};
 
 export type PreferenceKey = 'autoCompactThreshold' | 'gooseThinkingEffort' | 'voiceAutoSubmitPhrases' | 'voiceDictationProvider' | 'voiceDictationPreferredMic';
 
@@ -1267,6 +1320,133 @@ export type ReadResourceResponseUnstable = {
     result?: unknown;
 };
 
+export type RecipeAuthorDto = {
+    contact?: string | null;
+    metadata?: string | null;
+};
+
+export type RecipeDto = {
+    activities?: Array<string> | null;
+    author?: RecipeAuthorDto | null;
+    description: string;
+    extensions?: Array<RecipeExtensionDto> | null;
+    instructions?: string | null;
+    parameters?: Array<RecipeParameterDto> | null;
+    prompt?: string | null;
+    response?: RecipeResponseDto | null;
+    retry?: RecipeRetryConfigDto | null;
+    settings?: RecipeSettingsDto | null;
+    sub_recipes?: Array<SubRecipeDto> | null;
+    title: string;
+    version?: string;
+};
+
+export type RecipeExtensionDto = {
+    bundled?: boolean | null;
+    description?: string | null;
+    display_name?: string | null;
+    name: string;
+    timeout?: number | null;
+    type: 'builtin';
+} | {
+    bundled?: boolean | null;
+    description?: string | null;
+    display_name?: string | null;
+    name: string;
+    type: 'platform';
+} | {
+    args?: Array<string>;
+    bundled?: boolean | null;
+    cmd: string;
+    cwd?: string | null;
+    description?: string | null;
+    env_keys?: Array<string>;
+    envs?: {
+        [key: string]: string;
+    };
+    name: string;
+    timeout?: number | null;
+    type: 'stdio';
+} | {
+    bundled?: boolean | null;
+    description?: string | null;
+    env_keys?: Array<string>;
+    envs?: {
+        [key: string]: string;
+    };
+    headers?: {
+        [key: string]: string;
+    };
+    name: string;
+    socket?: string | null;
+    timeout?: number | null;
+    type: 'streamable_http';
+    uri: string;
+};
+
+export type RecipeListEntryDto = {
+    file_path: string;
+    id: string;
+    last_modified: string;
+    recipe: RecipeDto;
+    schedule_cron?: string | null;
+    slash_command?: string | null;
+};
+
+export type RecipeParameterDto = {
+    default?: string | null;
+    description: string;
+    input_type: RecipeParameterInputTypeDto;
+    key: string;
+    options?: Array<string> | null;
+    requirement: RecipeParameterRequirementDto;
+};
+
+export type RecipeParameterInputTypeDto = 'string' | 'number' | 'boolean' | 'date' | 'file' | 'select';
+
+export type RecipeParameterRequirementDto = 'required' | 'optional' | 'user_prompt';
+
+export type RecipeParamsAction = 'submit' | 'cancel';
+
+export type RecipeParamsResponseUnstable = {
+    action?: RecipeParamsAction;
+    values?: {
+        [key: string]: string;
+    };
+};
+
+export type RecipeResponseDto = {
+    json_schema?: unknown;
+};
+
+export type RecipeRetryConfigDto = {
+    checks?: Array<RecipeSuccessCheckDto>;
+    max_retries: number;
+    on_failure?: string | null;
+    on_failure_timeout_seconds?: number | null;
+    timeout_seconds?: number | null;
+};
+
+export type RecipeSettingsDto = {
+    goose_model?: string | null;
+    goose_provider?: string | null;
+    max_turns?: number | null;
+    temperature?: number | null;
+};
+
+export type RecipeSuccessCheckDto = {
+    command: string;
+    type: 'shell';
+};
+
+export type RecipeToYamlRequestUnstable = {
+    recipe: RecipeDto;
+};
+
+export type RecipeToYamlResponseUnstable = {
+    yaml: string;
+};
+
 /**
  * Trigger a background refresh of provider inventories.
  */
@@ -1308,7 +1488,7 @@ export type RemoveConfigExtensionRequestUnstable = {
 /**
  * Remove an extension from an active session.
  */
-export type RemoveExtensionRequestUnstable = {
+export type RemoveSessionExtensionRequestUnstable = {
     name: string;
     sessionId: string;
 };
@@ -1319,6 +1499,11 @@ export type RemoveExtensionRequestUnstable = {
 export type RenameSessionRequestUnstable = {
     sessionId: string;
     title: string;
+};
+
+export type RequestRecipeParamsUnstable = {
+    parameters: Array<RecipeParameterDto>;
+    sessionId: string;
 };
 
 /**
@@ -1348,6 +1533,30 @@ export type ResourceLink = {
  * The sender or recipient of messages and data in a conversation.
  */
 export type Role = 'assistant' | 'user';
+
+export type SaveRecipeRequestUnstable = {
+    id?: string | null;
+    recipe: RecipeDto;
+};
+
+export type SaveRecipeResponseUnstable = {
+    file_name: string;
+    file_path: string;
+    id: string;
+};
+
+export type ScanRecipeRequestUnstable = {
+    recipe: RecipeDto;
+};
+
+export type ScanRecipeResponseUnstable = {
+    has_security_warnings: boolean;
+};
+
+export type ScheduleRecipeRequestUnstable = {
+    cron_schedule?: string | null;
+    id: string;
+};
 
 /**
  * A unique identifier for a conversation session between a client and agent.
@@ -1423,6 +1632,11 @@ export type SessionUsageUpdate = {
 export type SetConfigExtensionEnabledRequestUnstable = {
     configKey: string;
     enabled: boolean;
+};
+
+export type SetRecipeSlashCommandRequestUnstable = {
+    id: string;
+    slash_command?: string | null;
 };
 
 /**
@@ -1533,6 +1747,16 @@ export type SteerSessionResponseUnstable = {
     runId: string;
 };
 
+export type SubRecipeDto = {
+    description?: string | null;
+    name: string;
+    path: string;
+    sequential_when_repeated?: boolean;
+    values?: {
+        [key: string]: string;
+    } | null;
+};
+
 /**
  * Text provided to or from an LLM.
  */
@@ -1568,6 +1792,14 @@ export type TextResourceContents = {
     mimeType?: string | null;
     text: string;
     uri: string;
+};
+
+/**
+ * Truncate a session conversation from the given message timestamp onward.
+ */
+export type TruncateSessionConversationRequestUnstable = {
+    sessionId: string;
+    truncateFrom: number;
 };
 
 /**

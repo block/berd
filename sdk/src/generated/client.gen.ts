@@ -9,7 +9,7 @@ export interface ExtMethodProvider {
 
 import type {
   AddConfigExtensionRequestUnstable,
-  AddExtensionRequestUnstable,
+  AddSessionExtensionRequestUnstable,
   ArchiveSessionRequestUnstable,
   CreateSourceRequestUnstable,
   CreateSourceResponseUnstable,
@@ -21,9 +21,12 @@ import type {
   CustomProviderReadResponseUnstable,
   CustomProviderUpdateRequestUnstable,
   CustomProviderUpdateResponseUnstable,
+  DecodeRecipeRequestUnstable,
+  DecodeRecipeResponseUnstable,
   DefaultsReadRequestUnstable,
   DefaultsReadResponseUnstable,
   DefaultsSaveRequestUnstable,
+  DeleteRecipeRequestUnstable,
   DeleteSessionRequest,
   DeleteSourceRequestUnstable,
   DictationConfigRequestUnstable,
@@ -40,6 +43,8 @@ import type {
   DictationSecretSaveRequestUnstable,
   DictationTranscribeRequestUnstable,
   DictationTranscribeResponseUnstable,
+  EncodeRecipeRequestUnstable,
+  EncodeRecipeResponseUnstable,
   ExportSessionRequestUnstable,
   ExportSessionResponseUnstable,
   ExportSourceRequestUnstable,
@@ -62,12 +67,16 @@ import type {
   ImportSourcesResponseUnstable,
   ListProvidersRequestUnstable,
   ListProvidersResponseUnstable,
+  ListRecipesRequestUnstable,
+  ListRecipesResponseUnstable,
   ListSourcesRequestUnstable,
   ListSourcesResponseUnstable,
   OnboardingImportApplyRequestUnstable,
   OnboardingImportApplyResponseUnstable,
   OnboardingImportScanRequestUnstable,
   OnboardingImportScanResponseUnstable,
+  ParseRecipeRequestUnstable,
+  ParseRecipeResponseUnstable,
   PreferencesReadRequestUnstable,
   PreferencesReadResponseUnstable,
   PreferencesRemoveRequestUnstable,
@@ -90,15 +99,24 @@ import type {
   ProviderSupportedModelsListResponseUnstable,
   ReadResourceRequestUnstable,
   ReadResourceResponseUnstable,
+  RecipeToYamlRequestUnstable,
+  RecipeToYamlResponseUnstable,
   RefreshProviderInventoryRequestUnstable,
   RefreshProviderInventoryResponseUnstable,
   RemoveConfigExtensionRequestUnstable,
-  RemoveExtensionRequestUnstable,
+  RemoveSessionExtensionRequestUnstable,
   RenameSessionRequestUnstable,
+  SaveRecipeRequestUnstable,
+  SaveRecipeResponseUnstable,
+  ScanRecipeRequestUnstable,
+  ScanRecipeResponseUnstable,
+  ScheduleRecipeRequestUnstable,
   SetConfigExtensionEnabledRequestUnstable,
+  SetRecipeSlashCommandRequestUnstable,
   SetSessionSystemPromptRequestUnstable,
   SteerSessionRequestUnstable,
   SteerSessionResponseUnstable,
+  TruncateSessionConversationRequestUnstable,
   UnarchiveSessionRequestUnstable,
   UpdateSessionProjectRequestUnstable,
   UpdateSourceRequestUnstable,
@@ -111,11 +129,13 @@ import {
   zCustomProviderDeleteResponseUnstable,
   zCustomProviderReadResponseUnstable,
   zCustomProviderUpdateResponseUnstable,
+  zDecodeRecipeResponseUnstable,
   zDefaultsReadResponseUnstable,
   zDictationConfigResponseUnstable,
   zDictationModelDownloadProgressResponseUnstable,
   zDictationModelsListResponseUnstable,
   zDictationTranscribeResponseUnstable,
+  zEncodeRecipeResponseUnstable,
   zExportSessionResponseUnstable,
   zExportSourceResponseUnstable,
   zGetAvailableExtensionsResponseUnstable,
@@ -127,9 +147,11 @@ import {
   zImportSessionResponseUnstable,
   zImportSourcesResponseUnstable,
   zListProvidersResponseUnstable,
+  zListRecipesResponseUnstable,
   zListSourcesResponseUnstable,
   zOnboardingImportApplyResponseUnstable,
   zOnboardingImportScanResponseUnstable,
+  zParseRecipeResponseUnstable,
   zPreferencesReadResponseUnstable,
   zProviderCatalogListResponseUnstable,
   zProviderCatalogTemplateResponseUnstable,
@@ -139,7 +161,10 @@ import {
   zProviderSetupCatalogListResponseUnstable,
   zProviderSupportedModelsListResponseUnstable,
   zReadResourceResponseUnstable,
+  zRecipeToYamlResponseUnstable,
   zRefreshProviderInventoryResponseUnstable,
+  zSaveRecipeResponseUnstable,
+  zScanRecipeResponseUnstable,
   zSteerSessionResponseUnstable,
   zUpdateSourceResponseUnstable,
 } from './zod.gen.js';
@@ -148,13 +173,13 @@ export class GooseExtClient {
   constructor(private conn: ExtMethodProvider) {}
 
   async GooseUnstableSessionExtensionsAdd(
-    params: AddExtensionRequestUnstable,
+    params: AddSessionExtensionRequestUnstable,
   ): Promise<void> {
     await this.conn.extMethod("_goose/unstable/session/extensions/add", params);
   }
 
   async GooseUnstableSessionExtensionsRemove(
-    params: RemoveExtensionRequestUnstable,
+    params: RemoveSessionExtensionRequestUnstable,
   ): Promise<void> {
     await this.conn.extMethod(
       "_goose/unstable/session/extensions/remove",
@@ -560,6 +585,104 @@ export class GooseExtClient {
     ) as ImportSessionResponseUnstable;
   }
 
+  async GooseUnstableRecipesEncode(
+    params: EncodeRecipeRequestUnstable,
+  ): Promise<EncodeRecipeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/encode",
+      params,
+    );
+    return zEncodeRecipeResponseUnstable.parse(
+      raw,
+    ) as EncodeRecipeResponseUnstable;
+  }
+
+  async GooseUnstableRecipesDecode(
+    params: DecodeRecipeRequestUnstable,
+  ): Promise<DecodeRecipeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/decode",
+      params,
+    );
+    return zDecodeRecipeResponseUnstable.parse(
+      raw,
+    ) as DecodeRecipeResponseUnstable;
+  }
+
+  async GooseUnstableRecipesScan(
+    params: ScanRecipeRequestUnstable,
+  ): Promise<ScanRecipeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/scan",
+      params,
+    );
+    return zScanRecipeResponseUnstable.parse(raw) as ScanRecipeResponseUnstable;
+  }
+
+  async GooseUnstableRecipesList(
+    params: ListRecipesRequestUnstable,
+  ): Promise<ListRecipesResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/list",
+      params,
+    );
+    return zListRecipesResponseUnstable.parse(
+      raw,
+    ) as ListRecipesResponseUnstable;
+  }
+
+  async GooseUnstableRecipesDelete(
+    params: DeleteRecipeRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/recipes/delete", params);
+  }
+
+  async GooseUnstableRecipesSchedule(
+    params: ScheduleRecipeRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/recipes/schedule", params);
+  }
+
+  async GooseUnstableRecipesSlashCommand(
+    params: SetRecipeSlashCommandRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod("_goose/unstable/recipes/slash-command", params);
+  }
+
+  async GooseUnstableRecipesSave(
+    params: SaveRecipeRequestUnstable,
+  ): Promise<SaveRecipeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/save",
+      params,
+    );
+    return zSaveRecipeResponseUnstable.parse(raw) as SaveRecipeResponseUnstable;
+  }
+
+  async GooseUnstableRecipesParse(
+    params: ParseRecipeRequestUnstable,
+  ): Promise<ParseRecipeResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/parse",
+      params,
+    );
+    return zParseRecipeResponseUnstable.parse(
+      raw,
+    ) as ParseRecipeResponseUnstable;
+  }
+
+  async GooseUnstableRecipesToYaml(
+    params: RecipeToYamlRequestUnstable,
+  ): Promise<RecipeToYamlResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/recipes/to-yaml",
+      params,
+    );
+    return zRecipeToYamlResponseUnstable.parse(
+      raw,
+    ) as RecipeToYamlResponseUnstable;
+  }
+
   async GooseUnstableSessionInfo(
     params: GetSessionInfoRequestUnstable,
   ): Promise<GetSessionInfoResponseUnstable> {
@@ -570,6 +693,15 @@ export class GooseExtClient {
     return zGetSessionInfoResponseUnstable.parse(
       raw,
     ) as GetSessionInfoResponseUnstable;
+  }
+
+  async GooseUnstableSessionConversationTruncate(
+    params: TruncateSessionConversationRequestUnstable,
+  ): Promise<void> {
+    await this.conn.extMethod(
+      "_goose/unstable/session/conversation/truncate",
+      params,
+    );
   }
 
   async GooseUnstableSessionProjectUpdate(

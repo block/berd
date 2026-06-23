@@ -16,18 +16,17 @@
       "x-method": "_goose/unstable/config/extensions/add",
       "x-side": "agent"
     },
-    "AddExtensionRequest_unstable": {
+    "AddSessionExtensionRequest_unstable": {
       "description": "Add an extension to an active session.",
       "properties": {
-        "config": {
-          "default": null,
-          "description": "Extension configuration (see ExtensionConfig variants: Stdio, StreamableHttp, Builtin, Platform)."
+        "extension": {
+          "$ref": "#/$defs/GooseExtension"
         },
         "sessionId": {
           "type": "string"
         }
       },
-      "required": ["sessionId"],
+      "required": ["sessionId", "extension"],
       "type": "object",
       "x-method": "_goose/unstable/session/extensions/add",
       "x-side": "agent"
@@ -484,6 +483,28 @@
       "x-method": "_goose/unstable/providers/custom/update",
       "x-side": "agent"
     },
+    "DecodeRecipeRequest_unstable": {
+      "properties": {
+        "deeplink": {
+          "type": "string"
+        }
+      },
+      "required": ["deeplink"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/decode",
+      "x-side": "agent"
+    },
+    "DecodeRecipeResponse_unstable": {
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/decode",
+      "x-side": "agent"
+    },
     "DefaultsReadRequest_unstable": {
       "description": "Read Goose default provider and model configuration.",
       "type": "object",
@@ -515,6 +536,17 @@
       "required": ["providerId"],
       "type": "object",
       "x-method": "_goose/unstable/defaults/save",
+      "x-side": "agent"
+    },
+    "DeleteRecipeRequest_unstable": {
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/delete",
       "x-side": "agent"
     },
     "DeleteSessionRequest": {
@@ -885,6 +917,28 @@
       "type": "object",
       "x-side": "agent"
     },
+    "EncodeRecipeRequest_unstable": {
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/encode",
+      "x-side": "agent"
+    },
+    "EncodeRecipeResponse_unstable": {
+      "properties": {
+        "deeplink": {
+          "type": "string"
+        }
+      },
+      "required": ["deeplink"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/encode",
+      "x-side": "agent"
+    },
     "EnvVariable": {
       "description": "An environment variable to set when launching an MCP server.",
       "properties": {
@@ -958,6 +1012,97 @@
       "x-method": "_goose/unstable/sources/export",
       "x-side": "agent"
     },
+    "ExtAgentRequest": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "method": {
+          "type": "string"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/RequestRecipeParams_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/session/recipe/request-params",
+                  "title": "RequestRecipeParams_unstable"
+                }
+              ]
+            },
+            {
+              "description": "Untyped params",
+              "type": ["object", "null"]
+            }
+          ]
+        }
+      },
+      "required": ["id", "method"],
+      "type": "object",
+      "x-docs-ignore": true
+    },
+    "ExtAgentResponse": {
+      "anyOf": [
+        {
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "result": {
+              "anyOf": [
+                {
+                  "anyOf": [
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/RecipeParamsResponse_unstable"
+                        }
+                      ],
+                      "title": "RecipeParamsResponse_unstable"
+                    }
+                  ]
+                },
+                {
+                  "description": "Untyped result"
+                }
+              ]
+            }
+          },
+          "required": ["id"],
+          "title": "Success",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "error": {
+              "properties": {
+                "code": {
+                  "type": "integer"
+                },
+                "data": {},
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": ["code", "message"],
+              "type": "object"
+            },
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": ["id", "error"],
+          "title": "Error",
+          "type": "object"
+        }
+      ],
+      "x-docs-ignore": true
+    },
     "ExtNotification": {
       "properties": {
         "method": {
@@ -1004,20 +1149,20 @@
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/AddExtensionRequest_unstable"
+                      "$ref": "#/$defs/AddSessionExtensionRequest_unstable"
                     }
                   ],
                   "description": "Params for _goose/unstable/session/extensions/add",
-                  "title": "AddExtensionRequest_unstable"
+                  "title": "AddSessionExtensionRequest_unstable"
                 },
                 {
                   "allOf": [
                     {
-                      "$ref": "#/$defs/RemoveExtensionRequest_unstable"
+                      "$ref": "#/$defs/RemoveSessionExtensionRequest_unstable"
                     }
                   ],
                   "description": "Params for _goose/unstable/session/extensions/remove",
-                  "title": "RemoveExtensionRequest_unstable"
+                  "title": "RemoveSessionExtensionRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1355,11 +1500,110 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/EncodeRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/encode",
+                  "title": "EncodeRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/DecodeRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/decode",
+                  "title": "DecodeRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ScanRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/scan",
+                  "title": "ScanRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListRecipesRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/list",
+                  "title": "ListRecipesRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/DeleteRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/delete",
+                  "title": "DeleteRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ScheduleRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/schedule",
+                  "title": "ScheduleRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/SetRecipeSlashCommandRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/slash-command",
+                  "title": "SetRecipeSlashCommandRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/SaveRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/save",
+                  "title": "SaveRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ParseRecipeRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/parse",
+                  "title": "ParseRecipeRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/RecipeToYamlRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/recipes/to-yaml",
+                  "title": "RecipeToYamlRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/GetSessionInfoRequest_unstable"
                     }
                   ],
                   "description": "Params for _goose/unstable/session/info",
                   "title": "GetSessionInfoRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/TruncateSessionConversationRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/session/conversation/truncate",
+                  "title": "TruncateSessionConversationRequest_unstable"
                 },
                 {
                   "allOf": [
@@ -1784,6 +2028,62 @@
                     {
                       "allOf": [
                         {
+                          "$ref": "#/$defs/EncodeRecipeResponse_unstable"
+                        }
+                      ],
+                      "title": "EncodeRecipeResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/DecodeRecipeResponse_unstable"
+                        }
+                      ],
+                      "title": "DecodeRecipeResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ScanRecipeResponse_unstable"
+                        }
+                      ],
+                      "title": "ScanRecipeResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListRecipesResponse_unstable"
+                        }
+                      ],
+                      "title": "ListRecipesResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/SaveRecipeResponse_unstable"
+                        }
+                      ],
+                      "title": "SaveRecipeResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ParseRecipeResponse_unstable"
+                        }
+                      ],
+                      "title": "ParseRecipeResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/RecipeToYamlResponse_unstable"
+                        }
+                      ],
+                      "title": "RecipeToYamlResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
                           "$ref": "#/$defs/GetSessionInfoResponse_unstable"
                         }
                       ],
@@ -1961,7 +2261,9 @@
     "GetSessionExtensionsResponse_unstable": {
       "properties": {
         "extensions": {
-          "items": {},
+          "items": {
+            "$ref": "#/$defs/GooseExtension"
+          },
           "type": "array"
         }
       },
@@ -2349,6 +2651,25 @@
       "x-method": "_goose/unstable/providers/list",
       "x-side": "agent"
     },
+    "ListRecipesRequest_unstable": {
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/list",
+      "x-side": "agent"
+    },
+    "ListRecipesResponse_unstable": {
+      "properties": {
+        "recipes": {
+          "items": {
+            "$ref": "#/$defs/RecipeListEntryDto"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["recipes"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/list",
+      "x-side": "agent"
+    },
     "ListSourcesRequest_unstable": {
       "description": "List discovered sources.\n\nIf `type` is omitted or `skill`, this lists filesystem/plugin skills only.\nBoth global and project-scoped skills are included when `project_dir` is\nset. If `type` is `builtinSkill`, this lists shipped read-only built-in\nskills.",
       "properties": {
@@ -2667,6 +2988,28 @@
       "description": "Sources that onboarding knows how to discover and import.",
       "enum": ["goose_config", "claude_desktop"],
       "type": "string"
+    },
+    "ParseRecipeRequest_unstable": {
+      "properties": {
+        "content": {
+          "type": "string"
+        }
+      },
+      "required": ["content"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/parse",
+      "x-side": "agent"
+    },
+    "ParseRecipeResponse_unstable": {
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/parse",
+      "x-side": "agent"
     },
     "PreferenceKey": {
       "enum": [
@@ -3428,6 +3771,422 @@
       "x-method": "_goose/unstable/resources/read",
       "x-side": "agent"
     },
+    "RecipeAuthorDto": {
+      "properties": {
+        "contact": {
+          "type": ["string", "null"]
+        },
+        "metadata": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "RecipeDto": {
+      "properties": {
+        "activities": {
+          "items": {
+            "type": "string"
+          },
+          "type": ["array", "null"]
+        },
+        "author": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeAuthorDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": "string"
+        },
+        "extensions": {
+          "items": {
+            "$ref": "#/$defs/RecipeExtensionDto"
+          },
+          "type": ["array", "null"]
+        },
+        "instructions": {
+          "type": ["string", "null"]
+        },
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/RecipeParameterDto"
+          },
+          "type": ["array", "null"]
+        },
+        "prompt": {
+          "type": ["string", "null"]
+        },
+        "response": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeResponseDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "retry": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeRetryConfigDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "settings": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RecipeSettingsDto"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sub_recipes": {
+          "items": {
+            "$ref": "#/$defs/SubRecipeDto"
+          },
+          "type": ["array", "null"]
+        },
+        "title": {
+          "type": "string"
+        },
+        "version": {
+          "default": "1.0.0",
+          "type": "string"
+        }
+      },
+      "required": ["title", "description"],
+      "type": "object"
+    },
+    "RecipeExtensionDto": {
+      "oneOf": [
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "display_name": {
+              "type": ["string", "null"]
+            },
+            "name": {
+              "type": "string"
+            },
+            "timeout": {
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            "type": {
+              "const": "builtin",
+              "type": "string"
+            }
+          },
+          "required": ["type", "name"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "display_name": {
+              "type": ["string", "null"]
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "platform",
+              "type": "string"
+            }
+          },
+          "required": ["type", "name"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "args": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "cmd": {
+              "type": "string"
+            },
+            "cwd": {
+              "type": ["string", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "env_keys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "envs": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "timeout": {
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            "type": {
+              "const": "stdio",
+              "type": "string"
+            }
+          },
+          "required": ["type", "name", "cmd"],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "bundled": {
+              "type": ["boolean", "null"]
+            },
+            "description": {
+              "type": ["string", "null"]
+            },
+            "env_keys": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "envs": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "headers": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "name": {
+              "type": "string"
+            },
+            "socket": {
+              "type": ["string", "null"]
+            },
+            "timeout": {
+              "minimum": 0,
+              "type": ["integer", "null"]
+            },
+            "type": {
+              "const": "streamable_http",
+              "type": "string"
+            },
+            "uri": {
+              "type": "string"
+            }
+          },
+          "required": ["type", "name", "uri"],
+          "type": "object"
+        }
+      ]
+    },
+    "RecipeListEntryDto": {
+      "properties": {
+        "file_path": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "last_modified": {
+          "type": "string"
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        },
+        "schedule_cron": {
+          "type": ["string", "null"]
+        },
+        "slash_command": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id", "recipe", "file_path", "last_modified"],
+      "type": "object"
+    },
+    "RecipeParameterDto": {
+      "properties": {
+        "default": {
+          "type": ["string", "null"]
+        },
+        "description": {
+          "type": "string"
+        },
+        "input_type": {
+          "$ref": "#/$defs/RecipeParameterInputTypeDto"
+        },
+        "key": {
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "type": "string"
+          },
+          "type": ["array", "null"]
+        },
+        "requirement": {
+          "$ref": "#/$defs/RecipeParameterRequirementDto"
+        }
+      },
+      "required": ["key", "input_type", "requirement", "description"],
+      "type": "object"
+    },
+    "RecipeParameterInputTypeDto": {
+      "enum": ["string", "number", "boolean", "date", "file", "select"],
+      "type": "string"
+    },
+    "RecipeParameterRequirementDto": {
+      "enum": ["required", "optional", "user_prompt"],
+      "type": "string"
+    },
+    "RecipeParamsAction": {
+      "enum": ["submit", "cancel"],
+      "type": "string"
+    },
+    "RecipeParamsResponse_unstable": {
+      "properties": {
+        "action": {
+          "$ref": "#/$defs/RecipeParamsAction",
+          "default": "submit"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object",
+      "x-method": "_goose/unstable/session/recipe/request-params",
+      "x-side": "client"
+    },
+    "RecipeResponseDto": {
+      "properties": {
+        "json_schema": {}
+      },
+      "type": "object"
+    },
+    "RecipeRetryConfigDto": {
+      "properties": {
+        "checks": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/RecipeSuccessCheckDto"
+          },
+          "type": "array"
+        },
+        "max_retries": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "on_failure": {
+          "type": ["string", "null"]
+        },
+        "on_failure_timeout_seconds": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "timeout_seconds": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        }
+      },
+      "required": ["max_retries"],
+      "type": "object"
+    },
+    "RecipeSettingsDto": {
+      "properties": {
+        "goose_model": {
+          "type": ["string", "null"]
+        },
+        "goose_provider": {
+          "type": ["string", "null"]
+        },
+        "max_turns": {
+          "minimum": 0,
+          "type": ["integer", "null"]
+        },
+        "temperature": {
+          "format": "float",
+          "type": ["number", "null"]
+        }
+      },
+      "type": "object"
+    },
+    "RecipeSuccessCheckDto": {
+      "oneOf": [
+        {
+          "properties": {
+            "command": {
+              "type": "string"
+            },
+            "type": {
+              "const": "shell",
+              "type": "string"
+            }
+          },
+          "required": ["type", "command"],
+          "type": "object"
+        }
+      ]
+    },
+    "RecipeToYamlRequest_unstable": {
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/to-yaml",
+      "x-side": "agent"
+    },
+    "RecipeToYamlResponse_unstable": {
+      "properties": {
+        "yaml": {
+          "type": "string"
+        }
+      },
+      "required": ["yaml"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/to-yaml",
+      "x-side": "agent"
+    },
     "RefreshProviderInventoryRequest_unstable": {
       "description": "Trigger a background refresh of provider inventories.",
       "properties": {
@@ -3501,7 +4260,7 @@
       "x-method": "_goose/unstable/config/extensions/remove",
       "x-side": "agent"
     },
-    "RemoveExtensionRequest_unstable": {
+    "RemoveSessionExtensionRequest_unstable": {
       "description": "Remove an extension from an active session.",
       "properties": {
         "name": {
@@ -3530,6 +4289,23 @@
       "type": "object",
       "x-method": "_goose/unstable/session/rename",
       "x-side": "agent"
+    },
+    "RequestRecipeParams_unstable": {
+      "properties": {
+        "parameters": {
+          "items": {
+            "$ref": "#/$defs/RecipeParameterDto"
+          },
+          "type": "array"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionId", "parameters"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/recipe/request-params",
+      "x-side": "client"
     },
     "ResourceLink": {
       "description": "A resource that the server is capable of reading, included in a prompt or tool call result.",
@@ -3575,6 +4351,73 @@
       "description": "The sender or recipient of messages and data in a conversation.",
       "enum": ["assistant", "user"],
       "type": "string"
+    },
+    "SaveRecipeRequest_unstable": {
+      "properties": {
+        "id": {
+          "type": ["string", "null"]
+        },
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/save",
+      "x-side": "agent"
+    },
+    "SaveRecipeResponse_unstable": {
+      "properties": {
+        "file_name": {
+          "type": "string"
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id", "file_name", "file_path"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/save",
+      "x-side": "agent"
+    },
+    "ScanRecipeRequest_unstable": {
+      "properties": {
+        "recipe": {
+          "$ref": "#/$defs/RecipeDto"
+        }
+      },
+      "required": ["recipe"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/scan",
+      "x-side": "agent"
+    },
+    "ScanRecipeResponse_unstable": {
+      "properties": {
+        "has_security_warnings": {
+          "type": "boolean"
+        }
+      },
+      "required": ["has_security_warnings"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/scan",
+      "x-side": "agent"
+    },
+    "ScheduleRecipeRequest_unstable": {
+      "properties": {
+        "cron_schedule": {
+          "type": ["string", "null"]
+        },
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": ["id"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/schedule",
+      "x-side": "agent"
     },
     "SessionId": {
       "description": "A unique identifier for a conversation session between a client and agent.\n\nSessions maintain their own context, conversation history, and state,\nallowing multiple independent interactions with the same agent.\n\nSee protocol docs: [Session ID](https://agentclientprotocol.com/protocol/session-setup#session-id)",
@@ -3675,6 +4518,20 @@
       "required": ["configKey", "enabled"],
       "type": "object",
       "x-method": "_goose/unstable/config/extensions/set-enabled",
+      "x-side": "agent"
+    },
+    "SetRecipeSlashCommandRequest_unstable": {
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "slash_command": {
+          "type": ["string", "null"]
+        }
+      },
+      "required": ["id"],
+      "type": "object",
+      "x-method": "_goose/unstable/recipes/slash-command",
       "x-side": "agent"
     },
     "SetSessionSystemPromptRequest_unstable": {
@@ -3873,6 +4730,31 @@
       "x-method": "_goose/unstable/session/steer",
       "x-side": "agent"
     },
+    "SubRecipeDto": {
+      "properties": {
+        "description": {
+          "type": ["string", "null"]
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sequential_when_repeated": {
+          "default": false,
+          "type": "boolean"
+        },
+        "values": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": ["object", "null"]
+        }
+      },
+      "required": ["name", "path"],
+      "type": "object"
+    },
     "TextContent": {
       "description": "Text provided to or from an LLM.",
       "properties": {
@@ -3918,6 +4800,21 @@
       },
       "required": ["text", "uri"],
       "type": "object"
+    },
+    "TruncateSessionConversationRequest_unstable": {
+      "description": "Truncate a session conversation from the given message timestamp onward.",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "truncateFrom": {
+          "type": "integer"
+        }
+      },
+      "required": ["sessionId", "truncateFrom"],
+      "type": "object",
+      "x-method": "_goose/unstable/session/conversation/truncate",
+      "x-side": "agent"
     },
     "UnarchiveSessionRequest_unstable": {
       "description": "Unarchive a previously archived session.",
@@ -4030,6 +4927,24 @@
       ],
       "description": "Extension notification (agent → client, fire-and-forget)",
       "title": "Notification"
+    },
+    {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ExtAgentRequest"
+        }
+      ],
+      "description": "Extension agent request (agent → client)",
+      "title": "AgentRequest"
+    },
+    {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ExtAgentResponse"
+        }
+      ],
+      "description": "Extension agent response (client → agent)",
+      "title": "AgentResponse"
     }
   ],
   "title": "GooseExtensions"
