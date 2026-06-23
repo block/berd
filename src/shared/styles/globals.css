@@ -1647,6 +1647,14 @@ body,
   .scrollbar-subtle:focus-within::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
   }
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"] {
+    scrollbar-color: transparent transparent;
+  }
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]::-webkit-scrollbar-thumb,
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:hover::-webkit-scrollbar-thumb,
+  .scrollbar-subtle[data-scrollbar-passive-suppressed="true"]:focus-within::-webkit-scrollbar-thumb {
+    background: transparent;
+  }
 
   .scrollbar-none {
     -ms-overflow-style: none;
