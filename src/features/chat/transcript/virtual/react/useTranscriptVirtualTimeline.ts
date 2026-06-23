@@ -1195,9 +1195,7 @@ export function useTranscriptVirtualTimeline({
       }
 
       const tokenKey = getMeasurementTokenKey(plan.token);
-      const measuredBlockSize = Math.ceil(
-        element.getBoundingClientRect().height,
-      );
+      const measuredBlockSize = measureElementBlockSize(element);
 
       if (measuredBlockSize <= 0) {
         if (!skippedMeasurementByTokenRef.current.has(`${tokenKey}:zero`)) {
@@ -1288,9 +1286,7 @@ export function useTranscriptVirtualTimeline({
         continue;
       }
 
-      const measuredBlockSize = Math.ceil(
-        element.getBoundingClientRect().height,
-      );
+      const measuredBlockSize = measureElementBlockSize(element);
       if (measuredBlockSize <= 0) {
         continue;
       }
@@ -1340,9 +1336,7 @@ export function useTranscriptVirtualTimeline({
         continue;
       }
 
-      const measuredBlockSize = Math.ceil(
-        element.getBoundingClientRect().height,
-      );
+      const measuredBlockSize = measureElementBlockSize(element);
       if (measuredBlockSize <= 0) {
         continue;
       }
@@ -1714,6 +1708,16 @@ export function useTranscriptVirtualTimeline({
     setRowFocused,
     markRowInteracted,
   };
+}
+
+function measureElementBlockSize(element: HTMLElement): number {
+  const rectHeight = element.getBoundingClientRect().height;
+  const layoutHeight = Math.max(
+    element.scrollHeight,
+    element.offsetHeight,
+    element.clientHeight,
+  );
+  return Math.ceil(Math.max(rectHeight, layoutHeight));
 }
 
 function getReservedBlockSizeForRow(element: HTMLElement): number | null {

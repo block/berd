@@ -211,6 +211,42 @@ describe("useTranscriptVirtualTimeline", () => {
     ).toBe(3);
   });
 
+  it("measures rows in layout pixels when css zoom shrinks the visual rect", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("assistant-tail", 120)];
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      result.current.measureRowElement(
+        "assistant-tail",
+        createMeasuredElementWithLayout({
+          visualHeight: 168,
+          layoutHeight: 240,
+        }),
+      );
+      runPendingFrames();
+    });
+
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      340,
+    );
+    expect(
+      result.current.snapshot.measurementStats.acceptedVisibleMeasurements,
+    ).toBe(1);
+  });
+
   it("ignores tiny mounted measurement jitter for an unchanged row token", async () => {
     const container = createContainer();
     const containerRef = {
@@ -876,6 +912,22 @@ function createContainer(): HTMLDivElement {
 
 function createMeasuredElement(height: number): HTMLElement {
   return createMeasuredElementFromRef({ current: height });
+}
+
+function createMeasuredElementWithLayout({
+  visualHeight,
+  layoutHeight,
+}: {
+  visualHeight: number;
+  layoutHeight: number;
+}): HTMLElement {
+  const element = createMeasuredElement(visualHeight);
+  Object.defineProperties(element, {
+    clientHeight: { configurable: true, value: layoutHeight },
+    offsetHeight: { configurable: true, value: layoutHeight },
+    scrollHeight: { configurable: true, value: layoutHeight },
+  });
+  return element;
 }
 
 function createMeasuredElementFromRef(heightRef: {
