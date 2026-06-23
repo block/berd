@@ -71,10 +71,6 @@ What changed and why.
 </details>
 ```
 
-### Section 3: Screenshots/Demos (for UX changes)
-
-Always include this section header and leave the section blank underneath.
-
 ## Step 5: Resolve And Link Linear
 
 Keep Linear tracking lightweight and automatic. Do this workflow outside the generated PR body. Complete the Linear decision before pushing or creating the PR; a user request to create a PR is not permission to skip Linear resolution.
@@ -84,11 +80,10 @@ Before creating the PR:
 1. Look for an explicit Linear key, such as `BOT-361`, in the current conversation, branch name, commit messages, PR title, or PR body.
 2. If no key is explicit, search active Goose Internal issues using the branch name, commit subjects, changed-file intent, and PR title. Prefer team `BOT`, project `Goose [Internal]`, and `backlog`, `unstarted`, or `started` issues.
 3. If one issue clearly matches the same user need or implementation intent, use it. If a few issues could match, pause and ask the user which one to attach.
-4. If no plausible issue exists, pause and ask the user once: "I could not find a matching Linear issue. Want me to create one for this PR and attach it?" If they approve, create it in team `BOT` and project `Goose [Internal]` using the PR title and summary. If they decline, continue without Linear.
 
 After the GitHub PR exists:
 
-1. If an issue was resolved or created, attach the PR to it with `attachmentLinkGitHubPR` so Linear shows PR number and live status.
+1. If an issue was resolved, attach the PR to it with `attachmentLinkGitHubPR` so Linear shows PR number and live status.
 2. Verify the issue attachment points at the new PR and has GitHub metadata.
 3. If Linear tooling is unavailable, do not block PR creation. Tell the user the PR was created but Linear linking was skipped.
 
