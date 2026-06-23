@@ -9,12 +9,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { AppView } from "@/app/AppShell";
 import {
   selectDraftsBySession,
-  selectMessagesBySession,
+  selectLocalMessageCountsBySession,
   selectSessionStateById,
 } from "@/features/chat/stores/chatSelectors";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -339,7 +340,9 @@ export function SessionListCapability({
   const [selectedSessionIds, setSelectedSessionIds] = useState<Set<string>>(
     () => new Set(),
   );
-  const messagesBySession = useChatStore(selectMessagesBySession);
+  const localMessageCountsBySession = useChatStore(
+    useShallow(selectLocalMessageCountsBySession),
+  );
   const draftsBySession = useChatStore(selectDraftsBySession);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
@@ -378,12 +381,12 @@ export function SessionListCapability({
   const visibleSessions = useMemo(
     () =>
       includeSessionListPlaceholderSessions(
-        getVisibleSessions(sessions, messagesBySession),
+        getVisibleSessions(sessions, localMessageCountsBySession),
         sessions,
         draftsBySession,
         activeSessionId,
       ),
-    [activeSessionId, draftsBySession, messagesBySession, sessions],
+    [activeSessionId, draftsBySession, localMessageCountsBySession, sessions],
   );
   const activeSessions = useMemo(
     () => visibleSessions.sessions.filter((session) => !session.archivedAt),

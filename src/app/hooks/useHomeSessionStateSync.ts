@@ -8,7 +8,7 @@ import { persistHomeSessionId } from "../lib/homeSessionStorage";
 interface UseHomeSessionStateSyncOptions {
   homeSessionId: string | null;
   homeSession?: ChatSession;
-  messagesBySession: Record<string, ArrayLike<unknown> | undefined>;
+  homeSessionMessages?: ArrayLike<unknown>;
   hasHydratedSessions: boolean;
   isLoading: boolean;
   setHomeSessionId: (sessionId: string | null) => void;
@@ -17,7 +17,7 @@ interface UseHomeSessionStateSyncOptions {
 export function useHomeSessionStateSync({
   homeSessionId,
   homeSession,
-  messagesBySession,
+  homeSessionMessages,
   hasHydratedSessions,
   isLoading,
   setHomeSessionId,
@@ -30,7 +30,7 @@ export function useHomeSessionStateSync({
     if (
       !homeSession ||
       homeSession.archivedAt ||
-      hasSessionStarted(homeSession, messagesBySession[homeSession.id])
+      hasSessionStarted(homeSession, homeSessionMessages)
     ) {
       setHomeSessionId(null);
     }
@@ -40,8 +40,8 @@ export function useHomeSessionStateSync({
     homeSession?.archivedAt,
     homeSession?.messageCount,
     homeSessionId,
+    homeSessionMessages,
     isLoading,
-    messagesBySession,
     setHomeSessionId,
   ]);
 

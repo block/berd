@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, Search } from "lucide-react";
 import {
@@ -8,6 +9,7 @@ import {
   type ChatSession,
 } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import { DEFAULT_CHAT_TITLE } from "@/features/chat/lib/sessionTitle";
 import {
   getAutomationTiles,
@@ -277,14 +279,16 @@ function useWidgetPickerOptions({
   const personas = useAgentStore((state) => state.personas);
   const projects = useProjectStore(selectProjects);
   const sessions = useChatSessionStore((state) => state.sessions);
-  const messagesBySession = useChatStore((state) => state.messagesBySession);
+  const localMessageCountsBySession = useChatStore(
+    useShallow(selectLocalMessageCountsBySession),
+  );
 
   const visibleSessions = useMemo(
     () =>
-      getVisibleSessions(sessions, messagesBySession).filter(
+      getVisibleSessions(sessions, localMessageCountsBySession).filter(
         (session) => !session.archivedAt,
       ),
-    [messagesBySession, sessions],
+    [localMessageCountsBySession, sessions],
   );
 
   return useMemo(() => {

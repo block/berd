@@ -51,6 +51,16 @@ export function getNotificationBody(
   return `${name} finished`;
 }
 
+function getChangedSessionIds<T>(
+  current: Record<string, T | undefined>,
+  previous: Record<string, T | undefined>,
+): string[] {
+  const ids = new Set([...Object.keys(current), ...Object.keys(previous)]);
+  return Array.from(ids).filter(
+    (sessionId) => !Object.is(current[sessionId], previous[sessionId]),
+  );
+}
+
 export function useCompletionNotifications(
   onNavigateToSession: (sessionId: string) => void,
 ): void {
@@ -138,85 +148,103 @@ export function useCompletionNotifications(
     };
   }, []);
 
-  // Subscribe to all session state changes and fire notifications on
-  // transitions from active → idle. Refs are stable so the dep array is [].
+  // Subscribe to runtime-state changes only. Streaming text writes update the
+  // message array, so they should not make notification handling scan sessions.
+  // Refs are stable so the dep array is [].
   useEffect(() => {
     const pendingSessions = new Set<string>();
-    return useChatStore.subscribe((state, prevState) => {
-      const prefs = getNotificationPrefs();
-      if (!prefs.enabled) return;
+    return useChatStore.subscribe(
+      (state) => state.sessionStateById,
+      (sessionStateById, previousSessionStateById) => {
+        const prefs = getNotificationPrefs();
+        if (!prefs.enabled) return;
 
-      for (const sessionId of Object.keys(state.sessionStateById)) {
-        const curr = state.sessionStateById[sessionId]?.chatState;
-        const prev = prevState.sessionStateById[sessionId]?.chatState;
+        for (const sessionId of getChangedSessionIds(
+          sessionStateById,
+          previousSessionStateById,
+        )) {
+          const curr = sessionStateById[sessionId]?.chatState;
+          const prev = previousSessionStateById[sessionId]?.chatState;
+          if (!curr) {
+            pendingSessions.delete(sessionId);
+            continue;
+          }
 
-        // Track when a session enters an active state.
-        if (curr === "streaming" || curr === "thinking") {
-          pendingSessions.add(sessionId);
-        }
+          // Track when a session enters an active state.
+          if (curr === "streaming" || curr === "thinking") {
+            pendingSessions.add(sessionId);
+          }
 
-        // Fire when a pending session reaches idle.
-        if (
-          curr === "idle" &&
-          prev !== "idle" &&
-          pendingSessions.has(sessionId)
-        ) {
-          pendingSessions.delete(sessionId);
+          // Fire when a pending session reaches idle.
+          if (
+            curr === "idle" &&
+            prev !== "idle" &&
+            (pendingSessions.has(sessionId) ||
+              prev === "streaming" ||
+              prev === "thinking")
+          ) {
+            pendingSessions.delete(sessionId);
 
-          const chatStoreState = useChatStore.getState();
-          const activeSessionId =
-            useChatSessionStore.getState().activeSessionId;
-          const isViewingThisSession =
-            sessionId === activeSessionId &&
-            chatStoreState.isViewingActiveSession;
-          // Skip if user is already watching this session in a focused window.
-          if (isViewingThisSession && windowFocusedRef.current) continue;
+            const chatStoreState = useChatStore.getState();
+            const activeSessionId =
+              useChatSessionStore.getState().activeSessionId;
+            const isViewingThisSession =
+              sessionId === activeSessionId &&
+              chatStoreState.isViewingActiveSession;
+            // Skip if user is already watching this session in a focused window.
+            if (isViewingThisSession && windowFocusedRef.current) continue;
 
-          const messages = state.messagesBySession[sessionId] ?? [];
-          const outcome = getCompletionOutcome(messages);
-          const session = useChatSessionStore.getState().getSession(sessionId);
-          // Use the session title only when it's user-set; fall back to empty
-          // string so getNotificationBody uses the "Agent" default.
-          const title =
-            session && !isDefaultChatTitle(session.title) ? session.title : "";
-          const body = getNotificationBody(outcome, title);
+            const messages = chatStoreState.messagesBySession[sessionId] ?? [];
+            const outcome = getCompletionOutcome(messages);
+            const session = useChatSessionStore
+              .getState()
+              .getSession(sessionId);
+            // Use the session title only when it's user-set; fall back to empty
+            // string so getNotificationBody uses the "Agent" default.
+            const title =
+              session && !isDefaultChatTitle(session.title)
+                ? session.title
+                : "";
+            const body = getNotificationBody(outcome, title);
 
-          if (!windowFocusedRef.current) {
-            if (!prefs.desktop) continue;
-            import("@tauri-apps/api/core").then(({ invoke }) => {
-              void invoke("show_completion_notification", {
-                body,
-                sessionId,
-                sound: getNotificationSoundResource(prefs.desktopSound) ?? null,
+            if (!windowFocusedRef.current) {
+              if (!prefs.desktop) continue;
+              import("@tauri-apps/api/core").then(({ invoke }) => {
+                void invoke("show_completion_notification", {
+                  body,
+                  sessionId,
+                  sound:
+                    getNotificationSoundResource(prefs.desktopSound) ?? null,
+                });
               });
-            });
-          } else {
-            if (!prefs.inApp) continue;
-            playNotificationSound(prefs.inAppSound);
-            const shouldShowChangeSound = shouldShowAssistiveMoment(
-              ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-            );
-            if (shouldShowChangeSound) {
-              recordAssistiveMomentShown(
+            } else {
+              if (!prefs.inApp) continue;
+              playNotificationSound(prefs.inAppSound);
+              const shouldShowChangeSound = shouldShowAssistiveMoment(
                 ASSISTIVE_UX_RULES.notificationsChangeSound.id,
               );
+              if (shouldShowChangeSound) {
+                recordAssistiveMomentShown(
+                  ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                );
+              }
+              showCompletionNotificationToast({
+                title: body,
+                outcome,
+                onView: () => navigateRef.current(sessionId),
+                onChangeSound: shouldShowChangeSound
+                  ? () => {
+                      recordAssistiveMomentAccepted(
+                        ASSISTIVE_UX_RULES.notificationsChangeSound.id,
+                      );
+                      requestOpenSettings("notifications");
+                    }
+                  : undefined,
+              });
             }
-            showCompletionNotificationToast({
-              title: body,
-              outcome,
-              onView: () => navigateRef.current(sessionId),
-              onChangeSound: shouldShowChangeSound
-                ? () => {
-                    recordAssistiveMomentAccepted(
-                      ASSISTIVE_UX_RULES.notificationsChangeSound.id,
-                    );
-                    requestOpenSettings("notifications");
-                  }
-                : undefined,
-            });
           }
         }
-      }
-    });
+      },
+    );
   }, []);
 }

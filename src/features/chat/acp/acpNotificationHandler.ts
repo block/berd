@@ -366,8 +366,7 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
       );
 
       if (update.content.type === "text" && "text" in update.content) {
-        store.setStreamingMessageId(sessionId, messageId);
-        store.updateStreamingText(sessionId, update.content.text);
+        store.appendStreamingText(sessionId, messageId, update.content.text);
 
         // Mirror the backend's last-message-snippet append: update the sidebar
         // subtitle live from the assistant message's accumulated text so far.

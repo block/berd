@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
 import type {
   ChatAttachmentDraft,
   Message,
@@ -280,6 +281,11 @@ interface ChatStoreActions {
     sessionId: string,
     content: MessageContent,
   ) => void;
+  appendStreamingText: (
+    sessionId: string,
+    messageId: string,
+    text: string,
+  ) => void;
   updateStreamingText: (sessionId: string, text: string) => void;
   startAssistantStreamAfterIntervention: (sessionId: string) => void;
   setChatState: (sessionId: string, state: ChatState) => void;
@@ -313,7 +319,10 @@ interface ChatStoreActions {
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
-export const useChatStore = create<ChatStore>((set, get) => ({
+const createChatStore: StateCreator<
+  ChatStore,
+  [["zustand/subscribeWithSelector", never]]
+> = (set, get) => ({
   // State
   messagesBySession: {},
   sessionStateById: buildInitialSessionStateById(),
@@ -528,17 +537,33 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   // Streaming
   setStreamingMessageId: (sessionId, id) =>
-    set((state) => ({
-      sessionStateById: {
-        ...state.sessionStateById,
-        [sessionId]: {
-          ...(state.sessionStateById[sessionId] ??
-            createInitialSessionRuntime()),
-          streamingMessageId: id,
-          ...(id === null ? { pendingInterventionBoundary: null } : {}),
+    set((state) => {
+      const existing = state.sessionStateById[sessionId];
+      if (!existing && id === null) {
+        return state;
+      }
+
+      const current = existing ?? createInitialSessionRuntime();
+      const nextPendingInterventionBoundary =
+        id === null ? null : current.pendingInterventionBoundary;
+      if (
+        current.streamingMessageId === id &&
+        current.pendingInterventionBoundary === nextPendingInterventionBoundary
+      ) {
+        return state;
+      }
+
+      return {
+        sessionStateById: {
+          ...state.sessionStateById,
+          [sessionId]: {
+            ...current,
+            streamingMessageId: id,
+            pendingInterventionBoundary: nextPendingInterventionBoundary,
+          },
         },
-      },
-    })),
+      };
+    }),
 
   setActiveRunId: (sessionId, activeRunId) =>
     set((state) => ({
@@ -632,58 +657,94 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     );
   },
 
-  updateStreamingText: (sessionId, text) => {
+  appendStreamingText: (sessionId, messageId, text) => {
     const previousSessionStateById = get().sessionStateById;
+    let didUnreadStateChange = false;
     set((state) => {
-      const streamingMessageId =
-        state.sessionStateById[sessionId]?.streamingMessageId ?? null;
-      if (!streamingMessageId) return state;
       const messages = state.messagesBySession[sessionId];
       if (!messages) return state;
 
-      let shouldMarkUnread = false;
-      const current =
-        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const messageIndex = messages.findLastIndex(
+        (message) => message.id === messageId,
+      );
+      const message = messages[messageIndex];
+      if (!message) return state;
 
-      const updatedMessages = messages.map((message) => {
-        if (message.id !== streamingMessageId) return message;
-
-        shouldMarkUnread = shouldMarkSessionUnread(state, sessionId, message);
+      let updatedMessage = message;
+      if (text.length > 0) {
         const lastContent = message.content[message.content.length - 1];
-        if (lastContent?.type !== "text") {
-          // Start a new text segment after non-text content so
-          // streamed tool calls stay inline between text blocks.
-          return {
+        if (lastContent?.type === "text") {
+          const nextContent = [...message.content];
+          nextContent[nextContent.length - 1] = {
+            ...lastContent,
+            text: lastContent.text + text,
+          };
+          updatedMessage = { ...message, content: nextContent };
+        } else {
+          // Start a new text segment after non-text content so streamed tool
+          // calls stay inline between text blocks.
+          updatedMessage = {
             ...message,
             content: [...message.content, { type: "text" as const, text }],
           };
         }
-        const newContent = [...message.content];
-        newContent[newContent.length - 1] = {
-          type: "text" as const,
-          text: lastContent.text + text,
-        };
-        return { ...message, content: newContent };
-      });
+      }
+
+      const current =
+        state.sessionStateById[sessionId] ?? createInitialSessionRuntime();
+      const nextHasUnread =
+        current.hasUnread || shouldMarkSessionUnread(state, sessionId, message);
+      didUnreadStateChange = current.hasUnread !== nextHasUnread;
+      const shouldUpdateRuntime =
+        current.streamingMessageId !== messageId ||
+        current.hasUnread !== nextHasUnread;
+      const shouldUpdateMessage = updatedMessage !== message;
+
+      if (!shouldUpdateMessage && !shouldUpdateRuntime) {
+        return state;
+      }
+
+      const nextMessages = shouldUpdateMessage ? [...messages] : messages;
+      if (shouldUpdateMessage) {
+        nextMessages[messageIndex] = updatedMessage;
+      }
 
       return {
-        messagesBySession: {
-          ...state.messagesBySession,
-          [sessionId]: updatedMessages,
-        },
-        sessionStateById: {
-          ...state.sessionStateById,
-          [sessionId]: {
-            ...current,
-            ...(shouldMarkUnread ? { hasUnread: true } : {}),
-          },
-        },
+        ...(shouldUpdateMessage
+          ? {
+              messagesBySession: {
+                ...state.messagesBySession,
+                [sessionId]: nextMessages,
+              },
+            }
+          : {}),
+        ...(shouldUpdateRuntime
+          ? {
+              sessionStateById: {
+                ...state.sessionStateById,
+                [sessionId]: {
+                  ...current,
+                  streamingMessageId: messageId,
+                  hasUnread: nextHasUnread,
+                },
+              },
+            }
+          : {}),
       };
     });
-    persistUnreadStateIfChanged(
-      previousSessionStateById,
-      get().sessionStateById,
-    );
+    if (didUnreadStateChange) {
+      persistUnreadStateIfChanged(
+        previousSessionStateById,
+        get().sessionStateById,
+      );
+    }
+  },
+
+  updateStreamingText: (sessionId, text) => {
+    const streamingMessageId =
+      get().sessionStateById[sessionId]?.streamingMessageId ?? null;
+    if (!streamingMessageId) return;
+    get().appendStreamingText(sessionId, streamingMessageId, text);
   },
 
   startAssistantStreamAfterIntervention: (sessionId) => {
@@ -1084,4 +1145,8 @@ export const useChatStore = create<ChatStore>((set, get) => ({
       get().sessionStateById,
     );
   },
-}));
+});
+
+export const useChatStore = create<ChatStore>()(
+  subscribeWithSelector(createChatStore),
+);

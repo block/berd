@@ -15,6 +15,7 @@ import {
   ASSISTIVE_UX_STORAGE_KEY,
   ASSISTIVE_UX_RULES,
 } from "@/shared/assistive-ux/registry";
+import { INITIAL_SESSION_CHAT_RUNTIME } from "@/shared/types/chat";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
@@ -397,6 +398,53 @@ describe("useCompletionNotifications", () => {
     } finally {
       window.removeEventListener("goose:open-settings", onOpenSettings);
     }
+  });
+
+  it("does not process unrelated idle sessions for streaming text writes", async () => {
+    const idleRuntime = { ...INITIAL_SESSION_CHAT_RUNTIME };
+    Object.defineProperty(idleRuntime, "chatState", {
+      get: () => {
+        throw new Error("idle session was scanned");
+      },
+    });
+
+    useChatStore.setState({
+      activeSessionId: "idle",
+      isViewingActiveSession: true,
+      messagesBySession: {
+        idle: [makeMsg("completed")],
+        streaming: [
+          {
+            ...makeMsg("completed"),
+            id: "streaming-message",
+            content: [{ type: "text", text: "hello" }],
+          },
+        ],
+      },
+      sessionStateById: {
+        idle: idleRuntime,
+        streaming: {
+          ...INITIAL_SESSION_CHAT_RUNTIME,
+          chatState: "streaming",
+          streamingMessageId: "streaming-message",
+        },
+      },
+    });
+    renderHook(() => useCompletionNotifications(vi.fn()));
+
+    act(() => {
+      useChatStore
+        .getState()
+        .appendStreamingText("streaming", "streaming-message", " world");
+    });
+
+    await Promise.resolve();
+    expect(useChatStore.getState().sessionStateById.streaming.hasUnread).toBe(
+      true,
+    );
+    expect(mocks.invoke).not.toHaveBeenCalled();
+    expect(mocks.toast).not.toHaveBeenCalled();
+    expect(mocks.audioPlay).not.toHaveBeenCalled();
   });
 
   it("passes null sound to desktop notifications when desktop sound is silent", async () => {

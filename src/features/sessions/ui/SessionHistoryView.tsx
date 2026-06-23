@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
+import { useShallow } from "zustand/react/shallow";
 import { History } from "lucide-react";
 import { IconCheck, IconCopy, IconUpload, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -31,7 +32,7 @@ import {
 } from "@/features/chat/stores/chatSessionStore";
 import { selectSessions } from "@/features/chat/stores/chatSessionSelectors";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
+import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
 import {
@@ -197,7 +198,9 @@ export function SessionHistoryView({
   const [importNotice, setImportNotice] = useState<ImportNotice | null>(null);
   const [copiedImportCommand, setCopiedImportCommand] = useState(false);
   const sessions = useChatSessionStore(selectSessions);
-  const messagesBySession = useChatStore(selectMessagesBySession);
+  const localMessageCountsBySession = useChatStore(
+    useShallow(selectLocalMessageCountsBySession),
+  );
   const loadSessions = useChatSessionStore((s) => s.loadSessions);
   const hasMoreSessions = useChatSessionStore((s) => s.hasMoreSessions);
   const isLoadingMoreSessions = useChatSessionStore(
@@ -212,10 +215,10 @@ export function SessionHistoryView({
   const loadMoreInFlightRef = useRef(false);
   const activeSessions = useMemo(
     () =>
-      getVisibleSessions(sessions, messagesBySession).filter(
+      getVisibleSessions(sessions, localMessageCountsBySession).filter(
         (session) => !session.archivedAt,
       ),
-    [messagesBySession, sessions],
+    [localMessageCountsBySession, sessions],
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
   const selectedCount = selectedSessionIds.size;

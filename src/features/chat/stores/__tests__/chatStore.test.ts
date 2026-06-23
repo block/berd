@@ -146,6 +146,73 @@ describe("chatStore", () => {
     expect(getRuntime("s2").streamingMessageId).toBeNull();
   });
 
+  it("appends streaming text with one logical write and preserves unrelated session arrays", () => {
+    const streaming = makeMessage({
+      id: "stream-1",
+      content: [{ type: "text", text: "Hello" }],
+    });
+    const other = makeMessage({ id: "other-1" });
+    const store = useChatStore.getState();
+
+    store.setActiveSession("s1");
+    store.setActiveSessionViewing(true);
+    store.setMessages("s1", [streaming]);
+    store.setMessages("s2", [other]);
+    store.setStreamingMessageId("s1", "stream-1");
+
+    let writeCount = 0;
+    const unsubscribe = useChatStore.subscribe(() => {
+      writeCount += 1;
+    });
+    const before = useChatStore.getState();
+    const s2Messages = before.messagesBySession.s2;
+    const s1Runtime = before.sessionStateById.s1;
+
+    store.appendStreamingText("s1", "stream-1", " world");
+
+    const after = useChatStore.getState();
+    expect(after.messagesBySession.s1).not.toBe(before.messagesBySession.s1);
+    expect(after.messagesBySession.s2).toBe(s2Messages);
+    expect(after.sessionStateById.s1).toBe(s1Runtime);
+    expect(after.messagesBySession.s1[0]?.content[0]).toEqual({
+      type: "text",
+      text: "Hello world",
+    });
+    expect(writeCount).toBe(1);
+    unsubscribe();
+  });
+
+  it("does not replace runtime state when appending to the same streaming message", () => {
+    const store = useChatStore.getState();
+    store.setActiveSession("s1");
+    store.setActiveSessionViewing(true);
+    store.setMessages("s1", [makeMessage({ id: "assistant-1" })]);
+    store.setStreamingMessageId("s1", "assistant-1");
+
+    const beforeRuntime = useChatStore.getState().sessionStateById.s1;
+    store.appendStreamingText("s1", "assistant-1", " more");
+
+    expect(useChatStore.getState().sessionStateById.s1).toBe(beforeRuntime);
+  });
+
+  it("updates runtime state once when the streaming message id changes", () => {
+    const store = useChatStore.getState();
+    store.setMessages("s1", [
+      makeMessage({ id: "assistant-1", content: [] }),
+      makeMessage({ id: "assistant-2", content: [] }),
+    ]);
+    store.setStreamingMessageId("s1", "assistant-1");
+
+    const beforeRuntime = useChatStore.getState().sessionStateById.s1;
+    store.appendStreamingText("s1", "assistant-2", "next");
+    const afterRuntime = useChatStore.getState().sessionStateById.s1;
+
+    expect(afterRuntime).not.toBe(beforeRuntime);
+    expect(afterRuntime.streamingMessageId).toBe("assistant-2");
+    store.appendStreamingText("s1", "assistant-2", " chunk");
+    expect(useChatStore.getState().sessionStateById.s1).toBe(afterRuntime);
+  });
+
   it("transitions a session to error without affecting another session", () => {
     const store = useChatStore.getState();
 

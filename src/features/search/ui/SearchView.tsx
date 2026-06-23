@@ -12,10 +12,12 @@ import type {
   ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { useShallow } from "zustand/react/shallow";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import type { ExtensionEntry } from "@/features/extensions/types";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import {
   type ChatSession,
   getVisibleSessions,
@@ -112,7 +114,9 @@ export function SearchView({
   const trimmedDebouncedQuery = debouncedQuery.trim();
 
   const sessions = useChatSessionStore((state) => state.sessions);
-  const messagesBySession = useChatStore((state) => state.messagesBySession);
+  const localMessageCountsBySession = useChatStore(
+    useShallow(selectLocalMessageCountsBySession),
+  );
   const personas = useAgentStore((state) => state.personas);
   const projects = useProjectStore((state) => state.projects);
 
@@ -120,9 +124,9 @@ export function SearchView({
     () =>
       getVisibleSessions(
         sessions.filter((session) => !session.archivedAt),
-        messagesBySession,
+        localMessageCountsBySession,
       ),
-    [messagesBySession, sessions],
+    [localMessageCountsBySession, sessions],
   );
 
   const resolvers = useMemo(

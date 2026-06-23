@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useTranslation } from "react-i18next";
 
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
@@ -8,6 +9,7 @@ import {
   useChatSessionStore,
 } from "@/features/chat/stores/chatSessionStore";
 import { useChatStore } from "@/features/chat/stores/chatStore";
+import { selectLocalMessageCountsBySession } from "@/features/chat/stores/chatSelectors";
 import {
   buildQuickSwitchResults,
   type QuickSwitchResult,
@@ -80,11 +82,13 @@ export function SessionQuickSwitcher({
   }
 
   const sessions = useChatSessionStore((state) => state.sessions);
-  const messagesBySession = useChatStore((state) => state.messagesBySession);
+  const localMessageCountsBySession = useChatStore(
+    useShallow(selectLocalMessageCountsBySession),
+  );
   const sessionStateById = useChatStore((state) => state.sessionStateById);
 
   const results = useMemo<QuickSwitchResult[]>(() => {
-    const candidates = getVisibleSessions(sessions, messagesBySession)
+    const candidates = getVisibleSessions(sessions, localMessageCountsBySession)
       .filter((session) => !session.archivedAt)
       .map((session) => ({
         id: session.id,
@@ -98,7 +102,7 @@ export function SessionQuickSwitcher({
         ),
       }));
     return buildQuickSwitchResults(candidates, query);
-  }, [sessions, messagesBySession, sessionStateById, query, t]);
+  }, [sessions, localMessageCountsBySession, sessionStateById, query, t]);
 
   const handleSelect = (sessionId: string) => {
     onOpenChange(false);

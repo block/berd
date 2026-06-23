@@ -99,16 +99,20 @@ export interface ModelSelectionIntent {
 
 export function hasSessionStarted(
   session: Pick<ChatSession, "messageCount">,
-  localMessages?: ArrayLike<unknown>,
+  localMessages?: ArrayLike<unknown> | number,
 ): boolean {
-  return session.messageCount > 0 || (localMessages?.length ?? 0) > 0;
+  const localMessageCount =
+    typeof localMessages === "number"
+      ? localMessages
+      : (localMessages?.length ?? 0);
+  return session.messageCount > 0 || localMessageCount > 0;
 }
 
 export function getVisibleSessions<
   T extends Pick<ChatSession, "id" | "messageCount">,
 >(
   sessions: T[],
-  messagesBySession: Record<string, ArrayLike<unknown> | undefined>,
+  messagesBySession: Record<string, ArrayLike<unknown> | number | undefined>,
 ): T[] {
   return sessions.filter((session) =>
     hasSessionStarted(session, messagesBySession[session.id]),

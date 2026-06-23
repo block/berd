@@ -34,7 +34,6 @@ import { isCompanyManagedExtension } from "@/features/connections/lib/managedExt
 import { classifyExtension } from "@/features/extensions/lib/extensionCategories";
 import type { TopBarChromeInsets } from "./ui/TopBar";
 import { useChatStore } from "@/features/chat/stores/chatStore";
-import { selectMessagesBySession } from "@/features/chat/stores/chatSelectors";
 import { useActiveProjectTint } from "@/features/chat/hooks/useActiveProjectTint";
 import {
   type ChatSession,
@@ -480,7 +479,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     useState(false);
   const [automationLeaveSaving, setAutomationLeaveSaving] = useState(false);
 
-  const messagesBySession = useChatStore(selectMessagesBySession);
+  const homeSessionMessages = useChatStore((s) =>
+    homeSessionId ? s.messagesBySession[homeSessionId] : undefined,
+  );
   const setChatActiveSession = useChatStore((s) => s.setActiveSession);
   const setChatActiveSessionViewing = useChatStore(
     (s) => s.setActiveSessionViewing,
@@ -938,7 +939,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   useHomeSessionStateSync({
     homeSessionId,
     homeSession,
-    messagesBySession,
+    homeSessionMessages,
     hasHydratedSessions,
     isLoading: sessionsLoading,
     setHomeSessionId,
