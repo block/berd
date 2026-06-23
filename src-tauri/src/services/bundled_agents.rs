@@ -169,7 +169,7 @@ fn is_installed_bundled_agent(agent_file: &Path) -> Result<bool, String> {
     };
 
     Ok(agent_frontmatter(&contents)
-        .and_then(|frontmatter| serde_yaml::from_str::<AgentFrontmatter>(frontmatter).ok())
+        .and_then(|frontmatter| yaml_serde::from_str::<AgentFrontmatter>(frontmatter).ok())
         .and_then(|frontmatter| frontmatter.metadata)
         .and_then(|metadata| metadata.goose_internal_bundled)
         .unwrap_or(false))
@@ -192,7 +192,7 @@ fn source_agent_avatar_ref(agent_file: &Path) -> Result<Option<String>, String> 
     })?;
 
     Ok(agent_frontmatter(&contents)
-        .and_then(|frontmatter| serde_yaml::from_str::<AgentFrontmatter>(frontmatter).ok())
+        .and_then(|frontmatter| yaml_serde::from_str::<AgentFrontmatter>(frontmatter).ok())
         .and_then(|frontmatter| frontmatter.avatar)
         .map(|value| value.trim().to_string())
         .filter(|value| value.starts_with("app-avatar:")))

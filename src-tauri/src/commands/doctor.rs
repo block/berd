@@ -669,7 +669,7 @@ fn collect_thinking_settings_from_yaml(path: &Path, sources: &mut BTreeSet<Strin
     let Ok(contents) = fs::read_to_string(path) else {
         return;
     };
-    let Ok(value) = serde_yaml::from_str::<serde_yaml::Value>(&contents) else {
+    let Ok(value) = yaml_serde::from_str::<yaml_serde::Value>(&contents) else {
         return;
     };
     let Some(mapping) = value.as_mapping() else {
@@ -677,12 +677,12 @@ fn collect_thinking_settings_from_yaml(path: &Path, sources: &mut BTreeSet<Strin
     };
 
     for key in CLAUDE_THINKING_CONFIG_KEYS {
-        if mapping.contains_key(serde_yaml::Value::String((*key).to_string())) {
+        if mapping.contains_key(yaml_serde::Value::String((*key).to_string())) {
             sources.insert(format!("{}: {key}", path.display()));
         }
     }
 
-    if mapping.contains_key(serde_yaml::Value::String(
+    if mapping.contains_key(yaml_serde::Value::String(
         GOOSE_THINKING_EFFORT_ENV.to_string(),
     )) {
         sources.insert(format!("{}: {GOOSE_THINKING_EFFORT_ENV}", path.display()));
@@ -813,7 +813,7 @@ fn validate_yaml_file(path: &Path) -> ConfigFileValidation {
         }
     };
 
-    match serde_yaml::from_slice::<serde_yaml::Value>(&contents) {
+    match yaml_serde::from_slice::<yaml_serde::Value>(&contents) {
         Ok(_) => ConfigFileValidation::Valid,
         Err(error) => ConfigFileValidation::Invalid(format!("failed to parse YAML: {error}")),
     }

@@ -95,7 +95,7 @@ fn is_installed_bundled_skill(skill_dir: &Path) -> Result<bool, String> {
     };
 
     Ok(skill_frontmatter(&contents)
-        .and_then(|frontmatter| serde_yaml::from_str::<SkillFrontmatter>(frontmatter).ok())
+        .and_then(|frontmatter| yaml_serde::from_str::<SkillFrontmatter>(frontmatter).ok())
         .and_then(|frontmatter| frontmatter.metadata)
         .and_then(|metadata| metadata.goose_internal_bundled)
         .unwrap_or(false))
