@@ -1,4 +1,3 @@
-import React from "react";
 import "@testing-library/jest-dom/vitest";
 import { beforeEach, vi } from "vitest";
 
@@ -14,19 +13,6 @@ if (hasWindow) {
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
   openUrl: vi.fn(),
-}));
-
-vi.mock("react-syntax-highlighter", () => ({
-  Prism: ({ children }: { children: React.ReactNode }) =>
-    React.createElement(
-      "pre",
-      { "data-testid": "syntax-highlighter" },
-      children,
-    ),
-}));
-
-vi.mock("react-syntax-highlighter/dist/esm/styles/prism", () => ({
-  oneDark: {},
 }));
 
 // Mock ResizeObserver for jsdom (not available by default)
