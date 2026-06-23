@@ -4,6 +4,7 @@ export {
   createMeasurementCacheKey,
   createTranscriptMeasurementScheduler,
 } from "./transcriptMeasurementScheduler";
+export { readTranscriptElementBlockSize } from "./transcriptElementMeasurement";
 export type {
   TranscriptControllerBatchFlushResult,
   TranscriptControllerMeasurementUpdate,

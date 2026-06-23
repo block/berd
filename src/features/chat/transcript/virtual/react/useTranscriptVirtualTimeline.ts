@@ -36,6 +36,7 @@ import {
 } from "../";
 import {
   createTranscriptMeasurementScheduler,
+  readTranscriptElementBlockSize,
   type TranscriptMeasurementScheduler,
   type TranscriptMeasurementSchedulerDiagnostics,
 } from "../measurement";
@@ -1711,13 +1712,13 @@ export function useTranscriptVirtualTimeline({
 }
 
 function measureElementBlockSize(element: HTMLElement): number {
-  const rectHeight = element.getBoundingClientRect().height;
+  const rectHeight = readTranscriptElementBlockSize(element);
   const layoutHeight = Math.max(
     element.scrollHeight,
     element.offsetHeight,
     element.clientHeight,
   );
-  return Math.ceil(Math.max(rectHeight, layoutHeight));
+  return Math.max(rectHeight, layoutHeight);
 }
 
 function getReservedBlockSizeForRow(element: HTMLElement): number | null {
