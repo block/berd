@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Mock CDP. Identity is stamped per-event via the envelope `overrides`, so the
 // client only needs `trackWithSchema`; there is no `user`/`_identify` to model.
 const trackWithSchema = vi.fn();
+const buildFeatures = vi.hoisted(() => ({
+  agentToolsTip: true,
+  automations: true,
+  builderbot: true,
+  telemetry: true,
+}));
 const desktopPageContext = {
   path: "",
   referrer: "",
@@ -26,6 +32,10 @@ const invoke = vi.fn();
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: (...args: unknown[]) => invoke(...args),
+}));
+
+vi.mock("@/shared/profile/buildProfile", () => ({
+  getBuildFeatureState: () => buildFeatures,
 }));
 
 // The schema factories just echo their params so we can assert what was passed.
@@ -84,6 +94,10 @@ function setEnv(env: "production" | "staging" | "development") {
 }
 
 beforeEach(() => {
+  buildFeatures.agentToolsTip = true;
+  buildFeatures.automations = true;
+  buildFeatures.builderbot = true;
+  buildFeatures.telemetry = true;
   trackWithSchema.mockClear();
   invoke.mockReset();
 });
@@ -284,6 +298,18 @@ describe("telemetry", () => {
     expect(invoke).not.toHaveBeenCalled();
     expect(trackWithSchema).not.toHaveBeenCalled();
     expect(consoleInfo).not.toHaveBeenCalled();
+  });
+
+  it("is a no-op in production when the telemetry build feature is disabled", async () => {
+    setEnv("production");
+    buildFeatures.telemetry = false;
+
+    const t = await loadTelemetry();
+    t.initTelemetry();
+    t.trackAppLaunched();
+
+    expect(invoke).not.toHaveBeenCalled();
+    expect(trackWithSchema).not.toHaveBeenCalled();
   });
 
   it("logs development events when the env debug toggle is enabled without sending", async () => {

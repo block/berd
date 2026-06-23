@@ -7,6 +7,7 @@ import {
   type ExperimentDefinition,
 } from "./experimentDefinitions";
 import { normalizeKeyboardShortcut } from "@/shared/keyboard/keyboardShortcut";
+import { filterExperimentRegistryForBuildProfile } from "@/shared/profile/buildProfile";
 
 export const EXPERIMENT_PREFERENCES_STORAGE_KEY = "goose:experimental-features";
 export const EXPERIMENT_PREFERENCES_STORAGE_VERSION = 2;
@@ -305,14 +306,22 @@ function resolveExperimentState(
 }
 
 function findDefinition(id: string, registry: ExperimentRegistry) {
-  return registry.find((definition) => definition.id === id);
+  return getVisibleExperimentRegistry(registry).find(
+    (definition) => definition.id === id,
+  );
+}
+
+export function getVisibleExperimentRegistry(
+  registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
+): ExperimentRegistry {
+  return filterExperimentRegistryForBuildProfile(registry);
 }
 
 export function listExperiments(
   registry: ExperimentRegistry = EXPERIMENT_DEFINITIONS,
 ): ExperimentState[] {
   const storedPreferences = readStoredPreferences();
-  return registry.map((definition) =>
+  return getVisibleExperimentRegistry(registry).map((definition) =>
     resolveExperimentState(
       definition,
       storedPreferences.experiments[definition.id],

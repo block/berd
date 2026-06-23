@@ -9,6 +9,7 @@ import {
   getOutputSummary,
   latestRunTimestampFromTile,
 } from "@/features/automations/lib/automationFormatting";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { cn } from "@/shared/lib/cn";
 import { useLocaleFormatting } from "@/shared/i18n";
 import { InlineMarkdownText } from "@/shared/ui/inline-markdown-text";
@@ -89,6 +90,7 @@ export function AutomationOutputWidget({
 }: WidgetRenderProps) {
   const { t } = useTranslation("home");
   const { formatRelativeTimeToNow } = useLocaleFormatting();
+  const automationsEnabled = useProfileCapability("automations");
   const automationId = getAutomationId(instance.state);
 
   const { data: tileData } = useQuery<GetAutomationTileResponse>({
@@ -97,14 +99,14 @@ export function AutomationOutputWidget({
       automationId
         ? getAutomationTile(automationId)
         : Promise.resolve<GetAutomationTileResponse>({}),
-    enabled: Boolean(automationId),
+    enabled: automationsEnabled && Boolean(automationId),
     staleTime: 15_000,
   });
 
   const { data: listData } = useQuery({
     queryKey: ["automation-tiles"],
     queryFn: () => getAutomationTiles().then((r) => r.tiles),
-    enabled: !automationId,
+    enabled: automationsEnabled && !automationId,
     staleTime: 15_000,
   });
 

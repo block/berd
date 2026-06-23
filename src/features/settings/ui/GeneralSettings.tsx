@@ -41,6 +41,8 @@ import {
 } from "@/features/chat/lib/streamingShortcutPreference";
 import { useAtMentionDefaultCategoryPreference } from "@/features/chat/lib/mentionPreference";
 import { useSidebarGitBranchSubtitlePreference } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import { useProfileCapability } from "@/shared/profile/capabilities";
+import { RuntimeConfigSettings } from "./RuntimeConfigSettings";
 
 interface AboutAppInfo {
   name: string;
@@ -132,6 +134,7 @@ export function GeneralSettings() {
   } = useTheme();
   const followUpBehavior =
     streamingShortcutPreference.mode === "cmd-enter-steers" ? "queue" : "steer";
+  const showAgentToolsTipsSetting = useProfileCapability("agentToolsTip");
 
   // The picker is self-contained: a "follow theme" swatch (clears the custom
   // override so the primary tracks the active light/dark theme) plus the
@@ -369,16 +372,18 @@ export function GeneralSettings() {
           </div>
         </SettingRow>
 
-        <SettingRow
-          label={t("general.agentToolsTips.label")}
-          description={t("general.agentToolsTips.description")}
-        >
-          <Switch
-            checked={agentToolsTipsPreference.enabled}
-            onCheckedChange={agentToolsTipsPreference.setEnabled}
-            aria-label={t("general.agentToolsTips.label")}
-          />
-        </SettingRow>
+        {showAgentToolsTipsSetting ? (
+          <SettingRow
+            label={t("general.agentToolsTips.label")}
+            description={t("general.agentToolsTips.description")}
+          >
+            <Switch
+              checked={agentToolsTipsPreference.enabled}
+              onCheckedChange={agentToolsTipsPreference.setEnabled}
+              aria-label={t("general.agentToolsTips.label")}
+            />
+          </SettingRow>
+        ) : null}
 
         <SettingRow
           label={t("shortcuts:settings.label")}
@@ -635,6 +640,12 @@ export function GeneralSettings() {
           <GooseAutoCompactSettings />
         </div>
       </SettingsSection>
+
+      {import.meta.env.DEV ? (
+        <SettingsSection title={t("runtimeConfig.title")}>
+          <RuntimeConfigSettings />
+        </SettingsSection>
+      ) : null}
 
       <SettingsSection title={t("about.title")}>
         <AboutInfoRow

@@ -41,7 +41,7 @@ interface TopBarProps {
   onGoForward?: () => void;
   onToggleContextPanel?: () => void;
   onToggleSidebar?: () => void;
-  onFeedbackClick: () => void;
+  onFeedbackClick?: () => void;
   onSearchClick?: () => void;
 }
 
@@ -224,16 +224,18 @@ export function TopBar({
         <div className="flex shrink-0 items-center gap-2">{viewActions}</div>
       ) : null}
       <div className="flex shrink-0 items-center gap-[var(--spacing-app-top-bar-button-gap)]">
-        <Button
-          type="button"
-          variant="top-bar-icon"
-          size="icon-top-bar"
-          onClick={onFeedbackClick}
-          aria-label={t("feedback:title")}
-          title={t("feedback:title")}
-        >
-          <IconMessageReport aria-hidden="true" />
-        </Button>
+        {onFeedbackClick ? (
+          <Button
+            type="button"
+            variant="top-bar-icon"
+            size="icon-top-bar"
+            onClick={onFeedbackClick}
+            aria-label={t("feedback:title")}
+            title={t("feedback:title")}
+          >
+            <IconMessageReport aria-hidden="true" />
+          </Button>
+        ) : null}
         {showContextPanelToggle && (
           <Button
             type="button"

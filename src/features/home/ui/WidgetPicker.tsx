@@ -13,6 +13,7 @@ import {
   getAutomationTiles,
   type AutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { selectProjects } from "@/features/projects/stores/projectSelectors";
@@ -95,10 +96,6 @@ const STAGE_ONE_ORDER: WidgetCategory[] = [
   "automation",
   "clock",
 ];
-
-const VISIBLE_WIDGET_CATEGORIES = STAGE_ONE_ORDER.filter((category) =>
-  HOME_WIDGET_CATEGORIES.includes(category),
-);
 
 const PIN_CONFIG = {
   agent: { stateKey: "agentId", widgetType: "agentPin" },
@@ -354,6 +351,16 @@ export function WidgetPicker({
   onSelectStarterStickies,
 }: WidgetPickerProps) {
   const { t } = useTranslation("home");
+  const automationsEnabled = useProfileCapability("automations");
+  const visibleWidgetCategories = useMemo(
+    () =>
+      STAGE_ONE_ORDER.filter(
+        (category) =>
+          HOME_WIDGET_CATEGORIES.includes(category) &&
+          (category !== "automation" || automationsEnabled),
+      ),
+    [automationsEnabled],
+  );
   const searchInputId = useId();
   const [activePanel, setActivePanel] = useState<WidgetCategory | null>(null);
   const [query, setQuery] = useState("");
@@ -409,7 +416,7 @@ export function WidgetPicker({
   }
 
   useEffect(() => {
-    if (!open || activePanel !== "automation") {
+    if (!automationsEnabled || !open || activePanel !== "automation") {
       return;
     }
     if (automationCacheLoadedRef.current) {
@@ -447,7 +454,7 @@ export function WidgetPicker({
     return () => {
       cancelled = true;
     };
-  }, [activePanel, open]);
+  }, [activePanel, automationsEnabled, open]);
 
   useEffect(() => {
     const normalizedQuery = query.trim();
@@ -602,7 +609,7 @@ export function WidgetPicker({
           />
         ) : (
           <PanelStageOne
-            categories={VISIBLE_WIDGET_CATEGORIES}
+            categories={visibleWidgetCategories}
             headerLabel={t("widgets.picker.header")}
             onSelectCategory={selectCategory}
             getSectionLabel={(category) =>

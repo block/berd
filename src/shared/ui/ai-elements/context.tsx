@@ -12,7 +12,7 @@ import type { ComponentProps } from "react";
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { getUsage } from "tokenlens";
-import { useDistroStore } from "@/features/settings/stores/distroStore";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
 const PERCENT_MAX = 100;
 const ICON_RADIUS = 10;
@@ -63,10 +63,8 @@ export const Context = ({
 };
 
 function useCostTrackingEnabled() {
-  const featureToggles = useDistroStore(
-    (state) => state.manifest.featureToggles,
-  );
-  return featureToggles?.costTracking !== false;
+  const runtimeConfig = useRuntimeConfigStore((state) => state.config);
+  return runtimeConfig.featureToggles?.costTracking !== false;
 }
 
 const ContextIcon = () => {

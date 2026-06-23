@@ -182,4 +182,20 @@ describe("AppShell startup diagnostics", () => {
 
     expect(mocks.startupRetry).toHaveBeenCalledTimes(1);
   });
+
+  it("shows a blocking configuration unavailable startup error", () => {
+    mocks.startupState.error = Object.assign(
+      new Error(
+        "Runtime config unavailable: missing from fakeEndpoint: No fake response",
+      ),
+      { name: "RuntimeConfigUnavailableError" },
+    );
+
+    render(<AppShell />);
+
+    expect(
+      screen.getByRole("heading", { name: "Configuration unavailable" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByTestId("app-shell-content")).not.toBeInTheDocument();
+  });
 });

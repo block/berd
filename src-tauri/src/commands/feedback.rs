@@ -1,6 +1,10 @@
 use crate::commands::doctor::DoctorReport;
+use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState};
 use crate::services::log_export::{self, LogDirs};
-use crate::services::{distro_bundle::DistroBundleState, kgoose};
+use crate::services::{
+    distro_bundle::DistroBundleState,
+    kgoose::{self, KgooseContext},
+};
 use base64::Engine as _;
 use reqwest::multipart::{Form, Part};
 use serde::Deserialize;
@@ -41,7 +45,8 @@ pub struct FeedbackAttachmentFile {
 #[allow(clippy::too_many_arguments)]
 pub async fn submit_feedback_issue(
     app: tauri::AppHandle,
-    state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
+    distro_state: State<'_, DistroBundleState>,
     title: String,
     description: String,
     attachment_paths: Option<Vec<String>>,
@@ -63,6 +68,17 @@ pub async fn submit_feedback_issue(
             "Feedback description must not be empty",
         ));
     }
+    let runtime_config = runtime_config_state
+        .ready_config()
+        .map_err(|error| feedback_error("configurationUnavailable", &error))?;
+    if !feedback_enabled(&runtime_config) {
+        return Err(feedback_error(
+            "disabled",
+            "Feedback is disabled by runtime configuration",
+        ));
+    }
+    let kgoose_client = KgooseContext::new(distro_state.inner(), &runtime_config);
+    let project_key = feedback_project_key(&runtime_config);
 
     let attachment_paths = normalized_attachment_paths(attachment_paths.unwrap_or_default());
     let attachment_files = attachment_files.unwrap_or_default();
@@ -92,6 +108,7 @@ pub async fn submit_feedback_issue(
             build_feedback_multipart_form(
                 &title,
                 &description,
+                &project_key,
                 &attachment_paths,
                 &attachment_files,
                 log_dirs,
@@ -105,23 +122,23 @@ pub async fn submit_feedback_issue(
                 &format!("Failed to prepare feedback attachments: {error}"),
             )
         })??;
-        return kgoose::post_multipart_detailed(
-            state.inner(),
-            FILE_ISSUE_WITH_ATTACHMENT_ENDPOINT,
-            form,
-        )
-        .await
-        .map_err(|error| feedback_submission_error(FILE_ISSUE_WITH_ATTACHMENT_ENDPOINT, &error));
+        return kgoose_client
+            .post_multipart_detailed(FILE_ISSUE_WITH_ATTACHMENT_ENDPOINT, form)
+            .await
+            .map_err(|error| {
+                feedback_submission_error(FILE_ISSUE_WITH_ATTACHMENT_ENDPOINT, &error)
+            });
     }
 
     let body = json!({
         "title": title,
         "description": description,
         "labelIds": [],
-        "project_key": FEEDBACK_PROJECT_KEY,
+        "project_key": project_key,
     });
 
-    kgoose::post_json_detailed(state.inner(), FILE_ISSUE_ENDPOINT, body)
+    kgoose_client
+        .post_json_detailed(FILE_ISSUE_ENDPOINT, body)
         .await
         .map_err(|error| feedback_submission_error(FILE_ISSUE_ENDPOINT, &error))
 }
@@ -129,6 +146,7 @@ pub async fn submit_feedback_issue(
 fn build_feedback_multipart_form(
     title: &str,
     description: &str,
+    project_key: &str,
     attachment_paths: &[PathBuf],
     attachment_files: &[FeedbackAttachmentFile],
     log_dirs: Option<LogDirs>,
@@ -164,7 +182,7 @@ fn build_feedback_multipart_form(
     let mut form = Form::new()
         .text("title", title.to_string())
         .text("description", description.to_string())
-        .text("project_key", FEEDBACK_PROJECT_KEY.to_string());
+        .text("project_key", project_key.to_string());
 
     for path in attachment_paths {
         let attachment = read_image_attachment(path, &mut total_size)?;
@@ -179,6 +197,25 @@ fn build_feedback_multipart_form(
     }
 
     Ok(form)
+}
+
+fn feedback_enabled(config: &RuntimeConfig) -> bool {
+    config
+        .feedback
+        .as_ref()
+        .and_then(|feedback| feedback.enabled)
+        .unwrap_or(true)
+}
+
+fn feedback_project_key(config: &RuntimeConfig) -> String {
+    config
+        .feedback
+        .as_ref()
+        .and_then(|feedback| feedback.project_key.as_deref())
+        .map(str::trim)
+        .filter(|project_key| !project_key.is_empty())
+        .unwrap_or(FEEDBACK_PROJECT_KEY)
+        .to_string()
 }
 
 fn build_log_zip_part(bytes: Vec<u8>) -> Result<Part, Value> {
@@ -432,10 +469,12 @@ fn log_feedback_failure(endpoint: &str, code: &str, kgoose_error: &kgoose::Kgoos
 #[cfg(test)]
 mod tests {
     use super::{
-        build_feedback_multipart_form, normalized_attachment_paths,
-        prepare_browser_image_attachment, prepare_path_image_attachment, FeedbackAttachmentFile,
+        build_feedback_multipart_form, feedback_enabled, feedback_project_key,
+        normalized_attachment_paths, prepare_browser_image_attachment,
+        prepare_path_image_attachment, FeedbackAttachmentFile, FEEDBACK_PROJECT_KEY,
         MAX_ATTACHMENT_BASE64_CHARS,
     };
+    use crate::commands::runtime_config::{RuntimeConfig, RuntimeFeedbackConfig};
     use base64::Engine as _;
     use serde_json::Value;
     use std::fs;
@@ -444,14 +483,49 @@ mod tests {
     const PNG_1X1_BASE64: &str =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
 
+    fn runtime_config_with_feedback(feedback: Option<RuntimeFeedbackConfig>) -> RuntimeConfig {
+        RuntimeConfig {
+            schema_version: 1,
+            customer: None,
+            workspace: None,
+            provider_allowlist: None,
+            feature_toggles: None,
+            doctor: None,
+            feedback,
+            kgoose: None,
+        }
+    }
+
+    #[test]
+    fn feedback_policy_comes_from_runtime_config() {
+        let disabled = runtime_config_with_feedback(Some(RuntimeFeedbackConfig {
+            enabled: Some(false),
+            project_key: Some("CUSTOM".to_string()),
+        }));
+        assert!(!feedback_enabled(&disabled));
+        assert_eq!(feedback_project_key(&disabled), "CUSTOM");
+
+        let defaulted = runtime_config_with_feedback(None);
+        assert!(feedback_enabled(&defaulted));
+        assert_eq!(feedback_project_key(&defaulted), FEEDBACK_PROJECT_KEY);
+    }
+
     #[test]
     fn rejects_uploads_that_are_too_many_too_large_or_not_real_images() {
         let paths = (0..6)
             .map(|index| PathBuf::from(format!("image-{index}.png")))
             .collect::<Vec<_>>();
 
-        let error = build_feedback_multipart_form("title", "description", &paths, &[], None, None)
-            .expect_err("too many attachments should fail");
+        let error = build_feedback_multipart_form(
+            "title",
+            "description",
+            FEEDBACK_PROJECT_KEY,
+            &paths,
+            &[],
+            None,
+            None,
+        )
+        .expect_err("too many attachments should fail");
 
         assert!(error_message(&error).contains("up to 5 image attachments"));
 

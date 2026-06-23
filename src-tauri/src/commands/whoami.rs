@@ -1,4 +1,5 @@
-use crate::services::{distro_bundle::DistroBundleState, kgoose};
+use crate::commands::runtime_config::RuntimeConfigState;
+use crate::services::{distro_bundle::DistroBundleState, kgoose::KgooseContext};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tauri::State;
@@ -32,8 +33,13 @@ pub struct WhoAmIResponse {
 /// panics) on any network/parse/access failure; callers treat that as "no
 /// identity".
 #[tauri::command]
-pub async fn whoami(state: State<'_, DistroBundleState>) -> Result<WhoAmIResponse, String> {
-    let response = kgoose::post_json(state.inner(), WHOAMI_ENDPOINT, json!({})).await?;
+pub async fn whoami(
+    state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
+) -> Result<WhoAmIResponse, String> {
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
+    let response = kgoose.post_json(WHOAMI_ENDPOINT, json!({})).await?;
     serde_json::from_value(response)
         .map_err(|error| format!("Failed to parse whoami response: {error}"))
 }

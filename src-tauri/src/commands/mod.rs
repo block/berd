@@ -21,6 +21,7 @@ pub mod openai_realtime;
 pub mod path_resolver;
 pub mod project_icons;
 pub mod renderer;
+pub mod runtime_config;
 pub mod system;
 pub mod telemetry;
 pub mod terminal;

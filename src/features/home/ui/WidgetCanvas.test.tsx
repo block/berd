@@ -34,6 +34,9 @@ const mocks = vi.hoisted(() => ({
     camera: { centerX: 0, centerY: 0, zoomBps: 10_000 } as LayoutCamera,
     constraints: null as LayoutConstraints | null,
   },
+  profileCapabilities: {
+    automations: true,
+  },
   personas: [
     {
       id: "agent-1",
@@ -138,6 +141,11 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
 vi.mock("@/features/automations/api/kgooseAutomations", () => ({
   getAutomationTiles: mocks.getAutomationTiles,
   getAutomationTile: mocks.getAutomationTile,
+}));
+
+vi.mock("@/shared/profile/capabilities", () => ({
+  useProfileCapability: (id: keyof typeof mocks.profileCapabilities) =>
+    mocks.profileCapabilities[id] ?? true,
 }));
 
 vi.mock("@/features/projects/stores/projectStore", () => ({
@@ -329,6 +337,7 @@ describe("WidgetCanvas", () => {
     vi.useRealTimers();
     mocks.homeWidgetState.camera = { centerX: 0, centerY: 0, zoomBps: 10_000 };
     mocks.homeWidgetState.constraints = null;
+    mocks.profileCapabilities.automations = true;
     mocks.hasMoreSessions = false;
     mocks.isLoadingMoreSessions = false;
     mocks.loadMoreSessions.mockResolvedValue(undefined);
@@ -1564,6 +1573,45 @@ describe("WidgetCanvas", () => {
     const emphasizedText = await screen.findByText("Great Blue Heron");
     expect(emphasizedText.tagName).toBe("STRONG");
     expect(screen.queryByText(/\*\*Great Blue Heron\*\*/)).toBeNull();
+  });
+
+  it("skips persisted automation widgets when automations are disabled", () => {
+    mocks.profileCapabilities.automations = false;
+
+    const { container } = renderCanvas({
+      instances: [
+        widget({
+          id: "automation-widget",
+          type: "automationOutputPin",
+          width: 244,
+          height: 213,
+          state: { automationId: "automation-1" },
+        }),
+      ],
+    });
+
+    expect(container.querySelector(HOME_WIDGET_NODE_SELECTOR)).toBeNull();
+    expect(
+      screen.queryByText(/automation unavailable/i),
+    ).not.toBeInTheDocument();
+    expect(mocks.getAutomationTile).not.toHaveBeenCalled();
+    expect(mocks.getAutomationTiles).not.toHaveBeenCalled();
+  });
+
+  it("skips the persisted automations onboarding sticky when automations are disabled", () => {
+    mocks.profileCapabilities.automations = false;
+
+    const { container } = renderCanvas({
+      instances: [
+        stickyNoteWidget({
+          id: "automation-sticky",
+          state: { noteId: "onboarding:manage-automations" },
+        }),
+      ],
+    });
+
+    expect(container.querySelector(HOME_WIDGET_NODE_SELECTOR)).toBeNull();
+    expect(screen.queryByText("Manage automations")).not.toBeInTheDocument();
   });
 
   it("keeps loaded automations cached across panel switches", async () => {

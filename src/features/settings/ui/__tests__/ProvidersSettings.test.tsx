@@ -4,9 +4,12 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
-import { useDistroStore } from "@/features/settings/stores/distroStore";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import {
+  INITIAL_RUNTIME_CONFIG_RESULT,
+  useRuntimeConfigStore,
+} from "@/shared/runtime-config/runtimeConfigStore";
 import { ProvidersSettings } from "../ProvidersSettings";
 
 const mocks = vi.hoisted(() => ({
@@ -120,7 +123,15 @@ describe("ProvidersSettings", () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     useProviderCatalogStore.getState().setEntries(providerCatalog);
-    useDistroStore.setState({ loaded: false, manifest: { present: false } });
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: {
+        status: "ready",
+        source: "fakeEndpoint",
+        config: { schemaVersion: 1 },
+      },
+      config: { schemaVersion: 1 },
+    });
     mocks.checkAgentInstalled.mockResolvedValue(true);
     mocks.installAgent.mockResolvedValue(undefined);
     mocks.nextAgentInstallFix.mockResolvedValue(null);
@@ -243,10 +254,15 @@ describe("ProvidersSettings", () => {
     });
   });
 
-  it("hides non-allowlisted model and custom providers for a distro", () => {
-    useDistroStore.setState({
+  it("hides non-allowlisted model and custom providers for runtime config", () => {
+    useRuntimeConfigStore.setState({
       loaded: true,
-      manifest: { present: true, providerAllowlist: "databricks" },
+      result: {
+        status: "ready",
+        source: "fakeEndpoint",
+        config: { schemaVersion: 1, providerAllowlist: ["databricks"] },
+      },
+      config: { schemaVersion: 1, providerAllowlist: ["databricks"] },
     });
     renderProviders(<ProvidersSettings />);
 
@@ -254,5 +270,19 @@ describe("ProvidersSettings", () => {
     expect(screen.queryByText("OpenAI")).not.toBeInTheDocument();
     expect(screen.queryByText("Anthropic")).not.toBeInTheDocument();
     expect(screen.queryByText("Acme Models")).not.toBeInTheDocument();
+  });
+
+  it("shows all model providers when runtime config is unavailable", () => {
+    useRuntimeConfigStore.setState({
+      loaded: true,
+      result: INITIAL_RUNTIME_CONFIG_RESULT,
+      config: { schemaVersion: 1 },
+    });
+
+    renderProviders(<ProvidersSettings />);
+
+    expect(screen.getByText("OpenAI")).toBeInTheDocument();
+    expect(screen.getByText("Databricks")).toBeInTheDocument();
+    expect(screen.getByText("Anthropic")).toBeInTheDocument();
   });
 });

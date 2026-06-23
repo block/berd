@@ -3,6 +3,7 @@ import {
   getAutomationTiles,
   type AutomationTile,
 } from "@/features/automations/api/kgooseAutomations";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import { filterByQuery } from "../lib/filterByQuery";
 
 let automationCache: AutomationTile[] | null = null;
@@ -22,11 +23,17 @@ function loadAutomations(): Promise<AutomationTile[]> {
 }
 
 export function useAutomationSearch(query: string): AutomationTile[] {
-  const [automations, setAutomations] = useState<AutomationTile[]>(
-    () => automationCache ?? [],
+  const automationsEnabled = useProfileCapability("automations");
+  const [automations, setAutomations] = useState<AutomationTile[]>(() =>
+    automationsEnabled ? (automationCache ?? []) : [],
   );
 
   useEffect(() => {
+    if (!automationsEnabled) {
+      setAutomations([]);
+      return;
+    }
+
     let cancelled = false;
 
     void loadAutomations()
@@ -44,16 +51,18 @@ export function useAutomationSearch(query: string): AutomationTile[] {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [automationsEnabled]);
 
-  return useMemo(
-    () =>
-      filterByQuery(automations, query, (automation) => [
-        automation.title,
-        automation.schedule,
-        ...(automation.humanReadableInstructions ?? []),
-        ...(automation.instructions ?? []),
-      ]),
-    [automations, query],
-  );
+  return useMemo(() => {
+    if (!automationsEnabled) {
+      return [];
+    }
+
+    return filterByQuery(automations, query, (automation) => [
+      automation.title,
+      automation.schedule,
+      ...(automation.humanReadableInstructions ?? []),
+      ...(automation.instructions ?? []),
+    ]);
+  }, [automations, automationsEnabled, query]);
 }

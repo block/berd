@@ -1,9 +1,10 @@
 mod sanitize;
 mod stream_registry;
 
+use crate::commands::runtime_config::RuntimeConfigState;
 use crate::services::{
     distro_bundle::DistroBundleState,
-    kgoose::{self, build_sse_url, open_sse_stream, read_sse_chunk},
+    kgoose::{open_sse_stream, read_sse_chunk, KgooseContext},
     sse::{SseDecoder, SseMessage},
 };
 use sanitize::{
@@ -62,9 +63,13 @@ struct AutomationBuilderStreamPayload {
 }
 
 #[tauri::command]
-pub async fn get_automation_tiles(state: State<'_, DistroBundleState>) -> Result<Value, String> {
-    kgoose::post_json(
+pub async fn get_automation_tiles(
+    state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
+) -> Result<Value, String> {
+    post_automation_json(
         state.inner(),
+        runtime_config_state.inner(),
         GET_USER_TILES_ENDPOINT,
         json!({ "spaceId": null }),
     )
@@ -74,20 +79,29 @@ pub async fn get_automation_tiles(state: State<'_, DistroBundleState>) -> Result
 #[tauri::command]
 pub async fn get_automation_tile(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    kgoose::post_json(state.inner(), GET_TILE_ENDPOINT, json!({ "id": id })).await
+    post_automation_json(
+        state.inner(),
+        runtime_config_state.inner(),
+        GET_TILE_ENDPOINT,
+        json!({ "id": id }),
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn get_automation_tile_results(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     tile_id: String,
 ) -> Result<Value, String> {
     let tile_id = trim_required_string(&tile_id, "automation id")?;
-    kgoose::post_json(
+    post_automation_json(
         state.inner(),
+        runtime_config_state.inner(),
         GET_TILE_RESULTS_ENDPOINT,
         json!({ "tileId": tile_id }),
     )
@@ -97,29 +111,45 @@ pub async fn get_automation_tile_results(
 #[tauri::command]
 pub async fn create_automation_tile(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_create_automation_tile_request(request)?;
-    kgoose::post_json(state.inner(), CREATE_TILE_ENDPOINT, request).await
+    post_automation_json(
+        state.inner(),
+        runtime_config_state.inner(),
+        CREATE_TILE_ENDPOINT,
+        request,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn push_automation_builder_messages(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_push_automation_builder_messages_request(request)?;
-    kgoose::post_json(state.inner(), PUSH_MESSAGES_ENDPOINT, request).await
+    post_automation_json(
+        state.inner(),
+        runtime_config_state.inner(),
+        PUSH_MESSAGES_ENDPOINT,
+        request,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn cancel_automation_builder_message(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     session_id: String,
 ) -> Result<Value, String> {
     let session_id = trim_required_string(&session_id, "session id")?;
-    kgoose::post_json(
+    post_automation_json(
         state.inner(),
+        runtime_config_state.inner(),
         CANCEL_LAST_USER_MESSAGE_ENDPOINT,
         json!({ "sessionId": session_id }),
     )
@@ -130,6 +160,7 @@ pub async fn cancel_automation_builder_message(
 pub async fn start_automation_builder_stream(
     window: Window,
     distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     stream_state: State<'_, AutomationStreamState>,
     session_id: String,
     stream_id: String,
@@ -137,11 +168,9 @@ pub async fn start_automation_builder_stream(
 ) -> Result<(), String> {
     let session_id = trim_required_string(&session_id, "session id")?;
     let stream_id = trim_required_string(&stream_id, "stream id")?;
-    let url = build_sse_url(
-        GET_MESSAGES_SSE_ENDPOINT,
-        &session_id,
-        distro_state.inner().kgoose_config(),
-    )?;
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(distro_state.inner(), &runtime_config);
+    let url = kgoose.build_sse_url(GET_MESSAGES_SSE_ENDPOINT, &session_id)?;
     let last_event_id = validate_last_event_id(last_event_id)?;
 
     let app = window.app_handle().clone();
@@ -200,41 +229,55 @@ pub fn stop_automation_builder_stream(
 #[tauri::command]
 pub async fn update_automation_tile(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     request: Value,
 ) -> Result<Value, String> {
     let request = sanitize_update_automation_request(request)?;
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
     let id = request
         .get("id")
         .and_then(Value::as_str)
         .ok_or_else(|| "automation id must not be empty".to_string())?
         .to_string();
-    ensure_generic_automation_tile(state.inner(), &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
-    kgoose::post_json(state.inner(), UPDATE_TILE_ENDPOINT, request).await
+    ensure_generic_automation_tile(&kgoose, &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
+    kgoose.post_json(UPDATE_TILE_ENDPOINT, request).await
 }
 
 #[tauri::command]
 pub async fn delete_automation_tile(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    ensure_generic_automation_tile(state.inner(), &id, DELETE_UNMANAGED_AUTOMATION_ERROR).await?;
-    kgoose::post_json(state.inner(), DELETE_TILE_ENDPOINT, json!({ "id": id })).await
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
+    ensure_generic_automation_tile(&kgoose, &id, DELETE_UNMANAGED_AUTOMATION_ERROR).await?;
+    kgoose
+        .post_json(DELETE_TILE_ENDPOINT, json!({ "id": id }))
+        .await
 }
 
 #[tauri::command]
 pub async fn refresh_automation_tile(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     id: String,
 ) -> Result<Value, String> {
     let id = trim_required_string(&id, "automation id")?;
-    ensure_generic_automation_tile(state.inner(), &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
-    kgoose::post_json(state.inner(), REFRESH_TILE_ENDPOINT, json!({ "id": id })).await
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
+    ensure_generic_automation_tile(&kgoose, &id, NON_GENERIC_AUTOMATION_TILE_ERROR).await?;
+    kgoose
+        .post_json(REFRESH_TILE_ENDPOINT, json!({ "id": id }))
+        .await
 }
 
 #[tauri::command]
 pub async fn generate_automation_schedule(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     schedule_description: String,
     time_zone: Option<String>,
 ) -> Result<Value, String> {
@@ -243,24 +286,35 @@ pub async fn generate_automation_schedule(
     if let Some(time_zone) = time_zone.as_deref().and_then(trim_optional_string) {
         body["timeZone"] = Value::String(time_zone);
     }
-    kgoose::post_json(state.inner(), GENERATE_CRON_SCHEDULE_ENDPOINT, body).await
+    post_automation_json(
+        state.inner(),
+        runtime_config_state.inner(),
+        GENERATE_CRON_SCHEDULE_ENDPOINT,
+        body,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn get_automation_session_messages(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
     session_id: String,
 ) -> Result<Value, String> {
     let session_id = trim_required_string(&session_id, "session id")?;
-    get_automation_messages_snapshot(state.inner(), &session_id).await
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
+    get_automation_messages_snapshot(&kgoose, &session_id).await
 }
 
 async fn ensure_generic_automation_tile(
-    distro_state: &DistroBundleState,
+    kgoose: &KgooseContext<'_>,
     id: &str,
     non_generic_error: &str,
 ) -> Result<(), String> {
-    let response = kgoose::post_json(distro_state, GET_TILE_ENDPOINT, json!({ "id": id })).await?;
+    let response = kgoose
+        .post_json(GET_TILE_ENDPOINT, json!({ "id": id }))
+        .await?;
     let tile = response
         .get("tileInfo")
         .or_else(|| response.get("tile_info"))
@@ -268,6 +322,17 @@ async fn ensure_generic_automation_tile(
         .ok_or_else(|| "kgoose did not return tileInfo for automation".to_string())?;
 
     validate_generic_automation_tile(tile, non_generic_error)
+}
+
+async fn post_automation_json(
+    distro_state: &DistroBundleState,
+    runtime_config_state: &RuntimeConfigState,
+    endpoint: &str,
+    body: Value,
+) -> Result<Value, String> {
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(distro_state, &runtime_config);
+    kgoose.post_json(endpoint, body).await
 }
 
 fn validate_generic_automation_tile(
@@ -372,15 +437,11 @@ fn parse_automation_sse_event_data(event: &str, data: &str) -> Result<Option<Val
 }
 
 async fn get_automation_messages_snapshot(
-    distro_state: &DistroBundleState,
+    kgoose: &KgooseContext<'_>,
     session_id: &str,
 ) -> Result<Value, String> {
     timeout(KGOOSE_MESSAGES_SNAPSHOT_TIMEOUT, async {
-        let mut url = build_sse_url(
-            GET_MESSAGES_SSE_ENDPOINT,
-            session_id,
-            distro_state.kgoose_config(),
-        )?;
+        let mut url = kgoose.build_sse_url(GET_MESSAGES_SSE_ENDPOINT, session_id)?;
         url.query_pairs_mut()
             .append_pair("update_last_read_at", "false");
 

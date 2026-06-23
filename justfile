@@ -140,7 +140,7 @@ tauri-test:
 # Run the local CI gate.
 ci: check tauri-fmt-check tauri-check tauri-test clippy test build
 
-# Stage the pinned Goose backend and goosectl CLI into src-tauri/binaries and build bundles.
+# Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -253,7 +253,7 @@ dev:
         echo "Using distro dir: ${GOOSE_DISTRO_DIR}"
     fi
 
-    EXTRA_CONFIG_ARGS=(--config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
+    EXTRA_CONFIG_ARGS=(--config src-tauri/tauri.dev.conf.json --config "{\"build\":{\"devUrl\":\"http://localhost:${VITE_PORT}\",\"beforeDevCommand\":{\"script\":\"exec pnpm exec vite --port ${VITE_PORT} --strictPort\",\"cwd\":\"..\",\"wait\":false}}}")
     EXTRA_CONFIG_ARGS+=(--config "{\"version\":\"${GOOSE_APP_VERSION}\"}")
 
     ICON_DIR="${CARGO_TARGET_DIR}/dev-icons"
@@ -276,7 +276,7 @@ dev:
         EXTRA_CONFIG_ARGS+=(--config "$DEV_ICON_CONFIG")
     fi
 
-    pnpm tauri dev --features {{ app_features }} --config src-tauri/tauri.dev.conf.json "${EXTRA_CONFIG_ARGS[@]}"
+    pnpm tauri dev --features {{ app_features }} "${EXTRA_CONFIG_ARGS[@]}"
 
 dev-debug: dev
 

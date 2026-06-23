@@ -1,12 +1,18 @@
 import { useCallback } from "react";
-import skillBody from "../../../../distro/skills/agent-builder/SKILL.md?raw";
+import agentBuilderSkillBody from "../../../../distro/skills/agent-builder/SKILL.md?raw";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type {
   ChatInputSendHandler,
   ChatSendOptions,
 } from "@/features/chat/types";
 
-const SKILL_BODY = skillBody;
+export function resolveAgentBuilderSkillBody(
+  skillBody = agentBuilderSkillBody,
+) {
+  return skillBody;
+}
+
+const SKILL_BODY = resolveAgentBuilderSkillBody();
 const sentStaticPromptByPath = new Set<string>();
 
 export function composeBuilderSendOptions(

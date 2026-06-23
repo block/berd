@@ -19,6 +19,7 @@ import { SessionListCapability } from "@/features/sessions/capabilities/SessionL
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
 import {
   DEFAULT_SETTINGS_SECTION,
+  getVisibleSettingsSections,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
@@ -26,8 +27,7 @@ import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
   type DesignSystemSection,
 } from "@/features/design-system/ui/designSystemSections";
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { usePaneScrollIntoView } from "./usePaneScrollIntoView";
 import {
   SIDEBAR_PRIMARY_NAV_COMPACT_WIDTH_PX,
@@ -336,8 +336,10 @@ export function NavigationPanesView({
       SIDEBAR_DETACHED_PANEL_GAP_PX +
       sessionListPanelWidth
     : Math.max(primaryNavPanelWidth, sessionListPanelWidth);
-  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
-  const showBuilderbotSurface = Boolean(builderbotExperiment?.enabled);
+  const capabilities = useProfileCapabilities();
+  const showAutomationsSurface = capabilities.automations;
+  const showBuilderbotSurface = capabilities.builderbot;
+  const visibleSettingsSections = getVisibleSettingsSections(capabilities);
   const isSettingsSurface = activeView === "settings";
   const isDesignSystemSurface = activeView === "design-system";
   const isSecondarySurface = isSettingsSurface || isDesignSystemSurface;
@@ -704,7 +706,9 @@ export function NavigationPanesView({
             : undefined
         }
         secondaryNavRef={secondaryNavRef}
+        settingsSections={visibleSettingsSections}
         showBottomMask={showBottomMask}
+        showAutomationsSurface={showAutomationsSurface}
         showBuilderbotSurface={showBuilderbotSurface}
         showDesignSystemSettingsItem={showDesignSystemSettingsItem}
         showPrimaryNavWidthToggle={

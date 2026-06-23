@@ -1,15 +1,15 @@
-import type { DistroBundleInfo } from "@/shared/types/distro";
-import { filterModelProvidersForDistro } from "./distroProviderConstraints";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
+import { filterModelProvidersForRuntimeConfig } from "./runtimeProviderConstraints";
 import { getAgentProviders, getModelProviders } from "./providerCatalog";
 
 export function getModelCacheRefreshProviderIds(
-  distro: DistroBundleInfo | null | undefined,
+  runtimeConfig: RuntimeConfig | null | undefined,
 ): string[] {
   const ids = new Set<string>();
 
-  for (const provider of filterModelProvidersForDistro(
+  for (const provider of filterModelProvidersForRuntimeConfig(
     getModelProviders(),
-    distro,
+    runtimeConfig,
   )) {
     ids.add(provider.id);
   }

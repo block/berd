@@ -8,6 +8,7 @@ import type {
 } from "@/features/layout/api/layout";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 import {
   hasVisibleHomeCanvasWidget,
   isHomeCanvasPointInsideViewport,
@@ -88,6 +89,14 @@ const DEFAULT_CONSTRAINTS: LayoutConstraints = {
   maxTitleOverrideLength: 120,
   maxItems: 100,
 };
+
+function isAutomationOnlyWidget(instance: WidgetInstance): boolean {
+  return (
+    instance.type === "automationOutputPin" ||
+    (instance.type === "stickyNote" &&
+      instance.state?.noteId === "onboarding:manage-automations")
+  );
+}
 
 function currentDevicePixelRatio(): number {
   return typeof window === "undefined" ? 1 : window.devicePixelRatio || 1;
@@ -277,8 +286,8 @@ function homeCanvasZoomConstraints(
  * Right-clicking the canvas background opens the WidgetPicker at the cursor
  * position. Pinned widgets stopPropagation on their own right-click so the
  * canvas picker does not race the per-widget UnpinPill. Only instances whose
- * catalog entry has a Component are rendered; stubs are silently skipped until
- * their Component is supplied.
+ * catalog entry has a Component and whose feature is enabled are rendered;
+ * stubs are silently skipped until their Component is supplied.
  */
 export function WidgetCanvas({
   instances,
@@ -305,6 +314,7 @@ export function WidgetCanvas({
     recenterLabel ?? t("widgets.canvasControls.recenterVisibleLabel");
   const resolvedRecenterTitle =
     recenterTitle ?? t("widgets.canvasControls.recenterTitle");
+  const automationsEnabled = useProfileCapability("automations");
   const camera = useHomeWidgetStore((state) => state.camera) ?? DEFAULT_CAMERA;
   const constraints =
     useHomeWidgetStore((state) => state.constraints) ?? DEFAULT_CONSTRAINTS;
@@ -462,9 +472,11 @@ export function WidgetCanvas({
   const renderedInstances = useMemo(
     () =>
       instances.filter(
-        (instance) => HOME_WIDGET_CATALOG_BY_ID[instance.type]?.Component,
+        (instance) =>
+          HOME_WIDGET_CATALOG_BY_ID[instance.type]?.Component &&
+          (!isAutomationOnlyWidget(instance) || automationsEnabled),
       ),
-    [instances],
+    [automationsEnabled, instances],
   );
   const hasVisibleWidget = useMemo(
     () =>

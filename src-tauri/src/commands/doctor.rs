@@ -16,10 +16,12 @@ use tokio::time::timeout;
 use crate::services::{
     distro_bundle::DistroBundleState,
     goose_config::{self, AdditionalConfigFiles},
-    kgoose::{self, KgooseProbeResult},
+    kgoose::{KgooseContext, KgooseProbeResult},
     path_env::{build_extended_path, build_extended_path_from_path},
     shell_env,
 };
+
+use crate::commands::runtime_config::{RuntimeConfig, RuntimeConfigState, RuntimeDoctorConfig};
 
 use doctor::types::{AuthStatus, InstallSource};
 use doctor::CheckStatus;
@@ -877,8 +879,12 @@ fn validate_goose_bin_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-async fn run_kgoose_connectivity_check(distro_state: &DistroBundleState) -> DoctorCheck {
-    match kgoose::probe_connectivity(distro_state).await {
+async fn run_kgoose_connectivity_check(
+    distro_state: &DistroBundleState,
+    runtime_config: &RuntimeConfig,
+) -> DoctorCheck {
+    let kgoose = KgooseContext::new(distro_state, runtime_config);
+    match kgoose.probe_connectivity().await {
         Ok(probe) => build_kgoose_connectivity_check(&KGOOSE_CONNECTIVITY_CHECK, probe),
         Err(error) => build_kgoose_connectivity_error(&KGOOSE_CONNECTIVITY_CHECK, error.as_str()),
     }
@@ -892,23 +898,34 @@ fn build_kgoose_connectivity_check(
     let (status, message) = if probe.status == Some(407) {
         (
             CheckStatus::Fail,
-            format!("Checked kgoose access probe; proxy authentication required ({status_label})"),
+            format!(
+                "Checked kgoose access probe at {}; proxy authentication required ({status_label})",
+                probe.url
+            ),
         )
     } else if probe.likely_warp_failure {
         (
             CheckStatus::Fail,
-            format!("Checked kgoose access probe; WARP/access failure suspected ({status_label})"),
+            format!(
+                "Checked kgoose access probe at {}; WARP/access failure suspected ({status_label})",
+                probe.url
+            ),
         )
     } else if probe.status.is_some() {
         (
             CheckStatus::Pass,
-            format!("Checked kgoose access probe; {status_label} reachable"),
+            format!(
+                "Checked kgoose access probe at {}; {status_label} reachable",
+                probe.url
+            ),
         )
     } else {
         (
             CheckStatus::Warn,
-            "Checked kgoose access probe; request failed for an unclassified network reason"
-                .to_string(),
+            format!(
+                "Checked kgoose access probe at {}; request failed for an unclassified network reason",
+                probe.url
+            ),
         )
     };
 
@@ -933,11 +950,13 @@ fn build_kgoose_connectivity_error(check: &LocalCheckMeta, error: &str) -> Docto
 
 fn format_kgoose_probe_details(probe: &KgooseProbeResult) -> String {
     format!(
-        "checked: kgoose access probe\nkind: {}\nstatus: {}\nlikely_warp_failure: {}\nclassification: {}",
+        "checked: kgoose access probe\nurl: {}\nkind: {}\nstatus: {}\nlikely_warp_failure: {}\nclassification: {}\nmessage: {}",
+        probe.url,
         probe.kind,
         kgoose_probe_status_label(probe),
         probe.likely_warp_failure,
-        classify_kgoose_probe(probe)
+        classify_kgoose_probe(probe),
+        probe.message
     )
 }
 
@@ -1007,8 +1026,13 @@ async fn execute_local_fix(command: &'static str) -> Result<(), String> {
 async fn run_doctor_impl(
     registry: &LocalDoctorRegistry<'_>,
     distro_state: &DistroBundleState,
+    runtime_config: &RuntimeConfig,
     check_freshness: bool,
 ) -> DoctorReport {
+    if !doctor_enabled(runtime_config) {
+        return DoctorReport { checks: Vec::new() };
+    }
+
     let upstream = doctor::run_checks_with_options(doctor::RunChecksOptions {
         npm_registry: Some(crate::commands::agent_setup::BLOCK_NPM_REGISTRY_URL.to_string()),
         check_freshness,
@@ -1022,9 +1046,35 @@ async fn run_doctor_impl(
     let distro_config_path = distro_state
         .bundle()
         .and_then(|bundle| bundle.config_path.as_deref());
-    checks.extend(run_local_checks(registry, distro_config_path).await);
-    checks.push(run_kgoose_connectivity_check(distro_state).await);
+    if doctor_internal_tooling_checks_enabled(runtime_config) {
+        checks.extend(run_local_checks(registry, distro_config_path).await);
+    }
+    if doctor_kgoose_connectivity_enabled(runtime_config) {
+        checks.push(run_kgoose_connectivity_check(distro_state, runtime_config).await);
+    }
     DoctorReport { checks }
+}
+
+fn doctor_config(runtime_config: &RuntimeConfig) -> Option<&RuntimeDoctorConfig> {
+    runtime_config.doctor.as_ref()
+}
+
+fn doctor_enabled(runtime_config: &RuntimeConfig) -> bool {
+    doctor_config(runtime_config)
+        .and_then(|doctor| doctor.enabled)
+        .unwrap_or(true)
+}
+
+fn doctor_internal_tooling_checks_enabled(runtime_config: &RuntimeConfig) -> bool {
+    doctor_config(runtime_config)
+        .and_then(|doctor| doctor.internal_tooling_checks)
+        .unwrap_or(true)
+}
+
+fn doctor_kgoose_connectivity_enabled(runtime_config: &RuntimeConfig) -> bool {
+    doctor_config(runtime_config)
+        .and_then(|doctor| doctor.kgoose_connectivity)
+        .unwrap_or(true)
 }
 
 async fn run_doctor_or_timeout<F>(future: F, timeout_duration: Duration) -> DoctorReport
@@ -1093,9 +1143,16 @@ fn doctor_timeout_report(timeout_duration: Duration) -> DoctorReport {
 #[tauri::command]
 pub async fn run_doctor(
     distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
+    let runtime_config = runtime_config_state.ready_config()?;
     Ok(run_doctor_or_timeout(
-        run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), false),
+        run_doctor_impl(
+            &LOCAL_DOCTOR_REGISTRY,
+            distro_state.inner(),
+            &runtime_config,
+            false,
+        ),
         DOCTOR_REPORT_TIMEOUT,
     )
     .await)
@@ -1113,9 +1170,16 @@ pub async fn run_doctor(
 #[tauri::command]
 pub async fn run_doctor_fresh(
     distro_state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<DoctorReport, String> {
+    let runtime_config = runtime_config_state.ready_config()?;
     run_doctor_fresh_or_timeout(
-        run_doctor_impl(&LOCAL_DOCTOR_REGISTRY, distro_state.inner(), true),
+        run_doctor_impl(
+            &LOCAL_DOCTOR_REGISTRY,
+            distro_state.inner(),
+            &runtime_config,
+            true,
+        ),
         DOCTOR_FRESH_REPORT_TIMEOUT,
     )
     .await
@@ -1200,6 +1264,19 @@ mod tests {
         )
     }
 
+    fn runtime_config_with_doctor(doctor: Option<RuntimeDoctorConfig>) -> RuntimeConfig {
+        RuntimeConfig {
+            schema_version: 1,
+            customer: None,
+            workspace: None,
+            provider_allowlist: None,
+            feature_toggles: None,
+            doctor,
+            feedback: None,
+            kgoose: None,
+        }
+    }
+
     #[test]
     fn doctor_timeout_report_builds_synthetic_warning() {
         let report = doctor_timeout_report(DOCTOR_REPORT_TIMEOUT);
@@ -1214,6 +1291,23 @@ mod tests {
             .raw_output
             .as_deref()
             .is_some_and(|raw| raw.contains("app-side doctor timeout")));
+    }
+
+    #[test]
+    fn doctor_policy_comes_from_runtime_config() {
+        let disabled = runtime_config_with_doctor(Some(RuntimeDoctorConfig {
+            enabled: Some(false),
+            kgoose_connectivity: Some(false),
+            internal_tooling_checks: Some(false),
+        }));
+        assert!(!doctor_enabled(&disabled));
+        assert!(!doctor_kgoose_connectivity_enabled(&disabled));
+        assert!(!doctor_internal_tooling_checks_enabled(&disabled));
+
+        let defaulted = runtime_config_with_doctor(None);
+        assert!(doctor_enabled(&defaulted));
+        assert!(doctor_kgoose_connectivity_enabled(&defaulted));
+        assert!(doctor_internal_tooling_checks_enabled(&defaulted));
     }
 
     #[tokio::test]
@@ -1355,6 +1449,7 @@ mod tests {
                 likely_warp_failure: false,
                 status: Some(200),
                 kind: "http_status",
+                url: "https://kgoose.example.test/cash-app/goose/list-oauth-extensions".to_string(),
                 message: "kgoose probe returned 200".to_string(),
             },
         );
@@ -1362,11 +1457,13 @@ mod tests {
         assert_eq!(check.status, CheckStatus::Pass);
         assert_eq!(
             check.message,
-            "Checked kgoose access probe; HTTP 200 reachable"
+            "Checked kgoose access probe at https://kgoose.example.test/cash-app/goose/list-oauth-extensions; HTTP 200 reachable"
         );
         let output = check.raw_output.as_deref().expect("raw output");
+        assert!(output
+            .contains("url: https://kgoose.example.test/cash-app/goose/list-oauth-extensions"));
         assert!(output.contains("classification: reachable"));
-        assert!(!output.contains("kgoose probe returned 200"));
+        assert!(output.contains("message: kgoose probe returned 200"));
     }
 
     #[tokio::test]

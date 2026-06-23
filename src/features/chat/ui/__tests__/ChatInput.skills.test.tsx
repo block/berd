@@ -11,6 +11,8 @@ import { useState } from "react";
 import { ChatInput } from "./chatInputTestUtils";
 import { OPEN_SETTINGS_EVENT } from "@/features/settings/lib/settingsEvents";
 import type { ChatSkillDraft } from "../../types";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 
 if (!HTMLElement.prototype.scrollIntoView) {
   HTMLElement.prototype.scrollIntoView = vi.fn();
@@ -94,6 +96,18 @@ const CODE_REVIEW_SKILL = {
   sourceLabel: "Personal",
 };
 
+function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: {
+      status: "ready",
+      source: "fakeEndpoint",
+      config,
+    },
+    config,
+  });
+}
+
 describe("ChatInput skill mentions", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -104,6 +118,7 @@ describe("ChatInput skill mentions", () => {
     lastVoiceDictationOptions = null;
     mockVoiceDictation.isStarting.mockReset();
     mockVoiceDictation.isStarting.mockReturnValue(false);
+    setReadyRuntimeConfig();
   });
 
   it("does not show skills in @mention results", async () => {

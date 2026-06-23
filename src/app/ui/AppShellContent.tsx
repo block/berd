@@ -13,8 +13,6 @@ import { SessionHistoryView } from "@/features/sessions/ui/SessionHistoryView";
 import { SettingsView } from "@/features/settings/ui/SettingsView";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
-import { BUILDERBOT_SURFACE_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
-import { useExperiment } from "@/features/experiments/experimentPreferences";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
@@ -38,6 +36,8 @@ interface AppShellContentProps {
   renderedLocation: AppNavigationLocation;
   isPreparingContent: boolean;
   activeConnectionsTab: ConnectionsTab;
+  automationsEnabled: boolean;
+  builderbotEnabled: boolean;
   renderedSession?: ChatSession;
   homeSessionId: string | null;
   homeViewportLeftOcclusionPx?: number;
@@ -105,6 +105,8 @@ export function AppShellContent({
   renderedLocation,
   isPreparingContent,
   activeConnectionsTab,
+  automationsEnabled,
+  builderbotEnabled,
   renderedSession,
   homeSessionId,
   homeViewportLeftOcclusionPx = 0,
@@ -143,13 +145,24 @@ export function AppShellContent({
   onStartProviderTroubleshootingChat,
   onReturnToAgentDraft,
 }: AppShellContentProps) {
-  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
   useNavigationPerfLogging({
     isPreparingContent,
     renderedLocation,
     targetLocation,
   });
 
+  const openHomeAutomation = automationsEnabled
+    ? (automationId: string) =>
+        onNavigateAutomations({
+          surface: "detail",
+          automationId,
+          tab: "details",
+          selectedRunKey: null,
+        })
+    : undefined;
+  const openHomeAutomations = automationsEnabled
+    ? () => onNavigateAutomations({ surface: "overview" })
+    : undefined;
   const homeContent = (
     <HomeView
       onOpenProject={onStartChatFromProjectId}
@@ -159,16 +172,9 @@ export function AppShellContent({
       onStartProjectChat={onStartProjectChat}
       onCreatePersona={onCreatePersona}
       onCreateProject={onCreateProject}
-      onOpenAutomation={(automationId) =>
-        onNavigateAutomations({
-          surface: "detail",
-          automationId,
-          tab: "details",
-          selectedRunKey: null,
-        })
-      }
+      onOpenAutomation={openHomeAutomation}
       onOpenSkills={() => onNavigateSkills(null)}
-      onOpenAutomations={() => onNavigateAutomations({ surface: "overview" })}
+      onOpenAutomations={openHomeAutomations}
       onHydratePinnedChatSessions={onHydratePinnedChatSessions}
       viewportLeftOcclusionPx={homeViewportLeftOcclusionPx}
     />
@@ -176,7 +182,8 @@ export function AppShellContent({
 
   const routeContent = renderRouteContent({
     activeConnectionsTab,
-    builderbotEnabled: Boolean(builderbotExperiment?.enabled),
+    automationsEnabled,
+    builderbotEnabled,
     chatViewportLeftOcclusionPx,
     homeContent,
     homeSessionId,
@@ -230,6 +237,7 @@ export function AppShellContent({
 
 interface RenderRouteContentOptions {
   activeConnectionsTab: ConnectionsTab;
+  automationsEnabled: boolean;
   builderbotEnabled: boolean;
   chatViewportLeftOcclusionPx: number;
   homeContent: ReactNode;
@@ -293,6 +301,7 @@ interface RenderRouteContentOptions {
 
 function renderRouteContent({
   activeConnectionsTab,
+  automationsEnabled,
   builderbotEnabled,
   chatViewportLeftOcclusionPx,
   homeContent,
@@ -346,13 +355,15 @@ function renderRouteContent({
         />
       );
     case "automations":
-      return (
+      return automationsEnabled ? (
         <AutomationsWorkbench
           route={location.route}
           onRouteChange={onNavigateAutomations}
           onBreadcrumbLabelChange={onAutomationsBreadcrumbLabelChange}
           onBuilderLeaveActionChange={onAutomationBuilderLeaveActionChange}
         />
+      ) : (
+        homeContent
       );
     case "builderbot":
       return builderbotEnabled ? (

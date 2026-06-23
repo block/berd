@@ -45,6 +45,7 @@ import {
   isProduction,
   isStaging,
 } from "@/shared/utils/environment";
+import { getBuildFeatureState } from "@/shared/profile/buildProfile";
 import { IdentityProvider, type ResolvedIdentity } from "./identity";
 import { installTelemetryTransportBridge } from "./transport";
 
@@ -69,9 +70,9 @@ const client = new CDP({
   environment: getEnvironment(),
 });
 
-/** Telemetry only emits in production/staging so dev builds stay inert. */
+/** Telemetry only emits when the build feature is enabled in production/staging. */
 function telemetryEnabled(): boolean {
-  return isProduction() || isStaging();
+  return getBuildFeatureState().telemetry && (isProduction() || isStaging());
 }
 
 function telemetryDebugLoggingEnabled(): boolean {

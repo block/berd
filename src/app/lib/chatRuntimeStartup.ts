@@ -4,7 +4,7 @@ import { getCuratedAgentProviders } from "@/features/providers/curatedProviders"
 import {
   hasAllowedModelProvider,
   parseProviderAllowlist,
-} from "@/features/providers/distroProviderConstraints";
+} from "@/features/providers/runtimeProviderConstraints";
 import { getModelCacheRefreshProviderIds } from "@/features/providers/modelCacheRefresh";
 import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
@@ -14,9 +14,10 @@ import { getClient, setNotificationHandler } from "@/shared/api/acpConnection";
 import notificationHandler from "@/features/chat/acp/acpNotificationHandler";
 import { registerChatSessionConfigSnapshotHandlers } from "@/features/chat/acp/sessionConfigSnapshotAdapter";
 import { perfLog } from "@/shared/lib/perfLog";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
 
-export function filterStartupProvidersForDistro(
+export function filterStartupProvidersForRuntimeConfig(
   providers: AcpProvider[],
   providerAllowlist: Set<string> | null,
   modelProviders: Pick<ProviderCatalogEntry, "id">[],
@@ -47,14 +48,15 @@ export async function runChatRuntimeStartup(): Promise<void> {
   const store = useAgentStore.getState();
   const modelCacheStore = useProviderModelCacheStore.getState();
   const distroStore = useDistroStore.getState();
+  const runtimeConfigStore = useRuntimeConfigStore.getState();
 
   modelCacheStore.loadPersisted();
 
   const applyCuratedProviders = (validated = true) => {
     const providerAllowlist = parseProviderAllowlist(
-      useDistroStore.getState().manifest,
+      useRuntimeConfigStore.getState().config,
     );
-    const providers = filterStartupProvidersForDistro(
+    const providers = filterStartupProvidersForRuntimeConfig(
       getCuratedAgentProviders(),
       providerAllowlist,
       getModelProviders(),
@@ -71,6 +73,13 @@ export async function runChatRuntimeStartup(): Promise<void> {
     } catch (err) {
       console.error("Failed to load distro bundle on startup:", err);
       distroStore.setManifest({ present: false });
+    }
+  };
+
+  const loadRuntimeConfig = async () => {
+    const result = await runtimeConfigStore.refresh();
+    if (result.status !== "ready") {
+      console.warn("Runtime config unavailable; using app defaults:", result);
     }
   };
 
@@ -93,7 +102,7 @@ export async function runChatRuntimeStartup(): Promise<void> {
 
   const refreshProviderModels = async () => {
     await modelCacheStore.refreshAllModelProviders(
-      getModelCacheRefreshProviderIds(useDistroStore.getState().manifest),
+      getModelCacheRefreshProviderIds(useRuntimeConfigStore.getState().config),
     );
   };
 
@@ -109,6 +118,7 @@ export async function runChatRuntimeStartup(): Promise<void> {
 
   applyCuratedProviders(false);
 
+  await loadRuntimeConfig();
   await loadDistroBundle();
   applyCuratedProviders(true);
 

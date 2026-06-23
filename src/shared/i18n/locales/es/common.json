@@ -115,6 +115,10 @@
           "retry": "Haz clic en Reintentar"
         }
       },
+      "runtimeConfig": {
+        "title": "Configuración no disponible",
+        "description": "Goose no pudo cargar su configuración de tiempo de ejecución. Inténtalo de nuevo, o copia los detalles de inicio y compártelos con soporte."
+      },
       "unknown": {
         "title": "Goose no pudo iniciarse",
         "description": "Goose no pudo terminar de iniciarse. Inténtalo de nuevo, o copia los detalles de inicio y abre la carpeta de logs para compartirlos con soporte."

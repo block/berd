@@ -5,7 +5,11 @@ import type { KgooseProbeReport } from "@/shared/api/connectivity";
 // it from here.
 export type { KgooseProbeReport };
 
-export type StartupErrorKind = "goose-serve" | "network-warp" | "unknown";
+export type StartupErrorKind =
+  | "goose-serve"
+  | "network-warp"
+  | "runtime-config"
+  | "unknown";
 
 export interface StartupDiagnosticIssue {
   kind: StartupErrorKind;
@@ -23,6 +27,10 @@ const ERROR_COPY_KEYS = {
   "network-warp": {
     titleKey: "common:startup.error.networkWarp.title",
     descriptionKey: "common:startup.error.networkWarp.description",
+  },
+  "runtime-config": {
+    titleKey: "common:startup.error.runtimeConfig.title",
+    descriptionKey: "common:startup.error.runtimeConfig.description",
   },
   unknown: {
     titleKey: "common:startup.error.unknown.title",
@@ -75,6 +83,13 @@ function classifyStartupErrorFromRaw(rawError: string): StartupErrorKind {
     lowerRaw.includes("could not resolve goose binary")
   ) {
     return "goose-serve";
+  }
+
+  if (
+    lowerRaw.includes("runtimeconfigunavailableerror") ||
+    lowerRaw.includes("runtime config unavailable")
+  ) {
+    return "runtime-config";
   }
 
   return "unknown";

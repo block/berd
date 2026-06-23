@@ -1,131 +1,72 @@
-# Goose distro bundles
+# Goose bundled app defaults
 
-A Goose distro bundle is an optional app-specific package of configuration and policy that the Tauri shell loads at startup.
+`distro/` contains generic resources and defaults that ship with the single Goose Internal app build. It is not a customer/org profile system.
 
-## What a distro bundle is
+## Supported files
 
-A distro bundle lives under `distro/` in development, and is bundled into the packaged app as a Tauri resource in production.
-
-Current supported files:
-
-- `distro.json` — distro manifest
+- `distro.json` — minimal bundled manifest for app-level defaults that still need to be available before runtime config owns them
 - `config.yaml` — optional Goose config passed to `goose serve`
 - `bin/` — optional executables or helper scripts prepended to `PATH` for `goose serve`
-- `skills/` — optional bundled skills seeded into the user's global skills directory
-- `agents/` — optional bundled agents seeded into the user's global agents directory
+- `skills/` — bundled skills seeded into the user's global skills directory
+- `agents/` — bundled agents seeded into the user's global agents directory
 
-## How it is discovered
+## Discovery
 
-The Tauri app resolves the distro bundle in this order:
+The Tauri app resolves bundled defaults in this order:
 
 1. `GOOSE_DISTRO_DIR`, if set
 2. bundled Tauri resource dir at `resource_dir()/distro`
 
-In development, `just dev` and `just dev-debug` automatically export `GOOSE_DISTRO_DIR` to `distro` when that directory exists.
+In development, `just dev` exports `GOOSE_DISTRO_DIR` to this repository's `distro/` directory when it exists.
 
 ## Manifest shape
 
-Example:
+Current `distro.json` example:
 
 ```json
 {
-  "appVersion": "development",
-  "featureToggles": {
-    "costTracking": false
-  },
   "kgoose": {
     "baseUrl": "https://kgoose.sqprod.co/",
     "path": "cash-app/goose"
-  },
-  "providerAllowlist": "databricks"
+  }
 }
 ```
 
 ### Fields
 
 - `appVersion?: string`
-  - optional app version tag supplied by the distro
-
-- `featureToggles?: Record<string, boolean>`
-  - optional UI/product flags controlled by the distro
-  - currently supported:
-    - `costTracking`
-      - `false` hides cost UI in the token/context usage surfaces
-      - omitted behaves as enabled
-
-- `providerAllowlist?: string`
-  - comma-separated provider ids
-  - suggests which model providers to show in Settings
-  - suggests which Goose model options to show in the chat model picker
-
-- `extensionAllowlist?: string`
-  - comma-separated extension ids
-  - reserved for future UI suggestions
-
+  - optional app version tag supplied by bundled defaults
 - `kgoose?: { baseUrl?: string, path?: string }`
-  - default kgoose endpoint used by KGoose-backed features
+  - generic default KGoose endpoint used by KGoose-backed features until runtime config owns this source
   - `baseUrl` must use `http` or `https`
-  - environment variables `GOOSE_INTERNAL_KGOOSE_BASE_URL` and
-    `GOOSE_INTERNAL_KGOOSE_PATH` override these values for local testing
+  - environment variables `GOOSE_INTERNAL_KGOOSE_BASE_URL` and `GOOSE_INTERNAL_KGOOSE_PATH` override these values for local testing
 
 ## Runtime effects
 
-When a distro bundle is present, Goose does two kinds of things with it.
-
-### Frontend behavior
-
-The frontend loads `get_distro_bundle` during app startup and stores the manifest in Zustand.
-
-Today it uses that manifest to:
-
-- filter model providers shown in provider settings via `providerAllowlist`
-- filter Goose model options shown in the chat input model picker via `providerAllowlist`
-- hide cost UI when `featureToggles.costTracking === false`
-
-These allowlists are UI suggestions only. They do not enforce backend access control and do not invalidate existing sessions or saved model choices.
-
-### Backend / shell behavior
-
-When the Tauri shell launches the long-lived `goose serve` process, it applies the distro bundle like this:
+When bundled defaults are present, the Tauri shell:
 
 - prepends `distro/bin` to `PATH` when present
 - adds `distro/config.yaml` to `GOOSE_ADDITIONAL_CONFIG_FILES` when present
 - sets `GOOSE_DISTRO_DIR` to the resolved distro root
-- uses `kgoose` as the default endpoint for KGoose-backed features
+- uses `kgoose` as the generic default endpoint for KGoose-backed features
 - installs `distro/skills/<name>/` entries into `~/.agents/skills/<name>/`
 - installs `distro/agents/<name>.md` entries into `~/.agents/agents/<name>.md`
 - warms installed bundled agent `app-avatar:` media when network access is available
 
-This is shell-level behavior, so it is implemented as Tauri-side setup rather than an ACP method.
+Bundled skills reinstall existing copies only when the installed `SKILL.md` frontmatter has `metadata.gooseInternalBundled: true`. Existing unmarked user skills are left untouched.
 
-Bundled skills reinstall existing copies only when the installed `SKILL.md`
-frontmatter has `metadata.gooseInternalBundled: true`. Existing unmarked user
-skills are left untouched.
-
-Bundled agents use the same `metadata.gooseInternalBundled: true` convention.
-The app records which bundled agent files were seeded so deleted starter agents
-do not reappear on later launches. Existing unmarked user agents are left
-untouched. During pre-launch iteration, existing seeded agents that still carry
-the bundled marker are refreshed when the bundled source file changes, so updates
-to starter-agent instructions can reach internal installs before launch.
-
-## Development notes
-
-- packaged apps discover distro content from bundled Tauri resources
-- local development uses `GOOSE_DISTRO_DIR`
-- after changing `distro.json`, restart `just dev` so startup reloads the manifest
+Bundled agents use the same `metadata.gooseInternalBundled: true` convention. The app records which bundled agent files were seeded so deleted starter agents do not reappear on later launches. Existing unmarked user agents are left untouched.
 
 ## Scope guidance
 
-Use distro bundles for packaged-app policy and shell-level defaults.
+Use bundled app defaults for generic packaged-app resources and shell-level startup defaults only.
 
 Good fits:
 
-- packaged build policy or startup defaults
-- Tauri shell or sidecar resources/config
-- `providerAllowlist`, `kgoose`, `featureToggles.costTracking`
-- bundled `config.yaml`, `bin/`, `skills/`, and `agents/`
+- bundled skills
+- bundled agents
+- app-local Goose `config.yaml`
+- bundled `bin/`
+- temporary generic app defaults that cannot yet move to runtime config
 
-Do not use distro bundles for normal app state, user preferences, dynamic
-runtime switches, ACP-backed data, or per-user experiments. For opt-in
-experiments, use `.agents/skills/experimental-features/SKILL.md`.
+Do not use bundled app defaults for customer/org/workspace policy, customer-specific package identities, provider allowlists, feedback policy, doctor policy, runtime feature toggles, normal app state, user preferences, ACP-backed data, or per-user experiments. Customer/org/workspace behavior should come from auth and runtime/server config.

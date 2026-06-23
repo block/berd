@@ -19,6 +19,8 @@ import {
   SIDEBAR_PRIMARY_NAV_EXPANDED_WIDTH_PX,
 } from "@/app/layout/panes/paneSizeRules";
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { NavigationPanesView } from "../NavigationPanesView";
 
 const designSystemExplorer = vi.hoisted(() => ({
@@ -127,6 +129,18 @@ function renderSidebar(props: Partial<NavigationPanesViewProps> = {}) {
   return renderWithQueryClient(
     <NavigationPanesView {...sidebarProps(props)} />,
   );
+}
+
+function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: {
+      status: "ready",
+      source: "fakeEndpoint",
+      config,
+    },
+    config,
+  });
 }
 
 function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
@@ -298,6 +312,7 @@ describe("NavigationPanesView", () => {
     });
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
+    setReadyRuntimeConfig();
   });
 
   it("keeps latest message snippets in chat rows by default", () => {
@@ -913,6 +928,17 @@ describe("NavigationPanesView", () => {
 
     expect(sessionHistoryIndex).toBeGreaterThanOrEqual(0);
     expect(settingsIndex).toBe(sessionHistoryIndex + 1);
+  });
+
+  it("hides Doctor settings navigation when runtime config disables it", () => {
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      doctor: { enabled: false },
+    });
+
+    renderSidebar({ activeView: "settings" });
+
+    expect(screen.queryByRole("button", { name: /doctor/i })).toBeNull();
   });
 
   it("moves the dev-only design system entry into settings navigation", async () => {

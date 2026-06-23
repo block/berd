@@ -11,6 +11,8 @@ import { useChatSessionStore } from "@/features/chat/stores/chatSessionStore";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { useShortcutsDialogStore } from "@/features/shortcuts/stores/shortcutsDialogStore";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -198,6 +200,18 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
   };
 }
 
+function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: {
+      status: "ready",
+      source: "fakeEndpoint",
+      config,
+    },
+    config,
+  });
+}
+
 /** Starts a controller command inside act() so prompt-open state updates flush. */
 function startCommand(
   start: () => Promise<CommandOutcome>,
@@ -278,6 +292,7 @@ describe("AppShell goosectl integration", () => {
       loading: false,
       activeProjectId: null,
     });
+    setReadyRuntimeConfig();
   });
 
   it("registers the controller after mount and clears it on unmount", () => {

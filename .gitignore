@@ -4,6 +4,7 @@ node_modules/
 
 # Build output
 dist/
+.generated/
 
 # Rust/Tauri build artifacts
 /target/

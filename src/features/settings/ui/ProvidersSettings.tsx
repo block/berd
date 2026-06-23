@@ -17,12 +17,12 @@ import {
 } from "@/features/providers/providerCatalog";
 import { useCredentials } from "@/features/providers/hooks/useCredentials";
 import { useAgentProviderStatus } from "@/features/providers/hooks/useAgentProviderStatus";
-import { useDistroStore } from "@/features/settings/stores/distroStore";
-import { filterModelProvidersForDistro } from "@/features/providers/distroProviderConstraints";
+import { filterModelProvidersForRuntimeConfig } from "@/features/providers/runtimeProviderConstraints";
 import { useProviderCatalogStore } from "@/features/providers/stores/providerCatalogStore";
 import { AgentProviderCard } from "./AgentProviderCard";
 import { ModelProviderRow } from "./ModelProviderRow";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type {
   ProviderDisplayInfo,
@@ -64,7 +64,7 @@ export function ProvidersSettings({
   onReturnToAgentDraft,
 }: ProvidersSettingsProps) {
   const { t } = useTranslation("settings");
-  const distro = useDistroStore((state) => state.manifest);
+  const runtimeConfig = useRuntimeConfigStore((state) => state.config);
   const [showAllModels, setShowAllModels] = useState(false);
   const [modelOrder, setModelOrder] = useState<string[] | null>(null);
   const [setupDetourReadyProviderId, setSetupDetourReadyProviderId] = useState<
@@ -124,13 +124,13 @@ export function ProvidersSettings({
   const allModels = useMemo(
     () =>
       toDisplayInfo(
-        filterModelProvidersForDistro(
+        filterModelProvidersForRuntimeConfig(
           getModelProvidersFromEntries(catalogEntries),
-          distro,
+          runtimeConfig,
         ),
         configuredIds,
       ),
-    [configuredIds, distro, catalogEntries],
+    [configuredIds, runtimeConfig, catalogEntries],
   );
 
   const sortedModels = useMemo(() => {

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
@@ -5,6 +6,7 @@ import { EXPERIMENT_DEFINITIONS } from "./experimentDefinitions";
 import { ExperimentConfigControls } from "./ExperimentConfigControls";
 import {
   clearExperimentEnabledOverride,
+  getVisibleExperimentRegistry,
   setExperimentEnabled,
   useExperimentList,
   type ExperimentRegistry,
@@ -21,7 +23,11 @@ export function ExperimentsSettings({
   registry = EXPERIMENT_DEFINITIONS,
 }: ExperimentsSettingsProps) {
   const { t } = useTranslation("settings");
-  const experiments = useExperimentList(registry);
+  const visibleRegistry = useMemo(
+    () => getVisibleExperimentRegistry(registry),
+    [registry],
+  );
+  const experiments = useExperimentList(visibleRegistry);
 
   return (
     <SettingsPage contentClassName="space-y-3">
@@ -39,13 +45,13 @@ export function ExperimentsSettings({
             </p>
           ) : null}
         </div>
-        {registry.length === 0 ? (
+        {visibleRegistry.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {t("experiments.emptyDescription")}
           </p>
         ) : (
           <div className="space-y-3">
-            {registry.map((definition) => {
+            {visibleRegistry.map((definition) => {
               const experiment = experiments.find(
                 (item) => item.id === definition.id,
               );

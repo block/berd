@@ -27,8 +27,9 @@ export const GOOSE_PROVIDER_ID = "goose";
  * the backend's `session/new` (which resolves providers strictly against the
  * registry and rejects the sentinel with `Unknown provider 'goose'`).
  *
- * Aliased to `DEFAULT_PROVIDER_ID` so the distro default lives in one place;
- * both track `distro/distro.json`'s `providerAllowlist`.
+ * Aliased to `DEFAULT_PROVIDER_ID` so the app default lives in one place. The
+ * runtime provider allowlist controls whether this default appears in the Goose
+ * model picker.
  */
 export const DEFAULT_GOOSE_MODEL_PROVIDER_ID = DEFAULT_PROVIDER_ID;
 

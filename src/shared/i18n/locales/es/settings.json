@@ -277,6 +277,24 @@
     },
     "title": "General"
   },
+  "runtimeConfig": {
+    "clearError": "No se pudo limpiar la respuesta del endpoint falso.",
+    "clearSuccess": "Respuesta del endpoint falso limpiada.",
+    "clearing": "Limpiando...",
+    "editorLabel": "Respuesta del endpoint falso",
+    "jsonLabel": "JSON del endpoint falso",
+    "refreshError": "No se pudo recargar la respuesta del endpoint falso.",
+    "refreshSuccess": "Respuesta del endpoint falso recargada.",
+    "refreshing": "Recargando...",
+    "saveError": "No se pudo guardar la respuesta del endpoint falso.",
+    "saveSuccess": "Respuesta del endpoint falso guardada.",
+    "saving": "Guardando...",
+    "status": {
+      "ready": "Cargado desde {{source}}.",
+      "unavailable": "{{reason}}: {{message}}"
+    },
+    "title": "Configuración de runtime"
+  },
   "storage": {
     "cachedMedia": {
       "clear": "Limpiar medios en caché",

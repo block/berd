@@ -16,6 +16,7 @@ import { UpdatesSettings } from "@/features/updates/ui/UpdatesSettings";
 import { PageShell } from "@/shared/ui/page-shell";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import { refreshDoctorReportFreshness } from "@/shared/api/useDoctorReport";
+import { useProfileCapability } from "@/shared/profile/capabilities";
 
 interface SettingsViewProps {
   activeSection: SectionId;
@@ -35,6 +36,7 @@ export function SettingsView({
   onReturnToAgentDraft,
 }: SettingsViewProps) {
   const queryClient = useQueryClient();
+  const doctorEnabled = useProfileCapability("doctor");
 
   // Warm the shared doctor report once per Settings visit. SettingsView mounts
   // whenever Settings opens (every entry path: sidebar, restored URL, returning
@@ -47,8 +49,11 @@ export function SettingsView({
   // network-touching freshness pass off that path and seeds version/update
   // badges into the same cache entry without blocking first paint.
   useEffect(() => {
+    if (!doctorEnabled) {
+      return;
+    }
     void refreshDoctorReportFreshness(queryClient);
-  }, [queryClient]);
+  }, [doctorEnabled, queryClient]);
 
   return (
     <PageShell contentWidth="narrow" contentClassName="gap-0">
@@ -64,7 +69,7 @@ export function SettingsView({
           onActiveTabChange={onConnectionsTabChange}
         />
       )}
-      {activeSection === "doctor" && <DoctorSettings />}
+      {activeSection === "doctor" && doctorEnabled && <DoctorSettings />}
       {activeSection === "experiments" && <ExperimentsSettings />}
       {activeSection === "general" && <GeneralSettings />}
       {activeSection === "notifications" && <NotificationSettings />}

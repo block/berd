@@ -160,14 +160,12 @@ pub fn run() {
                     .plugin(tauri_plugin_updater::Builder::new().build())?;
             }
 
-            match app.path().app_data_dir() {
-                Ok(app_data_dir) => {
-                    services::goosectl_discovery::sweep_stale_discovery_files(&app_data_dir);
-                }
-                Err(error) => log::warn!(
-                    "Skipping goosectl discovery sweep: failed to resolve app data dir: {error}"
-                ),
-            }
+            let app_data_dir = app.path().app_data_dir()?;
+            services::goosectl_discovery::sweep_stale_discovery_files(&app_data_dir);
+
+            app.manage(commands::runtime_config::RuntimeConfigState::new(
+                app_data_dir.clone(),
+            ));
 
             let distro_state = DistroBundleState::new(app.handle());
             if let Some(bundle) = distro_state.bundle() {
@@ -216,7 +214,7 @@ pub fn run() {
             app.manage(commands::automations::AutomationStreamState::default());
             app.manage(commands::terminal::TerminalState::default());
             app.manage(commands::window_session::WindowSessionRegistry::default());
-            let layout_app_data_dir = app.path().app_data_dir()?;
+            let layout_app_data_dir = app_data_dir;
             let layout_state = tauri::async_runtime::block_on(commands::layout::LayoutState::new(
                 layout_app_data_dir,
             ))
@@ -369,6 +367,10 @@ pub fn run() {
             commands::diagnostics::probe_kgoose_connectivity,
             commands::diagnostics::write_diagnostic_event,
             commands::distro::get_distro_bundle,
+            commands::runtime_config::get_runtime_config,
+            commands::runtime_config::set_fake_runtime_config,
+            commands::runtime_config::clear_fake_runtime_config,
+            commands::runtime_config::refresh_runtime_config,
             commands::system::get_home_dir,
             commands::system::open_in_chrome,
             commands::system::save_exported_session_file,

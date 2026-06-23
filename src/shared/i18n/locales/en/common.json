@@ -115,6 +115,10 @@
           "retry": "Click Retry"
         }
       },
+      "runtimeConfig": {
+        "title": "Configuration unavailable",
+        "description": "Goose couldn't load its runtime configuration. Try again, or copy the startup details and share them with support."
+      },
       "unknown": {
         "title": "Goose couldn't start",
         "description": "Goose couldn't finish starting. Try again, or copy the startup details and open the logs folder to share them with support."

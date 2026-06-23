@@ -6,7 +6,7 @@ import {
 import { perfLog } from "@/shared/lib/perfLog";
 import { runChatRuntimeStartup } from "../lib/chatRuntimeStartup";
 
-export { filterStartupProvidersForDistro } from "../lib/chatRuntimeStartup";
+export { filterStartupProvidersForRuntimeConfig } from "../lib/chatRuntimeStartup";
 
 export function useAppStartup() {
   const [ready, setReady] = useState(false);

@@ -24,6 +24,29 @@ describe("startup diagnostics", () => {
     expect(classifyStartupError(new Error("boom"))).toBe("unknown");
   });
 
+  it("classifies runtime config failures as configuration startup failures", () => {
+    const issue = buildStartupDiagnosticIssue(
+      Object.assign(
+        new Error(
+          "Runtime config unavailable: missing from fakeEndpoint: No fake response",
+        ),
+        { name: "RuntimeConfigUnavailableError" },
+      ),
+      {
+        likelyWarpFailure: true,
+        status: 302,
+        kind: "http_status",
+        message: "redirect to access",
+      },
+    );
+
+    expect(issue.kind).toBe("runtime-config");
+    expect(issue.titleKey).toBe("common:startup.error.runtimeConfig.title");
+    expect(issue.descriptionKey).toBe(
+      "common:startup.error.runtimeConfig.description",
+    );
+  });
+
   it("serializes direct error fields, causes, data, and enumerable fields", () => {
     const cause = Object.assign(new Error("inner"), { code: "inner-code" });
     const error = Object.assign(new Error("outer"), {

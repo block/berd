@@ -20,7 +20,7 @@ import {
 } from "@/features/design-system/ui/designSystemSections";
 import {
   DEFAULT_SETTINGS_SECTION,
-  SETTINGS_SECTIONS,
+  type SETTINGS_SECTIONS,
   type SectionId,
 } from "@/features/settings/ui/settingsSections";
 import { cn } from "@/shared/lib/cn";
@@ -128,7 +128,9 @@ interface PrimaryNavigationSurfaceProps {
   renderInlineSessionList?: () => ReactNode;
   renderPrimaryNavResizeRail?: () => ReactNode;
   secondaryNavRef: Ref<HTMLElement>;
+  settingsSections: readonly (typeof SETTINGS_SECTIONS)[number][];
   showBottomMask: boolean;
+  showAutomationsSurface: boolean;
   showBuilderbotSurface: boolean;
   showDesignSystemSettingsItem: boolean;
   showPrimaryNavWidthToggle: boolean;
@@ -170,7 +172,9 @@ export const PrimaryNavigationSurface = forwardRef<
     renderInlineSessionList,
     renderPrimaryNavResizeRail,
     secondaryNavRef,
+    settingsSections,
     showBottomMask,
+    showAutomationsSurface,
     showBuilderbotSurface,
     showDesignSystemSettingsItem,
     showPrimaryNavWidthToggle,
@@ -188,11 +192,15 @@ export const PrimaryNavigationSurface = forwardRef<
   }[] = [
     { id: "agents", label: t("navigation.agents"), icon: SidebarNavAgentsIcon },
     { id: "skills", label: t("navigation.skills"), icon: SidebarNavSkillsIcon },
-    {
-      id: "automations",
-      label: t("navigation.automations"),
-      icon: SidebarNavAutomationsIcon,
-    },
+    ...(showAutomationsSurface
+      ? [
+          {
+            id: "automations" as const,
+            label: t("navigation.automations"),
+            icon: SidebarNavAutomationsIcon,
+          },
+        ]
+      : []),
     ...(showBuilderbotSurface
       ? [
           {
@@ -352,7 +360,7 @@ export const PrimaryNavigationSurface = forwardRef<
             <div className="space-y-0.5">
               {isSettingsSurface ? (
                 <>
-                  {SETTINGS_SECTIONS.map((item) => {
+                  {settingsSections.map((item) => {
                     const showUpdate =
                       item.id === "providers" && agentUpdatesAvailable;
                     return (

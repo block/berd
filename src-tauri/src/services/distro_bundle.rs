@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
@@ -13,10 +12,7 @@ const DISTRO_BIN_DIR_NAME: &str = "bin";
 #[serde(rename_all = "camelCase")]
 pub struct DistroManifest {
     pub app_version: Option<String>,
-    pub feature_toggles: Option<HashMap<String, bool>>,
-    pub extension_allowlist: Option<String>,
     pub kgoose: Option<KgooseDistroConfig>,
-    pub provider_allowlist: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -30,11 +26,8 @@ pub struct KgooseDistroConfig {
 #[serde(rename_all = "camelCase")]
 pub struct DistroBundleInfo {
     pub present: bool,
-    pub app_version: Option<String>,
-    pub feature_toggles: Option<HashMap<String, bool>>,
-    pub extension_allowlist: Option<String>,
-    pub kgoose: Option<KgooseDistroConfig>,
-    pub provider_allowlist: Option<String>,
+    #[serde(flatten)]
+    pub manifest: DistroManifest,
 }
 
 #[derive(Debug, Clone)]
@@ -66,21 +59,13 @@ impl DistroBundleState {
         let Some(bundle) = &self.bundle else {
             return DistroBundleInfo {
                 present: false,
-                app_version: None,
-                feature_toggles: None,
-                extension_allowlist: None,
-                kgoose: None,
-                provider_allowlist: None,
+                manifest: DistroManifest::default(),
             };
         };
 
         DistroBundleInfo {
             present: true,
-            app_version: bundle.manifest.app_version.clone(),
-            feature_toggles: bundle.manifest.feature_toggles.clone(),
-            extension_allowlist: bundle.manifest.extension_allowlist.clone(),
-            kgoose: bundle.manifest.kgoose.clone(),
-            provider_allowlist: bundle.manifest.provider_allowlist.clone(),
+            manifest: bundle.manifest.clone(),
         }
     }
 
@@ -163,7 +148,6 @@ mod tests {
         let manifest = serde_json::from_str::<DistroManifest>(
             r#"{
                 "appVersion": "development",
-                "featureToggles": {"foo": true},
                 "kgoose": {
                     "baseUrl": "https://kgoose.sqprod.co/",
                     "path": "cash-app/goose"
@@ -180,13 +164,5 @@ mod tests {
             Some("https://kgoose.sqprod.co/")
         );
         assert_eq!(kgoose.path.as_deref(), Some("cash-app/goose"));
-        assert_eq!(
-            manifest
-                .feature_toggles
-                .as_ref()
-                .and_then(|toggles| toggles.get("foo"))
-                .copied(),
-            Some(true)
-        );
     }
 }

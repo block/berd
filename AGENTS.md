@@ -12,7 +12,7 @@ UI can handle operations that are not yet in ACP or are client specific.
 - `src/` — React UI/features/shared code
 - `src-tauri/` — Tauri shell that starts or resolves `goose serve`
 - `sdk/` — vendored `@aaif/goose-sdk` package and generated ACP types
-- `distro/` — packaged distribution config/resources
+- `distro/` — bundled app defaults and packaged distribution assets
 - `goose-backend.lock.json` — pinned upstream Goose backend used by dev and bundles
 - `scripts/ensure-local-goose.sh` — managed local Goose checkout for dev
 - `scripts/prepare-goose-sidecar.sh` — stages the pinned or explicit Goose binary for Tauri bundling

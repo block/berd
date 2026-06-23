@@ -1,13 +1,17 @@
+use crate::commands::runtime_config::RuntimeConfigState;
 use crate::services::diagnostic_log::{self, DiagnosticEventInput};
 use crate::services::distro_bundle::DistroBundleState;
-use crate::services::kgoose::{self, KgooseProbeResult};
+use crate::services::kgoose::{KgooseContext, KgooseProbeResult};
 use tauri::State;
 
 #[tauri::command]
 pub async fn probe_kgoose_connectivity(
     state: State<'_, DistroBundleState>,
+    runtime_config_state: State<'_, RuntimeConfigState>,
 ) -> Result<KgooseProbeResult, String> {
-    kgoose::probe_connectivity(state.inner()).await
+    let runtime_config = runtime_config_state.ready_config()?;
+    let kgoose = KgooseContext::new(state.inner(), &runtime_config);
+    kgoose.probe_connectivity().await
 }
 
 #[tauri::command]

@@ -2,15 +2,15 @@ import {
   readinessFromReport,
   type AgentProviderReadiness,
 } from "@/features/providers/hooks/useAgentProviderStatus";
-import { filterModelProvidersForDistro } from "@/features/providers/distroProviderConstraints";
+import { filterModelProvidersForRuntimeConfig } from "@/features/providers/runtimeProviderConstraints";
 import { getProviderModelSelectionHint } from "@/features/providers/modelSelectionHints";
 import { getModelProviders } from "@/features/providers/providerCatalog";
 import { useProviderModelCacheStore } from "@/features/providers/stores/providerModelCacheStore";
-import { useDistroStore } from "@/features/settings/stores/distroStore";
 import { discoverAcpProviders } from "@/shared/api/acp";
 import { GOOSE_PROVIDER_ID } from "@/shared/api/acpPersonaHandoff";
 import { runDoctor, type DoctorReport } from "@/shared/api/doctor";
 import { prefetchDoctorReport } from "@/shared/api/useDoctorReport";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 
 import { getGoosectlQueryClient } from "../../bridge/runtimeContext";
 import { CommandError } from "../types";
@@ -72,9 +72,9 @@ export async function findReadyHarnessOrThrow(
 }
 
 export async function gooseModelOptions(): Promise<ModelEntry[]> {
-  const providerIds = filterModelProvidersForDistro(
+  const providerIds = filterModelProvidersForRuntimeConfig(
     getModelProviders(),
-    useDistroStore.getState().manifest,
+    useRuntimeConfigStore.getState().config,
   ).map((provider) => provider.id);
   const store = useProviderModelCacheStore.getState();
   await store.refreshAllModelProviders(providerIds);

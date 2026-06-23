@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { screen, waitFor } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,11 +14,26 @@ import { TERMINAL_FALLBACK_CWD_STORAGE_KEY } from "@/features/terminal/lib/termi
 import { STREAMING_SHORTCUT_MODE_STORAGE_KEY } from "@/features/chat/lib/streamingShortcutPreference";
 import { AT_MENTION_DEFAULT_CATEGORY_STORAGE_KEY } from "@/features/chat/lib/mentionPreference";
 import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/sidebarBranchSubtitlePreference";
+import {
+  INITIAL_RUNTIME_CONFIG_RESULT,
+  useRuntimeConfigStore,
+} from "@/shared/runtime-config/runtimeConfigStore";
+import { DEFAULT_RUNTIME_CONFIG } from "@/shared/runtime-config/schema";
+import type {
+  RuntimeConfig,
+  RuntimeConfigLoadResult,
+} from "@/shared/runtime-config/schema";
 import { GeneralSettings } from "../GeneralSettings";
 import { toast } from "sonner";
 
-const { mockOpenDialog } = vi.hoisted(() => ({
+const { mockOpenDialog, mockRuntimeConfigApi } = vi.hoisted(() => ({
   mockOpenDialog: vi.fn(),
+  mockRuntimeConfigApi: {
+    clearFakeRuntimeConfig: vi.fn(),
+    getRuntimeConfig: vi.fn(),
+    refreshRuntimeConfig: vi.fn(),
+    setFakeRuntimeConfig: vi.fn(),
+  },
 }));
 
 vi.mock("@/shared/api/localMediaCaches", () => ({
@@ -27,6 +42,13 @@ vi.mock("@/shared/api/localMediaCaches", () => ({
 
 vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: mockOpenDialog,
+}));
+
+vi.mock("@/shared/api/runtimeConfig", () => ({
+  clearFakeRuntimeConfig: mockRuntimeConfigApi.clearFakeRuntimeConfig,
+  getRuntimeConfig: mockRuntimeConfigApi.getRuntimeConfig,
+  refreshRuntimeConfig: mockRuntimeConfigApi.refreshRuntimeConfig,
+  setFakeRuntimeConfig: mockRuntimeConfigApi.setFakeRuntimeConfig,
 }));
 
 vi.mock("sonner", () => ({
@@ -67,6 +89,24 @@ function renderGeneralSettings(queryClient = createQueryClient()) {
   );
 }
 
+function readyRuntimeConfigResult(
+  config: RuntimeConfig = { schemaVersion: 1 },
+): RuntimeConfigLoadResult {
+  return {
+    status: "ready",
+    source: "fakeEndpoint",
+    config,
+  };
+}
+
+function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: readyRuntimeConfigResult(config),
+    config,
+  });
+}
+
 function getClearCachedMediaButton() {
   const buttons = screen.getAllByRole("button", {
     name: "Clear cached media",
@@ -81,7 +121,21 @@ function getClearCachedMediaButton() {
 describe("GeneralSettings appearance section", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("DEV", true);
     localStorage.clear();
+    setReadyRuntimeConfig();
+    mockRuntimeConfigApi.setFakeRuntimeConfig.mockImplementation(
+      async (config: RuntimeConfig) => readyRuntimeConfigResult(config),
+    );
+    mockRuntimeConfigApi.refreshRuntimeConfig.mockResolvedValue(
+      readyRuntimeConfigResult(),
+    );
+    mockRuntimeConfigApi.getRuntimeConfig.mockResolvedValue(
+      readyRuntimeConfigResult(),
+    );
+    mockRuntimeConfigApi.clearFakeRuntimeConfig.mockResolvedValue(
+      INITIAL_RUNTIME_CONFIG_RESULT,
+    );
   });
 
   it("selects default light and dark theme modes", async () => {
@@ -389,5 +443,103 @@ describe("GeneralSettings appearance section", () => {
       screen.getByRole("heading", { name: "Clear cached media?" }),
     ).toBeInTheDocument();
     expect(getClearCachedMediaButton()).toBeEnabled();
+  });
+
+  it("shows the development fake endpoint runtime config editor", () => {
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      providerAllowlist: ["openai"],
+    });
+
+    renderGeneralSettings();
+
+    expect(screen.getByText("Runtime config")).toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
+    ).toHaveValue(
+      `${JSON.stringify(
+        { schemaVersion: 1, providerAllowlist: ["openai"] },
+        null,
+        2,
+      )}\n`,
+    );
+  });
+
+  it("hides the fake endpoint runtime config editor outside development", () => {
+    vi.stubEnv("DEV", false);
+
+    renderGeneralSettings();
+
+    expect(screen.queryByText("Runtime config")).not.toBeInTheDocument();
+  });
+
+  it("saves fake endpoint runtime config through the runtime config store", async () => {
+    const user = userEvent.setup();
+    const nextConfig = {
+      schemaVersion: 1,
+      providerAllowlist: ["databricks"],
+    } satisfies RuntimeConfig;
+    renderGeneralSettings();
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
+      {
+        target: { value: JSON.stringify(nextConfig, null, 2) },
+      },
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      expect(mockRuntimeConfigApi.setFakeRuntimeConfig).toHaveBeenCalledWith(
+        nextConfig,
+      );
+    });
+    expect(useRuntimeConfigStore.getState().config).toEqual(nextConfig);
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "Fake endpoint response saved.",
+    );
+  });
+
+  it("reports invalid fake endpoint runtime config without saving", async () => {
+    const user = userEvent.setup();
+    renderGeneralSettings();
+
+    fireEvent.change(
+      screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
+      {
+        target: { value: "{not-json" },
+      },
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(mockRuntimeConfigApi.setFakeRuntimeConfig).not.toHaveBeenCalled();
+    expect(toastErrorMock).toHaveBeenCalledWith(
+      "Couldn't save fake endpoint response.",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/json/i);
+  });
+
+  it("clears the fake endpoint runtime config response", async () => {
+    const user = userEvent.setup();
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      providerAllowlist: ["openai"],
+    });
+    renderGeneralSettings();
+
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+
+    await waitFor(() => {
+      expect(mockRuntimeConfigApi.clearFakeRuntimeConfig).toHaveBeenCalled();
+    });
+    expect(useRuntimeConfigStore.getState().config).toEqual(
+      DEFAULT_RUNTIME_CONFIG,
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Fake endpoint JSON" }),
+    ).toHaveValue(`${JSON.stringify(DEFAULT_RUNTIME_CONFIG, null, 2)}\n`);
+    expect(toastSuccessMock).toHaveBeenCalledWith(
+      "Fake endpoint response cleared.",
+    );
   });
 });

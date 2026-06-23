@@ -1,31 +1,22 @@
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
-import type { DistroBundleInfo } from "@/shared/types/distro";
 
 export function parseProviderAllowlist(
-  distro: DistroBundleInfo | null | undefined,
+  runtimeConfig: RuntimeConfig | null | undefined,
 ): Set<string> | null {
-  if (!distro?.present) {
-    return null;
-  }
-
-  const raw = distro.providerAllowlist?.trim();
-  if (!raw) {
-    return null;
-  }
-
-  const providerIds = raw
-    .split(",")
-    .map((providerId) => providerId.trim())
-    .filter(Boolean);
+  const providerIds =
+    runtimeConfig?.providerAllowlist
+      ?.map((providerId) => providerId.trim())
+      .filter(Boolean) ?? [];
 
   return providerIds.length > 0 ? new Set(providerIds) : null;
 }
 
-export function filterModelProvidersForDistro(
+export function filterModelProvidersForRuntimeConfig(
   providers: ProviderCatalogEntry[],
-  distro: DistroBundleInfo | null | undefined,
+  runtimeConfig: RuntimeConfig | null | undefined,
 ): ProviderCatalogEntry[] {
-  const allowlist = parseProviderAllowlist(distro);
+  const allowlist = parseProviderAllowlist(runtimeConfig);
   if (!allowlist) {
     return providers;
   }

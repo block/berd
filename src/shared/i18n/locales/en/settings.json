@@ -277,6 +277,24 @@
     },
     "title": "General"
   },
+  "runtimeConfig": {
+    "clearError": "Couldn't clear fake endpoint response.",
+    "clearSuccess": "Fake endpoint response cleared.",
+    "clearing": "Clearing...",
+    "editorLabel": "Fake endpoint response",
+    "jsonLabel": "Fake endpoint JSON",
+    "refreshError": "Couldn't reload fake endpoint response.",
+    "refreshSuccess": "Fake endpoint response reloaded.",
+    "refreshing": "Reloading...",
+    "saveError": "Couldn't save fake endpoint response.",
+    "saveSuccess": "Fake endpoint response saved.",
+    "saving": "Saving...",
+    "status": {
+      "ready": "Loaded from {{source}}.",
+      "unavailable": "{{reason}}: {{message}}"
+    },
+    "title": "Runtime config"
+  },
   "storage": {
     "cachedMedia": {
       "clear": "Clear cached media",

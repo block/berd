@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
-import { useDistroStore } from "@/features/settings/stores/distroStore";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { ModelOption } from "@/features/chat/types";
-import { filterModelProvidersForDistro } from "../distroProviderConstraints";
+import { filterModelProvidersForRuntimeConfig } from "../runtimeProviderConstraints";
 import { getModelProviders } from "../providerCatalog";
 import { getModelCacheRefreshProviderIds } from "../modelCacheRefresh";
 import { getProviderModelSelectionHint } from "../modelSelectionHints";
@@ -20,18 +20,19 @@ export function useProviderModels() {
   const refreshAllModelProviders = useProviderModelCacheStore(
     (state) => state.refreshAllModelProviders,
   );
-  const distro = useDistroStore((state) => state.manifest);
+  const runtimeConfig = useRuntimeConfigStore((state) => state.config);
 
   const configuredModelProviderIds = useMemo(
     () =>
-      filterModelProvidersForDistro(getModelProviders(), distro).map(
-        (p) => p.id,
-      ),
-    [distro],
+      filterModelProvidersForRuntimeConfig(
+        getModelProviders(),
+        runtimeConfig,
+      ).map((p) => p.id),
+    [runtimeConfig],
   );
   const modelCacheRefreshProviderIds = useMemo(
-    () => getModelCacheRefreshProviderIds(distro),
-    [distro],
+    () => getModelCacheRefreshProviderIds(runtimeConfig),
+    [runtimeConfig],
   );
 
   const getModelsForProvider = useCallback(

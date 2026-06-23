@@ -30,6 +30,8 @@ import {
   EXPERIMENT_PREFERENCES_STORAGE_VERSION,
 } from "@/features/experiments/experimentPreferences";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
+import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
+import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { AppShell } from "./AppShell";
 import type { AppShellContent as AppShellContentType } from "./ui/AppShellContent";
 
@@ -107,6 +109,18 @@ async function waitForCreatedAgentBuilderTarget() {
         "/Users/test/.agents/agents/untitled-agent-created-session.md",
       targetAgentDraftState: null,
     });
+  });
+}
+
+function setReadyRuntimeConfig(config: RuntimeConfig = { schemaVersion: 1 }) {
+  useRuntimeConfigStore.setState({
+    loaded: true,
+    result: {
+      status: "ready",
+      source: "fakeEndpoint",
+      config,
+    },
+    config,
   });
 }
 
@@ -482,6 +496,7 @@ describe("AppShell global navigation", () => {
       loading: false,
       activeProjectId: null,
     });
+    setReadyRuntimeConfig();
   });
 
   it("starts a full blank chat from the sidebar new chat action", async () => {
@@ -1541,6 +1556,27 @@ describe("AppShell global navigation", () => {
         "general",
       );
     });
+  });
+
+  it("redirects a disabled deep-linked Doctor settings section to General", async () => {
+    window.history.replaceState(null, "", "/settings?section=doctor");
+    setReadyRuntimeConfig({
+      schemaVersion: 1,
+      doctor: { enabled: false },
+    });
+
+    renderAppShell();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("settings");
+      expect(screen.getByTestId("settings-section")).toHaveTextContent(
+        "general",
+      );
+    });
+    expect(window.location.pathname).toBe("/settings");
+    expect(new URLSearchParams(window.location.search).get("section")).toBe(
+      "general",
+    );
   });
 
   it("opens search from the top bar and returns to the previous view", async () => {

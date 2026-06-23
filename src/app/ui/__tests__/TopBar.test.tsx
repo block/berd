@@ -64,6 +64,14 @@ describe("TopBar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("omits feedback when onFeedbackClick is not provided", () => {
+    renderTopBar({ onFeedbackClick: undefined });
+
+    expect(
+      screen.queryByRole("button", { name: /feedback/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps only the current breadcrumb at narrow widths", () => {
     setWindowWidth(900);
 

@@ -18,6 +18,7 @@ import { archiveProject } from "@/features/projects/api/projects";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import {
   DEFAULT_SETTINGS_SECTION,
+  resolveEnabledSettingsSection,
   resolveSettingsSection,
   SETTINGS_SECTIONS,
   type SectionId,
@@ -132,7 +133,6 @@ import {
 } from "@/shared/types/messages";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import {
-  BUILDERBOT_SURFACE_EXPERIMENT_ID,
   PANE_JUMP_NAVIGATION_EXPERIMENT_ID,
   SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,
 } from "@/features/experiments/experimentDefinitions";
@@ -144,6 +144,7 @@ import {
   resolveStackedNavigationPaneSizes,
 } from "./layout/panes/paneSizeRules";
 import { SIDEBAR_DETACHED_PANEL_GAP_PX } from "@/shared/ui/sidebar-tokens";
+import { useProfileCapabilities } from "@/shared/profile/capabilities";
 import { getOptimisticArtifactCwd } from "@/shared/artifacts/sessionArtifactLocation";
 import {
   DEFAULT_DESIGN_SYSTEM_SECTION,
@@ -311,8 +312,10 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   ] = useState(0);
   const initialActiveView = getInitialAppView(initialSettingsSection);
   const [activeView, setActiveView] = useState<AppView>(initialActiveView);
-  const builderbotExperiment = useExperiment(BUILDERBOT_SURFACE_EXPERIMENT_ID);
-  const isBuilderbotSurfaceEnabled = Boolean(builderbotExperiment?.enabled);
+  const capabilities = useProfileCapabilities();
+  const isAutomationsFeatureEnabled = capabilities.automations;
+  const isBuilderbotSurfaceEnabled = capabilities.builderbot;
+  const isFeedbackEnabled = capabilities.feedback;
   const sessionWindowSupport = useSessionWindowSupport();
   const isMultiWindowEnabled = sessionWindowSupport.supported;
   const paneJumpNavigationExperiment = useExperiment(
@@ -663,7 +666,24 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     if (activeView === "builderbot" && !isBuilderbotSurfaceEnabled) {
       setActiveView("home");
     }
-  }, [activeView, isBuilderbotSurfaceEnabled]);
+    if (activeView === "automations" && !isAutomationsFeatureEnabled) {
+      setActiveView("home");
+    }
+  }, [activeView, isAutomationsFeatureEnabled, isBuilderbotSurfaceEnabled]);
+
+  useEffect(() => {
+    const enabledSection = resolveEnabledSettingsSection(
+      activeSettingsSection,
+      capabilities,
+    );
+    if (enabledSection === activeSettingsSection) {
+      return;
+    }
+    setActiveSettingsSection(enabledSection);
+    if (activeView === "settings") {
+      setSettingsSectionUrl(enabledSection);
+    }
+  }, [activeSettingsSection, activeView, capabilities]);
 
   useEffect(() => {
     if (activeView !== "settings") {
@@ -1726,17 +1746,21 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const openSettings = useCallback(
     (section: SectionId = DEFAULT_SETTINGS_SECTION) => {
+      const enabledSection = resolveEnabledSettingsSection(
+        section,
+        capabilities,
+      );
       if (activeView !== "settings" && activeView !== "design-system") {
         lastNonSecondaryViewRef.current = activeView;
       }
-      setActiveSettingsSection(section);
-      setSettingsSectionUrl(section);
+      setActiveSettingsSection(enabledSection);
+      setSettingsSectionUrl(enabledSection);
       setActiveView("settings");
       if (sidebarCollapsed) {
         void expandSidebar();
       }
     },
-    [activeView, expandSidebar, sidebarCollapsed],
+    [activeView, capabilities, expandSidebar, sidebarCollapsed],
   );
 
   const leaveSecondarySurface = useCallback(() => {
@@ -1747,10 +1771,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     setActiveView(lastNonSecondaryViewRef.current);
   }, [returnToAgentBuilderSettingsTarget]);
 
-  const selectSettingsSection = useCallback((section: SectionId) => {
-    setActiveSettingsSection(section);
-    setSettingsSectionUrl(section);
-  }, []);
+  const selectSettingsSection = useCallback(
+    (section: SectionId) => {
+      const enabledSection = resolveEnabledSettingsSection(
+        section,
+        capabilities,
+      );
+      setActiveSettingsSection(enabledSection);
+      setSettingsSectionUrl(enabledSection);
+    },
+    [capabilities],
+  );
 
   const openDesignSystem = useCallback(() => {
     if (!isDesignSystemExplorerEnabled()) return;
@@ -2001,6 +2032,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleOpenAutomationFromSearch = useCallback(
     (automationId: string) => {
+      if (!isAutomationsFeatureEnabled) {
+        return;
+      }
       guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = false;
         setAutomationsRoute({
@@ -2014,12 +2048,16 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("automations");
       });
     },
-    [guardAppNavigation, setActiveSession],
+    [guardAppNavigation, isAutomationsFeatureEnabled, setActiveSession],
   );
 
   const handleNavigate = useCallback(
     (view: AppView) => {
       guardAppNavigation(() => {
+        if (view === "automations" && !isAutomationsFeatureEnabled) {
+          setActiveView("home");
+          return;
+        }
         if (view === "builderbot" && !isBuilderbotSurfaceEnabled) {
           setActiveView("home");
           return;
@@ -2056,6 +2094,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       openSettings,
       guardAppNavigation,
       setActiveSession,
+      isAutomationsFeatureEnabled,
       isBuilderbotSurfaceEnabled,
     ],
   );
@@ -2128,6 +2167,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       route: AutomationNavigationRoute,
       options?: AppNavigationUpdateOptions,
     ) => {
+      if (!isAutomationsFeatureEnabled) {
+        return;
+      }
       guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = Boolean(options?.replace);
         setAutomationsRoute(route);
@@ -2136,7 +2178,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("automations");
       });
     },
-    [guardAppNavigation, setActiveSession],
+    [guardAppNavigation, isAutomationsFeatureEnabled, setActiveSession],
   );
 
   const navigateBuilderbot = useCallback(
@@ -2144,6 +2186,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       route: BuilderbotNavigationRoute,
       options?: AppNavigationUpdateOptions,
     ) => {
+      if (!isBuilderbotSurfaceEnabled) {
+        return;
+      }
       guardAppNavigation(() => {
         replaceNextNavigationEntryRef.current = Boolean(options?.replace);
         setBuilderbotRoute(route);
@@ -2152,7 +2197,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setActiveView("builderbot");
       });
     },
-    [guardAppNavigation, setActiveSession],
+    [guardAppNavigation, isBuilderbotSurfaceEnabled, setActiveSession],
   );
 
   const applyNavigationLocation = useCallback(
@@ -2199,6 +2244,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }
 
       if (location.view === "automations") {
+        if (!isAutomationsFeatureEnabled) {
+          setActiveSession(null);
+          setActiveView("home");
+          return;
+        }
         setActiveSession(null);
         setAutomationsRoute(location.route);
         setActiveView("automations");
@@ -2206,6 +2256,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       }
 
       if (location.view === "builderbot") {
+        if (!isBuilderbotSurfaceEnabled) {
+          setActiveSession(null);
+          setActiveView("home");
+          return;
+        }
         setActiveSession(null);
         setBuilderbotRoute(location.route);
         setActiveView("builderbot");
@@ -2235,7 +2290,14 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       setActiveSession(null);
       setActiveView(location.view === "chat" ? "home" : location.view);
     },
-    [expandSidebar, setActiveSession, setChatActiveSession, sidebarCollapsed],
+    [
+      expandSidebar,
+      isAutomationsFeatureEnabled,
+      isBuilderbotSurfaceEnabled,
+      setActiveSession,
+      setChatActiveSession,
+      sidebarCollapsed,
+    ],
   );
 
   const goBack = useCallback(() => {
@@ -2319,8 +2381,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const shortcutsOpen = useShortcutsDialogStore((state) => state.open);
   const setShortcutsOpen = useShortcutsDialogStore((state) => state.setOpen);
   const handleFeedbackClick = useCallback(() => {
+    if (!isFeedbackEnabled) {
+      return;
+    }
     setFeedbackOpen(true);
-  }, []);
+  }, [isFeedbackEnabled]);
+
+  useEffect(() => {
+    if (!isFeedbackEnabled) {
+      setFeedbackOpen(false);
+    }
+  }, [isFeedbackEnabled]);
 
   const startupIssue = useMemo(
     () =>
@@ -2670,7 +2741,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           contextPanelOpen: isContextPanelOpen,
           contextPanelLabel,
           onToggleContextPanel: toggleContextPanel,
-          onFeedbackClick: handleFeedbackClick,
+          onFeedbackClick: isFeedbackEnabled ? handleFeedbackClick : undefined,
           onSearchClick: () => handleNavigate("search"),
         }}
         navigationPanes={{
@@ -2758,6 +2829,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               renderedLocation={renderedLocation}
               isPreparingContent={isPreparingContent}
               activeConnectionsTab={activeConnectionsTab}
+              automationsEnabled={isAutomationsFeatureEnabled}
+              builderbotEnabled={isBuilderbotSurfaceEnabled}
               renderedSession={renderedSession}
               homeSessionId={homeSessionId}
               homeViewportLeftOcclusionPx={
@@ -2848,7 +2921,9 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         onDiscard={discardAutomationLeave}
         onSave={() => void saveAutomationLeave()}
       />
-      <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+      {isFeedbackEnabled ? (
+        <FeedbackDialog open={feedbackOpen} onOpenChange={setFeedbackOpen} />
+      ) : null}
       <KeyboardShortcutsDialog
         open={shortcutsOpen}
         onOpenChange={setShortcutsOpen}

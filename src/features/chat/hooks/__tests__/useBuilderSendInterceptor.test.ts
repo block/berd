@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { composeBuilderSendOptions } from "../useBuilderSendInterceptor";
+import {
+  composeBuilderSendOptions,
+  resolveAgentBuilderSkillBody,
+} from "../useBuilderSendInterceptor";
 
 describe("composeBuilderSendOptions", () => {
   it("returns options unchanged when session is not a builder", () => {
@@ -49,5 +52,9 @@ describe("composeBuilderSendOptions", () => {
     expect(first.assistantPrompt).toContain("# Agent Builder");
     expect(second.assistantPrompt).toContain("agent-builder session path");
     expect(second.assistantPrompt).not.toContain("# Agent Builder");
+  });
+
+  it("resolves the bundled app default agent-builder skill body", () => {
+    expect(resolveAgentBuilderSkillBody("bundled body")).toBe("bundled body");
   });
 });
