@@ -535,9 +535,14 @@ export const MessageBubble = memo(function MessageBubble({
     fragmentRole === "middle" || fragmentRole === "end";
   const showLeadingAssistantChrome =
     !fragmentRole || fragmentRole === "start" || fragmentRole === "single";
-  const showMessageActions =
-    !isStreaming &&
-    (!fragmentRole || fragmentRole === "end" || fragmentRole === "single");
+  const canHostMessageActions =
+    !fragmentRole || fragmentRole === "end" || fragmentRole === "single";
+  const showMessageActions = !isStreaming && canHostMessageActions;
+  // Reserve the action tray while the terminal assistant row is still
+  // streaming so completion does not add pb-9 and nudge a bottom-pinned
+  // transcript upward.
+  const shouldReserveMessageActionSpace =
+    showMessageActions || (!isUser && isStreaming && canHostMessageActions);
   const messageActionsArePersistentlyVisible =
     actionsAlwaysVisible || isCopyConfirmed;
   const outerSpacingClassName =
@@ -625,7 +630,7 @@ export const MessageBubble = memo(function MessageBubble({
         }
         className={cn(
           "group relative min-w-0 flex flex-col gap-1",
-          showMessageActions && "pb-9",
+          shouldReserveMessageActionSpace && "pb-9",
           isUser
             ? "max-w-[var(--chat-user-message-max-width)] items-end"
             : "w-full items-start",

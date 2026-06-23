@@ -1047,6 +1047,163 @@ describe("VirtualMessageTimeline", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("resumes following a live flow tail when touch scrolling reaches latest", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.touchMove(scroller);
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5200,
+      clientHeight: 300,
+    });
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={[
+          messages[0],
+          textMessage(
+            "assistant-1",
+            "assistant",
+            `${longText("streaming fragment", 130)}\n[height:720]`,
+          ),
+        ]}
+        streamingMessageId="assistant-1"
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(4900));
+  });
+
+  it("treats Space as scrolling toward latest during streaming reattach", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
+    ];
+    renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    expect(
+      await screen.findByRole("button", { name: "Jump to latest" }),
+    ).toBeInTheDocument();
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.keyDown(scroller, { key: " " });
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("preserves detached near-bottom position when a live flow tail completes", async () => {
+    mockTranscriptElementMeasurements();
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage(
+        "assistant-1",
+        "assistant",
+        `${longText("streaming fragment", 120)}\n[height:650]`,
+      ),
+    ];
+    const { rerender } = renderWithProviders(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId="assistant-1"
+      />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4700,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+    fireEvent.wheel(scroller, { deltaY: -80 });
+    setScrollMetrics(scroller, {
+      scrollTop: 4650,
+      scrollHeight: 5000,
+      clientHeight: 300,
+    });
+    fireEvent.scroll(scroller);
+
+    rerender(
+      <VirtualMessageTimeline
+        sessionId="session-1"
+        messages={messages}
+        streamingMessageId={null}
+      />,
+    );
+
+    await waitFor(() => expect(scroller.scrollTop).toBe(4650));
+  });
+
   it("does not auto-scroll again for the same latest user message after detaching", async () => {
     mockTranscriptElementMeasurements();
     const latestUser = textMessage("user-latest", "user", "Follow up");

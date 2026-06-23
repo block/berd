@@ -363,7 +363,7 @@ describe("MessageBubble", () => {
     expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 
-  it("does not show assistant actions while the message is streaming", () => {
+  it("reserves assistant action space without showing actions while the message is streaming", () => {
     const { container } = render(
       <MessageBubble
         message={assistantMessage([{ type: "text", text: "response" }])}
@@ -373,6 +373,9 @@ describe("MessageBubble", () => {
       />,
     );
 
+    expect(
+      container.querySelector('[data-role="assistant-message"] .pb-9'),
+    ).toBeInTheDocument();
     expect(
       container.querySelector(
         '[data-role="assistant-message"] [data-role="message-actions"]',

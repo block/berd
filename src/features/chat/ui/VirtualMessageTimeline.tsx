@@ -78,7 +78,6 @@ import {
   hasTimelineRealScrollableOverflow,
   isTimelineNearLatest,
   isTimelinePinnedToLatest,
-  shouldResumeTimelineFollowFromUserScroll,
   shouldShowTimelineJumpToLatest,
   TIMELINE_AUTO_SCROLL_THRESHOLD_PX,
   TIMELINE_MCP_APP_STICKY_SCROLL_MS,
@@ -946,6 +945,9 @@ export function VirtualMessageTimeline({
   const isNearBottomRef = useRef(true);
   const userDetachedRef = useRef(false);
   const userScrollIntentRef = useRef(false);
+  const userScrollDirectionRef = useRef<
+    "toward-latest" | "away-from-latest" | null
+  >(null);
   const lastScrollTopRef = useRef(0);
   const suppressScrollDeltaDetachUntilRef = useRef(0);
   const stickyScrollUntilRef = useRef(0);
@@ -982,6 +984,7 @@ export function VirtualMessageTimeline({
     distanceFromBottom: number;
     scrollTop: number;
     scrollHeight: number;
+    wasDetached: boolean;
   } | null>(null);
   const lastEffectiveVirtualScrollHeightRef = useRef<number | null>(null);
   const diagnosticsStartMsRef = useRef(getDiagnosticsNowMs());
@@ -1015,6 +1018,7 @@ export function VirtualMessageTimeline({
     scrollIntentRef.current = "following-latest";
     suppressFollowResumeFromProgrammaticScrollRef.current = false;
     userDetachedRef.current = false;
+    userScrollDirectionRef.current = null;
     detachedScrollTopRef.current = null;
     liveTailHandoffRef.current = null;
     streamingBottomFollowActiveRef.current = false;
@@ -1652,6 +1656,7 @@ export function VirtualMessageTimeline({
         stopStreamingBottomFollow();
         detachedScrollTopRef.current = container.scrollTop;
       } else {
+        userScrollDirectionRef.current = null;
         detachedScrollTopRef.current = null;
         liveTailHandoffRef.current = null;
         setLiveTailScrollHeightFloorPx(0);
@@ -1730,6 +1735,20 @@ export function VirtualMessageTimeline({
 
   const clearProgrammaticFollowResumeSuppression = useCallback(() => {
     suppressFollowResumeFromProgrammaticScrollRef.current = false;
+  }, []);
+
+  const markUserScrollIntent = useCallback(
+    (direction: "toward-latest" | "away-from-latest" | null) => {
+      clearProgrammaticFollowResumeSuppression();
+      userScrollIntentRef.current = true;
+      userScrollDirectionRef.current = direction;
+    },
+    [clearProgrammaticFollowResumeSuppression],
+  );
+
+  const clearUserScrollIntent = useCallback(() => {
+    userScrollIntentRef.current = false;
+    userScrollDirectionRef.current = null;
   }, []);
 
   const scrollToTargetWithControlledSmooth = useCallback(
@@ -1846,19 +1865,15 @@ export function VirtualMessageTimeline({
         return;
       }
 
-      const distanceFromBottom = Math.max(
-        0,
-        getBottomScrollTop(container) - container.scrollTop,
-      );
-      liveTailHandoffRef.current =
-        userDetachedRef.current &&
-        distanceFromBottom >= TIMELINE_AUTO_SCROLL_THRESHOLD_PX
-          ? {
-              distanceFromBottom,
-              scrollHeight: container.scrollHeight,
-              scrollTop: container.scrollTop,
-            }
-          : null;
+      liveTailHandoffRef.current = {
+        distanceFromBottom: Math.max(
+          0,
+          getBottomScrollTop(container) - container.scrollTop,
+        ),
+        scrollHeight: container.scrollHeight,
+        scrollTop: container.scrollTop,
+        wasDetached: userDetachedRef.current,
+      };
     },
     [getBottomScrollTop, hasLiveStreamingTail],
   );
@@ -1871,17 +1886,24 @@ export function VirtualMessageTimeline({
 
     const domNearLatest = isTimelineNearLatest(container);
     const domPinnedToLatest = isTimelinePinnedToLatest(container);
-    const domScrollingTowardLatest =
-      container.scrollTop > lastScrollTopRef.current;
+    const rawScrollDelta = container.scrollTop - lastScrollTopRef.current;
+    const userScrollDirection =
+      userScrollDirectionRef.current ??
+      (userScrollIntentRef.current && rawScrollDelta > 1
+        ? "toward-latest"
+        : userScrollIntentRef.current && rawScrollDelta < -1
+          ? "away-from-latest"
+          : null);
+    const userIntendedTowardLatest =
+      userScrollIntentRef.current && userScrollDirection === "toward-latest";
+    const userIntendedAwayFromLatest =
+      userScrollIntentRef.current && userScrollDirection === "away-from-latest";
     const shouldResumeFromDom =
       !suppressFollowResumeFromProgrammaticScrollRef.current &&
-      shouldResumeTimelineFollowFromUserScroll({
-        hasUserScrollIntent: userScrollIntentRef.current,
-        isNearLatest: domNearLatest,
-        isPinnedToLatest: domPinnedToLatest,
-        isStreaming: Boolean(streamingMessageId),
-        scrollingTowardLatest: domScrollingTowardLatest,
-      });
+      (domPinnedToLatest ||
+        (Boolean(streamingMessageId) &&
+          userIntendedTowardLatest &&
+          domNearLatest));
     const preserveStreamingScrollPosition =
       streamingMessageId !== null &&
       userDetachedRef.current &&
@@ -1901,15 +1923,11 @@ export function VirtualMessageTimeline({
         scrollTop < lastScrollTopRef.current - 1 &&
         performance.now() > suppressScrollDeltaDetachUntilRef.current;
       const shouldResumeFollowing =
-        shouldResumeFromDom ||
-        (!suppressFollowResumeFromProgrammaticScrollRef.current &&
-          shouldResumeTimelineFollowFromUserScroll({
-            hasUserScrollIntent: userScrollIntentRef.current,
-            isNearLatest,
-            isPinnedToLatest,
-            isStreaming: Boolean(streamingMessageId),
-            scrollingTowardLatest: scrollTop > lastScrollTopRef.current,
-          }));
+        !suppressFollowResumeFromProgrammaticScrollRef.current &&
+        (isPinnedToLatest ||
+          (Boolean(streamingMessageId) &&
+            userIntendedTowardLatest &&
+            isNearLatest));
 
       if (shouldResumeFollowing) {
         setDetachedFromLatest(false);
@@ -1917,7 +1935,7 @@ export function VirtualMessageTimeline({
           scrollToBottom("auto");
           isNearBottomRef.current = true;
         }
-      } else if (userScrollIntentRef.current || scrollDeltaDetached) {
+      } else if (userIntendedAwayFromLatest || scrollDeltaDetached) {
         // Explicit wheel/touch/pointer/keyboard intent detaches. Raw scrollTop
         // decreases also come from resize clamps and anchor corrections, so
         // the resize handler suppresses this fallback around geometry syncs.
@@ -1928,7 +1946,7 @@ export function VirtualMessageTimeline({
       }
 
       lastScrollTopRef.current = scrollTop;
-      userScrollIntentRef.current = false;
+      clearUserScrollIntent();
       captureLiveTailHandoff(container);
       return;
     }
@@ -1937,7 +1955,7 @@ export function VirtualMessageTimeline({
     if (scrollHeight <= clientHeight) {
       isNearBottomRef.current = true;
       lastScrollTopRef.current = scrollTop;
-      userScrollIntentRef.current = false;
+      clearUserScrollIntent();
       setDetachedFromLatest(false);
       return;
     }
@@ -1950,13 +1968,10 @@ export function VirtualMessageTimeline({
     const isPinnedToLatest = isTimelinePinnedToLatest(container);
     const shouldResumeFollowing =
       !suppressFollowResumeFromProgrammaticScrollRef.current &&
-      shouldResumeTimelineFollowFromUserScroll({
-        hasUserScrollIntent: userScrollIntentRef.current,
-        isNearLatest: isNearBottomRef.current,
-        isPinnedToLatest,
-        isStreaming: Boolean(streamingMessageId),
-        scrollingTowardLatest: scrollTop > lastScrollTopRef.current,
-      });
+      (isPinnedToLatest ||
+        (Boolean(streamingMessageId) &&
+          userIntendedTowardLatest &&
+          isNearBottomRef.current));
 
     if (shouldResumeFollowing) {
       setDetachedFromLatest(false);
@@ -1964,7 +1979,7 @@ export function VirtualMessageTimeline({
         scrollToBottom("auto");
         isNearBottomRef.current = true;
       }
-    } else if (userScrollIntentRef.current || scrollDeltaDetached) {
+    } else if (userIntendedAwayFromLatest || scrollDeltaDetached) {
       // Mirrors the virtual path above.
       setDetachedFromLatest(true);
       stickyScrollUntilRef.current = 0;
@@ -1973,10 +1988,11 @@ export function VirtualMessageTimeline({
     }
 
     lastScrollTopRef.current = scrollTop;
-    userScrollIntentRef.current = false;
+    clearUserScrollIntent();
     captureLiveTailHandoff(container);
   }, [
     captureLiveTailHandoff,
+    clearUserScrollIntent,
     scrollToBottom,
     setDetachedFromLatest,
     streamingMessageId,
@@ -2827,8 +2843,13 @@ export function VirtualMessageTimeline({
       return;
     }
 
-    userScrollIntentRef.current = true;
-    clearProgrammaticFollowResumeSuppression();
+    markUserScrollIntent(
+      event.deltaY < 0
+        ? "away-from-latest"
+        : event.deltaY > 0
+          ? "toward-latest"
+          : null,
+    );
 
     if (event.deltaY < 0) {
       detachFromBottomFollow();
@@ -2855,8 +2876,7 @@ export function VirtualMessageTimeline({
     if (footerRef.current?.contains(event.target as Node)) {
       return;
     }
-    clearProgrammaticFollowResumeSuppression();
-    userScrollIntentRef.current = true;
+    markUserScrollIntent(null);
     if (event.type !== "pointerdown") {
       handleStreamingUserScrollIntent();
     }
@@ -2879,8 +2899,14 @@ export function VirtualMessageTimeline({
       case "PageUp":
       case " ":
       case "Spacebar":
-        clearProgrammaticFollowResumeSuppression();
-        userScrollIntentRef.current = true;
+        markUserScrollIntent(
+          event.key === "ArrowDown" ||
+            event.key === "End" ||
+            event.key === "PageDown" ||
+            ((event.key === " " || event.key === "Spacebar") && !event.shiftKey)
+            ? "toward-latest"
+            : "away-from-latest",
+        );
         handleStreamingUserScrollIntent();
         cancelJumpToLatestAnimation();
         break;
@@ -3236,11 +3262,7 @@ export function VirtualMessageTimeline({
     }
 
     const handoff = liveTailHandoffRef.current;
-    if (
-      !handoff ||
-      handoff.distanceFromBottom < TIMELINE_AUTO_SCROLL_THRESHOLD_PX ||
-      streamingMessageId
-    ) {
+    if (!handoff || streamingMessageId) {
       if (
         liveTailScrollHeightFloorPx > 0 &&
         measuredEffectiveVirtualScrollHeight >= liveTailScrollHeightFloorPx
@@ -3258,11 +3280,16 @@ export function VirtualMessageTimeline({
 
     liveTailHandoffRef.current = null;
 
-    const nextScrollTop = Math.min(
-      getBottomScrollTop(container),
-      Math.max(0, handoff.scrollTop),
-    );
-    container.scrollTop = nextScrollTop;
+    const nextBottomScrollTop = getBottomScrollTop(container);
+    const wasNearLatest =
+      !handoff.wasDetached &&
+      handoff.distanceFromBottom < TIMELINE_AUTO_SCROLL_THRESHOLD_PX;
+    const nextScrollTop = wasNearLatest
+      ? nextBottomScrollTop
+      : Math.min(nextBottomScrollTop, Math.max(0, handoff.scrollTop));
+    if (Math.abs(container.scrollTop - nextScrollTop) > 1) {
+      container.scrollTop = nextScrollTop;
+    }
     const distanceFromBottom = Math.max(
       0,
       getBottomScrollTop(container) - container.scrollTop,
