@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -40,6 +41,7 @@ import {
   useChatSessionStore,
   type ChatSession,
 } from "../stores/chatSessionStore";
+import type { ChatInputControls } from "../types";
 import { TerminalPanel } from "@/features/terminal/ui/TerminalPanel";
 import {
   queueTerminalCommand,
@@ -57,6 +59,7 @@ import { eventMatchesShortcutCommand } from "@/features/shortcuts/lib/shortcutRe
 import { useChatTranscriptSearch } from "@/features/chat/hooks/useChatTranscriptSearch";
 import type { TranscriptSearchBackend } from "@/features/chat/lib/transcriptSearchBackend";
 import { scheduleAfterNextPaint } from "@/app/lib/scheduleAfterNextPaint";
+import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 
 const CHAT_COMPOSER_SHELL_CLASS =
   "rounded-sm bg-surface-chat-composer [backdrop-filter:var(--backdrop-composer-glass)] [-webkit-backdrop-filter:var(--backdrop-composer-glass)]";
@@ -293,6 +296,11 @@ interface ChatViewProps {
   }) => void;
   onOpenProjectSettings?: (projectId: string) => void;
   leftViewportOcclusionPx?: number;
+  composerHandoffRequest?: number;
+  composerHandoffSessionId?: string | null;
+  composerHandoffActive?: boolean;
+  composerHandoffInProgress?: boolean;
+  onComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
 }
 
 export function ChatView({
@@ -305,10 +313,16 @@ export function ChatView({
   onCreateProject,
   onOpenProjectSettings,
   leftViewportOcclusionPx = 0,
+  composerHandoffRequest = 0,
+  composerHandoffSessionId = null,
+  composerHandoffActive = false,
+  composerHandoffInProgress = false,
+  onComposerHandoffTarget,
 }: ChatViewProps) {
   const { t } = useTranslation("chat");
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
+  const composerShellRef = useRef<HTMLDivElement | null>(null);
   const [closingTerminalTabId, setClosingTerminalTabId] = useState<
     string | null
   >(null);
@@ -332,6 +346,54 @@ export function ChatView({
     readOnly: Boolean(readOnlyStatus),
     onCreatePersonaRequested: onCreatePersona,
   });
+  const activeSessionClientSessionId = activeSession?.clientSessionId ?? null;
+
+  useLayoutEffect(() => {
+    const isComposerHandoffTargetSession =
+      composerHandoffSessionId !== null &&
+      (sessionId === composerHandoffSessionId ||
+        activeSessionClientSessionId === composerHandoffSessionId);
+
+    if (
+      composerHandoffRequest <= 0 ||
+      !composerHandoffInProgress ||
+      !isComposerHandoffTargetSession
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const measure = () => {
+      if (cancelled) {
+        return;
+      }
+
+      const rect = composerShellRef.current?.getBoundingClientRect();
+      if (rect) {
+        onComposerHandoffTarget?.({
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        });
+      }
+    };
+
+    const frameId = window.requestAnimationFrame(measure);
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [
+    composerHandoffInProgress,
+    composerHandoffRequest,
+    activeSessionClientSessionId,
+    composerHandoffSessionId,
+    onComposerHandoffTarget,
+    sessionId,
+  ]);
   const effectiveSession = controller.session ?? activeSession ?? null;
   const isContextPanelCompactViewport = useChatContextPanelCompactViewport(
     leftViewportOcclusionPx,
@@ -748,6 +810,29 @@ export function ChatView({
   const agentBuilderEmptyPrompt = t("emptyState.buildAgentPrompt");
   const agentBuilderComposerPlaceholder = t("input.agentBuilderPlaceholder");
   const isReadOnly = Boolean(readOnlyStatus);
+  const chatInputControls = useMemo<ChatInputControls | undefined>(() => {
+    if (isReadOnly) {
+      return {
+        agentModelPicker: false,
+        attachments: false,
+        autoFocus: false,
+        fileMentions: false,
+        projectPicker: false,
+        skills: false,
+        voice: false,
+      };
+    }
+
+    if (effectiveSession?.intent === "build-agent") {
+      return {
+        agentModelPicker: false,
+        ...(composerHandoffActive ? { autoFocus: false } : {}),
+        projectPicker: false,
+      };
+    }
+
+    return composerHandoffActive ? { autoFocus: false } : undefined;
+  }, [composerHandoffActive, effectiveSession?.intent, isReadOnly]);
   const shouldStageTranscript = shouldStageInitialTranscript(
     controller.messages,
     controller.isLoadingHistory,
@@ -766,6 +851,8 @@ export function ChatView({
   const timelineMessages = isPreparingInitialTranscript
     ? []
     : controller.messages;
+  const suppressEmptyConversationPlaceholder =
+    composerHandoffInProgress || controller.queue.queuedMessage !== null;
 
   // Only gate the first render for a session. Later live updates should stream
   // into the mounted timeline without showing the skeleton again.
@@ -862,10 +949,10 @@ export function ChatView({
 
   // The composer is owned by the timeline so it stays mounted across loading,
   // empty, and populated states without losing focus or draft text.
-  const footerStatus = readOnlyStatus ? (
+  const footerStatus = composerHandoffActive ? null : readOnlyStatus ? (
     <div
       className={cn(
-        "flex h-8 items-center gap-2 px-3 text-sm",
+        "chat-response-status-enter flex h-8 items-center gap-2 px-3 text-sm",
         CHAT_RESPONDING_PILL_CLASS,
       )}
     >
@@ -879,7 +966,7 @@ export function ChatView({
     <AnimatePresence initial={false}>
       <div
         className={cn(
-          "flex h-8 items-center gap-2 px-3",
+          "chat-response-status-enter flex h-8 items-center gap-2 px-3",
           CHAT_RESPONDING_PILL_CLASS,
         )}
       >
@@ -912,9 +999,11 @@ export function ChatView({
   const composerFooter = (
     <div className="px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-inline)]">
       <div
+        ref={composerShellRef}
         className={cn(
           "pointer-events-auto mx-auto w-full max-w-[var(--chat-composer-max-width)]",
           CHAT_COMPOSER_SHELL_CLASS,
+          composerHandoffActive && "invisible pointer-events-none",
         )}
       >
         <ChatInput
@@ -922,24 +1011,7 @@ export function ChatView({
           placeholder={
             isAgentBuilderSession ? agentBuilderComposerPlaceholder : undefined
           }
-          controls={
-            isReadOnly
-              ? {
-                  agentModelPicker: false,
-                  attachments: false,
-                  autoFocus: false,
-                  fileMentions: false,
-                  projectPicker: false,
-                  skills: false,
-                  voice: false,
-                }
-              : effectiveSession?.intent === "build-agent"
-                ? {
-                    agentModelPicker: false,
-                    projectPicker: false,
-                  }
-                : undefined
-          }
+          controls={chatInputControls}
           composerActions={{
             onSend: controller.handleSend,
             onSteerMessage: controller.steerDraftMessage,
@@ -955,8 +1027,12 @@ export function ChatView({
               effectiveSession?.creationState != null ||
               isAgentBuilderTargetPending,
             sendDisabledReason,
-            queuedMessage: controller.queue.queuedMessage,
-            onDismissQueue: controller.queue.dismiss,
+            queuedMessage: composerHandoffInProgress
+              ? null
+              : controller.queue.queuedMessage,
+            onDismissQueue: composerHandoffInProgress
+              ? undefined
+              : controller.queue.dismiss,
             onStop: isReadOnly ? undefined : controller.stopStreaming,
             isStreaming:
               !isReadOnly &&
@@ -1022,6 +1098,8 @@ export function ChatView({
 
   const conversationPlaceholder = showTimelineLoading ? (
     <ChatLoadingSkeleton />
+  ) : suppressEmptyConversationPlaceholder ? (
+    <div className="flex w-full flex-1" aria-hidden="true" />
   ) : (
     <div className="flex w-full flex-1 flex-col items-center justify-center px-6">
       <AnimatePresence initial={false}>
@@ -1106,7 +1184,8 @@ export function ChatView({
     >
       <div
         className={cn(
-          "page-transition flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
+          "flex h-full min-w-0 px-[var(--spacing-app-panel-gutter-inline)] pb-[var(--spacing-app-panel-gutter-bottom)] pt-[var(--spacing-app-panel-gutter-top)]",
+          !composerHandoffActive && "page-transition",
           hasVisibleRightRail && "gap-[var(--spacing-app-panel-gutter-inline)]",
         )}
       >

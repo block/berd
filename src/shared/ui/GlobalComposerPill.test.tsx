@@ -614,6 +614,46 @@ describe("GlobalComposerPill", () => {
     expect(screen.getByRole("textbox")).not.toHaveFocus();
   });
 
+  it("suppresses the empty placeholder while the composer handoff is visible", () => {
+    render(
+      <GlobalComposerPill
+        onSend={vi.fn()}
+        placement="handoff"
+        handoffSourceRect={{ left: 10, top: 20, width: 500, height: 72 }}
+        handoffTargetRect={{ left: 30, top: 400, width: 420, height: 64 }}
+      />,
+    );
+
+    const textbox = screen.getByRole("textbox");
+    expect(textbox).toHaveAttribute("placeholder", "");
+    expect(textbox).toHaveClass("caret-transparent");
+    expect(textbox).toHaveAttribute("readonly");
+  });
+
+  it("keeps the centered composer focused when starting a send handoff", async () => {
+    const user = userEvent.setup();
+    const onSend = vi.fn();
+    const onHandoffStart = vi.fn();
+    render(
+      <GlobalComposerPill
+        onSend={onSend}
+        onHandoffStart={onHandoffStart}
+        placement="centered"
+      />,
+    );
+    const textbox = screen.getByRole("textbox");
+
+    await user.click(textbox);
+    await user.type(textbox, "Hi");
+    expect(textbox).toHaveFocus();
+
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    expect(onHandoffStart).toHaveBeenCalled();
+    expect(onSend).toHaveBeenCalledWith("Hi");
+    expect(textbox).toHaveFocus();
+  });
+
   it("disables send until there is sendable content", async () => {
     const user = userEvent.setup();
     const onSend = renderGlobalComposer();

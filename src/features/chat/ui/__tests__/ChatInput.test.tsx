@@ -583,6 +583,18 @@ describe("ChatInput", () => {
     expect(screen.getByRole("textbox")).not.toHaveFocus();
   });
 
+  it("focuses when autofocus is re-enabled", async () => {
+    const { rerender } = render(
+      <ChatInput onSend={vi.fn()} controls={{ autoFocus: false }} />,
+    );
+    const textbox = screen.getByRole("textbox");
+    expect(textbox).not.toHaveFocus();
+
+    rerender(<ChatInput onSend={vi.fn()} controls={{ autoFocus: true }} />);
+
+    await waitFor(() => expect(textbox).toHaveFocus());
+  });
+
   it("shows the selected project name in the toolbar", () => {
     render(
       <ChatInput

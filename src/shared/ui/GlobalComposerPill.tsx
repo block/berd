@@ -6,6 +6,7 @@ import {
   useRef,
   useId,
   useState,
+  type CSSProperties,
 } from "react";
 import { IconArrowUp, IconMicrophone, IconPlus } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
@@ -58,15 +59,28 @@ export interface GlobalComposeOptions {
   };
 }
 
+export interface GlobalComposerHandoffRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
 interface GlobalComposerPillProps {
   focusRequest?: number;
   onSend: (text: string, options?: GlobalComposeOptions) => void;
+  onDismiss?: () => void;
+  onHandoffStart?: (rect: GlobalComposerHandoffRect) => void;
   suggestedPersonaId?: string | null;
   reasoningEffort?: ChatInputReasoningEffort;
   reasoningEffortModelSelection?: {
     providerId?: string | null;
     modelId?: string | null;
   };
+  placement?: "docked" | "centered" | "handoff";
+  mainLeftOffsetPx?: number;
+  handoffSourceRect?: GlobalComposerHandoffRect | null;
+  handoffTargetRect?: GlobalComposerHandoffRect | null;
 }
 
 interface ModelSelection {
@@ -138,9 +152,15 @@ function getPreferredModel(
 export function GlobalComposerPill({
   focusRequest = 0,
   onSend,
+  onDismiss,
+  onHandoffStart,
   suggestedPersonaId = null,
   reasoningEffort,
   reasoningEffortModelSelection,
+  placement = "docked",
+  mainLeftOffsetPx = 0,
+  handoffSourceRect,
+  handoffTargetRect,
 }: GlobalComposerPillProps) {
   const { t } = useTranslation("chat");
   const { providers, providersLoading, selectedProvider, setSelectedProvider } =
@@ -169,7 +189,9 @@ export function GlobalComposerPill({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [containerElement, setContainerElement] =
     useState<HTMLDivElement | null>(null);
-  const lastFocusRequestRef = useRef(focusRequest);
+  const lastFocusRequestRef = useRef(
+    placement === "centered" ? 0 : focusRequest,
+  );
   const [previousSuggestedPersonaId, setPreviousSuggestedPersonaId] = useState<
     string | null
   >(suggestedPersonaId);
@@ -241,7 +263,9 @@ export function GlobalComposerPill({
     selectedProjectId !== null ||
     ((providerOverride !== null || modelOverride !== null) &&
       !personaOverrideActiveRef.current);
-  const canSend = hasSendableContent && !attachmentWorkPending;
+  const handoffActive = placement === "handoff";
+  const canSend =
+    hasSendableContent && !attachmentWorkPending && !handoffActive;
 
   // Adopt the route-suggested persona inline as the route, draft, or selection
   // changes — instead of in an effect — so the composer never paints a stale
@@ -604,32 +628,53 @@ export function GlobalComposerPill({
         options.sendOptions = sendOptions;
       }
 
+      const clearComposerDraft = () => {
+        setText("");
+        clearAttachments();
+        setProviderOverride(null);
+        setModelOverride(null);
+        setSelectedProjectId(null);
+        setSelectedPersonaId(null);
+        personaSelectionSourceRef.current = "none";
+        userTouchedRoutePersonaRef.current = false;
+        personaOverrideActiveRef.current = false;
+        personaOverrideAppliedForRef.current = null;
+        personaOverrideUserOverrideForRef.current = null;
+        setSelectedSkills([]);
+      };
+
+      if (placement === "centered") {
+        const rect = containerRef.current?.getBoundingClientRect();
+        if (rect) {
+          onHandoffStart?.({
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+          });
+        }
+        clearComposerDraft();
+      }
+
       if (Object.keys(options).length > 0) {
         onSend(messageText, options);
       } else {
         onSend(messageText);
       }
-      setText("");
-      clearAttachments();
-      setProviderOverride(null);
-      setModelOverride(null);
-      setSelectedProjectId(null);
-      setSelectedPersonaId(null);
-      personaSelectionSourceRef.current = "none";
-      userTouchedRoutePersonaRef.current = false;
-      personaOverrideActiveRef.current = false;
-      personaOverrideAppliedForRef.current = null;
-      personaOverrideUserOverrideForRef.current = null;
-      setSelectedSkills([]);
+      if (placement !== "centered") {
+        clearComposerDraft();
+      }
       return true;
     },
     [
       attachments,
       clearAttachments,
       modelOverride,
+      onHandoffStart,
       onSend,
       providerOverride,
       activeReasoningEffort?.config,
+      placement,
       selectedPersonaId,
       selectedProjectId,
       selectedSkills,
@@ -705,6 +750,7 @@ export function GlobalComposerPill({
     : dictation.isTranscribing
       ? t("toolbar.voiceInputTranscribing")
       : placeholder;
+  const visiblePlaceholder = handoffActive ? "" : effectivePlaceholder;
   useFocusRegion(
     useMemo(
       () => ({
@@ -773,12 +819,30 @@ export function GlobalComposerPill({
     containerRef.current = node;
     setContainerElement(node);
   }, []);
+  const composerStyle = {
+    "--global-composer-main-left": `${mainLeftOffsetPx}px`,
+    "--global-composer-from-left": `${handoffSourceRect?.left ?? 0}px`,
+    "--global-composer-from-top": `${handoffSourceRect?.top ?? 0}px`,
+    "--global-composer-from-width": `${handoffSourceRect?.width ?? 0}px`,
+    "--global-composer-from-height": `${handoffSourceRect?.height ?? 0}px`,
+    "--global-composer-to-left": `${handoffTargetRect?.left ?? handoffSourceRect?.left ?? 0}px`,
+    "--global-composer-to-top": `${handoffTargetRect?.top ?? handoffSourceRect?.top ?? 0}px`,
+    "--global-composer-to-width": `${handoffTargetRect?.width ?? handoffSourceRect?.width ?? 0}px`,
+    "--global-composer-to-height": `${handoffTargetRect?.height ?? handoffSourceRect?.height ?? 0}px`,
+  } as CSSProperties;
+  const placementClassName =
+    placement === "handoff" && handoffSourceRect
+      ? "global-composer-pill-flip fixed overflow-hidden"
+      : placement === "docked"
+        ? "bottom-3 right-3 w-[482px] max-w-[calc(100vw-24px)]"
+        : "left-[calc(var(--global-composer-main-left)+(100vw-var(--global-composer-main-left))/2)] top-1/2 w-[min(680px,calc(100vw-var(--global-composer-main-left)-48px))] max-w-[calc(100vw-24px)] -translate-x-1/2 -translate-y-1/2 shadow-global-composer-pill-hover";
 
   return (
     <div
       ref={handleContainerRef}
       role="region"
       aria-label={t("globalPill.ariaLabel")}
+      data-placement={placement}
       onDragEnter={handleDragEnter}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -789,8 +853,16 @@ export function GlobalComposerPill({
           setFocused(false);
         }
       }}
+      style={composerStyle}
       className={cn(
-        "group relative fixed bottom-3 right-3 z-40 isolate flex w-[482px] max-w-[calc(100vw-24px)] flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-shadow duration-300 ease-out hover:shadow-global-composer-pill-hover",
+        "global-composer-pill group relative fixed z-40 isolate flex flex-col rounded-composer bg-sidebar py-2 pl-4 pr-2.5 backdrop-blur-md transition-[box-shadow,opacity,transform] duration-300 ease-out hover:shadow-global-composer-pill-hover",
+        placementClassName,
+        placement === "centered" && "global-composer-pill-centered",
+        placement === "handoff" &&
+          "pointer-events-none global-composer-pill-handoff",
+        placement === "handoff" &&
+          !handoffTargetRect &&
+          "global-composer-pill-handoff-pending",
       )}
     >
       {isAttachmentDragOver ? (
@@ -911,15 +983,26 @@ export function GlobalComposerPill({
                   ) {
                     event.preventDefault();
                     handleSend();
+                    return;
+                  }
+                  if (
+                    event.key === "Escape" &&
+                    !mentionOpen &&
+                    placement !== "docked"
+                  ) {
+                    event.preventDefault();
+                    onDismiss?.();
                   }
                 }}
                 onPaste={handlePaste}
                 onFocus={() => setFocused(true)}
-                placeholder={effectivePlaceholder}
+                placeholder={visiblePlaceholder}
+                readOnly={handoffActive}
                 aria-controls={mentionOpen ? mentionListboxId : undefined}
                 aria-describedby={mentionOpen ? mentionStatusId : undefined}
                 className={cn(
                   "focus-override max-h-[200px] w-full resize-none appearance-none overflow-y-auto overscroll-contain scrollbar-none border-0 bg-transparent text-sm leading-5 text-foreground outline-none placeholder:text-foreground/40 placeholder:transition-colors placeholder:duration-200 placeholder:ease-out group-hover:placeholder:text-foreground group-focus-within:placeholder:text-foreground focus:outline-none focus:ring-0",
+                  handoffActive && "caret-transparent",
                   expanded
                     ? "min-h-10 py-2.5 pr-2"
                     : "h-8 min-h-0 py-0 pr-[5.75rem]",
@@ -974,6 +1057,7 @@ export function GlobalComposerPill({
             onClick={() => {
               runAttachmentWork(handleAttachFiles);
             }}
+            disabled={handoffActive}
             variant="composer-action"
             size="icon-pill-sm"
             aria-label={t("attachments.chooseFilesDialogTitle")}

@@ -1502,7 +1502,11 @@ export const designSystemComponentManifest = [
   {
     name: "Global Composer Pill",
     source: "src/shared/ui/GlobalComposerPill.tsx",
-    exports: ["GlobalComposeOptions", "GlobalComposerPill"],
+    exports: [
+      "GlobalComposeOptions",
+      "GlobalComposerHandoffRect",
+      "GlobalComposerPill",
+    ],
     slots: [],
     cva: [],
     tokenClasses: [

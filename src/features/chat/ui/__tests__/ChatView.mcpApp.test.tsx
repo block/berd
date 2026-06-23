@@ -427,6 +427,126 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
+  it("keeps the empty-state placeholder visible while a blank draft session is pending", () => {
+    mocks.useChatSessionController.mockReturnValue({
+      ...mocks.useChatSessionController(),
+      messages: [],
+    });
+
+    render(
+      <ChatView
+        sessionId="draft-session"
+        activeSession={{
+          ...chatSessionWithWorkingDir("~/goose artifacts"),
+          id: "draft-session",
+          creationState: "pending",
+        }}
+      />,
+    );
+
+    expect(screen.getByText("emptyState.startAConversation")).toBeTruthy();
+
+    const timelineProps = mocks.messageTimelineSpy.mock.calls.at(-1)?.[0] as {
+      footer?: unknown;
+      showPlaceholder?: boolean;
+    };
+    expect(timelineProps.footer).toBeTruthy();
+    expect(timelineProps.showPlaceholder).toBe(false);
+  });
+
+  it("measures a static composer handoff target without page-enter motion", () => {
+    const rect = {
+      left: 10,
+      top: 20,
+      width: 300,
+      height: 64,
+      right: 310,
+      bottom: 84,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    } as DOMRect;
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    const getBoundingClientRectSpy = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(rect);
+    const onComposerHandoffTarget = vi.fn();
+
+    try {
+      render(
+        <ChatView
+          sessionId="created-session"
+          activeSession={{
+            ...chatSessionWithWorkingDir("~/goose artifacts"),
+            id: "created-session",
+            clientSessionId: "draft-session",
+          }}
+          composerHandoffActive
+          composerHandoffInProgress
+          composerHandoffRequest={1}
+          composerHandoffSessionId="draft-session"
+          onComposerHandoffTarget={onComposerHandoffTarget}
+        />,
+      );
+
+      expect(document.querySelector(".page-transition")).toBeNull();
+      expect(onComposerHandoffTarget).toHaveBeenCalledTimes(1);
+      expect(onComposerHandoffTarget).toHaveBeenCalledWith({
+        left: 10,
+        top: 20,
+        width: 300,
+        height: 64,
+      });
+      const chatInputProps = mocks.chatInputSpy.mock.calls.at(-1)?.[0] as {
+        controls?: { autoFocus?: boolean };
+      };
+      expect(chatInputProps.controls?.autoFocus).toBe(false);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      getBoundingClientRectSpy.mockRestore();
+    }
+  });
+
+  it("ignores composer handoff target measurements from non-destination chats", () => {
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, "requestAnimationFrame")
+      .mockImplementation((callback) => {
+        callback(0);
+        return 1;
+      });
+    const getBoundingClientRectSpy = vi.spyOn(
+      HTMLElement.prototype,
+      "getBoundingClientRect",
+    );
+    const onComposerHandoffTarget = vi.fn();
+
+    try {
+      render(
+        <ChatView
+          sessionId="session-1"
+          activeSession={chatSessionWithWorkingDir("~/goose artifacts")}
+          composerHandoffActive
+          composerHandoffInProgress
+          composerHandoffRequest={1}
+          composerHandoffSessionId="session-2"
+          onComposerHandoffTarget={onComposerHandoffTarget}
+        />,
+      );
+
+      expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+      expect(getBoundingClientRectSpy).not.toHaveBeenCalled();
+      expect(onComposerHandoffTarget).not.toHaveBeenCalled();
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+      getBoundingClientRectSpy.mockRestore();
+    }
+  });
+
   it("renders the selected persona's avatar above the empty-state text for a fresh chat", () => {
     const persona = {
       id: "gloopy",

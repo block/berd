@@ -943,7 +943,7 @@ describe("AppShell global navigation", () => {
     );
   });
 
-  it("returns home and focuses the global composer with Cmd+N from chat", async () => {
+  it("keeps the current view and focuses a centered global composer with Cmd+N from chat", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
@@ -958,20 +958,176 @@ describe("AppShell global navigation", () => {
 
     await user.keyboard("{Meta>}n{/Meta}");
 
-    await waitFor(() => {
-      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
-    });
     await act(async () => {
       flushAfterNextPaintCallbacks();
     });
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
     const textbox = await screen.findByPlaceholderText("Start a conversation");
     await waitFor(() => {
       expect(textbox).toHaveFocus();
     });
+    expect(textbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "centered",
+    );
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
   });
 
-  it("drops pending Cmd+N focus when the global composer remains hidden", async () => {
+  it("starts centered composer sends on a background draft before the visual handoff changes chat", async () => {
+    vi.useFakeTimers();
+    try {
+      const session: ChatSession = {
+        id: "session-1",
+        title: "Active chat",
+        providerId: "goose",
+        workingDir: "~/goose artifacts",
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+        messageCount: 1,
+      };
+      useChatSessionStore.setState({
+        sessions: [session],
+        activeSessionId: null,
+      });
+      renderAppShell();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
+      expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+      mockAcpCreateSession.mockClear();
+
+      fireEvent.keyDown(window, { key: "n", metaKey: true });
+      const textbox = screen.getByPlaceholderText("Start a conversation");
+      fireEvent.change(textbox, {
+        target: { value: "send behind the animation" },
+      });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+
+      const queuedMessages = useChatStore.getState().queuedMessageBySession;
+      const [draftSessionId] = Object.keys(queuedMessages);
+      expect(draftSessionId).toEqual(expect.any(String));
+      expect(draftSessionId).not.toBe("session-1");
+      expect(queuedMessages[draftSessionId]).toMatchObject({
+        text: "send behind the animation",
+      });
+      expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+      expect(screen.getByTestId("rendered-session-id")).toHaveTextContent(
+        "session-1",
+      );
+
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(mockAcpCreateSession).toHaveBeenCalledTimes(1);
+
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+      expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+        "session-1",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("skips the centered composer handoff delay for reduced-motion users", async () => {
+    const originalMatchMedia = window.matchMedia;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: query === "(prefers-reduced-motion: reduce)",
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    try {
+      const session: ChatSession = {
+        id: "session-1",
+        title: "Active chat",
+        providerId: "goose",
+        workingDir: "~/goose artifacts",
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+        messageCount: 1,
+      };
+      useChatSessionStore.setState({
+        sessions: [session],
+        activeSessionId: null,
+      });
+      renderAppShell();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
+      fireEvent.keyDown(window, { key: "n", metaKey: true });
+      const textbox = screen.getByPlaceholderText("Start a conversation");
+      fireEvent.change(textbox, {
+        target: { value: "send without animation" },
+      });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+        "session-1",
+      );
+      expect(
+        screen.queryByPlaceholderText("Start a conversation"),
+      ).not.toBeInTheDocument();
+    } finally {
+      window.matchMedia = originalMatchMedia;
+    }
+  });
+
+  it("keeps centered composer send activation after navigation resets the visual handoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const session: ChatSession = {
+        id: "session-1",
+        title: "Active chat",
+        providerId: "goose",
+        workingDir: "~/goose artifacts",
+        createdAt: "2026-06-09T00:00:00.000Z",
+        updatedAt: "2026-06-09T00:00:00.000Z",
+        messageCount: 1,
+      };
+      useChatSessionStore.setState({
+        sessions: [session],
+        activeSessionId: null,
+      });
+      renderAppShell();
+
+      fireEvent.click(screen.getByRole("button", { name: "Open session 1" }));
+      fireEvent.keyDown(window, { key: "n", metaKey: true });
+      const textbox = screen.getByPlaceholderText("Start a conversation");
+      fireEvent.change(textbox, {
+        target: { value: "send then navigate quickly" },
+      });
+      fireEvent.keyDown(textbox, { key: "Enter" });
+
+      const [draftSessionId] = Object.keys(
+        useChatStore.getState().queuedMessageBySession,
+      );
+      expect(draftSessionId).toEqual(expect.any(String));
+
+      fireEvent.click(screen.getByRole("button", { name: "Sidebar skills" }));
+      expect(screen.getByTestId("active-view")).toHaveTextContent("skills");
+
+      act(() => {
+        vi.advanceTimersByTime(220);
+      });
+
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+      expect(useChatSessionStore.getState().activeSessionId).not.toBe(
+        "session-1",
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not queue Cmd+N focus when the global composer remains hidden", async () => {
     const user = userEvent.setup();
     const { rerender } = renderAppShell(<div>Custom shell content</div>);
 
@@ -985,16 +1141,15 @@ describe("AppShell global navigation", () => {
 
     await user.keyboard("{Meta>}n{/Meta}");
 
-    await waitFor(() => {
-      expect(useChatSessionStore.getState().activeSessionId).toBeNull();
-    });
+    expect(useChatSessionStore.getState().activeSessionId).not.toBeNull();
     rerender(appShellWithTheme());
     await act(async () => {
       flushAfterNextPaintCallbacks();
     });
 
-    const textbox = await screen.findByPlaceholderText("Start a conversation");
-    expect(textbox).not.toHaveFocus();
+    expect(
+      screen.queryByPlaceholderText("Start a conversation"),
+    ).not.toBeInTheDocument();
   });
 
   it("opens a blank chat before ACP session creation finishes", async () => {
@@ -1590,7 +1745,29 @@ describe("AppShell global navigation", () => {
     });
   });
 
-  it("prompts before leaving unsaved automation builder changes with keyboard navigation", async () => {
+  it("prompts before leaving unsaved automation builder changes with keyboard search navigation", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Mark automation edits unsaved" }),
+    );
+
+    await user.keyboard("{Meta>}k{/Meta}");
+
+    expect(
+      await screen.findByText("Unsaved automation changes"),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+  });
+
+  it("prompts before opening the centered composer from unsaved automation builder changes", async () => {
     const user = userEvent.setup();
     renderAppShell();
 
@@ -1610,6 +1787,60 @@ describe("AppShell global navigation", () => {
       await screen.findByText("Unsaved automation changes"),
     ).toBeInTheDocument();
     expect(screen.getByTestId("active-view")).toHaveTextContent("automations");
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    const textbox = await screen.findByPlaceholderText("Start a conversation");
+    await waitFor(() => {
+      expect(textbox).toHaveFocus();
+    });
+    expect(textbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "centered",
+    );
+  });
+
+  it("resets a centered composer when entering a route that hides it", async () => {
+    const user = userEvent.setup();
+    renderAppShell();
+
+    await user.click(
+      screen.getByRole("button", { name: "Sidebar automations" }),
+    );
+    await user.keyboard("{Meta>}n{/Meta}");
+
+    const centeredTextbox = await screen.findByPlaceholderText(
+      "Start a conversation",
+    );
+    expect(centeredTextbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "centered",
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Open automation builder" }),
+    );
+    expect(
+      screen.queryByPlaceholderText("Start a conversation"),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Open automation history" }),
+    );
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
+
+    const dockedTextbox = await screen.findByPlaceholderText(
+      "Start a conversation",
+    );
+    expect(dockedTextbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "docked",
+    );
   });
 
   it("keeps Settings section navigation in the global stack", async () => {

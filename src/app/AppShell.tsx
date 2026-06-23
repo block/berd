@@ -107,6 +107,7 @@ import { useSessionWindowSupport } from "@/features/chat/hooks/useSessionWindowS
 import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindowTracking";
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
+import { cn } from "@/shared/lib/cn";
 import { setTerminalRenderingSuspended } from "@/features/terminal/lib/terminalSessionManager";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
@@ -123,6 +124,7 @@ import {
 import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitcher";
 import {
   GlobalComposerPill,
+  type GlobalComposerHandoffRect,
   type GlobalComposeOptions,
 } from "@/shared/ui/GlobalComposerPill";
 import { acpCreateSession, acpSetSessionConfigOption } from "@/shared/api/acp";
@@ -179,6 +181,11 @@ const APP_NAVIGATION_HISTORY_LIMIT = 50;
 const PINNED_CHAT_HYDRATION_CONCURRENCY = 5;
 const DESIGN_SYSTEM_INSPECTOR_VISIBLE_STORAGE_KEY =
   "goose:design-system-inspector-visible:v2";
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+const GLOBAL_COMPOSER_HANDOFF_MS = 620;
+const GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS = 220;
+
+type GlobalComposerPlacement = "docked" | "centered" | "handoff";
 
 const current = (id: string, label: string): TopBarBreadcrumb => ({
   id,
@@ -210,6 +217,20 @@ function getOptimisticSessionCwd(project?: ProjectInfo | null): string {
     .map((directory) => directory.trim())
     .find((directory) => directory.length > 0);
   return projectWorkingDir ?? getOptimisticArtifactCwd();
+}
+
+function resolveLiveSessionId(sessionId: string): string | null {
+  const session = useChatSessionStore
+    .getState()
+    .sessions.find(
+      (candidate) =>
+        candidate.id === sessionId || candidate.clientSessionId === sessionId,
+    );
+  return session && !session.archivedAt ? session.id : null;
+}
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.(REDUCED_MOTION_QUERY).matches ?? false;
 }
 
 function useWindowFullscreenState() {
@@ -377,7 +398,18 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const [agentsPersonaId, setAgentsPersonaId] = useState<string | null>(null);
   const [globalComposerFocusRequest, setGlobalComposerFocusRequest] =
     useState(0);
-  const pendingGlobalComposerFocusViewRef = useRef<AppView | null>(null);
+  const [globalComposerPlacement, setGlobalComposerPlacement] =
+    useState<GlobalComposerPlacement>("docked");
+  const [chatComposerHandoffRequest, setChatComposerHandoffRequest] =
+    useState(0);
+  const [chatComposerHandoffSessionId, setChatComposerHandoffSessionId] =
+    useState<string | null>(null);
+  const [globalComposerHandoffSourceRect, setGlobalComposerHandoffSourceRect] =
+    useState<GlobalComposerHandoffRect | null>(null);
+  const [globalComposerHandoffTargetRect, setGlobalComposerHandoffTargetRect] =
+    useState<GlobalComposerHandoffRect | null>(null);
+  const globalComposerHandoffTimeoutRef = useRef<number | null>(null);
+  const globalComposerRouteSwapTimeoutRef = useRef<number | null>(null);
   const [automationsRoute, setAutomationsRoute] =
     useState<AutomationNavigationRoute>({ surface: "overview" });
   const [builderbotRoute, setBuilderbotRoute] =
@@ -554,6 +586,75 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
     return () => window.clearTimeout(timeoutId);
   }, []);
+  const clearGlobalComposerHandoffTimer = useCallback(() => {
+    if (globalComposerHandoffTimeoutRef.current !== null) {
+      window.clearTimeout(globalComposerHandoffTimeoutRef.current);
+      globalComposerHandoffTimeoutRef.current = null;
+    }
+  }, []);
+
+  const clearGlobalComposerRouteSwapTimer = useCallback(() => {
+    if (globalComposerRouteSwapTimeoutRef.current !== null) {
+      window.clearTimeout(globalComposerRouteSwapTimeoutRef.current);
+      globalComposerRouteSwapTimeoutRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearGlobalComposerHandoffTimer();
+      clearGlobalComposerRouteSwapTimer();
+    };
+  }, [clearGlobalComposerHandoffTimer, clearGlobalComposerRouteSwapTimer]);
+
+  const resetGlobalComposerTransition = useCallback(() => {
+    clearGlobalComposerHandoffTimer();
+    setGlobalComposerPlacement("docked");
+    setChatComposerHandoffSessionId(null);
+    setGlobalComposerHandoffSourceRect(null);
+    setGlobalComposerHandoffTargetRect(null);
+  }, [clearGlobalComposerHandoffTimer]);
+
+  const finishGlobalComposerHandoff = useCallback(() => {
+    resetGlobalComposerTransition();
+  }, [resetGlobalComposerTransition]);
+
+  useEffect(() => {
+    if (globalComposerPlacement !== "handoff") {
+      return;
+    }
+
+    if (globalComposerHandoffTimeoutRef.current !== null) {
+      window.clearTimeout(globalComposerHandoffTimeoutRef.current);
+      globalComposerHandoffTimeoutRef.current = null;
+    }
+
+    if (prefersReducedMotion()) {
+      finishGlobalComposerHandoff();
+      return;
+    }
+
+    const hasMeasuredHandoff =
+      globalComposerHandoffSourceRect && globalComposerHandoffTargetRect;
+    globalComposerHandoffTimeoutRef.current = window.setTimeout(
+      finishGlobalComposerHandoff,
+      hasMeasuredHandoff
+        ? GLOBAL_COMPOSER_HANDOFF_MS
+        : GLOBAL_COMPOSER_HANDOFF_MS + 500,
+    );
+
+    return () => {
+      if (globalComposerHandoffTimeoutRef.current !== null) {
+        window.clearTimeout(globalComposerHandoffTimeoutRef.current);
+        globalComposerHandoffTimeoutRef.current = null;
+      }
+    };
+  }, [
+    finishGlobalComposerHandoff,
+    globalComposerHandoffSourceRect,
+    globalComposerHandoffTargetRect,
+    globalComposerPlacement,
+  ]);
   const startupReady = startup.ready && !startup.error;
   const migrationGate = useMigrationGate(startupReady);
   const migrationSettled =
@@ -1495,6 +1596,89 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     ],
   );
 
+  const createBackgroundDraftChat = useCallback(
+    (
+      title = DEFAULT_CHAT_TITLE,
+      project?: ProjectInfo,
+      options: {
+        providerId?: string;
+        modelId?: string;
+        modelName?: string;
+      } = {},
+    ) => {
+      const tStart = performance.now();
+      perfLog(
+        `[perf:newtab] createBackgroundDraftChat start (project=${project?.id ?? "none"})`,
+      );
+      const providerId = options.providerId ?? selectedProvider ?? "goose";
+      const sessionState = useChatSessionStore.getState();
+      const chatState = useChatStore.getState();
+      const existingDraft = findExistingDraft({
+        sessions: sessionState.sessions,
+        activeSessionId: sessionState.activeSessionId,
+        draftsBySession: chatState.draftsBySession,
+        messagesBySession: chatState.messagesBySession,
+        request: {
+          title,
+          projectId: project?.id,
+        },
+      });
+
+      if (existingDraft) {
+        perfLog(
+          `[perf:newtab] ${existingDraft.id.slice(0, 8)} reused background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+        );
+        return existingDraft;
+      }
+
+      const sessionModelPreference = resolveSupportedSessionModelPreference(
+        providerId,
+        undefined,
+        options.modelId ?? undefined,
+      ).then((preference) =>
+        options.modelName && preference.modelId === options.modelId
+          ? { ...preference, modelName: options.modelName }
+          : preference,
+      );
+      const optimisticWorkingDir = getOptimisticSessionCwd(project);
+      const session = createDraftSession({
+        title,
+        projectId: project?.id,
+        providerId,
+        workingDir: optimisticWorkingDir,
+        modelId: options.modelId,
+        modelName: options.modelName,
+      });
+      perfLog(
+        `[perf:newtab] ${session.id.slice(0, 8)} created background draft in ${(performance.now() - tStart).toFixed(1)}ms`,
+      );
+      startDraftSessionCreation({
+        session,
+        sessionModelPreference,
+        workingDir: resolveSessionCwd(project),
+        projectId: project?.id,
+      });
+      return session;
+    },
+    [selectedProvider, createDraftSession, startDraftSessionCreation],
+  );
+
+  const activateDeferredChatSession = useCallback(
+    (sessionId: string) => {
+      const liveSessionId = resolveLiveSessionId(sessionId);
+      if (!liveSessionId) {
+        return;
+      }
+
+      clearSettingsSectionUrl();
+      setChatComposerHandoffSessionId(liveSessionId);
+      setActiveSession(liveSessionId);
+      setActiveView("chat");
+      setChatActiveSession(liveSessionId);
+    },
+    [setActiveSession, setChatActiveSession],
+  );
+
   const handleStartChatFromProject = useCallback(
     (project: ProjectInfo) => {
       guardAppNavigation(() => {
@@ -1620,70 +1804,117 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
 
   const handleGlobalCompose = useCallback(
     (text: string, options?: GlobalComposeOptions) => {
-      guardAppNavigation(() => {
-        const project = options?.projectId
-          ? projects.find((candidate) => candidate.id === options.projectId)
-          : undefined;
-        const chatOptions = {
-          providerId: options?.providerId,
-          modelId: options?.modelId,
-          modelName: options?.modelName,
-        };
+      const shouldRunComposerHandoff = globalComposerPlacement === "centered";
+      if (shouldRunComposerHandoff) {
+        clearGlobalComposerHandoffTimer();
+        setGlobalComposerPlacement("handoff");
+        setChatComposerHandoffRequest((request) => request + 1);
+        setChatComposerHandoffSessionId(null);
+        setGlobalComposerHandoffTargetRect(null);
+      }
+
+      const project = options?.projectId
+        ? projects.find((candidate) => candidate.id === options.projectId)
+        : undefined;
+      const chatOptions = {
+        providerId: options?.providerId,
+        modelId: options?.modelId,
+        modelName: options?.modelName,
+      };
+      const enqueueMessage = async (session: ChatSession) => {
+        const sessionId = resolveLiveSessionId(session.id) ?? session.id;
+
+        if (options?.providerId || options?.modelId) {
+          patchSession(sessionId, {
+            ...(options.providerId ? { providerId: options.providerId } : {}),
+            ...(options.modelId
+              ? {
+                  modelId: options.modelId,
+                  modelName: options.modelName ?? options.modelId,
+                }
+              : {}),
+          });
+        }
+        if (options?.personaId) {
+          patchSession(sessionId, { personaId: options.personaId });
+        }
+        if (options?.reasoningEffort) {
+          try {
+            await acpSetSessionConfigOption(
+              sessionId,
+              options.reasoningEffort.configId,
+              options.reasoningEffort.value,
+            );
+          } catch (error) {
+            console.error(
+              "Failed to apply reasoning effort from global composer:",
+              error,
+            );
+          }
+        }
+        useChatStore.getState().enqueueMessage(sessionId, {
+          text,
+          attachments: options?.attachments,
+          ...(options?.sendOptions ? { sendOptions: options.sendOptions } : {}),
+        });
+      };
+
+      const startChat = () => {
         const createChat = project
           ? createNewProjectDraft(DEFAULT_CHAT_TITLE, project, chatOptions)
           : createNewTab(DEFAULT_CHAT_TITLE, undefined, chatOptions);
 
-        void createChat
-          .then(async (session) => {
-            if (options?.providerId || options?.modelId) {
-              patchSession(session.id, {
-                ...(options.providerId
-                  ? { providerId: options.providerId }
-                  : {}),
-                ...(options.modelId
-                  ? {
-                      modelId: options.modelId,
-                      modelName: options.modelName ?? options.modelId,
-                    }
-                  : {}),
-              });
-            }
-            if (options?.personaId) {
-              patchSession(session.id, { personaId: options.personaId });
-            }
-            if (options?.reasoningEffort) {
-              try {
-                await acpSetSessionConfigOption(
-                  session.id,
-                  options.reasoningEffort.configId,
-                  options.reasoningEffort.value,
-                );
-              } catch (error) {
-                console.error(
-                  "Failed to apply reasoning effort from global composer:",
-                  error,
-                );
-              }
-            }
-            useChatStore.getState().enqueueMessage(session.id, {
-              text,
-              attachments: options?.attachments,
-              ...(options?.sendOptions
-                ? { sendOptions: options.sendOptions }
-                : {}),
-            });
-          })
-          .catch((error) => {
-            console.error("Failed to start chat from global composer:", error);
-          });
-      });
+        void createChat.then(enqueueMessage).catch((error) => {
+          console.error("Failed to start chat from global composer:", error);
+        });
+      };
+
+      const startBackgroundChat = () => {
+        try {
+          const session = createBackgroundDraftChat(
+            DEFAULT_CHAT_TITLE,
+            project,
+            chatOptions,
+          );
+          setChatComposerHandoffSessionId(session.id);
+          void enqueueMessage(session);
+          clearGlobalComposerRouteSwapTimer();
+          if (prefersReducedMotion()) {
+            activateDeferredChatSession(session.id);
+            resetGlobalComposerTransition();
+            return;
+          }
+          globalComposerRouteSwapTimeoutRef.current = window.setTimeout(() => {
+            globalComposerRouteSwapTimeoutRef.current = null;
+            activateDeferredChatSession(session.id);
+          }, GLOBAL_COMPOSER_ROUTE_SWAP_DELAY_MS);
+        } catch (error) {
+          console.error("Failed to start chat from global composer:", error);
+          resetGlobalComposerTransition();
+        }
+      };
+
+      if (shouldRunComposerHandoff) {
+        guardAppNavigation(startBackgroundChat, () => {
+          resetGlobalComposerTransition();
+        });
+        return;
+      }
+
+      guardAppNavigation(startChat);
     },
     [
+      activateDeferredChatSession,
+      createBackgroundDraftChat,
       createNewProjectDraft,
       createNewTab,
+      clearGlobalComposerHandoffTimer,
+      clearGlobalComposerRouteSwapTimer,
+      globalComposerPlacement,
       patchSession,
       projects,
       guardAppNavigation,
+      resetGlobalComposerTransition,
     ],
   );
 
@@ -2078,6 +2309,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const handleNavigate = useCallback(
     (view: AppView) => {
       guardAppNavigation(() => {
+        resetGlobalComposerTransition();
         if (view === "automations" && !isAutomationsFeatureEnabled) {
           setActiveView("home");
           return;
@@ -2117,6 +2349,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       openDesignSystem,
       openSettings,
       guardAppNavigation,
+      resetGlobalComposerTransition,
       setActiveSession,
       isAutomationsFeatureEnabled,
       isBuilderbotSurfaceEnabled,
@@ -2427,53 +2660,58 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
   const forceStartupLoading =
     import.meta.env.DEV &&
     new URLSearchParams(window.location.search).has("startupLoading");
-  const showGlobalComposer =
+  const isGlobalComposerHandoff = globalComposerPlacement === "handoff";
+  const isGlobalComposerRouteDisallowed =
+    targetLocation.view === "automations" &&
+    targetLocation.route.surface === "builder";
+  const canShowGlobalComposer =
     startup.ready &&
     !forceStartupLoading &&
     !startupIssue &&
     children == null &&
-    !isPreparingContent &&
-    renderedLocation.view !== "chat" &&
-    !(
-      renderedLocation.view === "automations" &&
-      renderedLocation.route.surface === "builder"
-    );
+    (!isPreparingContent || globalComposerPlacement === "handoff") &&
+    !isGlobalComposerRouteDisallowed;
+  const canUseGlobalComposerShortcut =
+    startup.ready && !forceStartupLoading && !startupIssue && children == null;
+  const showGlobalComposer =
+    canShowGlobalComposer &&
+    (globalComposerPlacement !== "docked" || renderedLocation.view !== "chat");
+  const showGlobalComposerShim =
+    canShowGlobalComposer && globalComposerPlacement !== "docked";
 
-  const requestGlobalComposerFocus = useCallback(() => {
-    if (showGlobalComposer) {
-      setGlobalComposerFocusRequest((request) => request + 1);
-      return;
-    }
-
-    pendingGlobalComposerFocusViewRef.current = "home";
-  }, [showGlobalComposer]);
-
-  const canDeferGlobalComposerFocus = children == null && isPreparingContent;
   useEffect(() => {
-    const pendingView = pendingGlobalComposerFocusViewRef.current;
-    if (!pendingView) {
+    if (
+      globalComposerPlacement === "docked" ||
+      !isGlobalComposerRouteDisallowed
+    ) {
       return;
     }
 
-    // Only bridge the Cmd+N unmount gap. If Home lands without the composer,
-    // drop the request so a later unrelated composer-visible route won't steal focus.
-    if (activeView !== pendingView) {
-      pendingGlobalComposerFocusViewRef.current = null;
-      return;
+    resetGlobalComposerTransition();
+  }, [
+    globalComposerPlacement,
+    isGlobalComposerRouteDisallowed,
+    resetGlobalComposerTransition,
+  ]);
+
+  const handleGlobalComposerHandoffStart = useCallback(
+    (rect: GlobalComposerHandoffRect) => {
+      setGlobalComposerHandoffSourceRect(rect);
+      setGlobalComposerHandoffTargetRect(null);
+    },
+    [],
+  );
+  const handleChatComposerHandoffTarget = useCallback(
+    (rect: GlobalComposerHandoffRect) => {
+      setGlobalComposerHandoffTargetRect((current) => current ?? rect);
+    },
+    [],
+  );
+  const dismissCenteredGlobalComposer = useCallback(() => {
+    if (globalComposerPlacement === "centered") {
+      resetGlobalComposerTransition();
     }
-
-    if (!showGlobalComposer) {
-      if (canDeferGlobalComposerFocus) {
-        return;
-      }
-
-      pendingGlobalComposerFocusViewRef.current = null;
-      return;
-    }
-
-    pendingGlobalComposerFocusViewRef.current = null;
-    setGlobalComposerFocusRequest((request) => request + 1);
-  }, [activeView, canDeferGlobalComposerFocus, showGlobalComposer]);
+  }, [globalComposerPlacement, resetGlobalComposerTransition]);
 
   const topBarBreadcrumbs = useMemo<TopBarBreadcrumb[]>(() => {
     switch (activeView) {
@@ -2695,14 +2933,24 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         }
         return;
       }
-      // New conversation screen (default mod+n)
+      // Floating new conversation composer (default mod+n)
       if (eventMatchesShortcutCommand(e, "navigation.newConversation")) {
         e.preventDefault();
+        if (!canUseGlobalComposerShortcut) {
+          return;
+        }
         guardAppNavigation(() => {
-          setActiveSession(null);
-          clearSettingsSectionUrl();
-          setActiveView("home");
-          requestGlobalComposerFocus();
+          clearGlobalComposerHandoffTimer();
+          setChatComposerHandoffSessionId(null);
+          setGlobalComposerHandoffSourceRect(null);
+          setGlobalComposerHandoffTargetRect(null);
+          if (!canShowGlobalComposer) {
+            setActiveSession(null);
+            clearSettingsSectionUrl();
+            setActiveView("home");
+          }
+          setGlobalComposerPlacement("centered");
+          setGlobalComposerFocusRequest((request) => request + 1);
         });
       }
     };
@@ -2710,13 +2958,15 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     return () => window.removeEventListener("keydown", handler);
   }, [
     activeView,
+    canShowGlobalComposer,
+    canUseGlobalComposerShortcut,
     clearActiveSession,
+    clearGlobalComposerHandoffTimer,
     guardAppNavigation,
     handleNavigate,
     leaveSecondarySurface,
-    requestGlobalComposerFocus,
-    setActiveSession,
     setDesignSystemInspectorVisible,
+    setActiveSession,
     toggleSidebar,
   ]);
 
@@ -2857,6 +3107,11 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               builderbotEnabled={isBuilderbotSurfaceEnabled}
               renderedSession={renderedSession}
               homeSessionId={homeSessionId}
+              chatComposerHandoffRequest={chatComposerHandoffRequest}
+              chatComposerHandoffSessionId={chatComposerHandoffSessionId}
+              chatComposerHandoffActive={isGlobalComposerHandoff}
+              chatComposerHandoffInProgress={isGlobalComposerHandoff}
+              onChatComposerHandoffTarget={handleChatComposerHandoffTarget}
               homeViewportLeftOcclusionPx={
                 renderedLocation.view === "home" ? sidebarDockedOuterWidth : 0
               }
@@ -2905,10 +3160,28 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
                   : undefined
               }
             />
+            {showGlobalComposerShim ? (
+              <div
+                aria-hidden="true"
+                className={cn(
+                  "global-composer-shim pointer-events-none fixed top-0 right-0 bottom-0 z-[35]",
+                  globalComposerPlacement === "handoff"
+                    ? "global-composer-shim-handoff"
+                    : "global-composer-shim-centered",
+                )}
+                style={{ left: sidebarDockedOuterWidth }}
+              />
+            ) : null}
             {showGlobalComposer ? (
               <GlobalComposerPill
                 focusRequest={globalComposerFocusRequest}
                 onSend={handleGlobalCompose}
+                onDismiss={dismissCenteredGlobalComposer}
+                onHandoffStart={handleGlobalComposerHandoffStart}
+                placement={globalComposerPlacement}
+                mainLeftOffsetPx={sidebarDockedOuterWidth}
+                handoffSourceRect={globalComposerHandoffSourceRect}
+                handoffTargetRect={globalComposerHandoffTargetRect}
                 reasoningEffort={{
                   config: homeSession?.reasoningEffort,
                   onChange: handleGlobalComposerReasoningEffortChange,

@@ -14,6 +14,7 @@ import { SettingsView } from "@/features/settings/ui/SettingsView";
 import { DesignSystemView } from "@/features/design-system/ui/DesignSystemView";
 import { isDesignSystemExplorerEnabled } from "@/features/design-system/lib/designSystemEnabled";
 import type { ChatSession } from "@/features/chat/stores/chatSessionStore";
+import type { GlobalComposerHandoffRect } from "@/shared/ui/GlobalComposerPill";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import type { ExtensionEntry } from "@/features/extensions/types";
@@ -40,6 +41,11 @@ interface AppShellContentProps {
   builderbotEnabled: boolean;
   renderedSession?: ChatSession;
   homeSessionId: string | null;
+  chatComposerHandoffRequest?: number;
+  chatComposerHandoffSessionId?: string | null;
+  chatComposerHandoffActive?: boolean;
+  chatComposerHandoffInProgress?: boolean;
+  onChatComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
   homeViewportLeftOcclusionPx?: number;
   chatViewportLeftOcclusionPx?: number;
   onNavigateSkills: (
@@ -109,6 +115,11 @@ export function AppShellContent({
   builderbotEnabled,
   renderedSession,
   homeSessionId,
+  chatComposerHandoffRequest = 0,
+  chatComposerHandoffSessionId = null,
+  chatComposerHandoffActive = false,
+  chatComposerHandoffInProgress = false,
+  onChatComposerHandoffTarget,
   homeViewportLeftOcclusionPx = 0,
   chatViewportLeftOcclusionPx = 0,
   onNavigateSkills,
@@ -184,6 +195,10 @@ export function AppShellContent({
     activeConnectionsTab,
     automationsEnabled,
     builderbotEnabled,
+    chatComposerHandoffActive,
+    chatComposerHandoffInProgress,
+    chatComposerHandoffRequest,
+    chatComposerHandoffSessionId,
     chatViewportLeftOcclusionPx,
     homeContent,
     homeSessionId,
@@ -196,6 +211,7 @@ export function AppShellContent({
     onAutomationBuilderLeaveActionChange,
     onAutomationsBreadcrumbLabelChange,
     onBuilderbotBreadcrumbLabelChange,
+    onChatComposerHandoffTarget,
     onConnectionsTabChange,
     onCreatePersona,
     onCreateProject,
@@ -239,6 +255,10 @@ interface RenderRouteContentOptions {
   activeConnectionsTab: ConnectionsTab;
   automationsEnabled: boolean;
   builderbotEnabled: boolean;
+  chatComposerHandoffActive: boolean;
+  chatComposerHandoffInProgress: boolean;
+  chatComposerHandoffRequest: number;
+  chatComposerHandoffSessionId: string | null;
   chatViewportLeftOcclusionPx: number;
   homeContent: ReactNode;
   homeSessionId: string | null;
@@ -264,6 +284,7 @@ interface RenderRouteContentOptions {
   onAgentsBreadcrumbLabelChange?: (label: string | null) => void;
   onAutomationsBreadcrumbLabelChange?: (label: string | null) => void;
   onBuilderbotBreadcrumbLabelChange?: (label: string | null) => void;
+  onChatComposerHandoffTarget?: (rect: GlobalComposerHandoffRect) => void;
   onAutomationBuilderLeaveActionChange?: (
     action: AutomationBuilderLeaveAction | null,
   ) => void;
@@ -303,6 +324,10 @@ function renderRouteContent({
   activeConnectionsTab,
   automationsEnabled,
   builderbotEnabled,
+  chatComposerHandoffActive,
+  chatComposerHandoffInProgress,
+  chatComposerHandoffRequest,
+  chatComposerHandoffSessionId,
   chatViewportLeftOcclusionPx,
   homeContent,
   homeSessionId,
@@ -315,6 +340,7 @@ function renderRouteContent({
   onAutomationBuilderLeaveActionChange,
   onAutomationsBreadcrumbLabelChange,
   onBuilderbotBreadcrumbLabelChange,
+  onChatComposerHandoffTarget,
   onConnectionsTabChange,
   onCreatePersona,
   onCreateProject,
@@ -428,6 +454,11 @@ function renderRouteContent({
           onCreateProject={onCreateProject}
           onOpenProjectSettings={onOpenProjectSettings}
           leftViewportOcclusionPx={chatViewportLeftOcclusionPx}
+          composerHandoffRequest={chatComposerHandoffRequest}
+          composerHandoffSessionId={chatComposerHandoffSessionId}
+          composerHandoffActive={chatComposerHandoffActive}
+          composerHandoffInProgress={chatComposerHandoffInProgress}
+          onComposerHandoffTarget={onChatComposerHandoffTarget}
         />
       ) : (
         <HomeScreen

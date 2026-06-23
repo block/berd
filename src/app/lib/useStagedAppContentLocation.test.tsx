@@ -78,7 +78,7 @@ describe("useStagedAppContentLocation", () => {
     });
   });
 
-  it("keeps the previous rendered location for non-chat routes until after the next paint", () => {
+  it("keeps the previous rendered location for secondary routes until after the next paint", () => {
     const frames = mockAnimationFrames();
     const { result, rerender } = renderStagedLocation(homeLocation);
 
@@ -104,6 +104,16 @@ describe("useStagedAppContentLocation", () => {
 
     expect(result.current.targetLocation).toBe(chatLocation);
     expect(result.current.renderedLocation).toBe(chatLocation);
+    expect(result.current.isPreparingContent).toBe(false);
+  });
+
+  it("renders home routes immediately without app-level staging", () => {
+    const { result, rerender } = renderStagedLocation(settingsLocation);
+
+    rerender({ location: homeLocation });
+
+    expect(result.current.targetLocation).toBe(homeLocation);
+    expect(result.current.renderedLocation).toBe(homeLocation);
     expect(result.current.isPreparingContent).toBe(false);
   });
 
