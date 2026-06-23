@@ -12,6 +12,7 @@ import {
 } from "@/features/goosectl/bridge/runtimeContext";
 import { GOOSECTL_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
+import { installStartupSessionDeepLinkHandler } from "./startupDeepLinks";
 import { useGoosectlQueuedMessageDrain } from "./useGoosectlQueuedMessageDrain";
 
 /**
@@ -47,6 +48,8 @@ export function GoosectlBridge() {
       void unlisten.then((cleanup) => cleanup());
     };
   }, []);
+
+  useEffect(() => installStartupSessionDeepLinkHandler(), []);
 
   // Broker lifecycle: declare desired state; the lifecycle reconciler
   // serializes start/stop and goes inert if the plugin is not in this build.

@@ -19,7 +19,9 @@ struct SessionDeepLinkErrorPayload {
 }
 
 pub(crate) fn install<R: Runtime>(app: &tauri::App<R>) {
-    // Handles link delivered while app is already running. TODO: cold start from link.
+    // Handles links delivered while the app is already running. Startup
+    // session links are drained by GoosectlBridge after the renderer command
+    // registry has mounted.
     let deep_link_app = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
         handle_urls(deep_link_app.clone(), event.urls());
