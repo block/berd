@@ -8,6 +8,7 @@ export {
   buildTranscriptRows,
   canReuseTranscriptRowDescriptor,
 } from "./buildTranscriptRows";
+export { getTranscriptRowEstimatedHeight } from "./transcriptItemTypes";
 export {
   buildBlockId,
   buildContentHeightRevision,

@@ -469,6 +469,37 @@ describe("transcript projection cache", () => {
     );
   });
 
+  it("does not project empty user messages into measurable rows", () => {
+    const cache = createTranscriptProjectionCache();
+    const emptyUser = messageWithContent(
+      "empty-user",
+      "user",
+      [],
+      utc(2026, 6, 4, 10),
+    );
+    const assistant = message(
+      "assistant-1",
+      "assistant",
+      "answer",
+      utc(2026, 6, 4, 10, 1),
+    );
+
+    const snapshot = update(cache, [emptyUser, assistant]);
+
+    expect(snapshot.rowByMessageId.has("empty-user")).toBe(false);
+    expect(snapshot.messageById.has("empty-user")).toBe(false);
+    expect(snapshot.rows.some((row) => row.messageId === "empty-user")).toBe(
+      false,
+    );
+    expect(snapshot.rows[0]).toMatchObject({
+      rowId: "date:2026-06-04:before:assistant-1",
+      date: { firstMessageId: "assistant-1" },
+    });
+    expect(messageRow(snapshot, "assistant-1").rowId).toBe(
+      "message:assistant-1",
+    );
+  });
+
   it("separates render and height revisions for timestamp-only updates", () => {
     const original = message("user-1", "user", "same", utc(2026, 6, 4, 10));
     const changedTimestamp = {
@@ -529,6 +560,36 @@ describe("transcript projection cache", () => {
       expect.arrayContaining(["active-tool", "active-timer"]),
     );
     expect(row.reactKey).toBe(row.rowId);
+  });
+
+  it("keeps tool-chain detail rows spacing-free in the row model", () => {
+    const cache = createTranscriptProjectionCache();
+    const user = message("user-1", "user", "prompt", utc(2026, 6, 4, 10));
+    const assistant = messageWithContent(
+      "assistant-1",
+      "assistant",
+      [
+        {
+          type: "toolRequest",
+          id: "tool-1",
+          name: "read_file",
+          arguments: { path: "README.md" },
+          status: "completed",
+          startedAt: utc(2026, 6, 4, 10, 1),
+        },
+      ],
+      utc(2026, 6, 4, 10, 1),
+    );
+
+    const snapshot = update(cache, [user, assistant]);
+    const summary = rowById(snapshot, "message:assistant-1:tool-chain");
+    const detail = rowById(snapshot, "message:assistant-1:tool-chain-detail");
+
+    expect(summary.spacingBefore).toBe(16);
+    expect(summary.layoutRevision).toBe("layout-spacing:16");
+    expect(detail.spacingBefore).toBe(0);
+    expect(detail.layoutRevision).toBe("layout-spacing:0");
+    expect(detail.estimatedHeight).toBe(0);
   });
 
   it("uses measurement policy decisions for MCP app rows", () => {

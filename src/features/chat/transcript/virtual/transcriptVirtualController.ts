@@ -1,4 +1,7 @@
-import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
+import {
+  getTranscriptRowEstimatedHeight,
+  type TranscriptRowDescriptor,
+} from "../projection/transcriptItemTypes";
 import {
   computeTranscriptVirtualRange,
   type TranscriptRangeInput,
@@ -37,6 +40,7 @@ import {
 interface MeasurementEntry {
   widthScope: string;
   heightRevision: string;
+  layoutRevision: string;
   height: number;
 }
 
@@ -273,6 +277,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     this.measurements.set(this.measurementKey(input.token.rowId), {
       widthScope: input.token.widthScope,
       heightRevision: input.token.heightRevision,
+      layoutRevision: input.token.layoutRevision,
       height,
     });
     this.lastRange = null;
@@ -309,6 +314,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       this.measurements.set(this.measurementKey(input.token.rowId), {
         widthScope: input.token.widthScope,
         heightRevision: input.token.heightRevision,
+        layoutRevision: input.token.layoutRevision,
         height,
       });
       this.diagnostics.measuredHeightUpdates += 1;
@@ -426,6 +432,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       widthScope: this.widthScope,
       rowId,
       heightRevision: row.heightRevision,
+      layoutRevision: row.layoutRevision,
     };
   }
 
@@ -495,7 +502,10 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     if (!row) {
       this.diagnostics.staleMeasurementMissingRowDrops += 1;
       valid = false;
-    } else if (row.heightRevision !== token.heightRevision) {
+    } else if (
+      row.heightRevision !== token.heightRevision ||
+      row.layoutRevision !== token.layoutRevision
+    ) {
       this.diagnostics.staleMeasurementRevisionDrops += 1;
       valid = false;
     }
@@ -816,20 +826,23 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
 
   private getRowHeight(row: TranscriptRowDescriptor): number {
     const measured = this.measurements.get(this.measurementKey(row.rowId));
-    const estimatedHeight = Math.max(0, row.estimatedHeight);
-    // A width-stale measurement (same content, different transcript width) is
-    // an interim height: rewrap shifts it slightly, but it is far closer than
-    // the estimate. Snapping back to estimates during a continuous resize
-    // (window drag, rail animation) collapses the scroll height every frame
-    // and makes the transcript jump while remeasurement is in flight.
+    const estimatedHeight = getTranscriptRowEstimatedHeight(row);
+    // The scheduler/cache are width-scoped, but live controller geometry keeps
+    // the last accepted height as a provisional value across width changes.
+    // That preserves the visible anchor while same-width remeasurement catches
+    // up after resize.
     const measuredHeight =
-      measured && measured.heightRevision === row.heightRevision
+      measured &&
+      measured.heightRevision === row.heightRevision &&
+      measured.layoutRevision === row.layoutRevision
         ? measured.height
         : null;
+    const measuredFloorHeight =
+      measured?.layoutRevision === row.layoutRevision ? measured.height : 0;
     if (row.anchorPriority === "streaming") {
       return Math.max(
         measuredHeight ?? estimatedHeight,
-        measured?.height ?? 0,
+        measuredFloorHeight,
         this.streamingHeightFloors.get(this.measurementKey(row.rowId)) ?? 0,
       );
     }
@@ -873,9 +886,6 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
     return Math.min(Math.max(0, scrollTop), this.getBottomScrollTop());
   }
 
-  // Measurements are keyed by row only. Each entry records the widthScope it
-  // was measured at; width-stale entries still serve as interim heights so a
-  // continuous resize never collapses the layout back to estimates.
   private measurementKey(rowId: string): string {
     return rowId;
   }

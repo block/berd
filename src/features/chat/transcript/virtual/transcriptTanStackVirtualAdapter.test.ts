@@ -85,8 +85,9 @@ describe("TranscriptTanStackVirtualAdapter", () => {
       offsetWithinRow: 20,
     });
 
-    // The width change keeps the width-stale row-2 measurement as an interim
-    // height, so nothing moves until remeasurement lands at the new width.
+    // The width change keeps the last accepted height as provisional live
+    // geometry, so the browser scroll position stays put and the captured row
+    // remains stable while same-width remeasurement catches up.
     adapter.syncViewport(
       {
         scrollTop: 620,
@@ -530,7 +531,9 @@ function row(
     renderRevision: overrides.renderRevision ?? `render:${rowId}`,
     heightRevision:
       overrides.heightRevision ?? `height:${rowId}:${estimatedHeight}`,
+    layoutRevision: overrides.layoutRevision ?? "layout-spacing:0",
     estimatedHeight,
+    spacingBefore: overrides.spacingBefore ?? 0,
     anchorPriority: overrides.anchorPriority ?? "stable",
     measurementPolicy: overrides.measurementPolicy ?? "measure-real",
     layoutPendingPolicy: overrides.layoutPendingPolicy ?? "can-finalize",

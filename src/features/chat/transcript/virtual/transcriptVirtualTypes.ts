@@ -55,6 +55,7 @@ export interface TranscriptVirtualMeasurementToken {
   widthScope: string;
   rowId: string;
   heightRevision: string;
+  layoutRevision: string;
 }
 
 export type TranscriptMeasurementSource =

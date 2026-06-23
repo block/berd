@@ -463,8 +463,10 @@ describe("MessageBubble", () => {
 
     expect(start).toHaveClass("pt-1", "pb-0");
     expect(start).not.toHaveClass("py-1");
-    expect(middle).toHaveClass("-mt-1", "py-0");
-    expect(end).toHaveClass("-mt-1", "pt-0", "pb-1");
+    expect(middle).toHaveClass("py-0");
+    expect(middle).not.toHaveClass("-mt-1");
+    expect(end).toHaveClass("pt-0", "pb-1");
+    expect(end).not.toHaveClass("-mt-1");
   });
 
   it("reserves assistant action space only on terminal fragments", () => {

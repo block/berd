@@ -1,4 +1,7 @@
-import type { TranscriptRowDescriptor } from "../../projection/transcriptItemTypes";
+import {
+  getTranscriptRowEstimatedHeight,
+  type TranscriptRowDescriptor,
+} from "../../projection/transcriptItemTypes";
 import { getMeasurementFinalizationDecision } from "../../measurement/transcriptLayoutPending";
 import type { TranscriptMeasurementResult } from "../transcriptVirtualEngine";
 import type {
@@ -366,6 +369,7 @@ export class TranscriptMeasurementScheduler {
       widthScope: this.widthScope,
       rowId,
       heightRevision: row.heightRevision,
+      layoutRevision: row.layoutRevision,
     };
   }
 
@@ -410,7 +414,7 @@ export class TranscriptMeasurementScheduler {
 
   queueCachedControllerUpdate(rowId: string): boolean {
     const cached = this.peekCachedMeasurement(rowId);
-    if (!cached || !this.validateToken(cached.token).valid) {
+    if (!cached?.finalized || !this.validateToken(cached.token).valid) {
       return false;
     }
 
@@ -497,6 +501,10 @@ export class TranscriptMeasurementScheduler {
     ) {
       this.counters.policyMeasurementsDropped += 1;
       return this.createDroppedResult(input.token, "policy-blocked");
+    }
+
+    if (input.source === "offscreen-shell") {
+      return this.acceptShellEstimate(input);
     }
 
     return this.acceptMeasurement({
@@ -648,7 +656,7 @@ export class TranscriptMeasurementScheduler {
       kind,
       rowId,
       token,
-      estimatedHeight: normalizeHeight(row.estimatedHeight),
+      estimatedHeight: normalizeHeight(getTranscriptRowEstimatedHeight(row)),
       cachedHeight: cached?.height ?? null,
       cachedSource: cached?.source ?? null,
     };
@@ -706,6 +714,38 @@ export class TranscriptMeasurementScheduler {
     };
   }
 
+  private acceptShellEstimate(
+    input: TranscriptOffscreenMeasurementInput,
+  ): TranscriptMeasurementRecordResult {
+    const existing = this.cache.peek(input.token);
+    if (
+      existing &&
+      getMeasurementSourcePriority(existing.source) >
+        getMeasurementSourcePriority("estimate")
+    ) {
+      return {
+        status: "accepted",
+        entry: existing,
+        queuedControllerUpdate: false,
+      };
+    }
+
+    const entry: TranscriptMeasurementCacheEntry = {
+      token: cloneToken(input.token),
+      height: normalizeHeight(input.height),
+      source: "estimate",
+      finalized: false,
+      updatedAt: this.now(),
+    };
+
+    this.cache.set(entry);
+    return {
+      status: "accepted",
+      entry: cloneCacheEntry(entry),
+      queuedControllerUpdate: false,
+    };
+  }
+
   private queueControllerUpdate(entry: TranscriptMeasurementCacheEntry): void {
     const wasEmpty = this.controllerQueue.size === 0;
     this.controllerQueue.set(createMeasurementCacheKey(entry.token), {
@@ -742,7 +782,10 @@ export class TranscriptMeasurementScheduler {
     if (!row) {
       this.counters.staleMeasurementMissingRowDrops += 1;
       valid = false;
-    } else if (row.heightRevision !== token.heightRevision) {
+    } else if (
+      row.heightRevision !== token.heightRevision ||
+      row.layoutRevision !== token.layoutRevision
+    ) {
       this.counters.staleMeasurementRevisionDrops += 1;
       valid = false;
     }
@@ -761,7 +804,8 @@ export class TranscriptMeasurementScheduler {
       token.sessionEpoch === this.sessionEpoch &&
       token.widthScope === this.widthScope &&
       row !== undefined &&
-      row.heightRevision === token.heightRevision
+      row.heightRevision === token.heightRevision &&
+      row.layoutRevision === token.layoutRevision
     );
   }
 
@@ -812,6 +856,7 @@ export function createMeasurementCacheKey(
     token.widthScope,
     token.rowId,
     token.heightRevision,
+    token.layoutRevision,
   ].join("\u0000");
 }
 
@@ -878,6 +923,7 @@ function cloneToken(
     widthScope: token.widthScope,
     rowId: token.rowId,
     heightRevision: token.heightRevision,
+    layoutRevision: token.layoutRevision,
   };
 }
 

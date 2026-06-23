@@ -79,7 +79,9 @@ export interface TranscriptRowDescriptor {
   toolChainDetail?: TranscriptToolChainDetailPayload;
   renderRevision: string;
   heightRevision: string;
+  layoutRevision: string;
   estimatedHeight: number;
+  spacingBefore: number;
   anchorPriority: TranscriptAnchorPriority;
   measurementPolicy: TranscriptMeasurementPolicy;
   layoutPendingPolicy: TranscriptLayoutPendingPolicy;
@@ -271,4 +273,10 @@ export interface TranscriptProjectionCache {
   cleanupSession(sessionId: string): void;
   cancelPendingWork(sessionId: string, sessionEpoch: number): void;
   invalidateCalendarLabels(nowBucket: string, localeKey: string): void;
+}
+
+export function getTranscriptRowEstimatedHeight(
+  row: Pick<TranscriptRowDescriptor, "estimatedHeight" | "spacingBefore">,
+): number {
+  return Math.max(0, row.estimatedHeight) + Math.max(0, row.spacingBefore);
 }

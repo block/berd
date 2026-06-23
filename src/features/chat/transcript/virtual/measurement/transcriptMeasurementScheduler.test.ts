@@ -157,8 +157,22 @@ describe("TranscriptMeasurementScheduler", () => {
         token: tokenFor(scheduler, "shell-row"),
         height: 260,
         source: "offscreen-shell",
-      }).status,
-    ).toBe("accepted");
+      }),
+    ).toMatchObject({
+      status: "accepted",
+      queuedControllerUpdate: false,
+      entry: {
+        height: 260,
+        source: "estimate",
+        finalized: false,
+      },
+    });
+    expect(scheduler.getCachedMeasurement("shell-row")).toMatchObject({
+      height: 260,
+      source: "estimate",
+      finalized: false,
+    });
+    expect(scheduler.drainControllerUpdateBatch()).toEqual([]);
     expect(
       scheduler.recordOffscreenMeasurement({
         token: tokenFor(scheduler, "shell-row"),
@@ -185,7 +199,7 @@ describe("TranscriptMeasurementScheduler", () => {
       reason: "policy-blocked",
     });
     expect(scheduler.getDiagnostics()).toMatchObject({
-      offscreenShellMeasurementsAccepted: 1,
+      offscreenShellMeasurementsAccepted: 0,
       estimateOnlyPlans: 1,
       policyMeasurementsDropped: 2,
     });
@@ -395,6 +409,36 @@ describe("TranscriptMeasurementScheduler", () => {
     expect(scheduler.queueCachedControllerUpdate("row-1")).toBe(false);
     expect(scheduler.drainControllerUpdateBatch()).toEqual([]);
   });
+
+  it("does not queue non-finalized shell estimates back to a recreated controller", () => {
+    const scheduler = createScheduler([
+      row("shell-row", 120, {
+        measurementPolicy: "measure-shell",
+        capabilities: capabilities({
+          canOffscreenRenderReal: false,
+          canOffscreenRenderShell: true,
+        }),
+      }),
+    ]);
+
+    expect(
+      scheduler.recordOffscreenMeasurement({
+        token: tokenFor(scheduler, "shell-row"),
+        height: 172,
+        source: "offscreen-shell",
+      }),
+    ).toMatchObject({
+      status: "accepted",
+      queuedControllerUpdate: false,
+      entry: {
+        source: "estimate",
+        finalized: false,
+      },
+    });
+
+    expect(scheduler.queueCachedControllerUpdate("shell-row")).toBe(false);
+    expect(scheduler.drainControllerUpdateBatch()).toEqual([]);
+  });
 });
 
 function createScheduler(
@@ -435,7 +479,9 @@ function row(
     renderRevision: overrides.renderRevision ?? `render:${rowId}`,
     heightRevision:
       overrides.heightRevision ?? `height:${rowId}:${estimatedHeight}`,
+    layoutRevision: overrides.layoutRevision ?? "layout-spacing:0",
     estimatedHeight,
+    spacingBefore: overrides.spacingBefore ?? 0,
     anchorPriority: overrides.anchorPriority ?? "stable",
     measurementPolicy: overrides.measurementPolicy ?? "measure-real",
     layoutPendingPolicy: overrides.layoutPendingPolicy ?? "can-finalize",

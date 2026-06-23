@@ -1267,7 +1267,7 @@ export function useTranscriptVirtualTimeline({
         continue;
       }
 
-      if (result.status === "accepted") {
+      if (result.status === "accepted" && result.queuedControllerUpdate) {
         measuredHeightByTokenRef.current.set(tokenKey, result.entry.height);
         cachedHeightAppliedByTokenRef.current.set(
           tokenKey,
@@ -1318,7 +1318,7 @@ export function useTranscriptVirtualTimeline({
         height: measuredBlockSize,
         source: "offscreen-shell",
       });
-      if (result.status === "accepted") {
+      if (result.status === "accepted" && result.queuedControllerUpdate) {
         cachedHeightAppliedByTokenRef.current.set(
           tokenKey,
           result.entry.height,
@@ -1368,7 +1368,7 @@ export function useTranscriptVirtualTimeline({
         height: measuredBlockSize,
         source: "offscreen-real",
       });
-      if (result.status === "accepted") {
+      if (result.status === "accepted" && result.queuedControllerUpdate) {
         cachedHeightAppliedByTokenRef.current.set(
           tokenKey,
           result.entry.height,
@@ -2186,6 +2186,7 @@ function getMeasurementTokenKey(
     token.widthScope,
     token.rowId,
     token.heightRevision,
+    token.layoutRevision,
   ].join("\u0000");
 }
 

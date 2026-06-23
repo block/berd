@@ -5,7 +5,10 @@ import {
   type VirtualItem,
   type VirtualizerOptions,
 } from "@tanstack/react-virtual";
-import type { TranscriptRowDescriptor } from "../projection/transcriptItemTypes";
+import {
+  getTranscriptRowEstimatedHeight,
+  type TranscriptRowDescriptor,
+} from "../projection/transcriptItemTypes";
 import { TranscriptVirtualController } from "./transcriptVirtualController";
 import type {
   TranscriptMeasurementBatchResult,
@@ -61,6 +64,7 @@ export interface TranscriptTanStackVirtualAdapterOptions
 interface MeasurementEntry {
   widthScope: string;
   heightRevision: string;
+  layoutRevision: string;
   height: number;
 }
 
@@ -232,14 +236,12 @@ export class TranscriptTanStackVirtualAdapter
       this.updateStreamingHeightFloor(row, input.token.widthScope, height);
     }
 
-    this.measurements.set(
-      this.measurementKey(input.token.rowId, input.token.widthScope),
-      {
-        widthScope: input.token.widthScope,
-        heightRevision: input.token.heightRevision,
-        height,
-      },
-    );
+    this.measurements.set(this.measurementKey(input.token.rowId), {
+      widthScope: input.token.widthScope,
+      heightRevision: input.token.heightRevision,
+      layoutRevision: input.token.layoutRevision,
+      height,
+    });
 
     if (index !== undefined && row) {
       this.virtualizer.resizeItem(
@@ -281,14 +283,12 @@ export class TranscriptTanStackVirtualAdapter
         this.updateStreamingHeightFloor(row, token.widthScope, height);
       }
 
-      this.measurements.set(
-        this.measurementKey(token.rowId, token.widthScope),
-        {
-          widthScope: token.widthScope,
-          heightRevision: token.heightRevision,
-          height,
-        },
-      );
+      this.measurements.set(this.measurementKey(token.rowId), {
+        widthScope: token.widthScope,
+        heightRevision: token.heightRevision,
+        layoutRevision: token.layoutRevision,
+        height,
+      });
 
       if (index !== undefined && row) {
         this.virtualizer.resizeItem(
@@ -614,26 +614,23 @@ export class TranscriptTanStackVirtualAdapter
 
   private getRowHeight(
     row: TranscriptRowDescriptor,
-    widthScope: string,
+    _widthScope: string,
   ): number {
-    const measured = this.measurements.get(
-      this.measurementKey(row.rowId, widthScope),
-    );
-    const estimatedHeight = Math.max(0, row.estimatedHeight);
-    // Width-stale measurements remain interim heights so a continuous resize
-    // never snaps row heights back to estimates (see
-    // TranscriptVirtualController.getRowHeight).
+    const measured = this.measurements.get(this.measurementKey(row.rowId));
+    const estimatedHeight = getTranscriptRowEstimatedHeight(row);
     const measuredHeight =
-      measured && measured.heightRevision === row.heightRevision
+      measured &&
+      measured.heightRevision === row.heightRevision &&
+      measured.layoutRevision === row.layoutRevision
         ? measured.height
         : null;
+    const measuredFloorHeight =
+      measured?.layoutRevision === row.layoutRevision ? measured.height : 0;
     if (row.anchorPriority === "streaming") {
       return Math.max(
         measuredHeight ?? estimatedHeight,
-        measured?.height ?? 0,
-        this.streamingHeightFloors.get(
-          this.measurementKey(row.rowId, widthScope),
-        ) ?? 0,
+        measuredFloorHeight,
+        this.streamingHeightFloors.get(this.measurementKey(row.rowId)) ?? 0,
       );
     }
     return measuredHeight ?? estimatedHeight;
@@ -644,7 +641,7 @@ export class TranscriptTanStackVirtualAdapter
     widthScope: string,
     measuredHeight: number,
   ): void {
-    const key = this.measurementKey(row.rowId, widthScope);
+    const key = this.measurementKey(row.rowId);
     this.streamingHeightFloors.set(
       key,
       Math.max(
@@ -720,9 +717,7 @@ export class TranscriptTanStackVirtualAdapter
       : top + this.getRowHeight(row, widthScope);
   }
 
-  // Measurements are keyed by row only; entries record their widthScope and
-  // width-stale heights stay usable as interim values during resizes.
-  private measurementKey(rowId: string, _widthScope?: string): string {
+  private measurementKey(rowId: string): string {
     return rowId;
   }
 }

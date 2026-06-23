@@ -4,7 +4,9 @@ const TRANSCRIPT_ROW_TOP_SPACING_PX = 16;
 const TRANSCRIPT_HEADING_ROW_TOP_SPACING_PX = 24;
 
 interface VirtualTranscriptRowSpacingInput {
-  row: Pick<TranscriptRowDescriptor, "fragment" | "kind">;
+  row: Pick<TranscriptRowDescriptor, "fragment" | "kind"> & {
+    spacingBefore?: number;
+  };
   index: number;
   previousRowKind?: TranscriptRowDescriptor["kind"];
 }
@@ -14,6 +16,10 @@ export function getVirtualTranscriptRowSpacingBlockSize({
   index,
   previousRowKind,
 }: VirtualTranscriptRowSpacingInput): number {
+  if (typeof row.spacingBefore === "number") {
+    return Math.max(0, row.spacingBefore);
+  }
+
   if (isFragmentContinuation(row) || previousRowKind === "date-separator") {
     return 0;
   }

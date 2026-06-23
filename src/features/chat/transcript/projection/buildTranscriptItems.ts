@@ -124,6 +124,11 @@ export function buildTranscriptItems({
       continue;
     }
 
+    const visibleContent = getUserVisibleMessageContent(message.content);
+    if (message.role === "user" && visibleContent.length === 0) {
+      continue;
+    }
+
     const dateBucketRange = getDateBucketRange(
       message.created,
       cachedDateBucketRange,
@@ -160,8 +165,6 @@ export function buildTranscriptItems({
     }
 
     const isStreaming = message.id === streamingMessageId;
-    const visibleContent = getUserVisibleMessageContent(message.content);
-
     const toolChainItems = buildToolChainItems({ message, visibleContent });
     if (toolChainItems) {
       items.push(...toolChainItems);

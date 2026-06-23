@@ -2597,10 +2597,6 @@ export function VirtualMessageTimeline({
       );
     };
 
-    if (!scrollTargetByBestAvailablePath()) {
-      return;
-    }
-
     const frames: number[] = [];
     const isTargetVisible = (target: HTMLElement) => {
       const container = containerRef.current;
@@ -2616,9 +2612,10 @@ export function VirtualMessageTimeline({
     };
     const tryScrollToTarget = (remainingFrames: number, visibleFrames = 0) => {
       const frame = requestAnimationFrame(() => {
+        scrollTargetByBestAvailablePath();
         const target = messageRefs.current[resolvedScrollTargetMessageId];
         if (!target || !isTargetVisible(target)) {
-          if (remainingFrames > 0 && scrollTargetByBestAvailablePath()) {
+          if (remainingFrames > 0) {
             tryScrollToTarget(remainingFrames - 1, 0);
           }
           return;

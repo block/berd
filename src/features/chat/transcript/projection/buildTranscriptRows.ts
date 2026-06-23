@@ -8,6 +8,10 @@ import type {
   TranscriptToolChainPayload,
 } from "./transcriptItemTypes";
 
+const TRANSCRIPT_ROW_TOP_SPACING_PX = 16;
+const TRANSCRIPT_HEADING_ROW_TOP_SPACING_PX = 24;
+const TRANSCRIPT_ZERO_LAYOUT_REVISION = "layout-spacing:0";
+
 const rowDescriptorByItem = new WeakMap<
   TranscriptItemDescriptor,
   {
@@ -24,7 +28,7 @@ export function invalidateTranscriptRowDescriptorCache(): void {
 export function buildTranscriptRows(
   items: readonly TranscriptItemDescriptor[],
 ): readonly TranscriptRowDescriptor[] {
-  return items.map((item) => {
+  const rows = items.map((item) => {
     const cachedRow = rowDescriptorByItem.get(item);
     if (cachedRow?.generation === rowDescriptorCacheGeneration) {
       return cachedRow.row;
@@ -44,7 +48,9 @@ export function buildTranscriptRows(
           date: item.payload,
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
           estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
           anchorPriority: "none",
           measurementPolicy: measurementDecision.policy,
           layoutPendingPolicy: measurementDecision.layoutPendingPolicy,
@@ -63,7 +69,9 @@ export function buildTranscriptRows(
           blockIds: item.blockIds,
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
           estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
           anchorPriority: item.anchorPriority,
           measurementPolicy: item.measurementPolicy,
           layoutPendingPolicy: item.layoutPendingPolicy,
@@ -82,7 +90,9 @@ export function buildTranscriptRows(
           fragment: item.fragment,
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
           estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
           anchorPriority: item.anchorPriority,
           measurementPolicy: item.measurementPolicy,
           layoutPendingPolicy: item.layoutPendingPolicy,
@@ -105,7 +115,9 @@ export function buildTranscriptRows(
           },
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
           estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
           anchorPriority: item.anchorPriority,
           measurementPolicy: item.measurementPolicy,
           layoutPendingPolicy: item.layoutPendingPolicy,
@@ -128,7 +140,9 @@ export function buildTranscriptRows(
           },
           renderRevision: item.renderRevision,
           heightRevision: item.heightRevision,
+          layoutRevision: TRANSCRIPT_ZERO_LAYOUT_REVISION,
           estimatedHeight: item.estimatedHeight,
+          spacingBefore: 0,
           anchorPriority: item.anchorPriority,
           measurementPolicy: item.measurementPolicy,
           layoutPendingPolicy: item.layoutPendingPolicy,
@@ -147,6 +161,8 @@ export function buildTranscriptRows(
     });
     return row;
   });
+
+  return applyTranscriptRowLayout(rows);
 }
 
 export function canReuseTranscriptRowDescriptor(
@@ -164,7 +180,9 @@ export function canReuseTranscriptRowDescriptor(
     previous.messageId === next.messageId &&
     previous.renderRevision === next.renderRevision &&
     previous.heightRevision === next.heightRevision &&
+    previous.layoutRevision === next.layoutRevision &&
     previous.estimatedHeight === next.estimatedHeight &&
+    previous.spacingBefore === next.spacingBefore &&
     previous.anchorPriority === next.anchorPriority &&
     previous.measurementPolicy === next.measurementPolicy &&
     previous.layoutPendingPolicy === next.layoutPendingPolicy &&
@@ -192,7 +210,9 @@ export function canReuseTranscriptRowDescriptor(
     toolChainPayloadsEqual(previous.toolChainDetail, next.toolChainDetail) &&
     previous.renderRevision === next.renderRevision &&
     previous.heightRevision === next.heightRevision &&
+    previous.layoutRevision === next.layoutRevision &&
     previous.estimatedHeight === next.estimatedHeight &&
+    previous.spacingBefore === next.spacingBefore &&
     previous.anchorPriority === next.anchorPriority &&
     previous.measurementPolicy === next.measurementPolicy &&
     previous.layoutPendingPolicy === next.layoutPendingPolicy &&
@@ -202,6 +222,70 @@ export function canReuseTranscriptRowDescriptor(
       next.measurementSafetyReasons,
     ) &&
     previous.keepAlivePriority === next.keepAlivePriority
+  );
+}
+
+function applyTranscriptRowLayout(
+  rows: TranscriptRowDescriptor[],
+): readonly TranscriptRowDescriptor[] {
+  let previousRowKind: TranscriptRowDescriptor["kind"] | undefined;
+
+  return rows.map((row, index) => {
+    const spacingBefore = getTranscriptRowSpacingBefore({
+      row,
+      index,
+      previousRowKind,
+    });
+    const layoutRevision = `layout-spacing:${spacingBefore}`;
+    previousRowKind = row.kind;
+
+    if (
+      row.spacingBefore === spacingBefore &&
+      row.layoutRevision === layoutRevision
+    ) {
+      return row;
+    }
+
+    return {
+      ...row,
+      spacingBefore,
+      layoutRevision,
+    };
+  });
+}
+
+function getTranscriptRowSpacingBefore({
+  row,
+  index,
+  previousRowKind,
+}: {
+  row: TranscriptRowDescriptor;
+  index: number;
+  previousRowKind?: TranscriptRowDescriptor["kind"];
+}): number {
+  if (
+    index === 0 ||
+    row.kind === "tool-chain-detail" ||
+    previousRowKind === "date-separator" ||
+    isFragmentContinuation(row)
+  ) {
+    return 0;
+  }
+
+  if (
+    row.kind === "assistant-content-fragment" &&
+    row.fragment?.startsWithHeading
+  ) {
+    return TRANSCRIPT_HEADING_ROW_TOP_SPACING_PX;
+  }
+
+  return TRANSCRIPT_ROW_TOP_SPACING_PX;
+}
+
+function isFragmentContinuation(row: TranscriptRowDescriptor): boolean {
+  return (
+    row.kind === "assistant-content-fragment" &&
+    row.fragment?.isCodeContinuationChunk === true
   );
 }
 

@@ -557,9 +557,9 @@ export const MessageBubble = memo(function MessageBubble({
     fragmentRole === "start"
       ? "pt-1 pb-0"
       : fragmentRole === "middle"
-        ? "-mt-1 py-0"
+        ? "py-0"
         : fragmentRole === "end"
-          ? "-mt-1 pt-0 pb-1"
+          ? "pt-0 pb-1"
           : "py-1";
   const showAssistantIdentity = Boolean(
     !isUser &&

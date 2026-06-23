@@ -97,9 +97,9 @@ describe("transcript virtual controller", () => {
       offsetWithinRow: 20,
     });
 
-    // A rail animation changes the transcript width. Width-stale measurements
-    // stay in effect as interim heights, so the layout must not collapse back
-    // to estimates and the viewport must not move.
+    // A rail animation changes the transcript width. Cached/replayed
+    // measurements are width-scoped, but live geometry keeps the last accepted
+    // height as a provisional value so the visible anchor does not jump rows.
     const resized = controller.syncViewport(
       {
         scrollTop: 620,
@@ -120,7 +120,7 @@ describe("transcript virtual controller", () => {
     });
 
     // Remeasurement at the new width lands: row-2 rewraps from 200px to
-    // 320px, shifting everything after it down. The anchored row must stay
+    // 320px, shifting everything after it down. The captured row must stay
     // pinned at the same viewport offset.
     const remeasured = controller.applyMeasuredHeight({
       token: tokenFor(controller, "row-2"),
@@ -481,6 +481,48 @@ describe("transcript virtual controller", () => {
     expect(controller.getState().virtualScrollHeight).toBe(140);
   });
 
+  it("includes row spacing in estimated virtual heights", () => {
+    const controller = createController({ viewportHeight: 50 });
+
+    controller.setRows([
+      row("first", 100),
+      row("second", 100, { spacingBefore: 16 }),
+    ]);
+
+    expect(controller.getState().virtualScrollHeight).toBe(216);
+    expect(controller.getScrollTopForRow("first", "end")).toBe(50);
+    expect(controller.getScrollTopForRow("second", "start")).toBe(100);
+    expect(controller.getScrollTopForRow("second", "end")).toBe(166);
+  });
+
+  it("drops stale measurements when only row layout revision changes", () => {
+    const controller = createController({ viewportHeight: 300 });
+    controller.setRows([row("message-1", 100)]);
+    const staleToken = tokenFor(controller, "message-1");
+
+    expect(
+      controller.applyMeasuredHeight({
+        token: staleToken,
+        height: 220,
+      }).accepted,
+    ).toBe(true);
+    expect(controller.getState().virtualScrollHeight).toBe(220);
+
+    controller.setRows([row("message-1", 100, { spacingBefore: 16 })]);
+
+    expect(controller.getState().virtualScrollHeight).toBe(116);
+    expect(
+      controller.applyMeasuredHeight({
+        token: staleToken,
+        height: 240,
+      }).accepted,
+    ).toBe(false);
+    expect(controller.getDiagnostics()).toMatchObject({
+      staleMeasurementsDropped: 1,
+      staleMeasurementRevisionDrops: 1,
+    });
+  });
+
   it("skips non-anchorable sentinels and falls back to streaming only when no stable row intersects", () => {
     const controller = createController({ viewportHeight: 300, scrollTop: 40 });
     controller.setRows([
@@ -622,6 +664,7 @@ function row(
   estimatedHeight: number,
   overrides: Partial<TranscriptRowDescriptor> = {},
 ): TranscriptRowDescriptor {
+  const spacingBefore = overrides.spacingBefore ?? 0;
   return {
     rowId,
     reactKey: rowId,
@@ -631,7 +674,10 @@ function row(
     renderRevision: overrides.renderRevision ?? `render:${rowId}`,
     heightRevision:
       overrides.heightRevision ?? `height:${rowId}:${estimatedHeight}`,
+    layoutRevision:
+      overrides.layoutRevision ?? `layout-spacing:${spacingBefore}`,
     estimatedHeight,
+    spacingBefore,
     anchorPriority: overrides.anchorPriority ?? "stable",
     measurementPolicy: overrides.measurementPolicy ?? "measure-real",
     layoutPendingPolicy: overrides.layoutPendingPolicy ?? "can-finalize",

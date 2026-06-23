@@ -1509,9 +1509,12 @@ describe("VirtualMessageTimeline", () => {
     });
     await waitFor(() =>
       expect(
-        diagnosticEvents.at(-1)?.measurement.acceptedOffscreenShellMeasurements,
+        diagnosticEvents.at(-1)?.measurement.offscreenShellMeasurementAttempts,
       ).toBeGreaterThan(0),
     );
+    expect(
+      diagnosticEvents.at(-1)?.measurement.acceptedOffscreenShellMeasurements,
+    ).toBe(0);
     await waitFor(() =>
       expect(
         diagnosticEvents.at(-1)?.measurement.acceptedOffscreenRealMeasurements,

@@ -976,7 +976,9 @@ function row(
     renderRevision: overrides.renderRevision ?? `render:${rowId}`,
     heightRevision:
       overrides.heightRevision ?? `height:${rowId}:${estimatedHeight}`,
+    layoutRevision: overrides.layoutRevision ?? "layout-spacing:0",
     estimatedHeight,
+    spacingBefore: overrides.spacingBefore ?? 0,
     anchorPriority: overrides.anchorPriority ?? "stable",
     measurementPolicy: overrides.measurementPolicy ?? "measure-real",
     layoutPendingPolicy: overrides.layoutPendingPolicy ?? "can-finalize",
