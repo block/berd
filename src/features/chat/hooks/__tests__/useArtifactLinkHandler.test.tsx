@@ -24,6 +24,7 @@ function makeCandidate(
   return {
     rawPath: "/project/report.md",
     resolvedPath: "/Users/test/project/report.md",
+    isWithinSessionCwd: true,
     ...overrides,
   };
 }

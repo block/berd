@@ -17,6 +17,14 @@ import { pathExists } from "@/shared/api/system";
 export interface ArtifactLinkCandidate {
   resolvedPath: string;
   rawPath: string;
+  /**
+   * True when `resolvedPath` is contained within the session working
+   * directory (i.e. not an absolute path or `..`-escape that lands outside
+   * the cwd). Consumers that want cwd-scoped behavior (e.g. inline local
+   * Markdown images) must check this; it is `false` when there is no session
+   * cwd to scope against.
+   */
+  isWithinSessionCwd: boolean;
   line?: number | null;
 }
 
@@ -117,8 +125,22 @@ function resolveRelativeToBase(base: string, relativePath: string): string {
   return `/${resolved}`;
 }
 
+// Markdown image/link destinations percent-encode characters that are not
+// allowed raw in a URL destination — most commonly spaces (`%20`). Filesystem
+// checks (`path_exists`) and `convertFileSrc` both expect a real, decoded path
+// (the latter re-encodes internally, so a pre-encoded path would double-encode).
+// Decode once here so every consumer works with the true path. Guarded because
+// `decodeURIComponent` throws on malformed `%` sequences.
+function decodePathIfEncoded(path: string): string {
+  try {
+    return decodeURIComponent(path);
+  } catch {
+    return path;
+  }
+}
+
 function resolvePath(path: string, sessionCwd: string | null): string {
-  const normalized = normalizePath(path);
+  const normalized = decodePathIfEncoded(normalizePath(path));
   if (!normalized) return "";
 
   if (normalized.toLowerCase().startsWith("file://")) {
@@ -132,6 +154,22 @@ function resolvePath(path: string, sessionCwd: string | null): string {
   return sessionCwd
     ? resolveRelativeToBase(sessionCwd, normalized)
     : normalized;
+}
+
+/**
+ * Returns true when `resolvedPath` is the session cwd itself or a descendant
+ * of it. Used to enforce that cwd-scoped consumers never resolve to a path
+ * outside the session working directory (absolute paths, `..`-escapes, etc.).
+ * Comparison is done on normalized, boundary-terminated paths so a sibling
+ * like `/work-secrets` does not count as inside `/work`.
+ */
+function isWithinBase(base: string | null, resolvedPath: string): boolean {
+  if (!base || !resolvedPath) return false;
+  const normalizedBase = normalizePath(base).replace(/\/+$/, "");
+  const normalizedTarget = normalizePath(resolvedPath).replace(/\/+$/, "");
+  if (!normalizedBase) return false;
+  if (normalizedTarget === normalizedBase) return true;
+  return normalizedTarget.startsWith(`${normalizedBase}/`);
 }
 
 function isNonEmptyLocation(
@@ -165,9 +203,11 @@ export function ArtifactPolicyProvider({
       const withoutQuery = withoutHash.split("?")[0];
       if (!withoutQuery) return null;
 
+      const resolvedPath = resolvePath(withoutQuery, normalizedSessionCwd);
       return {
         rawPath: withoutQuery,
-        resolvedPath: resolvePath(withoutQuery, normalizedSessionCwd),
+        resolvedPath,
+        isWithinSessionCwd: isWithinBase(normalizedSessionCwd, resolvedPath),
       };
     },
     [normalizedSessionCwd],

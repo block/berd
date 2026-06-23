@@ -32,6 +32,8 @@ import {
 import type { McpAppMessageHandler } from "./mcpAppTypes";
 import { ToolChainCards, type ToolChainItem } from "./ToolChainCards";
 import { ClickableImage } from "./ClickableImage";
+import { MarkdownImage } from "./MarkdownImage";
+import { resolveImageContentSrc } from "./resolveImageContentSrc";
 import { McpAppView } from "./McpAppView";
 import { useArtifactLinkHandler } from "@/features/chat/hooks/useArtifactLinkHandler";
 import type { CustomRenderer } from "streamdown";
@@ -287,6 +289,7 @@ function renderContentBlock(
           codeRenderers={
             options.onRunShellCommand ? options.runItCodeRenderers : undefined
           }
+          imageRenderer={MarkdownImage}
         >
           {tc.text}
         </MessageResponse>
@@ -294,7 +297,12 @@ function renderContentBlock(
     }
     case "image": {
       const ic = content as ImageContent;
-      const src = ic.uri ?? `data:${ic.mimeType};base64,${ic.data}`;
+      // Prefer inline base64 `data` over a `file://` `uri` (which the webview
+      // cannot load); convert local file URIs through the asset scheme.
+      const src = resolveImageContentSrc(ic);
+      if (!src) {
+        return null;
+      }
       return (
         <ClickableImage
           key={`image-${index}`}

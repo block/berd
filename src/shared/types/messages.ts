@@ -249,6 +249,9 @@ export interface Message {
 export function isTextContent(c: MessageContent): c is TextContent {
   return c.type === "text";
 }
+export function isImageContent(c: MessageContent): c is ImageContent {
+  return c.type === "image";
+}
 export function isToolRequest(c: MessageContent): c is ToolRequestContent {
   return c.type === "toolRequest";
 }

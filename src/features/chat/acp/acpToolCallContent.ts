@@ -4,7 +4,11 @@ import {
   getReplayBuffer,
   getBufferedMessage,
 } from "@/features/chat/hooks/replayBuffer";
-import type { McpAppContent, MessageContent } from "@/shared/types/messages";
+import type {
+  ImageContent,
+  McpAppContent,
+  MessageContent,
+} from "@/shared/types/messages";
 import { buildMcpAppPayloadFromToolUpdate } from "@/shared/api/mcpAppToolUpdate";
 
 export function findReplayMessageWithToolCall(
@@ -47,6 +51,32 @@ export function extractToolResultText(update: {
       : JSON.stringify(update.rawOutput);
   }
   return "";
+}
+
+export function extractToolResultImages(update: {
+  // biome-ignore lint/suspicious/noExplicitAny: ACP SDK ToolCallContent type is complex
+  content?: Array<any> | null;
+}): ImageContent[] {
+  if (!update.content || update.content.length === 0) {
+    return [];
+  }
+  const images: ImageContent[] = [];
+  for (const item of update.content) {
+    // ACP tool results wrap each block as { type: "content", content: <ContentBlock> }.
+    // An image-producing MCP (e.g. imagegenerator) emits an image ContentBlock here;
+    // pull it out so it renders inline instead of being dropped (text-only before).
+    if (item?.type === "content" && item.content?.type === "image") {
+      const { data, mimeType, uri, annotations } = item.content;
+      images.push({
+        type: "image",
+        data,
+        mimeType,
+        ...(uri !== undefined ? { uri } : {}),
+        ...(annotations !== undefined ? { annotations } : {}),
+      });
+    }
+  }
+  return images;
 }
 
 export function extractToolStructuredContent(update: {

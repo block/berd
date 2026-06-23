@@ -34,7 +34,11 @@ import {
   useRef,
   useState,
 } from "react";
-import { Streamdown, type CustomRenderer } from "streamdown";
+import {
+  type Components as StreamdownComponents,
+  type CustomRenderer,
+  Streamdown,
+} from "streamdown";
 import { useTranslation } from "react-i18next";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -334,6 +338,12 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown> & {
   codeRenderers?: CustomRenderer[];
+  /**
+   * Optional feature-aware Markdown image renderer. Chat injects one that can
+   * resolve local files through the asset scheme; when omitted, images render
+   * with a plain <img>. Keeps this shared module free of chat-feature imports.
+   */
+  imageRenderer?: MarkdownImageRenderer;
 };
 
 const streamdownPlugins = { cjk, code, math, mermaid };
@@ -429,7 +439,20 @@ const MarkdownLink = memo(
 );
 MarkdownLink.displayName = "MarkdownLink";
 
-const streamdownComponents = { a: MarkdownLink };
+export type MarkdownImageRenderer = NonNullable<StreamdownComponents["img"]>;
+
+// Default Markdown image renderer: plain <img>. Chat injects a feature-aware
+// renderer (local file → asset: scheme, gated by experiment) via the
+// `imageRenderer` prop on MessageResponse so this shared module stays free of
+// chat-feature dependencies.
+const DefaultMarkdownImage: MarkdownImageRenderer = ({
+  node: _node,
+  ...rest
+}) => <img {...rest} alt={rest.alt ?? ""} />;
+
+function buildStreamdownComponents(imageRenderer?: MarkdownImageRenderer) {
+  return { a: MarkdownLink, img: imageRenderer ?? DefaultMarkdownImage };
+}
 
 const linkSafetyConfig: ComponentProps<typeof Streamdown>["linkSafety"] = {
   enabled: false,
@@ -440,6 +463,7 @@ export const MessageResponse = memo(
     children,
     className,
     codeRenderers,
+    imageRenderer,
     isAnimating,
     mode,
     onAnimationEnd,
@@ -448,6 +472,10 @@ export const MessageResponse = memo(
   }: MessageResponseProps) => {
     const { t } = useTranslation("common");
     const [modalUrl, setModalUrl] = useState<string | null>(null);
+    const streamdownComponents = useMemo(
+      () => buildStreamdownComponents(imageRenderer),
+      [imageRenderer],
+    );
     const streamdownRootRef = useRef<HTMLDivElement>(null);
     const streamdownLayoutPending = useVirtualLayoutPendingForStreamdown({
       contentKey: children,

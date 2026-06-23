@@ -63,6 +63,8 @@ export const DEFAULT_PANE_JUMP_NAVIGATION_SHORTCUT = "ctrl+;";
 export const TRANSCRIPT_VIRTUAL_RENDERER_EXPERIMENT_ID =
   "transcript-virtual-renderer";
 
+export const LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID = "local-markdown-images";
+
 export const SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID =
   "sidebar-detachable-chats";
 
@@ -116,6 +118,16 @@ export const EXPERIMENT_DEFINITIONS = [
     id: GOOSECTL_EXPERIMENT_ID,
     titleKey: "experiments.goosectl.title",
     descriptionKey: "experiments.goosectl.description",
+  },
+  {
+    id: LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID,
+    titleKey: "experiments.localMarkdownImages.title",
+    descriptionKey: "experiments.localMarkdownImages.description",
+    // Renders Markdown image links that point at local files in the session
+    // working directory inline (via the asset: scheme), instead of showing a
+    // broken image. Off by default until the path-scoping behavior is reviewed;
+    // remote http(s) images stay blocked regardless of this switch.
+    defaultEnabled: false,
   },
   {
     id: SIDEBAR_DETACHABLE_CHATS_EXPERIMENT_ID,

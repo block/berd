@@ -221,6 +221,58 @@ describe("acpNotificationHandler", () => {
     ).toBe("assistant-1");
   });
 
+  it("renders an image returned by a live tool result as an inline image block", async () => {
+    // An image-producing MCP (e.g. imagegenerator) returns the image as an
+    // image ContentBlock in the tool result. The completed tool_call_update must
+    // surface it as an inline image block after the toolResponse, not drop it.
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-img-tool");
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call",
+        toolCallId: "img-1",
+        title: "imagegenerator__generate",
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "img-1",
+        status: "completed",
+        content: [
+          {
+            type: "content",
+            content: { type: "text", text: "Here is your image." },
+          },
+          {
+            type: "content",
+            content: {
+              type: "image",
+              data: "iVBORw0KGgo=",
+              mimeType: "image/png",
+            },
+          },
+        ],
+      },
+    } as never);
+
+    const [message] = useChatStore.getState().messagesBySession["acp-session"];
+    expect(message.content.map((block) => block.type)).toEqual([
+      "toolRequest",
+      "toolResponse",
+      "image",
+    ]);
+    expect(message.content[2]).toMatchObject({
+      type: "image",
+      data: "iVBORw0KGgo=",
+      mimeType: "image/png",
+    });
+  });
+
   it("bounds the per-chunk subtitle accumulator and still matches the canonical snippet", async () => {
     registerPreparedSession("acp-session", "goose", "/Users/test");
     setActiveMessageId("acp-session", "assistant-1");
@@ -1259,6 +1311,55 @@ describe("acpNotificationHandler", () => {
     expect(buffer).toHaveLength(1);
     expect(buffer?.[0]).toMatchObject({
       id: "assistant-1",
+      role: "assistant",
+      content: [
+        { type: "text", text: "here is the generated image:" },
+        {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+          uri: "file:///tmp/generated.png",
+        },
+      ],
+    });
+  });
+
+  it("appends live assistant image chunks inline during the turn", async () => {
+    // Live counterpart to "replay appends assistant image chunks in message
+    // order". A session not in loadingSessionIds takes the handleLive path. An
+    // image chunk that follows a text chunk must be appended to the streaming
+    // assistant message so it renders during the turn (regression guard for the
+    // previously-missing live image branch).
+    registerPreparedSession("acp-session", "goose", "/Users/test");
+    setActiveMessageId("acp-session", "assistant-img-live", {});
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "text",
+          text: "here is the generated image:",
+        },
+      },
+    } as never);
+
+    await handleSessionNotification({
+      sessionId: "acp-session",
+      update: {
+        sessionUpdate: "agent_message_chunk",
+        content: {
+          type: "image",
+          data: "iVBORw0KGgo=",
+          mimeType: "image/png",
+          uri: "file:///tmp/generated.png",
+        },
+      },
+    } as never);
+
+    const [message] = useChatStore.getState().messagesBySession["acp-session"];
+    expect(message).toMatchObject({
+      id: "assistant-img-live",
       role: "assistant",
       content: [
         { type: "text", text: "here is the generated image:" },

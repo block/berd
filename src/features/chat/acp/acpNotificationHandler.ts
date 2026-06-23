@@ -28,6 +28,7 @@ import {
 } from "./acpSkillReplayChips";
 import {
   attachMcpAppPayload,
+  extractToolResultImages,
   extractToolStructuredContent,
   extractToolResultText,
   findReplayMessageWithToolCall,
@@ -316,6 +317,11 @@ function handleReplay(sessionId: string, update: SessionUpdate): void {
             structuredContent: extractToolStructuredContent(update),
             isError: update.status === "failed",
           });
+          // Mirror the live branch: surface image blocks returned by the tool
+          // so image-producing MCPs render inline on replay too.
+          for (const image of extractToolResultImages(update)) {
+            msg.content.push(image);
+          }
           if (update.status === "completed") {
             attachMcpAppPayload(
               sessionId,
@@ -404,6 +410,15 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
             .getState()
             .updateSessionSubtitleFromText(sessionId, accumulatedText);
         }
+      } else if (update.content.type === "image") {
+        // Live counterpart to the replay path (see the replay
+        // agent_message_chunk handler above): append an image content block to
+        // the streaming assistant message so agent-emitted images render inline
+        // during the turn, not only after reload. Without this branch image
+        // chunks were silently dropped live. Ensure the streaming message id is
+        // set first so appendToStreamingMessage targets the right message.
+        store.setStreamingMessageId(sessionId, messageId);
+        store.appendToStreamingMessage(sessionId, { ...update.content });
       }
       break;
     }
@@ -514,6 +529,15 @@ function handleLive(sessionId: string, update: SessionUpdate): void {
           ...msg,
           content: [...msg.content, toolResponse],
         }));
+        // Append any image blocks the tool returned so image-producing MCPs
+        // (e.g. imagegenerator) render inline rather than only as text/JSON.
+        const toolImages = extractToolResultImages(update);
+        if (toolImages.length > 0) {
+          store.updateMessage(sessionId, messageId, (msg) => ({
+            ...msg,
+            content: [...msg.content, ...toolImages],
+          }));
+        }
         if (update.status === "completed") {
           attachMcpAppPayload(
             sessionId,
