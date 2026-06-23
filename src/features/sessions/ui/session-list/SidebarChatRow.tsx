@@ -1,4 +1,10 @@
-import { type MouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import {
   Archive,
   ExternalLink,
@@ -25,6 +31,12 @@ import { useSessionWindowStore } from "@/features/chat/stores/sessionWindowStore
 import { isMultiSelectModifier } from "@/features/sessions/lib/sessionSelection";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
+import {
+  clearPointerDragClickSuppression,
+  hasExceededPointerDragThreshold,
+  isPrimaryPointerButton,
+  schedulePointerDragClickSuppressionReset,
+} from "@/features/sidebar/lib/pointerDrag";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -133,7 +145,8 @@ export function SidebarChatRow({
   onMarkSelectedUnread,
 }: SidebarChatRowProps) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const { beginSessionDrag, endSessionDrag } = useSidebarChatDrag();
+  const { beginSessionDrag, updateSessionDragTarget, endSessionDrag } =
+    useSidebarChatDrag();
   const [menuOpen, setMenuOpen] = useState(false);
   const [flatProjectTooltipOpen, setFlatProjectTooltipOpen] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -146,6 +159,15 @@ export function SidebarChatRow({
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "chat", id });
   const inputRef = useRef<HTMLInputElement>(null);
+  const pointerDragRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    dragging: boolean;
+  } | null>(null);
+  const pointerDragCleanupRef = useRef<(() => void) | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const suppressNextClickResetRef = useRef<number | null>(null);
   const sessionWindowSupport = useSessionWindowSupport();
   const isMultiWindowEnabled = sessionWindowSupport.supported;
   const displayTitle = getDisplaySessionTitle(
@@ -308,6 +330,109 @@ export function SidebarChatRow({
     });
   };
 
+  const clearPointerDragListeners = () => {
+    pointerDragCleanupRef.current?.();
+    pointerDragCleanupRef.current = null;
+  };
+
+  const finishPointerDrag = () => {
+    clearPointerDragListeners();
+    pointerDragRef.current = null;
+    setDragging(false);
+    endSessionDrag();
+    if (suppressNextClickRef.current) {
+      schedulePointerDragClickSuppressionReset(
+        suppressNextClickRef,
+        suppressNextClickResetRef,
+      );
+    }
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (!isPrimaryPointerButton(event) || editing) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest("[data-sidebar-drag-ignore]")
+    ) {
+      return;
+    }
+
+    clearPointerDragListeners();
+    pointerDragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+
+    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return;
+
+      const isDragging =
+        drag.dragging ||
+        hasExceededPointerDragThreshold({
+          startX: drag.startX,
+          startY: drag.startY,
+          clientX: moveEvent.clientX,
+          clientY: moveEvent.clientY,
+        });
+
+      if (!isDragging) return;
+
+      moveEvent.preventDefault();
+      suppressNextClickRef.current = true;
+      if (!drag.dragging) {
+        pointerDragRef.current = { ...drag, dragging: true };
+        setMenuOpen(false);
+        setDragging(true);
+        beginSessionDrag(id, currentProjectId);
+      }
+      updateSessionDragTarget(moveEvent.clientX, moveEvent.clientY);
+    };
+
+    const handlePointerUp = (upEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || upEvent.pointerId !== drag.pointerId) return;
+
+      if (drag.dragging) {
+        upEvent.preventDefault();
+        const target = updateSessionDragTarget(
+          upEvent.clientX,
+          upEvent.clientY,
+        );
+        target?.onDrop(id);
+      }
+      finishPointerDrag();
+    };
+
+    const handlePointerCancel = (cancelEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || cancelEvent.pointerId !== drag.pointerId) return;
+      finishPointerDrag();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    pointerDragCleanupRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  };
+
+  useEffect(() => {
+    return () => {
+      pointerDragCleanupRef.current?.();
+      clearPointerDragClickSuppression(
+        suppressNextClickRef,
+        suppressNextClickResetRef,
+      );
+    };
+  }, []);
+
   if (editing) {
     return (
       <div
@@ -344,21 +469,20 @@ export function SidebarChatRow({
   }
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: wrapper handles drag and context menu, interactive content is the inner Button
+    // biome-ignore lint/a11y/noStaticElementInteractions: wrapper handles pointer drag and context menu; interactive content is the inner Button
     <div
       data-session-id={id}
       data-sidebar-chat-row
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData("text/x-session-id", id);
-        e.dataTransfer.effectAllowed = "move";
-        setMenuOpen(false);
-        setDragging(true);
-        beginSessionDrag(id, currentProjectId);
-      }}
-      onDragEnd={() => {
-        setDragging(false);
-        endSessionDrag();
+      data-sidebar-chat-draggable
+      onPointerDown={handlePointerDown}
+      onClickCapture={(event) => {
+        if (!suppressNextClickRef.current) return;
+        clearPointerDragClickSuppression(
+          suppressNextClickRef,
+          suppressNextClickResetRef,
+        );
+        event.preventDefault();
+        event.stopPropagation();
       }}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -396,6 +520,7 @@ export function SidebarChatRow({
                     name: flatProjectName,
                   })}
                   data-sidebar-flat-project-icon
+                  data-sidebar-drag-ignore
                   onClick={handleEditFlatProject}
                 >
                   {flatProjectGlyph}
@@ -531,6 +656,7 @@ export function SidebarChatRow({
             variant="ghost"
             size="icon-xs"
             aria-label={t("menu.optionsFor", { label: displayTitle })}
+            data-sidebar-drag-ignore
             onClick={(e) => e.stopPropagation()}
             className={cn(
               "absolute size-5 rounded-sm transition-[color,opacity] duration-75 hover:text-sidebar-foreground",

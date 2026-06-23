@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ChatInput } from "./chatInputTestUtils";
@@ -167,9 +168,7 @@ describe("ChatInput attachments", () => {
     fireEvent.dragEnter(composer, { dataTransfer });
     fireEvent.dragOver(composer, { dataTransfer });
 
-    expect(
-      screen.getByText("Drop files or folders to attach"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Drop files or folders")).toBeInTheDocument();
   });
 
   it("does not cancel non-file drops into the composer", () => {
@@ -193,6 +192,61 @@ describe("ChatInput attachments", () => {
     fireEvent(composer, dropEvent);
 
     expect(dropEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("opens image attachments in a keyboard-navigable lightbox", async () => {
+    const user = userEvent.setup();
+    mockOpenDialog.mockResolvedValue([
+      "/Users/test/one.png",
+      "/Users/test/two.png",
+    ]);
+    mockInspectAttachmentPaths.mockResolvedValue([
+      {
+        name: "one.png",
+        path: "/Users/test/one.png",
+        kind: "file",
+        mimeType: "image/png",
+      },
+      {
+        name: "two.png",
+        path: "/Users/test/two.png",
+        kind: "file",
+        mimeType: "image/png",
+      },
+    ]);
+    mockReadImageAttachment
+      .mockResolvedValueOnce({ base64: "one", mimeType: "image/png" })
+      .mockResolvedValueOnce({ base64: "two", mimeType: "image/png" });
+
+    render(<ChatInput onSend={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /attach/i }));
+    await user.click(screen.getByRole("menuitem", { name: /^file$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByAltText("Attachment 2")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("button", { name: /view attachment 1/i }),
+    );
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByAltText("Attachment 1")).toHaveAttribute(
+      "src",
+      "/Users/test/one.png",
+    );
+
+    await user.keyboard("{ArrowRight}");
+    expect(within(dialog).getByAltText("Attachment 2")).toHaveAttribute(
+      "src",
+      "/Users/test/two.png",
+    );
+
+    await user.keyboard("{ArrowLeft}");
+    expect(within(dialog).getByAltText("Attachment 1")).toHaveAttribute(
+      "src",
+      "/Users/test/one.png",
+    );
   });
 
   it("renders mixed attachments from a single file picker pass", async () => {

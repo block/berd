@@ -1,9 +1,8 @@
-import { useCallback, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconEdit, IconPlus } from "@tabler/icons-react";
 import { History } from "lucide-react";
 import type { AppView } from "@/app/AppShell";
-import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { getDisplaySessionTitle } from "@/features/chat/lib/sessionTitle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -16,6 +15,7 @@ import {
   SIDEBAR_SECTION_HEADER_ROW_CLASS,
 } from "@/shared/ui/sidebar-tokens";
 import { SessionActivityIndicator } from "@/shared/ui/SessionActivityIndicator";
+import { SidebarChatMenuIcon } from "./SidebarChatMenuIcon";
 import { SidebarChatRow } from "./SidebarChatRow";
 import { useSidebarChatDrag } from "./SidebarChatDragContext";
 import type { SidebarSessionItem } from "./SidebarProjectSection";
@@ -78,56 +78,35 @@ export function SidebarRecentsSection({
   sectionHeaderTextClass: string;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const { draggingSession } = useSidebarChatDrag();
-  const [recentsDragOver, setRecentsDragOver] = useState(false);
+  const { activeSessionDropTargetKey, registerSessionDropTarget } =
+    useSidebarChatDrag();
+  const recentsDropTargetRef = useRef<HTMLDivElement>(null);
   const showContent = collapsed || isOpen;
+  const recentsDropTargetKey = "recents";
 
-  // Recents only accepts chats that currently belong to a project (moving them
-  // back out). A chat already in Recents has nowhere to move here, so the drop
-  // zone stays inert instead of suggesting an action that does nothing.
-  const canAcceptDraggedSession =
-    draggingSession != null && draggingSession.fromProjectId != null;
-
-  const handleRecentsDragOver = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      if (
-        canAcceptDraggedSession &&
-        e.dataTransfer.types.includes("text/x-session-id")
-      ) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setRecentsDragOver(true);
-      }
+  const handleSessionDrop = useCallback(
+    (sessionId: string) => {
+      onMoveToProject?.(sessionId, null);
     },
-    [canAcceptDraggedSession],
+    [onMoveToProject],
   );
 
-  const handleRecentsDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      setRecentsDragOver(false);
-    }
-  }, []);
+  useEffect(() => {
+    const element = recentsDropTargetRef.current;
+    if (!element) return;
+    return registerSessionDropTarget({
+      key: recentsDropTargetKey,
+      kind: "recents",
+      projectId: null,
+      element,
+      onDrop: handleSessionDrop,
+    });
+  }, [handleSessionDrop, registerSessionDropTarget]);
 
-  const handleRecentsDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      setRecentsDragOver(false);
-      if (!canAcceptDraggedSession) return;
-      e.preventDefault();
-      const sessionId = e.dataTransfer.getData("text/x-session-id");
-      if (sessionId) {
-        onMoveToProject?.(sessionId, null);
-      }
-    },
-    [canAcceptDraggedSession, onMoveToProject],
-  );
+  const recentsDragOver = activeSessionDropTargetKey === recentsDropTargetKey;
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
-    <div
-      onDragOver={handleRecentsDragOver}
-      onDragLeave={handleRecentsDragLeave}
-      onDrop={handleRecentsDrop}
-    >
+    <div ref={recentsDropTargetRef} data-sidebar-session-drop-target="recents">
       <div
         className={cn(
           SIDEBAR_SECTION_DIVIDER_INSET_CLASS,

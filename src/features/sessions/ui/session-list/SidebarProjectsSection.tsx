@@ -63,7 +63,11 @@ export interface SidebarProjectsSectionProps {
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  onReorderProject?: (fromId: string, toId: string) => void;
+  onReorderProject?: (
+    fromId: string,
+    toId: string,
+    placement?: "before" | "after",
+  ) => void;
   hasMoreSessions?: boolean;
   projectsSectionOpen: boolean;
   recentsSectionOpen: boolean;

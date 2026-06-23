@@ -16,6 +16,8 @@ const badgeVariants = cva(
           "border-transparent bg-muted text-foreground [a&]:hover:bg-muted/90",
         destructive:
           "border-transparent bg-destructive text-destructive-foreground [a&]:hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
+        inverse:
+          "rounded-full border-transparent bg-surface-chat-responding-pill-bg px-4 py-2 text-sm text-surface-chat-responding-pill-fg",
         outline:
           "text-foreground [a&]:hover:bg-muted [a&]:hover:text-muted-foreground",
       },

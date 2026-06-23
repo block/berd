@@ -32,6 +32,7 @@ import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
 import { usePinToHomeWidget } from "@/features/home/hooks/usePinToHomeWidget";
 import { perfLog } from "@/shared/lib/perfLog";
+import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/shared/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
@@ -323,6 +324,9 @@ export function ChatView({
   const mountStart = useRef(performance.now());
   const terminalRootRef = useRef<HTMLDivElement | null>(null);
   const composerShellRef = useRef<HTMLDivElement | null>(null);
+  const conversationDropTargetRef = useRef<HTMLDivElement | null>(null);
+  const [conversationAttachmentDragOver, setConversationAttachmentDragOver] =
+    useState(false);
   const [closingTerminalTabId, setClosingTerminalTabId] = useState<
     string | null
   >(null);
@@ -1042,6 +1046,8 @@ export function ChatView({
           onRecallLastUserMessage={
             isReadOnly ? undefined : handleRecallLastUserMessage
           }
+          attachmentDropTargetRef={conversationDropTargetRef}
+          onAttachmentDragOverChange={setConversationAttachmentDragOver}
           initialValue={controller.draftValue}
           onDraftChange={controller.handleDraftChange}
           selectedSkills={controller.selectedSkills}
@@ -1197,12 +1203,18 @@ export function ChatView({
           style={agentBuilderChatColumnStyle}
         >
           <div
+            ref={conversationDropTargetRef}
             className={cn(
               "relative flex min-h-0 flex-1 flex-col overflow-visible rounded-md bg-card",
               terminalVisible && "min-h-[280px]",
             )}
           >
             {messageTimeline}
+            {conversationAttachmentDragOver ? (
+              <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center rounded-md border border-dashed border-border/80 bg-surface-glass-subtle p-6 [backdrop-filter:var(--backdrop-glass-subtle)] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-150 [-webkit-backdrop-filter:var(--backdrop-glass-subtle)]">
+                <Badge variant="inverse">{t("attachments.dropToAttach")}</Badge>
+              </div>
+            ) : null}
             {search.isOpen ? (
               <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-4 sm:justify-end sm:px-[var(--chat-transcript-inline-padding)]">
                 <ChatSearchBar

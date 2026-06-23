@@ -3,14 +3,19 @@ import {
   useEffect,
   useRef,
   useState,
-  type DragEvent,
+  type DragEvent as ReactDragEvent,
   type RefObject,
 } from "react";
+
+type AttachmentDragEvent =
+  | ReactDragEvent<HTMLDivElement>
+  | globalThis.DragEvent;
 
 interface UseAttachmentDropTargetOptions {
   disabled: boolean;
   isStreaming: boolean;
   targetRef: RefObject<HTMLDivElement | null>;
+  bindTargetEvents?: boolean;
   onDropFiles: (files: File[]) => void;
   onDropPaths: (paths: string[]) => void;
 }
@@ -100,6 +105,7 @@ export function useAttachmentDropTarget({
   disabled,
   isStreaming,
   targetRef,
+  bindTargetEvents = false,
   onDropFiles,
   onDropPaths,
 }: UseAttachmentDropTargetOptions) {
@@ -107,9 +113,29 @@ export function useAttachmentDropTarget({
   const dragDepthRef = useRef(0);
   const tauriDropHandledAtRef = useRef(0);
   const nativeDropExpectedUntilRef = useRef(0);
+
+  useEffect(() => {
+    if (!disabled && !isStreaming) return;
+    dragDepthRef.current = 0;
+    nativeDropExpectedUntilRef.current = 0;
+    setIsAttachmentDragOver(false);
+  }, [disabled, isStreaming]);
+
   const handleDragEnter = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const draggedFiles = hasDraggedFiles(event.dataTransfer);
+    (event: AttachmentDragEvent) => {
+      const currentTarget = event.currentTarget;
+      const relatedTarget = event.relatedTarget;
+      if (
+        currentTarget instanceof Node &&
+        relatedTarget instanceof Node &&
+        currentTarget.contains(relatedTarget)
+      ) {
+        return;
+      }
+
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) return;
+      const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || isStreaming || !draggedFiles) {
         return;
       }
@@ -122,21 +148,33 @@ export function useAttachmentDropTarget({
   );
 
   const handleDragOver = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const draggedFiles = hasDraggedFiles(event.dataTransfer);
+    (event: AttachmentDragEvent) => {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) return;
+      const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || isStreaming || !draggedFiles) {
         return;
       }
 
       event.preventDefault();
-      event.dataTransfer.dropEffect = "copy";
+      dataTransfer.dropEffect = "copy";
       setIsAttachmentDragOver(true);
     },
     [disabled, isStreaming],
   );
 
-  const handleDragLeave = useCallback((event: DragEvent<HTMLDivElement>) => {
+  const handleDragLeave = useCallback((event: AttachmentDragEvent) => {
     event.preventDefault();
+    const currentTarget = event.currentTarget;
+    const relatedTarget = event.relatedTarget;
+    if (
+      currentTarget instanceof Node &&
+      relatedTarget instanceof Node &&
+      currentTarget.contains(relatedTarget)
+    ) {
+      return;
+    }
+
     dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
     if (dragDepthRef.current === 0) {
       setIsAttachmentDragOver(false);
@@ -144,8 +182,10 @@ export function useAttachmentDropTarget({
   }, []);
 
   const handleDrop = useCallback(
-    (event: DragEvent<HTMLDivElement>) => {
-      const draggedFiles = hasDraggedFiles(event.dataTransfer);
+    (event: AttachmentDragEvent) => {
+      const dataTransfer = event.dataTransfer;
+      if (!dataTransfer) return;
+      const draggedFiles = hasDraggedFiles(dataTransfer);
       if (disabled || isStreaming || !draggedFiles) {
         return;
       }
@@ -154,7 +194,7 @@ export function useAttachmentDropTarget({
       dragDepthRef.current = 0;
       setIsAttachmentDragOver(false);
 
-      const files = Array.from(event.dataTransfer.files);
+      const files = Array.from(dataTransfer.files);
       if (files.length === 0) {
         return;
       }
@@ -173,8 +213,9 @@ export function useAttachmentDropTarget({
 
       // In Tauri, local file drops can arrive through both DOM File objects
       // and native webview drag/drop events. If we have already seen a native
-      // drag event over the composer, let the native path drop win. Otherwise
-      // keep the browser fallback immediate so ordinary DOM drops still work.
+      // drag event over the active attachment target, let the native path drop
+      // win. Otherwise keep the browser fallback immediate so ordinary DOM drops
+      // still work.
       if (nativeDropExpectedUntilRef.current > Date.now()) {
         return;
       }
@@ -183,6 +224,35 @@ export function useAttachmentDropTarget({
     },
     [disabled, isStreaming, onDropFiles],
   );
+
+  useEffect(() => {
+    if (!bindTargetEvents) {
+      return;
+    }
+
+    const target = targetRef.current;
+    if (!target) {
+      return;
+    }
+
+    target.addEventListener("dragenter", handleDragEnter);
+    target.addEventListener("dragover", handleDragOver);
+    target.addEventListener("dragleave", handleDragLeave);
+    target.addEventListener("drop", handleDrop);
+    return () => {
+      target.removeEventListener("dragenter", handleDragEnter);
+      target.removeEventListener("dragover", handleDragOver);
+      target.removeEventListener("dragleave", handleDragLeave);
+      target.removeEventListener("drop", handleDrop);
+    };
+  }, [
+    bindTargetEvents,
+    handleDragEnter,
+    handleDragLeave,
+    handleDragOver,
+    handleDrop,
+    targetRef,
+  ]);
 
   useEffect(() => {
     if (!isInTauriEnvironment()) {
@@ -200,6 +270,7 @@ export function useAttachmentDropTarget({
           }
 
           if (payload.type === "leave") {
+            dragDepthRef.current = 0;
             setIsAttachmentDragOver(false);
             nativeDropExpectedUntilRef.current = 0;
             return;

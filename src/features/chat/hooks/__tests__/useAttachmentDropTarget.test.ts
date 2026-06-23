@@ -213,4 +213,66 @@ describe("useAttachmentDropTarget", () => {
     unmount();
     cleanup();
   });
+
+  it("can bind DOM drop events to a larger external target", async () => {
+    const { target, targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        bindTargetEvents: true,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    const file = new File(["pdf"], "report.pdf", {
+      type: "application/pdf",
+    });
+    const dataTransfer = {
+      files: [file],
+      items: [{ kind: "file" }],
+      types: ["Files"],
+      dropEffect: "copy",
+    } as unknown as DataTransfer;
+
+    const dragEnterEvent = new Event("dragenter", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(dragEnterEvent, "dataTransfer", {
+      configurable: true,
+      value: dataTransfer,
+    });
+    act(() => {
+      target.dispatchEvent(dragEnterEvent);
+    });
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    const dropEvent = new Event("drop", {
+      bubbles: true,
+      cancelable: true,
+    });
+    Object.defineProperty(dropEvent, "dataTransfer", {
+      configurable: true,
+      value: dataTransfer,
+    });
+    act(() => {
+      target.dispatchEvent(dropEvent);
+    });
+
+    expect(dropEvent.defaultPrevented).toBe(true);
+    expect(onDropFiles).toHaveBeenCalledWith([file]);
+    expect(onDropPaths).not.toHaveBeenCalled();
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+  });
 });

@@ -255,14 +255,15 @@ describe("SidebarChatRow", () => {
     ).toBeInTheDocument();
   });
 
-  it("does not advertise drag with the cursor", () => {
+  it("does not use native HTML draggable affordances", () => {
     const { container } = render(
       <SidebarChatRow id="session-1" title="Idle Chat" isActive={false} />,
     );
 
-    const row = container.querySelector("[draggable]");
-    expect(row).not.toHaveClass("cursor-default");
-    expect(row).not.toHaveClass("active:cursor-grabbing");
+    expect(container.querySelector("[draggable]")).not.toBeInTheDocument();
+    expect(
+      container.querySelector("[data-sidebar-chat-draggable]"),
+    ).toBeInTheDocument();
     expect(screen.getByTitle("Double-click to rename")).toHaveClass(
       "cursor-pointer",
     );

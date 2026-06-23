@@ -389,6 +389,8 @@
   --surface-agent-profile-control-bg-hover: rgba(255, 255, 255, 0.9);
   --surface-agent-profile-action-fg: rgba(245, 245, 245, 0.96);
   --surface-agent-profile-action-bg-hover: rgba(36, 36, 36, 0.9);
+  --surface-glass-subtle: rgba(255, 255, 255, 0.1);
+  --backdrop-glass-subtle: blur(6px) saturate(120%) brightness(1.01);
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: #242424;
@@ -841,6 +843,8 @@
   --surface-agent-profile-control-bg-hover: var(--color-gray-700);
   --surface-agent-profile-action-fg: var(--color-gray-900);
   --surface-agent-profile-action-bg-hover: var(--color-gray-300);
+  --surface-glass-subtle: rgba(255, 255, 255, 0.04);
+  --backdrop-glass-subtle: blur(6px) saturate(120%) brightness(1.01);
   --surface-glass-strong: rgba(255, 255, 255, 0.72);
   --surface-glass-strong-hover: rgba(255, 255, 255, 0.88);
   --surface-glass-strong-fg: var(--color-gray-900);
@@ -1032,6 +1036,7 @@
     --surface-chat-responding-pill-fg
   );
   --color-surface-composer-glass: var(--surface-composer-glass);
+  --color-surface-glass-subtle: var(--surface-glass-subtle);
   --color-surface-editor-panel: var(--surface-editor-panel);
   --color-surface-agent-profile-bg: var(--surface-agent-profile-bg);
   --color-surface-agent-profile-fg: var(--surface-agent-profile-fg);

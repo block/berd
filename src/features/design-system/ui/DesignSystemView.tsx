@@ -1558,6 +1558,15 @@ const badgeVariantColorRows: Record<BadgeVariant, TokenColorRow[]> = {
       border: "transparent",
     },
   ],
+  inverse: [
+    {
+      anatomy: "Badge",
+      state: "Default",
+      background: "--surface-chat-responding-pill-bg",
+      textIcon: "--surface-chat-responding-pill-fg",
+      border: "transparent",
+    },
+  ],
   outline: [
     {
       anatomy: "Badge",

@@ -147,6 +147,8 @@ export function ChatInput({
   contextUsage,
   controls,
   onRecallLastUserMessage,
+  attachmentDropTargetRef,
+  onAttachmentDragOverChange,
   surface = "pill",
 }: ChatInputProps) {
   const {
@@ -255,6 +257,9 @@ export function ChatInput({
   const resizeTextareaFrameRef = useRef<number | null>(null);
   const pendingCursorOffsetRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const effectiveAttachmentDropTargetRef =
+    attachmentDropTargetRef ?? containerRef;
+  const usesExternalAttachmentDropTarget = Boolean(attachmentDropTargetRef);
   const {
     attachments,
     addBrowserFiles,
@@ -876,7 +881,8 @@ export function ChatInput({
   } = useAttachmentDropTarget({
     disabled: disabled || !scopedControls.attachments,
     isStreaming,
-    targetRef: containerRef,
+    targetRef: effectiveAttachmentDropTargetRef,
+    bindTargetEvents: usesExternalAttachmentDropTarget,
     onDropFiles: (files) => {
       void runAttachmentWork(() => addBrowserFiles(files));
     },
@@ -888,6 +894,16 @@ export function ChatInput({
     disabled: disabled || !scopedControls.attachments,
     addPathAttachments: addPathAttachmentsWithPending,
   });
+
+  useEffect(() => {
+    onAttachmentDragOverChange?.(isAttachmentDragOver);
+  }, [isAttachmentDragOver, onAttachmentDragOverChange]);
+
+  useEffect(() => {
+    return () => {
+      onAttachmentDragOverChange?.(false);
+    };
+  }, [onAttachmentDragOverChange]);
 
   const providerDisplayName =
     providers.find((provider) => provider.id === selectedProvider)?.label ??
@@ -1194,14 +1210,22 @@ export function ChatInput({
                 surface === "bare" ? "px-4 pb-2.5 pt-3" : "px-5 pb-3 pt-4",
                 composerRadius,
                 surface === "pill" && "bg-surface-composer backdrop-blur-md",
-                isAttachmentDragOver && "bg-surface-composer/60",
+                isAttachmentDragOver &&
+                  !usesExternalAttachmentDropTarget &&
+                  "bg-surface-composer/60",
               )}
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
+              onDragEnter={
+                usesExternalAttachmentDropTarget ? undefined : handleDragEnter
+              }
+              onDragOver={
+                usesExternalAttachmentDropTarget ? undefined : handleDragOver
+              }
+              onDragLeave={
+                usesExternalAttachmentDropTarget ? undefined : handleDragLeave
+              }
+              onDrop={usesExternalAttachmentDropTarget ? undefined : handleDrop}
             >
-              {isAttachmentDragOver && (
+              {isAttachmentDragOver && !usesExternalAttachmentDropTarget && (
                 <div
                   className={cn(
                     "pointer-events-none absolute inset-0 z-10 flex items-center justify-center border border-dashed border-border/80 bg-card/60",

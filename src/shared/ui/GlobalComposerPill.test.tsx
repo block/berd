@@ -906,9 +906,7 @@ describe("GlobalComposerPill", () => {
       },
     });
 
-    expect(
-      screen.getByText("Drop files or folders to attach"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Drop files or folders")).toBeInTheDocument();
   });
 
   it("attaches selected project file mentions as chips", async () => {

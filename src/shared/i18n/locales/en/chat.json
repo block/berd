@@ -3,7 +3,8 @@
     "alt": "Attachment {{index}}",
     "chooseFilesDialogTitle": "Choose files to attach",
     "chooseFoldersDialogTitle": "Choose folders to attach",
-    "dropToAttach": "Drop files or folders to attach",
+    "dropToAttach": "Drop files or folders",
+    "imagePreviewTitle": "Image preview",
     "open": "Open attachment {{name}}",
     "remove": "Remove attachment",
     "view": "View attachment {{index}}"

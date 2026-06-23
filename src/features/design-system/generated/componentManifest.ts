@@ -190,7 +190,13 @@ export const designSystemComponentManifest = [
       {
         name: "badgeVariants",
         variants: {
-          variant: ["default", "secondary", "destructive", "outline"],
+          variant: [
+            "default",
+            "secondary",
+            "destructive",
+            "inverse",
+            "outline",
+          ],
         },
         defaultVariants: {
           variant: "default",
@@ -207,6 +213,7 @@ export const designSystemComponentManifest = [
           "bg-destructive",
           "bg-muted",
           "bg-primary",
+          "bg-surface-chat-responding-pill-bg",
           "border-border",
           "dark:aria-invalid:ring-destructive/40",
           "dark:focus-visible:ring-destructive/40",
@@ -216,6 +223,7 @@ export const designSystemComponentManifest = [
           "text-destructive-foreground",
           "text-foreground",
           "text-primary-foreground",
+          "text-surface-chat-responding-pill-fg",
         ],
         stateClasses: [
           "aria-invalid:border-destructive",
@@ -259,6 +267,7 @@ export const designSystemComponentManifest = [
       "bg-destructive",
       "bg-muted",
       "bg-primary",
+      "bg-surface-chat-responding-pill-bg",
       "border-border",
       "dark:aria-invalid:ring-destructive/40",
       "dark:focus-visible:ring-destructive/40",
@@ -268,6 +277,7 @@ export const designSystemComponentManifest = [
       "text-destructive-foreground",
       "text-foreground",
       "text-primary-foreground",
+      "text-surface-chat-responding-pill-fg",
     ],
     stateClasses: [
       "aria-invalid:border-destructive",
@@ -1600,7 +1610,7 @@ export const designSystemComponentManifest = [
     slots: [],
     cva: [],
     tokenClasses: [],
-    stateClasses: [],
+    stateClasses: ["focus-visible:outline-none", "focus:outline-none"],
     sourceTokenClasses: [],
   },
   {

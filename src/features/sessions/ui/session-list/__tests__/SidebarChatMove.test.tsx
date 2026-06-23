@@ -21,22 +21,6 @@ const PROJECT: ProjectInfo = {
   archivedAt: null,
 };
 
-/** A stateful DataTransfer stub so setData on dragstart survives to drop. */
-function createDataTransfer(): DataTransfer {
-  const store = new Map<string, string>();
-  return {
-    dropEffect: "none",
-    effectAllowed: "all",
-    setData: (type: string, value: string) => {
-      store.set(type, value);
-    },
-    getData: (type: string) => store.get(type) ?? "",
-    get types() {
-      return Array.from(store.keys());
-    },
-  } as unknown as DataTransfer;
-}
-
 type MoveHandler = (sessionId: string, projectId: string | null) => void;
 
 function renderSidebar(onMoveToProject: MoveHandler) {
@@ -71,23 +55,86 @@ function renderSidebar(onMoveToProject: MoveHandler) {
   );
 }
 
-function dragRow(title: string) {
-  const row = screen.getByText(title).closest("[draggable]");
+function mockRect(element: Element, rect: Pick<DOMRect, "top" | "bottom">) {
+  const height = rect.bottom - rect.top;
+  vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+    x: 0,
+    y: rect.top,
+    top: rect.top,
+    bottom: rect.bottom,
+    left: 0,
+    right: 300,
+    width: 300,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect);
+}
+
+function draggableRow(title: string) {
+  const row = screen.getByText(title).closest("[data-sidebar-chat-draggable]");
   if (!row) throw new Error(`No draggable row for "${title}"`);
-  const dataTransfer = createDataTransfer();
-  fireEvent.dragStart(row, { dataTransfer });
-  return dataTransfer;
+  return row;
+}
+
+function dropTarget(kind: "project" | "recents") {
+  const target = document.querySelector(
+    `[data-sidebar-session-drop-target="${kind}"]`,
+  );
+  if (!target) throw new Error(`No ${kind} drop target`);
+  return target;
+}
+
+function dispatchPointerEvent(
+  target: Element | Window | Document,
+  type: string,
+  props: {
+    pointerId?: number;
+    button?: number;
+    clientX: number;
+    clientY: number;
+  },
+) {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    button: props.button ?? 0,
+    clientX: props.clientX,
+    clientY: props.clientY,
+  });
+  Object.defineProperty(event, "pointerId", {
+    configurable: true,
+    value: props.pointerId ?? 1,
+  });
+  fireEvent(target, event);
+}
+
+function pointerDragRowTo(title: string, clientY: number) {
+  const row = draggableRow(title);
+  dispatchPointerEvent(row, "pointerdown", {
+    pointerId: 1,
+    button: 0,
+    clientX: 10,
+    clientY: 10,
+  });
+  dispatchPointerEvent(window, "pointermove", {
+    pointerId: 1,
+    clientX: 20,
+    clientY,
+  });
+  dispatchPointerEvent(window, "pointerup", {
+    pointerId: 1,
+    clientX: 20,
+    clientY,
+  });
 }
 
 describe("sidebar chat drag-to-move", () => {
   it("ignores a drop back onto the chat's own project (no-op)", () => {
     const onMoveToProject = vi.fn<MoveHandler>();
     renderSidebar(onMoveToProject);
+    mockRect(dropTarget("project"), { top: 0, bottom: 80 });
 
-    const dataTransfer = dragRow("Project Chat");
-    const target = screen.getByText("Alpha");
-    fireEvent.dragOver(target, { dataTransfer });
-    fireEvent.drop(target, { dataTransfer });
+    pointerDragRowTo("Project Chat", 40);
 
     expect(onMoveToProject).not.toHaveBeenCalled();
   });
@@ -95,11 +142,9 @@ describe("sidebar chat drag-to-move", () => {
   it("moves a Recents chat into a project when dropped on it", () => {
     const onMoveToProject = vi.fn<MoveHandler>();
     renderSidebar(onMoveToProject);
+    mockRect(dropTarget("project"), { top: 0, bottom: 80 });
 
-    const dataTransfer = dragRow("Recent Chat");
-    const target = screen.getByText("Alpha");
-    fireEvent.dragOver(target, { dataTransfer });
-    fireEvent.drop(target, { dataTransfer });
+    pointerDragRowTo("Recent Chat", 40);
 
     expect(onMoveToProject).toHaveBeenCalledWith("r1", "alpha");
   });
@@ -107,11 +152,9 @@ describe("sidebar chat drag-to-move", () => {
   it("ignores a drop back into Recents for a chat already there (no-op)", () => {
     const onMoveToProject = vi.fn<MoveHandler>();
     renderSidebar(onMoveToProject);
+    mockRect(dropTarget("recents"), { top: 100, bottom: 180 });
 
-    const dataTransfer = dragRow("Recent Chat");
-    const target = screen.getByText("Recent Chat");
-    fireEvent.dragOver(target, { dataTransfer });
-    fireEvent.drop(target, { dataTransfer });
+    pointerDragRowTo("Recent Chat", 140);
 
     expect(onMoveToProject).not.toHaveBeenCalled();
   });
@@ -119,11 +162,9 @@ describe("sidebar chat drag-to-move", () => {
   it("moves a project chat out to Recents when dropped there", () => {
     const onMoveToProject = vi.fn<MoveHandler>();
     renderSidebar(onMoveToProject);
+    mockRect(dropTarget("recents"), { top: 100, bottom: 180 });
 
-    const dataTransfer = dragRow("Project Chat");
-    const target = screen.getByText("Recent Chat");
-    fireEvent.dragOver(target, { dataTransfer });
-    fireEvent.drop(target, { dataTransfer });
+    pointerDragRowTo("Project Chat", 140);
 
     expect(onMoveToProject).toHaveBeenCalledWith("p1", null);
   });
@@ -131,12 +172,14 @@ describe("sidebar chat drag-to-move", () => {
   it("closes the row overflow menu when a drag starts", async () => {
     const user = userEvent.setup();
     render(
-      <SidebarChatRow
-        id="session-1"
-        title="Draggable Chat"
-        isActive={false}
-        onMarkUnread={vi.fn()}
-      />,
+      <SidebarChatDragProvider>
+        <SidebarChatRow
+          id="session-1"
+          title="Draggable Chat"
+          isActive={false}
+          onMarkUnread={vi.fn()}
+        />
+      </SidebarChatDragProvider>,
     );
 
     await user.click(
@@ -146,12 +189,27 @@ describe("sidebar chat drag-to-move", () => {
       screen.getByRole("menuitem", { name: /mark unread/i }),
     ).toBeInTheDocument();
 
-    const row = screen.getByText("Draggable Chat").closest("[draggable]");
-    if (!row) throw new Error("No draggable row");
-    fireEvent.dragStart(row, { dataTransfer: createDataTransfer() });
+    const row = draggableRow("Draggable Chat");
+    dispatchPointerEvent(row, "pointerdown", {
+      pointerId: 1,
+      button: 0,
+      clientX: 10,
+      clientY: 10,
+    });
+    dispatchPointerEvent(window, "pointermove", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
 
     expect(
       screen.queryByRole("menuitem", { name: /mark unread/i }),
     ).not.toBeInTheDocument();
+
+    dispatchPointerEvent(window, "pointerup", {
+      pointerId: 1,
+      clientX: 20,
+      clientY: 20,
+    });
   });
 });

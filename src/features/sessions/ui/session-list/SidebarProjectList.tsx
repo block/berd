@@ -1,6 +1,22 @@
-import { useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+} from "react";
 import type { AppView } from "@/app/AppShell";
 import type { ProjectInfo } from "@/features/projects/api/projects";
+import {
+  findSidebarProjectReorderTarget,
+  type SidebarProjectReorderTarget,
+} from "@/features/sidebar/lib/sidebarPointerDragRegistry";
+import {
+  clearPointerDragClickSuppression,
+  hasExceededPointerDragThreshold,
+  isPrimaryPointerButton,
+  schedulePointerDragClickSuppressionReset,
+} from "@/features/sidebar/lib/pointerDrag";
 import { ProjectIcon } from "@/features/projects/ui/ProjectIcon";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -8,6 +24,19 @@ import {
   SidebarProjectSection,
   type SidebarSessionItem,
 } from "./SidebarProjectSection";
+
+interface ProjectPointerDragState {
+  projectId: string;
+  pointerId: number;
+  startX: number;
+  startY: number;
+  dragging: boolean;
+}
+
+interface ProjectDropTargetState {
+  projectId: string;
+  placement: "before" | "after";
+}
 
 export function SidebarProjectList({
   projects,
@@ -65,13 +94,165 @@ export function SidebarProjectList({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
-  onReorderProject?: (fromId: string, toId: string) => void;
+  onReorderProject?: (
+    fromId: string,
+    toId: string,
+    placement?: "before" | "after",
+  ) => void;
   hasMoreSessions?: boolean;
 }) {
   const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
-  const [dropTargetProjectId, setDropTargetProjectId] = useState<string | null>(
-    null,
+  const [dropTargetProject, setDropTargetProject] =
+    useState<ProjectDropTargetState | null>(null);
+  const rowRefs = useRef(new Map<string, HTMLDivElement>());
+  const pointerDragRef = useRef<ProjectPointerDragState | null>(null);
+  const pointerDragCleanupRef = useRef<(() => void) | null>(null);
+  const suppressNextClickRef = useRef(false);
+  const suppressNextClickResetRef = useRef<number | null>(null);
+  const projectsRef = useRef(projects);
+  projectsRef.current = projects;
+  const onReorderProjectRef = useRef(onReorderProject);
+  onReorderProjectRef.current = onReorderProject;
+
+  const getProjectTargets = useCallback((): SidebarProjectReorderTarget[] => {
+    return projectsRef.current.flatMap((project) => {
+      const element = rowRefs.current.get(project.id);
+      if (!element) return [];
+      return [{ projectId: project.id, rect: element.getBoundingClientRect() }];
+    });
+  }, []);
+
+  const getProjectDropTarget = useCallback(
+    (draggedId: string, clientX: number, clientY: number) =>
+      findSidebarProjectReorderTarget(
+        getProjectTargets(),
+        draggedId,
+        clientX,
+        clientY,
+      ),
+    [getProjectTargets],
   );
+
+  const clearPointerDragListeners = () => {
+    pointerDragCleanupRef.current?.();
+    pointerDragCleanupRef.current = null;
+  };
+
+  const endProjectPointerDrag = () => {
+    clearPointerDragListeners();
+    pointerDragRef.current = null;
+    setDraggedProjectId(null);
+    setDropTargetProject(null);
+    if (suppressNextClickRef.current) {
+      schedulePointerDragClickSuppressionReset(
+        suppressNextClickRef,
+        suppressNextClickResetRef,
+      );
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      pointerDragCleanupRef.current?.();
+      clearPointerDragClickSuppression(
+        suppressNextClickRef,
+        suppressNextClickResetRef,
+      );
+    };
+  }, []);
+
+  const handleProjectPointerDown = (
+    projectId: string,
+    event: PointerEvent<HTMLDivElement>,
+  ) => {
+    if (!isPrimaryPointerButton(event)) return;
+    const target = event.target;
+    if (
+      target instanceof Element &&
+      target.closest(
+        "[data-sidebar-drag-ignore], [data-sidebar-chat-draggable]",
+      )
+    ) {
+      return;
+    }
+
+    clearPointerDragListeners();
+    pointerDragRef.current = {
+      projectId,
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      dragging: false,
+    };
+
+    const handlePointerMove = (moveEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || moveEvent.pointerId !== drag.pointerId) return;
+
+      const isDragging =
+        drag.dragging ||
+        hasExceededPointerDragThreshold({
+          startX: drag.startX,
+          startY: drag.startY,
+          clientX: moveEvent.clientX,
+          clientY: moveEvent.clientY,
+        });
+
+      if (!isDragging) return;
+
+      moveEvent.preventDefault();
+      suppressNextClickRef.current = true;
+      if (!drag.dragging) {
+        pointerDragRef.current = { ...drag, dragging: true };
+        setDraggedProjectId(drag.projectId);
+      }
+
+      setDropTargetProject(
+        getProjectDropTarget(
+          drag.projectId,
+          moveEvent.clientX,
+          moveEvent.clientY,
+        ),
+      );
+    };
+
+    const handlePointerUp = (upEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || upEvent.pointerId !== drag.pointerId) return;
+
+      if (drag.dragging) {
+        upEvent.preventDefault();
+        const finalTarget = getProjectDropTarget(
+          drag.projectId,
+          upEvent.clientX,
+          upEvent.clientY,
+        );
+        if (finalTarget) {
+          onReorderProjectRef.current?.(
+            drag.projectId,
+            finalTarget.projectId,
+            finalTarget.placement,
+          );
+        }
+      }
+      endProjectPointerDrag();
+    };
+
+    const handlePointerCancel = (cancelEvent: globalThis.PointerEvent) => {
+      const drag = pointerDragRef.current;
+      if (!drag || cancelEvent.pointerId !== drag.pointerId) return;
+      endProjectPointerDrag();
+    };
+
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", handlePointerUp);
+    window.addEventListener("pointercancel", handlePointerCancel);
+    pointerDragCleanupRef.current = () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", handlePointerUp);
+      window.removeEventListener("pointercancel", handlePointerCancel);
+    };
+  };
 
   if (collapsed) {
     return (
@@ -102,54 +283,42 @@ export function SidebarProjectList({
   return (
     <div className="space-y-0.5">
       {projects.map((project) => (
-        // biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop reorder target
         <div
           key={project.id}
-          draggable
-          onDragStart={(e) => {
-            if (e.dataTransfer.types.includes("text/x-session-id")) return;
-            e.dataTransfer.setData("text/x-project-id", project.id);
-            e.dataTransfer.effectAllowed = "move";
-            setDraggedProjectId(project.id);
-          }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes("text/x-project-id")) {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-              if (project.id !== draggedProjectId) {
-                setDropTargetProjectId(project.id);
-              }
+          data-sidebar-project-draggable
+          data-project-id={project.id}
+          ref={(element) => {
+            if (element) {
+              rowRefs.current.set(project.id, element);
+            } else {
+              rowRefs.current.delete(project.id);
             }
           }}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-              setDropTargetProjectId((prev) =>
-                prev === project.id ? null : prev,
-              );
-            }
-          }}
-          onDrop={(e) => {
-            const fromId = e.dataTransfer.getData("text/x-project-id");
-            if (fromId && fromId !== project.id) {
-              e.preventDefault();
-              e.stopPropagation();
-              onReorderProject?.(fromId, project.id);
-            }
-            setDraggedProjectId(null);
-            setDropTargetProjectId(null);
-          }}
-          onDragEnd={() => {
-            setDraggedProjectId(null);
-            setDropTargetProjectId(null);
+          onPointerDown={(event) => handleProjectPointerDown(project.id, event)}
+          onClickCapture={(event) => {
+            if (!suppressNextClickRef.current) return;
+            clearPointerDragClickSuppression(
+              suppressNextClickRef,
+              suppressNextClickResetRef,
+            );
+            event.preventDefault();
+            event.stopPropagation();
           }}
           className={cn(
             "relative",
             draggedProjectId === project.id && "opacity-40",
           )}
         >
-          {dropTargetProjectId === project.id &&
+          {dropTargetProject?.projectId === project.id &&
             draggedProjectId !== project.id && (
-              <div className="absolute top-0 left-3 right-3 h-0.5 rounded-full bg-sidebar-foreground" />
+              <div
+                className={cn(
+                  "absolute left-3 right-3 h-0.5 rounded-full bg-sidebar-foreground",
+                  dropTargetProject.placement === "after"
+                    ? "bottom-0"
+                    : "top-0",
+                )}
+              />
             )}
           <SidebarProjectSection
             project={project}

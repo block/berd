@@ -65,7 +65,11 @@ export interface ProjectStore {
     useWorktrees: boolean,
   ) => Promise<ProjectInfo>;
   removeProject: (id: string) => Promise<void>;
-  reorderProjects: (fromId: string, toId: string) => void;
+  reorderProjects: (
+    fromId: string,
+    toId: string,
+    placement?: "before" | "after",
+  ) => void;
   setActiveProject: (id: string | null) => void;
   getActiveProject: () => ProjectInfo | null;
 }
@@ -152,7 +156,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     persistProjects(get().projects);
   },
 
-  reorderProjects: (fromId, toId) => {
+  reorderProjects: (fromId, toId, placement = "before") => {
     set((state) => {
       const projects = [...state.projects];
       const fromIndex = projects.findIndex((p) => p.id === fromId);
@@ -160,8 +164,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       if (fromIndex === -1 || toIndex === -1 || fromIndex === toIndex)
         return state;
       const [moved] = projects.splice(fromIndex, 1);
-      // When dragging down, removing the source shifts the target index
-      const insertAt = fromIndex < toIndex ? toIndex - 1 : toIndex;
+      const targetIndexAfterRemoval =
+        fromIndex < toIndex ? toIndex - 1 : toIndex;
+      const insertAt =
+        placement === "after"
+          ? targetIndexAfterRemoval + 1
+          : targetIndexAfterRemoval;
       projects.splice(insertAt, 0, moved);
       // Update order fields so views sorting by .order stay consistent
       for (let i = 0; i < projects.length; i++) {

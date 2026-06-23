@@ -1,4 +1,4 @@
-import { useCallback, useState, type DragEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconChevronDown,
@@ -95,9 +95,11 @@ export function SidebarProjectSection({
   hasMoreSessions?: boolean;
 }) {
   const { t } = useTranslation(["sidebar", "common"]);
-  const { draggingSession } = useSidebarChatDrag();
+  const { activeSessionDropTargetKey, registerSessionDropTarget } =
+    useSidebarChatDrag();
+  const dropTargetRef = useRef<HTMLDivElement>(null);
+  const dropTargetKey = `project:${project.id}`;
   const [showExpandedChats, setShowExpandedChats] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const projectHasUnread = projectChats.some((session) => session.hasUnread);
   const projectHasChats = projectChats.length > 0;
@@ -111,12 +113,6 @@ export function SidebarProjectSection({
     pinToHome,
     unpinFromHome,
   } = usePinToHomeWidget({ kind: "project", id: project.id });
-
-  // Only a chat coming from a different group can be moved into this project.
-  // Dragging a chat that already lives here resolves to a no-op, so the project
-  // stays inert rather than advertising a drop that would not move anything.
-  const canAcceptDraggedSession =
-    draggingSession != null && draggingSession.fromProjectId !== project.id;
 
   if (!isExpanded && showExpandedChats) {
     setShowExpandedChats(false);
@@ -136,45 +132,27 @@ export function SidebarProjectSection({
     setShowExpandedChats(true);
   }
 
-  const handleDragOver = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      if (
-        canAcceptDraggedSession &&
-        e.dataTransfer.types.includes("text/x-session-id")
-      ) {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = "move";
-        setDragOver(true);
-      }
+  const handleSessionDrop = useCallback(
+    (sessionId: string) => {
+      onMoveToProject?.(sessionId, project.id);
+      if (!isExpanded) toggleProject(project.id);
     },
-    [canAcceptDraggedSession],
+    [isExpanded, onMoveToProject, project.id, toggleProject],
   );
 
-  const handleDragLeave = useCallback((e: DragEvent<HTMLDivElement>) => {
-    if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-      setDragOver(false);
-    }
-  }, []);
+  useEffect(() => {
+    const element = dropTargetRef.current;
+    if (!element) return;
+    return registerSessionDropTarget({
+      key: dropTargetKey,
+      kind: "project",
+      projectId: project.id,
+      element,
+      onDrop: handleSessionDrop,
+    });
+  }, [dropTargetKey, handleSessionDrop, project.id, registerSessionDropTarget]);
 
-  const handleDrop = useCallback(
-    (e: DragEvent<HTMLDivElement>) => {
-      setDragOver(false);
-      if (!canAcceptDraggedSession) return;
-      e.preventDefault();
-      const sessionId = e.dataTransfer.getData("text/x-session-id");
-      if (sessionId) {
-        onMoveToProject?.(sessionId, project.id);
-        if (!isExpanded) toggleProject(project.id);
-      }
-    },
-    [
-      canAcceptDraggedSession,
-      onMoveToProject,
-      project.id,
-      isExpanded,
-      toggleProject,
-    ],
-  );
+  const dragOver = activeSessionDropTargetKey === dropTargetKey;
   const visibleChatLimit = showExpandedChats
     ? MAX_EXPANDED_PROJECT_CHATS
     : MAX_VISIBLE_PROJECT_CHATS;
@@ -186,11 +164,10 @@ export function SidebarProjectSection({
     (projectChats.length > MAX_EXPANDED_PROJECT_CHATS || hasMoreSessions);
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: drop target for drag-and-drop
     <div
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
+      ref={dropTargetRef}
+      data-sidebar-session-drop-target="project"
+      data-project-id={project.id}
     >
       <div
         className={cn(
@@ -257,28 +234,31 @@ export function SidebarProjectSection({
             {project.name}
           </span>
         </Button>
-        <SidebarItemMenu
-          label={project.name}
-          onOpenChange={setMenuOpen}
-          onPinToHome={() =>
-            isPinnedToHome ? unpinFromHome() : void pinToHome()
-          }
-          pinToHomeDisabled={isPinningToHome}
-          isPinnedToHome={isPinnedToHome}
-          pinToHomeLabel={
-            isPinnedToHome
-              ? t("common:actions.unpinFromHome")
-              : isPinningToHome
-                ? t("common:actions.pinningToHome")
-                : t("common:actions.pinToHome")
-          }
-          onEdit={() => onEditProject?.(project.id)}
-          onArchive={() => onArchiveProject?.(project.id)}
-        />
+        <div data-sidebar-drag-ignore>
+          <SidebarItemMenu
+            label={project.name}
+            onOpenChange={setMenuOpen}
+            onPinToHome={() =>
+              isPinnedToHome ? unpinFromHome() : void pinToHome()
+            }
+            pinToHomeDisabled={isPinningToHome}
+            isPinnedToHome={isPinnedToHome}
+            pinToHomeLabel={
+              isPinnedToHome
+                ? t("common:actions.unpinFromHome")
+                : isPinningToHome
+                  ? t("common:actions.pinningToHome")
+                  : t("common:actions.pinToHome")
+            }
+            onEdit={() => onEditProject?.(project.id)}
+            onArchive={() => onArchiveProject?.(project.id)}
+          />
+        </div>
         <Button
           type="button"
           variant="ghost"
           size="icon-xs"
+          data-sidebar-drag-ignore
           onClick={(e) => {
             e.stopPropagation();
             onNewChatInProject?.(project.id);

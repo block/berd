@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import type { AcpProvider } from "@/shared/api/acp";
 import type { AgentProviderReadiness } from "@/features/providers/hooks/useAgentProviderStatus";
 import type { Persona } from "@/shared/types/agents";
@@ -155,6 +156,10 @@ export interface ChatInputProps {
   controls?: ChatInputControls;
   /** Called when ↑ should recall the last sent user message. */
   onRecallLastUserMessage?: () => string | null;
+  /** Optional larger surface that should accept attachment drops for this composer. */
+  attachmentDropTargetRef?: RefObject<HTMLDivElement | null>;
+  /** Mirrors attachment drag-over state when the drop target is rendered outside the composer. */
+  onAttachmentDragOverChange?: (isDragOver: boolean) => void;
   /**
    * Visual surface for the composer.
    * - "pill" (default): translucent glass pill — used by the Home composer.
