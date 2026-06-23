@@ -42,22 +42,26 @@ export interface SessionArtifact {
   line?: number | null;
 }
 
-interface ArtifactPolicyContextValue {
+export interface ArtifactPolicyContextValue {
   resolveMarkdownHref: (href: string) => ArtifactLinkCandidate | null;
   pathExists: (path: string) => Promise<boolean>;
   openResolvedPath: (path: string) => Promise<void>;
-  getAllSessionArtifacts: () => SessionArtifact[];
 }
 
-const DEFAULT_CONTEXT_VALUE: ArtifactPolicyContextValue = {
+const DEFAULT_ACTIONS_CONTEXT_VALUE: ArtifactPolicyContextValue = {
   resolveMarkdownHref: () => null,
   pathExists: async () => false,
   openResolvedPath: async () => {},
-  getAllSessionArtifacts: () => [],
 };
 
-const ArtifactPolicyContext = createContext<ArtifactPolicyContextValue>(
-  DEFAULT_CONTEXT_VALUE,
+const EMPTY_SESSION_ARTIFACTS: readonly SessionArtifact[] = [];
+
+const ArtifactActionsContext = createContext<ArtifactPolicyContextValue>(
+  DEFAULT_ACTIONS_CONTEXT_VALUE,
+);
+
+const ArtifactListContext = createContext<readonly SessionArtifact[]>(
+  EMPTY_SESSION_ARTIFACTS,
 );
 
 function normalizePath(path: string): string {
@@ -178,6 +182,96 @@ function isNonEmptyLocation(
   return typeof location.path === "string" && location.path.trim().length > 0;
 }
 
+export function collectSessionArtifacts(
+  messages: readonly Message[],
+  cwd: string | null,
+): SessionArtifact[] {
+  const artifactMap = new Map<string, SessionArtifact>();
+
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    if (message.metadata?.userVisible === false) continue;
+
+    for (const block of message.content) {
+      if (block.type !== "toolRequest") continue;
+      const locations = block.locations?.filter(isNonEmptyLocation) ?? [];
+
+      for (const location of locations) {
+        const resolvedPath = resolvePath(location.path, cwd);
+        const key = normalizeComparablePath(resolvedPath);
+        if (!key) continue;
+
+        const existing = artifactMap.get(key);
+        if (existing) {
+          existing.versionCount += 1;
+          if (message.created > existing.lastTouchedAt) {
+            existing.lastTouchedAt = message.created;
+            existing.toolName = block.toolName ?? block.name;
+            existing.toolKind = block.toolKind;
+            existing.line = location.line;
+          }
+          continue;
+        }
+
+        artifactMap.set(key, {
+          resolvedPath,
+          displayPath: resolvedPath,
+          filename: basenameOf(resolvedPath),
+          directoryPath: parentDir(resolvedPath),
+          resolvedDirectoryPath: parentDir(resolvedPath),
+          versionCount: 1,
+          lastTouchedAt: message.created,
+          kind: inferPathKind(resolvedPath),
+          toolName: block.toolName ?? block.name,
+          toolKind: block.toolKind,
+          line: location.line,
+        });
+      }
+    }
+  }
+
+  return Array.from(artifactMap.values()).sort(
+    (a, b) => b.lastTouchedAt - a.lastTouchedAt,
+  );
+}
+
+function getArtifactSignature(
+  messages: readonly Message[],
+  cwd: string | null,
+): string {
+  const parts = ["cwd", cwd ?? ""];
+
+  for (const message of messages) {
+    if (message.role !== "assistant") continue;
+    // Mirror collectSessionArtifacts: hidden messages never contribute an
+    // artifact, so they must not contribute to the signature either —
+    // otherwise a hidden tool call would invalidate the cache and publish a
+    // new (identical) list, defeating the stability optimization.
+    if (message.metadata?.userVisible === false) continue;
+
+    const toolRequestParts = [];
+    for (const block of message.content) {
+      if (block.type !== "toolRequest") continue;
+      const locations = block.locations?.filter(isNonEmptyLocation) ?? [];
+      if (locations.length === 0) continue;
+      toolRequestParts.push([
+        block.toolName ?? block.name,
+        block.toolKind ?? null,
+        locations.map((location) => [
+          normalizePath(location.path),
+          location.line ?? null,
+        ]),
+      ]);
+    }
+
+    if (toolRequestParts.length === 0) continue;
+
+    parts.push(JSON.stringify([message.created, toolRequestParts]));
+  }
+
+  return parts.join("\n");
+}
+
 export function ArtifactPolicyProvider({
   messages,
   sessionCwd,
@@ -191,7 +285,31 @@ export function ArtifactPolicyProvider({
     () => sessionCwd?.trim() || null,
     [sessionCwd],
   );
+  const artifactCacheRef = useRef<{
+    artifacts: SessionArtifact[];
+    signature: string;
+  } | null>(null);
   const lastOpenAtByPathRef = useRef(new Map<string, number>());
+
+  // Recompute the content signature only when the message list or cwd changes,
+  // then recollect artifacts only when that signature changes — keeping the
+  // artifact array's identity stable across streaming text chunks that don't
+  // touch any tool-call locations. cwd is part of the signature, so a cwd
+  // change invalidates the cache on its own.
+  const artifactSignature = useMemo(
+    () => getArtifactSignature(messages, normalizedSessionCwd),
+    [messages, normalizedSessionCwd],
+  );
+  if (
+    !artifactCacheRef.current ||
+    artifactCacheRef.current.signature !== artifactSignature
+  ) {
+    artifactCacheRef.current = {
+      artifacts: collectSessionArtifacts(messages, normalizedSessionCwd),
+      signature: artifactSignature,
+    };
+  }
+  const artifacts = artifactCacheRef.current.artifacts;
 
   const resolveMarkdownHref = useCallback(
     (href: string): ArtifactLinkCandidate | null => {
@@ -250,78 +368,28 @@ export function ArtifactPolicyProvider({
     [resolveOpenTarget, normalizedSessionCwd],
   );
 
-  const getAllSessionArtifacts = useCallback((): SessionArtifact[] => {
-    const artifactMap = new Map<string, SessionArtifact>();
-
-    for (const message of messages) {
-      if (message.role !== "assistant") continue;
-      if (message.metadata?.userVisible === false) continue;
-
-      for (const block of message.content) {
-        if (block.type !== "toolRequest") continue;
-        const locations = block.locations?.filter(isNonEmptyLocation) ?? [];
-
-        for (const location of locations) {
-          const resolvedPath = resolvePath(location.path, normalizedSessionCwd);
-          const key = normalizeComparablePath(resolvedPath);
-          if (!key) continue;
-
-          const existing = artifactMap.get(key);
-          if (existing) {
-            existing.versionCount += 1;
-            if (message.created > existing.lastTouchedAt) {
-              existing.lastTouchedAt = message.created;
-              existing.toolName = block.toolName ?? block.name;
-              existing.toolKind = block.toolKind;
-              existing.line = location.line;
-            }
-            continue;
-          }
-
-          artifactMap.set(key, {
-            resolvedPath,
-            displayPath: resolvedPath,
-            filename: basenameOf(resolvedPath),
-            directoryPath: parentDir(resolvedPath),
-            resolvedDirectoryPath: parentDir(resolvedPath),
-            versionCount: 1,
-            lastTouchedAt: message.created,
-            kind: inferPathKind(resolvedPath),
-            toolName: block.toolName ?? block.name,
-            toolKind: block.toolKind,
-            line: location.line,
-          });
-        }
-      }
-    }
-
-    return Array.from(artifactMap.values()).sort(
-      (a, b) => b.lastTouchedAt - a.lastTouchedAt,
-    );
-  }, [messages, normalizedSessionCwd]);
-
-  const contextValue = useMemo<ArtifactPolicyContextValue>(
+  const actionsValue = useMemo<ArtifactPolicyContextValue>(
     () => ({
       resolveMarkdownHref,
       pathExists: checkPathExists,
       openResolvedPath,
-      getAllSessionArtifacts,
     }),
-    [
-      checkPathExists,
-      getAllSessionArtifacts,
-      openResolvedPath,
-      resolveMarkdownHref,
-    ],
+    [checkPathExists, openResolvedPath, resolveMarkdownHref],
   );
 
   return (
-    <ArtifactPolicyContext.Provider value={contextValue}>
-      {children}
-    </ArtifactPolicyContext.Provider>
+    <ArtifactActionsContext.Provider value={actionsValue}>
+      <ArtifactListContext.Provider value={artifacts}>
+        {children}
+      </ArtifactListContext.Provider>
+    </ArtifactActionsContext.Provider>
   );
 }
 
-export function useArtifactPolicyContext(): ArtifactPolicyContextValue {
-  return useContext(ArtifactPolicyContext);
+export function useArtifactActionsContext(): ArtifactPolicyContextValue {
+  return useContext(ArtifactActionsContext);
+}
+
+export function useSessionArtifacts(): readonly SessionArtifact[] {
+  return useContext(ArtifactListContext);
 }

@@ -20,7 +20,7 @@ import {
   type ToolInputSummaryRow,
 } from "@/features/chat/lib/toolCallPresentation";
 import type { ToolCallLocation, ToolCallStatus } from "@/shared/types/messages";
-import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 
 interface ToolCallAdapterProps {
   name: string;
@@ -99,7 +99,7 @@ function ArtifactActions({ locations }: { locations?: ToolCallLocation[] }) {
   const { t } = useTranslation(["chat", "common"]);
   const [moreOutputsOpen, setMoreOutputsOpen] = useState(false);
   const [openError, setOpenError] = useState<string | null>(null);
-  const { openResolvedPath } = useArtifactPolicyContext();
+  const { openResolvedPath } = useArtifactActionsContext();
   const artifactLocations = visibleLocations(locations);
 
   if (artifactLocations.length === 0) return null;
@@ -289,7 +289,7 @@ export function ToolCallAdapter({
   const elapsedSeconds =
     status === "in_progress" && elapsed >= 3 ? elapsed : undefined;
 
-  const { resolveMarkdownHref, openResolvedPath } = useArtifactPolicyContext();
+  const { resolveMarkdownHref, openResolvedPath } = useArtifactActionsContext();
 
   const pathRow = summaryRows.find((row) => row.kind === "path");
   const headerFileLabel = pathRow?.value;

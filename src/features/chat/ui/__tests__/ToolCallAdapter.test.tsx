@@ -11,11 +11,10 @@ const mockPathExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
+  useArtifactActionsContext: () => ({
     resolveMarkdownHref: mockResolveMarkdownHref,
     pathExists: mockPathExists,
     openResolvedPath: mockOpenResolvedPath,
-    getAllSessionArtifacts: () => [],
   }),
 }));
 

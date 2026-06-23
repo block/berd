@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MessageBubble } from "../MessageBubble";
 import { useAgentStore } from "@/features/agents/stores/agentStore";
@@ -9,7 +15,11 @@ import type {
   SystemNotificationContent,
 } from "@/shared/types/messages";
 import type { ProviderCatalogEntry } from "@/shared/types/providers";
+import { ArtifactPolicyProvider } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { openPath } from "@tauri-apps/plugin-opener";
+const mockPathExists = vi.hoisted(() =>
+  vi.fn<(path: string) => Promise<boolean>>(),
+);
 const mockWriteText = vi.fn().mockResolvedValue(undefined);
 
 const providerCatalogEntries: ProviderCatalogEntry[] = [
@@ -64,6 +74,14 @@ vi.mock("@/shared/hooks/useAvatarSrc", () => ({
   }),
 }));
 
+vi.mock("@/shared/api/system", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/api/system")>();
+  return {
+    ...actual,
+    pathExists: (path: string) => mockPathExists(path),
+  };
+});
+
 vi.mock("@tauri-apps/plugin-opener", () => ({
   openPath: vi.fn(),
 }));
@@ -103,6 +121,8 @@ describe("MessageBubble", () => {
     useAgentStore.setState({ personas: [] });
     useProviderCatalogStore.getState().setEntries(providerCatalogEntries);
     vi.mocked(openPath).mockClear();
+    mockPathExists.mockReset();
+    mockPathExists.mockResolvedValue(false);
     mockWriteText.mockClear();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
@@ -115,6 +135,89 @@ describe("MessageBubble", () => {
   afterEach(() => {
     vi.useRealTimers();
     useProviderCatalogStore.getState().reset();
+  });
+
+  it("does not rerender an old bubble when later streaming text changes", () => {
+    const oldMessage = assistantMessage(
+      [{ type: "text", text: "old artifact [report](report.md)" }],
+      { id: "old", created: 1 },
+    );
+    const firstStreamingMessage = assistantMessage(
+      [{ type: "text", text: "streaming" }],
+      { id: "streaming", created: 2 },
+    );
+    const memoizedMessageBubble = MessageBubble as unknown as {
+      type: (
+        props: Parameters<typeof MessageBubble>[0],
+      ) => ReturnType<typeof MessageBubble>;
+    };
+    const originalRender = memoizedMessageBubble.type;
+    const renderSpy = vi.fn(originalRender);
+    memoizedMessageBubble.type = renderSpy;
+
+    try {
+      function Harness({ streamingText }: { streamingText: string }) {
+        const streamingMessage = {
+          ...firstStreamingMessage,
+          content: [{ type: "text" as const, text: streamingText }],
+        };
+
+        return (
+          <ArtifactPolicyProvider
+            messages={[oldMessage, streamingMessage]}
+            sessionCwd="/work"
+          >
+            <MessageBubble message={oldMessage} animateEntry={false} />
+          </ArtifactPolicyProvider>
+        );
+      }
+
+      const { rerender } = render(<Harness streamingText="streaming" />);
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+
+      rerender(<Harness streamingText="streaming more text" />);
+
+      expect(renderSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      memoizedMessageBubble.type = originalRender;
+    }
+  });
+
+  it("opens artifact links against the latest cwd after it changes", async () => {
+    const user = userEvent.setup();
+    mockPathExists.mockResolvedValue(true);
+    const message = assistantMessage([{ type: "text", text: "open report" }], {
+      id: "artifact-link",
+      created: 1,
+    });
+
+    const { container, rerender } = render(
+      <ArtifactPolicyProvider messages={[message]} sessionCwd="/old">
+        <MessageBubble message={message} animateEntry={false} />
+      </ArtifactPolicyProvider>,
+    );
+
+    rerender(
+      <ArtifactPolicyProvider messages={[message]} sessionCwd="/new">
+        <MessageBubble message={message} animateEntry={false} />
+      </ArtifactPolicyProvider>,
+    );
+
+    const content = container.querySelector<HTMLElement>(
+      '[data-role="assistant-message-content"] > div',
+    );
+    if (!content) throw new Error("expected assistant content container");
+    const link = document.createElement("a");
+    link.setAttribute("href", "report.md");
+    link.textContent = "report";
+    content.appendChild(link);
+
+    await user.click(link);
+
+    await waitFor(() => {
+      expect(mockPathExists).toHaveBeenCalledWith("/new/report.md");
+      expect(vi.mocked(openPath)).toHaveBeenCalledWith("/new/report.md");
+    });
   });
 
   it("renders user message with correct alignment", () => {

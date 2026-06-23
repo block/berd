@@ -10,7 +10,7 @@ import {
 } from "@/features/chat/transcript/row-state";
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
+  useArtifactActionsContext: () => ({
     resolveToolCardDisplay: () => ({
       role: "none",
       primaryCandidate: null,

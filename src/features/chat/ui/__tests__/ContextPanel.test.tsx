@@ -82,11 +82,11 @@ vi.mock("@/shared/api/git", () => ({
 }));
 
 vi.mock("../../hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
-    getAllSessionArtifacts: mockGetAllSessionArtifacts,
+  useArtifactActionsContext: () => ({
     openResolvedPath: vi.fn(),
     pathExists: () => Promise.resolve(true),
   }),
+  useSessionArtifacts: () => mockGetAllSessionArtifacts(),
 }));
 
 describe("ContextPanel", () => {

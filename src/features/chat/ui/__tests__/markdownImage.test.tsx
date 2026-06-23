@@ -18,7 +18,7 @@ vi.mock("@/features/experiments/experimentPreferences", () => ({
 }));
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
+  useArtifactActionsContext: () => ({
     resolveMarkdownHref: mocks.resolveMarkdownHref,
     pathExists: mocks.pathExists,
   }),

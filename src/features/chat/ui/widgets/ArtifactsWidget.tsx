@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import {
   IconFile,
@@ -11,7 +10,8 @@ import {
 } from "@tabler/icons-react";
 import { FileContextMenu } from "@/shared/ui/file-context-menu";
 import {
-  useArtifactPolicyContext,
+  useArtifactActionsContext,
+  useSessionArtifacts,
   type SessionArtifact,
 } from "../../hooks/ArtifactPolicyContext";
 import { Widget } from "./Widget";
@@ -69,13 +69,8 @@ export function ArtifactsWidget({
   onToggleOpen,
 }: ArtifactsWidgetProps) {
   const { t } = useTranslation("chat");
-  const { getAllSessionArtifacts, openResolvedPath } =
-    useArtifactPolicyContext();
-
-  const artifacts = useMemo(
-    () => getAllSessionArtifacts(),
-    [getAllSessionArtifacts],
-  );
+  const artifacts = useSessionArtifacts();
+  const { openResolvedPath } = useArtifactActionsContext();
 
   if (artifacts.length === 0) {
     return null;

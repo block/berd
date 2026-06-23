@@ -99,9 +99,7 @@ vi.mock("@/shared/api/acpConnection", () => ({
 }));
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
-    getAllSessionArtifacts: () => [],
-  }),
+  useSessionArtifacts: () => [],
 }));
 
 function setProjectStore() {

@@ -8,11 +8,10 @@ const mockResolveMarkdownHref =
 const mockOpenResolvedPath = vi.fn<(path: string) => Promise<void>>();
 
 vi.mock("@/features/chat/hooks/ArtifactPolicyContext", () => ({
-  useArtifactPolicyContext: () => ({
+  useArtifactActionsContext: () => ({
     resolveMarkdownHref: mockResolveMarkdownHref,
     pathExists: async () => false,
     openResolvedPath: mockOpenResolvedPath,
-    getAllSessionArtifacts: () => [],
   }),
 }));
 
@@ -35,7 +34,12 @@ function Harness({ href, label }: { href: string; label: string }) {
     // biome-ignore lint/a11y/useKeyWithClickEvents: test harness only
     // biome-ignore lint/a11y/noStaticElementInteractions: test harness only
     <div onClick={handleContentClick}>
-      <a href={href}>{label}</a>
+      {/* External hrefs are intentionally not preventDefault-ed by the handler
+          (the LinkSafetyModal owns them), so suppress jsdom's unimplemented
+          navigation here; the delegated handler under test still runs. */}
+      <a href={href} onClick={(event) => event.preventDefault()}>
+        {label}
+      </a>
       {pathNotice && <p data-testid="notice">{pathNotice}</p>}
     </div>
   );
@@ -70,6 +74,25 @@ describe("useArtifactLinkHandler", () => {
 
     expect(mockResolveMarkdownHref).toHaveBeenCalledWith("/project/report.md");
     expect(mockOpenResolvedPath).toHaveBeenCalledWith(candidate.resolvedPath);
+  });
+
+  it("routes file links through the artifact policy", async () => {
+    const user = userEvent.setup();
+    const candidate = makeCandidate({
+      rawPath: "file:///tmp/report.md",
+      resolvedPath: "/tmp/report.md",
+      isWithinSessionCwd: false,
+    });
+    mockResolveMarkdownHref.mockReturnValue(candidate);
+    mockOpenResolvedPath.mockResolvedValue(undefined);
+
+    render(<Harness href="file:///tmp/report.md" label="File" />);
+    await user.click(screen.getByText("File"));
+
+    expect(mockResolveMarkdownHref).toHaveBeenCalledWith(
+      "file:///tmp/report.md",
+    );
+    expect(mockOpenResolvedPath).toHaveBeenCalledWith("/tmp/report.md");
   });
 
   it("shows opener errors", async () => {

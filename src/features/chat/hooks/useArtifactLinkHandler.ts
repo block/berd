@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { isExternalHref } from "@/shared/lib/isExternalHref";
-import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 
 /**
  * Delegated click handler that intercepts local link clicks within a
@@ -12,7 +12,7 @@ import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyCo
  * below ensures there is no conflict.
  */
 export function useArtifactLinkHandler() {
-  const { resolveMarkdownHref, openResolvedPath } = useArtifactPolicyContext();
+  const { resolveMarkdownHref, openResolvedPath } = useArtifactActionsContext();
   const [pathNotice, setPathNotice] = useState<string | null>(null);
 
   const handleContentClick = useCallback(

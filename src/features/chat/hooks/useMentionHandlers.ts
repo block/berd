@@ -18,7 +18,7 @@ import {
   type MentionItem,
   type SkillMentionItem,
 } from "../ui/MentionAutocomplete";
-import { useArtifactPolicyContext } from "./ArtifactPolicyContext";
+import { useSessionArtifacts } from "./ArtifactPolicyContext";
 
 interface MentionHandlersOptions {
   personas: Persona[];
@@ -340,7 +340,7 @@ export function useMentionHandlers({
   onSkillMentionSelect,
   onFileMentionSelect,
 }: MentionHandlersOptions) {
-  const { getAllSessionArtifacts } = useArtifactPolicyContext();
+  const sessionArtifacts = useSessionArtifacts();
   const normalizedProjectRoots = useMemo(
     () => normalizeRoots(projectWorkingDirs),
     [projectWorkingDirs],
@@ -439,7 +439,7 @@ export function useMentionHandlers({
       return [];
     }
 
-    for (const artifact of getAllSessionArtifacts()) {
+    for (const artifact of sessionArtifacts) {
       addFileMentionItem(dedup, {
         resolvedPath: artifact.resolvedPath,
         displayPath: artifact.displayPath,
@@ -459,7 +459,7 @@ export function useMentionHandlers({
     return Array.from(dedup.values());
   }, [
     fileMentionsEnabled,
-    getAllSessionArtifacts,
+    sessionArtifacts,
     homeDir,
     projectFileEntries,
     normalizedProjectRoots,

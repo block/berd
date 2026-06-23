@@ -1,6 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { type ComponentProps, memo, useEffect, useState } from "react";
-import { useArtifactPolicyContext } from "@/features/chat/hooks/ArtifactPolicyContext";
+import { useArtifactActionsContext } from "@/features/chat/hooks/ArtifactPolicyContext";
 import { LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID } from "@/features/experiments/experimentDefinitions";
 import { useExperiment } from "@/features/experiments/experimentPreferences";
 import { ClickableImage } from "./ClickableImage";
@@ -34,7 +34,7 @@ export const MarkdownImage = memo(
     ...rest
   }: ComponentProps<"img"> & { node?: unknown }) => {
     const experiment = useExperiment(LOCAL_MARKDOWN_IMAGES_EXPERIMENT_ID);
-    const { resolveMarkdownHref, pathExists } = useArtifactPolicyContext();
+    const { resolveMarkdownHref, pathExists } = useArtifactActionsContext();
     const [assetSrc, setAssetSrc] = useState<string | null>(null);
 
     const rawSrc = typeof src === "string" ? src : "";
