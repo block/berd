@@ -50,6 +50,7 @@ export interface SidebarProjectsSectionProps {
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
@@ -103,6 +104,7 @@ export function SidebarProjectsSection({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
@@ -146,6 +148,7 @@ export function SidebarProjectsSection({
         onSelectSession={onSelectSession}
         onArchiveChat={onArchiveChat}
         onRenameChat={onRenameChat}
+        onForkChat={onForkChat}
         onMarkChatRead={onMarkChatRead}
         onMarkChatUnread={onMarkChatUnread}
         selectedSessionIds={selectedSessionIds}
@@ -256,6 +259,7 @@ export function SidebarProjectsSection({
             onArchiveProject={onArchiveProject}
             onArchiveChat={onArchiveChat}
             onRenameChat={onRenameChat}
+            onForkChat={onForkChat}
             onMarkChatRead={onMarkChatRead}
             onMarkChatUnread={onMarkChatUnread}
             onMoveToProject={onMoveToProject}
@@ -380,6 +384,7 @@ export function SidebarProjectsSection({
             onSelectSession={onSelectSession}
             onArchiveChat={onArchiveChat}
             onRenameChat={onRenameChat}
+            onForkChat={onForkChat}
             onMarkChatRead={onMarkChatRead}
             onMarkChatUnread={onMarkChatUnread}
             onMoveToProject={onMoveToProject}

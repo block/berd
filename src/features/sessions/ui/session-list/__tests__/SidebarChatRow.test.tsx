@@ -432,6 +432,27 @@ describe("SidebarChatRow", () => {
     expect(onMarkUnread).toHaveBeenCalledWith("session-1");
   });
 
+  it("can duplicate an idle chat from the menu", async () => {
+    const user = userEvent.setup();
+    const onFork = vi.fn();
+
+    render(
+      <SidebarChatRow
+        id="session-1"
+        title="Idle Chat"
+        isActive={false}
+        onFork={onFork}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /options for idle chat/i }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: /duplicate/i }));
+
+    expect(onFork).toHaveBeenCalledWith("session-1");
+  });
+
   it("shows pin-to-home in the chat options menu", async () => {
     const user = userEvent.setup();
 

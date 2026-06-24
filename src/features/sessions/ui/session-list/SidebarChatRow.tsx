@@ -7,6 +7,7 @@ import {
 } from "react";
 import {
   Archive,
+  CopyPlus,
   ExternalLink,
   Mail,
   MailOpen,
@@ -102,6 +103,7 @@ interface SidebarChatRowProps {
   onSelectionClear?: () => void;
   onSelectionChange?: (id: string, selected: boolean) => void;
   onRename?: (id: string, nextTitle: string) => void;
+  onFork?: (id: string) => void;
   onArchive?: (id: string) => void;
   onArchiveSelected?: () => void;
   onPinSelectedToHome?: () => void;
@@ -135,6 +137,7 @@ export function SidebarChatRow({
   onSelectionClear,
   onSelectionChange,
   onRename,
+  onFork,
   onArchive,
   onArchiveSelected,
   onPinSelectedToHome,
@@ -704,6 +707,17 @@ export function SidebarChatRow({
                 <Pencil className="size-3.5" />
                 {t("common:actions.rename")}
               </DropdownMenuItem>
+              {onFork ? (
+                <DropdownMenuItem
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onFork(id);
+                  }}
+                >
+                  <CopyPlus className="size-3.5" />
+                  {t("common:actions.duplicate")}
+                </DropdownMenuItem>
+              ) : null}
             </>
           )}
           <DropdownMenuItem

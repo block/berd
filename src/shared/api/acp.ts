@@ -351,6 +351,10 @@ export async function acpDuplicateSession(
 
   try {
     await directAcp.renameSession(session.sessionId, normalizedTitle);
+    // forkSession returns a pre-rename snapshot (title: null); reflect the
+    // applied title so callers can render the fork without waiting for a
+    // session-list refresh.
+    return { ...session, title: normalizedTitle };
   } catch (error) {
     console.error("Failed to rename duplicated session:", error);
   }

@@ -24,6 +24,7 @@ export function buildInitScript(options?: {
   personas?: unknown[];
   skills?: unknown[];
   projects?: unknown[];
+  sessions?: unknown[];
   providerCatalog?: unknown[];
   providerInventory?: unknown[];
   agentSetupFailure?: {
@@ -35,6 +36,7 @@ export function buildInitScript(options?: {
   const personas = JSON.stringify(options?.personas ?? MOCK_PERSONAS);
   const skills = JSON.stringify(options?.skills ?? MOCK_SKILLS);
   const projects = JSON.stringify(options?.projects ?? MOCK_PROJECTS);
+  const sessions = JSON.stringify(options?.sessions ?? []);
   const providerCatalog = JSON.stringify(options?.providerCatalog ?? []);
   const providerInventory = JSON.stringify(
     options?.providerInventory ?? [
@@ -99,6 +101,7 @@ export function buildInitScript(options?: {
       const PERSONAS = ${personas};
       const SKILLS = ${skills};
       const PROJECTS = ${projects};
+      const SEED_SESSIONS = ${sessions};
       const PROVIDER_CATALOG = ${providerCatalog};
       const PROVIDER_INVENTORY = ${providerInventory};
       const AGENT_SETUP_FAILURE = ${agentSetupFailure};
@@ -106,7 +109,14 @@ export function buildInitScript(options?: {
         present: false,
       };
       const FAKE_ACP_URL = "ws://127.0.0.1:0/mock-acp";
-      const ACP_SESSIONS = [];
+      const ACP_SESSIONS = SEED_SESSIONS.map((session) => ({
+        sessionId: session.sessionId,
+        title: session.title ?? "New Chat",
+        updatedAt: session.updatedAt ?? new Date().toISOString(),
+        messageCount: session.messageCount ?? 0,
+        providerId: session.providerId ?? "goose",
+        modelId: session.modelId ?? null,
+      }));
       const CALLBACKS = new Map();
       const EVENT_LISTENERS = new Map();
       const LAYOUT_CONSTRAINTS = {
@@ -288,6 +298,7 @@ export function buildInitScript(options?: {
               agentCapabilities: {
                 loadSession: {},
                 listSessions: {},
+                fork: {},
               },
               agentInfo: {
                 name: "mock-goose",
@@ -311,6 +322,37 @@ export function buildInitScript(options?: {
             const sessionId = "session-" + Math.random().toString(36).slice(2, 10);
             ACP_SESSIONS.unshift(buildSession(sessionId, providerId));
             return jsonRpcResult(message.id, { sessionId });
+          }
+          case "session/fork": {
+            const source = findSession(message.params?.sessionId);
+            const sessionId = "session-fork-" + Math.random().toString(36).slice(2, 10);
+            const copy = {
+              sessionId,
+              title: source?.title ?? "New Chat",
+              updatedAt: nowIso(),
+              messageCount: source?.messageCount ?? 0,
+              providerId: source?.providerId ?? "goose",
+              modelId: source?.modelId ?? null,
+            };
+            ACP_SESSIONS.unshift(copy);
+            return jsonRpcResult(message.id, {
+              sessionId,
+              _meta: {
+                messageCount: copy.messageCount,
+                providerId: copy.providerId,
+                modelId: copy.modelId,
+                createdAt: copy.updatedAt,
+              },
+            });
+          }
+          case "_goose/unstable/session/rename":
+          case "_goose/session/rename": {
+            const session = findSession(message.params?.sessionId);
+            if (session && typeof message.params?.title === "string") {
+              session.title = message.params.title;
+              session.updatedAt = nowIso();
+            }
+            return jsonRpcResult(message.id, {});
           }
           case "session/load":
             return jsonRpcResult(message.id, {});

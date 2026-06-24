@@ -7,6 +7,7 @@ import { createAgentCommand } from "./impl/createAgent";
 import { createProjectCommand } from "./impl/createProject";
 import { createSessionCommand } from "./impl/createSession";
 import { createSkillCommand } from "./impl/createSkill";
+import { forkSessionCommand } from "./impl/forkSession";
 import { getContextCommand } from "./impl/getContext";
 import { getProjectCommand } from "./impl/getProject";
 import { getSessionCommand } from "./impl/getSession";
@@ -44,11 +45,11 @@ export const TOOL_GROUPS = {
   sessions: {
     description:
       "Manage the user's chat sessions: create (fire-and-forget, on any " +
-      "installed agent harness), send, open, list, get, rename, move, clear project, archive.",
+      "installed agent harness), send, open, list, get, rename, move, clear project, fork, archive.",
     cli: {
       noun: "session",
       about:
-        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, archive",
+        "Manage chat sessions: create, send, open, list, get, rename, move, clear project, fork, archive",
       verbs: {
         create: "create",
         send: "send",
@@ -58,6 +59,7 @@ export const TOOL_GROUPS = {
         rename: "rename",
         move: "move",
         "clear-project": "clear_project",
+        fork: "fork",
         archive: "archive",
       },
     },
@@ -70,6 +72,7 @@ export const TOOL_GROUPS = {
       rename: renameSessionCommand,
       move: moveSessionCommand,
       clear_project: clearSessionProjectCommand,
+      fork: forkSessionCommand,
       archive: archiveSessionCommand,
     },
   },

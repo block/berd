@@ -411,7 +411,7 @@ describe("acpDuplicateSession", () => {
 
     await expect(
       acpDuplicateSession("session-1", "/tmp/project", "Copy of Chat One"),
-    ).resolves.toEqual(forkedSession);
+    ).resolves.toEqual({ ...forkedSession, title: "Copy of Chat One" });
     expect(mockForkSession).toHaveBeenCalledWith("session-1", "/tmp/project");
     expect(mockRenameSession).toHaveBeenCalledWith(
       "session-2",

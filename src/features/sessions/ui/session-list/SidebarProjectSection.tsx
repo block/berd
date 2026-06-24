@@ -51,6 +51,7 @@ export function SidebarProjectSection({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
@@ -78,6 +79,7 @@ export function SidebarProjectSection({
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
@@ -302,6 +304,7 @@ export function SidebarProjectSection({
                 onSelectionClear={onSelectionClear}
                 onSelectionChange={onSelectionChange}
                 onRename={onRenameChat}
+                onFork={onForkChat}
                 onMarkRead={onMarkChatRead}
                 onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}

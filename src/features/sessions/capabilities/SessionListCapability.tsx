@@ -105,6 +105,7 @@ export interface SessionListCapabilityProps {
   onArchiveProject?: (projectId: string) => void;
   onCreateProject?: () => void;
   onEditProject?: (projectId: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
@@ -305,6 +306,7 @@ export function SessionListCapability({
   onArchiveProject,
   onCreateProject,
   onEditProject,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
@@ -644,6 +646,7 @@ export function SessionListCapability({
     onNewChat,
     onCreateProject,
     onEditProject,
+    onForkChat,
     onArchiveProject,
     onArchiveChat,
     onRenameChat,

@@ -38,6 +38,7 @@ export function SidebarFlatChatsSection({
   onSelectSession,
   onArchiveChat,
   onRenameChat,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   selectedSessionIds,
@@ -65,6 +66,7 @@ export function SidebarFlatChatsSection({
   onSelectSession?: (sessionId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   selectedSessionIds?: Set<string>;
@@ -328,6 +330,7 @@ export function SidebarFlatChatsSection({
                       onSelectionClear={onSelectionClear}
                       onSelectionChange={onSelectionChange}
                       onRename={onRenameChat}
+                      onFork={onForkChat}
                       onMarkRead={onMarkChatRead}
                       onMarkUnread={onMarkChatUnread}
                       onArchive={onArchiveChat}

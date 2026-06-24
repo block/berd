@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import {
   Archive,
   ArchiveRestore,
+  CopyPlus,
   Download,
   ExternalLink,
   MoreHorizontal,
@@ -51,6 +52,7 @@ interface SessionCardProps {
   onSelectionClear?: () => void;
   onSelectionChange?: (id: string, selected: boolean) => void;
   onRename?: (id: string, nextTitle: string) => void;
+  onFork?: (id: string) => void;
   onArchive?: (id: string) => void;
   onArchiveSelected?: () => void;
   onUnarchive?: (id: string) => void;
@@ -82,6 +84,7 @@ export function SessionCard({
   onSelectionClear,
   onSelectionChange,
   onRename,
+  onFork,
   onArchive,
   onArchiveSelected,
   onUnarchive,
@@ -358,6 +361,17 @@ export function SessionCard({
                     <Pencil className="size-3.5" />
                     {t("common:actions.rename")}
                   </DropdownMenuItem>
+                  {onFork ? (
+                    <DropdownMenuItem
+                      onClick={() => {
+                        setMenuOpen(false);
+                        onFork(id);
+                      }}
+                    >
+                      <CopyPlus className="size-3.5" />
+                      {t("common:actions.duplicate")}
+                    </DropdownMenuItem>
+                  ) : null}
                 </>
               )}
               <DropdownMenuItem

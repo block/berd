@@ -3,7 +3,7 @@
   "nouns": {
     "session": {
       "group": "sessions",
-      "about": "Manage chat sessions: create, send, open, list, get, rename, move, clear project, archive",
+      "about": "Manage chat sessions: create, send, open, list, get, rename, move, clear project, fork, archive",
       "verbs": {
         "create": {
           "action": "create",
@@ -44,6 +44,11 @@
           "action": "clear_project",
           "about": "Move a chat session out of any project",
           "afterHelp": "Example:\n  goosectl session clear-project --session-id <session-id>\n\nResult:\n  {\"ok\": true} — the app's session list regroups immediately."
+        },
+        "fork": {
+          "action": "fork",
+          "about": "Fork a chat session into an independent copy with its history",
+          "afterHelp": "Example:\n  goosectl session fork --session-id <session-id> --title \"Alternate approach\"\n\nResult:\n  {\"session_id\": \"...\", \"title\": \"...\", \"source_session_id\": \"...\",\n   \"message_count\": 7}\n  The fork appears in the session list with a copy of the original history."
         },
         "archive": {
           "action": "archive",

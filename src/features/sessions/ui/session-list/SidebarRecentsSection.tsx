@@ -32,6 +32,7 @@ export function SidebarRecentsSection({
   onSelectSession,
   onArchiveChat,
   onRenameChat,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
@@ -60,6 +61,7 @@ export function SidebarRecentsSection({
   onSelectSession?: (sessionId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
@@ -255,6 +257,7 @@ export function SidebarRecentsSection({
                 onSelectionClear={onSelectionClear}
                 onSelectionChange={onSelectionChange}
                 onRename={onRenameChat}
+                onFork={onForkChat}
                 onMarkRead={onMarkChatRead}
                 onMarkUnread={onMarkChatUnread}
                 onArchive={onArchiveChat}

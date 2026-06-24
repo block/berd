@@ -26,6 +26,13 @@ export default defineConfig({
       },
     },
     {
+      name: "session-fork",
+      testMatch: ["**/session-fork.spec.ts"],
+      use: {
+        ...devices["Desktop Chrome"],
+      },
+    },
+    {
       name: "personas",
       testMatch: ["**/personas.spec.ts"],
       use: {

@@ -121,6 +121,7 @@ import {
   hasOpenKeyboardOwningLayer,
 } from "./focus/FocusRegionProvider";
 import { SessionQuickSwitcher } from "@/features/sessions/ui/SessionQuickSwitcher";
+import { useForkSession } from "@/features/sessions/hooks/useForkSession";
 import {
   GlobalComposerPill,
   type GlobalComposerHandoffRect,
@@ -2272,6 +2273,8 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     [handleSelectSession],
   );
 
+  const handleForkChat = useForkSession({ onForked: handleSelectSession });
+
   const handleOpenExtensionFromSearch = useCallback(
     (entry: ExtensionEntry) => {
       setActiveConnectionsTab(
@@ -3044,6 +3047,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
           onArchiveProject: handleArchiveProject,
           onArchiveChat: handleArchiveChat,
           onRenameChat: handleRenameChat,
+          onForkChat: handleForkChat,
           onMarkChatRead: handleMarkChatRead,
           onMarkChatUnread: handleMarkChatUnread,
           onMoveToProject: handleMoveToProject,

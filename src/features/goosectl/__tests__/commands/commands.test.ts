@@ -32,6 +32,7 @@ import { getTextContent } from "@/shared/types/messages";
 
 const mocks = vi.hoisted(() => ({
   acpCreateSession: vi.fn(),
+  acpDuplicateSession: vi.fn(),
   acpListSessionsPage: vi.fn(),
   acpPrepareSession: vi.fn(),
   acpSendMessage: vi.fn(),
@@ -55,6 +56,8 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("@/shared/api/acp", () => ({
   acpCreateSession: (...args: unknown[]) => mocks.acpCreateSession(...args),
+  acpDuplicateSession: (...args: unknown[]) =>
+    mocks.acpDuplicateSession(...args),
   acpListSessionsPage: (...args: unknown[]) =>
     mocks.acpListSessionsPage(...args),
   acpPrepareSession: (...args: unknown[]) => mocks.acpPrepareSession(...args),
@@ -437,6 +440,7 @@ describe("action schemas", () => {
       "sessions.rename": { session_id: "s1", title: "Title" },
       "sessions.move": { session_id: "s1", project_id: "p1" },
       "sessions.clear_project": { session_id: "s1" },
+      "sessions.fork": { session_id: "s1" },
       "sessions.archive": { session_id: "s1" },
       "projects.create": { name: "Project" },
       "projects.list": {},
@@ -1365,6 +1369,67 @@ describe("sessions.rename", () => {
       "session_not_found",
     );
     expect(mocks.updateSessionTitle).not.toHaveBeenCalled();
+  });
+});
+
+describe("sessions.fork", () => {
+  it("forks via acpDuplicateSession and adds the copy to the store", async () => {
+    mockSessionFound({ workingDir: "/projects/one" });
+    mocks.acpDuplicateSession.mockResolvedValue(
+      makeAcpSession({
+        sessionId: "session-fork",
+        title: "Alternate approach",
+        messageCount: 2,
+      }),
+    );
+
+    const result = await dispatchCommand(
+      "sessions",
+      { action: "fork", session_id: "session-1", title: "Alternate approach" },
+      ctx,
+    );
+
+    expect(mocks.acpDuplicateSession).toHaveBeenCalledWith(
+      "session-1",
+      "/projects/one",
+      "Alternate approach",
+    );
+    expect(result).toEqual({
+      session_id: "session-fork",
+      title: "Alternate approach",
+      source_session_id: "session-1",
+      message_count: 2,
+    });
+    expect(
+      useChatSessionStore.getState().getSession("session-fork"),
+    ).toBeDefined();
+  });
+
+  it("refuses a running session before forking", async () => {
+    seedSessions(makeSession({ id: "session-1" }));
+    useChatStore.getState().setChatState("session-1", "streaming");
+
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "fork", session_id: "session-1" },
+        ctx,
+      ),
+      "target_session_running",
+    );
+    expect(mocks.acpDuplicateSession).not.toHaveBeenCalled();
+  });
+
+  it("throws session_not_found for unknown sessions", async () => {
+    await expectCommandError(
+      dispatchCommand(
+        "sessions",
+        { action: "fork", session_id: "missing" },
+        ctx,
+      ),
+      "session_not_found",
+    );
+    expect(mocks.acpDuplicateSession).not.toHaveBeenCalled();
   });
 });
 

@@ -72,6 +72,7 @@ export interface NavigationPanesViewProps {
   onArchiveProject?: (projectId: string) => void;
   onArchiveChat?: (sessionId: string) => void | Promise<void>;
   onRenameChat?: (sessionId: string, nextTitle: string) => void;
+  onForkChat?: (sessionId: string) => void;
   onMarkChatRead?: (sessionId: string) => void;
   onMarkChatUnread?: (sessionId: string) => void;
   onMoveToProject?: (sessionId: string, projectId: string | null) => void;
@@ -213,6 +214,7 @@ export function NavigationPanesView({
   onArchiveProject,
   onArchiveChat,
   onRenameChat,
+  onForkChat,
   onMarkChatRead,
   onMarkChatUnread,
   onMoveToProject,
@@ -567,6 +569,7 @@ export function NavigationPanesView({
       onArchiveProject={onArchiveProject}
       onCreateProject={onCreateProject}
       onEditProject={onEditProject}
+      onForkChat={onForkChat}
       onMarkChatRead={onMarkChatRead}
       onMarkChatUnread={onMarkChatUnread}
       onMoveToProject={onMoveToProject}
@@ -679,6 +682,7 @@ export function NavigationPanesView({
                   onArchiveProject={onArchiveProject}
                   onCreateProject={onCreateProject}
                   onEditProject={onEditProject}
+                  onForkChat={onForkChat}
                   onMarkChatRead={onMarkChatRead}
                   onMarkChatUnread={onMarkChatUnread}
                   onMoveToProject={onMoveToProject}

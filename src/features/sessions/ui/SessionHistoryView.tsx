@@ -57,6 +57,7 @@ import {
   toggleSessionSelection as getToggledSessionSelection,
 } from "../lib/sessionSelection";
 import { useBulkSessionActions } from "../hooks/useBulkSessionActions";
+import { useForkSession } from "../hooks/useForkSession";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import {
   flattenFlatSessionRows,
@@ -547,6 +548,8 @@ export function SessionHistoryView({
     [onArchiveChat],
   );
 
+  const handleFork = useForkSession({ onForked: onSelectSession });
+
   const toggleSessionSelection = useCallback(
     (sessionId: string, selected: boolean) => {
       setSelectedSessionIds((current) =>
@@ -875,6 +878,7 @@ export function SessionHistoryView({
           onSelectionClear={clearSelection}
           onSelectionChange={toggleSessionSelection}
           onRename={onRenameChat}
+          onFork={handleFork}
           onArchive={handleArchive}
           onArchiveSelected={requestArchiveSelected}
           onExport={handleExport}
@@ -896,6 +900,7 @@ export function SessionHistoryView({
       getProjectName,
       getWorkingDir,
       handleArchive,
+      handleFork,
       requestArchiveSelected,
       clearSelection,
       handleExport,

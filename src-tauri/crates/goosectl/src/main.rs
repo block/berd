@@ -275,6 +275,7 @@ mod tests {
             ("session", "rename") => vec!["--session-id", "s", "--title", "t"],
             ("session", "move") => vec!["--session-id", "s", "--project-id", "p"],
             ("session", "clear-project") => vec!["--session-id", "s"],
+            ("session", "fork") => vec!["--session-id", "s"],
             ("session", "archive") => vec!["--session-id", "s"],
             ("project", "create") => vec!["--name", "n"],
             ("project", "list") => vec![],
@@ -535,7 +536,7 @@ goosectl talks to the running Goose desktop app and acts on what the user
 sees there:
 
   session   chat sessions        create, open, list, get, rename, move,
-                                  send, clear-project, archive
+                                  send, clear-project, fork, archive
   project   projects             create, list, get, archive
   agent     agents (personas)    create, list
   skill     skills (SKILL.md)    create, list, get
@@ -549,7 +550,7 @@ Usage: goosectl [OPTIONS] <COMMAND>
 
 Commands:
   session  Manage chat sessions: create, send, open, list, get, rename, move,
-           clear project, archive
+           clear project, fork, archive
   project  Manage projects: create, list, get, archive
   agent    Manage agents (personas): create, list
   skill    Manage skills: create, list, get

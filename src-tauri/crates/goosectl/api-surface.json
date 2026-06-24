@@ -3,7 +3,7 @@
   "protocolVersion": 1,
   "groups": {
     "sessions": {
-      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, archive.",
+      "description": "Manage the user's chat sessions: create (fire-and-forget, on any installed agent harness), send, open, list, get, rename, move, clear project, fork, archive.",
       "actions": {
         "create": {
           "description": "Create a new chat session on any installed agent harness and send the prompt in it. Fire-and-forget: returns the session id immediately and the session runs in the background without changing what the user sees; the user can open it themselves. Only check on it later (action \"get\") if the user asks.",
@@ -315,6 +315,41 @@
               "session_id": {
                 "description": "Id of the session to move out of its project.",
                 "type": "string"
+              }
+            },
+            "required": ["session_id"],
+            "additionalProperties": false
+          }
+        },
+        "fork": {
+          "description": "Duplicate an existing chat session, copying its full conversation history into a new session the user can continue down an independent path. The fork appears in the app's session list; the user's current view does not change.",
+          "fields": [
+            {
+              "name": "session_id",
+              "required": true,
+              "kind": "string",
+              "description": "Id of the session to fork (duplicate)."
+            },
+            {
+              "name": "title",
+              "required": false,
+              "kind": "string",
+              "description": "Optional title for the forked session. Defaults to the source title.",
+              "min": 1
+            }
+          ],
+          "schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {
+              "session_id": {
+                "description": "Id of the session to fork (duplicate).",
+                "type": "string"
+              },
+              "title": {
+                "description": "Optional title for the forked session. Defaults to the source title.",
+                "type": "string",
+                "minLength": 1
               }
             },
             "required": ["session_id"],
