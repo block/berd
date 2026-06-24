@@ -2902,6 +2902,17 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
       if (hasOpenKeyboardOwningLayer()) {
         return;
       }
+      // Dismiss the centered global composer on Escape from anywhere once
+      // nested menus/popovers have had the chance to handle Escape first.
+      if (
+        e.key === "Escape" &&
+        !e.defaultPrevented &&
+        globalComposerPlacement === "centered"
+      ) {
+        e.preventDefault();
+        resetGlobalComposerTransition();
+        return;
+      }
       // Settings (default mod+,)
       if (eventMatchesShortcutCommand(e, "navigation.openSettings")) {
         e.preventDefault();
@@ -2991,10 +3002,12 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     canUseGlobalComposerShortcut,
     clearActiveSession,
     clearGlobalComposerHandoffTimer,
+    globalComposerPlacement,
     guardAppNavigation,
     handleArchiveChat,
     handleNavigate,
     leaveSecondarySurface,
+    resetGlobalComposerTransition,
     setDesignSystemInspectorVisible,
     setActiveSession,
     toggleSidebar,
@@ -3195,12 +3208,13 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
               <div
                 aria-hidden="true"
                 className={cn(
-                  "global-composer-shim pointer-events-none fixed top-0 right-0 bottom-0 z-[35]",
+                  "global-composer-shim fixed top-0 right-0 bottom-0 z-[35]",
                   globalComposerPlacement === "handoff"
-                    ? "global-composer-shim-handoff"
+                    ? "pointer-events-none global-composer-shim-handoff"
                     : "global-composer-shim-centered",
                 )}
                 style={{ left: sidebarDockedOuterWidth }}
+                onClick={dismissCenteredGlobalComposer}
               />
             ) : null}
             {showGlobalComposer ? (

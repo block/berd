@@ -190,6 +190,7 @@ export function MentionAutocomplete({
       onCloseAutoFocus={(e) => e.preventDefault()}
       onEscapeKeyDown={(e) => {
         e.preventDefault();
+        e.stopPropagation();
         onClose?.();
       }}
     >

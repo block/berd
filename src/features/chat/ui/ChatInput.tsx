@@ -692,6 +692,7 @@ export function ChatInput({
         eventMatchesShortcutCommand(event.nativeEvent, "chat.mention.close")
       ) {
         event.preventDefault();
+        event.stopPropagation();
         closeMention();
         return;
       }

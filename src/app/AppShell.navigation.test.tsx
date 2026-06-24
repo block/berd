@@ -101,6 +101,23 @@ function renderAppShell(children?: ReactNode) {
   return render(appShellWithTheme(children));
 }
 
+async function openCenteredComposerFromChat() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole("button", { name: "Sidebar new chat" }));
+  await waitFor(() => {
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+  });
+  await user.keyboard("{Meta>}n{/Meta}");
+  const textbox = await screen.findByPlaceholderText("Start a conversation");
+  await waitFor(() => {
+    expect(textbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "centered",
+    );
+  });
+  return { textbox, user };
+}
+
 async function waitForCreatedAgentBuilderTarget() {
   await waitFor(() => {
     expect(useChatSessionStore.getState().getActiveSession()).toMatchObject({
@@ -1047,6 +1064,56 @@ describe("AppShell global navigation", () => {
       "centered",
     );
     expect(mockAcpCreateSession).not.toHaveBeenCalled();
+  });
+
+  it("dismisses the centered global composer from the backdrop and global Escape", async () => {
+    for (const dismiss of ["backdrop", "escape"] as const) {
+      const { container, unmount } = renderAppShell();
+
+      await openCenteredComposerFromChat();
+      if (dismiss === "backdrop") {
+        const shim = container.querySelector(".global-composer-shim");
+        expect(shim).not.toBeNull();
+        fireEvent.click(shim as Element);
+      } else {
+        fireEvent.keyDown(window, { key: "Escape" });
+      }
+
+      await waitFor(() => {
+        expect(
+          screen.queryByPlaceholderText("Start a conversation"),
+        ).not.toBeInTheDocument();
+      });
+      unmount();
+    }
+  });
+
+  it("lets nested centered-composer pickers consume Escape before the composer dismisses", async () => {
+    renderAppShell();
+
+    const { textbox, user } = await openCenteredComposerFromChat();
+    await user.click(
+      screen.getByRole("button", { name: /choose agent and model/i }),
+    );
+    await screen.findByText("Agent");
+
+    await user.keyboard("{Escape}");
+
+    await waitFor(() => {
+      expect(screen.queryByText("Agent")).not.toBeInTheDocument();
+    });
+    expect(textbox).toBeInTheDocument();
+    expect(textbox.closest("[data-placement]")).toHaveAttribute(
+      "data-placement",
+      "centered",
+    );
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => {
+      expect(
+        screen.queryByPlaceholderText("Start a conversation"),
+      ).not.toBeInTheDocument();
+    });
   });
 
   it("starts centered composer sends on a background draft before the visual handoff changes chat", async () => {

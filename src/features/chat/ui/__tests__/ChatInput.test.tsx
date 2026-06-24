@@ -1159,21 +1159,29 @@ describe("ChatInput", () => {
 
   it("pressing Escape closes path mentions without changing text", async () => {
     const user = userEvent.setup();
+    const windowKeyDown = vi.fn();
+    window.addEventListener("keydown", windowKeyDown);
     mockSearchFilesForMentions.mockResolvedValue(PROJECT_FILE_MENTION_ENTRIES);
-    renderProjectChatInput();
+    try {
+      renderProjectChatInput();
 
-    const input = screen.getByRole("textbox");
-    await user.type(input, "@@read");
-    expect(
-      await screen.findByRole("option", { name: /readme\.md/i }),
-    ).toBeInTheDocument();
+      const input = screen.getByRole("textbox");
+      await user.type(input, "@@read");
+      expect(
+        await screen.findByRole("option", { name: /readme\.md/i }),
+      ).toBeInTheDocument();
+      windowKeyDown.mockClear();
 
-    await user.keyboard("{Escape}");
+      await user.keyboard("{Escape}");
 
-    expect(input).toHaveValue("@read");
-    expect(
-      screen.queryByRole("option", { name: /readme\.md/i }),
-    ).not.toBeInTheDocument();
+      expect(input).toHaveValue("@read");
+      expect(
+        screen.queryByRole("option", { name: /readme\.md/i }),
+      ).not.toBeInTheDocument();
+      expect(windowKeyDown).not.toHaveBeenCalled();
+    } finally {
+      window.removeEventListener("keydown", windowKeyDown);
+    }
   });
 
   it("attaches folder and static root references as chips", async () => {

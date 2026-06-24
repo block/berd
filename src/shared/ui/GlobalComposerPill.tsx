@@ -940,6 +940,7 @@ export function GlobalComposerPill({
                   if (mentionOpen && !isComposing) {
                     if (event.key === "Escape") {
                       event.preventDefault();
+                      event.stopPropagation();
                       closeMention();
                       return;
                     }
