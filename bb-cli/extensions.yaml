@@ -127,3 +127,5 @@
   about: Search the web for up-to-date information.
 - name: workday
   about: Manage time off, inbox tasks, and org data in Workday.
+- name: edge-feedback
+  about: Recognize, collect and store user steering for extensions from internal use cases 
