@@ -78,7 +78,7 @@ export const AgentPinWidget = memo(function AgentPinWidget({
         type="button"
         onClick={handleClick}
         aria-label={t("widgets.agentPin.openAria", { name: label })}
-        className="pointer-events-auto relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-full bg-transparent transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="pointer-events-auto relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-full bg-transparent transition-colors duration-150 cursor-pointer outline-none hover:bg-transparent focus-visible:ring-2 focus-visible:ring-ring"
       >
         {gestureSnapshot ? (
           <img

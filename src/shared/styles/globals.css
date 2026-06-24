@@ -376,6 +376,30 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
+  --surface-editor-control: var(--color-white);
+  --surface-editor-control-hover: rgba(255, 255, 255, 0.5);
+  --surface-editor-badge: rgba(255, 255, 255, 0.7);
+  --surface-color-picker-swatches: rgba(255, 255, 255, 0.95);
+  --text-editor-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 30%,
+    transparent
+  );
+  --border-editor-divider: color-mix(
+    in oklab,
+    var(--foreground) 10%,
+    transparent
+  );
+  --color-picker-hue-gradient: linear-gradient(
+    90deg,
+    #eeb4b4,
+    #eeeeae,
+    #b4eed0,
+    #b4d0ee,
+    #d0b4ee,
+    #eeb4d2,
+    #eeb4b4
+  );
   --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: #242424;
   --surface-agent-profile-fg-80: rgba(36, 36, 36, 0.8);
@@ -571,6 +595,10 @@
   --shadow-agent-profile-affordance: 0 1px 2px rgba(36, 36, 36, 0.18);
   --shadow-agent-profile-input-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
   --shadow-agent-profile-input-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-editor-field-hover: 0 1px 1px rgba(0, 0, 0, 0.18);
+  --shadow-editor-field-focus: 0 1px 1px rgba(0, 0, 0, 0.24);
+  --shadow-editor-footer: 0 -12px 24px rgba(36, 36, 36, 0.06);
+  --shadow-color-picker-swatches: 0 10px 26px rgba(15, 23, 42, 0.12);
 
   /* Goose inverse popover — dark menu on light surface (Alex tile menu).
      Reuses gray-900 / white so the chain stays inside the existing palette. */
@@ -802,6 +830,20 @@
     var(--surface-editor-panel-neutral) 40%,
     transparent
   );
+  --surface-editor-control: var(--color-gray-800);
+  --surface-editor-control-hover: rgba(255, 255, 255, 0.08);
+  --surface-editor-badge: rgba(0, 0, 0, 0.35);
+  --surface-color-picker-swatches: rgba(35, 35, 35, 0.95);
+  --text-editor-field-placeholder: color-mix(
+    in oklab,
+    var(--foreground) 32%,
+    transparent
+  );
+  --border-editor-divider: color-mix(
+    in oklab,
+    var(--foreground) 12%,
+    transparent
+  );
   --surface-agent-profile-bg: var(--canvas-base);
   --surface-agent-profile-fg: var(--color-gray-50);
   --surface-agent-profile-fg-80: color-mix(
@@ -981,6 +1023,10 @@
   --shadow-agent-profile-affordance: 0 10px 24px rgba(0, 0, 0, 0.4);
   --shadow-agent-profile-input-hover: 0 0 0 1px rgba(255, 255, 255, 0.1);
   --shadow-agent-profile-input-focus: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --shadow-editor-field-hover: 0 0 0 1px rgba(255, 255, 255, 0.1);
+  --shadow-editor-field-focus: 0 0 0 1px rgba(255, 255, 255, 0.18);
+  --shadow-editor-footer: 0 -12px 24px rgba(0, 0, 0, 0.24);
+  --shadow-color-picker-swatches: 0 10px 26px rgba(0, 0, 0, 0.36);
 
   /* Inverse popover — light menu on dark surface (inverted for dark theme). */
   --popover-inverse: var(--color-gray-50);
@@ -1202,6 +1248,10 @@
   --shadow-agent-profile-affordance: var(--shadow-agent-profile-affordance);
   --shadow-agent-profile-input-hover: var(--shadow-agent-profile-input-hover);
   --shadow-agent-profile-input-focus: var(--shadow-agent-profile-input-focus);
+  --shadow-editor-field-hover: var(--shadow-editor-field-hover);
+  --shadow-editor-field-focus: var(--shadow-editor-field-focus);
+  --shadow-editor-footer: var(--shadow-editor-footer);
+  --shadow-color-picker-swatches: var(--shadow-color-picker-swatches);
 
   /* Spacing — app chrome dimensions */
   --spacing-app-top-bar: 52px;
@@ -1219,6 +1269,8 @@
   --toast-mobile-bottom-offset: 16px;
   --spacing-input: 3.25rem;
   --spacing-input-sm: 2.75rem;
+  --spacing-editor-field: 42px;
+  --spacing-editor-instructions-min: 215px;
   --spacing-button: 2.75rem;
   --spacing-button-sm: 2rem;
 
@@ -1227,11 +1279,14 @@
   --text-label-alex: 10px;
   --text-body-alex: 14px;
   --text-input-alex: 16px;
+  --text-editor-mono: 13px;
   --text-title-alex: 24px;
   --text-app-top-bar-title: 20px;
   --text-app-top-bar-title-leading: 18px;
   --text-app-top-bar-icon: 18px;
   --text-app-top-bar-title-compact: var(--text-app-top-bar-title);
+
+  --leading-editor-field: 15px;
 
   --breakpoint-desktop: 1440px;
 

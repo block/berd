@@ -246,7 +246,7 @@ export function ClockWidget({
             : "widgets.clock.toggleToDigital",
         )}
         className={cn(
-          "pointer-events-auto absolute inset-0 cursor-pointer bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+          "pointer-events-auto absolute inset-0 cursor-pointer bg-transparent outline-none focus-visible:ring-2 focus-visible:ring-ring",
           shapeClass,
         )}
       />

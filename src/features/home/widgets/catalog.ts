@@ -136,7 +136,7 @@ export const HOME_WIDGET_CATALOG: WidgetCatalogEntry[] = [
       lockAspectRatio: true,
     },
     resizeHandleClassName:
-      "absolute right-[6%] bottom-[13%] z-30 hidden size-6 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+      "absolute right-[6%] bottom-[13%] z-30 hidden size-6 cursor-nwse-resize items-center justify-center rounded-full group-hover/widget:flex focus-visible:flex focus-visible:ring-2 focus-visible:ring-ring",
     Component: ProjectArtifactWidget,
   },
   {

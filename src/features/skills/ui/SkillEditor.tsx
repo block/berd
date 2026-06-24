@@ -18,11 +18,8 @@ import {
 import { useProjectStore } from "@/features/projects/stores/projectStore";
 import { ProjectColorPicker } from "@/features/projects/ui/ProjectColorPicker";
 import { isHexColor } from "@/features/projects/lib/customPillColor";
-import { isPillTone } from "@/features/projects/lib/pillTones";
-import {
-  resolveSkillPillTone,
-  skillPillToneClass,
-} from "@/features/skills/lib/resolveSkillPillTone";
+import { pillCssColor } from "@/features/projects/lib/pillTones";
+import { resolveSkillPillTone } from "@/features/skills/lib/resolveSkillPillTone";
 import {
   createSkill,
   updateSkill,
@@ -37,25 +34,24 @@ const GLOBAL_VALUE = "__global__";
 
 // Shared visual constants for create/edit sheets.
 const SHEET_CONTENT_CLASS =
-  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-surface-editor-panel p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
+  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-lg bg-surface-editor-panel p-0 shadow-[var(--shadow-modal)] backdrop-blur-2xl sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
 const CLOSE_BUTTON_CLASS =
-  "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-white/50";
-const HERO_HEIGHT_CLASS = "h-[200px]";
+  "top-5 right-5 rounded-full bg-transparent opacity-80 hover:bg-[var(--surface-editor-control-hover)]";
 const FIELD_INPUT_CLASS =
-  "h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+  "h-editor-field rounded-sm border-0 bg-[var(--surface-editor-control)] px-3.5 py-0 text-body-alex leading-editor-field text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[color:var(--text-editor-field-placeholder)] hover:shadow-[var(--shadow-editor-field-focus)] focus:shadow-[var(--shadow-editor-field-focus)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[var(--shadow-editor-field-focus)]";
 const SELECT_TRIGGER_CLASS =
-  "!h-[42px] min-h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 data-[placeholder]:text-[#242424]/30 data-[size=default]:!h-[42px] hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)] data-[state=open]:shadow-[0_1px_1px_rgba(0,0,0,0.24)]";
+  "!h-editor-field min-h-editor-field rounded-sm border-0 bg-[var(--surface-editor-control)] px-3.5 py-0 text-body-alex leading-editor-field text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 data-[placeholder]:text-[color:var(--text-editor-field-placeholder)] data-[size=default]:!h-editor-field hover:shadow-[var(--shadow-editor-field-focus)] focus:shadow-[var(--shadow-editor-field-focus)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[var(--shadow-editor-field-focus)] data-[state=open]:shadow-[var(--shadow-editor-field-focus)]";
 // Instructions stay monospace because the field holds markdown the agent
 // reads literally. Height comes from the parent section's
 // flex-grow so the textarea owns whatever vertical space the form body has
 // after the other fields, falling back to a 215px floor on short windows.
 const INSTRUCTIONS_TEXTAREA_CLASS =
-  "h-full min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] font-mono text-[13px] leading-relaxed text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none";
+  "h-full min-h-editor-instructions-min w-full resize-none rounded-sm border-0 bg-[var(--surface-editor-control)] px-3.5 py-[13px] font-mono text-editor-mono leading-relaxed text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[color:var(--text-editor-field-placeholder)] hover:shadow-[var(--shadow-editor-field-hover)] focus:shadow-[var(--shadow-editor-field-hover)] focus:outline-none";
 const FIELD_LABEL_CLASS =
   "text-[10px] leading-3 font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground";
 const SECTION_GAP_CLASS = "group/field space-y-2";
 const ERROR_CALLOUT_CLASS =
-  "flex items-start gap-2 rounded-[12px] border border-destructive/15 bg-destructive/6 px-3 py-2.5 text-[12px] leading-5 shadow-none";
+  "flex items-start gap-2 rounded-sm border border-destructive/15 bg-destructive/6 px-3 py-2.5 text-[12px] leading-5 shadow-none";
 
 type SkillEditorError =
   | { kind: "nameConflict"; sourceName: string }
@@ -173,11 +169,12 @@ export function SkillEditor({
   // color in both surfaces.
   const heroToneSeed = name || editingSkill?.name || "new";
   const effectiveColor = color ?? resolveSkillPillTone(heroToneSeed);
-  const heroTone = isPillTone(effectiveColor)
-    ? effectiveColor
-    : resolveSkillPillTone(heroToneSeed);
-  const heroCustomColor = isHexColor(effectiveColor) ? effectiveColor : null;
-  const heroToneClass = heroCustomColor ? null : skillPillToneClass(heroTone);
+  const fallbackPanelTone = resolveSkillPillTone(heroToneSeed);
+  const selectedPanelColor =
+    pillCssColor(effectiveColor) ??
+    (isHexColor(effectiveColor) ? effectiveColor : null) ??
+    pillCssColor(fallbackPanelTone) ??
+    "var(--surface-editor-panel-neutral)";
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -273,7 +270,7 @@ export function SkillEditor({
         closeButtonClassName={CLOSE_BUTTON_CLASS}
         overlayClassName="bg-transparent"
         style={{
-          backgroundColor: "var(--surface-editor-panel)",
+          backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
         }}
         aria-describedby={undefined}
       >
@@ -282,38 +279,28 @@ export function SkillEditor({
           onSubmit={handleSave}
           className="flex h-full min-h-0 flex-col"
         >
-          {/* Header: title + Built-in tag at top-left. Sheet renders its own
-              close X in top-right. */}
-          <div className="flex items-center gap-2 px-8 pt-5 pb-2">
+          {/* Header: title at top-left. Sheet renders its own close X in
+              top-right. */}
+          <div className="flex items-center gap-2 px-8 pt-5 pb-2 pr-16">
             <SheetTitle className="truncate text-sm font-normal text-foreground">
               {titleText}
             </SheetTitle>
             {isBuiltIn ? (
-              <span className="rounded-xs bg-white/70 px-1.5 py-0.5 text-[11px] text-[#242424]">
+              <span className="rounded-xs bg-[var(--surface-editor-badge)] px-1.5 py-0.5 text-[11px] text-foreground">
                 {t("dialog.builtIn")}
               </span>
             ) : null}
           </div>
 
-          {/* Hero: pill-tone block with a swatch picker anchored bottom-center,
-              mirroring CreateProjectDialog's color picker layout. */}
-          <div
-            className={cn(
-              "relative shrink-0 overflow-hidden",
-              HERO_HEIGHT_CLASS,
-              heroToneClass,
-            )}
-            style={
-              heroCustomColor ? { backgroundColor: heroCustomColor } : undefined
-            }
-          >
-            <div className="absolute inset-x-0 bottom-4 flex justify-center">
-              <ProjectColorPicker
-                variant="swatches"
-                value={effectiveColor}
-                onChange={setColor}
-              />
-            </div>
+          {/* Color well: centered below the title so the color choice feels like
+              the skill's visual identity, similar to the project editor preview
+              area, without restoring the old giant color block. */}
+          <div className="flex shrink-0 justify-center px-8 pt-7 pb-5">
+            <ProjectColorPicker
+              variant="swatches"
+              value={effectiveColor}
+              onChange={setColor}
+            />
           </div>
 
           {/* Scrollable form body. */}
@@ -355,7 +342,7 @@ export function SkillEditor({
                     className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive"
                   />
                   <div className="min-w-0">
-                    <p className="font-medium text-[#242424]">
+                    <p className="font-medium text-foreground">
                       {t("dialog.nameConflictTitle", {
                         name: error.sourceName,
                       })}
@@ -432,7 +419,7 @@ export function SkillEditor({
                   className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive"
                 />
                 <div className="min-w-0">
-                  <p className="font-medium text-[#242424]">
+                  <p className="font-medium text-foreground">
                     {t("dialog.saveErrorTitle")}
                   </p>
                   <p className="break-words text-muted-foreground">
@@ -466,7 +453,7 @@ export function SkillEditor({
             className={cn(
               "flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-transparent px-6 pt-4 pb-7 transition-[border-color,box-shadow] duration-200 sm:px-8",
               formHasScrollBelow
-                ? "border-[#242424]/10 shadow-[0_-12px_24px_rgba(36,36,36,0.06)]"
+                ? "border-[color:var(--border-editor-divider)] shadow-[var(--shadow-editor-footer)]"
                 : "border-transparent shadow-none",
             )}
           >
@@ -478,7 +465,7 @@ export function SkillEditor({
                   size="sm"
                   onClick={() => onDelete(editingSkill)}
                   aria-label={t("common:actions.delete")}
-                  className="h-10 rounded-full px-4 text-sm text-destructive hover:bg-white/50 hover:text-destructive"
+                  className="h-10 rounded-full px-4 text-sm text-destructive hover:bg-[var(--surface-editor-control-hover)] hover:text-destructive"
                 >
                   <Trash2 className="h-3 w-3" />
                   {t("common:actions.delete")}
@@ -492,7 +479,7 @@ export function SkillEditor({
                   size="sm"
                   disabled
                   title={t("dialog.customizeComingSoon")}
-                  className="h-10 rounded-full bg-white px-4 text-sm text-[#242424] hover:bg-white/90"
+                  className="h-10 rounded-full bg-[var(--surface-editor-control)] px-4 text-sm text-foreground hover:bg-[color-mix(in_oklab,var(--surface-editor-control)_90%,transparent)]"
                 >
                   <Copy className="h-3 w-3" />
                   {t("dialog.duplicate")}
@@ -506,7 +493,7 @@ export function SkillEditor({
                 size="sm"
                 onClick={handleClose}
                 disabled={saving}
-                className="h-10 rounded-full px-4 text-sm hover:bg-white/50"
+                className="h-10 rounded-full px-4 text-sm hover:bg-[var(--surface-editor-control-hover)]"
               >
                 {t("common:actions.cancel")}
               </Button>
@@ -515,7 +502,7 @@ export function SkillEditor({
                 form="skill-form"
                 size="sm"
                 disabled={!canSave}
-                className="h-10 rounded-full !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
+                className="h-10 rounded-full bg-foreground px-5 text-sm text-background hover:bg-foreground/90 disabled:bg-foreground disabled:text-background"
               >
                 {saving
                   ? isEditing

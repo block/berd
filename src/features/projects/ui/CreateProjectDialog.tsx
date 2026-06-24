@@ -23,6 +23,15 @@ import { ProjectColorPicker } from "./ProjectColorPicker";
 import { ProjectIconPicker } from "./ProjectIconPicker";
 import { ProjectArtifactPreview } from "../artifact/ProjectArtifactPreview";
 
+const SHEET_CONTENT_CLASS =
+  "top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-lg bg-surface-editor-panel p-0 shadow-[var(--shadow-modal)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none";
+const EDITOR_FIELD_CLASS =
+  "h-editor-field rounded-sm border-0 bg-[var(--surface-editor-control)] px-3.5 py-0 text-body-alex leading-editor-field text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[color:var(--text-editor-field-placeholder)] hover:shadow-[var(--shadow-editor-field-focus)] focus:shadow-[var(--shadow-editor-field-focus)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[var(--shadow-editor-field-focus)]";
+const EDITOR_TEXTAREA_CLASS =
+  "h-editor-instructions-min min-h-editor-instructions-min w-full resize-none rounded-sm border-0 bg-[var(--surface-editor-control)] px-3.5 py-[13px] text-body-alex leading-editor-field text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[color:var(--text-editor-field-placeholder)] hover:shadow-[var(--shadow-editor-field-hover)] focus:shadow-[var(--shadow-editor-field-hover)] focus:outline-none";
+const FIELD_LABEL_CLASS =
+  "text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground";
+
 function getDefaultProjectName(path: string | null | undefined): string {
   const trimmed = path?.trim();
   if (!trimmed) {
@@ -261,7 +270,7 @@ export function CreateProjectDialog({
     pillCssColor(color) ??
     (/^#[0-9a-f]{3,8}$/i.test(color) ? color : null) ??
     pillCssColor(DEFAULT_PROJECT_COLOR) ??
-    "#c4e2f6";
+    "var(--color-pill-olive)";
 
   // Keep a stable `input` reference so the hero renderer only reconciles when a
   // field it actually derives from changes. A fresh object literal here would
@@ -282,8 +291,8 @@ export function CreateProjectDialog({
   return (
     <Sheet open={isOpen} onOpenChange={(open) => !open && handleClose()}>
       <SheetContent
-        className="top-3 right-3 bottom-3 h-auto w-[calc(100vw-1.5rem)] gap-0 overflow-hidden rounded-[24px] bg-[rgba(196,226,246,0.26)] p-0 shadow-[0_22px_72px_rgba(15,23,42,0.18)] backdrop-blur-2xl transition-colors duration-500 ease-out sm:top-5 sm:right-5 sm:bottom-5 sm:w-[560px] sm:max-w-none"
-        closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-white/50"
+        className={SHEET_CONTENT_CLASS}
+        closeButtonClassName="top-5 right-5 rounded-sm bg-transparent opacity-80 hover:bg-[var(--surface-editor-control-hover)]"
         overlayClassName="bg-transparent"
         style={{
           backgroundColor: `color-mix(in oklab, ${selectedPanelColor} 26%, transparent)`,
@@ -331,7 +340,7 @@ export function CreateProjectDialog({
             />
 
             <div className="group/field space-y-2">
-              <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+              <Label className={FIELD_LABEL_CLASS}>
                 {t("dialog.nameLabel")}{" "}
                 <span className="text-destructive">*</span>
               </Label>
@@ -342,13 +351,13 @@ export function CreateProjectDialog({
                   setError(null);
                 }}
                 placeholder={t("dialog.nameInlinePlaceholder")}
-                className="h-[42px] rounded-sm border-0 bg-white px-3.5 py-0 text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]"
+                className={EDITOR_FIELD_CLASS}
               />
             </div>
 
             <div className="group/field space-y-2">
               <div className="flex items-center gap-1.5">
-                <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+                <Label className={FIELD_LABEL_CLASS}>
                   {t("dialog.folderLabel")}
                 </Label>
                 {missingDirs.length > 0 ? (
@@ -388,19 +397,19 @@ export function CreateProjectDialog({
                 type="button"
                 onClick={handleAddDirectory}
                 className={cn(
-                  "h-[42px] rounded-sm border-0 bg-white pr-3.5 pl-[17px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.24)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[0_1px_1px_rgba(0,0,0,0.24)]",
+                  "h-editor-field rounded-sm border-0 bg-[var(--surface-editor-control)] pr-3.5 pl-[17px] text-body-alex leading-editor-field text-foreground shadow-none outline-none transition-[box-shadow,background-color] duration-200 hover:shadow-[var(--shadow-editor-field-focus)] focus:shadow-[var(--shadow-editor-field-focus)] focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:shadow-[var(--shadow-editor-field-focus)]",
                   "flex w-full items-center gap-2.5 text-left",
                 )}
               >
                 <IconFolderPlus
-                  className="size-3 text-[#242424]"
+                  className="size-3 text-foreground"
                   aria-hidden="true"
                 />
                 <span
                   className={
                     folderDisplay
-                      ? "truncate text-[#242424]"
-                      : "truncate text-[#242424]/30"
+                      ? "truncate text-foreground"
+                      : "truncate text-[color:var(--text-editor-field-placeholder)]"
                   }
                 >
                   {folderDisplay ?? t("dialog.folderPlaceholder")}
@@ -409,7 +418,7 @@ export function CreateProjectDialog({
             </div>
 
             <div className="group/field space-y-2">
-              <Label className="text-xs font-normal text-muted-foreground transition-colors group-hover/field:text-foreground group-focus-within/field:text-foreground">
+              <Label className={FIELD_LABEL_CLASS}>
                 {t("dialog.describeLabel")}
               </Label>
               <textarea
@@ -417,7 +426,7 @@ export function CreateProjectDialog({
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder={t("dialog.describePlaceholder")}
                 rows={4}
-                className="h-[215px] min-h-[215px] w-full resize-none rounded-sm border-0 bg-white px-3.5 py-[13px] text-[14px] leading-[15px] text-[#242424] shadow-none outline-none transition-[box-shadow,background-color] duration-200 placeholder:text-[#242424]/30 hover:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:shadow-[0_1px_1px_rgba(0,0,0,0.18)] focus:outline-none"
+                className={EDITOR_TEXTAREA_CLASS}
               />
             </div>
 
@@ -432,7 +441,7 @@ export function CreateProjectDialog({
               size="sm"
               onClick={handleClose}
               disabled={saving}
-              className="h-10 rounded-sm px-4 text-sm hover:bg-white/50"
+              className="h-10 rounded-full px-4 text-sm hover:bg-[var(--surface-editor-control-hover)]"
             >
               {t("common:actions.cancel")}
             </Button>
@@ -442,7 +451,7 @@ export function CreateProjectDialog({
               variant="default"
               size="sm"
               disabled={!canSave}
-              className="h-10 rounded-sm !bg-[#242424] px-5 text-sm !text-white hover:!bg-[#242424]/90 disabled:!bg-[#242424] disabled:!text-white"
+              className="h-10 rounded-full bg-foreground px-5 text-sm text-background hover:bg-foreground/90 disabled:bg-foreground disabled:text-background"
             >
               {saving
                 ? isEditing

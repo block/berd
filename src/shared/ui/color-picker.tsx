@@ -115,12 +115,12 @@ function hexFromHue(mode: "pastel" | "none", hue: number): string {
 
 function swatchIconColor(hex: string): string {
   const match = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!match) return "#666666";
+  if (!match) return "var(--muted-foreground)";
   const r = Number.parseInt(match[1], 16);
   const g = Number.parseInt(match[2], 16);
   const b = Number.parseInt(match[3], 16);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.62 ? "#242424" : "#ffffff";
+  return luminance > 0.62 ? "var(--color-gray-800)" : "var(--color-white)";
 }
 
 function normalizeCustomColor(
@@ -257,7 +257,7 @@ export function ColorPicker({
       >
         <div
           className={cn(
-            "inline-flex items-center rounded-full bg-white/95 shadow-[0_10px_26px_rgba(15,23,42,0.12)] backdrop-blur-md",
+            "inline-flex items-center rounded-full bg-[var(--surface-color-picker-swatches)] shadow-[var(--shadow-color-picker-swatches)] backdrop-blur-md",
             swatchSize === "md" ? "h-10 gap-2 px-2.5" : "h-8 gap-1.5 px-2",
           )}
         >
@@ -348,14 +348,14 @@ const SwatchButton = forwardRef<HTMLButtonElement, SwatchButtonProps>(
         aria-label={label}
         aria-pressed={selected}
         className={cn(
-          "inline-flex items-center justify-center rounded-full border border-[#242424]/15 text-[#666666] transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#666666]/35",
+          "inline-flex items-center justify-center rounded-full border border-foreground/15 text-muted-foreground transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-muted-foreground/35",
           size === "md" ? "size-5" : "size-4",
-          !className && !style && "bg-white",
+          !className && !style && "bg-background",
           className,
           selected &&
             (size === "md"
-              ? "scale-110 border-[#666666] ring-2 ring-[#666666]/55 ring-offset-2 ring-offset-white"
-              : "border-[#666666] ring-2 ring-[#666666]/55"),
+              ? "scale-110 border-muted-foreground ring-2 ring-muted-foreground/55 ring-offset-2 ring-offset-background"
+              : "border-muted-foreground ring-2 ring-muted-foreground/55"),
         )}
         style={style}
         {...props}
@@ -416,14 +416,14 @@ function CustomColorPopover({
         align="end"
         sideOffset={12}
         avoidCollisions={false}
-        className="z-[70] w-[320px] gap-5 rounded-[24px] bg-white p-5 shadow-[0_22px_72px_rgba(15,23,42,0.18)]"
+        className="z-[70] w-[320px] gap-5 rounded-lg bg-popover p-5 shadow-[var(--shadow-modal)]"
       >
-        <h2 className="text-sm font-normal tracking-normal text-[#242424]">
+        <h2 className="text-sm font-normal tracking-normal text-foreground">
           {heading}
         </h2>
         <div className="mt-5 space-y-4">
           <label htmlFor={hueInputId} className="block space-y-2">
-            <span className="text-[10px] leading-3 text-[#242424]/45">
+            <span className="text-[10px] leading-3 text-foreground/45">
               {hueLabel}
             </span>
             <input
@@ -433,11 +433,11 @@ function CustomColorPopover({
               max={359}
               value={hue}
               onChange={(event) => onHueChange(Number(event.target.value))}
-              className="h-3 w-full cursor-pointer appearance-none rounded-full bg-[linear-gradient(90deg,#eeb4b4,#eeeeae,#b4eed0,#b4d0ee,#d0b4ee,#eeb4d2,#eeb4b4)] accent-[#666666]"
+              className="h-3 w-full cursor-pointer appearance-none rounded-full bg-[image:var(--color-picker-hue-gradient)] accent-muted-foreground"
             />
           </label>
           <label htmlFor={hexInputId} className="block space-y-2">
-            <span className="text-[10px] leading-3 text-[#242424]/45">
+            <span className="text-[10px] leading-3 text-foreground/45">
               {hexLabel}
             </span>
             <Input
@@ -445,7 +445,7 @@ function CustomColorPopover({
               value={hex}
               onChange={(event) => onHexChange(event.target.value)}
               onBlur={(event) => onHexBlur(event.target.value)}
-              className="h-10 rounded-[12px] border-0 bg-[#f5f5f5] px-3 font-mono text-[13px] uppercase text-[#242424] shadow-none focus-visible:ring-[#666666]/35"
+              className="h-10 rounded-sm border-0 bg-accent px-3 font-mono text-editor-mono uppercase text-foreground shadow-none focus-visible:ring-muted-foreground/35"
             />
           </label>
         </div>
