@@ -921,13 +921,16 @@ export function SessionHistoryView({
   );
 
   const renderGroupedRow = useCallback(
-    (row: GroupedSessionRow) => {
+    (row: GroupedSessionRow, isFirstRow = false) => {
       if (row.kind === "header") {
         return (
           <h2
             className={cn(
               SESSION_GRID_COLS,
-              "pt-10 pb-3 text-base text-foreground",
+              "pb-3 text-base text-foreground",
+              // The page container already spaces the search bar from the
+              // first group; only stack extra top padding between groups.
+              isFirstRow ? "pt-1" : "pt-10",
             )}
           >
             <span>{row.label}</span>
@@ -1199,7 +1202,7 @@ export function SessionHistoryView({
                       }px)`,
                     }}
                   >
-                    {renderGroupedRow(row)}
+                    {renderGroupedRow(row, virtualRow.index === 0)}
                   </div>
                 );
               })}

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { RotateCcw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
@@ -20,8 +20,8 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { getPlatform } from "@/shared/lib/platform";
 import { Button } from "@/shared/ui/button";
-import { Input } from "@/shared/ui/input";
 import { Kbd } from "@/shared/ui/kbd";
+import { SearchBar } from "@/shared/ui/SearchBar";
 import { SettingsPage } from "@/shared/ui/SettingsPage";
 
 type RowError =
@@ -31,8 +31,6 @@ type RowError =
       kind: "conflict";
       conflictDescriptionKey: string;
     };
-
-const SEARCH_INPUT_ID = "keyboard-shortcuts-search";
 
 function editButtonId(commandId: ShortcutCommandId): string {
   return `shortcut-edit-${commandId}`;
@@ -66,6 +64,7 @@ function SettingsSection({
 export function KeyboardShortcutsSettings() {
   const { t } = useTranslation("shortcuts");
   const isMac = getPlatform() === "mac";
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [recordingId, setRecordingId] = useState<ShortcutCommandId | null>(
     null,
@@ -176,7 +175,7 @@ export function KeyboardShortcutsSettings() {
     setRowError(null);
     // "Reset all" disables itself afterwards; move focus to the search
     // input so keyboard users are not stranded.
-    document.getElementById(SEARCH_INPUT_ID)?.focus();
+    searchInputRef.current?.focus();
   }
 
   function renderRow(command: ResolvedShortcutCommand) {
@@ -325,11 +324,11 @@ export function KeyboardShortcutsSettings() {
           {t("settings.resetAll")}
         </Button>
       </div>
-      <Input
-        type="search"
-        id={SEARCH_INPUT_ID}
+      <SearchBar
+        size="pill"
+        inputRef={searchInputRef}
         value={query}
-        onChange={(event) => setQuery(event.target.value)}
+        onChange={setQuery}
         placeholder={t("settings.searchPlaceholder")}
         aria-label={t("settings.searchPlaceholder")}
       />
