@@ -532,7 +532,7 @@ fn bb_skills_bundles_lists_bundles() {
 // config & auth resolution
 
 #[test]
-fn bb_skills_profile_config_supplies_server_url_and_token() {
+fn bb_skills_profile_config_supplies_server_url_and_ignores_legacy_auth() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
     let temp = temp_test_dir("bb-skills-profile-config");
     let bb_home = temp.join("bb-home");
@@ -558,15 +558,13 @@ fn bb_skills_profile_config_supplies_server_url_and_token() {
     let response = serde_json::from_str::<Value>(&stdout).expect("parse list output");
     assert_eq!(response["items"][0]["slug"], json!("builderbot-tools"));
     assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[0].headers.get("authorization").map(String::as_str),
-        Some("Bearer profile-token")
-    );
+    assert!(!requests[0].headers.contains_key("authorization"));
+    assert!(!requests[0].headers.contains_key("x-bb-session-credential"));
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
 #[test]
-fn bb_skills_list_prefers_stored_session_credential_over_profile_token() {
+fn bb_skills_list_uses_stored_session_credential_despite_legacy_profile_auth() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
     let temp = temp_test_dir("bb-skills-list-session");
     let bb_home = temp.join("bb-home");
@@ -662,38 +660,6 @@ fn bb_local_dev_discovers_checked_in_config_from_ancestor() {
 }
 
 #[test]
-fn bb_skills_env_token_takes_precedence_over_profile_token() {
-    let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
-    let temp = temp_test_dir("bb-skills-token-precedence");
-    let bb_home = temp.join("bb-home");
-    fs::create_dir_all(&bb_home).expect("create bb home");
-    fs::write(
-        bb_home.join("skills.yaml"),
-        format!(
-            "current_profile: local\nprofiles:\n  local:\n    server_url: {}\n    auth:\n      token: profile-token\n",
-            server.base_url
-        ),
-    )
-    .expect("write skills config");
-
-    let output = bb_command()
-        .env("BB_HOME", &bb_home)
-        .env("BB_SKILLS_TOKEN", "env-token")
-        .args(["skills", "list", "--json"])
-        .output()
-        .expect("run bb skills list");
-    let requests = server.finish();
-    let (_stdout, stderr) = output_text(&output);
-
-    assert!(output.status.success(), "stderr was: {stderr}");
-    assert_eq!(
-        requests[0].headers.get("authorization").map(String::as_str),
-        Some("Bearer env-token")
-    );
-    fs::remove_dir_all(temp).expect("remove temp dir");
-}
-
-#[test]
 fn bb_skills_env_playpen_adds_baggage_header() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
 
@@ -718,84 +684,6 @@ fn bb_skills_env_playpen_adds_baggage_header() {
 }
 
 #[test]
-fn bb_skills_profile_token_command_supplies_token() {
-    let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
-    let temp = temp_test_dir("bb-skills-token-command");
-    let bb_home = temp.join("bb-home");
-    fs::create_dir_all(&bb_home).expect("create bb home");
-    fs::write(
-        bb_home.join("skills.yaml"),
-        format!(
-            "current_profile: local\nprofiles:\n  local:\n    server_url: {}\n    auth:\n      token_command: printf command-token\n",
-            server.base_url
-        ),
-    )
-    .expect("write skills config");
-
-    let output = bb_command()
-        .env("BB_HOME", &bb_home)
-        .args(["skills", "list", "--json"])
-        .output()
-        .expect("run bb skills list");
-    let requests = server.finish();
-    let (_stdout, stderr) = output_text(&output);
-
-    assert!(output.status.success(), "stderr was: {stderr}");
-    assert_eq!(
-        requests[0].headers.get("authorization").map(String::as_str),
-        Some("Bearer command-token")
-    );
-    fs::remove_dir_all(temp).expect("remove temp dir");
-}
-
-#[test]
-fn bb_auth_login_and_logout_update_selected_profile() {
-    let temp = temp_test_dir("bb-auth-login");
-    let bb_home = temp.join("bb-home");
-
-    let login = bb_command()
-        .env("BB_HOME", &bb_home)
-        .args([
-            "--profile",
-            "local",
-            "--server-url",
-            "http://marketplace.local",
-            "auth",
-            "login",
-            "--token",
-            "login-token",
-            "--set-current",
-            "--json",
-        ])
-        .output()
-        .expect("run bb auth login");
-    let (login_stdout, login_stderr) = output_text(&login);
-    assert!(login.status.success(), "stderr was: {login_stderr}");
-    let login_response = serde_json::from_str::<Value>(&login_stdout).expect("parse login output");
-    assert_eq!(login_response["profile"], json!("local"));
-
-    let config = fs::read_to_string(bb_home.join("skills.yaml")).expect("read skills config");
-    assert!(config.contains("current_profile: local"));
-    assert!(config.contains("server_url: http://marketplace.local"));
-    assert!(config.contains("token: login-token"));
-
-    let logout = bb_command()
-        .env("BB_HOME", &bb_home)
-        .args(["--profile", "local", "auth", "logout", "--json"])
-        .output()
-        .expect("run bb auth logout");
-    let (logout_stdout, logout_stderr) = output_text(&logout);
-    assert!(logout.status.success(), "stderr was: {logout_stderr}");
-    let logout_response =
-        serde_json::from_str::<Value>(&logout_stdout).expect("parse logout output");
-    assert_eq!(logout_response["removed"], json!(true));
-
-    let config = fs::read_to_string(bb_home.join("skills.yaml")).expect("read skills config");
-    assert!(!config.contains("token: login-token"));
-    fs::remove_dir_all(temp).expect("remove temp dir");
-}
-
-#[test]
 fn bb_auth_status_without_token_is_local_and_unauthenticated() {
     let temp = temp_test_dir("bb-auth-status");
 
@@ -809,13 +697,12 @@ fn bb_auth_status_without_token_is_local_and_unauthenticated() {
     assert!(output.status.success(), "stderr was: {stderr}");
     let response = serde_json::from_str::<Value>(&stdout).expect("parse status output");
     assert_eq!(response["authenticated"], json!(false));
-    assert_eq!(response["token_source"], json!("none"));
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
 #[test]
-fn bb_auth_login_browser_uses_valid_stored_file_session() {
-    let temp = temp_test_dir("bb-auth-login-browser-stored");
+fn bb_auth_login_uses_valid_stored_file_session() {
+    let temp = temp_test_dir("bb-auth-login-stored");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
@@ -844,15 +731,9 @@ fn bb_auth_login_browser_uses_valid_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args([
-            "--server-url",
-            &server.base_url,
-            "auth",
-            "login-browser",
-            "--json",
-        ])
+        .args(["--server-url", &server.base_url, "auth", "login", "--json"])
         .output()
-        .expect("run bb auth login-browser");
+        .expect("run bb auth login");
     let requests = server.finish();
     let (stdout, stderr) = output_text(&output);
 
@@ -876,8 +757,8 @@ fn bb_auth_login_browser_uses_valid_stored_file_session() {
 }
 
 #[test]
-fn bb_auth_login_browser_env_playpen_adds_baggage_to_stored_session_check() {
-    let temp = temp_test_dir("bb-auth-login-browser-playpen");
+fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
+    let temp = temp_test_dir("bb-auth-login-playpen");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
@@ -907,15 +788,9 @@ fn bb_auth_login_browser_env_playpen_adds_baggage_to_stored_session_check() {
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .env("BB_KGOOSE_PLAYPEN", "baxen")
-        .args([
-            "--server-url",
-            &server.base_url,
-            "auth",
-            "login-browser",
-            "--json",
-        ])
+        .args(["--server-url", &server.base_url, "auth", "login", "--json"])
         .output()
-        .expect("run bb auth login-browser");
+        .expect("run bb auth login");
     let requests = server.finish();
     let (_stdout, stderr) = output_text(&output);
 
@@ -930,8 +805,8 @@ fn bb_auth_login_browser_env_playpen_adds_baggage_to_stored_session_check() {
 }
 
 #[test]
-fn bb_auth_logout_browser_removes_stored_file_session() {
-    let temp = temp_test_dir("bb-auth-logout-browser");
+fn bb_auth_logout_removes_stored_file_session() {
+    let temp = temp_test_dir("bb-auth-logout");
     let bb_home = temp.join("bb-home");
     let storage_path = temp.join("auth-sessions.json");
     let server_url = "http://localhost:5173/cash-app/goose";
@@ -957,15 +832,9 @@ fn bb_auth_logout_browser_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args([
-            "--server-url",
-            server_url,
-            "auth",
-            "logout-browser",
-            "--json",
-        ])
+        .args(["--server-url", server_url, "auth", "logout", "--json"])
         .output()
-        .expect("run bb auth logout-browser");
+        .expect("run bb auth logout");
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
@@ -981,15 +850,9 @@ fn bb_auth_logout_browser_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args([
-            "--server-url",
-            server_url,
-            "auth",
-            "logout-browser",
-            "--json",
-        ])
+        .args(["--server-url", server_url, "auth", "logout", "--json"])
         .output()
-        .expect("run bb auth logout-browser again");
+        .expect("run bb auth logout again");
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");

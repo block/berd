@@ -19,7 +19,7 @@ use super::auth_storage::{SessionCredentialStorage, SessionStorageKey, StoredSes
 use super::skills_config::SkillsConfig;
 
 const CALLBACK_PATH: &str = "/callback";
-const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login-browser";
+const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 
 #[derive(Debug, Serialize)]
 pub struct BrowserLoginSummary {

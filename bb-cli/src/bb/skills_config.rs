@@ -8,14 +8,12 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command as ProcessCommand;
 
 use anyhow::{Context, Result};
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 
 use super::display::Style;
-use super::skills_api::truncate;
 use super::skills_models::SkillsPreferences;
 
 pub const DEFAULT_SKILLS_SERVER_URL: &str = "http://localhost:8080";
@@ -26,7 +24,6 @@ pub const BB_SKILLS_PACKAGES_DIR_ENV_VAR: &str = "BB_SKILLS_PACKAGES_DIR";
 pub const BB_SKILLS_CONFIG_ENV_VAR: &str = "BB_SKILLS_CONFIG";
 pub const BB_SKILLS_PROFILE_ENV_VAR: &str = "BB_SKILLS_PROFILE";
 pub const BB_SKILLS_SERVER_URL_ENV_VAR: &str = "BB_SKILLS_SERVER_URL";
-pub const BB_SKILLS_TOKEN_ENV_VAR: &str = "BB_SKILLS_TOKEN";
 pub const BB_KGOOSE_PLAYPEN_ENV_VAR: &str = "BB_KGOOSE_PLAYPEN";
 pub const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "skills.yaml";
@@ -44,8 +41,6 @@ pub struct SkillsConfig {
     pub config_path: PathBuf,
     pub profile: String,
     pub local_dev: bool,
-    pub token: Option<String>,
-    pub token_source: TokenSource,
     pub json: bool,
     pub style: Style,
 }
@@ -127,8 +122,6 @@ impl SkillsConfig {
                     default_agents_skills_dir()
                 }
             });
-        let (token, token_source) = resolve_token(profile_config)?;
-
         let json = matches.get_flag("json");
         let style = Style::new(
             matches.get_flag("no-color"),
@@ -145,8 +138,6 @@ impl SkillsConfig {
             config_path,
             profile,
             local_dev,
-            token,
-            token_source,
             json,
             style,
         })
@@ -230,26 +221,6 @@ fn resolve_profile_path(local_dev: bool, config_path: &Path, path: PathBuf) -> P
         .unwrap_or(path)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum TokenSource {
-    None,
-    Env,
-    Profile,
-    ProfileCommand,
-}
-
-impl TokenSource {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Env => "env",
-            Self::Profile => "profile",
-            Self::ProfileCommand => "profile_command",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillsFileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -266,29 +237,6 @@ impl SkillsFileConfig {
         let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
         serde_yaml::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
     }
-
-    pub fn write(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| format!("create {}", parent.display()))?;
-        }
-        let yaml = serde_yaml::to_string(self).context("serialize skills config")?;
-        fs::write(path, yaml).with_context(|| format!("write {}", path.display()))?;
-        restrict_permissions(path)
-    }
-}
-
-/// Legacy `bb auth login --token` credentials are stored in plaintext YAML, so
-/// keep the config private to the owning user. Browser auth session credentials
-/// use separate storage.
-fn restrict_permissions(path: &Path) -> Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let permissions = fs::Permissions::from_mode(0o600);
-        fs::set_permissions(path, permissions)
-            .with_context(|| format!("chmod 600 {}", path.display()))?;
-    }
-    Ok(())
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -299,81 +247,6 @@ pub struct SkillsProfileConfig {
     pub skills_home: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages_dir: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub auth: Option<StoredAuth>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct StoredAuth {
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub token_command: Option<String>,
-}
-
-impl StoredAuth {
-    pub fn token(token: String) -> Self {
-        Self {
-            token: Some(token),
-            token_command: None,
-        }
-    }
-
-    pub fn token_command(token_command: String) -> Self {
-        Self {
-            token: None,
-            token_command: Some(token_command),
-        }
-    }
-}
-
-pub fn resolve_token(
-    profile_config: Option<&SkillsProfileConfig>,
-) -> Result<(Option<String>, TokenSource)> {
-    if let Some(token) = read_optional_env(BB_SKILLS_TOKEN_ENV_VAR)? {
-        return Ok((Some(token), TokenSource::Env));
-    }
-
-    let Some(auth) = profile_config.and_then(|profile| profile.auth.as_ref()) else {
-        return Ok((None, TokenSource::None));
-    };
-    if let Some(token) = auth.token.as_ref().filter(|token| !token.is_empty()) {
-        return Ok((Some(token.clone()), TokenSource::Profile));
-    }
-    if let Some(command) = auth
-        .token_command
-        .as_ref()
-        .filter(|command| !command.trim().is_empty())
-    {
-        return Ok((
-            Some(run_token_command(command)?),
-            TokenSource::ProfileCommand,
-        ));
-    }
-
-    Ok((None, TokenSource::None))
-}
-
-pub fn run_token_command(command: &str) -> Result<String> {
-    let output = ProcessCommand::new("sh")
-        .arg("-c")
-        .arg(command)
-        .output()
-        .with_context(|| format!("run token command `{command}`"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!(
-            "token command failed with {}: {}",
-            output.status,
-            truncate(stderr.trim(), 400)
-        );
-    }
-    let token = String::from_utf8(output.stdout).context("token command output was not UTF-8")?;
-    let token = token.trim().to_string();
-    if token.is_empty() {
-        anyhow::bail!("token command produced an empty token");
-    }
-    Ok(token)
 }
 
 pub fn default_bb_home() -> PathBuf {

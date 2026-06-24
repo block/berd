@@ -344,7 +344,9 @@ pub fn execute_plan(
 }
 
 fn fetch_tenant_id(config: &SkillsConfig, client: &MarketplaceClient) -> Option<String> {
-    config.token.as_ref()?;
+    if !client.has_auth() {
+        return None;
+    }
     match client.get_json::<MeResponse>("/v1/marketplace/me") {
         Ok(me) => Some(me.tenant_id),
         Err(err) => {

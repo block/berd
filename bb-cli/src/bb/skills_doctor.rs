@@ -86,25 +86,16 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
         }
     }
 
-    // Token resolvable (includes running token_command).
-    match &config.token {
-        Some(_) => report.add(
-            "token",
-            CheckStatus::Pass,
-            format!("resolved from {}", config.token_source.as_str()),
-        ),
-        None => report.add(
-            "token",
-            CheckStatus::Warn,
-            "no token configured; run `bb auth login`",
-        ),
-    }
-
     // Server reachable + capabilities, distinguishing auth failures from the
     // server being down.
     let mut registry_from_server: Option<TargetRegistry> = None;
     match MarketplaceClient::new(config) {
         Ok(client) => {
+            if client.has_auth() {
+                report.add("auth", CheckStatus::Pass, "stored CLI auth session");
+            } else {
+                report.add("auth", CheckStatus::Warn, "no stored CLI auth session");
+            }
             match client.get_json::<CapabilitiesResponse>("/v1/marketplace/capabilities") {
                 Ok(capabilities) => {
                     report.add("server", CheckStatus::Pass, config.server_url.clone());
@@ -137,7 +128,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
                 Err(err) => {
                     let message = format!("{err:#}");
                     let status_check = if message.contains("401") || message.contains("403") {
-                        ("auth", "server reachable but the token was rejected")
+                        ("auth", "server reachable but credentials were rejected")
                     } else {
                         ("unreachable", "server unreachable")
                     };
@@ -153,8 +144,8 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
                     );
                 }
             }
-            // Authenticated identity, only meaningful when a token resolved.
-            if config.token.is_some() {
+            // Authenticated identity, only meaningful when a session credential resolved.
+            if client.has_auth() {
                 match client.get_json::<MeResponse>("/v1/marketplace/me") {
                     Ok(me) => report.add(
                         "identity",

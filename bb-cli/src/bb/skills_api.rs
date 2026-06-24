@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -130,12 +130,6 @@ impl MarketplaceClient {
                 HeaderValue::from_str(session_credential)
                     .context("build marketplace session credential header")?,
             );
-        } else if let Some(token) = &config.token {
-            headers.insert(
-                AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {token}"))
-                    .context("build marketplace Authorization header")?,
-            );
         }
         if let Some(playpen) = &config.playpen {
             headers.insert(
@@ -150,9 +144,13 @@ impl MarketplaceClient {
                 .default_headers(headers)
                 .build()
                 .context("build marketplace HTTP client")?,
-            has_auth: session_credential.is_some() || config.token.is_some(),
+            has_auth: session_credential.is_some(),
             style: config.style,
         })
+    }
+
+    pub fn has_auth(&self) -> bool {
+        self.has_auth
     }
 
     pub fn get_json<T>(&self, path: &str) -> Result<T>
@@ -314,15 +312,15 @@ impl MarketplaceClient {
         let exit_code = match status.as_u16() {
             401 => {
                 message.push_str(if self.has_auth {
-                    "\nhint: the marketplace rejected your credentials; run `bb auth login-browser` to refresh your session"
+                    "\nhint: the marketplace rejected your credentials; run `bb auth login` to refresh your session"
                 } else {
-                    "\nhint: no credentials are configured; run `bb auth login-browser` first"
+                    "\nhint: no credentials are configured; run `bb auth login` first"
                 });
                 exit_codes::AUTH_REQUIRED
             }
             403 => {
                 message.push_str(
-                    "\nhint: your credentials lack the required scope; run `bb auth login-browser` with an authorized account",
+                    "\nhint: your credentials lack the required scope; run `bb auth login` with an authorized account",
                 );
                 exit_codes::FORBIDDEN
             }

@@ -16,7 +16,7 @@ use super::auth_storage::default_session_storage;
 use super::display::Style;
 use super::skills_api::{exit_codes, failure, failure_info, MarketplaceClient, SilentJsonExit};
 use super::skills_archive::validate_preview_path;
-use super::skills_config::{SkillsConfig, SkillsFileConfig, StoredAuth};
+use super::skills_config::SkillsConfig;
 use super::skills_doctor::{run_doctor, CheckStatus};
 use super::skills_install::{
     canonical_dir, confirm_or_bail, ensure_base_dirs, execute_plan, install_local_path,
@@ -176,12 +176,12 @@ pub fn skills_command() -> Command {
             Command::new("doctor")
                 .about("Diagnose the local skills installation")
                 .long_about(
-                    "Run independent diagnostic probes: config parse, profile, token \
-                     resolution, server reachability (distinguishing auth failures \
-                     from the server being down), capabilities, package metadata, \
-                     target links, and leftover staging directories. Each probe \
-                     reports pass/warn/fail; an unreachable server never hides the \
-                     local checks.\n\n\
+                    "Run independent diagnostic probes: config parse, profile, \
+                     stored auth session, server reachability (distinguishing auth \
+                     failures from the server being down), capabilities, package \
+                     metadata, target links, and leftover staging directories. Each \
+                     probe reports pass/warn/fail; an unreachable server never hides \
+                     the local checks.\n\n\
                      `--fix` repairs what is safe to repair: creates missing base \
                      directories, removes orphaned staging/backup directories, and \
                      re-links broken target links. It never deletes unmanaged files.",
@@ -236,53 +236,13 @@ pub fn auth_command() -> Command {
             Command::new("status")
                 .about("Print marketplace auth status")
                 .long_about(
-                    "Print marketplace auth status. With a token configured this \
-                     calls the server's /me endpoint and prints the authenticated \
+                    "Print marketplace auth status. With a stored CLI auth session \
+                     this calls the server's /me endpoint and prints the authenticated \
                      tenant, subject, and scopes.",
                 ),
         )
         .subcommand(
             Command::new("login")
-                .about("Store local marketplace auth for the selected profile")
-                .long_about(
-                    "Store marketplace auth for the selected profile in \
-                     `~/.bb/skills.yaml` (chmod 600). Provide a static token with \
-                     --token / --token-stdin, or a command that prints a fresh token \
-                     with --token-command (recommended for short-lived tokens).",
-                )
-                .arg(
-                    Arg::new("token")
-                        .long("token")
-                        .value_name("TOKEN")
-                        .conflicts_with_all(["token-command", "token-stdin"])
-                        .help("Bearer token to store in the selected profile"),
-                )
-                .arg(
-                    Arg::new("token-command")
-                        .long("token-command")
-                        .value_name("COMMAND")
-                        .conflicts_with_all(["token", "token-stdin"])
-                        .help("Command that prints a bearer token for this profile"),
-                )
-                .arg(
-                    Arg::new("token-stdin")
-                        .long("token-stdin")
-                        .conflicts_with_all(["token", "token-command"])
-                        .help("Read the bearer token from stdin")
-                        .action(ArgAction::SetTrue),
-                )
-                .arg(
-                    Arg::new("set-current")
-                        .long("set-current")
-                        .help("Make this profile the default profile in the config file")
-                        .action(ArgAction::SetTrue),
-                ),
-        )
-        .subcommand(
-            Command::new("logout").about("Remove local marketplace auth for the selected profile"),
-        )
-        .subcommand(
-            Command::new("login-browser")
                 .about("Log in with browser-based CLI auth")
                 .long_about(
                     "Log in with the browser-based CLI auth flow. This first checks \
@@ -293,12 +253,11 @@ pub fn auth_command() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("logout-browser")
+            Command::new("logout")
                 .about("Remove browser-based CLI auth for the selected profile")
                 .long_about(
                     "Remove the browser-based CLI auth session credential for the selected \
-                     profile and server URL from the configured browser auth storage. This \
-                     does not change legacy bb auth entries in the skills config file.",
+                     profile and server URL from the configured browser auth storage.",
                 ),
         )
 }
@@ -542,10 +501,8 @@ fn run_with(
 fn dispatch_auth(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         Some(("status", _)) => auth_status(config),
-        Some(("login", login_matches)) => auth_login(config, login_matches),
-        Some(("logout", _)) => auth_logout(config),
-        Some(("login-browser", _)) => auth_login_browser(config),
-        Some(("logout-browser", _)) => auth_logout_browser(config),
+        Some(("login", _)) => auth_login_browser(config),
+        Some(("logout", _)) => auth_logout_browser(config),
         _ => anyhow::bail!("expected an auth subcommand"),
     }
 }
@@ -578,31 +535,28 @@ fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 // auth
 
 fn auth_status(config: &SkillsConfig) -> Result<()> {
-    if config.token.is_none() {
+    let client = MarketplaceClient::new(config)?;
+    if !client.has_auth() {
         if !config.json {
             println!("BuilderBot skills auth");
             println!("  profile: {}", config.profile);
             println!("  server: {}", config.server_url);
             println!("  authenticated: no");
-            println!("  token source: {}", config.token_source.as_str());
             return Ok(());
         }
         return print_json(&json!({
             "authenticated": false,
             "server_url": config.server_url,
             "profile": config.profile,
-            "token_source": config.token_source,
         }));
     }
 
-    let client = MarketplaceClient::new(config)?;
     let me = client.get_json::<MeResponse>("/v1/marketplace/me")?;
     if !config.json {
         println!("BuilderBot skills auth");
         println!("  profile: {}", config.profile);
         println!("  server: {}", config.server_url);
         println!("  authenticated: yes");
-        println!("  token source: {}", config.token_source.as_str());
         println!("  tenant: {}", me.tenant_id);
         println!("  subject: {}", me.subject);
         if !me.scopes.is_empty() {
@@ -614,56 +568,9 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         "authenticated": true,
         "server_url": config.server_url,
         "profile": config.profile,
-        "token_source": config.token_source,
         "subject": me.subject,
         "tenant_id": me.tenant_id,
         "scopes": me.scopes,
-    }))
-}
-
-fn auth_login(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
-    let auth = if let Some(token) = matches.get_one::<String>("token") {
-        StoredAuth::token(token.clone())
-    } else if let Some(command) = matches.get_one::<String>("token-command") {
-        StoredAuth::token_command(command.clone())
-    } else if matches.get_flag("token-stdin") {
-        let mut token = String::new();
-        std::io::Read::read_to_string(&mut std::io::stdin(), &mut token)
-            .context("read token from stdin")?;
-        let token = token.trim().to_string();
-        if token.is_empty() {
-            anyhow::bail!("stdin did not contain a token");
-        }
-        StoredAuth::token(token)
-    } else {
-        anyhow::bail!("`bb auth login` requires --token, --token-command, or --token-stdin");
-    };
-
-    let mut file_config = SkillsFileConfig::read(&config.config_path)?;
-    let profile = file_config
-        .profiles
-        .entry(config.profile.clone())
-        .or_default();
-    profile.server_url = Some(config.server_url.clone());
-    profile.skills_home = Some(config.skills_home.to_string_lossy().to_string());
-    profile.auth = Some(auth);
-    if matches.get_flag("set-current") || file_config.current_profile.is_none() {
-        file_config.current_profile = Some(config.profile.clone());
-    }
-    file_config.write(&config.config_path)?;
-
-    if !config.json {
-        config.style.success("Stored BuilderBot skills auth");
-        println!("  profile: {}", config.profile);
-        println!("  server: {}", config.server_url);
-        println!("  config: {}", config.config_path.display());
-        return Ok(());
-    }
-    print_json(&json!({
-        "profile": config.profile,
-        "server_url": config.server_url,
-        "config_path": config.config_path,
-        "authenticated": true,
     }))
 }
 
@@ -728,33 +635,6 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     println!("  server: {}", config.server_url);
     println!("  storage: {}", storage.kind());
     Ok(())
-}
-
-fn auth_logout(config: &SkillsConfig) -> Result<()> {
-    let mut file_config = SkillsFileConfig::read(&config.config_path)?;
-    let removed = file_config
-        .profiles
-        .get_mut(&config.profile)
-        .and_then(|profile| profile.auth.take())
-        .is_some();
-    file_config.write(&config.config_path)?;
-
-    if !config.json {
-        if removed {
-            println!("Removed BuilderBot skills auth");
-        } else {
-            println!("No BuilderBot skills auth was stored");
-        }
-        println!("  profile: {}", config.profile);
-        println!("  config: {}", config.config_path.display());
-        return Ok(());
-    }
-    print_json(&json!({
-        "profile": config.profile,
-        "config_path": config.config_path,
-        "authenticated": false,
-        "removed": removed,
-    }))
 }
 
 // ---------------------------------------------------------------------------
@@ -2187,16 +2067,7 @@ mod tests {
             .iter()
             .map(|command| command["name"].as_str().expect("name").to_string())
             .collect::<Vec<_>>();
-        assert_eq!(
-            auth_names,
-            [
-                "status",
-                "login",
-                "logout",
-                "login-browser",
-                "logout-browser"
-            ]
-        );
+        assert_eq!(auth_names, ["status", "login", "logout"]);
 
         let config = describe_config_commands();
         assert_eq!(config["name"], "config");
