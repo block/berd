@@ -48,6 +48,11 @@
       "responseType": "SteerSessionResponse_unstable"
     },
     {
+      "method": "_goose/unstable/diagnostics/get",
+      "requestType": "DiagnosticsGetRequest_unstable",
+      "responseType": "DiagnosticsGetResponse_unstable"
+    },
+    {
       "method": "session/delete",
       "requestType": "DeleteSessionRequest",
       "responseType": "EmptyResponse"
@@ -291,6 +296,16 @@
       "method": "_goose/unstable/sources/list",
       "requestType": "ListSourcesRequest_unstable",
       "responseType": "ListSourcesResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/agent-mentions/list",
+      "requestType": "ListAgentMentionsRequest_unstable",
+      "responseType": "ListAgentMentionsResponse_unstable"
+    },
+    {
+      "method": "_goose/unstable/slash-commands/list",
+      "requestType": "ListSlashCommandsRequest_unstable",
+      "responseType": "ListSlashCommandsResponse_unstable"
     },
     {
       "method": "_goose/unstable/sources/update",

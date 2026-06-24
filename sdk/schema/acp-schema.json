@@ -31,6 +31,28 @@
       "x-method": "_goose/unstable/session/extensions/add",
       "x-side": "agent"
     },
+    "AgentMention": {
+      "description": "A user-facing `@` mention target backed by an agent, recipe, or subrecipe source.",
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "mention": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "sourcePath": {
+          "type": ["string", "null"]
+        },
+        "sourceType": {
+          "$ref": "#/$defs/SourceType"
+        }
+      },
+      "required": ["name", "description", "sourceType", "mention"],
+      "type": "object"
+    },
     "Annotations": {
       "description": "Optional annotations for the client. The client can use annotations to inform how objects are used or displayed",
       "properties": {
@@ -94,6 +116,46 @@
       },
       "required": ["data", "mimeType"],
       "type": "object"
+    },
+    "AvailableCommand": {
+      "description": "Information about a command.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "description": {
+          "description": "Human-readable description of what the command does.",
+          "type": "string"
+        },
+        "input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AvailableCommandInput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Input for the command if required"
+        },
+        "name": {
+          "description": "Command name (e.g., `create_plan`, `research_codebase`).",
+          "type": "string"
+        }
+      },
+      "required": ["name", "description"],
+      "type": "object"
+    },
+    "AvailableCommandInput": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/UnstructuredCommandInput",
+          "description": "All text that was typed after the command name is provided as input."
+        }
+      ],
+      "description": "The input specification for a command."
     },
     "BlobResourceContents": {
       "description": "Binary resource contents.",
@@ -575,6 +637,34 @@
       "type": "object",
       "x-method": "_goose/unstable/sources/delete",
       "x-side": "agent"
+    },
+    "DiagnosticsGetRequest_unstable": {
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/DiagnosticsReportLevel",
+          "default": "summary"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": ["sessionId"],
+      "type": "object",
+      "x-method": "_goose/unstable/diagnostics/get",
+      "x-side": "agent"
+    },
+    "DiagnosticsGetResponse_unstable": {
+      "properties": {
+        "report": {}
+      },
+      "required": ["report"],
+      "type": "object",
+      "x-method": "_goose/unstable/diagnostics/get",
+      "x-side": "agent"
+    },
+    "DiagnosticsReportLevel": {
+      "enum": ["summary", "full"],
+      "type": "string"
     },
     "DictationConfigRequest_unstable": {
       "description": "Get the configuration status of all dictation providers.",
@@ -1221,6 +1311,15 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/DiagnosticsGetRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/diagnostics/get",
+                  "title": "DiagnosticsGetRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/DeleteSessionRequest"
                     }
                   ],
@@ -1662,6 +1761,24 @@
                 {
                   "allOf": [
                     {
+                      "$ref": "#/$defs/ListAgentMentionsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/agent-mentions/list",
+                  "title": "ListAgentMentionsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/ListSlashCommandsRequest_unstable"
+                    }
+                  ],
+                  "description": "Params for _goose/unstable/slash-commands/list",
+                  "title": "ListSlashCommandsRequest_unstable"
+                },
+                {
+                  "allOf": [
+                    {
                       "$ref": "#/$defs/UpdateSourceRequest_unstable"
                     }
                   ],
@@ -1848,6 +1965,14 @@
                         }
                       ],
                       "title": "SteerSessionResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/DiagnosticsGetResponse_unstable"
+                        }
+                      ],
+                      "title": "DiagnosticsGetResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -2104,6 +2229,22 @@
                         }
                       ],
                       "title": "ListSourcesResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListAgentMentionsResponse_unstable"
+                        }
+                      ],
+                      "title": "ListAgentMentionsResponse_unstable"
+                    },
+                    {
+                      "allOf": [
+                        {
+                          "$ref": "#/$defs/ListSlashCommandsResponse_unstable"
+                        }
+                      ],
+                      "title": "ListSlashCommandsResponse_unstable"
                     },
                     {
                       "allOf": [
@@ -2620,6 +2761,34 @@
       "x-method": "_goose/unstable/sources/import",
       "x-side": "agent"
     },
+    "ListAgentMentionsRequest_unstable": {
+      "description": "List user-facing agent mention targets for `@` autocomplete.",
+      "properties": {
+        "cwd": {
+          "type": ["string", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object",
+      "x-method": "_goose/unstable/agent-mentions/list",
+      "x-side": "agent"
+    },
+    "ListAgentMentionsResponse_unstable": {
+      "properties": {
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentMention"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["agents"],
+      "type": "object",
+      "x-method": "_goose/unstable/agent-mentions/list",
+      "x-side": "agent"
+    },
     "ListProvidersRequest_unstable": {
       "description": "List providers with setup metadata and the current model inventory snapshot.",
       "properties": {
@@ -2668,6 +2837,34 @@
       "required": ["recipes"],
       "type": "object",
       "x-method": "_goose/unstable/recipes/list",
+      "x-side": "agent"
+    },
+    "ListSlashCommandsRequest_unstable": {
+      "description": "List slash commands available for `/` autocomplete.",
+      "properties": {
+        "cwd": {
+          "type": ["string", "null"]
+        },
+        "sessionId": {
+          "type": ["string", "null"]
+        }
+      },
+      "type": "object",
+      "x-method": "_goose/unstable/slash-commands/list",
+      "x-side": "agent"
+    },
+    "ListSlashCommandsResponse_unstable": {
+      "properties": {
+        "availableCommands": {
+          "items": {
+            "$ref": "#/$defs/AvailableCommand"
+          },
+          "type": "array"
+        }
+      },
+      "required": ["availableCommands"],
+      "type": "object",
+      "x-method": "_goose/unstable/slash-commands/list",
       "x-side": "agent"
     },
     "ListSourcesRequest_unstable": {
@@ -4827,6 +5024,22 @@
       "type": "object",
       "x-method": "_goose/unstable/session/unarchive",
       "x-side": "agent"
+    },
+    "UnstructuredCommandInput": {
+      "description": "All text that was typed after the command name is provided as input.",
+      "properties": {
+        "_meta": {
+          "additionalProperties": {},
+          "description": "The _meta property is reserved by ACP to allow clients and agents to attach additional\nmetadata to their interactions. Implementations MUST NOT make assumptions about values at\nthese keys.\n\nSee protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)",
+          "type": ["object", "null"]
+        },
+        "hint": {
+          "description": "A hint to display when the input hasn't been provided yet",
+          "type": "string"
+        }
+      },
+      "required": ["hint"],
+      "type": "object"
     },
     "UpdateSessionProjectRequest_unstable": {
       "description": "Update the project association for a session.",

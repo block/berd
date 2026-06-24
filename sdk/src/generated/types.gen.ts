@@ -18,6 +18,17 @@ export type AddSessionExtensionRequestUnstable = {
 };
 
 /**
+ * A user-facing `@` mention target backed by an agent, recipe, or subrecipe source.
+ */
+export type AgentMention = {
+    description: string;
+    mention: string;
+    name: string;
+    sourcePath?: string | null;
+    sourceType: SourceType;
+};
+
+/**
  * Optional annotations for the client. The client can use annotations to inform how objects are used or displayed
  */
 export type Annotations = {
@@ -61,6 +72,39 @@ export type AudioContent = {
     data: string;
     mimeType: string;
 };
+
+/**
+ * Information about a command.
+ */
+export type AvailableCommand = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * Human-readable description of what the command does.
+     */
+    description: string;
+    /**
+     * Input for the command if required
+     */
+    input?: AvailableCommandInput | null;
+    /**
+     * Command name (e.g., `create_plan`, `research_codebase`).
+     */
+    name: string;
+};
+
+/**
+ * All text that was typed after the command name is provided as input.
+ */
+export type AvailableCommandInput = UnstructuredCommandInput;
 
 /**
  * Binary resource contents.
@@ -270,6 +314,17 @@ export type DeleteSourceRequestUnstable = {
     path: string;
     type: SourceType;
 };
+
+export type DiagnosticsGetRequestUnstable = {
+    level?: DiagnosticsReportLevel;
+    sessionId: string;
+};
+
+export type DiagnosticsGetResponseUnstable = {
+    report: unknown;
+};
+
+export type DiagnosticsReportLevel = 'summary' | 'full';
 
 /**
  * Get the configuration status of all dictation providers.
@@ -542,14 +597,14 @@ export type ExtNotification = {
 export type ExtRequest = {
     id: string;
     method: string;
-    params?: AddSessionExtensionRequestUnstable | RemoveSessionExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | EncodeRecipeRequestUnstable | DecodeRecipeRequestUnstable | ScanRecipeRequestUnstable | ListRecipesRequestUnstable | DeleteRecipeRequestUnstable | ScheduleRecipeRequestUnstable | SetRecipeSlashCommandRequestUnstable | SaveRecipeRequestUnstable | ParseRecipeRequestUnstable | RecipeToYamlRequestUnstable | GetSessionInfoRequestUnstable | TruncateSessionConversationRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
+    params?: AddSessionExtensionRequestUnstable | RemoveSessionExtensionRequestUnstable | GetToolsRequestUnstable | GooseToolCallRequestUnstable | ReadResourceRequestUnstable | UpdateWorkingDirRequestUnstable | SetSessionSystemPromptRequestUnstable | SteerSessionRequestUnstable | DiagnosticsGetRequestUnstable | DeleteSessionRequest | GetConfigExtensionsRequestUnstable | GetAvailableExtensionsRequestUnstable | AddConfigExtensionRequestUnstable | RemoveConfigExtensionRequestUnstable | SetConfigExtensionEnabledRequestUnstable | GetSessionExtensionsRequestUnstable | ListProvidersRequestUnstable | ProviderSupportedModelsListRequestUnstable | ProviderCatalogListRequestUnstable | ProviderSetupCatalogListRequestUnstable | ProviderCatalogTemplateRequestUnstable | CustomProviderCreateRequestUnstable | CustomProviderReadRequestUnstable | CustomProviderUpdateRequestUnstable | CustomProviderDeleteRequestUnstable | RefreshProviderInventoryRequestUnstable | ProviderConfigReadRequestUnstable | ProviderConfigStatusRequestUnstable | ProviderConfigSaveRequestUnstable | ProviderConfigDeleteRequestUnstable | ProviderConfigAuthenticateRequestUnstable | PreferencesReadRequestUnstable | PreferencesSaveRequestUnstable | PreferencesRemoveRequestUnstable | DefaultsReadRequestUnstable | DefaultsSaveRequestUnstable | OnboardingImportScanRequestUnstable | OnboardingImportApplyRequestUnstable | ExportSessionRequestUnstable | ImportSessionRequestUnstable | EncodeRecipeRequestUnstable | DecodeRecipeRequestUnstable | ScanRecipeRequestUnstable | ListRecipesRequestUnstable | DeleteRecipeRequestUnstable | ScheduleRecipeRequestUnstable | SetRecipeSlashCommandRequestUnstable | SaveRecipeRequestUnstable | ParseRecipeRequestUnstable | RecipeToYamlRequestUnstable | GetSessionInfoRequestUnstable | TruncateSessionConversationRequestUnstable | UpdateSessionProjectRequestUnstable | RenameSessionRequestUnstable | ArchiveSessionRequestUnstable | UnarchiveSessionRequestUnstable | CreateSourceRequestUnstable | ListSourcesRequestUnstable | ListAgentMentionsRequestUnstable | ListSlashCommandsRequestUnstable | UpdateSourceRequestUnstable | DeleteSourceRequestUnstable | ExportSourceRequestUnstable | ImportSourcesRequestUnstable | DictationTranscribeRequestUnstable | DictationConfigRequestUnstable | DictationSecretSaveRequestUnstable | DictationSecretDeleteRequestUnstable | DictationModelsListRequestUnstable | DictationModelDownloadRequestUnstable | DictationModelDownloadProgressRequestUnstable | DictationModelCancelRequestUnstable | DictationModelDeleteRequestUnstable | DictationModelSelectRequestUnstable | {
         [key: string]: unknown;
     } | null;
 };
 
 export type ExtResponse = {
     id: string;
-    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | SteerSessionResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | EncodeRecipeResponseUnstable | DecodeRecipeResponseUnstable | ScanRecipeResponseUnstable | ListRecipesResponseUnstable | SaveRecipeResponseUnstable | ParseRecipeResponseUnstable | RecipeToYamlResponseUnstable | GetSessionInfoResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
+    result?: EmptyResponse | GetToolsResponseUnstable | GooseToolCallResponseUnstable | ReadResourceResponseUnstable | SteerSessionResponseUnstable | DiagnosticsGetResponseUnstable | GetConfigExtensionsResponseUnstable | GetAvailableExtensionsResponseUnstable | GetSessionExtensionsResponseUnstable | ListProvidersResponseUnstable | ProviderSupportedModelsListResponseUnstable | ProviderCatalogListResponseUnstable | ProviderSetupCatalogListResponseUnstable | ProviderCatalogTemplateResponseUnstable | CustomProviderCreateResponseUnstable | CustomProviderReadResponseUnstable | CustomProviderUpdateResponseUnstable | CustomProviderDeleteResponseUnstable | RefreshProviderInventoryResponseUnstable | ProviderConfigReadResponseUnstable | ProviderConfigStatusResponseUnstable | ProviderConfigChangeResponseUnstable | PreferencesReadResponseUnstable | DefaultsReadResponseUnstable | OnboardingImportScanResponseUnstable | OnboardingImportApplyResponseUnstable | ExportSessionResponseUnstable | ImportSessionResponseUnstable | EncodeRecipeResponseUnstable | DecodeRecipeResponseUnstable | ScanRecipeResponseUnstable | ListRecipesResponseUnstable | SaveRecipeResponseUnstable | ParseRecipeResponseUnstable | RecipeToYamlResponseUnstable | GetSessionInfoResponseUnstable | CreateSourceResponseUnstable | ListSourcesResponseUnstable | ListAgentMentionsResponseUnstable | ListSlashCommandsResponseUnstable | UpdateSourceResponseUnstable | ExportSourceResponseUnstable | ImportSourcesResponseUnstable | DictationTranscribeResponseUnstable | DictationConfigResponseUnstable | DictationModelsListResponseUnstable | DictationModelDownloadProgressResponseUnstable | unknown;
 } | {
     error: {
         code: number;
@@ -768,6 +823,18 @@ export type ImportSourcesResponseUnstable = {
 };
 
 /**
+ * List user-facing agent mention targets for `@` autocomplete.
+ */
+export type ListAgentMentionsRequestUnstable = {
+    cwd?: string | null;
+    sessionId?: string | null;
+};
+
+export type ListAgentMentionsResponseUnstable = {
+    agents: Array<AgentMention>;
+};
+
+/**
  * List providers with setup metadata and the current model inventory snapshot.
  */
 export type ListProvidersRequestUnstable = {
@@ -790,6 +857,18 @@ export type ListRecipesRequestUnstable = {
 
 export type ListRecipesResponseUnstable = {
     recipes: Array<RecipeListEntryDto>;
+};
+
+/**
+ * List slash commands available for `/` autocomplete.
+ */
+export type ListSlashCommandsRequestUnstable = {
+    cwd?: string | null;
+    sessionId?: string | null;
+};
+
+export type ListSlashCommandsResponseUnstable = {
+    availableCommands: Array<AvailableCommand>;
 };
 
 /**
@@ -1807,6 +1886,26 @@ export type TruncateSessionConversationRequestUnstable = {
  */
 export type UnarchiveSessionRequestUnstable = {
     sessionId: string;
+};
+
+/**
+ * All text that was typed after the command name is provided as input.
+ */
+export type UnstructuredCommandInput = {
+    /**
+     * The _meta property is reserved by ACP to allow clients and agents to attach additional
+     * metadata to their interactions. Implementations MUST NOT make assumptions about values at
+     * these keys.
+     *
+     * See protocol docs: [Extensibility](https://agentclientprotocol.com/protocol/extensibility)
+     */
+    _meta?: {
+        [key: string]: unknown;
+    } | null;
+    /**
+     * A hint to display when the input hasn't been provided yet
+     */
+    hint: string;
 };
 
 /**

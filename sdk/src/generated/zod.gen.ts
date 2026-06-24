@@ -174,6 +174,17 @@ export const zDeleteSessionRequest = z.object({
     sessionId: z.string()
 });
 
+export const zDiagnosticsGetResponseUnstable = z.object({
+    report: z.unknown()
+});
+
+export const zDiagnosticsReportLevel = z.enum(['summary', 'full']);
+
+export const zDiagnosticsGetRequestUnstable = z.object({
+    level: zDiagnosticsReportLevel.optional().default('summary'),
+    sessionId: z.string()
+});
+
 /**
  * Get the configuration status of all dictation providers.
  */
@@ -459,6 +470,20 @@ export const zImportSessionResponseUnstable = z.object({
 });
 
 /**
+ * List user-facing agent mention targets for `@` autocomplete.
+ */
+export const zListAgentMentionsRequestUnstable = z.object({
+    cwd: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    sessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
+
+/**
  * List providers with setup metadata and the current model inventory snapshot.
  */
 export const zListProvidersRequestUnstable = z.object({
@@ -466,6 +491,20 @@ export const zListProvidersRequestUnstable = z.object({
 });
 
 export const zListRecipesRequestUnstable = z.record(z.unknown());
+
+/**
+ * List slash commands available for `/` autocomplete.
+ */
+export const zListSlashCommandsRequestUnstable = z.object({
+    cwd: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    sessionId: z.union([
+        z.string(),
+        z.null()
+    ]).optional()
+});
 
 /**
  * HTTP transport configuration for MCP.
@@ -1555,6 +1594,20 @@ export const zSourceType = z.enum([
 ]);
 
 /**
+ * A user-facing `@` mention target backed by an agent, recipe, or subrecipe source.
+ */
+export const zAgentMention = z.object({
+    description: z.string(),
+    mention: z.string(),
+    name: z.string(),
+    sourcePath: z.union([
+        z.string(),
+        z.null()
+    ]).optional(),
+    sourceType: zSourceType
+});
+
+/**
  * Create a new source in an explicit target scope (global or project-scoped).
  */
 export const zCreateSourceRequestUnstable = z.object({
@@ -1580,6 +1633,10 @@ export const zDeleteSourceRequestUnstable = z.object({
 export const zExportSourceRequestUnstable = z.object({
     path: z.string(),
     type: zSourceType
+});
+
+export const zListAgentMentionsResponseUnstable = z.object({
+    agents: z.array(zAgentMention)
 });
 
 /**
@@ -1912,6 +1969,42 @@ export const zUnarchiveSessionRequestUnstable = z.object({
 });
 
 /**
+ * All text that was typed after the command name is provided as input.
+ */
+export const zUnstructuredCommandInput = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    hint: z.string()
+});
+
+/**
+ * All text that was typed after the command name is provided as input.
+ */
+export const zAvailableCommandInput = zUnstructuredCommandInput;
+
+/**
+ * Information about a command.
+ */
+export const zAvailableCommand = z.object({
+    _meta: z.union([
+        z.record(z.unknown()),
+        z.null()
+    ]).optional(),
+    description: z.string(),
+    input: z.union([
+        zAvailableCommandInput,
+        z.null()
+    ]).optional(),
+    name: z.string()
+});
+
+export const zListSlashCommandsResponseUnstable = z.object({
+    availableCommands: z.array(zAvailableCommand)
+});
+
+/**
  * Update the project association for a session.
  */
 export const zUpdateSessionProjectRequestUnstable = z.object({
@@ -1951,6 +2044,7 @@ export const zExtResponse = z.union([
                 zGooseToolCallResponseUnstable,
                 zReadResourceResponseUnstable,
                 zSteerSessionResponseUnstable,
+                zDiagnosticsGetResponseUnstable,
                 zGetConfigExtensionsResponseUnstable,
                 zGetAvailableExtensionsResponseUnstable,
                 zGetSessionExtensionsResponseUnstable,
@@ -1983,6 +2077,8 @@ export const zExtResponse = z.union([
                 zGetSessionInfoResponseUnstable,
                 zCreateSourceResponseUnstable,
                 zListSourcesResponseUnstable,
+                zListAgentMentionsResponseUnstable,
+                zListSlashCommandsResponseUnstable,
                 zUpdateSourceResponseUnstable,
                 zExportSourceResponseUnstable,
                 zImportSourcesResponseUnstable,
@@ -2025,6 +2121,7 @@ export const zExtRequest = z.object({
             zUpdateWorkingDirRequestUnstable,
             zSetSessionSystemPromptRequestUnstable,
             zSteerSessionRequestUnstable,
+            zDiagnosticsGetRequestUnstable,
             zDeleteSessionRequest,
             zGetConfigExtensionsRequestUnstable,
             zGetAvailableExtensionsRequestUnstable,
@@ -2074,6 +2171,8 @@ export const zExtRequest = z.object({
             zUnarchiveSessionRequestUnstable,
             zCreateSourceRequestUnstable,
             zListSourcesRequestUnstable,
+            zListAgentMentionsRequestUnstable,
+            zListSlashCommandsRequestUnstable,
             zUpdateSourceRequestUnstable,
             zDeleteSourceRequestUnstable,
             zExportSourceRequestUnstable,

@@ -29,6 +29,8 @@ import type {
   DeleteRecipeRequestUnstable,
   DeleteSessionRequest,
   DeleteSourceRequestUnstable,
+  DiagnosticsGetRequestUnstable,
+  DiagnosticsGetResponseUnstable,
   DictationConfigRequestUnstable,
   DictationConfigResponseUnstable,
   DictationModelCancelRequestUnstable,
@@ -65,10 +67,14 @@ import type {
   ImportSessionResponseUnstable,
   ImportSourcesRequestUnstable,
   ImportSourcesResponseUnstable,
+  ListAgentMentionsRequestUnstable,
+  ListAgentMentionsResponseUnstable,
   ListProvidersRequestUnstable,
   ListProvidersResponseUnstable,
   ListRecipesRequestUnstable,
   ListRecipesResponseUnstable,
+  ListSlashCommandsRequestUnstable,
+  ListSlashCommandsResponseUnstable,
   ListSourcesRequestUnstable,
   ListSourcesResponseUnstable,
   OnboardingImportApplyRequestUnstable,
@@ -131,6 +137,7 @@ import {
   zCustomProviderUpdateResponseUnstable,
   zDecodeRecipeResponseUnstable,
   zDefaultsReadResponseUnstable,
+  zDiagnosticsGetResponseUnstable,
   zDictationConfigResponseUnstable,
   zDictationModelDownloadProgressResponseUnstable,
   zDictationModelsListResponseUnstable,
@@ -146,8 +153,10 @@ import {
   zGooseToolCallResponseUnstable,
   zImportSessionResponseUnstable,
   zImportSourcesResponseUnstable,
+  zListAgentMentionsResponseUnstable,
   zListProvidersResponseUnstable,
   zListRecipesResponseUnstable,
+  zListSlashCommandsResponseUnstable,
   zListSourcesResponseUnstable,
   zOnboardingImportApplyResponseUnstable,
   zOnboardingImportScanResponseUnstable,
@@ -243,6 +252,18 @@ export class GooseExtClient {
     return zSteerSessionResponseUnstable.parse(
       raw,
     ) as SteerSessionResponseUnstable;
+  }
+
+  async GooseUnstableDiagnosticsGet(
+    params: DiagnosticsGetRequestUnstable,
+  ): Promise<DiagnosticsGetResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/diagnostics/get",
+      params,
+    );
+    return zDiagnosticsGetResponseUnstable.parse(
+      raw,
+    ) as DiagnosticsGetResponseUnstable;
   }
 
   async sessionDelete(params: DeleteSessionRequest): Promise<void> {
@@ -750,6 +771,30 @@ export class GooseExtClient {
     return zListSourcesResponseUnstable.parse(
       raw,
     ) as ListSourcesResponseUnstable;
+  }
+
+  async GooseUnstableAgentMentionsList(
+    params: ListAgentMentionsRequestUnstable,
+  ): Promise<ListAgentMentionsResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/agent-mentions/list",
+      params,
+    );
+    return zListAgentMentionsResponseUnstable.parse(
+      raw,
+    ) as ListAgentMentionsResponseUnstable;
+  }
+
+  async GooseUnstableSlashCommandsList(
+    params: ListSlashCommandsRequestUnstable,
+  ): Promise<ListSlashCommandsResponseUnstable> {
+    const raw = await this.conn.extMethod(
+      "_goose/unstable/slash-commands/list",
+      params,
+    );
+    return zListSlashCommandsResponseUnstable.parse(
+      raw,
+    ) as ListSlashCommandsResponseUnstable;
   }
 
   async GooseUnstableSourcesUpdate(
