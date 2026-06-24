@@ -275,4 +275,194 @@ describe("useAttachmentDropTarget", () => {
     unmount();
     cleanup();
   });
+
+  it("resets the overlay when Escape is pressed while drag is active", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    // Simulate a native drag over the target to activate the overlay
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/file.txt"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    // Press Escape — the overlay should dismiss
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+  });
+
+  it("resets the overlay when the window loses focus during a drag", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    // Simulate a native drag over the target
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/file.txt"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    // Window blur — the overlay should dismiss
+    act(() => {
+      window.dispatchEvent(new Event("blur"));
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+  });
+
+  it("resets the overlay via watchdog if native drag events stop arriving", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    // Switch to fake timers after the async listener is registered
+    vi.useFakeTimers();
+
+    // Simulate a native drag over the target
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/file.txt"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    // Advance time past the watchdog threshold (3000ms)
+    act(() => {
+      vi.advanceTimersByTime(3500);
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    unmount();
+    cleanup();
+    vi.useRealTimers();
+  });
+
+  it("clears the watchdog when Escape resets the overlay", async () => {
+    const { targetRef, cleanup } = createDropTarget();
+    const onDropFiles = vi.fn();
+    const onDropPaths = vi.fn();
+
+    const { result, unmount } = renderHook(() =>
+      useAttachmentDropTarget({
+        disabled: false,
+        isStreaming: false,
+        targetRef,
+        onDropFiles,
+        onDropPaths,
+      }),
+    );
+
+    await waitFor(() => expect(dragDropListener).not.toBeNull());
+
+    vi.useFakeTimers();
+
+    act(() => {
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/file.txt"],
+        },
+      });
+    });
+
+    act(() => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(false);
+
+    act(() => {
+      vi.advanceTimersByTime(2500);
+      dragDropListener?.({
+        payload: {
+          type: "over",
+          position: { x: 10, y: 10 },
+          paths: ["/Users/test/next-file.txt"],
+        },
+      });
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(600);
+    });
+
+    expect(result.current.isAttachmentDragOver).toBe(true);
+
+    unmount();
+    cleanup();
+    vi.useRealTimers();
+  });
 });

@@ -113,13 +113,65 @@ export function useAttachmentDropTarget({
   const dragDepthRef = useRef(0);
   const tauriDropHandledAtRef = useRef(0);
   const nativeDropExpectedUntilRef = useRef(0);
+  const nativeDragActiveTimeoutRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+
+  const clearNativeDragWatchdog = useCallback(() => {
+    if (nativeDragActiveTimeoutRef.current != null) {
+      clearTimeout(nativeDragActiveTimeoutRef.current);
+      nativeDragActiveTimeoutRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (!disabled && !isStreaming) return;
+    clearNativeDragWatchdog();
     dragDepthRef.current = 0;
     nativeDropExpectedUntilRef.current = 0;
     setIsAttachmentDragOver(false);
-  }, [disabled, isStreaming]);
+  }, [clearNativeDragWatchdog, disabled, isStreaming]);
+
+  // Safety-net: force-reset the overlay when the drag operation ends without a
+  // proper drop/leave cycle. This covers OS-level drag cancellation (Escape in
+  // Finder, window losing focus mid-drag, etc.) that can leave the overlay
+  // stuck because neither `dragleave` nor the Tauri `leave` event fires.
+  useEffect(() => {
+    const resetDragState = () => {
+      if (dragDepthRef.current > 0 || isAttachmentDragOver) {
+        clearNativeDragWatchdog();
+        dragDepthRef.current = 0;
+        nativeDropExpectedUntilRef.current = 0;
+        setIsAttachmentDragOver(false);
+      }
+    };
+
+    // `dragend` fires on the drag source when the operation finishes (drop or
+    // cancel). In Tauri the source is outside the webview so this mainly helps
+    // with intra-webview drags, but it's a cheap safety net.
+    const handleDragEnd = () => resetDragState();
+
+    // Escape key should always dismiss the overlay, even if the underlying
+    // drag events are lost.
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        resetDragState();
+      }
+    };
+
+    // Window blur means the user switched away mid-drag — the drag is
+    // effectively cancelled from our perspective.
+    const handleWindowBlur = () => resetDragState();
+
+    window.addEventListener("dragend", handleDragEnd);
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", handleWindowBlur);
+    return () => {
+      window.removeEventListener("dragend", handleDragEnd);
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", handleWindowBlur);
+    };
+  }, [clearNativeDragWatchdog, isAttachmentDragOver]);
 
   const handleDragEnter = useCallback(
     (event: AttachmentDragEvent) => {
@@ -262,6 +314,22 @@ export function useAttachmentDropTarget({
     let disposed = false;
     let unlisten: (() => void) | undefined;
 
+    // Tauri's native drag events don't always fire a `leave` when the drag is
+    // cancelled (e.g., Escape pressed in Finder). Use a watchdog timer: if we
+    // see an `over` event but no `leave`/`drop` within a generous window, reset.
+    const NATIVE_DRAG_WATCHDOG_MS = 3000;
+
+    const resetWatchdog = () => {
+      clearNativeDragWatchdog();
+      nativeDragActiveTimeoutRef.current = setTimeout(() => {
+        if (!disposed) {
+          dragDepthRef.current = 0;
+          nativeDropExpectedUntilRef.current = 0;
+          setIsAttachmentDragOver(false);
+        }
+      }, NATIVE_DRAG_WATCHDOG_MS);
+    };
+
     void import("@tauri-apps/api/webview")
       .then(({ getCurrentWebview }) =>
         getCurrentWebview().onDragDropEvent(({ payload }) => {
@@ -270,6 +338,7 @@ export function useAttachmentDropTarget({
           }
 
           if (payload.type === "leave") {
+            clearNativeDragWatchdog();
             dragDepthRef.current = 0;
             setIsAttachmentDragOver(false);
             nativeDropExpectedUntilRef.current = 0;
@@ -279,6 +348,7 @@ export function useAttachmentDropTarget({
           const hitTest = getTargetHitTest(targetRef.current, payload.position);
 
           if (payload.type === "drop") {
+            clearNativeDragWatchdog();
             setIsAttachmentDragOver(false);
             const nativeDropWasExpected =
               nativeDropExpectedUntilRef.current > Date.now();
@@ -295,6 +365,10 @@ export function useAttachmentDropTarget({
             onDropPaths(payload.paths);
             return;
           }
+
+          // `over` event — reset the watchdog so it doesn't fire while the
+          // user is still actively dragging.
+          resetWatchdog();
 
           const nativeDropIsOverTarget =
             hitTest.inside && !disabled && !isStreaming;
@@ -316,9 +390,10 @@ export function useAttachmentDropTarget({
 
     return () => {
       disposed = true;
+      clearNativeDragWatchdog();
       unlisten?.();
     };
-  }, [disabled, isStreaming, onDropPaths, targetRef]);
+  }, [clearNativeDragWatchdog, disabled, isStreaming, onDropPaths, targetRef]);
 
   return {
     isAttachmentDragOver,
