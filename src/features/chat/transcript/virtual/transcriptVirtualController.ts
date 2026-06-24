@@ -189,6 +189,7 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
       preserveScrollPosition?: boolean;
+      preserveBottomAnchor?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
     const previousScrollTop = this.scrollTop;
@@ -226,7 +227,11 @@ export class TranscriptVirtualController implements TranscriptVirtualEngine {
       (options.userScrollIntent === true || !geometryChanged);
 
     if (treatAsUserScroll && options.preserveScrollPosition === true) {
-      this.captureViewportAnchor({ fallback: "scroll-position" });
+      if (options.preserveBottomAnchor === true) {
+        this.setScrollAnchor({ type: "bottom" });
+      } else {
+        this.captureViewportAnchor({ fallback: "scroll-position" });
+      }
       return { correction: null };
     }
 

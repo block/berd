@@ -1520,9 +1520,20 @@ describe("VirtualMessageTimeline", () => {
         diagnosticEvents.at(-1)?.measurement.acceptedOffscreenRealMeasurements,
       ).toBeGreaterThan(0),
     );
-    expect(
-      screen.getByTestId("virtual-offscreen-real-measurement-host"),
-    ).toHaveAttribute("aria-hidden", "true");
+    const offscreenRealHost = screen.getByTestId(
+      "virtual-offscreen-real-measurement-host",
+    );
+    expect(offscreenRealHost).toHaveAttribute("aria-hidden", "true");
+    expect(offscreenRealHost.style.userSelect).toBe("none");
+    const offscreenRealRow = offscreenRealHost.querySelector<HTMLElement>(
+      "[data-virtual-row-offscreen-real-id]",
+    );
+    expect(offscreenRealRow).not.toBeNull();
+    expect(offscreenRealRow as HTMLElement).toHaveAttribute(
+      "data-virtual-row-selectable",
+      "false",
+    );
+    expect((offscreenRealRow as HTMLElement).style.userSelect).toBe("none");
     expect(
       screen.getByTestId("virtual-offscreen-measurement-host"),
     ).toHaveAttribute("aria-hidden", "true");
@@ -1619,6 +1630,31 @@ describe("VirtualMessageTimeline", () => {
     );
     expect(activeToolRow).toHaveAttribute("data-virtual-row-protected", "true");
     expect(activeToolRow).toHaveAttribute("data-virtual-row-visible", "false");
+    expect(activeToolRow).toHaveAttribute(
+      "data-virtual-row-selectable",
+      "false",
+    );
+    expect(activeToolRow).toHaveAttribute(
+      "data-virtual-row-selection-pinned",
+      "false",
+    );
+    expect(activeToolRow.style.pointerEvents).toBe("none");
+    expect(activeToolRow.style.userSelect).toBe("none");
+
+    const visibleTailRow = await screen.findByTestId(
+      "virtual-transcript-row-message:message-79",
+    );
+    expect(visibleTailRow).toHaveAttribute("data-virtual-row-visible", "true");
+    expect(visibleTailRow).toHaveAttribute(
+      "data-virtual-row-selectable",
+      "true",
+    );
+    expect(visibleTailRow).toHaveAttribute(
+      "data-virtual-row-selection-pinned",
+      "false",
+    );
+    expect(visibleTailRow.style.pointerEvents).toBe("");
+    expect(visibleTailRow.style.userSelect).toBe("");
 
     const offscreenHost = await screen.findByTestId(
       "virtual-offscreen-measurement-host",

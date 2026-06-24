@@ -20,7 +20,10 @@ import {
   type TranscriptDiagnostics,
 } from "@/features/chat/transcript/diagnostics";
 import { MessageTimeline } from "@/features/chat/ui/MessageTimeline";
-import { VirtualMessageTimeline } from "@/features/chat/ui/VirtualMessageTimeline";
+import {
+  VirtualMessageTimeline,
+  type VirtualMessageTimelineDiagnostics,
+} from "@/features/chat/ui/VirtualMessageTimeline";
 import type { Message } from "@/shared/types/messages";
 import type { TranscriptVirtualTimelineRowStateControls } from "../virtual/react/useTranscriptVirtualTimeline";
 import type {
@@ -33,6 +36,7 @@ import "@/shared/styles/globals.css";
 
 const BOTTOM_SCROLL_THRESHOLD_PX = 8;
 const SCROLL_TARGET_VISIBLE_TIMEOUT_MS = 10_000;
+const SCROLL_TARGET_VISIBLE_STABLE_FRAMES = 4;
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -57,6 +61,9 @@ declare global {
     __TRANSCRIPT_VIRTUALIZATION_RENDERER_MODE__?: TranscriptRendererMode;
     __TRANSCRIPT_VIRTUALIZATION_HARNESS__?: TranscriptVirtualizationBrowserHarness;
     __GOOSE_TRANSCRIPT_DIAGNOSTICS__?: TranscriptDiagnostics | undefined;
+    __GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__?:
+      | VirtualMessageTimelineDiagnostics
+      | undefined;
   }
 }
 
@@ -352,18 +359,6 @@ function getMessageRow(messageId: string): HTMLElement | null {
   return row instanceof HTMLElement ? row : null;
 }
 
-function scrollToMessage(messageId: string) {
-  const row = getMessageRow(messageId);
-  const scroller = getScroller();
-
-  if (row instanceof HTMLElement && scroller) {
-    const virtualStart = Number(row.dataset.virtualRowVirtualStart);
-    const rowTop = Number.isFinite(virtualStart) ? virtualStart : row.offsetTop;
-    scroller.scrollTop = Math.max(0, rowTop - 96);
-    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-  }
-}
-
 function isMessageVisible(messageId: string): boolean {
   const row = getMessageRow(messageId);
   const scroller = getScroller();
@@ -381,13 +376,18 @@ function isMessageVisible(messageId: string): boolean {
 
 async function waitForMessageVisible(messageId: string) {
   const startedAt = performance.now();
+  let stableVisibleFrames = 0;
 
   while (performance.now() - startedAt < SCROLL_TARGET_VISIBLE_TIMEOUT_MS) {
     if (isMessageVisible(messageId)) {
-      return;
+      stableVisibleFrames += 1;
+      if (stableVisibleFrames >= SCROLL_TARGET_VISIBLE_STABLE_FRAMES) {
+        return;
+      }
+    } else {
+      stableVisibleFrames = 0;
     }
 
-    scrollToMessage(messageId);
     await nextFrame();
   }
 
@@ -535,9 +535,30 @@ function countProtectedRows(state: RealRendererBridgeState): number {
   }).length;
 }
 
-function getProductionDiagnostics(): TranscriptDiagnostics | null {
-  const diagnostics = window.__GOOSE_TRANSCRIPT_DIAGNOSTICS__;
-  return diagnostics && typeof diagnostics === "object" ? diagnostics : null;
+type RealRendererProductionDiagnostics = Partial<TranscriptDiagnostics> &
+  Partial<VirtualMessageTimelineDiagnostics>;
+
+function getProductionDiagnostics(): RealRendererProductionDiagnostics | null {
+  const sharedDiagnostics = window.__GOOSE_TRANSCRIPT_DIAGNOSTICS__;
+  const virtualDiagnostics =
+    window.__GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__;
+  const sharedRecord =
+    sharedDiagnostics && typeof sharedDiagnostics === "object"
+      ? sharedDiagnostics
+      : null;
+  const virtualRecord =
+    virtualDiagnostics && typeof virtualDiagnostics === "object"
+      ? virtualDiagnostics
+      : null;
+
+  if (!sharedRecord && !virtualRecord) {
+    return null;
+  }
+
+  return {
+    ...(sharedRecord ?? {}),
+    ...(virtualRecord ?? {}),
+  };
 }
 
 function normalizeDiagnostics(
@@ -585,7 +606,6 @@ function RealRendererBridgeApp() {
   const pendingScrollPositionRef = useRef<"tail" | "top" | "middle" | null>(
     null,
   );
-  const pendingScrollTargetRef = useRef<string | null>(null);
 
   stateRef.current = state;
 
@@ -632,15 +652,6 @@ function RealRendererBridgeApp() {
         }
       });
     });
-  });
-
-  useEffect(() => {
-    const target = pendingScrollTargetRef.current;
-    if (!target) {
-      return;
-    }
-    pendingScrollTargetRef.current = null;
-    requestAnimationFrame(() => scrollToMessage(target));
   });
 
   const commitState = useCallback(
@@ -750,7 +761,6 @@ function RealRendererBridgeApp() {
           break;
         }
         case "controlledScrollTarget":
-          pendingScrollTargetRef.current = operation.messageId;
           await commitState((previous) => ({
             ...previous,
             scrollTargetMessageId: operation.messageId,

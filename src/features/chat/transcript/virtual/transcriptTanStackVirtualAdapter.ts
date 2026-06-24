@@ -177,6 +177,7 @@ export class TranscriptTanStackVirtualAdapter
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
       preserveScrollPosition?: boolean;
+      preserveBottomAnchor?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
     // Any viewport sync supersedes a pending TanStack scroll reconcile.

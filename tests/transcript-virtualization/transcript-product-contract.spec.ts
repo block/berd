@@ -171,7 +171,7 @@ async function applyHarnessOperation(
 }
 
 async function collectHarnessDiagnostics(page: Page) {
-  return page.evaluate(async () => {
+  const diagnostics = await page.evaluate(async () => {
     const diagnostics = await (
       window as TranscriptHarnessWindow
     ).__TRANSCRIPT_VIRTUALIZATION_HARNESS__?.collectDiagnostics?.();
@@ -181,6 +181,78 @@ async function collectHarnessDiagnostics(page: Page) {
         .__GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__ ?? {}),
     };
   });
+
+  if (typeof diagnostics.forcedProtectedRowCount === "number") {
+    return diagnostics;
+  }
+
+  const forcedProtectedRowCount = deriveForcedProtectedRowCount(
+    diagnostics.rows,
+  );
+  return forcedProtectedRowCount == null
+    ? diagnostics
+    : { ...diagnostics, forcedProtectedRowCount };
+}
+
+function deriveForcedProtectedRowCount(rows: unknown): number | null {
+  if (!Array.isArray(rows)) {
+    return null;
+  }
+
+  const forcedReasons = new Set([
+    "active-stream",
+    "focused",
+    "open-overlay",
+    "selection",
+  ]);
+  return rows.reduce((count, row) => {
+    if (typeof row !== "object" || row === null) {
+      return count;
+    }
+
+    const reasons = (row as { reasons?: unknown }).reasons;
+    if (!Array.isArray(reasons)) {
+      return count;
+    }
+
+    return reasons.some(
+      (reason) => typeof reason === "string" && forcedReasons.has(reason),
+    )
+      ? count + 1
+      : count;
+  }, 0);
+}
+
+async function waitForVirtualDiagnostics(
+  page: Page,
+  expectedDiagnostics: Record<string, number>,
+) {
+  try {
+    await page.waitForFunction(
+      (expected) => {
+        const diagnostics = (window as TranscriptHarnessWindow)
+          .__GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__;
+        if (!diagnostics) {
+          return false;
+        }
+
+        return Object.entries(expected).every(([key, value]) => {
+          const actual = (diagnostics as Record<string, unknown>)[key];
+          return typeof actual === "number" && actual === value;
+        });
+      },
+      expectedDiagnostics,
+      { timeout: 5_000 },
+    );
+  } catch (error) {
+    const diagnostics = await collectHarnessDiagnostics(page);
+    throw new Error(
+      `Timed out waiting for virtual diagnostics ${JSON.stringify(
+        expectedDiagnostics,
+      )}; last diagnostics ${JSON.stringify(diagnostics)}`,
+      { cause: error },
+    );
+  }
 }
 
 async function waitForProtectedRows(page: Page, protectedRows: number) {
@@ -702,6 +774,9 @@ test.describe("transcript product contract proof", () => {
       await expect(row).toHaveAttribute("data-virtual-row-visible", "false");
     }
 
+    await waitForVirtualDiagnostics(page, {
+      protectedRows: protectedMessageIds.length,
+    });
     let diagnostics = await collectHarnessDiagnostics(page);
     expect(diagnostics).toMatchObject({
       forcedProtectedRowCount: 2,
@@ -735,6 +810,12 @@ test.describe("transcript product contract proof", () => {
       });
     }
 
+    await waitForVirtualDiagnostics(page, {
+      mcpCandidateCount: 12,
+      mcpProtectedRowCount: 8,
+      evictedMcpRowCount: 4,
+      protectedRows: 8,
+    });
     diagnostics = await collectHarnessDiagnostics(page);
     expect(diagnostics).toMatchObject({
       mcpCandidateCount: 12,

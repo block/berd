@@ -89,8 +89,8 @@ const RESIZE_SCROLL_SUPPRESSION_MS = 250;
 const DOCKED_FOOTER_BOTTOM_PADDING_PX = 44;
 const LIVE_TAIL_BOTTOM_PADDING_PX = 60;
 const STREAMING_BOTTOM_FOLLOW_MAX_STEP_PX = 48;
-const SCROLL_TARGET_MOUNT_RETRY_FRAMES = 24;
-const SCROLL_TARGET_VISIBLE_SETTLE_FRAMES = 2;
+const SCROLL_TARGET_MOUNT_RETRY_FRAMES = 120;
+const SCROLL_TARGET_VISIBLE_SETTLE_FRAMES = 8;
 const RESPONSE_START_HINT_VIEWPORT_SLOP_PX = 16;
 // How far an assistant message's top must scroll above the viewport edge
 // before the floating gutter chevron offers to jump back to its start.
@@ -343,7 +343,9 @@ function TranscriptOffscreenShellMeasurementHost({
         position: "absolute",
         top: 0,
         transform: "translateY(-100000px)",
+        userSelect: "none",
         visibility: "hidden",
+        WebkitUserSelect: "none",
         width: "100%",
       }}
     >
@@ -382,7 +384,9 @@ function TranscriptOffscreenRealMeasurementHost({
         position: "absolute",
         top: 0,
         transform: "translateY(-100000px)",
+        userSelect: "none",
         visibility: "hidden",
+        WebkitUserSelect: "none",
         width: "100%",
       }}
     >
@@ -1152,6 +1156,10 @@ export function VirtualMessageTimeline({
   }, [virtualTimeline.rowStateControls, virtualTimelineControlsRef]);
   const isBoundedVirtualMode =
     virtualTimelineSnapshot.mode === "bounded-controller";
+  const selectionPinnedRowIds = useMemo(
+    () => new Set(virtualTimelineSnapshot.selectionPinnedRowIds),
+    [virtualTimelineSnapshot.selectionPinnedRowIds],
+  );
 
   // Indexed find-in-transcript: exact counts over the full transcript with
   // windowing intact. The list-root ref is shared with the forwarded
@@ -3149,6 +3157,7 @@ export function VirtualMessageTimeline({
       previousRowKind={stableRows[index - 1]?.kind}
       layoutMode={virtualItem ? "virtual" : "flow"}
       virtualItem={virtualItem}
+      selectionPinned={selectionPinnedRowIds.has(row.rowId)}
       measurementPlan={measurementPlanByRowId.get(row.rowId)}
       dateLabel={formatDateSeparator(snapshot, index, {
         today: t("timeline.today"),

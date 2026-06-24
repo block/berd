@@ -51,6 +51,7 @@ interface VirtualTranscriptRowProps {
     TranscriptVirtualItem,
     "end" | "protected" | "size" | "start" | "visible"
   >;
+  selectionPinned?: boolean;
   offscreenMeasurementKind?: "real";
   measurementPlan?: TranscriptShellMeasurementPlan;
   isStreaming?: boolean;
@@ -75,6 +76,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   dateLabel,
   layoutMode = "flow",
   virtualItem,
+  selectionPinned = false,
   offscreenMeasurementKind,
   measurementPlan,
   isStreaming,
@@ -88,7 +90,16 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   registerMessageElement,
 }: VirtualTranscriptRowProps) {
   const elementRef = useRef<HTMLDivElement | null>(null);
+  const isOffscreenRealMeasurement = offscreenMeasurementKind === "real";
   const isVirtualLayout = layoutMode === "virtual" && virtualItem;
+  const suppressVirtualRowSelection = Boolean(
+    isVirtualLayout &&
+      virtualItem.protected &&
+      !virtualItem.visible &&
+      !selectionPinned,
+  );
+  const suppressRowSelection =
+    suppressVirtualRowSelection || isOffscreenRealMeasurement;
   const streamingActionGutter =
     isVirtualLayout && isStreaming ? STREAMING_ROW_ACTION_GUTTER : undefined;
   const rowStyle: CSSProperties | undefined = isVirtualLayout
@@ -103,17 +114,25 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
           ? `calc(0px - ${streamingActionGutter})`
           : 0,
         position: "absolute",
+        pointerEvents: suppressRowSelection ? "none" : undefined,
         right: 0,
         top: `${virtualItem.start}px`,
+        userSelect: suppressRowSelection ? "none" : undefined,
+        WebkitUserSelect: suppressRowSelection ? "none" : undefined,
       }
-    : undefined;
+    : isOffscreenRealMeasurement
+      ? {
+          pointerEvents: "none",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+        }
+      : undefined;
   const spacingClassName = getVirtualTranscriptRowSpacingClassName({
     row,
     index,
     previousRowKind,
     layoutMode,
   });
-  const isOffscreenRealMeasurement = offscreenMeasurementKind === "real";
   const rowTestId = isOffscreenRealMeasurement
     ? `virtual-offscreen-real-row-${row.rowId}`
     : `virtual-transcript-row-${row.rowId}`;
@@ -157,6 +176,16 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
     "data-virtual-row-protected": virtualItem
       ? String(virtualItem.protected)
       : undefined,
+    "data-virtual-row-selectable": isOffscreenRealMeasurement
+      ? "false"
+      : virtualItem
+        ? String(!suppressRowSelection)
+        : undefined,
+    "data-virtual-row-selection-pinned": isOffscreenRealMeasurement
+      ? "false"
+      : virtualItem
+        ? String(selectionPinned)
+        : undefined,
     "data-virtual-row-shell-status": measurementPlan?.status,
     "data-virtual-row-shell-block-count": measurementPlan?.blocks.length,
     "data-virtual-row-shell-estimated-block-size":
@@ -417,6 +446,7 @@ function areVirtualTranscriptRowPropsEqual(
     previous.previousRowKind === next.previousRowKind &&
     previous.dateLabel === next.dateLabel &&
     previous.layoutMode === next.layoutMode &&
+    previous.selectionPinned === next.selectionPinned &&
     previous.offscreenMeasurementKind === next.offscreenMeasurementKind &&
     previous.measurementPlan === next.measurementPlan &&
     previous.isStreaming === next.isStreaming &&

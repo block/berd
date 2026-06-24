@@ -179,6 +179,55 @@ describe("transcript virtual controller", () => {
     expect(controller.getDiagnostics().bottomFollowExits).toBe(1);
   });
 
+  it("preserves bottom anchoring while preserving browser-owned scroll", () => {
+    const controller = createController({ viewportHeight: 300 });
+    controller.setRows(makeRows(10, 100));
+
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 700,
+      anchor: { type: "bottom" },
+    });
+
+    const preserved = controller.syncViewport(
+      {
+        scrollTop: 500,
+        viewportHeight: 300,
+        widthScope: WIDTH_SCOPE,
+      },
+      {
+        source: "browser",
+        userScrollIntent: true,
+        preserveScrollPosition: true,
+        preserveBottomAnchor: true,
+      },
+    );
+
+    expect(preserved.correction).toBeNull();
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 500,
+      anchor: { type: "bottom" },
+      distanceFromBottom: 200,
+    });
+
+    const measured = controller.applyMeasuredHeight({
+      token: tokenFor(controller, "row-0"),
+      height: 200,
+    });
+
+    expect(measured.accepted).toBe(true);
+    expect(measured.correction).toMatchObject({
+      reason: "bottom-anchor",
+      previousScrollTop: 500,
+      nextScrollTop: 800,
+      delta: 300,
+    });
+    expect(controller.getState()).toMatchObject({
+      scrollTop: 800,
+      anchor: { type: "bottom" },
+      pinnedToBottom: true,
+    });
+  });
+
   it("rejects stale session epoch, width, revision, and missing-row measurements", () => {
     const controller = createController({ viewportHeight: 300 });
     controller.setRows(makeRows(5, 100));
