@@ -921,10 +921,8 @@ fn bb_config_set_and_get_roundtrip() {
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
-/// The old `bb skills auth` / `bb skills config` spellings keep working as
-/// hidden aliases after the commands moved to the top level.
 #[test]
-fn bb_skills_auth_and_config_aliases_still_work() {
+fn bb_skills_auth_is_removed_but_config_alias_still_works() {
     let temp = temp_test_dir("bb-skills-alias");
     let bb_home = temp.join("bb-home");
     let skills_home = temp.join("skills-home");
@@ -934,11 +932,12 @@ fn bb_skills_auth_and_config_aliases_still_work() {
         .args(["skills", "auth", "status", "--json"])
         .output()
         .expect("run bb skills auth status");
-    let (status_stdout, status_stderr) = output_text(&status);
-    assert!(status.status.success(), "stderr was: {status_stderr}");
-    let status_response =
-        serde_json::from_str::<Value>(&status_stdout).expect("parse status output");
-    assert_eq!(status_response["authenticated"], json!(false));
+    let (_, status_stderr) = output_text(&status);
+    assert!(!status.status.success());
+    assert!(
+        status_stderr.contains("unrecognized subcommand 'auth'"),
+        "stderr was: {status_stderr}"
+    );
 
     let get = bb_command()
         .env("BB_HOME", &bb_home)

@@ -58,9 +58,6 @@ pub fn skills_command() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_subcommand(true)
-        // Hidden back-compat aliases: `auth` and `config` moved to the top
-        // level (`bb auth`, `bb config`) but the old spellings keep working.
-        .subcommand(auth_command().hide(true))
         .subcommand(
             Command::new("search")
                 .about("Search marketplace skills")
@@ -509,7 +506,6 @@ fn dispatch_auth(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 
 fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
-        Some(("auth", auth_matches)) => dispatch_auth(config, auth_matches),
         Some(("search", search_matches)) => {
             let query = search_matches
                 .get_one::<String>("query")
@@ -538,7 +534,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
     let client = MarketplaceClient::new(config)?;
     if !client.has_auth() {
         if !config.json {
-            println!("BuilderBot skills auth");
+            println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
             println!("  server: {}", config.server_url);
             println!("  authenticated: no");
@@ -553,7 +549,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
 
     let me = client.get_json::<MeResponse>("/v1/marketplace/me")?;
     if !config.json {
-        println!("BuilderBot skills auth");
+        println!("BuilderBot CLI auth");
         println!("  profile: {}", config.profile);
         println!("  server: {}", config.server_url);
         println!("  authenticated: yes");
@@ -2051,8 +2047,6 @@ mod tests {
         ] {
             assert!(names.contains(&expected.to_string()), "missing {expected}");
         }
-        // auth/config moved to the top level; the hidden aliases stay out of
-        // the machine-readable description.
         assert!(!names.contains(&"auth".to_string()));
         assert!(!names.contains(&"config".to_string()));
     }
