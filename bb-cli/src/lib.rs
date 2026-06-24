@@ -24,6 +24,11 @@ use runtime::{
 use serde::Serialize;
 use serde_json::{Map, Value};
 
+use crate::bb::auth_storage::stored_session_credential_header_value;
+use crate::bb::skills_config::{
+    default_bb_home, read_optional_env, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR,
+    DEFAULT_PROFILE_NAME,
+};
 use crate::catalog::{load_extensions_catalog, write_extensions_catalog};
 use crate::kgoose::{CallToolResponse, HttpKgooseClient, KgooseClient, KgooseConfig};
 use crate::proto::squareup::cash::kgoose::api::v3::user_content;
@@ -184,11 +189,12 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
 
     let bootstrap = bootstrap_args(raw_args.iter().cloned())?;
 
-    let kgoose_config = KgooseConfig {
+    let mut kgoose_config = KgooseConfig {
         base_url: bootstrap.base_url.clone(),
         playpen: bootstrap.playpen.clone(),
         goosemcp_playpen: bootstrap.goosemcp_playpen.clone(),
         timeout_secs: bootstrap.timeout_secs,
+        session_credential: None,
     };
 
     let client = HttpKgooseClient;
@@ -202,12 +208,16 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
             anyhow::bail!("`--write-extensions` does not accept command arguments");
         }
 
+        attach_kgoose_session_credential(&mut kgoose_config)?;
         let extensions = load_extensions(&client, &kgoose_config)?;
         write_extensions_catalog(path, &extensions)?;
         return Ok(());
     }
 
     if bootstrap.describe_commands {
+        if !bootstrap.command_tokens.is_empty() {
+            attach_kgoose_session_credential(&mut kgoose_config)?;
+        }
         let description =
             load_command_description(&client, &kgoose_config, &bootstrap.command_tokens, config)?;
         println!(
@@ -222,6 +232,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
         let summary = if bootstrap.command_tokens.is_empty() {
             ROOT_SUMMARY.to_string()
         } else {
+            attach_kgoose_session_credential(&mut kgoose_config)?;
             load_command_description(&client, &kgoose_config, &bootstrap.command_tokens, config)?
                 .summary
         };
@@ -239,6 +250,8 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
     if appkit::is_appkit_command(&bootstrap.command_tokens) {
         return appkit::run(raw_args);
     }
+
+    attach_kgoose_session_credential(&mut kgoose_config)?;
 
     let selected_extension_name = bootstrap
         .command_tokens
@@ -309,6 +322,38 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
 
     println!("{rendered_response}");
     Ok(())
+}
+
+fn attach_kgoose_session_credential(config: &mut KgooseConfig) -> Result<()> {
+    config.session_credential = resolve_kgoose_session_credential(&config.base_url)?;
+    Ok(())
+}
+
+fn resolve_kgoose_session_credential(base_url: &str) -> Result<Option<String>> {
+    let profile = read_optional_env(BB_SKILLS_PROFILE_ENV_VAR)?
+        .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
+    let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(default_bb_home);
+
+    for server_url in kgoose_auth_storage_lookup_urls(base_url) {
+        if let Some(credential) =
+            stored_session_credential_header_value(&profile, &server_url, bb_home.clone())?
+        {
+            return Ok(Some(credential));
+        }
+    }
+
+    Ok(None)
+}
+
+fn kgoose_auth_storage_lookup_urls(base_url: &str) -> Vec<String> {
+    let trimmed = base_url.trim_end_matches('/');
+    let mut urls = vec![trimmed.to_string()];
+    if !trimmed.ends_with("/cash-app/goose") {
+        urls.push(format!("{trimmed}/cash-app/goose"));
+    }
+    urls
 }
 
 fn clap_matches(command: Command, argv: Vec<String>) -> Result<ArgMatches> {
@@ -897,6 +942,7 @@ mod tests {
             playpen: Some("baxen".to_string()),
             goosemcp_playpen: None,
             timeout_secs: 600.0,
+            session_credential: None,
         }
     }
 

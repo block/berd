@@ -8,6 +8,7 @@ use reqwest::header::{HeaderMap, HeaderName, HeaderValue, ACCEPT, CONTENT_TYPE};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
+use crate::bb::auth::SESSION_CREDENTIAL_HEADER;
 pub use crate::proto::squareup::cash::kgoose::api::v3::{
     CallToolRequest, CallToolResponse, ExtensionInfo, ListExtensionsRequest,
     ListExtensionsResponse, ListToolsRequest, ListToolsResponse, Source, ToolConfig,
@@ -25,6 +26,7 @@ pub struct KgooseConfig {
     pub playpen: Option<String>,
     pub goosemcp_playpen: Option<String>,
     pub timeout_secs: f64,
+    pub session_credential: Option<String>,
 }
 
 impl KgooseConfig {
@@ -153,6 +155,13 @@ fn build_http_client(config: &KgooseConfig) -> Result<Client> {
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    if let Some(session_credential) = config.session_credential.as_deref() {
+        headers.insert(
+            SESSION_CREDENTIAL_HEADER,
+            HeaderValue::from_str(session_credential)
+                .context("build X-BB-Session-Credential header")?,
+        );
+    }
 
     // Build the Baggage header from independent playpen knobs:
     //   * KGOOSE_PLAYPEN routes the kgoose service itself.

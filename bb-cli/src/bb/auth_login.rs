@@ -14,12 +14,12 @@ use sha2::{Digest, Sha256};
 use tiny_http::{Header, Response, Server, StatusCode};
 use url::Url;
 
+use super::auth::SESSION_CREDENTIAL_HEADER;
 use super::auth_storage::{SessionCredentialStorage, SessionStorageKey, StoredSessionCredential};
 use super::skills_config::SkillsConfig;
 
 const CALLBACK_PATH: &str = "/callback";
 const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login-browser";
-pub const BB_SESSION_CREDENTIAL_HEADER: &str = "X-BB-Session-Credential";
 
 #[derive(Debug, Serialize)]
 pub struct BrowserLoginSummary {
@@ -266,7 +266,7 @@ fn verify_session_credential(
         .get(url)
         .header(USER_AGENT, CLI_USER_AGENT)
         .header(ACCEPT, "application/json")
-        .header(BB_SESSION_CREDENTIAL_HEADER, session_credential);
+        .header(SESSION_CREDENTIAL_HEADER, session_credential);
     if let Some(baggage) = playpen_baggage(playpen) {
         request = request.header("Baggage", baggage);
     }
@@ -484,7 +484,7 @@ mod tests {
                 break;
             }
             if let Some((name, value)) = line.split_once(':') {
-                if name.eq_ignore_ascii_case(BB_SESSION_CREDENTIAL_HEADER) {
+                if name.eq_ignore_ascii_case(SESSION_CREDENTIAL_HEADER) {
                     bb_session_credential = Some(value.trim().to_string());
                 }
             }

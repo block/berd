@@ -566,6 +566,59 @@ fn bb_skills_profile_config_supplies_server_url_and_token() {
 }
 
 #[test]
+fn bb_skills_list_prefers_stored_session_credential_over_profile_token() {
+    let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
+    let temp = temp_test_dir("bb-skills-list-session");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    fs::create_dir_all(&bb_home).expect("create bb home");
+    fs::write(
+        bb_home.join("skills.yaml"),
+        format!(
+            "current_profile: local\nprofiles:\n  local:\n    server_url: {}\n    auth:\n      token: profile-token\n",
+            server.base_url
+        ),
+    )
+    .expect("write skills config");
+    let storage_key = browser_auth_storage_key("local", &server.base_url);
+    fs::write(
+        &storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": "stored-marketplace-session",
+                "expiresAt": "2026-06-15T00:00:00Z"
+            }
+        }))
+        .expect("serialize storage"),
+    )
+    .expect("write auth storage");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .args(["skills", "list", "--json"])
+        .output()
+        .expect("run bb skills list");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        assert_eq!(
+            request
+                .headers
+                .get("x-bb-session-credential")
+                .map(String::as_str),
+            Some("stored-marketplace-session")
+        );
+        assert!(!request.headers.contains_key("authorization"));
+    }
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn bb_local_dev_discovers_checked_in_config_from_ancestor() {
     let server = MockServer::start(vec![MockResponse::json(json!({
         "target_registry": {
@@ -1891,6 +1944,98 @@ fn bb_tools_help_surfaces_schema_derived_flags() {
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].path, LIST_TOOLS_PATH);
     assert_eq!(requests[0].body["extension_name"], json!("utils"));
+}
+
+#[test]
+fn bb_tools_forwards_stored_session_credential_to_kgoose_calls() {
+    let server = MockServer::start(vec![
+        list_tools_response("utils", calculate_tool_schema(false)),
+        MockResponse::json(json!({
+            "content": [{"text": {"text": "{\"sum\":5}"}}],
+            "is_error": false
+        })),
+    ]);
+    let temp = temp_test_dir("bb-tools-session");
+    let storage_path = temp.join("auth-sessions.json");
+    let storage_key =
+        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+    fs::write(
+        &storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": "stored-bb-tools-session",
+                "expiresAt": "2026-06-15T00:00:00Z"
+            }
+        }))
+        .expect("serialize storage"),
+    )
+    .expect("write auth storage");
+
+    let output = server
+        .bb_tools_command()
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .args([
+            "utils",
+            "calculate",
+            "--numbers",
+            "2",
+            "3",
+            "--operation",
+            "add",
+        ])
+        .output()
+        .expect("run bb tools tool");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-bb-tools-session")
+    );
+    assert_eq!(
+        requests[1]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-bb-tools-session")
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[cfg(unix)]
+#[test]
+fn bb_tools_root_metadata_commands_do_not_read_auth_storage() {
+    let temp = temp_test_dir("bb-tools-metadata-auth-storage");
+    let malformed_storage = temp.join("auth-sessions.json");
+    fs::write(&malformed_storage, "not json").expect("write malformed auth storage");
+
+    for args in [
+        vec!["--version"],
+        vec!["--summary"],
+        vec!["--describe-commands"],
+    ] {
+        let server = MockServer::start(vec![]);
+        let output = server
+            .bb_tools_command()
+            .env("BB_AUTH_STORAGE", "file")
+            .env("BB_AUTH_STORAGE_FILE", &malformed_storage)
+            .args(args)
+            .output()
+            .expect("run bb tools metadata command");
+        let requests = server.finish();
+        let (_stdout, stderr) = output_text(&output);
+
+        assert!(output.status.success(), "stderr was: {stderr}");
+        assert!(requests.is_empty(), "requests were: {requests:#?}");
+    }
+
+    fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
 #[test]

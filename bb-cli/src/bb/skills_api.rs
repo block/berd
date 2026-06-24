@@ -7,6 +7,8 @@ use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
+use super::auth::SESSION_CREDENTIAL_HEADER;
+use super::auth_storage::stored_session_credential_header_value;
 use super::display::Style;
 use super::skills_config::SkillsConfig;
 use super::skills_models::{BundlePage, BundleSummary, SkillPage, SkillSummary};
@@ -108,7 +110,7 @@ pub fn failure_info(error: &anyhow::Error) -> (i32, Value) {
 pub struct MarketplaceClient {
     base_url: String,
     client: Client,
-    has_token: bool,
+    has_auth: bool,
     style: Style,
 }
 
@@ -117,7 +119,18 @@ impl MarketplaceClient {
         let mut headers = HeaderMap::new();
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
-        if let Some(token) = &config.token {
+        let session_credential = stored_session_credential_header_value(
+            &config.profile,
+            &config.server_url,
+            config.bb_home.clone(),
+        )?;
+        if let Some(session_credential) = session_credential.as_deref() {
+            headers.insert(
+                SESSION_CREDENTIAL_HEADER,
+                HeaderValue::from_str(session_credential)
+                    .context("build marketplace session credential header")?,
+            );
+        } else if let Some(token) = &config.token {
             headers.insert(
                 AUTHORIZATION,
                 HeaderValue::from_str(&format!("Bearer {token}"))
@@ -137,7 +150,7 @@ impl MarketplaceClient {
                 .default_headers(headers)
                 .build()
                 .context("build marketplace HTTP client")?,
-            has_token: config.token.is_some(),
+            has_auth: session_credential.is_some() || config.token.is_some(),
             style: config.style,
         })
     }
@@ -300,16 +313,16 @@ impl MarketplaceClient {
         let mut message = format_http_error(method, path, status, body);
         let exit_code = match status.as_u16() {
             401 => {
-                message.push_str(if self.has_token {
-                    "\nhint: the marketplace rejected your token; run `bb auth login` to refresh credentials"
+                message.push_str(if self.has_auth {
+                    "\nhint: the marketplace rejected your credentials; run `bb auth login-browser` to refresh your session"
                 } else {
-                    "\nhint: no token is configured; run `bb auth login` first"
+                    "\nhint: no credentials are configured; run `bb auth login-browser` first"
                 });
                 exit_codes::AUTH_REQUIRED
             }
             403 => {
                 message.push_str(
-                    "\nhint: your token lacks the required scope; run `bb auth login` with an authorized token",
+                    "\nhint: your credentials lack the required scope; run `bb auth login-browser` with an authorized account",
                 );
                 exit_codes::FORBIDDEN
             }

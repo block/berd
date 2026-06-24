@@ -137,6 +137,10 @@ impl MockServer {
             .env_remove("KGOOSE_PLAYPEN")
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
+            .env_remove("BB_HOME")
+            .env_remove("BB_SKILLS_PROFILE")
+            .env_remove("BB_AUTH_STORAGE")
+            .env_remove("BB_AUTH_STORAGE_FILE")
             .arg("--base-url")
             .arg(&self.base_url);
         command
@@ -150,6 +154,10 @@ impl MockServer {
             .env_remove("KGOOSE_PLAYPEN")
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
+            .env_remove("BB_HOME")
+            .env_remove("BB_SKILLS_PROFILE")
+            .env_remove("BB_AUTH_STORAGE")
+            .env_remove("BB_AUTH_STORAGE_FILE")
             .arg("tools")
             .arg("--base-url")
             .arg(&self.base_url);

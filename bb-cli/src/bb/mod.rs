@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod auth_login;
 pub mod auth_storage;
 pub mod display;

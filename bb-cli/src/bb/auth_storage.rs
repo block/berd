@@ -26,11 +26,15 @@ pub struct SessionStorageKey {
 }
 
 impl SessionStorageKey {
-    pub fn from_config(config: &SkillsConfig) -> Self {
+    pub fn new(profile: impl Into<String>, server_url: impl Into<String>) -> Self {
         Self {
-            profile: config.profile.clone(),
-            server_url: config.server_url.trim_end_matches('/').to_string(),
+            profile: profile.into(),
+            server_url: server_url.into().trim_end_matches('/').to_string(),
         }
+    }
+
+    pub fn from_config(config: &SkillsConfig) -> Self {
+        Self::new(config.profile.clone(), config.server_url.clone())
     }
 
     #[cfg(target_os = "macos")]
@@ -78,11 +82,36 @@ pub trait SessionCredentialStorage {
 }
 
 pub fn default_session_storage(config: &SkillsConfig) -> Result<Box<dyn SessionCredentialStorage>> {
+    default_session_storage_for_bb_home(config.bb_home.clone())
+}
+
+pub fn stored_session_credential_header_value(
+    profile: &str,
+    server_url: &str,
+    bb_home: PathBuf,
+) -> Result<Option<String>> {
+    #[cfg(not(target_os = "macos"))]
+    if std::env::var_os(BB_AUTH_STORAGE_ENV_VAR).is_none()
+        && std::env::var_os(BB_AUTH_STORAGE_FILE_ENV_VAR).is_none()
+    {
+        return Ok(None);
+    }
+
+    let storage = default_session_storage_for_bb_home(bb_home)?;
+    let storage_key = SessionStorageKey::new(profile, server_url);
+    Ok(storage
+        .get(&storage_key)?
+        .and_then(|credential| credential.session_credential_header_value()))
+}
+
+fn default_session_storage_for_bb_home(
+    bb_home: PathBuf,
+) -> Result<Box<dyn SessionCredentialStorage>> {
     match std::env::var(BB_AUTH_STORAGE_ENV_VAR).as_deref() {
         Ok("keyring") => Ok(Box::new(KeyringSessionCredentialStorage)),
         #[cfg(any(debug_assertions, test))]
         Ok("memory") => Ok(Box::new(InMemorySessionCredentialStorage::default())),
-        Ok("file") => file_storage_from_env(config),
+        Ok("file") => file_storage_from_env(&bb_home),
         Ok(value) if value.starts_with("file:") => {
             let path = value.trim_start_matches("file:");
             if path.is_empty() {
@@ -122,10 +151,10 @@ fn supported_storage_values() -> &'static str {
     }
 }
 
-fn file_storage_from_env(config: &SkillsConfig) -> Result<Box<dyn SessionCredentialStorage>> {
+fn file_storage_from_env(bb_home: &std::path::Path) -> Result<Box<dyn SessionCredentialStorage>> {
     let path = std::env::var_os(BB_AUTH_STORAGE_FILE_ENV_VAR)
         .map(PathBuf::from)
-        .unwrap_or_else(|| config.bb_home.join("auth-sessions.json"));
+        .unwrap_or_else(|| bb_home.join("auth-sessions.json"));
     Ok(Box::new(FileSessionCredentialStorage::new(path)))
 }
 

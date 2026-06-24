@@ -602,6 +602,7 @@ mod tests {
             playpen: Some("baxen".to_string()),
             goosemcp_playpen: None,
             timeout_secs: 600.0,
+            session_credential: None,
         }
     }
 

@@ -6,6 +6,7 @@ mod common;
 use std::fs;
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 #[cfg(unix)]
 use common::temp_test_dir;
@@ -17,6 +18,18 @@ use common::{
     write_extensions_catalog, MockResponse, MockServer, CALL_TOOL_PATH, LIST_EXTENSIONS_PATH,
     LIST_TOOLS_PATH,
 };
+
+fn browser_auth_storage_key(profile: &str, server_url: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(profile.as_bytes());
+    hasher.update([0]);
+    hasher.update(server_url.trim_end_matches('/').as_bytes());
+    hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 #[test]
 fn tool_help_surfaces_schema_derived_flags() {
@@ -326,6 +339,69 @@ fn tool_invocation_forwards_sts_access_token_as_identity_token() {
 }
 
 #[test]
+fn tool_invocation_forwards_stored_session_credential_to_kgoose_calls() {
+    let server = MockServer::start(vec![
+        list_tools_response("utils", calculate_tool_schema(false)),
+        MockResponse::json(json!({
+            "content": [{"text": {"text": "{\"sum\":5}"}}],
+            "is_error": false
+        })),
+    ]);
+    let temp = std::env::temp_dir().join(format!("sq-kgoose-cli-session-{}", unique_suffix()));
+    fs::create_dir_all(&temp).expect("create temp dir");
+    let storage_path = temp.join("auth-sessions.json");
+    let storage_key =
+        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+    fs::write(
+        &storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": "stored-kgoose-session",
+                "expiresAt": "2026-06-15T00:00:00Z"
+            }
+        }))
+        .expect("serialize storage"),
+    )
+    .expect("write auth storage");
+
+    let output = server
+        .command()
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .args([
+            "utils",
+            "calculate",
+            "--numbers",
+            "2",
+            "3",
+            "--operation",
+            "add",
+        ])
+        .output()
+        .expect("run agent-tools tool");
+    let requests = server.finish();
+    let (_stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-kgoose-session")
+    );
+    assert_eq!(
+        requests[1]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-kgoose-session")
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn tool_invocation_prefers_structured_output_over_duplicate_content() {
     let server = MockServer::start(vec![
         list_tools_response("utils", calculate_tool_schema(false)),
@@ -474,6 +550,36 @@ fn optional_boolean_defaults_do_not_crash_invocation() {
         .expect("parse arguments_json"),
         json!({"channel_id": "C123"})
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn root_metadata_commands_do_not_read_auth_storage() {
+    let temp = temp_test_dir("agent-tools-metadata-auth-storage");
+    let malformed_storage = temp.join("auth-sessions.json");
+    fs::write(&malformed_storage, "not json").expect("write malformed auth storage");
+
+    for args in [
+        vec!["--version"],
+        vec!["--summary"],
+        vec!["--describe-commands"],
+    ] {
+        let server = MockServer::start(vec![]);
+        let output = server
+            .command()
+            .env("BB_AUTH_STORAGE", "file")
+            .env("BB_AUTH_STORAGE_FILE", &malformed_storage)
+            .args(args)
+            .output()
+            .expect("run metadata command");
+        let requests = server.finish();
+        let (_stdout, stderr) = output_text(&output);
+
+        assert!(output.status.success(), "stderr was: {stderr}");
+        assert!(requests.is_empty(), "requests were: {requests:#?}");
+    }
+
+    fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
 #[test]
