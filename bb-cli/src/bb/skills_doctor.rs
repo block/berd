@@ -11,7 +11,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::skills_api::MarketplaceClient;
-use super::skills_config::{SkillsConfig, SkillsFileConfig};
+use super::skills_config::{kgoose_service_url, SkillsConfig, SkillsFileConfig};
 use super::skills_install::{find_orphaned_work_dirs, link_targets, read_installed};
 use super::skills_models::{CapabilitiesResponse, InstalledSkillMetadata, MeResponse};
 use super::skills_targets::{inspect_link, LinkState, Scope, TargetRegistry};
@@ -89,6 +89,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
     // Server reachable + capabilities, distinguishing auth failures from the
     // server being down.
     let mut registry_from_server: Option<TargetRegistry> = None;
+    let service_url = kgoose_service_url(&config.kgoose_base_url);
     match MarketplaceClient::new(config) {
         Ok(client) => {
             if client.has_auth() {
@@ -98,7 +99,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
             }
             match client.get_json::<CapabilitiesResponse>("/v1/marketplace/capabilities") {
                 Ok(capabilities) => {
-                    report.add("server", CheckStatus::Pass, config.server_url.clone());
+                    report.add("server", CheckStatus::Pass, service_url.clone());
                     if capabilities.target_registry.is_empty() {
                         report.add(
                             "capabilities",
@@ -135,7 +136,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
                     report.add(
                         "server",
                         CheckStatus::Fail,
-                        format!("{} ({}): {message}", status_check.1, config.server_url),
+                        format!("{} ({}): {message}", status_check.1, service_url),
                     );
                     report.add(
                         "capabilities",
@@ -322,7 +323,7 @@ pub fn run_doctor(config: &SkillsConfig, fix: bool) -> Result<(DoctorReport, Val
         "local_dev": config.local_dev,
         "profile": config.profile,
         "config_path": config.config_path,
-        "server_url": config.server_url,
+        "kgoose_base_url": config.kgoose_base_url,
         "bb_home": config.bb_home,
         "bb_skills_home": config.skills_home,
         "installed_count": installed.len(),

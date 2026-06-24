@@ -13,17 +13,19 @@ use anyhow::{Context, Result};
 use clap::ArgMatches;
 use serde::{Deserialize, Serialize};
 
+use crate::kgoose::DEFAULT_KGOOSE_BASE_URL;
+
 use super::display::Style;
 use super::skills_models::SkillsPreferences;
 
-pub const DEFAULT_SKILLS_SERVER_URL: &str = "http://localhost:8080";
+pub const KGOOSE_BASE_URL_ENV_VAR: &str = "KGOOSE_BASE_URL";
+pub const KGOOSE_SERVICE_PATH: &str = "/cash-app/goose";
 pub const LOCAL_DEV_CONFIG_FILE_NAME: &str = "bb-local-dev-config.yaml";
 pub const BB_HOME_ENV_VAR: &str = "BB_HOME";
 pub const BB_SKILLS_HOME_ENV_VAR: &str = "BB_SKILLS_HOME";
 pub const BB_SKILLS_PACKAGES_DIR_ENV_VAR: &str = "BB_SKILLS_PACKAGES_DIR";
 pub const BB_SKILLS_CONFIG_ENV_VAR: &str = "BB_SKILLS_CONFIG";
 pub const BB_SKILLS_PROFILE_ENV_VAR: &str = "BB_SKILLS_PROFILE";
-pub const BB_SKILLS_SERVER_URL_ENV_VAR: &str = "BB_SKILLS_SERVER_URL";
 pub const BB_KGOOSE_PLAYPEN_ENV_VAR: &str = "BB_KGOOSE_PLAYPEN";
 pub const KGOOSE_PLAYPEN_ENV_VAR: &str = "KGOOSE_PLAYPEN";
 pub const DEFAULT_CONFIG_FILE_NAME: &str = "skills.yaml";
@@ -33,7 +35,7 @@ pub const PREFERENCES_FILE_NAME: &str = "config.yaml";
 
 #[derive(Debug, Clone)]
 pub struct SkillsConfig {
-    pub server_url: String,
+    pub kgoose_base_url: String,
     pub playpen: Option<String>,
     pub bb_home: PathBuf,
     pub skills_home: PathBuf,
@@ -77,14 +79,9 @@ impl SkillsConfig {
             .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
         let profile_config = file_config.profiles.get(&profile);
 
-        let explicit_server_url = matches.get_one::<String>("skills-server-url").cloned();
-        let env_server_url = read_optional_env(BB_SKILLS_SERVER_URL_ENV_VAR)?;
-        let profile_server_url = profile_config.and_then(|profile| profile.server_url.clone());
-        let server_url = explicit_server_url
-            .or_else(|| local_dev.then(|| profile_server_url.clone()).flatten())
-            .or(env_server_url)
-            .or(profile_server_url)
-            .unwrap_or_else(|| DEFAULT_SKILLS_SERVER_URL.to_string());
+        let kgoose_base_url = read_optional_env(KGOOSE_BASE_URL_ENV_VAR)?
+            .map(|value| normalize_kgoose_base_url(&value))
+            .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string());
         let playpen = read_optional_env(BB_KGOOSE_PLAYPEN_ENV_VAR)?
             .or(read_optional_env(KGOOSE_PLAYPEN_ENV_VAR)?)
             .map(|value| value.trim().to_string())
@@ -130,7 +127,7 @@ impl SkillsConfig {
         );
 
         Ok(Self {
-            server_url,
+            kgoose_base_url,
             playpen,
             bb_home,
             skills_home,
@@ -242,8 +239,6 @@ impl SkillsFileConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SkillsProfileConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub server_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub skills_home: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub packages_dir: Option<String>,
@@ -270,4 +265,21 @@ pub fn read_optional_env(name: &str) -> Result<Option<String>> {
         Err(env::VarError::NotPresent) => Ok(None),
         Err(err) => anyhow::bail!("failed to read {name}: {err}"),
     }
+}
+
+pub fn normalize_kgoose_base_url(value: &str) -> String {
+    value
+        .trim()
+        .trim_end_matches('/')
+        .strip_suffix(KGOOSE_SERVICE_PATH)
+        .unwrap_or_else(|| value.trim().trim_end_matches('/'))
+        .to_string()
+}
+
+pub fn kgoose_service_url(base_url: &str) -> String {
+    format!(
+        "{}{}",
+        normalize_kgoose_base_url(base_url),
+        KGOOSE_SERVICE_PATH
+    )
 }

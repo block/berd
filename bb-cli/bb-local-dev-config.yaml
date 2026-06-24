@@ -8,5 +8,4 @@
 current_profile: local-dev
 profiles:
   local-dev:
-    server_url: http://localhost:8080
     skills_home: .bb/local-dev/skills

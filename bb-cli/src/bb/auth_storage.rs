@@ -10,7 +10,7 @@ use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use super::skills_config::SkillsConfig;
+use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 #[cfg(target_os = "macos")]
 const KEYRING_SERVICE: &str = "com.squareup.builderbot.cli-auth";
@@ -34,7 +34,10 @@ impl SessionStorageKey {
     }
 
     pub fn from_config(config: &SkillsConfig) -> Self {
-        Self::new(config.profile.clone(), config.server_url.clone())
+        Self::new(
+            config.profile.clone(),
+            kgoose_service_url(&config.kgoose_base_url),
+        )
     }
 
     #[cfg(target_os = "macos")]

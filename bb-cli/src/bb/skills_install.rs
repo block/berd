@@ -12,7 +12,7 @@ use serde_json::{json, Value};
 use super::display::stdin_is_tty;
 use super::skills_api::{exit_codes, failure, MarketplaceClient};
 use super::skills_archive::{extract_zip_safely, sha256_hex, verify_artifact};
-use super::skills_config::{SkillsConfig, META_FILE_NAME};
+use super::skills_config::{kgoose_service_url, SkillsConfig, META_FILE_NAME};
 use super::skills_models::{
     InstallOperation, InstallPlanResponse, InstalledSkillMetadata, InstalledSkillRequest,
     MeResponse, SkillDetail, Warning,
@@ -387,7 +387,7 @@ fn execute_install_operation(
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
         tenant_id: tenant_id.unwrap_or("unknown").to_string(),
-        server_url: config.server_url.clone(),
+        server_url: kgoose_service_url(&config.kgoose_base_url),
         slug: slug.clone(),
         version_id: operation.skill.version_id.clone(),
         content_sha256: operation.skill.content_sha256.clone(),
@@ -623,7 +623,7 @@ pub fn install_local_path(
     let metadata = InstalledSkillMetadata {
         schema_version: "bb-skills-install/v1".to_string(),
         tenant_id: "local".to_string(),
-        server_url: config.server_url.clone(),
+        server_url: kgoose_service_url(&config.kgoose_base_url),
         slug: slug.clone(),
         version_id: format!("local-{}", &content_sha[..12]),
         content_sha256: content_sha,

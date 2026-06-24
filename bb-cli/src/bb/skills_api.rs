@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use super::auth::SESSION_CREDENTIAL_HEADER;
 use super::auth_storage::stored_session_credential_header_value;
 use super::display::Style;
-use super::skills_config::SkillsConfig;
+use super::skills_config::{kgoose_service_url, SkillsConfig};
 use super::skills_models::{BundlePage, BundleSummary, SkillPage, SkillSummary};
 
 /// Documented `bb skills` exit codes (see `bb skills --help`).
@@ -121,7 +121,7 @@ impl MarketplaceClient {
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         let session_credential = stored_session_credential_header_value(
             &config.profile,
-            &config.server_url,
+            &kgoose_service_url(&config.kgoose_base_url),
             config.bb_home.clone(),
         )?;
         if let Some(session_credential) = session_credential.as_deref() {
@@ -139,7 +139,7 @@ impl MarketplaceClient {
             );
         }
         Ok(Self {
-            base_url: config.server_url.trim_end_matches('/').to_string(),
+            base_url: kgoose_service_url(&config.kgoose_base_url),
             client: Client::builder()
                 .default_headers(headers)
                 .build()

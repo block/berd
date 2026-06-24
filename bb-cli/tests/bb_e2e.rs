@@ -314,7 +314,8 @@ fn bb_skills_list_fetches_marketplace_skills_and_bundle_membership() {
     let server = MockServer::start(vec![skill_page_response(), starter_pack_bundles_response()]);
 
     let output = bb_command()
-        .args(["--server-url", &server.base_url, "skills", "list", "--json"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list", "--json"])
         .output()
         .expect("run bb skills list");
     let requests = server.finish();
@@ -328,9 +329,15 @@ fn bb_skills_list_fetches_marketplace_skills_and_bundle_membership() {
     assert_eq!(response["items"][0]["bundles"], json!(["starter-pack"]));
     assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/v1/marketplace/skills?limit=5000");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/skills?limit=5000"
+    );
     assert_eq!(requests[1].method, "GET");
-    assert_eq!(requests[1].path, "/v1/marketplace/bundles?limit=5000");
+    assert_eq!(
+        requests[1].path,
+        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+    );
 }
 
 #[test]
@@ -338,7 +345,8 @@ fn bb_skills_list_formats_marketplace_skills_for_humans() {
     let server = MockServer::start(vec![skill_page_response(), starter_pack_bundles_response()]);
 
     let output = bb_command()
-        .args(["--server-url", &server.base_url, "skills", "list"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list"])
         .output()
         .expect("run bb skills list");
     let _requests = server.finish();
@@ -402,7 +410,8 @@ fn bb_skills_list_groups_installed_and_available_skills() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args(["--server-url", &server.base_url, "skills", "list"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list"])
         .output()
         .expect("run bb skills list");
     let _requests = server.finish();
@@ -440,14 +449,8 @@ fn bb_skills_search_passes_query_filter() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
 
     let output = bb_command()
-        .args([
-            "--server-url",
-            &server.base_url,
-            "skills",
-            "search",
-            "builder",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "search", "builder", "--json"])
         .output()
         .expect("run bb skills search");
     let requests = server.finish();
@@ -459,9 +462,12 @@ fn bb_skills_search_passes_query_filter() {
     assert_eq!(requests.len(), 2);
     assert_eq!(
         requests[0].path,
-        "/v1/marketplace/skills?limit=5000&query=builder"
+        "/cash-app/goose/v1/marketplace/skills?limit=5000&query=builder"
     );
-    assert_eq!(requests[1].path, "/v1/marketplace/bundles?limit=5000");
+    assert_eq!(
+        requests[1].path,
+        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+    );
 }
 
 #[test]
@@ -469,14 +475,8 @@ fn bb_skills_show_prints_skill_detail() {
     let server = MockServer::start(vec![skill_detail_response()]);
 
     let output = bb_command()
-        .args([
-            "--server-url",
-            &server.base_url,
-            "skills",
-            "show",
-            "builderbot-tools",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "show", "builderbot-tools", "--json"])
         .output()
         .expect("run bb skills show");
     let requests = server.finish();
@@ -490,7 +490,10 @@ fn bb_skills_show_prints_skill_detail() {
         json!("ver_builtin_builderbot_tools_0_1_0")
     );
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/marketplace/skills/builderbot-tools");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/skills/builderbot-tools"
+    );
 }
 
 #[test]
@@ -509,13 +512,8 @@ fn bb_skills_bundles_lists_bundles() {
     }))]);
 
     let output = bb_command()
-        .args([
-            "--server-url",
-            &server.base_url,
-            "skills",
-            "bundles",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "bundles", "--json"])
         .output()
         .expect("run bb skills bundles");
     let requests = server.finish();
@@ -525,14 +523,17 @@ fn bb_skills_bundles_lists_bundles() {
     let response = serde_json::from_str::<Value>(&stdout).expect("parse bundles output");
     assert_eq!(response["items"][0]["slug"], json!("starter-pack"));
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/marketplace/bundles?limit=5000");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/bundles?limit=5000"
+    );
 }
 
 // ---------------------------------------------------------------------------
 // config & auth resolution
 
 #[test]
-fn bb_skills_profile_config_supplies_server_url_and_ignores_legacy_auth() {
+fn bb_skills_ignores_legacy_profile_server_url_and_auth() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
     let temp = temp_test_dir("bb-skills-profile-config");
     let bb_home = temp.join("bb-home");
@@ -548,6 +549,7 @@ fn bb_skills_profile_config_supplies_server_url_and_ignores_legacy_auth() {
 
     let output = bb_command()
         .env("BB_HOME", &bb_home)
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args(["skills", "list", "--json"])
         .output()
         .expect("run bb skills list");
@@ -578,7 +580,8 @@ fn bb_skills_list_uses_stored_session_credential_despite_legacy_profile_auth() {
         ),
     )
     .expect("write skills config");
-    let storage_key = browser_auth_storage_key("local", &server.base_url);
+    let storage_key =
+        browser_auth_storage_key("local", &format!("{}/cash-app/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -595,6 +598,7 @@ fn bb_skills_list_uses_stored_session_credential_despite_legacy_profile_auth() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args(["skills", "list", "--json"])
         .output()
         .expect("run bb skills list");
@@ -629,15 +633,13 @@ fn bb_local_dev_discovers_checked_in_config_from_ancestor() {
     fs::create_dir_all(&child).expect("create nested current dir");
     fs::write(
         temp.join("bb-local-dev-config.yaml"),
-        format!(
-            "current_profile: local-dev\nprofiles:\n  local-dev:\n    server_url: {}\n    skills_home: .bb/local-dev/skills\n",
-            server_base_url
-        ),
+        "current_profile: local-dev\nprofiles:\n  local-dev:\n    skills_home: .bb/local-dev/skills\n",
     )
     .expect("write local dev config");
 
     let output = bb_command()
         .current_dir(&child)
+        .env("KGOOSE_BASE_URL", &server_base_url)
         .args(["--local-dev", "skills", "doctor", "--json"])
         .output()
         .expect("run bb local dev doctor");
@@ -648,14 +650,17 @@ fn bb_local_dev_discovers_checked_in_config_from_ancestor() {
     let response = serde_json::from_str::<Value>(&stdout).expect("parse doctor output");
     assert_eq!(response["local_dev"], json!(true));
     assert_eq!(response["profile"], json!("local-dev"));
-    assert_eq!(response["server_url"], json!(server_base_url));
+    assert_eq!(response["kgoose_base_url"], json!(server_base_url));
     assert!(response["bb_skills_home"]
         .as_str()
         .expect("bb_skills_home string")
         .ends_with(".bb/local-dev/skills"));
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/v1/marketplace/capabilities");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/capabilities"
+    );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
@@ -665,7 +670,8 @@ fn bb_skills_env_playpen_adds_baggage_header() {
 
     let output = bb_command()
         .env("BB_KGOOSE_PLAYPEN", "baxen")
-        .args(["--server-url", &server.base_url, "skills", "list", "--json"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list", "--json"])
         .output()
         .expect("run bb skills list");
     let requests = server.finish();
@@ -714,7 +720,8 @@ fn bb_auth_login_uses_valid_stored_file_session() {
         "hasAccessToken": true,
         "hasRefreshToken": true
     }))]);
-    let storage_key = browser_auth_storage_key("default", &server.base_url);
+    let storage_key =
+        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -731,7 +738,8 @@ fn bb_auth_login_uses_valid_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args(["--server-url", &server.base_url, "auth", "login", "--json"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["auth", "login", "--json"])
         .output()
         .expect("run bb auth login");
     let requests = server.finish();
@@ -745,7 +753,7 @@ fn bb_auth_login_uses_valid_stored_file_session() {
     assert_eq!(response["credentialPrefix"], Value::Null);
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/auth/me");
+    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
     assert_eq!(
         requests[0]
             .headers
@@ -770,7 +778,8 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
         "hasAccessToken": true,
         "hasRefreshToken": true
     }))]);
-    let storage_key = browser_auth_storage_key("default", &server.base_url);
+    let storage_key =
+        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -788,7 +797,8 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .env("BB_KGOOSE_PLAYPEN", "baxen")
-        .args(["--server-url", &server.base_url, "auth", "login", "--json"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["auth", "login", "--json"])
         .output()
         .expect("run bb auth login");
     let requests = server.finish();
@@ -796,7 +806,7 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
 
     assert!(output.status.success(), "stderr was: {stderr}");
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/auth/me");
+    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
     assert_eq!(
         requests[0].headers.get("baggage").map(String::as_str),
         Some("kgoose-builderbot-playpen=baxen")
@@ -832,7 +842,8 @@ fn bb_auth_logout_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args(["--server-url", server_url, "auth", "logout", "--json"])
+        .env("KGOOSE_BASE_URL", "http://localhost:5173")
+        .args(["auth", "logout", "--json"])
         .output()
         .expect("run bb auth logout");
     let (stdout, stderr) = output_text(&output);
@@ -850,7 +861,8 @@ fn bb_auth_logout_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .args(["--server-url", server_url, "auth", "logout", "--json"])
+        .env("KGOOSE_BASE_URL", "http://localhost:5173")
+        .args(["auth", "logout", "--json"])
         .output()
         .expect("run bb auth logout again");
     let (stdout, stderr) = output_text(&output);
@@ -884,15 +896,7 @@ fn bb_config_set_and_get_roundtrip() {
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "config",
-            "set",
-            "channel",
-            "beta",
-            "--json",
-        ])
+        .args(["config", "set", "channel", "beta", "--json"])
         .output()
         .expect("run bb config set");
     let (set_stdout, set_stderr) = output_text(&set);
@@ -904,14 +908,7 @@ fn bb_config_set_and_get_roundtrip() {
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "config",
-            "get",
-            "channel",
-            "--json",
-        ])
+        .args(["config", "get", "channel", "--json"])
         .output()
         .expect("run bb config get");
     let (get_stdout, get_stderr) = output_text(&get);
@@ -943,15 +940,7 @@ fn bb_skills_auth_is_removed_but_config_alias_still_works() {
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "skills",
-            "config",
-            "get",
-            "channel",
-            "--json",
-        ])
+        .args(["skills", "config", "get", "channel", "--json"])
         .output()
         .expect("run bb skills config get");
     let (get_stdout, get_stderr) = output_text(&get);
@@ -974,7 +963,8 @@ fn bb_skills_list_surfaces_marketplace_error_envelope() {
     )]);
 
     let output = bb_command()
-        .args(["--server-url", &server.base_url, "skills", "list"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list"])
         .output()
         .expect("run bb skills list");
     let _requests = server.finish();
@@ -1008,7 +998,8 @@ fn bb_skills_list_json_errors_are_structured() {
     )]);
 
     let output = bb_command()
-        .args(["--server-url", &server.base_url, "skills", "list", "--json"])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "list", "--json"])
         .output()
         .expect("run bb skills list");
     let _requests = server.finish();
@@ -1058,9 +1049,8 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
         .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1116,9 +1106,15 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
 
     assert_eq!(requests.len(), 4);
     assert_eq!(requests[0].method, "GET");
-    assert_eq!(requests[0].path, "/v1/marketplace/capabilities");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/capabilities"
+    );
     assert_eq!(requests[1].method, "POST");
-    assert_eq!(requests[1].path, "/v1/marketplace/install-plan");
+    assert_eq!(
+        requests[1].path,
+        "/cash-app/goose/v1/marketplace/install-plan"
+    );
     assert_eq!(
         requests[1].body["targets"][0]["slug"],
         json!("builderbot-tools")
@@ -1128,11 +1124,14 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
         json!(["agents"])
     );
     assert_eq!(requests[2].method, "GET");
-    assert_eq!(requests[2].path, "/v1/marketplace/skills/builderbot-tools");
+    assert_eq!(
+        requests[2].path,
+        "/cash-app/goose/v1/marketplace/skills/builderbot-tools"
+    );
     assert_eq!(requests[3].method, "GET");
     assert_eq!(
         requests[3].path,
-        "/v1/marketplace/artifacts/art_builderbot_tools/download"
+        "/cash-app/goose/v1/marketplace/artifacts/art_builderbot_tools/download"
     );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
@@ -1164,9 +1163,8 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
         // Canonical packages dir == the registry's agents directory, like the
         // real default (`~/.agents/skills`).
         .env("BB_SKILLS_PACKAGES_DIR", &agents_dir)
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1202,15 +1200,8 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", &agents_dir)
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "skills",
-            "remove",
-            "builderbot-tools",
-            "--yes",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
+        .args(["skills", "remove", "builderbot-tools", "--yes", "--json"])
         .output()
         .expect("run bb skills remove");
     let (stdout, stderr) = output_text(&output);
@@ -1239,9 +1230,8 @@ fn bb_skills_install_surfaces_install_plan_error_envelope() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1295,9 +1285,8 @@ fn bb_skills_install_surfaces_artifact_error_envelope() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1344,9 +1333,8 @@ fn bb_skills_install_refuses_checksum_mismatch() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1397,9 +1385,8 @@ fn bb_skills_install_refuses_unsafe_zip_paths() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1450,9 +1437,8 @@ fn bb_skills_install_refuses_unmanaged_package_overwrite() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1506,9 +1492,8 @@ fn bb_skills_install_rejects_unresolvable_version_pin() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "builderbot-tools",
@@ -1549,9 +1534,8 @@ fn bb_skills_install_local_path_installs_without_marketplace() {
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .current_dir(&temp)
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args([
-            "--server-url",
-            &server.base_url,
             "skills",
             "install",
             "./local-skill",
@@ -1603,14 +1587,8 @@ fn bb_skills_update_reports_up_to_date_skills() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            &server.base_url,
-            "skills",
-            "update",
-            "--yes",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "update", "--yes", "--json"])
         .output()
         .expect("run bb skills update");
     let requests = server.finish();
@@ -1621,7 +1599,10 @@ fn bb_skills_update_reports_up_to_date_skills() {
     assert_eq!(response["up_to_date"], json!(["builderbot-tools"]));
     assert_eq!(response["installed"], json!([]));
     assert_eq!(requests.len(), 2);
-    assert_eq!(requests[1].path, "/v1/marketplace/install-plan");
+    assert_eq!(
+        requests[1].path,
+        "/cash-app/goose/v1/marketplace/install-plan"
+    );
     assert_eq!(
         requests[1].body["installed"][0]["slug"],
         json!("builderbot-tools")
@@ -1640,13 +1621,8 @@ fn bb_skills_installed_reports_update_availability() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            &server.base_url,
-            "skills",
-            "installed",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["skills", "installed", "--json"])
         .output()
         .expect("run bb skills installed");
     let requests = server.finish();
@@ -1658,7 +1634,10 @@ fn bb_skills_installed_reports_update_availability() {
     // Local content sha matches the marketplace's latest -> no update pending.
     assert_eq!(response["items"][0]["update_available"], json!(false));
     assert_eq!(requests.len(), 1);
-    assert_eq!(requests[0].path, "/v1/marketplace/skills?limit=5000");
+    assert_eq!(
+        requests[0].path,
+        "/cash-app/goose/v1/marketplace/skills?limit=5000"
+    );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
@@ -1681,14 +1660,8 @@ fn bb_skills_which_reports_link_state() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "skills",
-            "which",
-            "builderbot-tools",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
+        .args(["skills", "which", "builderbot-tools", "--json"])
         .output()
         .expect("run bb skills which");
     let (stdout, stderr) = output_text(&output);
@@ -1720,15 +1693,8 @@ fn bb_skills_remove_deletes_links_and_package() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "skills",
-            "remove",
-            "builderbot-tools",
-            "--yes",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
+        .args(["skills", "remove", "builderbot-tools", "--yes", "--json"])
         .output()
         .expect("run bb skills remove");
     let (stdout, stderr) = output_text(&output);
@@ -1755,13 +1721,8 @@ fn bb_skills_doctor_offline_reports_server_failure() {
         .env("BB_HOME", temp.join("bb-home"))
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
-        .args([
-            "--server-url",
-            "http://127.0.0.1:9",
-            "skills",
-            "doctor",
-            "--json",
-        ])
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
+        .args(["skills", "doctor", "--json"])
         .output()
         .expect("run bb skills doctor");
     let (stdout, stderr) = output_text(&output);

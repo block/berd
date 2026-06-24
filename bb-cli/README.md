@@ -65,11 +65,12 @@ cargo build --locked --bin bb
 ```
 
 When iterating against the sibling `../cash-server/kgoose`
-service on `localhost:8080`, use the checked-in local-dev profile:
+service on `localhost:8080`, use the checked-in local-dev profile and point
+`KGOOSE_BASE_URL` at the pure base URL:
 
 ```bash
-./target/debug/bb --local-dev skills doctor
-./target/debug/bb --local-dev skills list
+KGOOSE_BASE_URL=http://localhost:8080 ./target/debug/bb --local-dev skills doctor
+KGOOSE_BASE_URL=http://localhost:8080 ./target/debug/bb --local-dev skills list
 ```
 
 For browser-based `bb auth`, see [BuilderBot Auth Flow](docs/bb-auth-flow.md)

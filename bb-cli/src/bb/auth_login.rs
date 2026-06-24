@@ -16,14 +16,14 @@ use url::Url;
 
 use super::auth::SESSION_CREDENTIAL_HEADER;
 use super::auth_storage::{SessionCredentialStorage, SessionStorageKey, StoredSessionCredential};
-use super::skills_config::SkillsConfig;
+use super::skills_config::{kgoose_service_url, SkillsConfig};
 
 const CALLBACK_PATH: &str = "/callback";
 const CLI_USER_AGENT: &str = "sq-kgoose-bb-auth-login";
 
 #[derive(Debug, Serialize)]
 pub struct BrowserLoginSummary {
-    pub server_url: String,
+    pub kgoose_base_url: String,
     pub storage: String,
     pub source: BrowserLoginCredentialSource,
     pub subject: Option<String>,
@@ -70,6 +70,7 @@ pub fn run_browser_login(
     config: &SkillsConfig,
     storage: &dyn SessionCredentialStorage,
 ) -> Result<BrowserLoginSummary> {
+    let service_url = kgoose_service_url(&config.kgoose_base_url);
     let client = Client::builder()
         .redirect(Policy::none())
         .timeout(Duration::from_secs(30))
@@ -82,7 +83,7 @@ pub fn run_browser_login(
             if let Some(me) = verify_session_credential(
                 &client,
                 config.playpen.as_deref(),
-                &config.server_url,
+                &service_url,
                 &stored,
             )? {
                 auth_info(
@@ -93,7 +94,7 @@ pub fn run_browser_login(
                     ),
                 );
                 return Ok(BrowserLoginSummary {
-                    server_url: config.server_url.clone(),
+                    kgoose_base_url: config.kgoose_base_url.clone(),
                     storage: storage.kind().to_string(),
                     source: BrowserLoginCredentialSource::Stored,
                     subject: me.subject,
@@ -126,7 +127,7 @@ pub fn run_browser_login(
     let server = Server::http("127.0.0.1:0")
         .map_err(|error| anyhow!("listen on loopback callback port: {error}"))?;
     let callback_url = format!("http://{}{}", server.server_addr(), CALLBACK_PATH);
-    let login_url = login_url(&config.server_url, &callback_url)?;
+    let login_url = login_url(&service_url, &callback_url)?;
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -150,12 +151,7 @@ pub fn run_browser_login(
     let code = rx
         .recv()
         .context("loopback auth server stopped before login completed")??;
-    let exchange = exchange_login_code(
-        &client,
-        config.playpen.as_deref(),
-        &config.server_url,
-        &code,
-    )?;
+    let exchange = exchange_login_code(&client, config.playpen.as_deref(), &service_url, &code)?;
     let stored = StoredSessionCredential {
         session_credential: exchange.session_credential.clone(),
         expires_at: Some(exchange.expires_at.clone()),
@@ -170,7 +166,7 @@ pub fn run_browser_login(
     );
 
     Ok(BrowserLoginSummary {
-        server_url: config.server_url.clone(),
+        kgoose_base_url: config.kgoose_base_url.clone(),
         storage: storage.kind().to_string(),
         source: BrowserLoginCredentialSource::BrowserLogin,
         subject: exchange.subject,

@@ -410,13 +410,6 @@ fn yes_flag() -> Arg {
 pub fn skills_global_args(command: Command) -> Command {
     command
         .arg(
-            Arg::new("skills-server-url")
-                .long("server-url")
-                .value_name("URL")
-                .global(true)
-                .help("BuilderBot marketplace server URL"),
-        )
-        .arg(
             Arg::new("skills-config")
                 .long("config")
                 .value_name("PATH")
@@ -536,13 +529,13 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         if !config.json {
             println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
-            println!("  server: {}", config.server_url);
+            println!("  kgoose base: {}", config.kgoose_base_url);
             println!("  authenticated: no");
             return Ok(());
         }
         return print_json(&json!({
             "authenticated": false,
-            "server_url": config.server_url,
+            "kgoose_base_url": config.kgoose_base_url,
             "profile": config.profile,
         }));
     }
@@ -551,7 +544,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
     if !config.json {
         println!("BuilderBot CLI auth");
         println!("  profile: {}", config.profile);
-        println!("  server: {}", config.server_url);
+        println!("  kgoose base: {}", config.kgoose_base_url);
         println!("  authenticated: yes");
         println!("  tenant: {}", me.tenant_id);
         println!("  subject: {}", me.subject);
@@ -562,7 +555,7 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
     }
     print_json(&json!({
         "authenticated": true,
-        "server_url": config.server_url,
+        "kgoose_base_url": config.kgoose_base_url,
         "profile": config.profile,
         "subject": me.subject,
         "tenant_id": me.tenant_id,
@@ -585,7 +578,7 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
             .style
             .success("BuilderBot CLI auth browser login succeeded"),
     }
-    println!("  server: {}", summary.server_url);
+    println!("  kgoose base: {}", summary.kgoose_base_url);
     println!("  storage: {}", summary.storage);
     if let Some(expires_at) = &summary.expires_at {
         println!("  expires at: {expires_at}");
@@ -614,7 +607,7 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     if config.json {
         return print_json(&json!({
             "profile": config.profile,
-            "server_url": config.server_url,
+            "kgoose_base_url": config.kgoose_base_url,
             "storage": storage.kind(),
             "removed": removed,
         }));
@@ -628,7 +621,7 @@ fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
         println!("No BuilderBot CLI browser auth session was stored");
     }
     println!("  profile: {}", config.profile);
-    println!("  server: {}", config.server_url);
+    println!("  kgoose base: {}", config.kgoose_base_url);
     println!("  storage: {}", storage.kind());
     Ok(())
 }
@@ -1481,7 +1474,7 @@ fn doctor(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     println!("BuilderBot skills doctor");
     println!("  profile: {}", config.profile);
     println!("  local dev: {}", yes_no(config.local_dev));
-    println!("  server: {}", config.server_url);
+    println!("  kgoose base: {}", config.kgoose_base_url);
     println!("  config: {}", config.config_path.display());
     println!("  bb home: {}", config.bb_home.display());
     println!("  skills home: {}", config.skills_home.display());

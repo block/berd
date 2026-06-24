@@ -186,7 +186,6 @@ pub fn bb_command() -> Command {
         .env_remove("BB_SKILLS_PACKAGES_DIR")
         .env_remove("BB_SKILLS_CONFIG")
         .env_remove("BB_SKILLS_PROFILE")
-        .env_remove("BB_SKILLS_SERVER_URL")
         .env_remove("BB_KGOOSE_PLAYPEN")
         .env_remove("BB_AUTH_STORAGE")
         .env_remove("BB_AUTH_STORAGE_FILE")
