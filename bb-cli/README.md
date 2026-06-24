@@ -64,7 +64,7 @@ cargo build --locked --bin bb
 ./target/debug/bb skills --help
 ```
 
-When iterating against the sibling `../cash-server/builderbot-marketplace`
+When iterating against the sibling `../cash-server/kgoose`
 service on `localhost:8080`, use the checked-in local-dev profile:
 
 ```bash
