@@ -127,6 +127,16 @@ describe("shortcut command definitions", () => {
     ]);
   });
 
+  it("registers chat.archiveSession as configurable, discoverable, mod+e", () => {
+    const command = getShortcutCommand("chat.archiveSession");
+    expect(command).toBeDefined();
+    expect(command?.configurable).toBe(true);
+    expect(command?.discoverable).toBe(true);
+    expect(getShortcutBindings("chat.archiveSession")).toEqual([
+      { shortcut: "meta+e" },
+    ]);
+  });
+
   it("registers the design system inspector shortcuts on macOS", () => {
     const visibilityCommand = getShortcutCommand(
       "view.toggleDesignSystemInspector",

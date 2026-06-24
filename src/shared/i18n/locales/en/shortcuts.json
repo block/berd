@@ -16,6 +16,7 @@
     "openSettings": "Open settings",
     "quickSwitch": "Switch sessions",
     "paneJump": "Jump between panes",
+    "archiveSession": "Archive current session",
     "findInConversation": "Find in conversation",
     "sendMessage": "Send message",
     "insertNewline": "Insert newline",

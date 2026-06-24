@@ -107,6 +107,7 @@ import { useSessionWindowTracking } from "@/features/chat/hooks/useSessionWindow
 import { resolveSessionCwd } from "@/features/projects/lib/sessionCwdSelection";
 import { perfLog } from "@/shared/lib/perfLog";
 import { cn } from "@/shared/lib/cn";
+import { isEditableTarget } from "@/shared/keyboard/isEditableTarget";
 import { setTerminalRenderingSuspended } from "@/features/terminal/lib/terminalSessionManager";
 import type { AgentSetupTroubleshootingRequest } from "@/features/providers/lib/agentSetupTroubleshooting";
 import type { SkillInfo } from "@/features/skills/api/skills";
@@ -199,6 +200,13 @@ const parent = (
 
 function validateBooleanPreference(value: unknown, defaults: boolean) {
   return typeof value === "boolean" ? value : defaults;
+}
+
+function isArchiveShortcutBlockedTarget(target: EventTarget | null) {
+  if (isEditableTarget(target)) {
+    return true;
+  }
+  return target instanceof Element && Boolean(target.closest(".xterm"));
 }
 
 function getInitialAppView(initialSettingsSection: SectionId | null): AppView {
@@ -2922,6 +2930,23 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         setQuickSwitcherOpen((open) => !open);
         return;
       }
+      // Archive the current chat/session (default mod+e)
+      if (eventMatchesShortcutCommand(e, "chat.archiveSession")) {
+        if (e.defaultPrevented || isArchiveShortcutBlockedTarget(e.target)) {
+          return;
+        }
+        const { activeSessionId } = useChatSessionStore.getState();
+        const sessionId =
+          activeView === "chat" && activeSessionId
+            ? resolveLiveSessionId(activeSessionId)
+            : null;
+        if (!sessionId) {
+          return;
+        }
+        e.preventDefault();
+        void handleArchiveChat(sessionId);
+        return;
+      }
       // Returns to home instead of closing the window (default mod+w)
       if (eventMatchesShortcutCommand(e, "navigation.closeSession")) {
         e.preventDefault();
@@ -2967,6 +2992,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
     clearActiveSession,
     clearGlobalComposerHandoffTimer,
     guardAppNavigation,
+    handleArchiveChat,
     handleNavigate,
     leaveSecondarySurface,
     setDesignSystemInspectorVisible,

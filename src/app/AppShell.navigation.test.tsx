@@ -922,6 +922,82 @@ describe("AppShell global navigation", () => {
     expect(mockToastError).toHaveBeenCalledWith("backend down");
   });
 
+  it("archives the active session with Cmd+E", async () => {
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    fireEvent.keyDown(window, { key: "e", metaKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("home");
+    });
+    expect(mockAcpArchiveSession).toHaveBeenCalledWith("session-1");
+    expect(useChatSessionStore.getState().activeSessionId).toBeNull();
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toEqual(expect.any(String));
+  });
+
+  it("does not archive from Ctrl+E inside the terminal on non-mac platforms", async () => {
+    mockGetPlatform.mockReturnValue("windows");
+    const user = userEvent.setup();
+    const session: ChatSession = {
+      id: "session-1",
+      title: "Active chat",
+      providerId: "goose",
+      workingDir: "~/goose artifacts",
+      createdAt: "2026-06-09T00:00:00.000Z",
+      updatedAt: "2026-06-09T00:00:00.000Z",
+      messageCount: 1,
+    };
+    useChatSessionStore.setState({
+      sessions: [session],
+      activeSessionId: null,
+    });
+
+    renderAppShell();
+
+    await user.click(screen.getByRole("button", { name: "Open session 1" }));
+    await waitFor(() => {
+      expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    });
+
+    const terminal = document.createElement("div");
+    terminal.className = "xterm";
+    const terminalInput = document.createElement("textarea");
+    terminal.appendChild(terminalInput);
+    document.body.appendChild(terminal);
+
+    terminalInput.focus();
+    fireEvent.keyDown(terminalInput, { key: "e", ctrlKey: true });
+
+    expect(screen.getByTestId("active-view")).toHaveTextContent("chat");
+    expect(mockAcpArchiveSession).not.toHaveBeenCalled();
+    expect(useChatSessionStore.getState().activeSessionId).toBe("session-1");
+    expect(
+      useChatSessionStore.getState().getSession("session-1")?.archivedAt,
+    ).toBeUndefined();
+  });
+
   it("reserves toast space only while the global composer is visible", async () => {
     const user = userEvent.setup();
     renderAppShell();

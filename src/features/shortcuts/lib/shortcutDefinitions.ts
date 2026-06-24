@@ -26,6 +26,7 @@ export type KnownShortcutCommandId =
   | "navigation.openSettings"
   | "navigation.paneJump"
   | "session.quickSwitch"
+  | "chat.archiveSession"
   | "chat.findInConversation"
   | "chat.sendMessage"
   | "chat.insertNewline"
@@ -197,6 +198,15 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandDefinition[] = [
     when: () => paneJumpExperiment()?.enabled === true,
   },
   // Chat
+  {
+    id: "chat.archiveSession",
+    category: "chat",
+    scope: "chat",
+    defaultBindings: [{ shortcut: "mod+e" }],
+    descriptionKey: "actions.archiveSession",
+    configurable: true,
+    discoverable: true,
+  },
   {
     id: "chat.findInConversation",
     category: "chat",
