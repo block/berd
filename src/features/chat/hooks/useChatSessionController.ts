@@ -290,23 +290,31 @@ export function useChatSessionController({
     pendingPersonaId !== undefined
       ? pendingPersonaId
       : (session?.personaId ?? null);
-  const selectedPersona = personas.find(
+  const [selectedPersonaSnapshot, setSelectedPersonaSnapshot] =
+    useState<Persona | null>(null);
+  const liveSelectedPersona = personas.find(
     (persona) => persona.id === selectedPersonaId,
   );
-  // On the home composer the selected persona is driven by pendingPersonaId.
-  // If that persona no longer exists, drop the pending selection inline (it is
-  // self-guarded by `pendingPersonaId !== undefined`) rather than in an effect,
-  // so the picker never shows a deleted persona for a frame. The session-backed
-  // case is a store mutation and stays in the effect below.
-  if (
-    !sessionId &&
-    pendingPersonaId !== undefined &&
-    selectedPersonaId !== null &&
-    personas.length > 0 &&
-    !selectedPersona
-  ) {
-    setPendingPersonaId(undefined);
+  const nextSelectedPersonaSnapshot = !selectedPersonaId
+    ? null
+    : (liveSelectedPersona ??
+      (selectedPersonaSnapshot?.id === selectedPersonaId
+        ? selectedPersonaSnapshot
+        : null));
+  if (selectedPersonaSnapshot !== nextSelectedPersonaSnapshot) {
+    setSelectedPersonaSnapshot(nextSelectedPersonaSnapshot);
   }
+  const selectedPersona =
+    liveSelectedPersona ?? nextSelectedPersonaSnapshot ?? undefined;
+  const displayedPersonas = useMemo(() => {
+    if (
+      selectedPersona &&
+      !personas.some((persona) => persona.id === selectedPersona.id)
+    ) {
+      return [selectedPersona, ...personas];
+    }
+    return personas;
+  }, [personas, selectedPersona]);
   const sessionCwd =
     activeWorkspace?.path ??
     session?.workingDir ??
@@ -941,19 +949,6 @@ export function useChatSessionController({
     ],
   );
 
-  useEffect(() => {
-    if (
-      sessionId &&
-      selectedPersonaId !== null &&
-      personas.length > 0 &&
-      !personas.find((persona) => persona.id === selectedPersonaId)
-    ) {
-      useChatSessionStore
-        .getState()
-        .patchSession(sessionId, { personaId: undefined });
-    }
-  }, [personas, selectedPersonaId, sessionId]);
-
   const personaInfo = selectedPersona
     ? { id: selectedPersona.id, name: selectedPersona.displayName }
     : undefined;
@@ -1311,7 +1306,16 @@ export function useChatSessionController({
         return true;
       }
 
-      return sendWithAutoCompact(text, undefined, attachments, sendOptions);
+      return sendWithAutoCompact(
+        text,
+        personaId
+          ? selectedPersona?.id === personaId
+            ? { id: selectedPersona.id, name: selectedPersona.displayName }
+            : { id: personaId }
+          : undefined,
+        attachments,
+        sendOptions,
+      );
     },
     [
       chatState,
@@ -1322,6 +1326,7 @@ export function useChatSessionController({
       readOnly,
       session?.intent,
       sessionId,
+      selectedPersona,
       selectedPersonaId,
       sendWithAutoCompact,
     ],
@@ -1716,7 +1721,7 @@ export function useChatSessionController({
     scrollTarget,
     handleScrollTargetHandled,
     projectMetadataPending,
-    personas,
+    personas: displayedPersonas,
     selectedPersonaId,
     selectedPersona,
     handlePersonaChange,

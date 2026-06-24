@@ -1864,6 +1864,7 @@ export function AppShell({ children }: { children?: React.ReactNode }) {
         }
         useChatStore.getState().enqueueMessage(sessionId, {
           text,
+          ...(options?.personaId ? { personaId: options.personaId } : {}),
           attachments: options?.attachments,
           ...(options?.sendOptions ? { sendOptions: options.sendOptions } : {}),
         });

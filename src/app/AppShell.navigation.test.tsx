@@ -1116,6 +1116,36 @@ describe("AppShell global navigation", () => {
     });
   });
 
+  it("preserves the suggested agent tag when starting chat from the global composer", async () => {
+    renderAppShell();
+
+    fireEvent.click(screen.getByRole("button", { name: "Open agent detail" }));
+    await act(async () => {
+      flushAfterNextPaintCallbacks();
+    });
+    expect(screen.getByTestId("agent-route")).toHaveTextContent("persona-1");
+
+    const textbox = screen.getByPlaceholderText("Start a conversation");
+    fireEvent.change(textbox, {
+      target: { value: "ask the tagged agent" },
+    });
+    fireEvent.keyDown(textbox, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(useChatStore.getState().queuedMessageBySession).toMatchObject({
+        "created-session": {
+          text: "ask the tagged agent",
+          personaId: "persona-1",
+        },
+      });
+      expect(
+        useChatSessionStore.getState().getSession("created-session"),
+      ).toMatchObject({
+        personaId: "persona-1",
+      });
+    });
+  });
+
   it("starts centered composer sends on a background draft before the visual handoff changes chat", async () => {
     vi.useFakeTimers();
     try {

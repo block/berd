@@ -1,6 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { resolveAgentIcon } from "@/features/agents/lib/resolveAgentIcon";
-import { useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
+import { useAvatarImage, useAvatarMedia } from "@/shared/hooks/useAvatarSrc";
 import { AvatarMedia } from "@/shared/ui/avatar-media";
 import type { Persona } from "@/shared/types/agents";
 
@@ -11,20 +11,26 @@ import type { Persona } from "@/shared/types/agents";
  */
 function PersonaAvatarMedia({ persona }: { persona: Persona }) {
   const avatarMedia = useAvatarMedia(persona.avatar);
+  const avatarImage = useAvatarImage(persona.avatar);
   const fallbackIconSrc = resolveAgentIcon(persona.id);
 
-  return avatarMedia ? (
-    <AvatarMedia
-      media={avatarMedia}
-      alt=""
-      loadingStrategy="eager"
-      className="h-full w-full object-contain"
-    />
-  ) : (
+  if (avatarMedia) {
+    return (
+      <AvatarMedia
+        media={avatarMedia}
+        alt=""
+        loadingStrategy="eager"
+        poster={avatarImage}
+        className="h-full w-full object-contain"
+      />
+    );
+  }
+
+  return (
     <img
       aria-hidden="true"
       alt=""
-      src={fallbackIconSrc}
+      src={avatarImage ?? fallbackIconSrc}
       className="h-full w-full object-contain"
     />
   );

@@ -718,6 +718,37 @@ describe("chatSessionStore", () => {
       expect(useChatSessionStore.getState().hasMoreSessions).toBe(true);
     });
 
+    it("preserves a local persona tag when an ACP session row omits persona metadata", async () => {
+      seedSession({
+        id: "session-1",
+        title: "Tagged chat",
+        personaId: "persona-1",
+        providerId: "goose",
+        updatedAt: "2026-04-01T00:00:00.000Z",
+      });
+
+      mocks.acpListSessionsPage.mockResolvedValue(
+        mockPage([
+          makeAcpSession({
+            sessionId: "session-1",
+            title: "Tagged chat",
+            providerId: "goose",
+            personaId: null,
+            updatedAt: "2026-04-02T00:00:00.000Z",
+          }),
+        ]),
+      );
+
+      await useChatSessionStore.getState().loadSessions();
+
+      expect(
+        useChatSessionStore.getState().getSession("session-1"),
+      ).toMatchObject({
+        personaId: "persona-1",
+        updatedAt: "2026-04-02T00:00:00.000Z",
+      });
+    });
+
     it("hydrates the first page without dropping local sessions or clearing active session", async () => {
       const draft = makeSession({
         id: "draft-session",

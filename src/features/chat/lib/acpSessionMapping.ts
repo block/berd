@@ -65,9 +65,11 @@ function mergeSessionMetadata(
     const existing = byId.get(loadedSession.id);
     const modelName =
       existing?.modelId === session.modelId ? existing?.modelName : undefined;
+    const personaId = session.personaId ?? existing?.personaId;
     byId.set(session.id, {
       ...existing,
       ...session,
+      personaId,
       modelName,
       creationState: undefined,
       creationError: undefined,

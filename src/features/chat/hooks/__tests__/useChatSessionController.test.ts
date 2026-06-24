@@ -1527,6 +1527,111 @@ describe("useChatSessionController", () => {
     });
   });
 
+  it("keeps a selected persona when a later persona refresh omits it", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          personaId: "persona-1",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useAgentStore.setState({
+      personas: [
+        {
+          id: "persona-1",
+          displayName: "Research Scout",
+          systemPrompt: "Gather context.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ],
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    expect(result.current.selectedPersona?.displayName).toBe("Research Scout");
+
+    await act(async () => {
+      useAgentStore.getState().setPersonas([
+        {
+          id: "persona-2",
+          displayName: "Another Agent",
+          systemPrompt: "Help elsewhere.",
+          isBuiltin: false,
+          writable: true,
+        },
+      ]);
+      await Promise.resolve();
+    });
+
+    expect(
+      useChatSessionStore.getState().getSession("session-1"),
+    ).toMatchObject({
+      personaId: "persona-1",
+    });
+    expect(result.current.selectedPersona?.displayName).toBe("Research Scout");
+    expect(result.current.personas.map((persona) => persona.id)).toEqual([
+      "persona-1",
+      "persona-2",
+    ]);
+
+    act(() => {
+      result.current.handleSend("hello", "persona-1");
+    });
+
+    await waitFor(() => {
+      expect(mockUseChatSendMessage).toHaveBeenCalled();
+    });
+    expect(mockUseChatSendMessage.mock.calls.at(-1)?.[2]).toEqual({
+      id: "persona-1",
+      name: "Research Scout",
+    });
+  });
+
+  it("sends the selected persona id even when the persona snapshot is missing", async () => {
+    useChatSessionStore.setState({
+      sessions: [
+        {
+          id: "session-1",
+          title: "Chat",
+          providerId: "openai",
+          modelId: "gpt-4o",
+          modelName: "GPT-4o",
+          personaId: "persona-1",
+          createdAt: "2026-04-20T00:00:00.000Z",
+          updatedAt: "2026-04-20T00:00:00.000Z",
+          messageCount: 0,
+        },
+      ],
+    });
+    useAgentStore.setState({ personas: [] });
+
+    const { result } = renderHook(() =>
+      useChatSessionController({ sessionId: "session-1" }),
+    );
+
+    act(() => {
+      result.current.handleSend("hello", "persona-1");
+    });
+
+    await waitFor(() => {
+      expect(mockUseChatSendMessage).toHaveBeenCalled();
+    });
+    expect(mockUseChatSendMessage.mock.calls.at(-1)?.[2]).toEqual({
+      id: "persona-1",
+    });
+  });
+
   it("preserves the existing session working directory when sending with a configured persona", async () => {
     useChatSessionStore.setState({
       sessions: [
