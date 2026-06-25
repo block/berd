@@ -136,10 +136,6 @@ fn run_bb() -> Result<()> {
     let command = build_bb_command();
     let matches = clap_matches(command, argv)?;
     match matches.subcommand() {
-        Some(("setup", _)) => {
-            println!("placeholder");
-            Ok(())
-        }
         Some(("skills", skills_matches)) => bb::skills::run(skills_matches),
         Some(("auth", auth_matches)) => bb::skills::run_auth(auth_matches),
         Some(("config", config_matches)) => bb::skills::run_config(config_matches),
@@ -165,7 +161,6 @@ fn build_bb_command() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .disable_help_subcommand(true)
-        .subcommand(Command::new("setup").about("Placeholder setup command"))
         .subcommand(bb::skills::auth_command())
         .subcommand(bb::skills::config_command())
         .subcommand(bb::skills::skills_command())

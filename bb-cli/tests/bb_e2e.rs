@@ -271,7 +271,6 @@ fn bb_root_help_lists_skills_and_tools() {
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
-    assert!(stdout.contains("setup"));
     assert!(stdout.contains("auth"));
     assert!(stdout.contains("config"));
     assert!(stdout.contains("skills"));
@@ -297,16 +296,6 @@ fn bb_tools_root_help_does_not_require_org() {
     assert!(stdout.contains("Discover auth-backed tool extensions"));
     assert!(!stderr.contains("org_required"), "stderr was: {stderr}");
     fs::remove_dir_all(temp).expect("remove temp dir");
-}
-
-#[test]
-fn bb_setup_placeholder_still_prints_placeholder() {
-    let output = bb_command().arg("setup").output().expect("run bb setup");
-    let (stdout, stderr) = output_text(&output);
-
-    assert!(output.status.success(), "stderr was: {stderr}");
-    assert_eq!(stdout.trim(), "placeholder");
-    assert!(stderr.is_empty(), "stderr was: {stderr}");
 }
 
 #[test]
