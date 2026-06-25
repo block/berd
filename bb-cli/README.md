@@ -152,4 +152,4 @@ to `http://kgoose.cashappservices.com` or
 
 For release packaging, keep the `sqbin` output shape intact so the Homebrew formula can build from `bb-cli` and install the whole directory into `prefix/"etc"`.
 There is a short `sq` release checklist in `docs/RELEASING-sq.md`.
-The `bb` app and archive release path is documented separately in `docs/RELEASING-bb.md`.
+The `bb` CLI build path is documented separately in `docs/RELEASING-bb.md`; Goose.app owns app packaging and command-link installation.

@@ -16,27 +16,6 @@ build-sq: build-release
 build-bb-release:
   cargo build --locked --release --bin bb
 
-package-bb-macos-app:
-  script/package-bb-darwin build-bb app sign
-
-package-bb-dmg:
-  script/package-bb-darwin package
-
-sign-bb-macos:
-  script/package-bb-darwin sign
-
-package-bb-macos-zip:
-  script/package-bb-darwin app sign zip
-
-package-bb-linux:
-  script/package-bb-linux package
-
-package-bb-linux-amd64:
-  BB_LINUX_ARCHS=amd64 script/package-bb-linux package
-
-package-bb-linux-arm64:
-  BB_LINUX_ARCHS=arm64 script/package-bb-linux package
-
 # Download protos from schema-registry and generate Rust code
 protos:
   #!/usr/bin/env bash

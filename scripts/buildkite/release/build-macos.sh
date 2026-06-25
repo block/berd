@@ -61,7 +61,7 @@ jq 'del(.bundle.macOS.signingIdentity) | del(.bundle.createUpdaterArtifacts)' \
   src-tauri/tauri.release.conf.json > "$tmp" \
   && mv "$tmp" src-tauri/tauri.release.conf.json
 
-# Stage the goose backend and goosectl CLI as Tauri sidecars, then build for
+# Stage the goose backend and CLIs as Tauri resources/sidecars, then build for
 # an explicit aarch64 target so output paths are stable regardless of agent
 # architecture. The goosectl staged name must carry that same triple.
 # Production telemetry is an explicit release opt-in; generic builds default to
@@ -71,6 +71,7 @@ TARGET_TRIPLE="aarch64-apple-darwin"
 echo "+++ :hammer: pnpm tauri build (unsigned)"
 ./scripts/prepare-goose-sidecar.sh
 ./scripts/prepare-goosectl-sidecar.sh "$TARGET_TRIPLE"
+./scripts/prepare-bb-cli-resource.sh "$TARGET_TRIPLE"
 VITE_APP_VERSION="$RELEASE_VERSION" \
 VITE_ENVIRONMENT=production \
 VITE_UPDATER_ENABLED=true \

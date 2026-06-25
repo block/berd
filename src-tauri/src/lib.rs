@@ -124,6 +124,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             services::installer_media::maybe_prompt_move_to_applications(app.handle());
 
+            commands::cli::schedule_bb_cli_auto_install(app.handle());
+
             services::diagnostic_log::record_event(
                 services::diagnostic_log::DiagnosticLevel::Info,
                 services::diagnostic_log::DiagnosticCategory::Startup,
@@ -305,6 +307,8 @@ pub fn run() {
             commands::avatars::get_cached_avatars_for_refs,
             commands::avatars::ensure_avatar_collection,
             commands::cache::clear_local_media_caches,
+            commands::cli::get_bb_cli_status,
+            commands::cli::install_bb_cli,
             commands::connections::list_connections,
             commands::automations::get_automation_tiles,
             commands::automations::get_automation_tile,

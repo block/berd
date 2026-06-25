@@ -1,6 +1,6 @@
 import { ColorPicker } from "@/shared/ui/color-picker";
 import { useTranslation } from "react-i18next";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { type LocalePreference, useLocale } from "@/shared/i18n";
 import { cn } from "@/shared/lib/cn";
@@ -22,6 +22,7 @@ import {
   RotateCcw,
   Sun,
   SunMoon,
+  Terminal,
   Trash2,
 } from "lucide-react";
 import { IconCheck } from "@tabler/icons-react";
@@ -52,6 +53,11 @@ import {
   setExperimentConfigValue,
   useExperiment,
 } from "@/features/experiments/experimentPreferences";
+import {
+  getBbCliStatus,
+  installBbCli,
+  type BbCliStatus,
+} from "@/shared/api/bbCli";
 
 interface AboutAppInfo {
   name: string;
@@ -119,6 +125,9 @@ export function GeneralSettings() {
   const { t } = useTranslation(["settings", "shortcuts"]);
   const { preference, setLocalePreference, systemLocaleLabel } = useLocale();
   const [appInfo, setAppInfo] = useState<AboutAppInfo | null>(null);
+  const [bbCliStatus, setBbCliStatus] = useState<BbCliStatus | null>(null);
+  const [bbCliLoading, setBbCliLoading] = useState(false);
+  const [bbCliInstalling, setBbCliInstalling] = useState(false);
   const [clearCacheDialogOpen, setClearCacheDialogOpen] = useState(false);
   const [clearingCache, setClearingCache] = useState(false);
   const agentToolsTipsPreference = useAgentToolsTipsPreference();
@@ -205,6 +214,26 @@ export function GeneralSettings() {
   }, []);
 
   const aboutFallback = t("about.unavailable");
+
+  const refreshBbCliStatus = useCallback(async () => {
+    if (!window.__TAURI_INTERNALS__) {
+      return;
+    }
+
+    setBbCliLoading(true);
+    try {
+      setBbCliStatus(await getBbCliStatus());
+    } catch (error) {
+      console.warn("Failed to load bb CLI status:", error);
+      setBbCliStatus(null);
+    } finally {
+      setBbCliLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshBbCliStatus();
+  }, [refreshBbCliStatus]);
 
   async function handleClearMediaCache() {
     setClearingCache(true);
@@ -294,6 +323,27 @@ export function GeneralSettings() {
       toast.error(t("general.terminalFallback.saveError"));
     }
   }
+
+  async function handleInstallBbCli() {
+    setBbCliInstalling(true);
+    try {
+      const nextStatus = await installBbCli();
+      setBbCliStatus(nextStatus);
+      toast.success(t("general.bbCli.installSuccess"));
+    } catch (error) {
+      console.warn("Failed to install bb CLI:", error);
+      toast.error(t("general.bbCli.installError"));
+      await refreshBbCliStatus();
+    } finally {
+      setBbCliInstalling(false);
+    }
+  }
+
+  const bbCliActionLabel =
+    bbCliStatus?.installed || bbCliStatus?.needsRepair
+      ? t("general.bbCli.repair")
+      : t("general.bbCli.install");
+  const bbCliBusy = bbCliLoading || bbCliInstalling;
 
   return (
     <SettingsPage contentClassName="space-y-8">
@@ -523,6 +573,52 @@ export function GeneralSettings() {
             onCheckedChange={sidebarGitBranchSubtitlePreference.setEnabled}
             aria-label={t("general.sidebarBranchSubtitles.label")}
           />
+        </SettingRow>
+      </SettingsSection>
+
+      <SettingsSection title={t("general.bbCli.title")}>
+        <SettingRow
+          label={t("general.bbCli.label")}
+          description={
+            bbCliStatus
+              ? `${bbCliStatus.message}. ${bbCliStatus.detail}`
+              : t("general.bbCli.description")
+          }
+          className="items-start"
+        >
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="xs"
+                onClick={() => void refreshBbCliStatus()}
+                disabled={bbCliBusy}
+              >
+                <RotateCcw className="size-3.5" />
+                {t("general.bbCli.refresh")}
+              </Button>
+              <Button
+                type="button"
+                variant={bbCliStatus?.installed ? "outline" : "default"}
+                size="xs"
+                onClick={() => void handleInstallBbCli()}
+                disabled={bbCliBusy || bbCliStatus?.canInstall === false}
+              >
+                <Terminal className="size-3.5" />
+                {bbCliInstalling
+                  ? t("general.bbCli.installing")
+                  : bbCliActionLabel}
+              </Button>
+            </div>
+            <p className="max-w-80 truncate text-right text-xs text-muted-foreground">
+              {bbCliStatus?.bundledVersion
+                ? t("general.bbCli.version", {
+                    version: bbCliStatus.bundledVersion,
+                  })
+                : t("general.bbCli.versionUnknown")}
+            </p>
+          </div>
         </SettingRow>
       </SettingsSection>
 

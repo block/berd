@@ -159,10 +159,6 @@ bb-cli-lint:
 bb-cli-test:
     cd bb-cli && cargo test --locked
 
-# Build BuilderBot CLI Linux release archives.
-bb-cli-package-bb-linux:
-    cd bb-cli && just package-bb-linux
-
 # Stage the pinned Goose backend into src-tauri/binaries/goosed-<target> and build bundles.
 bundle:
     #!/usr/bin/env bash
@@ -170,6 +166,7 @@ bundle:
 
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    ./scripts/prepare-bb-cli-resource.sh
 
     # Derive a git-based version so non-release bundles don't ship the 0.1.0
     # placeholder. Injected via a temp --config overlay to keep the tree clean.
@@ -179,9 +176,40 @@ bundle:
     trap 'rm -f "$VERSION_CONFIG"' EXIT
     jq -n --arg v "$GOOSE_APP_VERSION" '{ version: $v }' > "$VERSION_CONFIG"
 
+    TAURI_BUILD_ARGS=(pnpm tauri build --features goosectl --config "$VERSION_CONFIG")
+    if [[ "$(uname -s)" = "Darwin" ]]; then
+      TAURI_BUILD_ARGS+=(--bundles app)
+    fi
+
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" \
       VITE_APP_VERSION="$GOOSE_APP_VERSION_RICH" \
-      pnpm tauri build --features goosectl --config "$VERSION_CONFIG"
+      "${TAURI_BUILD_ARGS[@]}"
+
+    if [[ "$(uname -s)" = "Darwin" ]]; then
+      APP_PATH="{{ tauri_cargo_target_dir }}/release/bundle/macos/Goose.app"
+      # Local Tauri builds are ad-hoc signed before resources are sealed. Re-sign
+      # after app bundling so the local DMG contains a verifiable app bundle.
+      codesign --force --deep --sign - "$APP_PATH"
+      DMG_DIR="{{ tauri_cargo_target_dir }}/release/bundle/dmg"
+      mkdir -p "$DMG_DIR"
+      case "$(uname -m)" in
+        arm64) DMG_ARCH="aarch64" ;;
+        *) DMG_ARCH="$(uname -m)" ;;
+      esac
+      ./scripts/package-macos-dmg.sh "$APP_PATH" "$DMG_DIR/Goose_${GOOSE_APP_VERSION}_${DMG_ARCH}.dmg"
+    fi
+
+# Build macOS app and DMG bundles.
+bundle-macos:
+    ./scripts/build_darwin.sh
+
+# Build Linux deb, rpm, and AppImage bundles. Must run on Linux.
+bundle-linux:
+    ./scripts/build_linux.sh
+
+# Build Linux deb, rpm, and AppImage bundles inside Docker.
+bundle-linux-docker:
+    ./scripts/build_linux_docker.sh
 
 # Stage the pinned Goose backend and build a release bundle with WebView devtools enabled.
 bundle-debug:
@@ -190,6 +218,7 @@ bundle-debug:
 
     ./scripts/prepare-goose-sidecar.sh
     CARGO_TARGET_DIR="{{ tauri_cargo_target_dir }}" ./scripts/prepare-goosectl-sidecar.sh
+    ./scripts/prepare-bb-cli-resource.sh
 
     # Use a temporary config overlay so normal release bundles keep devtools
     # disabled, and fold in the git-derived version so the bundle doesn't ship

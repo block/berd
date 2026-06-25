@@ -15,7 +15,7 @@ The publishable contract is:
 4. the executable responds to `--describe-commands` with JSON that describes the command tree
 
 This release path is specific to `sq` discovery through Homebrew. It is separate
-from the `bb` app/archive release path described in `docs/RELEASING-bb.md`.
+from the `bb` CLI build path described in `docs/RELEASING-bb.md`.
 
 ## Tag Format
 

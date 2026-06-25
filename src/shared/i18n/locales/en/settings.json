@@ -255,6 +255,19 @@
       "saveError": "Couldn't update the artifact location. Try again.",
       "saveSuccess": "Artifact location updated."
     },
+    "bbCli": {
+      "description": "Goose automatically installs or repairs the /usr/local/bin/bb link to this app's bundled command.",
+      "install": "Install",
+      "installError": "Couldn't install the bb command. Try again.",
+      "installSuccess": "bb command installed.",
+      "installing": "Installing...",
+      "label": "bb command",
+      "refresh": "Refresh",
+      "repair": "Repair",
+      "title": "Command line",
+      "version": "Bundled: {{version}}",
+      "versionUnknown": "Bundled version unavailable"
+    },
     "language": {
       "description": "Sets the language Goose uses across menus, buttons, and messages.",
       "english": "English",

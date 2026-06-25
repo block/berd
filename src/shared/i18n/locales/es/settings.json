@@ -255,6 +255,19 @@
       "saveError": "No se pudo actualizar la ubicación de artefactos. Inténtalo de nuevo.",
       "saveSuccess": "Ubicación de artefactos actualizada."
     },
+    "bbCli": {
+      "description": "Goose instala o repara automáticamente el enlace /usr/local/bin/bb al comando incluido con esta app.",
+      "install": "Instalar",
+      "installError": "No se pudo instalar el comando bb. Inténtalo de nuevo.",
+      "installSuccess": "Comando bb instalado.",
+      "installing": "Instalando...",
+      "label": "Comando bb",
+      "refresh": "Actualizar",
+      "repair": "Reparar",
+      "title": "Línea de comandos",
+      "version": "Incluido: {{version}}",
+      "versionUnknown": "Versión incluida no disponible"
+    },
     "language": {
       "description": "Elige cómo Goose formatea y muestra la interfaz.",
       "english": "Inglés",
