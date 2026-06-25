@@ -3105,13 +3105,14 @@ export function VirtualMessageTimeline({
     "message.jumpToFloatingResponseStart",
   );
   const hasFooterStatus = footerStatus != null;
-  const jumpToLatestButton = showJumpToLatest ? (
+  const jumpToLatestButton = (
     <MessageTimelineJumpToLatestButton
       compact={hasFooterStatus}
       label={jumpToLatestLabel}
       onClick={handleJumpToLatest}
+      visible={showJumpToLatest}
     />
-  ) : null;
+  );
   const footerControlRow = footer ? (
     <MessageTimelineFooterControlRow
       footerStatus={footerStatus}
@@ -3492,9 +3493,9 @@ export function VirtualMessageTimeline({
             {footer}
           </div>
         ) : null}
-        {!footer && jumpToLatestButton ? (
+        {!footer ? (
           <div
-            className="absolute left-1/2 flex -translate-x-1/2 gap-2"
+            className="pointer-events-none absolute left-1/2 flex -translate-x-1/2 gap-2"
             style={{ bottom: (tailPaddingPx ?? 16) + 8 }}
           >
             {jumpToLatestButton}

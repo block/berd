@@ -96,11 +96,18 @@ async function installFrameSampler(page: Page) {
           .sort((left, right) => left.rect.top - right.rect.top);
         const first =
           rows.find((row) => row.anchorPriority !== "none") ?? rows[0];
-        const detachedButton = Boolean(
-          Array.from(document.querySelectorAll("button")).find((button) =>
-            /jump to latest/i.test(button.textContent ?? ""),
-          ),
+        const jumpToLatestStates = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-jump-to-latest-state]"),
+          (element) => element.dataset.jumpToLatestState,
         );
+        const detachedButton =
+          jumpToLatestStates.length > 0
+            ? jumpToLatestStates.includes("visible")
+            : Boolean(
+                Array.from(document.querySelectorAll("button")).find((button) =>
+                  /jump to latest/i.test(button.textContent ?? ""),
+                ),
+              );
         window.__RESIZE_PROBE_SAMPLES__?.push({
           t: performance.now(),
           scrollTop: scroller.scrollTop,

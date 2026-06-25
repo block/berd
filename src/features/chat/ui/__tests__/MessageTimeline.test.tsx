@@ -649,6 +649,79 @@ describe("MessageTimeline", () => {
     );
   });
 
+  it("fades Jump to latest in and out while hiding it from accessibility", async () => {
+    const messages = [
+      message("user-1", "user", "Question"),
+      message("assistant-1", "assistant", "First token"),
+    ];
+    renderWithProviders(
+      <MessageTimeline messages={messages} streamingMessageId="assistant-1" />,
+    );
+    const scroller = getTimelineScroller();
+    setScrollMetrics(scroller, {
+      scrollTop: 100,
+      scrollHeight: 5000,
+      clientHeight: 500,
+    });
+
+    fireEvent.wheel(scroller, { deltaY: -120 });
+    fireEvent.scroll(scroller);
+
+    const visibleJumpButton = await screen.findByRole("button", {
+      name: "Jump to latest",
+    });
+    const visibleJumpButtonShell = visibleJumpButton.closest(
+      "[data-jump-to-latest-state]",
+    );
+    if (!visibleJumpButtonShell) {
+      throw new Error("Expected Jump to latest fade shell to be mounted");
+    }
+    expect(visibleJumpButtonShell).toHaveAttribute(
+      "data-jump-to-latest-state",
+      "visible",
+    );
+    expect(visibleJumpButtonShell).toHaveClass(
+      "pointer-events-auto",
+      "opacity-100",
+    );
+
+    setScrollMetrics(scroller, {
+      scrollTop: 4380,
+      scrollHeight: 5000,
+      clientHeight: 500,
+    });
+    fireEvent.wheel(scroller, { deltaY: 120 });
+    fireEvent.scroll(scroller);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: "Jump to latest" }),
+      ).not.toBeInTheDocument(),
+    );
+    const hiddenJumpButton = screen
+      .getByText("Jump to latest")
+      .closest("button");
+    if (!hiddenJumpButton) {
+      throw new Error("Expected Jump to latest button to remain mounted");
+    }
+    expect(hiddenJumpButton).toHaveAttribute("aria-hidden", "true");
+    expect(hiddenJumpButton).toHaveAttribute("tabindex", "-1");
+    const hiddenJumpButtonShell = hiddenJumpButton.closest(
+      "[data-jump-to-latest-state]",
+    );
+    if (!hiddenJumpButtonShell) {
+      throw new Error("Expected Jump to latest fade shell to remain mounted");
+    }
+    expect(hiddenJumpButtonShell).toHaveAttribute(
+      "data-jump-to-latest-state",
+      "hidden",
+    );
+    expect(hiddenJumpButtonShell).toHaveClass(
+      "pointer-events-none",
+      "opacity-0",
+    );
+  });
+
   it("does not scroll to the top of a long message when streaming completes", async () => {
     const messages = [
       message("user-1", "user", "Question"),
@@ -781,6 +854,24 @@ describe("MessageTimeline", () => {
     expect(
       screen.queryByRole("button", { name: "Jump to latest" }),
     ).not.toBeInTheDocument();
+    const hiddenJumpButton = screen
+      .getByText("Jump to latest")
+      .closest("button");
+    if (!hiddenJumpButton) {
+      throw new Error("Expected hidden Jump to latest button to be mounted");
+    }
+    const hiddenJumpButtonShell = hiddenJumpButton.closest(
+      "[data-jump-to-latest-state]",
+    );
+    if (!hiddenJumpButtonShell) {
+      throw new Error(
+        "Expected hidden Jump to latest fade shell to be mounted",
+      );
+    }
+    expect(hiddenJumpButtonShell).toHaveClass("pointer-events-none");
+    expect(hiddenJumpButtonShell.parentElement).toHaveClass(
+      "pointer-events-none",
+    );
 
     setScrollMetrics(scroller, {
       scrollTop: 300,
@@ -789,9 +880,21 @@ describe("MessageTimeline", () => {
     });
     fireEvent.wheel(scroller, { deltaY: -40 });
 
-    expect(
-      await screen.findByRole("button", { name: "Jump to latest" }),
-    ).toBeInTheDocument();
+    const visibleJumpButton = await screen.findByRole("button", {
+      name: "Jump to latest",
+    });
+    const visibleJumpButtonShell = visibleJumpButton.closest(
+      "[data-jump-to-latest-state]",
+    );
+    if (!visibleJumpButtonShell) {
+      throw new Error(
+        "Expected visible Jump to latest fade shell to be mounted",
+      );
+    }
+    expect(visibleJumpButtonShell).toHaveClass("pointer-events-auto");
+    expect(visibleJumpButtonShell.parentElement).toHaveClass(
+      "pointer-events-none",
+    );
   });
 
   it("keeps MCP app auto-scroll above the footer and skips it while detached", async () => {

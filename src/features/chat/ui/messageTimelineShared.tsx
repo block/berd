@@ -64,36 +64,64 @@ export function MessageTimelineJumpToLatestButton({
   compact,
   label,
   onClick,
+  visible = true,
 }: {
   compact: boolean;
   label: string;
   onClick: () => void;
+  visible?: boolean;
 }) {
+  const fadeClassName = cn(
+    "inline-flex shrink-0 will-change-[opacity] motion-safe:transition-opacity motion-safe:duration-[450ms] motion-safe:ease-in-out motion-reduce:transition-none",
+    visible
+      ? "pointer-events-auto opacity-100"
+      : "pointer-events-none opacity-0",
+  );
+  const handleClick = () => {
+    if (visible) {
+      onClick();
+    }
+  };
+
   if (compact) {
     return (
-      <Button
-        type="button"
-        variant="jump-to-latest"
-        size="icon-sm"
-        onClick={onClick}
-        aria-label={label}
-        title={label}
+      <span
+        data-jump-to-latest-state={visible ? "visible" : "hidden"}
+        className={fadeClassName}
       >
-        <IconChevronsDown aria-hidden="true" />
-      </Button>
+        <Button
+          type="button"
+          variant="jump-to-latest"
+          size="icon-sm"
+          onClick={handleClick}
+          aria-hidden={!visible}
+          tabIndex={visible ? undefined : -1}
+          aria-label={label}
+          title={label}
+        >
+          <IconChevronsDown aria-hidden="true" />
+        </Button>
+      </span>
     );
   }
 
   return (
-    <Button
-      type="button"
-      variant="jump-to-latest"
-      size="sm"
-      onClick={onClick}
-      leftIcon={<IconChevronsDown />}
+    <span
+      data-jump-to-latest-state={visible ? "visible" : "hidden"}
+      className={fadeClassName}
     >
-      {label}
-    </Button>
+      <Button
+        type="button"
+        variant="jump-to-latest"
+        size="sm"
+        onClick={handleClick}
+        aria-hidden={!visible}
+        tabIndex={visible ? undefined : -1}
+        leftIcon={<IconChevronsDown />}
+      >
+        {label}
+      </Button>
+    </span>
   );
 }
 
@@ -197,7 +225,7 @@ export function MessageTimelineFooterControlRow({
         <div className="pointer-events-auto">{footerStatus}</div>
       ) : null}
       {jumpToLatestButton ? (
-        <div className="pointer-events-auto">{jumpToLatestButton}</div>
+        <div className="pointer-events-none">{jumpToLatestButton}</div>
       ) : null}
     </div>
   );
