@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use crate::kgoose::DEFAULT_KGOOSE_BASE_URL;
 
 use super::display::Style;
+use super::org_routing::resolve_org_kgoose_base_url;
 use super::skills_models::SkillsPreferences;
 
 pub const KGOOSE_BASE_URL_ENV_VAR: &str = "KGOOSE_BASE_URL";
@@ -37,6 +38,7 @@ pub const PREFERENCES_FILE_NAME: &str = "config.yaml";
 pub struct SkillsConfig {
     pub kgoose_base_url: String,
     pub playpen: Option<String>,
+    pub org: Option<String>,
     pub bb_home: PathBuf,
     pub skills_home: PathBuf,
     packages_dir: PathBuf,
@@ -49,6 +51,14 @@ pub struct SkillsConfig {
 
 impl SkillsConfig {
     pub fn resolve(matches: &ArgMatches) -> Result<Self> {
+        Self::resolve_with_org_routing(matches, true)
+    }
+
+    pub fn resolve_for_config(matches: &ArgMatches) -> Result<Self> {
+        Self::resolve_with_org_routing(matches, false)
+    }
+
+    fn resolve_with_org_routing(matches: &ArgMatches, org_routing: bool) -> Result<Self> {
         let local_dev = matches.get_flag("local-dev");
         let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
             .map(PathBuf::from)
@@ -79,7 +89,7 @@ impl SkillsConfig {
             .unwrap_or_else(|| DEFAULT_PROFILE_NAME.to_string());
         let profile_config = file_config.profiles.get(&profile);
 
-        let kgoose_base_url = read_optional_env(KGOOSE_BASE_URL_ENV_VAR)?
+        let raw_kgoose_base_url = read_optional_env(KGOOSE_BASE_URL_ENV_VAR)?
             .map(|value| normalize_kgoose_base_url(&value))
             .unwrap_or_else(|| DEFAULT_KGOOSE_BASE_URL.to_string());
         let playpen = read_optional_env(BB_KGOOSE_PLAYPEN_ENV_VAR)?
@@ -125,10 +135,19 @@ impl SkillsConfig {
             json,
             matches.get_flag("verbose"),
         );
+        let preferences_path = default_preferences_path(&bb_home);
+        let preferences = read_preferences_file(&preferences_path)?;
+        let org = preferences.org.clone();
+        let kgoose_base_url = if org_routing {
+            resolve_org_kgoose_base_url(&raw_kgoose_base_url, org.as_deref(), local_dev)?
+        } else {
+            raw_kgoose_base_url
+        };
 
         Ok(Self {
             kgoose_base_url,
             playpen,
+            org,
             bb_home,
             skills_home,
             packages_dir,
@@ -165,23 +184,13 @@ impl SkillsConfig {
     }
 
     /// `~/.bb/config.yaml` by default: preferences are bb configuration, so
-    /// they sit next to `skills.yaml` rather than inside the skills state
-    /// dir. Resolved as a sibling of `skills_home` so a relocated state dir
-    /// (e.g. `--local-dev`) keeps its preferences contained too.
+    /// they sit next to `skills.yaml` rather than inside the skills state dir.
     pub fn preferences_path(&self) -> PathBuf {
-        self.skills_home
-            .parent()
-            .map(|parent| parent.join(PREFERENCES_FILE_NAME))
-            .unwrap_or_else(|| self.skills_home.join(PREFERENCES_FILE_NAME))
+        default_preferences_path(&self.bb_home)
     }
 
     pub fn read_preferences(&self) -> Result<SkillsPreferences> {
-        let path = self.preferences_path();
-        if !path.exists() {
-            return Ok(SkillsPreferences::default());
-        }
-        let bytes = fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-        serde_yaml::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
+        read_preferences_file(&self.preferences_path())
     }
 
     pub fn write_preferences(&self, preferences: &SkillsPreferences) -> Result<()> {
@@ -192,6 +201,18 @@ impl SkillsConfig {
         let yaml = serde_yaml::to_string(preferences).context("serialize skills preferences")?;
         fs::write(&path, yaml).with_context(|| format!("write {}", path.display()))
     }
+}
+
+pub fn default_preferences_path(bb_home: &Path) -> PathBuf {
+    bb_home.join(PREFERENCES_FILE_NAME)
+}
+
+pub fn read_preferences_file(path: &Path) -> Result<SkillsPreferences> {
+    if !path.exists() {
+        return Ok(SkillsPreferences::default());
+    }
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    serde_yaml::from_slice(&bytes).with_context(|| format!("parse {}", path.display()))
 }
 
 fn discover_local_dev_config() -> Result<PathBuf> {

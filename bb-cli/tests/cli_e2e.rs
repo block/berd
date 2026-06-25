@@ -339,7 +339,7 @@ fn tool_invocation_forwards_sts_access_token_as_identity_token() {
 }
 
 #[test]
-fn tool_invocation_forwards_stored_session_credential_to_kgoose_calls() {
+fn tool_invocation_ignores_bb_auth_storage() {
     let server = MockServer::start(vec![
         list_tools_response("utils", calculate_tool_schema(false)),
         MockResponse::json(json!({
@@ -384,20 +384,8 @@ fn tool_invocation_forwards_stored_session_credential_to_kgoose_calls() {
 
     assert!(output.status.success(), "stderr was: {stderr}");
     assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[0]
-            .headers
-            .get("x-bb-session-credential")
-            .map(String::as_str),
-        Some("stored-kgoose-session")
-    );
-    assert_eq!(
-        requests[1]
-            .headers
-            .get("x-bb-session-credential")
-            .map(String::as_str),
-        Some("stored-kgoose-session")
-    );
+    assert!(!requests[0].headers.contains_key("x-bb-session-credential"));
+    assert!(!requests[1].headers.contains_key("x-bb-session-credential"));
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 

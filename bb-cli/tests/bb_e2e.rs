@@ -14,7 +14,7 @@ use zip::write::SimpleFileOptions;
 
 use common::{
     bb_command, calculate_tool_schema, list_tools_response, output_text, temp_test_dir,
-    write_extensions_catalog, MockResponse, MockServer, LIST_TOOLS_PATH,
+    write_bb_org_config, write_extensions_catalog, MockResponse, MockServer, LIST_TOOLS_PATH,
 };
 
 // ---------------------------------------------------------------------------
@@ -281,6 +281,25 @@ fn bb_root_help_lists_skills_and_tools() {
 }
 
 #[test]
+fn bb_tools_root_help_does_not_require_org() {
+    let temp = temp_test_dir("bb-tools-help-no-org");
+    let bb_home = temp.join("bb-home");
+    fs::create_dir_all(&bb_home).expect("create bb home");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .args(["tools", "--help"])
+        .output()
+        .expect("run bb tools help");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    assert!(stdout.contains("Discover auth-backed tool extensions"));
+    assert!(!stderr.contains("org_required"), "stderr was: {stderr}");
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn bb_setup_placeholder_still_prints_placeholder() {
     let output = bb_command().arg("setup").output().expect("run bb setup");
     let (stdout, stderr) = output_text(&output);
@@ -384,6 +403,8 @@ fn bb_skills_list_formats_marketplace_skills_for_humans() {
 #[test]
 fn bb_skills_list_groups_installed_and_available_skills() {
     let temp = temp_test_dir("bb-skills-list-grouped");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     write_installed_package(&skills_home, "builderbot-tools", "content-sha", &["agents"]);
     let server = MockServer::start(vec![
@@ -407,7 +428,7 @@ fn bb_skills_list_groups_installed_and_available_skills() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -537,6 +558,7 @@ fn bb_skills_ignores_legacy_profile_server_url_and_auth() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
     let temp = temp_test_dir("bb-skills-profile-config");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     fs::create_dir_all(&bb_home).expect("create bb home");
     fs::write(
         bb_home.join("skills.yaml"),
@@ -570,6 +592,7 @@ fn bb_skills_list_uses_stored_session_credential_despite_legacy_profile_auth() {
     let server = MockServer::start(vec![skill_page_response(), empty_bundles_response()]);
     let temp = temp_test_dir("bb-skills-list-session");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     fs::create_dir_all(&bb_home).expect("create bb home");
     fs::write(
@@ -692,9 +715,11 @@ fn bb_skills_env_playpen_adds_baggage_header() {
 #[test]
 fn bb_auth_status_without_token_is_local_and_unauthenticated() {
     let temp = temp_test_dir("bb-auth-status");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .args(["auth", "status", "--json"])
         .output()
         .expect("run bb auth status");
@@ -707,9 +732,65 @@ fn bb_auth_status_without_token_is_local_and_unauthenticated() {
 }
 
 #[test]
+fn bb_auth_status_requires_org_in_json_mode() {
+    let temp = temp_test_dir("bb-auth-status-missing-org");
+    let bb_home = temp.join("bb-home");
+    fs::create_dir_all(&bb_home).expect("create bb home");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .args(["auth", "status", "--json"])
+        .output()
+        .expect("run bb auth status");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(!output.status.success());
+    assert!(stdout.is_empty(), "stdout was: {stdout}");
+    let payload = parse_stderr_error(&stderr);
+    assert_eq!(payload["error"]["code"], json!("org_required"));
+    assert_eq!(payload["error"]["exit_code"], json!(3));
+    assert!(
+        payload["error"]["message"]
+            .as_str()
+            .expect("error message string")
+            .contains("bb config set org <org>"),
+        "stderr was: {stderr}"
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_auth_status_uses_org_routed_custom_base_url() {
+    let temp = temp_test_dir("bb-auth-status-org-base");
+    let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
+    write_bb_org_config(&bb_home, "test");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", "blockstaging.build")
+        .args(["auth", "status", "--json"])
+        .output()
+        .expect("run bb auth status");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse status output");
+    assert_eq!(response["authenticated"], json!(false));
+    assert_eq!(
+        response["kgoose_base_url"],
+        json!("https://test.blockstaging.build")
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
 fn bb_auth_login_uses_valid_stored_file_session() {
     let temp = temp_test_dir("bb-auth-login-stored");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
         "authenticated": true,
@@ -768,6 +849,7 @@ fn bb_auth_login_uses_valid_stored_file_session() {
 fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
     let temp = temp_test_dir("bb-auth-login-playpen");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server = MockServer::start(vec![MockResponse::json(json!({
         "authenticated": true,
@@ -818,6 +900,7 @@ fn bb_auth_login_env_playpen_adds_baggage_to_stored_session_check() {
 fn bb_auth_logout_removes_stored_file_session() {
     let temp = temp_test_dir("bb-auth-logout");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
     let server_url = "http://localhost:5173/cash-app/goose";
     let default_key = browser_auth_storage_key("default", server_url);
@@ -890,6 +973,7 @@ fn browser_auth_storage_key(profile: &str, server_url: &str) -> String {
 fn bb_config_set_and_get_roundtrip() {
     let temp = temp_test_dir("bb-config-prefs");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
 
     let set = bb_command()
@@ -915,6 +999,52 @@ fn bb_config_set_and_get_roundtrip() {
     assert!(get.status.success(), "stderr was: {get_stderr}");
     let get_response = serde_json::from_str::<Value>(&get_stdout).expect("parse get output");
     assert_eq!(get_response["channel"], json!("beta"));
+
+    let set_org = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_SKILLS_HOME", &skills_home)
+        .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
+        .args(["config", "set", "org", " Test-Org ", "--json"])
+        .output()
+        .expect("run bb config set org");
+    let (_set_org_stdout, set_org_stderr) = output_text(&set_org);
+    assert!(set_org.status.success(), "stderr was: {set_org_stderr}");
+
+    let get_org = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_SKILLS_HOME", &skills_home)
+        .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
+        .args(["config", "get", "org", "--json"])
+        .output()
+        .expect("run bb config get org");
+    let (get_org_stdout, get_org_stderr) = output_text(&get_org);
+    assert!(get_org.status.success(), "stderr was: {get_org_stderr}");
+    let get_org_response =
+        serde_json::from_str::<Value>(&get_org_stdout).expect("parse get org output");
+    assert_eq!(get_org_response["org"], json!("test-org"));
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_config_set_org_repairs_invalid_existing_org() {
+    let temp = temp_test_dir("bb-config-repair-org");
+    let bb_home = temp.join("bb-home");
+    fs::create_dir_all(&bb_home).expect("create bb home");
+    fs::write(bb_home.join("config.yaml"), "org: bad_org\n").expect("write invalid config");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .args(["config", "set", "org", "Test-Org", "--json"])
+        .output()
+        .expect("run bb config set org");
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse set org output");
+    assert_eq!(response["updated"], json!("org"));
+
+    let saved = fs::read_to_string(bb_home.join("config.yaml")).expect("read repaired config");
+    assert!(saved.contains("org: test-org"), "saved config was: {saved}");
     fs::remove_dir_all(temp).expect("remove temp dir");
 }
 
@@ -922,6 +1052,7 @@ fn bb_config_set_and_get_roundtrip() {
 fn bb_skills_auth_is_removed_but_config_alias_still_works() {
     let temp = temp_test_dir("bb-skills-alias");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
 
     let status = bb_command()
@@ -1032,6 +1163,7 @@ fn bb_skills_install_downloads_verifies_and_installs_into_isolated_home() {
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-install");
     let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
@@ -1144,6 +1276,8 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
     let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-install-canonical");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
@@ -1158,7 +1292,7 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         // Canonical packages dir == the registry's agents directory, like the
         // real default (`~/.agents/skills`).
@@ -1197,7 +1331,7 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
 
     // Remove treats the entry as the package (offline via cached registry).
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", &agents_dir)
         .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
@@ -1215,6 +1349,8 @@ fn bb_skills_install_canonical_agents_dir_holds_real_package() {
 #[test]
 fn bb_skills_install_surfaces_install_plan_error_envelope() {
     let temp = temp_test_dir("bb-skills-install-plan-error");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1227,7 +1363,7 @@ fn bb_skills_install_surfaces_install_plan_error_envelope() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1264,6 +1400,8 @@ fn bb_skills_install_surfaces_artifact_error_envelope() {
     let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-artifact-error");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1282,7 +1420,7 @@ fn bb_skills_install_surfaces_artifact_error_envelope() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1317,6 +1455,8 @@ fn bb_skills_install_refuses_checksum_mismatch() {
     let bad_zip = skill_zip(&[("SKILL.md", "# Tampered\n")]);
     let artifact_sha = sha256_hex(&good_zip);
     let temp = temp_test_dir("bb-skills-checksum");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1330,7 +1470,7 @@ fn bb_skills_install_refuses_checksum_mismatch() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1369,6 +1509,8 @@ fn bb_skills_install_refuses_unsafe_zip_paths() {
     ]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-path-safety");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1382,7 +1524,7 @@ fn bb_skills_install_refuses_unsafe_zip_paths() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1420,6 +1562,8 @@ fn bb_skills_install_refuses_unmanaged_package_overwrite() {
     let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-unmanaged");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1434,7 +1578,7 @@ fn bb_skills_install_refuses_unmanaged_package_overwrite() {
     fs::write(unmanaged.join("SKILL.md"), "user file").expect("write unmanaged skill");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1478,6 +1622,8 @@ fn bb_skills_install_rejects_unresolvable_version_pin() {
     let zip_bytes = skill_zip(&[("SKILL.md", "# BuilderBot Tools\n")]);
     let artifact_sha = sha256_hex(&zip_bytes);
     let temp = temp_test_dir("bb-skills-version-pin");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![
         capabilities_response(&agents_dir),
@@ -1489,7 +1635,7 @@ fn bb_skills_install_rejects_unresolvable_version_pin() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1523,6 +1669,8 @@ fn bb_skills_install_rejects_unresolvable_version_pin() {
 #[test]
 fn bb_skills_install_local_path_installs_without_marketplace() {
     let temp = temp_test_dir("bb-skills-local-path");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let agents_dir = temp.join("agents-skills");
     let server = MockServer::start(vec![capabilities_response(&agents_dir)]);
     let source = temp.join("local-skill");
@@ -1530,7 +1678,7 @@ fn bb_skills_install_local_path_installs_without_marketplace() {
     fs::write(source.join("SKILL.md"), "# Local Skill\n").expect("write local SKILL.md");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .current_dir(&temp)
@@ -1575,6 +1723,8 @@ fn bb_skills_install_local_path_installs_without_marketplace() {
 #[test]
 fn bb_skills_update_reports_up_to_date_skills() {
     let temp = temp_test_dir("bb-skills-update-noop");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     let agents_dir = temp.join("agents-skills");
     write_installed_package(&skills_home, "builderbot-tools", "content-sha", &["agents"]);
@@ -1584,7 +1734,7 @@ fn bb_skills_update_reports_up_to_date_skills() {
     ]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1613,12 +1763,14 @@ fn bb_skills_update_reports_up_to_date_skills() {
 #[test]
 fn bb_skills_installed_reports_update_availability() {
     let temp = temp_test_dir("bb-skills-installed");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     write_installed_package(&skills_home, "builderbot-tools", "content-sha", &["agents"]);
     let server = MockServer::start(vec![skill_page_response()]);
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
         .env("KGOOSE_BASE_URL", &server.base_url)
@@ -1645,6 +1797,8 @@ fn bb_skills_installed_reports_update_availability() {
 #[test]
 fn bb_skills_which_reports_link_state() {
     let temp = temp_test_dir("bb-skills-which");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     let agents_dir = temp.join("agents-skills");
     write_installed_package(&skills_home, "builderbot-tools", "content-sha", &["agents"]);
@@ -1657,7 +1811,7 @@ fn bb_skills_which_reports_link_state() {
     .expect("create target link");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
         .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
@@ -1678,6 +1832,8 @@ fn bb_skills_which_reports_link_state() {
 #[test]
 fn bb_skills_remove_deletes_links_and_package() {
     let temp = temp_test_dir("bb-skills-remove");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
     let skills_home = temp.join("skills-home");
     let agents_dir = temp.join("agents-skills");
     write_installed_package(&skills_home, "builderbot-tools", "content-sha", &["agents"]);
@@ -1690,7 +1846,7 @@ fn bb_skills_remove_deletes_links_and_package() {
     .expect("create target link");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", &skills_home)
         .env("BB_SKILLS_PACKAGES_DIR", skills_home.join("packages"))
         .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
@@ -1716,9 +1872,11 @@ fn bb_skills_remove_deletes_links_and_package() {
 #[test]
 fn bb_skills_doctor_offline_reports_server_failure() {
     let temp = temp_test_dir("bb-skills-doctor-offline");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
 
     let output = bb_command()
-        .env("BB_HOME", temp.join("bb-home"))
+        .env("BB_HOME", &bb_home)
         .env("BB_SKILLS_HOME", temp.join("skills-home"))
         .env("BB_SKILLS_PACKAGES_DIR", temp.join("skills-home/packages"))
         .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")

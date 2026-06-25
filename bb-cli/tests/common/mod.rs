@@ -148,13 +148,14 @@ impl MockServer {
 
     pub fn bb_tools_command(&self) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_bb"));
+        let bb_home = bb_home_with_org("bb-tools-home", "test");
         command
             .env_remove("KGOOSE_BASE_URL")
             .env_remove("KGOOSE_DEBUG")
             .env_remove("KGOOSE_PLAYPEN")
             .env_remove("KGOOSE_TIMEOUT")
             .env_remove("STS_ACCESS_TOKEN")
-            .env_remove("BB_HOME")
+            .env("BB_HOME", bb_home)
             .env_remove("BB_SKILLS_PROFILE")
             .env_remove("BB_AUTH_STORAGE")
             .env_remove("BB_AUTH_STORAGE_FILE")
@@ -180,8 +181,9 @@ impl MockServer {
 
 pub fn bb_command() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_bb"));
+    let bb_home = bb_home_with_org("bb-home", "test");
     command
-        .env_remove("BB_HOME")
+        .env("BB_HOME", bb_home)
         .env_remove("BB_SKILLS_HOME")
         .env_remove("BB_SKILLS_PACKAGES_DIR")
         .env_remove("BB_SKILLS_CONFIG")
@@ -195,6 +197,17 @@ pub fn bb_command() -> Command {
         .env_remove("KGOOSE_TIMEOUT")
         .env_remove("STS_ACCESS_TOKEN");
     command
+}
+
+pub fn bb_home_with_org(prefix: &str, org: &str) -> PathBuf {
+    let bb_home = temp_test_dir(prefix);
+    write_bb_org_config(&bb_home, org);
+    bb_home
+}
+
+pub fn write_bb_org_config(bb_home: &Path, org: &str) {
+    fs::create_dir_all(bb_home).expect("create bb home");
+    fs::write(bb_home.join("config.yaml"), format!("org: {org}\n")).expect("write bb config");
 }
 
 fn handle_connection(

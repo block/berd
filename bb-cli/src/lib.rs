@@ -25,9 +25,10 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 
 use crate::bb::auth_storage::stored_session_credential_header_value;
+use crate::bb::org_routing::resolve_org_kgoose_base_url;
 use crate::bb::skills_config::{
-    default_bb_home, read_optional_env, BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR,
-    DEFAULT_PROFILE_NAME,
+    default_bb_home, default_preferences_path, read_optional_env, read_preferences_file,
+    BB_HOME_ENV_VAR, BB_SKILLS_PROFILE_ENV_VAR, DEFAULT_PROFILE_NAME,
 };
 use crate::catalog::{load_extensions_catalog, write_extensions_catalog};
 use crate::kgoose::{CallToolResponse, HttpKgooseClient, KgooseClient, KgooseConfig};
@@ -42,6 +43,7 @@ struct ToolsCliConfig {
     describe_root_name: &'static str,
     version_bin_name: &'static str,
     nested_appkit_help: &'static str,
+    builderbot_mode: bool,
 }
 
 fn agent_tools_config() -> ToolsCliConfig {
@@ -54,6 +56,7 @@ fn agent_tools_config() -> ToolsCliConfig {
         describe_root_name: ROOT_COMMAND_NAME,
         version_bin_name: ROOT_BIN_NAME,
         nested_appkit_help: "sq agent-tools appkit --help",
+        builderbot_mode: false,
     }
 }
 
@@ -67,6 +70,7 @@ fn bb_tools_config() -> ToolsCliConfig {
         describe_root_name: TOOLS_COMMAND_NAME,
         version_bin_name: BB_TOOLS_BIN_NAME,
         nested_appkit_help: "bb tools appkit --help",
+        builderbot_mode: true,
     }
 }
 
@@ -208,7 +212,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
             anyhow::bail!("`--write-extensions` does not accept command arguments");
         }
 
-        attach_kgoose_session_credential(&mut kgoose_config)?;
+        apply_builderbot_mode_if_needed(&mut kgoose_config, config.builderbot_mode)?;
         let extensions = load_extensions(&client, &kgoose_config)?;
         write_extensions_catalog(path, &extensions)?;
         return Ok(());
@@ -216,7 +220,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
 
     if bootstrap.describe_commands {
         if !bootstrap.command_tokens.is_empty() {
-            attach_kgoose_session_credential(&mut kgoose_config)?;
+            apply_builderbot_mode_if_needed(&mut kgoose_config, config.builderbot_mode)?;
         }
         let description =
             load_command_description(&client, &kgoose_config, &bootstrap.command_tokens, config)?;
@@ -232,7 +236,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
         let summary = if bootstrap.command_tokens.is_empty() {
             ROOT_SUMMARY.to_string()
         } else {
-            attach_kgoose_session_credential(&mut kgoose_config)?;
+            apply_builderbot_mode_if_needed(&mut kgoose_config, config.builderbot_mode)?;
             load_command_description(&client, &kgoose_config, &bootstrap.command_tokens, config)?
                 .summary
         };
@@ -251,8 +255,6 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
         return appkit::run(raw_args);
     }
 
-    attach_kgoose_session_credential(&mut kgoose_config)?;
-
     let selected_extension_name = bootstrap
         .command_tokens
         .first()
@@ -262,6 +264,7 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
     let (extensions, loaded_extension) = if let Some(extension_name) =
         selected_extension_name.as_deref()
     {
+        apply_builderbot_mode_if_needed(&mut kgoose_config, config.builderbot_mode)?;
         let known_extensions = load_extensions_catalog()?;
         let loaded = load_extension(&client, &kgoose_config, extension_name, &known_extensions)?;
         let extensions = vec![runtime::ExtensionSummary {
@@ -324,9 +327,29 @@ fn run_tools_cli(argv0: &str, raw_args: &[String], config: ToolsCliConfig) -> Re
     Ok(())
 }
 
-fn attach_kgoose_session_credential(config: &mut KgooseConfig) -> Result<()> {
+fn apply_builderbot_mode_if_needed(config: &mut KgooseConfig, builderbot_mode: bool) -> Result<()> {
+    if !builderbot_mode {
+        return Ok(());
+    }
+    let bb_home = read_optional_env(BB_HOME_ENV_VAR)?
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(default_bb_home);
+    let preferences = read_preferences_file(&default_preferences_path(&bb_home))?;
+    let org = preferences
+        .org
+        .as_deref()
+        .ok_or_else(bb_org_required_error)?;
+    config.base_url = resolve_org_kgoose_base_url(&config.base_url, Some(org), false)?;
     config.session_credential = resolve_kgoose_session_credential(&config.base_url)?;
     Ok(())
+}
+
+fn bb_org_required_error() -> anyhow::Error {
+    bb::skills_api::failure(
+        bb::skills_api::exit_codes::AUTH_REQUIRED,
+        "org_required",
+        "bb org is not configured; run `bb auth login` or `bb config set org <org>`",
+    )
 }
 
 fn resolve_kgoose_session_credential(base_url: &str) -> Result<Option<String>> {

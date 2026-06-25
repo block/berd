@@ -75,6 +75,9 @@ KGOOSE_BASE_URL=http://localhost:8080 ./target/debug/bb --local-dev skills list
 
 For browser-based `bb auth`, see [BuilderBot Auth Flow](docs/bb-auth-flow.md)
 and [BuilderBot Local Auth Testing](docs/bb-auth-local-testing.md).
+Non-local-dev `bb` commands that contact kgoose require an org configured with
+`bb config set org <org>` or collected by interactive `bb auth login`. This org
+routing does not apply to `sq agent-tools`.
 
 Inspect the live CLI surface:
 

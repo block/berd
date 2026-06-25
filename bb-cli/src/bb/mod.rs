@@ -2,6 +2,7 @@ pub mod auth;
 pub mod auth_login;
 pub mod auth_storage;
 pub mod display;
+pub mod org_routing;
 pub mod skills;
 pub mod skills_api;
 pub mod skills_archive;

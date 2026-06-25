@@ -13,7 +13,8 @@ use serde_json::{json, Value};
 
 use super::auth_login::{run_browser_login, BrowserLoginCredentialSource};
 use super::auth_storage::default_session_storage;
-use super::display::Style;
+use super::display::{stdin_is_tty, Style};
+use super::org_routing::{normalize_org, resolve_org_kgoose_base_url};
 use super::skills_api::{exit_codes, failure, failure_info, MarketplaceClient, SilentJsonExit};
 use super::skills_archive::validate_preview_path;
 use super::skills_config::SkillsConfig;
@@ -465,7 +466,7 @@ pub fn run_auth(matches: &ArgMatches) -> Result<()> {
 
 /// Entry point for the top-level `bb config` command.
 pub fn run_config(matches: &ArgMatches) -> Result<()> {
-    run_with(matches, preferences)
+    run_with_config(matches, preferences)
 }
 
 fn run_with(
@@ -473,7 +474,23 @@ fn run_with(
     dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
 ) -> Result<()> {
     let config = SkillsConfig::resolve(matches)?;
-    match dispatch(&config, matches) {
+    run_resolved(&config, matches, dispatch)
+}
+
+fn run_with_config(
+    matches: &ArgMatches,
+    dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
+) -> Result<()> {
+    let config = SkillsConfig::resolve_for_config(matches)?;
+    run_resolved(&config, matches, dispatch)
+}
+
+fn run_resolved(
+    config: &SkillsConfig,
+    matches: &ArgMatches,
+    dispatch: fn(&SkillsConfig, &ArgMatches) -> Result<()>,
+) -> Result<()> {
+    match dispatch(config, matches) {
         Ok(()) => Ok(()),
         Err(err) => {
             if config.json {
@@ -490,9 +507,15 @@ fn run_with(
 
 fn dispatch_auth(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
-        Some(("status", _)) => auth_status(config),
+        Some(("status", _)) => {
+            ensure_org_configured(config)?;
+            auth_status(config)
+        }
         Some(("login", _)) => auth_login_browser(config),
-        Some(("logout", _)) => auth_logout_browser(config),
+        Some(("logout", _)) => {
+            ensure_org_configured(config)?;
+            auth_logout_browser(config)
+        }
         _ => anyhow::bail!("expected an auth subcommand"),
     }
 }
@@ -500,24 +523,99 @@ fn dispatch_auth(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
 fn dispatch(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         Some(("search", search_matches)) => {
+            ensure_org_configured(config)?;
             let query = search_matches
                 .get_one::<String>("query")
                 .context("expected search query")?;
             list_skills(config, Some(query), search_matches)
         }
-        Some(("list", list_matches)) => list_skills(config, None, list_matches),
-        Some(("show", show_matches)) => show_skill(config, show_matches),
-        Some(("files", files_matches)) => list_files(config, files_matches),
-        Some(("bundles", bundles_matches)) => list_bundles(config, bundles_matches),
-        Some(("install", install_matches)) => install(config, install_matches),
-        Some(("update", update_matches)) => update(config, update_matches),
-        Some(("remove", remove_matches)) => remove(config, remove_matches),
-        Some(("installed", installed_matches)) => installed(config, installed_matches),
-        Some(("which", which_matches)) => which(config, which_matches),
-        Some(("doctor", doctor_matches)) => doctor(config, doctor_matches),
+        Some(("list", list_matches)) => {
+            ensure_org_configured(config)?;
+            list_skills(config, None, list_matches)
+        }
+        Some(("show", show_matches)) => {
+            ensure_org_configured(config)?;
+            show_skill(config, show_matches)
+        }
+        Some(("files", files_matches)) => {
+            ensure_org_configured(config)?;
+            list_files(config, files_matches)
+        }
+        Some(("bundles", bundles_matches)) => {
+            ensure_org_configured(config)?;
+            list_bundles(config, bundles_matches)
+        }
+        Some(("install", install_matches)) => {
+            ensure_org_configured(config)?;
+            install(config, install_matches)
+        }
+        Some(("update", update_matches)) => {
+            ensure_org_configured(config)?;
+            update(config, update_matches)
+        }
+        Some(("remove", remove_matches)) => {
+            ensure_org_configured(config)?;
+            remove(config, remove_matches)
+        }
+        Some(("installed", installed_matches)) => {
+            ensure_org_configured(config)?;
+            installed(config, installed_matches)
+        }
+        Some(("which", which_matches)) => {
+            ensure_org_configured(config)?;
+            which(config, which_matches)
+        }
+        Some(("doctor", doctor_matches)) => {
+            ensure_org_configured(config)?;
+            doctor(config, doctor_matches)
+        }
         Some(("config", config_matches)) => preferences(config, config_matches),
         _ => anyhow::bail!("expected a skills subcommand"),
     }
+}
+
+fn ensure_org_configured(config: &SkillsConfig) -> Result<()> {
+    if config.local_dev || config.org.is_some() {
+        return Ok(());
+    }
+    Err(missing_org_error())
+}
+
+fn missing_org_error() -> anyhow::Error {
+    failure(
+        exit_codes::AUTH_REQUIRED,
+        "org_required",
+        "bb org is not configured; run `bb auth login` or `bb config set org <org>`",
+    )
+}
+
+fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
+    if config.local_dev || config.org.is_some() {
+        return Ok(config.clone());
+    }
+    if config.json || !stdin_is_tty() {
+        return Err(missing_org_error());
+    }
+
+    eprint!("Enter your org: ");
+    std::io::stderr().flush().context("flush org prompt")?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .context("read org")?;
+    let org = normalize_org(&answer)?;
+    let mut preferences = config.read_preferences()?;
+    preferences.org = Some(org.clone());
+    config.write_preferences(&preferences)?;
+
+    let mut resolved = config.clone();
+    resolved.org = Some(org);
+    resolved.kgoose_base_url = resolve_org_kgoose_base_url(
+        &config.kgoose_base_url,
+        resolved.org.as_deref(),
+        config.local_dev,
+    )?;
+    Ok(resolved)
 }
 
 // ---------------------------------------------------------------------------
@@ -564,8 +662,9 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
 }
 
 fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
-    let storage = default_session_storage(config)?;
-    let summary = run_browser_login(config, storage.as_ref())?;
+    let config = config_with_login_org(config)?;
+    let storage = default_session_storage(&config)?;
+    let summary = run_browser_login(&config, storage.as_ref())?;
     if config.json {
         return print_json(&summary);
     }
@@ -1521,6 +1620,7 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
                 .context("expected preference key")?;
             let preferences = config.read_preferences()?;
             let value: Value = match key.as_str() {
+                "org" => json!(preferences.org.unwrap_or_default()),
                 "channel" => json!(preferences.channel.unwrap_or_else(|| "stable".to_string())),
                 "targets" => json!(if preferences.targets.is_empty() {
                     "agents".to_string()
@@ -1553,6 +1653,7 @@ fn preferences(config: &SkillsConfig, matches: &ArgMatches) -> Result<()> {
                 .context("expected preference value")?;
             let mut preferences = config.read_preferences()?;
             match key.as_str() {
+                "org" => preferences.org = Some(normalize_org(value)?),
                 "channel" => preferences.channel = Some(value.clone()),
                 "targets" => {
                     let names = value

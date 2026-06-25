@@ -46,6 +46,8 @@ kubectl -n kgoose-builderbot port-forward pod/<pod-name> 5173:<dynamic-java-port
 In another terminal, run the CLI login command through the port-forward:
 
 ```bash
+./target/debug/bb config set org test
+
 BB_AUTH_STORAGE=file \
 BB_AUTH_STORAGE_FILE="$(pwd)/target/bb-auth-sessions.json" \
 KGOOSE_BASE_URL="http://localhost:5173" \
@@ -67,7 +69,9 @@ By default, the CLI stores browser auth sessions in the OS keyring. For local de
 Point the CLI at the real staging URL:
 
 ```bash
-KGOOSE_BASE_URL="https://test.blockstaging.build" \
+./target/debug/bb config set org test
+
+KGOOSE_BASE_URL="https://blockstaging.build" \
   ./target/debug/bb auth login
 ```
 
@@ -80,7 +84,7 @@ The Chrome extension must be enabled for playpen login so browser requests route
 BB_AUTH_STORAGE=file \
 BB_AUTH_STORAGE_FILE="$(pwd)/target/bb-auth-sessions.json" \
 BB_KGOOSE_PLAYPEN="jsibbison--cash-usw2" \
-KGOOSE_BASE_URL="https://test.blockstaging.build" \
+KGOOSE_BASE_URL="https://blockstaging.build" \
   ./target/debug/bb auth login
 ```
 
@@ -88,6 +92,7 @@ KGOOSE_BASE_URL="https://test.blockstaging.build" \
 
 - For port-forward testing, use `localhost:5173`, not `127.0.0.1:5173`, so the browser host matches the registered Auth0 callback URL.
 - The dynamic Java app port is the port that serves `/cash-app/goose`; `8080` is the health/admin listener.
-- `KGOOSE_BASE_URL` is the pure base URL. The CLI appends `/cash-app/goose` when it calls auth and marketplace endpoints.
+- Non-local-dev `bb` commands require `org`; set it with `bb config set org <org>` or let interactive `bb auth login` prompt for it.
+- `KGOOSE_BASE_URL` is the pure base URL. The CLI derives the org-routed host, then appends `/cash-app/goose` when it calls auth and marketplace endpoints.
 - `BB_KGOOSE_PLAYPEN` routes bb backend requests with `Baggage: kgoose-builderbot-playpen=<playpen-route>`.
 - Do not log callback query strings, cookies, or returned session credentials.
