@@ -11,7 +11,9 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::auth_login::{run_browser_login, verify_stored_session, BrowserLoginCredentialSource};
+use super::auth_login::{
+    logout_stored_session, run_browser_login, verify_stored_session, BrowserLoginCredentialSource,
+};
 use super::auth_storage::default_session_storage;
 use super::display::{stdin_is_tty, Style};
 use super::org_routing::{normalize_org, resolve_org_kgoose_base_url};
@@ -708,23 +710,45 @@ fn auth_login_browser(config: &SkillsConfig) -> Result<()> {
 fn auth_logout_browser(config: &SkillsConfig) -> Result<()> {
     let storage = default_session_storage(config)?;
     let storage_key = super::auth_storage::SessionStorageKey::from_config(config);
-    let removed = storage.delete(&storage_key)?;
+    let mut warnings = Vec::new();
+    let server_revoked = match logout_stored_session(config, storage.as_ref()) {
+        Ok(server_revoked) => server_revoked,
+        Err(err) => {
+            warnings.push(format!("failed to destroy server auth session: {err}"));
+            false
+        }
+    };
+    let removed = match storage.delete(&storage_key) {
+        Ok(removed) => removed,
+        Err(err) => {
+            warnings.push(format!("failed to remove local auth session: {err}"));
+            false
+        }
+    };
 
     if config.json {
         return print_json(&json!({
             "profile": config.profile,
             "kgoose_base_url": config.kgoose_base_url,
             "storage": storage.kind(),
+            "server_revoked": server_revoked,
             "removed": removed,
+            "warnings": warnings,
         }));
     }
 
-    if removed {
+    if server_revoked {
         config
             .style
-            .success("Removed BuilderBot CLI browser auth session");
+            .success("Destroyed BuilderBot CLI auth session on the server");
+    }
+    if removed {
+        config.style.success("Removed BuilderBot CLI auth session");
     } else {
-        println!("No BuilderBot CLI browser auth session was stored");
+        println!("No BuilderBot CLI auth session was stored");
+    }
+    for warning in warnings {
+        config.style.warn(&warning);
     }
     println!("  profile: {}", config.profile);
     println!("  kgoose base: {}", config.kgoose_base_url);

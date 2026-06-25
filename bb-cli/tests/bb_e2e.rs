@@ -961,9 +961,10 @@ fn bb_auth_logout_removes_stored_file_session() {
     let bb_home = temp.join("bb-home");
     write_bb_org_config(&bb_home, "test");
     let storage_path = temp.join("auth-sessions.json");
-    let server_url = "http://localhost:5173/cash-app/goose";
-    let default_key = browser_auth_storage_key("default", server_url);
-    let other_key = browser_auth_storage_key("other", server_url);
+    let server = MockServer::start(vec![MockResponse::json(json!({}))]);
+    let server_url = format!("{}/cash-app/goose", server.base_url);
+    let default_key = browser_auth_storage_key("default", &server_url);
+    let other_key = browser_auth_storage_key("other", &server_url);
     fs::write(
         &storage_path,
         serde_json::to_string_pretty(&json!({
@@ -984,16 +985,28 @@ fn bb_auth_logout_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .env("KGOOSE_BASE_URL", "http://localhost:5173")
+        .env("KGOOSE_BASE_URL", &server.base_url)
         .args(["auth", "logout", "--json"])
         .output()
         .expect("run bb auth logout");
+    let requests = server.finish();
     let (stdout, stderr) = output_text(&output);
 
     assert!(output.status.success(), "stderr was: {stderr}");
     let response = serde_json::from_str::<Value>(&stdout).expect("parse logout output");
     assert_eq!(response["removed"], json!(true));
+    assert_eq!(response["server_revoked"], json!(true));
     assert_eq!(response["storage"], json!("file"));
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "POST");
+    assert_eq!(requests[0].path, "/cash-app/goose/auth/logout");
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("default-session")
+    );
 
     let storage = fs::read_to_string(&storage_path).expect("read storage");
     assert!(!storage.contains("default-session"));
@@ -1003,7 +1016,7 @@ fn bb_auth_logout_removes_stored_file_session() {
         .env("BB_HOME", &bb_home)
         .env("BB_AUTH_STORAGE", "file")
         .env("BB_AUTH_STORAGE_FILE", &storage_path)
-        .env("KGOOSE_BASE_URL", "http://localhost:5173")
+        .env("KGOOSE_BASE_URL", "http://127.0.0.1:9")
         .args(["auth", "logout", "--json"])
         .output()
         .expect("run bb auth logout again");
@@ -1012,6 +1025,7 @@ fn bb_auth_logout_removes_stored_file_session() {
     assert!(output.status.success(), "stderr was: {stderr}");
     let response = serde_json::from_str::<Value>(&stdout).expect("parse logout output");
     assert_eq!(response["removed"], json!(false));
+    assert_eq!(response["server_revoked"], json!(false));
 
     fs::remove_dir_all(temp).expect("remove temp dir");
 }

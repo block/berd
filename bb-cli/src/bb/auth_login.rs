@@ -196,6 +196,24 @@ pub fn verify_stored_session(
     verify_session_credential(&client, config.playpen.as_deref(), &service_url, &stored)
 }
 
+pub fn logout_stored_session(
+    config: &SkillsConfig,
+    storage: &dyn SessionCredentialStorage,
+) -> Result<bool> {
+    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let client = Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("build auth logout HTTP client")?;
+    let storage_key = SessionStorageKey::from_config(config);
+    let Some(stored) = storage.get(&storage_key)? else {
+        return Ok(false);
+    };
+
+    logout_session_credential(&client, config.playpen.as_deref(), &service_url, &stored)
+}
+
 fn receive_exchange_code(server: Server) -> Result<String> {
     for request in server.incoming_requests() {
         let url = request.url().to_string();
@@ -301,6 +319,38 @@ fn verify_session_credential(
     } else {
         Ok(None)
     }
+}
+
+fn logout_session_credential(
+    client: &Client,
+    playpen: Option<&str>,
+    server_url: &str,
+    credential: &StoredSessionCredential,
+) -> Result<bool> {
+    let Some(session_credential) = credential.session_credential_header_value() else {
+        return Ok(false);
+    };
+    let url = auth_url(server_url, "/auth/logout")?;
+    let mut request = client
+        .post(url)
+        .header(USER_AGENT, CLI_USER_AGENT)
+        .header(ACCEPT, "application/json")
+        .header(SESSION_CREDENTIAL_HEADER, session_credential);
+    if let Some(baggage) = playpen_baggage(playpen) {
+        request = request.header("Baggage", baggage);
+    }
+    let response = request
+        .send()
+        .context("destroy stored BuilderBot CLI auth session")?;
+    let status = response.status();
+    let body = response.text().context("read /auth/logout response")?;
+    if status == HttpStatusCode::UNAUTHORIZED || status == HttpStatusCode::FORBIDDEN {
+        return Ok(false);
+    }
+    if !status.is_success() {
+        return Err(anyhow!("/auth/logout failed with {status}: {body}"));
+    }
+    Ok(true)
 }
 
 fn login_url(server_url: &str, callback_url: &str) -> Result<Url> {
