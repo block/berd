@@ -284,6 +284,10 @@ dev:
     export GOOSECTL_BIN="${CARGO_TARGET_DIR}/debug/goosectl"
     echo "Using goosectl CLI: ${GOOSECTL_BIN}"
 
+    if [[ ! -x resources/bb ]]; then
+        ./scripts/prepare-bb-cli-resource.sh
+    fi
+
     if [[ -n "${GOOSE_BIN:-}" ]]; then
         echo "Using explicitly set GOOSE_BIN: ${GOOSE_BIN}"
     else

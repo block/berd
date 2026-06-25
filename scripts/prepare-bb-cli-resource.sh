@@ -31,16 +31,31 @@ fi
   cargo "${cargo_args[@]}"
 )
 
-target_dir="$bb_root/target/release"
-if [[ -n "$target_triple" ]]; then
-  target_dir="$bb_root/target/$target_triple/release"
+target_dir="$(
+  cd "$bb_root"
+  if [[ -f ./bin/activate-hermit ]]; then
+    # shellcheck source=/dev/null
+    source ./bin/activate-hermit >/dev/null
+  fi
+
+  cargo metadata --no-deps --format-version 1 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("target_directory",""))' 2>/dev/null \
+    || true
+)"
+if [[ -z "$target_dir" ]]; then
+  target_dir="${CARGO_TARGET_DIR:-$bb_root/target}"
 fi
+
+if [[ -n "$target_triple" ]]; then
+  target_dir="$target_dir/$target_triple"
+fi
+built_dir="$target_dir/release"
 
 binary_name="bb"
 if [[ "$target_triple" == *windows* ]] || [[ "$(uname -s)" =~ ^(MINGW|MSYS|CYGWIN) ]]; then
   binary_name="bb.exe"
 fi
-built="$target_dir/$binary_name"
+built="$built_dir/$binary_name"
 
 if [[ ! -x "$built" ]]; then
   echo "Built bb binary not found at: $built" >&2
