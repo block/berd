@@ -5,7 +5,8 @@ name: Bump sq-kgoose Formula
 on:
   push:
     tags:
-      - '[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+      - '[0-9]*.[0-9]*.[0-9]*'
   workflow_dispatch:
     inputs:
       tag:
@@ -27,18 +28,20 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ github.event.inputs.tag || github.ref }}
+          fetch-depth: 0
 
-      - name: Validate tag against bb-cli/Cargo.toml
+      - name: Prepare formula bump
         id: vars
         env:
           INPUT_TAG: ${{ github.event.inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           set -euo pipefail
 
           tag="${INPUT_TAG:-$REF_NAME}"
-          if [[ ! "$tag" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "formula bump tags must be bare semver like 0.1.0; got: $tag" >&2
+          if [[ ! "$tag" =~ ^v?[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "formula bump tags must be semver like v0.1.0 or 0.1.0; got: $tag" >&2
             exit 1
           fi
 
@@ -48,15 +51,49 @@ jobs:
             exit 1
           fi
 
-          if [[ "$tag" != "$manifest_version" ]]; then
-            echo "tag $tag does not match bb-cli/Cargo.toml version $manifest_version" >&2
-            exit 1
+          should_dispatch=true
+          if [[ "$EVENT_NAME" != "workflow_dispatch" ]]; then
+            tag_ref="refs/tags/$tag"
+            previous_tag="$(
+              git for-each-ref refs/tags \
+                --sort=-creatordate \
+                --format='%(refname)' \
+                | grep -E '^refs/tags/v?[0-9]+\.[0-9]+\.[0-9]+$' \
+                | grep -v -Fx "$tag_ref" \
+                | while read -r candidate; do
+                    if git merge-base --is-ancestor "$candidate" HEAD; then
+                      printf '%s\n' "${candidate#refs/tags/}"
+                      break
+                    fi
+                  done
+            )"
+
+            if [[ -n "$previous_tag" ]]; then
+              previous_manifest_version=""
+              if previous_manifest="$(git show "${previous_tag}:bb-cli/Cargo.toml" 2>/dev/null)"; then
+                previous_manifest_version="$(printf '%s\n' "$previous_manifest" \
+                  | sed -n 's/^version = "\([^"]*\)"/\1/p' \
+                  | head -n1)"
+              fi
+
+              if [[ -z "$previous_manifest_version" ]]; then
+                echo "Previous tag $previous_tag does not include bb-cli/Cargo.toml; dispatching formula bump"
+              elif [[ "$manifest_version" == "$previous_manifest_version" ]]; then
+                should_dispatch=false
+                echo "bb-cli version is still $manifest_version from previous tag $previous_tag; skipping formula bump"
+              fi
+            else
+              echo "No previous semver tag found; dispatching formula bump"
+            fi
           fi
 
           echo "formula=sq-kgoose" >> "$GITHUB_OUTPUT"
+          echo "formula_version=$manifest_version" >> "$GITHUB_OUTPUT"
+          echo "should_dispatch=$should_dispatch" >> "$GITHUB_OUTPUT"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Check Homebrew bump secrets
+        if: steps.vars.outputs.should_dispatch == 'true'
         env:
           HOMEBREW_FORMULAS_APP_ID: ${{ secrets.HOMEBREW_FORMULAS_APP_ID }}
           HOMEBREW_FORMULAS_PRIVATE_KEY: ${{ secrets.HOMEBREW_FORMULAS_PRIVATE_KEY }}
@@ -74,6 +111,7 @@ jobs:
           fi
 
       - name: Generate token
+        if: steps.vars.outputs.should_dispatch == 'true'
         uses: actions/create-github-app-token@a8d616148505b5069dccd32f177bb87d7f39123b # v2.1.1
         id: generate_token
         with:
@@ -82,9 +120,10 @@ jobs:
           repositories: homebrew-formulas
 
       - name: Dispatch formula bump
+        if: steps.vars.outputs.should_dispatch == 'true'
         uses: peter-evans/repository-dispatch@ff45666b9427631e3450c54a1bcbee4d9ff4d7c0
         with:
           token: ${{ steps.generate_token.outputs.token }}
           repository: squareup/homebrew-formulas
           event-type: bump_formula
-          client-payload: '{"repo":"${{ github.repository }}", "formula":"${{ steps.vars.outputs.formula }}", "tag":"${{ steps.vars.outputs.tag }}"}'
+          client-payload: '{"repo":"${{ github.repository }}", "formula":"${{ steps.vars.outputs.formula }}", "version":"${{ steps.vars.outputs.formula_version }}", "tag":"${{ steps.vars.outputs.tag }}"}'
