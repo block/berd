@@ -86,7 +86,11 @@ export const REAL_BRIDGE_PROOF_PROFILE: RealBridgeProofProfile = {
     projectionP95Ms: ["long-10k", "huge-assistant-output", "tool-chain-storm"],
     timeToFirstVisibleTailMs: ["composer-growth-session-switch"],
     descriptorChurnPercent: ["pr928-fragment-tail"],
-    rawBrowserLongTasksAndDroppedFrames: ["long-10k", "tool-chain-storm"],
+    rawBrowserLongTasksAndDroppedFrames: [
+      "long-10k",
+      "tool-chain-storm",
+      "pr928-fragment-tail",
+    ],
     browserLongTasksAndDroppedFrames: [
       "huge-assistant-output",
       "tool-chain-storm",

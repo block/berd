@@ -121,7 +121,7 @@ describe("transcript row state context adapters", () => {
     fireEvent.click(screen.getByRole("button", { name: /focus target/i }));
   });
 
-  it("reports focus and DOM selection protection for the current row", () => {
+  it("reports focus and ignores DOM selection for the current row", () => {
     const registry = createTranscriptRowStateRegistry();
     render(
       <TranscriptRowStateProvider
@@ -162,14 +162,14 @@ describe("transcript row state context adapters", () => {
     expect(
       registry.getRowState({ sessionId: SESSION_ID, rowId: ROW_ID })
         ?.selectionProtected,
-    ).toBe(true);
+    ).toBeUndefined();
 
     selection?.removeAllRanges();
     document.dispatchEvent(new Event("selectionchange"));
     expect(
       registry.getRowState({ sessionId: SESSION_ID, rowId: ROW_ID })
         ?.selectionProtected,
-    ).toBe(false);
+    ).toBeUndefined();
   });
 
   it("reports overlay, MCP, streaming, and active tool protection signals", () => {
@@ -207,7 +207,7 @@ describe("transcript row state context adapters", () => {
     ).toContain("probe-host");
   });
 
-  it("reports selected-text context menu protection for intersecting rows", async () => {
+  it("reports selected-text context menu overlay state for intersecting rows", async () => {
     const registry = createTranscriptRowStateRegistry();
     render(
       <TranscriptRowStateProvider
@@ -236,7 +236,7 @@ describe("transcript row state context adapters", () => {
         sessionId: SESSION_ID,
         rowId: ROW_ID,
       });
-      expect(state?.custom?.selectedTextContextMenuOpen).toBe(true);
+      expect(state?.custom?.selectedTextContextMenuOpen).toBeUndefined();
       expect(state?.overlays?.openMenuIds).toContain("selected-text");
     });
     expect(
@@ -253,7 +253,7 @@ describe("transcript row state context adapters", () => {
         rows: [
           expect.objectContaining({
             rowId: ROW_ID,
-            reasons: expect.arrayContaining(["open-overlay", "selection"]),
+            reasons: ["open-overlay"],
           }),
         ],
       },

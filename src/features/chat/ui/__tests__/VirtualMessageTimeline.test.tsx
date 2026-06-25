@@ -1687,10 +1687,6 @@ describe("VirtualMessageTimeline", () => {
       "data-virtual-row-selectable",
       "false",
     );
-    expect(activeToolRow).toHaveAttribute(
-      "data-virtual-row-selection-pinned",
-      "false",
-    );
     expect(activeToolRow.style.pointerEvents).toBe("none");
     expect(activeToolRow.style.userSelect).toBe("none");
 
@@ -1701,10 +1697,6 @@ describe("VirtualMessageTimeline", () => {
     expect(visibleTailRow).toHaveAttribute(
       "data-virtual-row-selectable",
       "true",
-    );
-    expect(visibleTailRow).toHaveAttribute(
-      "data-virtual-row-selection-pinned",
-      "false",
     );
     expect(visibleTailRow.style.pointerEvents).toBe("");
     expect(visibleTailRow.style.userSelect).toBe("");

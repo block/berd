@@ -69,8 +69,6 @@ export interface TranscriptMcpActivityReporter {
 }
 
 const ROW_FOCUS_SOURCE_ID = "row-focus";
-const ROW_SELECTION_SOURCE_ID = "dom-selection";
-const SELECTED_TEXT_CONTEXT_MENU_SOURCE_ID = "selected-text-context-menu";
 const ACTIVE_STREAM_SOURCE_ID = "message-stream";
 const ACTIVE_TOOL_SOURCE_ID = "active-tool";
 
@@ -203,7 +201,6 @@ export function useTranscriptRowStateAdapter(): TranscriptRowStateAdapter {
 export function useTranscriptRowRootAdapter(): TranscriptRowRootAttributes {
   const context = useOptionalTranscriptRowStateContext();
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const selectionActiveRef = useRef(false);
   const selectedTextContextMenuActiveRef = useRef(false);
 
   const ref = useCallback<RefCallback<HTMLDivElement>>((nextElement) => {
@@ -260,28 +257,7 @@ export function useTranscriptRowRootAdapter(): TranscriptRowRootAttributes {
       return;
     }
 
-    const doc = element.ownerDocument;
-    const updateSelectionProtection = () => {
-      const selection = doc.getSelection();
-      const active = selectionIntersectsElement(selection, element);
-
-      if (!active && !selectionActiveRef.current) {
-        return;
-      }
-
-      selectionActiveRef.current = active;
-      notifyRowStateChange(
-        context,
-        context.registry.setSelectionProtection({
-          sessionId: context.sessionId,
-          sessionEpoch: context.sessionEpoch,
-          nowMs: getContextNowMs(context),
-          rowIds: [context.rowId],
-          active,
-          sourceId: ROW_SELECTION_SOURCE_ID,
-        }),
-      );
-    };
+    const view = element.ownerDocument.defaultView;
 
     const updateSelectedTextContextMenuProtection = (event: Event) => {
       const detail = (
@@ -299,18 +275,6 @@ export function useTranscriptRowRootAdapter(): TranscriptRowRootAttributes {
       selectedTextContextMenuActiveRef.current = detail.open && intersects;
       notifyRowStateChange(
         context,
-        context.registry.setSelectionProtection({
-          sessionId: context.sessionId,
-          sessionEpoch: context.sessionEpoch,
-          nowMs: getContextNowMs(context),
-          rowIds: [context.rowId],
-          active: detail.open && intersects,
-          contextMenuOpen: detail.open && intersects,
-          sourceId: SELECTED_TEXT_CONTEXT_MENU_SOURCE_ID,
-        }),
-      );
-      notifyRowStateChange(
-        context,
         context.registry.setOpenOverlay({
           ...getLookupInput(context),
           open: detail.open && intersects,
@@ -320,46 +284,17 @@ export function useTranscriptRowRootAdapter(): TranscriptRowRootAttributes {
       );
     };
 
-    doc.addEventListener("selectionchange", updateSelectionProtection);
-    doc.defaultView?.addEventListener(
+    view?.addEventListener(
       TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
       updateSelectedTextContextMenuProtection,
     );
-    updateSelectionProtection();
 
     return () => {
-      doc.removeEventListener("selectionchange", updateSelectionProtection);
-      doc.defaultView?.removeEventListener(
+      view?.removeEventListener(
         TRANSCRIPT_SELECTED_TEXT_CONTEXT_MENU_EVENT,
         updateSelectedTextContextMenuProtection,
       );
-      if (selectionActiveRef.current) {
-        notifyRowStateChange(
-          context,
-          context.registry.setSelectionProtection({
-            sessionId: context.sessionId,
-            sessionEpoch: context.sessionEpoch,
-            nowMs: getContextNowMs(context),
-            rowIds: [context.rowId],
-            active: false,
-            sourceId: ROW_SELECTION_SOURCE_ID,
-          }),
-        );
-        selectionActiveRef.current = false;
-      }
       if (selectedTextContextMenuActiveRef.current) {
-        notifyRowStateChange(
-          context,
-          context.registry.setSelectionProtection({
-            sessionId: context.sessionId,
-            sessionEpoch: context.sessionEpoch,
-            nowMs: getContextNowMs(context),
-            rowIds: [context.rowId],
-            active: false,
-            contextMenuOpen: false,
-            sourceId: SELECTED_TEXT_CONTEXT_MENU_SOURCE_ID,
-          }),
-        );
         notifyRowStateChange(
           context,
           context.registry.setOpenOverlay({
@@ -580,28 +515,6 @@ function getFocusTargetId(target: EventTarget | null): string | undefined {
     target.getAttribute("data-testid") ||
     target.tagName.toLowerCase()
   );
-}
-
-function selectionIntersectsElement(
-  selection: Selection | null,
-  element: Element,
-): boolean {
-  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
-    return false;
-  }
-
-  for (let index = 0; index < selection.rangeCount; index += 1) {
-    const range = selection.getRangeAt(index);
-    try {
-      if (range.intersectsNode(element)) {
-        return true;
-      }
-    } catch {
-      // Ignore stale or cross-root range nodes.
-    }
-  }
-
-  return false;
 }
 
 function rangesIntersectElement(

@@ -51,7 +51,6 @@ interface VirtualTranscriptRowProps {
     TranscriptVirtualItem,
     "end" | "protected" | "size" | "start" | "visible"
   >;
-  selectionPinned?: boolean;
   offscreenMeasurementKind?: "real";
   measurementPlan?: TranscriptShellMeasurementPlan;
   isStreaming?: boolean;
@@ -76,7 +75,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   dateLabel,
   layoutMode = "flow",
   virtualItem,
-  selectionPinned = false,
   offscreenMeasurementKind,
   measurementPlan,
   isStreaming,
@@ -93,10 +91,7 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
   const isOffscreenRealMeasurement = offscreenMeasurementKind === "real";
   const isVirtualLayout = layoutMode === "virtual" && virtualItem;
   const suppressVirtualRowSelection = Boolean(
-    isVirtualLayout &&
-      virtualItem.protected &&
-      !virtualItem.visible &&
-      !selectionPinned,
+    isVirtualLayout && virtualItem.protected && !virtualItem.visible,
   );
   const suppressRowSelection =
     suppressVirtualRowSelection || isOffscreenRealMeasurement;
@@ -180,11 +175,6 @@ export const VirtualTranscriptRow = memo(function VirtualTranscriptRow({
       ? "false"
       : virtualItem
         ? String(!suppressRowSelection)
-        : undefined,
-    "data-virtual-row-selection-pinned": isOffscreenRealMeasurement
-      ? "false"
-      : virtualItem
-        ? String(selectionPinned)
         : undefined,
     "data-virtual-row-shell-status": measurementPlan?.status,
     "data-virtual-row-shell-block-count": measurementPlan?.blocks.length,
@@ -446,7 +436,6 @@ function areVirtualTranscriptRowPropsEqual(
     previous.previousRowKind === next.previousRowKind &&
     previous.dateLabel === next.dateLabel &&
     previous.layoutMode === next.layoutMode &&
-    previous.selectionPinned === next.selectionPinned &&
     previous.offscreenMeasurementKind === next.offscreenMeasurementKind &&
     previous.measurementPlan === next.measurementPlan &&
     previous.isStreaming === next.isStreaming &&

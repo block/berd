@@ -1,4 +1,4 @@
-import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderWithProviders } from "@/test/render";
 import type { Message } from "@/shared/types/messages";
@@ -10,7 +10,6 @@ import {
 
 const timelineMocks = vi.hoisted(() => ({
   scrollToBottom: vi.fn(() => true),
-  isSelectionViewportFrozen: vi.fn(() => false),
 }));
 
 vi.mock("../MessageBubble", () => ({
@@ -64,7 +63,6 @@ vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
     })),
     scrollToRow: vi.fn(() => true),
     scrollToBottom: timelineMocks.scrollToBottom,
-    isSelectionViewportFrozen: timelineMocks.isSelectionViewportFrozen,
     setRowFocused: vi.fn(),
     markRowInteracted: vi.fn(),
   }),
@@ -99,44 +97,9 @@ function mockRequestAnimationFrame() {
   };
 }
 
-function setScrollMetrics(
-  element: HTMLElement,
-  {
-    scrollTop,
-    scrollHeight,
-    clientHeight,
-    clientWidth = 800,
-  }: {
-    scrollTop: number;
-    scrollHeight: number;
-    clientHeight: number;
-    clientWidth?: number;
-  },
-) {
-  Object.defineProperty(element, "scrollTop", {
-    configurable: true,
-    writable: true,
-    value: scrollTop,
-  });
-  Object.defineProperty(element, "scrollHeight", {
-    configurable: true,
-    value: scrollHeight,
-  });
-  Object.defineProperty(element, "clientHeight", {
-    configurable: true,
-    value: clientHeight,
-  });
-  Object.defineProperty(element, "clientWidth", {
-    configurable: true,
-    value: clientWidth,
-  });
-}
-
 describe("VirtualMessageTimeline layout-driven bottom scroll", () => {
   beforeEach(() => {
     timelineMocks.scrollToBottom.mockClear();
-    timelineMocks.isSelectionViewportFrozen.mockReset();
-    timelineMocks.isSelectionViewportFrozen.mockReturnValue(false);
     Object.defineProperty(globalThis, "ResizeObserver", {
       configurable: true,
       writable: true,
@@ -174,64 +137,5 @@ describe("VirtualMessageTimeline layout-driven bottom scroll", () => {
 
     expect(timelineMocks.scrollToBottom).toHaveBeenCalledTimes(1);
     expect(timelineMocks.scrollToBottom).toHaveBeenCalledWith("auto");
-  });
-
-  it("skips queued layout-driven bottom scroll when selection takes the viewport", () => {
-    const animationFrame = mockRequestAnimationFrame();
-    const messages = [
-      textMessage("user-1", "user", "Question"),
-      textMessage("assistant-1", "assistant", "Answer"),
-    ];
-    const { rerender } = renderWithProviders(
-      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
-    );
-    animationFrame.runAll(1000);
-    timelineMocks.scrollToBottom.mockClear();
-
-    rerender(
-      <VirtualMessageTimeline
-        sessionId="session-1"
-        messages={messages}
-        footer={<div data-testid="composer-footer" />}
-      />,
-    );
-    timelineMocks.isSelectionViewportFrozen.mockReturnValue(true);
-    animationFrame.runAll(1016);
-
-    expect(timelineMocks.scrollToBottom).not.toHaveBeenCalled();
-  });
-
-  it("keeps the pre-drag scroll height while the selection viewport is frozen", async () => {
-    timelineMocks.isSelectionViewportFrozen.mockReturnValue(true);
-    const messages = [
-      textMessage("user-1", "user", "Question"),
-      textMessage("assistant-1", "assistant", "Answer"),
-    ];
-    renderWithProviders(
-      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
-    );
-    const scroller = screen.getByTestId("message-timeline-scroll");
-    setScrollMetrics(scroller, {
-      scrollTop: 1100,
-      scrollHeight: 1600,
-      clientHeight: 500,
-    });
-
-    fireEvent.pointerDown(scroller);
-
-    await waitFor(() =>
-      expect(
-        screen.getByTestId("virtual-message-timeline-list").style.minHeight,
-      ).toBe("1600px"),
-    );
-
-    timelineMocks.isSelectionViewportFrozen.mockReturnValue(false);
-    fireEvent.pointerUp(document);
-
-    await waitFor(() =>
-      expect(
-        screen.getByTestId("virtual-message-timeline-list").style.minHeight,
-      ).toBe(""),
-    );
   });
 });

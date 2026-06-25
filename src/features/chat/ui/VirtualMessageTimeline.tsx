@@ -97,10 +97,6 @@ const RESPONSE_START_HINT_VIEWPORT_SLOP_PX = 16;
 // before the floating gutter chevron offers to jump back to its start.
 const GUTTER_RESPONSE_START_THRESHOLD_PX = 16;
 
-interface ScrollToBottomOptions {
-  ignoreSelectionViewportFreeze?: boolean;
-}
-
 export const VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT =
   "goose:virtual-message-timeline-diagnostics";
 
@@ -996,7 +992,6 @@ export function VirtualMessageTimeline({
     scrollHeight: number;
     wasDetached: boolean;
   } | null>(null);
-  const selectionScrollHeightFloorRef = useRef(0);
   const lastEffectiveVirtualScrollHeightRef = useRef<number | null>(null);
   const diagnosticsStartMsRef = useRef(getDiagnosticsNowMs());
   const diagnosticsAccumulatorRef = useRef(
@@ -1009,8 +1004,6 @@ export function VirtualMessageTimeline({
   >(null);
   const [footerHeightPx, setFooterHeightPx] = useState(0);
   const [liveTailScrollHeightFloorPx, setLiveTailScrollHeightFloorPx] =
-    useState(0);
-  const [selectionScrollHeightFloorPx, setSelectionScrollHeightFloorPx] =
     useState(0);
   const [pulsingMessageId, setPulsingMessageId] = useState<string | null>(null);
   const [transientStateSessionId, setTransientStateSessionId] =
@@ -1034,7 +1027,6 @@ export function VirtualMessageTimeline({
     userScrollDirectionRef.current = null;
     detachedScrollTopRef.current = null;
     liveTailHandoffRef.current = null;
-    selectionScrollHeightFloorRef.current = 0;
     streamingBottomFollowActiveRef.current = false;
     previousStreamingMessageIdRef.current = null;
     previousLatestAssistantCompletionStatusRef.current = null;
@@ -1063,7 +1055,6 @@ export function VirtualMessageTimeline({
     setShowJumpToLatest(false);
     setResponseStartHintMessageId(null);
     setLiveTailScrollHeightFloorPx(0);
-    setSelectionScrollHeightFloorPx(0);
     setPulsingMessageId(null);
   }
 
@@ -1151,7 +1142,6 @@ export function VirtualMessageTimeline({
     measureOffscreenRealElement,
     scrollToRow: scrollVirtualToRow,
     syncViewportFromDom,
-    isSelectionViewportFrozen,
   } = virtualTimeline;
   useEffect(() => {
     if (!virtualTimelineControlsRef) {
@@ -1169,10 +1159,6 @@ export function VirtualMessageTimeline({
   }, [virtualTimeline.rowStateControls, virtualTimelineControlsRef]);
   const isBoundedVirtualMode =
     virtualTimelineSnapshot.mode === "bounded-controller";
-  const selectionPinnedRowIds = useMemo(
-    () => new Set(virtualTimelineSnapshot.selectionPinnedRowIds),
-    [virtualTimelineSnapshot.selectionPinnedRowIds],
-  );
 
   // Indexed find-in-transcript: exact counts over the full transcript with
   // windowing intact. The list-root ref is shared with the forwarded
@@ -1706,19 +1692,9 @@ export function VirtualMessageTimeline({
   );
 
   const scrollToBottom = useCallback(
-    (
-      behavior: ScrollBehavior = "smooth",
-      options: ScrollToBottomOptions = {},
-    ) => {
+    (behavior: ScrollBehavior = "smooth") => {
       const container = containerRef.current;
       if (!container) {
-        return;
-      }
-
-      if (
-        !options.ignoreSelectionViewportFreeze &&
-        isSelectionViewportFrozen()
-      ) {
         return;
       }
 
@@ -1737,7 +1713,7 @@ export function VirtualMessageTimeline({
       container.scrollTop = bottomScrollTop;
       lastScrollTopRef.current = container.scrollTop;
     },
-    [getBottomScrollTop, isSelectionViewportFrozen, scrollVirtualToBottom],
+    [getBottomScrollTop, scrollVirtualToBottom],
   );
 
   useLayoutEffect(() => {
@@ -1781,51 +1757,6 @@ export function VirtualMessageTimeline({
     userScrollIntentRef.current = false;
     userScrollDirectionRef.current = null;
   }, []);
-
-  const setSelectionScrollHeightFloor = useCallback((nextFloorPx: number) => {
-    const normalizedFloorPx = Math.max(0, Math.ceil(nextFloorPx));
-    if (selectionScrollHeightFloorRef.current === normalizedFloorPx) {
-      return;
-    }
-
-    selectionScrollHeightFloorRef.current = normalizedFloorPx;
-    setSelectionScrollHeightFloorPx(normalizedFloorPx);
-  }, []);
-
-  const captureSelectionScrollHeightFloor = useCallback(
-    (container: HTMLDivElement) => {
-      const nextFloorPx = Math.max(
-        selectionScrollHeightFloorRef.current,
-        Math.ceil(container.scrollHeight),
-      );
-      if (nextFloorPx <= 0) {
-        return;
-      }
-
-      setSelectionScrollHeightFloor(nextFloorPx);
-    },
-    [setSelectionScrollHeightFloor],
-  );
-
-  const clearSelectionScrollHeightFloor = useCallback(() => {
-    if (selectionScrollHeightFloorRef.current === 0) {
-      return;
-    }
-
-    setSelectionScrollHeightFloor(0);
-  }, [setSelectionScrollHeightFloor]);
-
-  useLayoutEffect(() => {
-    if (selectionScrollHeightFloorRef.current === 0) {
-      return;
-    }
-
-    if (pointerScrollIntentActiveRef.current || isSelectionViewportFrozen()) {
-      return;
-    }
-
-    clearSelectionScrollHeightFloor();
-  });
 
   const scrollToTargetWithControlledSmooth = useCallback(
     (
@@ -1902,10 +1833,6 @@ export function VirtualMessageTimeline({
   );
 
   const requestBottomScroll = useCallback(() => {
-    if (isSelectionViewportFrozen()) {
-      return;
-    }
-
     if (bottomScrollFrameRef.current != null) {
       return;
     }
@@ -1913,20 +1840,18 @@ export function VirtualMessageTimeline({
     const requestedSessionId = scheduledBottomScrollSessionIdRef.current;
     bottomScrollFrameRef.current = requestAnimationFrame(() => {
       bottomScrollFrameRef.current = null;
-      const selectionViewportFrozen = isSelectionViewportFrozen();
       if (
         scheduledBottomScrollSessionIdRef.current !== requestedSessionId ||
         userDetachedRef.current ||
         suppressFollowResumeFromProgrammaticScrollRef.current ||
-        resolvedScrollTargetMessageIdRef.current ||
-        selectionViewportFrozen
+        resolvedScrollTargetMessageIdRef.current
       ) {
         return;
       }
 
       scrollToBottomRef.current("auto");
     });
-  }, [isSelectionViewportFrozen]);
+  }, []);
 
   useLayoutEffect(
     () => () => {
@@ -2140,10 +2065,6 @@ export function VirtualMessageTimeline({
     ) {
       return;
     }
-    if (isSelectionViewportFrozen()) {
-      return;
-    }
-
     const distanceFromBottom = Math.max(
       0,
       getBottomScrollTop(container) - container.scrollTop,
@@ -2167,13 +2088,11 @@ export function VirtualMessageTimeline({
       streamingBottomFollowFrameRef.current = null;
 
       const container = containerRef.current;
-      const selectionViewportFrozen = isSelectionViewportFrozen();
       if (
         !container ||
         userDetachedRef.current ||
         suppressFollowResumeFromProgrammaticScrollRef.current ||
-        !streamingBottomFollowActiveRef.current ||
-        selectionViewportFrozen
+        !streamingBottomFollowActiveRef.current
       ) {
         streamingBottomFollowActiveRef.current = false;
         return;
@@ -2205,7 +2124,7 @@ export function VirtualMessageTimeline({
     };
 
     streamingBottomFollowFrameRef.current = requestAnimationFrame(step);
-  }, [getBottomScrollTop, isSelectionViewportFrozen]);
+  }, [getBottomScrollTop]);
 
   useLayoutEffect(() => {
     if (lastAutoScrollMessagesRef.current === messages) {
@@ -2980,7 +2899,6 @@ export function VirtualMessageTimeline({
     const container = containerRef.current;
     if (event.type === "pointerdown" && container) {
       pointerScrollIntentActiveRef.current = true;
-      captureSelectionScrollHeightFloor(container);
     }
     markUserScrollIntent(null);
     if (event.type !== "pointerdown") {
@@ -3032,9 +2950,6 @@ export function VirtualMessageTimeline({
       }
 
       pointerScrollIntentActiveRef.current = false;
-      if (!isSelectionViewportFrozen()) {
-        clearSelectionScrollHeightFloor();
-      }
     };
 
     document.addEventListener("pointerup", endPointerScrollIntent);
@@ -3045,7 +2960,7 @@ export function VirtualMessageTimeline({
       document.removeEventListener("pointercancel", endPointerScrollIntent);
       window.removeEventListener("blur", endPointerScrollIntent);
     };
-  }, [clearSelectionScrollHeightFloor, isSelectionViewportFrozen]);
+  }, []);
 
   const handleJumpToLatest = () => {
     clearProgrammaticFollowResumeSuppression();
@@ -3062,9 +2977,7 @@ export function VirtualMessageTimeline({
       !container ||
       window.matchMedia(REDUCED_MOTION_QUERY).matches
     ) {
-      scrollToBottom(streamingMessageId ? "auto" : "smooth", {
-        ignoreSelectionViewportFreeze: true,
-      });
+      scrollToBottom(streamingMessageId ? "auto" : "smooth");
       if (streamingMessageId) {
         scheduleCappedStreamingBottomFollow();
       }
@@ -3074,7 +2987,7 @@ export function VirtualMessageTimeline({
     const startScrollTop = container.scrollTop;
     const initialBottom = getBottomScrollTop(container);
     if (Math.abs(initialBottom - startScrollTop) <= 1) {
-      scrollToBottom("auto", { ignoreSelectionViewportFreeze: true });
+      scrollToBottom("auto");
       return;
     }
 
@@ -3104,7 +3017,7 @@ export function VirtualMessageTimeline({
       jumpToLatestFrameRef.current = null;
       // Final exact landing through the controller so virtual state, position,
       // and detached flag all settle on the true bottom.
-      scrollToBottom("auto", { ignoreSelectionViewportFreeze: true });
+      scrollToBottom("auto");
     };
     jumpToLatestFrameRef.current = requestAnimationFrame(animate);
   };
@@ -3287,7 +3200,6 @@ export function VirtualMessageTimeline({
       previousRowKind={stableRows[index - 1]?.kind}
       layoutMode={virtualItem ? "virtual" : "flow"}
       virtualItem={virtualItem}
-      selectionPinned={selectionPinnedRowIds.has(row.rowId)}
       measurementPlan={measurementPlanByRowId.get(row.rowId)}
       dateLabel={formatDateSeparator(snapshot, index, {
         today: t("timeline.today"),
@@ -3373,16 +3285,10 @@ export function VirtualMessageTimeline({
   const messageListStyle = isBoundedVirtualMode
     ? {
         paddingBottom: hasLiveStreamingTail ? messageListBottomPaddingPx : 0,
-        ...(selectionScrollHeightFloorPx > 0
-          ? { minHeight: selectionScrollHeightFloorPx }
-          : {}),
         overflowAnchor: "none" as const,
       }
     : {
         paddingBottom: messageListBottomPaddingPx,
-        ...(selectionScrollHeightFloorPx > 0
-          ? { minHeight: selectionScrollHeightFloorPx }
-          : {}),
       };
 
   useLayoutEffect(() => {

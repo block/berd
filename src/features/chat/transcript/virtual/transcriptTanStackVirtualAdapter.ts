@@ -54,11 +54,6 @@ export interface TranscriptTanStackVirtualAdapterOptions
   anchorTo?: TanStackAnchorTo;
   followOnAppend?: TanStackFollowOnAppend;
   scrollEndThresholdPx?: number;
-  // When true, the adapter computes anchors/ranges normally but does not write
-  // the scroll element's scrollTop (see setScrollWritesSuspended). Lets a freshly
-  // rebuilt controller start with writes already suspended for a selection
-  // gesture.
-  scrollWritesSuspended?: boolean;
 }
 
 interface MeasurementEntry {
@@ -96,9 +91,8 @@ export class TranscriptTanStackVirtualAdapter
   private rectCallback: ((rect: Rect) => void) | null = null;
   private lastRangeSelection: TranscriptPixelRangeSelection | null = null;
   // While true, setScrollOffset skips the DOM scrollTop write but still tracks
-  // the live offset, so the engine keeps computing ranges/anchors without moving
-  // the viewport. Set during a text-selection pointer gesture so neither our
-  // anchor reconciliation nor a rebuild fights the browser-owned viewport.
+  // the live offset, so internal measurement replay can warm the engine without
+  // moving the browser-owned viewport.
   private scrollWritesSuspended = false;
 
   constructor(
@@ -120,7 +114,6 @@ export class TranscriptTanStackVirtualAdapter
     this.overscanAfterRows =
       options.overscanAfterRows ?? TRANSCRIPT_DEFAULT_OVERSCAN_AFTER_ROWS;
     this.protectedRowIds = options.protectedRowIds ?? [];
-    this.scrollWritesSuspended = options.scrollWritesSuspended ?? false;
     this.scrollElement =
       options.scrollElement ??
       createInMemoryScrollElement(input.viewportHeight, input.scrollTop ?? 0);
@@ -177,7 +170,6 @@ export class TranscriptTanStackVirtualAdapter
       source?: "browser" | "programmatic" | "correction";
       userScrollIntent?: boolean;
       preserveScrollPosition?: boolean;
-      preserveBottomAnchor?: boolean;
     } = {},
   ): TranscriptViewportUpdateResult {
     // Any viewport sync supersedes a pending TanStack scroll reconcile.
@@ -214,7 +206,7 @@ export class TranscriptTanStackVirtualAdapter
 
   // Suspend/resume DOM scrollTop writes. The engine still ingests viewport syncs
   // and computes corrections while suspended; it just stops asserting scrollTop,
-  // so the browser-owned viewport is left alone during a text-selection gesture.
+  // so callers can replay internal measurements without moving the live viewport.
   // Resuming does not replay a write — the caller drives the next viewport sync,
   // which reconciles the anchor against wherever the viewport now sits.
   setScrollWritesSuspended(suspended: boolean): void {
@@ -591,10 +583,9 @@ export class TranscriptTanStackVirtualAdapter
   }
 
   private setScrollOffset(offset: number, isScrolling: boolean): void {
-    // During a text-selection gesture scroll writes are suspended (the browser
-    // owns the viewport): skip the DOM write but still notify with the live
-    // offset so the virtualizer keeps tracking native movement and renders the
-    // right rows.
+    // When scroll writes are suspended, skip the DOM write but still notify with
+    // the live offset so the virtualizer keeps tracking native movement and
+    // renders the right rows.
     if (!this.scrollWritesSuspended) {
       setElementNumber(this.scrollElement, "scrollTop", Math.max(0, offset));
     }

@@ -547,7 +547,7 @@ test.describe("transcript product contract proof", () => {
     }
   });
 
-  test("DOM selection keeps selected rows mounted until selection clears", async ({
+  test("DOM selection does not promote selected rows into keepalive", async ({
     page,
   }) => {
     const fixture = buildTranscriptFixture("long-10k");
@@ -572,30 +572,7 @@ test.describe("transcript product contract proof", () => {
       firstSelectedMessageId,
       secondSelectedMessageId,
     );
-    await page.waitForFunction(() => {
-      const diagnostics = (window as TranscriptHarnessWindow)
-        .__GOOSE_TRANSCRIPT_VIRTUALIZATION_DIAGNOSTICS__;
-      return (
-        typeof diagnostics?.protectedRows === "number" &&
-        diagnostics.protectedRows >= 2
-      );
-    });
-
-    await scrollToMessage(page, fixture, "long-00000");
-
-    for (const messageId of [firstSelectedMessageId, secondSelectedMessageId]) {
-      const selectedRow = page.locator(
-        `[data-virtual-row-id="message:${messageId}"]`,
-      );
-      await expect(selectedRow).toHaveAttribute(
-        "data-virtual-row-protected",
-        "true",
-      );
-      await expect(selectedRow).toHaveAttribute(
-        "data-virtual-row-visible",
-        "false",
-      );
-    }
+    await waitForProtectedRows(page, 0);
 
     await clearBrowserSelection(page);
     await waitForProtectedRows(page, 0);
@@ -624,7 +601,7 @@ test.describe("transcript product contract proof", () => {
     ).toBe(true);
 
     await selectTextInMessage(page, selectedMessageId);
-    await waitForProtectedRows(page, 1);
+    await waitForProtectedRows(page, 0);
     await settleFrames(page, 4);
 
     const after = await waitForStableTranscriptScrollSnapshot(page);
@@ -692,7 +669,7 @@ test.describe("transcript product contract proof", () => {
     ).toBe(true);
   });
 
-  test("selected-text menu protection cleans up after close", async ({
+  test("selected-text menu overlay protection cleans up after close", async ({
     page,
   }) => {
     const fixture = buildTranscriptFixture("long-10k");

@@ -304,8 +304,6 @@ const LOCAL_RENDERER_HTML = `<!doctype html>
             mountedEnd: 0,
             renderedIndexes: [],
             protectionSignals: new Map(),
-            selectionProtectedRowIds: new Set(),
-            selectedTextMenuProtectedRowIds: new Set(),
             renderDurations: [],
             scrollHandlerDurations: [],
             correctionsPx: [],
@@ -1477,31 +1475,11 @@ const LOCAL_RENDERER_HTML = `<!doctype html>
 
         function syncDomSelectionProtection() {
           clearProtectionSignalsBySource("dom-selection");
-          state.selectionProtectedRowIds.clear();
-          const selection = window.getSelection();
-          if (selection && !selection.isCollapsed) {
-            const ranges = Array.from(
-              { length: selection.rangeCount },
-              (_, index) => selection.getRangeAt(index),
-            );
-            for (const rowId of rowIdsIntersectingRanges(ranges)) {
-              state.selectionProtectedRowIds.add(rowId);
-              setProtectionSignal({
-                rowId,
-                reason: "selection",
-                sourceId: "dom-selection",
-                active: true,
-                nowMs: performance.now(),
-              });
-            }
-          }
           refreshProtectionDiagnosticsOnly();
         }
 
         function syncSelectedTextMenuProtection(detail) {
-          clearProtectionSignalsBySource("selected-text-menu-selection");
           clearProtectionSignalsBySource("selected-text-menu-overlay");
-          state.selectedTextMenuProtectedRowIds.clear();
           if (!detail?.open) {
             render();
             return;
@@ -1509,15 +1487,7 @@ const LOCAL_RENDERER_HTML = `<!doctype html>
 
           const ranges = Array.isArray(detail.ranges) ? detail.ranges : [];
           for (const rowId of rowIdsIntersectingRanges(ranges)) {
-            state.selectedTextMenuProtectedRowIds.add(rowId);
             const nowMs = performance.now();
-            setProtectionSignal({
-              rowId,
-              reason: "selection",
-              sourceId: "selected-text-menu-selection",
-              active: true,
-              nowMs,
-            });
             setProtectionSignal({
               rowId,
               reason: "open-overlay",

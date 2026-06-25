@@ -179,7 +179,7 @@ describe("transcript virtual controller", () => {
     expect(controller.getDiagnostics().bottomFollowExits).toBe(1);
   });
 
-  it("preserves bottom anchoring while preserving browser-owned scroll", () => {
+  it("captures a row anchor while preserving browser-owned scroll", () => {
     const controller = createController({ viewportHeight: 300 });
     controller.setRows(makeRows(10, 100));
 
@@ -198,14 +198,17 @@ describe("transcript virtual controller", () => {
         source: "browser",
         userScrollIntent: true,
         preserveScrollPosition: true,
-        preserveBottomAnchor: true,
       },
     );
 
     expect(preserved.correction).toBeNull();
     expect(controller.getState()).toMatchObject({
       scrollTop: 500,
-      anchor: { type: "bottom" },
+      anchor: {
+        type: "row",
+        rowId: "row-5",
+        offsetWithinRow: 0,
+      },
       distanceFromBottom: 200,
     });
 
@@ -216,15 +219,19 @@ describe("transcript virtual controller", () => {
 
     expect(measured.accepted).toBe(true);
     expect(measured.correction).toMatchObject({
-      reason: "bottom-anchor",
+      reason: "row-anchor",
       previousScrollTop: 500,
-      nextScrollTop: 800,
-      delta: 300,
+      nextScrollTop: 600,
+      delta: 100,
     });
     expect(controller.getState()).toMatchObject({
-      scrollTop: 800,
-      anchor: { type: "bottom" },
-      pinnedToBottom: true,
+      scrollTop: 600,
+      anchor: {
+        type: "row",
+        rowId: "row-5",
+        offsetWithinRow: 0,
+      },
+      pinnedToBottom: false,
     });
   });
 
