@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useId,
@@ -44,6 +43,7 @@ import { formatProviderLabel } from "@/shared/ui/icons/ProviderIcons";
 import { Popover, PopoverAnchor } from "@/shared/ui/popover";
 import type { ChatAttachmentDraft } from "@/shared/types/messages";
 import { useFocusRegion } from "@/app/focus/FocusRegionProvider";
+import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 
 export interface GlobalComposeOptions {
   providerId?: string;
@@ -209,16 +209,7 @@ export function GlobalComposerPill({
   } | null>(null);
   const personaOverrideUserOverrideForRef = useRef<string | null>(null);
 
-  const resizeTextarea = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, TEXTAREA_MAX_HEIGHT_PX)}px`;
-  }, []);
-
-  useLayoutEffect(() => {
-    resizeTextarea();
-  });
+  const getTextareaMaxHeightPx = useCallback(() => TEXTAREA_MAX_HEIGHT_PX, []);
   const {
     attachments,
     addBrowserFiles,
@@ -227,6 +218,12 @@ export function GlobalComposerPill({
     clearAttachments,
   } = useChatInputAttachments();
   const attachmentWorkPending = attachmentWorkCount > 0;
+  const { resetHeight: resetTextarea } = useTextareaAutosize({
+    textareaRef,
+    value: text,
+    getMaxHeightPx: getTextareaMaxHeightPx,
+    layoutKey: `${focused}:${modelPickerOpen}:${projectPickerOpen}:${placement}:${attachments.length}:${selectedPersonaId ?? ""}:${selectedSkills.length}`,
+  });
 
   const runAttachmentWork = useCallback((task: () => Promise<void>) => {
     setAttachmentWorkCount((count) => count + 1);
@@ -689,7 +686,7 @@ export function GlobalComposerPill({
     selectedPersonaId: null,
     onSend: (draftText) =>
       attachmentWorkPending ? false : submitCompose(draftText),
-    resetTextarea: () => {},
+    resetTextarea,
     isSendLocked: attachmentWorkPending,
   });
 

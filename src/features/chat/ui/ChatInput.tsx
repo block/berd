@@ -62,6 +62,7 @@ import {
 } from "../lib/streamingShortcutPreference";
 import type { MessageChip } from "@/shared/types/messages";
 import type { Persona } from "@/shared/types/agents";
+import { useTextareaAutosize } from "@/shared/hooks/useTextareaAutosize";
 
 const DOCKED_TEXTAREA_MIN_HEIGHT_PX = 140;
 const DOCKED_TEXTAREA_MAX_HEIGHT_PX = 220;
@@ -255,7 +256,6 @@ export function ChatInput({
   const [isCompact, setIsCompact] = useState(false);
   const [attachmentWorkCount, setAttachmentWorkCount] = useState(0);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const resizeTextareaFrameRef = useRef<number | null>(null);
   const pendingCursorOffsetRef = useRef<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const effectiveAttachmentDropTargetRef =
@@ -315,33 +315,17 @@ export function ChatInput({
     );
   }, [surface]);
 
-  const resizeTextarea = useCallback(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) {
-      return;
-    }
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(textarea.scrollHeight, getTextareaMaxHeightPx())}px`;
-  }, [getTextareaMaxHeightPx]);
-  const scheduleResizeTextarea = useCallback(() => {
-    if (resizeTextareaFrameRef.current !== null) {
-      return;
-    }
-
-    resizeTextareaFrameRef.current = window.requestAnimationFrame(() => {
-      resizeTextareaFrameRef.current = null;
-      resizeTextarea();
-    });
-  }, [resizeTextarea]);
-
-  const resetTextarea = useCallback(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
-  }, []);
+  const {
+    resetHeight: resetTextarea,
+    scheduleAutosize: scheduleResizeTextarea,
+  } = useTextareaAutosize({
+    textareaRef,
+    value: text,
+    getMaxHeightPx: getTextareaMaxHeightPx,
+    layoutKey: surface,
+  });
 
   useLayoutEffect(() => {
-    resizeTextarea();
     const cursorOffset = pendingCursorOffsetRef.current;
     if (cursorOffset === null) {
       return;
@@ -362,10 +346,6 @@ export function ChatInput({
     window.addEventListener("resize", scheduleResizeTextarea);
     return () => {
       window.removeEventListener("resize", scheduleResizeTextarea);
-      if (resizeTextareaFrameRef.current !== null) {
-        window.cancelAnimationFrame(resizeTextareaFrameRef.current);
-        resizeTextareaFrameRef.current = null;
-      }
     };
   }, [scheduleResizeTextarea, surface]);
 
@@ -850,7 +830,6 @@ export function ChatInput({
     setText(value, isBulkInput ? "aggregate" : "latest");
     const cursorPosition = event.target.selectionStart ?? value.length;
     detectMention(value, cursorPosition);
-    resizeTextarea();
   };
 
   const handlePaste = useCallback(
