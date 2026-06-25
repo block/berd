@@ -86,6 +86,18 @@ function replaceRecentMessageSessionId(
   ).slice(0, MESSAGE_SESSION_CACHE_LIMIT);
 }
 
+function buildNonEmptyDraftSessionIds(
+  draftsBySession: Record<string, string>,
+): Set<string> {
+  const sessionIds = new Set<string>();
+  for (const [sessionId, draft] of Object.entries(draftsBySession)) {
+    if (draft.length > 0) {
+      sessionIds.add(sessionId);
+    }
+  }
+  return sessionIds;
+}
+
 function trimMessageSessionCache(
   state: ChatStoreState,
   recentMessageSessionIds: string[],
@@ -243,6 +255,7 @@ interface ChatStoreState {
   sessionStateById: Record<string, SessionChatRuntime>;
   queuedMessageBySession: Record<string, QueuedMessage>;
   draftsBySession: Record<string, string>;
+  nonEmptyDraftSessionIds: Set<string>;
   skillDraftsBySession: Record<string, ChatSkillDraft[]>;
   activeSessionId: string | null;
   recentMessageSessionIds: string[];
@@ -319,6 +332,8 @@ interface ChatStoreActions {
 
 export type ChatStore = ChatStoreState & ChatStoreActions;
 
+const cachedDrafts = loadCachedDrafts();
+
 const createChatStore: StateCreator<
   ChatStore,
   [["zustand/subscribeWithSelector", never]]
@@ -327,7 +342,8 @@ const createChatStore: StateCreator<
   messagesBySession: {},
   sessionStateById: buildInitialSessionStateById(),
   queuedMessageBySession: {},
-  draftsBySession: loadCachedDrafts(),
+  draftsBySession: cachedDrafts,
+  nonEmptyDraftSessionIds: buildNonEmptyDraftSessionIds(cachedDrafts),
   skillDraftsBySession: {},
   activeSessionId: null,
   recentMessageSessionIds: [],
@@ -978,16 +994,51 @@ const createChatStore: StateCreator<
 
   // Drafts
   setDraft: (sessionId, text) => {
-    set((state) => ({
-      draftsBySession: { ...state.draftsBySession, [sessionId]: text },
-    }));
+    set((state) => {
+      const previousDraft = state.draftsBySession[sessionId] ?? "";
+      const hadDraft = previousDraft.length > 0;
+      const hasDraft = text.length > 0;
+      const nextDraftsBySession = {
+        ...state.draftsBySession,
+        [sessionId]: text,
+      };
+
+      if (hadDraft === hasDraft) {
+        return { draftsBySession: nextDraftsBySession };
+      }
+
+      const nextNonEmptyDraftSessionIds = new Set(
+        state.nonEmptyDraftSessionIds,
+      );
+      if (hasDraft) {
+        nextNonEmptyDraftSessionIds.add(sessionId);
+      } else {
+        nextNonEmptyDraftSessionIds.delete(sessionId);
+      }
+
+      return {
+        draftsBySession: nextDraftsBySession,
+        nonEmptyDraftSessionIds: nextNonEmptyDraftSessionIds,
+      };
+    });
     persistDrafts(get().draftsBySession);
   },
 
   clearDraft: (sessionId) => {
     set((state) => {
       const { [sessionId]: _, ...rest } = state.draftsBySession;
-      return { draftsBySession: rest };
+      if (!state.nonEmptyDraftSessionIds.has(sessionId)) {
+        return { draftsBySession: rest };
+      }
+
+      const nextNonEmptyDraftSessionIds = new Set(
+        state.nonEmptyDraftSessionIds,
+      );
+      nextNonEmptyDraftSessionIds.delete(sessionId);
+      return {
+        draftsBySession: rest,
+        nonEmptyDraftSessionIds: nextNonEmptyDraftSessionIds,
+      };
     });
     persistDrafts(get().draftsBySession);
   },
@@ -1058,6 +1109,10 @@ const createChatStore: StateCreator<
         state.queuedMessageBySession;
       const { [draftSessionId]: draft, ...remainingDrafts } =
         state.draftsBySession;
+      const nonEmptyDraftSessionIds = new Set(state.nonEmptyDraftSessionIds);
+      if (nonEmptyDraftSessionIds.delete(draftSessionId) && draft) {
+        nonEmptyDraftSessionIds.add(backendSessionId);
+      }
       const { [draftSessionId]: skillDrafts, ...remainingSkillDrafts } =
         state.skillDraftsBySession;
       const { [draftSessionId]: scrollTarget, ...remainingTargets } =
@@ -1082,6 +1137,7 @@ const createChatStore: StateCreator<
           draft !== undefined
             ? { ...remainingDrafts, [backendSessionId]: draft }
             : remainingDrafts,
+        nonEmptyDraftSessionIds,
         skillDraftsBySession: skillDrafts
           ? { ...remainingSkillDrafts, [backendSessionId]: skillDrafts }
           : remainingSkillDrafts,
@@ -1119,6 +1175,8 @@ const createChatStore: StateCreator<
       const { [sessionId]: ___, ...remainingQueued } =
         state.queuedMessageBySession;
       const { [sessionId]: ____, ...remainingDrafts } = state.draftsBySession;
+      const nonEmptyDraftSessionIds = new Set(state.nonEmptyDraftSessionIds);
+      nonEmptyDraftSessionIds.delete(sessionId);
       const { [sessionId]: removedSkillDrafts, ...remainingSkillDrafts } =
         state.skillDraftsBySession;
       void removedSkillDrafts;
@@ -1130,6 +1188,7 @@ const createChatStore: StateCreator<
         sessionStateById: remainingSessionState,
         queuedMessageBySession: remainingQueued,
         draftsBySession: remainingDrafts,
+        nonEmptyDraftSessionIds,
         skillDraftsBySession: remainingSkillDrafts,
         scrollTargetMessageBySession: remainingTargets,
         activeSessionId:

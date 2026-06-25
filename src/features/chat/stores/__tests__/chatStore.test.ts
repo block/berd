@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { INITIAL_TOKEN_STATE } from "@/shared/types/chat";
 import type { Message } from "@/shared/types/messages";
 import { useChatStore } from "../chatStore";
+import { loadCachedDrafts } from "../draftPersistence";
 import { loadCachedUnreadSessionIds } from "../unreadPersistence";
 
 function makeMessage(overrides: Partial<Message> = {}): Message {
@@ -566,6 +567,15 @@ describe("chatStore draft localStorage persistence", () => {
 
     const stored = JSON.parse(window.localStorage.getItem(STORAGE_KEY) ?? "{}");
     expect(stored).toEqual({ s2: "world" });
+  });
+
+  it("ignores malformed cached draft values", () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ s1: "hello", s2: null, s3: 42, s4: false }),
+    );
+
+    expect(loadCachedDrafts()).toEqual({ s1: "hello" });
   });
 });
 

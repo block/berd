@@ -14,8 +14,8 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { AppView } from "@/app/AppShell";
 import {
-  selectDraftsBySession,
   selectLocalMessageCountsBySession,
+  selectNonEmptyDraftSessionIds,
   selectSessionStateById,
 } from "@/features/chat/stores/chatSelectors";
 import { useChatStore } from "@/features/chat/stores/chatStore";
@@ -287,7 +287,7 @@ function compareSessionListItems(
 function includeSessionListPlaceholderSessions(
   visibleSessions: ChatSession[],
   sessions: ChatSession[],
-  draftsBySession: Record<string, string>,
+  nonEmptyDraftSessionIds: ReadonlySet<string>,
   activeSessionId?: string | null,
 ): {
   sessions: ChatSession[];
@@ -302,8 +302,7 @@ function includeSessionListPlaceholderSessions(
     }
 
     return (
-      session.id === activeSessionId ||
-      (draftsBySession[session.id] ?? "").length > 0
+      session.id === activeSessionId || nonEmptyDraftSessionIds.has(session.id)
     );
   });
   const placeholderSessionIds = new Set(
@@ -386,7 +385,7 @@ export function SessionListCapability({
   const localMessageCountsBySession = useChatStore(
     useShallow(selectLocalMessageCountsBySession),
   );
-  const draftsBySession = useChatStore(selectDraftsBySession);
+  const nonEmptyDraftSessionIds = useChatStore(selectNonEmptyDraftSessionIds);
   const sessionStateById = useChatStore(selectSessionStateById);
   const sessions = useChatSessionStore(selectSessions);
   const activeWorkspaceBySession = useChatSessionStore(
@@ -426,10 +425,15 @@ export function SessionListCapability({
       includeSessionListPlaceholderSessions(
         getVisibleSessions(sessions, localMessageCountsBySession),
         sessions,
-        draftsBySession,
+        nonEmptyDraftSessionIds,
         activeSessionId,
       ),
-    [activeSessionId, draftsBySession, localMessageCountsBySession, sessions],
+    [
+      activeSessionId,
+      localMessageCountsBySession,
+      nonEmptyDraftSessionIds,
+      sessions,
+    ],
   );
   const activeSessions = useMemo(
     () => visibleSessions.sessions.filter((session) => !session.archivedAt),

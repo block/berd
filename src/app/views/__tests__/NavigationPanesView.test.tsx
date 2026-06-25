@@ -243,6 +243,14 @@ function seedPinnedHomeChats(...sessionIds: string[]) {
   });
 }
 
+function nonEmptyDraftSessionIds() {
+  return new Set(
+    Object.entries(mockDraftsBySession)
+      .filter(([, draft]) => draft.length > 0)
+      .map(([sessionId]) => sessionId),
+  );
+}
+
 function disableProjectGrouping() {
   setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
   setExperimentConfigValue(
@@ -258,12 +266,14 @@ vi.mock("@/features/chat/stores/chatStore", () => ({
       selector({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
+        nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
         sessionStateById: {},
       }),
     {
       getState: () => ({
         messagesBySession: {},
         draftsBySession: mockDraftsBySession,
+        nonEmptyDraftSessionIds: nonEmptyDraftSessionIds(),
         sessionStateById: {},
       }),
     },

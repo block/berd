@@ -42,3 +42,6 @@ export const selectSessionStateById = (state: ChatStore) =>
 
 export const selectDraftsBySession = (state: ChatStore) =>
   state.draftsBySession;
+
+export const selectNonEmptyDraftSessionIds = (state: ChatStore) =>
+  state.nonEmptyDraftSessionIds;

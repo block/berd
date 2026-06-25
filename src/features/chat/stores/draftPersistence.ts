@@ -6,7 +6,14 @@ export function loadCachedDrafts(): Record<string, string> {
     const stored = window.localStorage.getItem(DRAFTS_STORAGE_KEY);
     if (!stored) return {};
     const parsed = JSON.parse(stored);
-    return parsed && typeof parsed === "object" ? parsed : {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        (entry): entry is [string, string] => typeof entry[1] === "string",
+      ),
+    );
   } catch {
     return {};
   }
@@ -16,7 +23,9 @@ export function persistDrafts(drafts: Record<string, string>): void {
   if (typeof window === "undefined") return;
   try {
     const nonEmpty = Object.fromEntries(
-      Object.entries(drafts).filter(([, v]) => v.length > 0),
+      Object.entries(drafts).filter(
+        ([, v]) => typeof v === "string" && v.length > 0,
+      ),
     );
     if (Object.keys(nonEmpty).length === 0) {
       window.localStorage.removeItem(DRAFTS_STORAGE_KEY);
