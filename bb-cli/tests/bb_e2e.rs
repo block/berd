@@ -716,10 +716,13 @@ fn bb_skills_env_playpen_adds_baggage_header() {
 fn bb_auth_status_without_token_is_local_and_unauthenticated() {
     let temp = temp_test_dir("bb-auth-status");
     let bb_home = temp.join("bb-home");
+    let storage_path = temp.join("auth-sessions.json");
     write_bb_org_config(&bb_home, "test");
 
     let output = bb_command()
         .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
         .args(["auth", "status", "--json"])
         .output()
         .expect("run bb auth status");
@@ -782,6 +785,62 @@ fn bb_auth_status_uses_org_routed_custom_base_url() {
     assert_eq!(
         response["kgoose_base_url"],
         json!("https://test.blockstaging.build")
+    );
+    fs::remove_dir_all(temp).expect("remove temp dir");
+}
+
+#[test]
+fn bb_auth_status_uses_auth_me_for_stored_file_session() {
+    let temp = temp_test_dir("bb-auth-status-stored");
+    let bb_home = temp.join("bb-home");
+    write_bb_org_config(&bb_home, "test");
+    let storage_path = temp.join("auth-sessions.json");
+    let server = MockServer::start(vec![MockResponse::json(json!({
+        "authenticated": true,
+        "subject": "auth0|user_123",
+        "email": "test@example.com",
+        "name": "Test User",
+        "expiresAt": "2026-06-15T00:00:00Z"
+    }))]);
+    let storage_key =
+        browser_auth_storage_key("default", &format!("{}/cash-app/goose", server.base_url));
+    fs::write(
+        &storage_path,
+        serde_json::to_string_pretty(&json!({
+            storage_key: {
+                "sessionCredential": "stored-cli-session",
+                "expiresAt": "2026-06-15T00:00:00Z"
+            }
+        }))
+        .expect("serialize storage"),
+    )
+    .expect("write auth storage");
+
+    let output = bb_command()
+        .env("BB_HOME", &bb_home)
+        .env("BB_AUTH_STORAGE", "file")
+        .env("BB_AUTH_STORAGE_FILE", &storage_path)
+        .env("KGOOSE_BASE_URL", &server.base_url)
+        .args(["auth", "status", "--json"])
+        .output()
+        .expect("run bb auth status");
+    let requests = server.finish();
+    let (stdout, stderr) = output_text(&output);
+
+    assert!(output.status.success(), "stderr was: {stderr}");
+    let response = serde_json::from_str::<Value>(&stdout).expect("parse status output");
+    assert_eq!(response["authenticated"], json!(true));
+    assert_eq!(response["subject"], json!("auth0|user_123"));
+    assert_eq!(response["email"], json!("test@example.com"));
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].method, "GET");
+    assert_eq!(requests[0].path, "/cash-app/goose/auth/me");
+    assert_eq!(
+        requests[0]
+            .headers
+            .get("x-bb-session-credential")
+            .map(String::as_str),
+        Some("stored-cli-session")
     );
     fs::remove_dir_all(temp).expect("remove temp dir");
 }

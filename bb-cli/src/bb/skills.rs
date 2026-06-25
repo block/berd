@@ -11,7 +11,7 @@ use clap::{Arg, ArgAction, ArgMatches, Command};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use super::auth_login::{run_browser_login, BrowserLoginCredentialSource};
+use super::auth_login::{run_browser_login, verify_stored_session, BrowserLoginCredentialSource};
 use super::auth_storage::default_session_storage;
 use super::display::{stdin_is_tty, Style};
 use super::org_routing::{normalize_org, resolve_org_kgoose_base_url};
@@ -25,7 +25,7 @@ use super::skills_install::{
     InstallLock, PlanExecution, SetupSummary,
 };
 use super::skills_models::{
-    BundleSummary, InstallPlanRequest, InstallPlanResponse, InstalledSkillMetadata, MeResponse,
+    BundleSummary, InstallPlanRequest, InstallPlanResponse, InstalledSkillMetadata,
     RequestedTarget, SkillDetail, SkillSummary, SkillVersionDetail, PREFERENCE_KEYS,
 };
 use super::skills_targets::{inspect_link, LinkState, ResolvedTarget, Scope, TargetRegistry};
@@ -622,8 +622,8 @@ fn config_with_login_org(config: &SkillsConfig) -> Result<SkillsConfig> {
 // auth
 
 fn auth_status(config: &SkillsConfig) -> Result<()> {
-    let client = MarketplaceClient::new(config)?;
-    if !client.has_auth() {
+    let storage = default_session_storage(config)?;
+    let Some(me) = verify_stored_session(config, storage.as_ref())? else {
         if !config.json {
             println!("BuilderBot CLI auth");
             println!("  profile: {}", config.profile);
@@ -636,18 +636,24 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
             "kgoose_base_url": config.kgoose_base_url,
             "profile": config.profile,
         }));
-    }
+    };
 
-    let me = client.get_json::<MeResponse>("/v1/marketplace/me")?;
     if !config.json {
         println!("BuilderBot CLI auth");
         println!("  profile: {}", config.profile);
         println!("  kgoose base: {}", config.kgoose_base_url);
         println!("  authenticated: yes");
-        println!("  tenant: {}", me.tenant_id);
-        println!("  subject: {}", me.subject);
-        if !me.scopes.is_empty() {
-            println!("  scopes: {}", me.scopes.join(", "));
+        if let Some(subject) = &me.subject {
+            println!("  subject: {subject}");
+        }
+        if let Some(email) = &me.email {
+            println!("  email: {email}");
+        }
+        if let Some(name) = &me.name {
+            println!("  name: {name}");
+        }
+        if let Some(expires_at) = &me.expires_at {
+            println!("  expires at: {expires_at}");
         }
         return Ok(());
     }
@@ -656,8 +662,9 @@ fn auth_status(config: &SkillsConfig) -> Result<()> {
         "kgoose_base_url": config.kgoose_base_url,
         "profile": config.profile,
         "subject": me.subject,
-        "tenant_id": me.tenant_id,
-        "scopes": me.scopes,
+        "email": me.email,
+        "name": me.name,
+        "expires_at": me.expires_at,
     }))
 }
 

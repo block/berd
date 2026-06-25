@@ -9,7 +9,6 @@ use serde_json::Value;
 pub struct MeResponse {
     pub tenant_id: String,
     pub subject: String,
-    pub scopes: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

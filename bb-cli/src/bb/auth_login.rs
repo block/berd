@@ -53,12 +53,12 @@ pub enum BrowserLoginCredentialSource {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct AuthMeResponse {
-    authenticated: bool,
-    subject: Option<String>,
-    email: Option<String>,
-    name: Option<String>,
-    expires_at: Option<String>,
+pub struct AuthMeResponse {
+    pub authenticated: bool,
+    pub subject: Option<String>,
+    pub email: Option<String>,
+    pub name: Option<String>,
+    pub expires_at: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -176,6 +176,24 @@ pub fn run_browser_login(
         credential_prefix: Some(safe_prefix(&exchange.session_credential)),
         credential_sha256_prefix: Some(sha256_prefix(&exchange.session_credential)),
     })
+}
+
+pub fn verify_stored_session(
+    config: &SkillsConfig,
+    storage: &dyn SessionCredentialStorage,
+) -> Result<Option<AuthMeResponse>> {
+    let service_url = kgoose_service_url(&config.kgoose_base_url);
+    let client = Client::builder()
+        .redirect(Policy::none())
+        .timeout(Duration::from_secs(30))
+        .build()
+        .context("build auth status HTTP client")?;
+    let storage_key = SessionStorageKey::from_config(config);
+    let Some(stored) = storage.get(&storage_key)? else {
+        return Ok(None);
+    };
+
+    verify_session_credential(&client, config.playpen.as_deref(), &service_url, &stored)
 }
 
 fn receive_exchange_code(server: Server) -> Result<String> {
