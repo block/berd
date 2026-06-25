@@ -4,6 +4,12 @@ export {
   createTranscriptRangeExtractor,
 } from "./transcriptVirtualRange";
 export {
+  TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
+  TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTES,
+  TRANSCRIPT_SELECTION_SURFACE_SELECTOR,
+  TRANSCRIPT_SELECTION_SURFACE_VALUE,
+} from "./transcriptSelectionSurface";
+export {
   TranscriptVirtualController,
   createTranscriptVirtualController,
 } from "./transcriptVirtualController";

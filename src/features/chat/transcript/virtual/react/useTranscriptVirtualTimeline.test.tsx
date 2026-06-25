@@ -1,11 +1,13 @@
 import { act, render, renderHook, waitFor } from "@testing-library/react";
-import { useLayoutEffect, type RefObject } from "react";
+import { useLayoutEffect, useRef, type RefObject } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TranscriptRowDescriptor } from "../../projection/transcriptItemTypes";
 import {
+  getSelectionRangeViewportOffset,
   useTranscriptVirtualTimeline,
   type TranscriptVirtualTimelineSnapshot,
 } from "./useTranscriptVirtualTimeline";
+import { TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTES } from "../transcriptSelectionSurface";
 
 const SESSION_ID = "session-a";
 
@@ -38,6 +40,36 @@ describe("useTranscriptVirtualTimeline", () => {
   afterEach(() => {
     document.body.replaceChildren();
     vi.restoreAllMocks();
+  });
+
+  it("reads a selection range offset relative to the transcript viewport", () => {
+    const container = createContainer();
+    setElementRect(container, { top: 25, height: 300 });
+    const textNode = document.createTextNode("selected text");
+    container.appendChild(textNode);
+    const selection = {
+      anchorNode: textNode,
+      focusNode: textNode,
+      isCollapsed: false,
+      rangeCount: 1,
+      getRangeAt: () =>
+        ({
+          getBoundingClientRect: () =>
+            ({
+              bottom: 141,
+              height: 16,
+              left: 0,
+              right: 120,
+              top: 125,
+              width: 120,
+              x: 0,
+              y: 125,
+              toJSON: () => ({}),
+            }) as DOMRect,
+        }) as Range,
+    } as unknown as Selection;
+
+    expect(getSelectionRangeViewportOffset(selection, container)).toBe(100);
   });
 
   it("flushes visible measurements on the next animation frame instead of a microtask", async () => {
@@ -151,6 +183,59 @@ describe("useTranscriptVirtualTimeline", () => {
     });
 
     expect(effectSnapshots).toHaveLength(1);
+  });
+
+  it("accepts browser-clamped bottom corrections until virtual layout is reachable", () => {
+    const { container, setScrollHeight } = createClampedContainer({
+      scrollHeight: 300,
+    });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 10 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    expect(container.scrollTop).toBe(0);
+    expect(result.current.snapshot.controllerState).toMatchObject({
+      scrollTop: 0,
+      bottomScrollTop: 700,
+      distanceFromBottom: 700,
+    });
+    expect(result.current.snapshot.controllerState.anchor).toMatchObject({
+      type: "row",
+      rowId: "row-0",
+    });
+
+    act(() => {
+      expect(result.current.scrollToBottom("auto")).toBe(true);
+    });
+
+    expect(container.scrollTop).toBe(0);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(0);
+
+    setScrollHeight(1000);
+
+    act(() => {
+      expect(result.current.scrollToBottom("auto")).toBe(true);
+    });
+
+    expect(container.scrollTop).toBe(700);
+    expect(result.current.snapshot.controllerState).toMatchObject({
+      scrollTop: 700,
+      anchor: { type: "bottom" },
+      distanceFromBottom: 0,
+    });
   });
 
   it("forces visible remeasurement when returning to a previously measured width", async () => {
@@ -296,7 +381,7 @@ describe("useTranscriptVirtualTimeline", () => {
     ).toBe(1);
   });
 
-  it("pins selection-endpoint rows into the protected set during a drag-select", async () => {
+  it("pins selection-spanned rows into the protected set during a drag-select", async () => {
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -329,13 +414,8 @@ describe("useTranscriptVirtualTimeline", () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
 
-    // Only the endpoint rows are pinned — the fully-selected row between them
-    // can still unmount, since the live Range is defined by its endpoints.
     expect(result.current.snapshot.range.protectedRowIds).toEqual(
-      expect.arrayContaining(["intro", "tail"]),
-    );
-    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
-      "middle",
+      expect.arrayContaining(["intro", "middle", "tail"]),
     );
 
     await act(async () => {
@@ -344,6 +424,606 @@ describe("useTranscriptVirtualTimeline", () => {
     });
 
     expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+  });
+
+  it("limits long selection spans to endpoint rows", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 7 }, (_, index) =>
+      row(`row-${index}`, 100 + index),
+    );
+
+    const firstEl = appendRowElement(container, "row-0", "first row text");
+    const lastEl = appendRowElement(container, "row-6", "last row text");
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(firstEl.firstChild as Text, 0);
+      range.setEnd(lastEl.firstChild as Text, "last".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([
+      "row-0",
+      "row-6",
+    ]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-0",
+      "row-6",
+    ]);
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "row-3",
+    );
+
+    await act(async () => {
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+  });
+
+  it("does not keep stale focus rows protected while extending a long drag-select", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = Array.from({ length: 6 }, (_, index) =>
+      row(`row-${index}`, 100 + index),
+    );
+    const rowElements = rows.map((transcriptRow) =>
+      appendRowElement(
+        container,
+        transcriptRow.rowId,
+        `${transcriptRow.rowId} text`,
+      ),
+    );
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      container.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(rowElements[0].firstChild as Text, 0);
+      range.setEnd(rowElements[2].firstChild as Text, "row-2".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([
+      "row-0",
+      "row-1",
+      "row-2",
+    ]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-0",
+      "row-1",
+      "row-2",
+    ]);
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(rowElements[0].firstChild as Text, 0);
+      range.setEnd(rowElements[5].firstChild as Text, "row-5".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([
+      "row-0",
+      "row-5",
+    ]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-0",
+      "row-5",
+    ]);
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+  });
+
+  it("skips oversized rows when protecting a drag-select", async () => {
+    const container = createContainer();
+    setElementRect(container, { top: 0, height: 300 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("huge", 100), row("tail", 120)];
+
+    const hugeEl = appendRowElement(container, "huge", "huge row text");
+    const tailEl = appendRowElement(container, "tail", "tail row text");
+    setElementRect(hugeEl, { top: 0, height: 5000 });
+    setElementRect(tailEl, { top: 120, height: 40 });
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      hugeEl.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(hugeEl.firstChild as Text, 0);
+      range.setEnd(tailEl.firstChild as Text, "tail".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual(["tail"]);
+    expect(result.current.snapshot.range.protectedRowIds).toContain("tail");
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain("huge");
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("skips streaming tail rows when protecting a drag-select", async () => {
+    const container = createContainer();
+    setElementRect(container, { top: 0, height: 300 });
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const streamTailRowId = "message:assistant:stream-tail";
+    const rows = [
+      row("start", 100),
+      row("middle", 120),
+      row(streamTailRowId, 140, {
+        kind: "assistant-content-fragment",
+        fragment: {
+          fragmentId: "stream-tail",
+          fragmentIndex: 1,
+          fragmentCount: 2,
+          role: "end",
+          content: [],
+          isStreamingTail: false,
+          messageScrollTarget: true,
+          isCodeContinuationChunk: false,
+          startsWithHeading: false,
+        },
+      }),
+    ];
+
+    const startEl = appendRowElement(container, "start", "start row text");
+    const middleEl = appendRowElement(container, "middle", "middle row text");
+    const streamTailEl = appendRowElement(
+      container,
+      streamTailRowId,
+      "stream tail row text",
+    );
+    setElementRect(startEl, { top: 0, height: 40 });
+    setElementRect(middleEl, { top: 80, height: 40 });
+    setElementRect(streamTailEl, { top: 140, height: 40 });
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      startEl.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(startEl.firstChild as Text, 0);
+      range.setEnd(streamTailEl.firstChild as Text, "stream tail".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual(["middle"]);
+    expect(result.current.snapshot.range.protectedRowIds).toContain("middle");
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      streamTailRowId,
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("does not protect the pointer-down row for same-row drag-selects", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("second", 120), row("tail", 140)];
+
+    const introEl = appendRowElement(container, "intro", "intro row text");
+    const secondEl = appendRowElement(container, "second", "second row text");
+    setElementRect(container, { top: 0, height: 300 });
+    setElementRect(introEl, { top: 80, height: 40 });
+    setElementRect(secondEl, { top: 140, height: 40 });
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      introEl.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(introEl.firstChild as Text, 0);
+      range.setEnd(introEl.firstChild as Text, "intro".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("does not pin rows for drag-selects that start on the timeline gutter", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("second", 120), row("tail", 140)];
+
+    const introEl = appendRowElement(container, "intro", "intro row text");
+    appendRowElement(container, "second", "second row text");
+    const tailEl = appendRowElement(container, "tail", "tail row text");
+    const timelineGutter = appendTimelineGutter(container);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      timelineGutter.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(introEl.firstChild as Text, 0);
+      range.setEnd(tailEl.firstChild as Text, "tail".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("does not treat timeline test ids as gutter selection surfaces", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("intro", 100), row("second", 120), row("tail", 140)];
+
+    const introEl = appendRowElement(container, "intro", "intro row text");
+    appendRowElement(container, "second", "second row text");
+    const tailEl = appendRowElement(container, "tail", "tail row text");
+    const timelineGutter = document.createElement("div");
+    timelineGutter.setAttribute("data-testid", "virtual-message-timeline-list");
+    container.appendChild(timelineGutter);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      timelineGutter.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(introEl.firstChild as Text, 0);
+      range.setEnd(tailEl.firstChild as Text, "tail".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([
+      "intro",
+      "second",
+      "tail",
+    ]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "intro",
+      "second",
+      "tail",
+    ]);
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("clears gutter-origin selection safe mode on pointer release", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const createRows = (activeRowId: string) =>
+      Array.from({ length: 8 }, (_, index) =>
+        row(`row-${index}`, 120, {
+          keepAlivePriority:
+            `row-${index}` === activeRowId ? "active-stream" : "none",
+        }),
+      );
+
+    const firstSelectedEl = appendRowElement(
+      container,
+      "row-6",
+      "selected row six text",
+    );
+    const lastSelectedEl = appendRowElement(
+      container,
+      "row-7",
+      "selected row seven text",
+    );
+    const timelineGutter = appendTimelineGutter(container);
+
+    const { result, rerender } = renderHook(
+      ({ rows }: { rows: readonly TranscriptRowDescriptor[] }) =>
+        useTranscriptVirtualTimeline({
+          sessionId: SESSION_ID,
+          sessionEpoch: 1,
+          rows,
+          containerRef,
+          footerHeight: 0,
+        }),
+      { initialProps: { rows: createRows("row-0") } },
+    );
+
+    expect(result.current.snapshot.range.protectedRowIds).toContain("row-0");
+
+    await act(async () => {
+      timelineGutter.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(lastSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).toContain("row-0");
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "row-6",
+    );
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "row-7",
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+    });
+
+    await act(async () => {
+      rerender({ rows: createRows("row-1") });
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).toContain("row-1");
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "row-0",
+    );
+
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("does not pin rows when replacing a selection from the timeline gutter", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [
+      row("previous", 80),
+      row("intro", 100),
+      row("second", 120),
+      row("tail", 140),
+    ];
+
+    const previousEl = appendRowElement(
+      container,
+      "previous",
+      "previous row text",
+    );
+    const introEl = appendRowElement(container, "intro", "intro row text");
+    appendRowElement(container, "second", "second row text");
+    const tailEl = appendRowElement(container, "tail", "tail row text");
+    const timelineGutter = appendTimelineGutter(container);
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(previousEl.firstChild as Text, 0);
+      range.setEnd(previousEl.firstChild as Text, "previous".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual(["previous"]);
+
+    await act(async () => {
+      timelineGutter.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(introEl.firstChild as Text, 0);
+      range.setEnd(tailEl.firstChild as Text, "tail".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "intro",
+    );
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain("tail");
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("does not pin replacement rows while clearing a selected drag-start row", async () => {
+    const container = createContainer();
+    const containerRef = {
+      current: container,
+    } satisfies RefObject<HTMLDivElement | null>;
+    const rows = [row("start", 100), row("focus", 120), row("tail", 140)];
+
+    const startEl = appendRowElement(container, "start", "start row text");
+    const focusEl = appendRowElement(container, "focus", "focus row text");
+
+    const { result } = renderHook(() =>
+      useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef,
+        footerHeight: 0,
+      }),
+    );
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(startEl.firstChild as Text, 0);
+      range.setEnd(startEl.firstChild as Text, "start".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual(["start"]);
+    expect(result.current.snapshot.range.protectedRowIds).toContain("start");
+
+    await act(async () => {
+      startEl.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(startEl.firstChild as Text, 0);
+      range.setEnd(focusEl.firstChild as Text, "focus".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(result.current.snapshot.selectionPinnedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "focus",
+    );
+    expect(result.current.snapshot.range.protectedRowIds).not.toContain(
+      "start",
+    );
+
+    await act(async () => {
+      document.dispatchEvent(new Event("pointerup"));
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+    document.getSelection()?.removeAllRanges();
   });
 
   it("defers measurement commits during a drag-select", async () => {
@@ -403,22 +1083,11 @@ describe("useTranscriptVirtualTimeline", () => {
       heightDuringSelection,
     );
 
-    // Pointer release resumes pointer handling, but the selection-safe render
-    // mode keeps measurements deferred while the browser still has a live Range.
+    // Pointer release drains the queued measurements even if the browser still
+    // has a live Range. The held selection keeps its endpoint rows protected,
+    // but it must not keep the controller stuck on stale measurements.
     await act(async () => {
       document.dispatchEvent(new Event("pointerup"));
-    });
-
-    expect(
-      result.current.snapshot.measurementStats.visibleMeasurementAttempts,
-    ).toBe(0);
-    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
-      heightDuringSelection,
-    );
-
-    await act(async () => {
-      document.getSelection()?.removeAllRanges();
-      document.dispatchEvent(new Event("selectionchange"));
     });
 
     await waitFor(() => {
@@ -429,6 +1098,21 @@ describe("useTranscriptVirtualTimeline", () => {
         340,
       );
     });
+
+    const attemptsAfterRelease =
+      result.current.snapshot.measurementStats.visibleMeasurementAttempts;
+
+    await act(async () => {
+      document.getSelection()?.removeAllRanges();
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(
+      result.current.snapshot.measurementStats.visibleMeasurementAttempts,
+    ).toBe(attemptsAfterRelease);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      340,
+    );
   });
 
   it("commits measurements immediately for a held selection with no drag", async () => {
@@ -650,7 +1334,7 @@ describe("useTranscriptVirtualTimeline", () => {
     );
   });
 
-  it("leaves topology safe mode after an ordinary transcript pointer release", async () => {
+  it("keeps bounded rendering during an ordinary transcript pointer release", async () => {
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -678,10 +1362,11 @@ describe("useTranscriptVirtualTimeline", () => {
       rerender({ protectedRowIds: ["intro"] });
     });
 
-    expect(result.current.snapshot.mode).toBe("safe-degraded");
-    expect(result.current.snapshot.fallbackReasons).toContain(
+    expect(result.current.snapshot.mode).toBe("bounded-controller");
+    expect(result.current.snapshot.fallbackReasons).not.toContain(
       "selection-safe-mode",
     );
+    expect(result.current.snapshot.range.protectedRowIds).toEqual(["intro"]);
 
     await act(async () => {
       document.dispatchEvent(new Event("pointerup"));
@@ -757,7 +1442,7 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(result.current.snapshot.range.protectedRowIds).toContain("row-0");
   });
 
-  it("defers cached measurement replay during selection-safe rendering", async () => {
+  it("defers cached measurement replay during selection topology freeze", async () => {
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -818,14 +1503,20 @@ describe("useTranscriptVirtualTimeline", () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
 
-    expect(result.current.snapshot.mode).toBe("safe-degraded");
-    expect(result.current.snapshot.fallbackReasons).toContain(
+    expect(result.current.snapshot.mode).toBe("bounded-controller");
+    expect(result.current.snapshot.fallbackReasons).not.toContain(
       "selection-safe-mode",
     );
     expect(result.current.snapshot.selectionPinnedRowIds).toEqual(
       expect.arrayContaining(["row-6", "row-7"]),
     );
-    expect(result.current.snapshot.range.protectedRowIds).toEqual([]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-6",
+      "row-7",
+    ]);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      800,
+    );
     expect(container.scrollTop).toBe(scrollTopBeforeSelection);
     expect(
       result.current.snapshot.measurementStats.controllerUpdatesFlushed,
@@ -835,8 +1526,15 @@ describe("useTranscriptVirtualTimeline", () => {
       rerender({ protectedRowIds: ["row-0"] });
     });
 
-    expect(result.current.snapshot.mode).toBe("safe-degraded");
-    expect(result.current.snapshot.range.protectedRowIds).toEqual(["row-0"]);
+    expect(result.current.snapshot.mode).toBe("bounded-controller");
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-0",
+      "row-6",
+      "row-7",
+    ]);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      800,
+    );
     expect(
       result.current.snapshot.measurementStats.controllerUpdatesFlushed,
     ).toBe(flushedBeforeSelection);
@@ -848,6 +1546,8 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(
       result.current.snapshot.measurementStats.controllerUpdatesFlushed,
     ).toBe(flushedBeforeSelection);
+    const flushedAfterRelease =
+      result.current.snapshot.measurementStats.controllerUpdatesFlushed;
 
     await act(async () => {
       document.getSelection()?.removeAllRanges();
@@ -856,7 +1556,7 @@ describe("useTranscriptVirtualTimeline", () => {
 
     expect(
       result.current.snapshot.measurementStats.controllerUpdatesFlushed,
-    ).toBeGreaterThan(flushedBeforeSelection);
+    ).toBeGreaterThan(flushedAfterRelease);
 
     document.getSelection()?.removeAllRanges();
   });
@@ -909,14 +1609,18 @@ describe("useTranscriptVirtualTimeline", () => {
       document.dispatchEvent(new Event("selectionchange"));
     });
 
-    expect(result.current.snapshot.mode).toBe("safe-degraded");
-    expect(result.current.snapshot.fallbackReasons).toContain(
+    expect(result.current.snapshot.mode).toBe("bounded-controller");
+    expect(result.current.snapshot.fallbackReasons).not.toContain(
       "selection-safe-mode",
     );
     expect(result.current.snapshot.selectionPinnedRowIds).toEqual(
       expect.arrayContaining(["row-6", "row-7"]),
     );
-    expect(result.current.snapshot.range.protectedRowIds).toEqual(["row-0"]);
+    expect(result.current.snapshot.range.protectedRowIds).toEqual([
+      "row-0",
+      "row-6",
+      "row-7",
+    ]);
 
     await act(async () => {
       rerender({ rows: createRows("row-1") });
@@ -957,7 +1661,7 @@ describe("useTranscriptVirtualTimeline", () => {
     document.getSelection()?.removeAllRanges();
   });
 
-  it("preserves protected topology after bottom-row selection release when keep-alive protections exceed the fail threshold", () => {
+  it("keeps selection safe mode when a drag begins from protected-threshold fallback", () => {
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -1252,6 +1956,392 @@ describe("useTranscriptVirtualTimeline", () => {
     });
   });
 
+  it("keeps the selected row anchored without entering selection-safe degraded rendering", async () => {
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+    const timelineRef: {
+      current: ReturnType<typeof useTranscriptVirtualTimeline> | null;
+    } = { current: null };
+    const containerRef: { current: HTMLDivElement | null } = { current: null };
+
+    function Harness() {
+      const hookContainerRef = useRef<HTMLDivElement | null>(null);
+      const timeline = useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef: hookContainerRef,
+        footerHeight: 0,
+      });
+      const selectedOffset =
+        timeline.snapshot.mode === "safe-degraded" ? 620 : 180;
+
+      useLayoutEffect(() => {
+        timelineRef.current = timeline;
+      }, [timeline]);
+
+      return (
+        <div
+          ref={(element) => {
+            if (!element) {
+              hookContainerRef.current = null;
+              containerRef.current = null;
+              return;
+            }
+            if (!element.hasAttribute("data-test-scroll-props")) {
+              Object.defineProperties(element, {
+                clientHeight: { configurable: true, value: 300 },
+                clientWidth: { configurable: true, value: 720 },
+                scrollHeight: { configurable: true, value: 2000 },
+                scrollTop: { configurable: true, writable: true, value: 0 },
+              });
+              element.setAttribute("data-test-scroll-props", "true");
+            }
+            setElementRect(element, { top: 0, height: 300 });
+            hookContainerRef.current = element;
+            containerRef.current = element;
+          }}
+        >
+          {rows.map((descriptor) => (
+            <div
+              key={descriptor.rowId}
+              data-virtual-row-state-row-id={descriptor.rowId}
+              ref={(element) => {
+                if (
+                  element &&
+                  (descriptor.rowId === "row-6" || descriptor.rowId === "row-7")
+                ) {
+                  setElementRect(element, {
+                    top: selectedOffset,
+                    height: 40,
+                  });
+                }
+              }}
+            >
+              selected text for {descriptor.rowId}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(timelineRef.current).not.toBeNull());
+    const container = containerRef.current as HTMLDivElement;
+
+    await act(async () => {
+      container.scrollTop = 500;
+      timelineRef.current?.syncViewportFromDom({
+        source: "browser",
+        userScrollIntent: true,
+      });
+    });
+
+    expect(container.scrollTop).toBe(500);
+    expect(timelineRef.current?.snapshot.controllerState.anchor).toMatchObject({
+      type: "row",
+    });
+
+    const firstSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-6"]',
+    ) as HTMLElement;
+    const lastSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-7"]',
+    ) as HTMLElement;
+
+    await act(async () => {
+      container.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(lastSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(timelineRef.current?.snapshot.mode).toBe("bounded-controller");
+    expect(timelineRef.current?.snapshot.fallbackReasons).not.toContain(
+      "selection-safe-mode",
+    );
+    expect(timelineRef.current?.snapshot.selectionPinnedRowIds).toEqual(
+      expect.arrayContaining(["row-6", "row-7"]),
+    );
+    expect(timelineRef.current?.snapshot.range.protectedRowIds).toEqual(
+      expect.arrayContaining(["row-6", "row-7"]),
+    );
+    expect(container.scrollTop).toBe(500);
+    expect(timelineRef.current?.snapshot.controllerState.scrollTop).toBe(500);
+
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("restores the selected endpoint after a protected-row rebuild shifts mounted geometry", async () => {
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+    const timelineRef: {
+      current: ReturnType<typeof useTranscriptVirtualTimeline> | null;
+    } = { current: null };
+    const containerRef: { current: HTMLDivElement | null } = { current: null };
+
+    function Harness() {
+      const hookContainerRef = useRef<HTMLDivElement | null>(null);
+      const timeline = useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef: hookContainerRef,
+        footerHeight: 0,
+      });
+      const rowEightProtected =
+        timeline.snapshot.range.protectedRowIds.includes("row-8");
+
+      useLayoutEffect(() => {
+        timelineRef.current = timeline;
+      }, [timeline]);
+
+      return (
+        <div
+          ref={(element) => {
+            if (!element) {
+              hookContainerRef.current = null;
+              containerRef.current = null;
+              return;
+            }
+            if (!element.hasAttribute("data-test-scroll-props")) {
+              Object.defineProperties(element, {
+                clientHeight: { configurable: true, value: 300 },
+                clientWidth: { configurable: true, value: 720 },
+                scrollHeight: { configurable: true, value: 2000 },
+                scrollTop: { configurable: true, writable: true, value: 0 },
+              });
+              element.setAttribute("data-test-scroll-props", "true");
+            }
+            setElementRect(element, { top: 0, height: 300 });
+            hookContainerRef.current = element;
+            containerRef.current = element;
+          }}
+        >
+          {rows.map((descriptor) => (
+            <div
+              key={descriptor.rowId}
+              data-virtual-row-state-row-id={descriptor.rowId}
+              ref={(element) => {
+                if (!element) {
+                  return;
+                }
+                if (descriptor.rowId === "row-7") {
+                  setElementRect(element, { top: 140, height: 40 });
+                }
+                if (descriptor.rowId === "row-8") {
+                  setElementRect(element, {
+                    top: rowEightProtected ? 540 : 320,
+                    height: 40,
+                  });
+                }
+              }}
+            >
+              selected text for {descriptor.rowId}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(timelineRef.current).not.toBeNull());
+    const container = containerRef.current as HTMLDivElement;
+
+    await act(async () => {
+      container.scrollTop = 500;
+      timelineRef.current?.syncViewportFromDom({
+        source: "browser",
+        userScrollIntent: true,
+      });
+    });
+
+    const firstSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-7"]',
+    ) as HTMLElement;
+    const lastSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-8"]',
+    ) as HTMLElement;
+
+    await act(async () => {
+      container.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(firstSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(container.scrollTop).toBe(500);
+    expect(timelineRef.current?.snapshot.range.protectedRowIds).toContain(
+      "row-7",
+    );
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(lastSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(timelineRef.current?.snapshot.mode).toBe("bounded-controller");
+    expect(timelineRef.current?.snapshot.range.protectedRowIds).toEqual(
+      expect.arrayContaining(["row-7", "row-8"]),
+    );
+    expect(container.scrollTop).toBe(720);
+    expect(timelineRef.current?.snapshot.controllerState.scrollTop).toBe(720);
+
+    act(() => {
+      document.dispatchEvent(new Event("pointerup"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
+  it("skips large protected-row viewport restores during drag-select", async () => {
+    const rows = Array.from({ length: 20 }, (_, index) =>
+      row(`row-${index}`, 100),
+    );
+    const timelineRef: {
+      current: ReturnType<typeof useTranscriptVirtualTimeline> | null;
+    } = { current: null };
+    const containerRef: { current: HTMLDivElement | null } = { current: null };
+
+    function Harness() {
+      const hookContainerRef = useRef<HTMLDivElement | null>(null);
+      const timeline = useTranscriptVirtualTimeline({
+        sessionId: SESSION_ID,
+        sessionEpoch: 1,
+        rows,
+        containerRef: hookContainerRef,
+        footerHeight: 0,
+      });
+      const rowEightProtected =
+        timeline.snapshot.range.protectedRowIds.includes("row-8");
+
+      useLayoutEffect(() => {
+        timelineRef.current = timeline;
+      }, [timeline]);
+
+      return (
+        <div
+          ref={(element) => {
+            if (!element) {
+              hookContainerRef.current = null;
+              containerRef.current = null;
+              return;
+            }
+            if (!element.hasAttribute("data-test-scroll-props")) {
+              Object.defineProperties(element, {
+                clientHeight: { configurable: true, value: 300 },
+                clientWidth: { configurable: true, value: 720 },
+                scrollHeight: { configurable: true, value: 2000 },
+                scrollTop: { configurable: true, writable: true, value: 0 },
+              });
+              element.setAttribute("data-test-scroll-props", "true");
+            }
+            setElementRect(element, { top: 0, height: 300 });
+            hookContainerRef.current = element;
+            containerRef.current = element;
+          }}
+        >
+          {rows.map((descriptor) => (
+            <div
+              key={descriptor.rowId}
+              data-virtual-row-state-row-id={descriptor.rowId}
+              ref={(element) => {
+                if (!element) {
+                  return;
+                }
+                if (descriptor.rowId === "row-7") {
+                  setElementRect(element, { top: 140, height: 40 });
+                }
+                if (descriptor.rowId === "row-8") {
+                  setElementRect(element, {
+                    top: rowEightProtected ? 900 : 320,
+                    height: 40,
+                  });
+                }
+              }}
+            >
+              selected text for {descriptor.rowId}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    render(<Harness />);
+
+    await waitFor(() => expect(timelineRef.current).not.toBeNull());
+    const container = containerRef.current as HTMLDivElement;
+
+    await act(async () => {
+      container.scrollTop = 500;
+      timelineRef.current?.syncViewportFromDom({
+        source: "browser",
+        userScrollIntent: true,
+      });
+    });
+
+    const firstSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-7"]',
+    ) as HTMLElement;
+    const lastSelectedEl = container.querySelector(
+      '[data-virtual-row-state-row-id="row-8"]',
+    ) as HTMLElement;
+
+    await act(async () => {
+      container.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(firstSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(container.scrollTop).toBe(500);
+    expect(timelineRef.current?.snapshot.range.protectedRowIds).toContain(
+      "row-7",
+    );
+
+    await act(async () => {
+      const range = document.createRange();
+      range.setStart(firstSelectedEl.firstChild as Text, 0);
+      range.setEnd(lastSelectedEl.firstChild as Text, "selected".length);
+      const selection = document.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      document.dispatchEvent(new Event("selectionchange"));
+    });
+
+    expect(timelineRef.current?.snapshot.mode).toBe("bounded-controller");
+    expect(timelineRef.current?.snapshot.range.protectedRowIds).toEqual(
+      expect.arrayContaining(["row-7", "row-8"]),
+    );
+    expect(container.scrollTop).toBe(500);
+    expect(timelineRef.current?.snapshot.controllerState.scrollTop).toBe(500);
+
+    act(() => {
+      document.dispatchEvent(new Event("pointerup"));
+    });
+    document.getSelection()?.removeAllRanges();
+  });
+
   it("does not replay a stale bottom jump larger than the viewport during drag-select", () => {
     const container = createContainer();
     const containerRef = {
@@ -1289,6 +2379,18 @@ describe("useTranscriptVirtualTimeline", () => {
       const range = document.createRange();
       range.setStart(firstSelectedEl.firstChild as Text, 0);
       range.setEnd(lastSelectedEl.firstChild as Text, "selected".length);
+      range.getBoundingClientRect = () =>
+        ({
+          bottom: 60,
+          height: 40,
+          left: 0,
+          right: 120,
+          top: 20,
+          width: 120,
+          x: 0,
+          y: 20,
+          toJSON: () => ({}),
+        }) as DOMRect;
       const selection = document.getSelection();
       selection?.removeAllRanges();
       selection?.addRange(range);
@@ -1529,7 +2631,7 @@ describe("useTranscriptVirtualTimeline", () => {
     document.getSelection()?.removeAllRanges();
   });
 
-  it("keeps the selected row anchored when a deferred measurement flush resumes after drag-select", async () => {
+  it("keeps the selected row anchored when a deferred measurement flush resumes after drag-select clears", async () => {
     const container = createContainer();
     const containerRef = {
       current: container,
@@ -1613,6 +2715,11 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(
       result.current.snapshot.measurementStats.visibleMeasurementAttempts,
     ).toBe(0);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      1000,
+    );
+    expect(container.scrollTop).toBe(500);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(500);
 
     await act(async () => {
       document.getSelection()?.removeAllRanges();
@@ -1703,6 +2810,11 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(
       result.current.snapshot.measurementStats.visibleMeasurementAttempts,
     ).toBe(0);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      1200,
+    );
+    expect(container.scrollTop).toBe(500);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(500);
 
     await act(async () => {
       document.getSelection()?.removeAllRanges();
@@ -1794,6 +2906,14 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(
       result.current.snapshot.measurementStats.visibleMeasurementAttempts,
     ).toBe(0);
+    expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
+      1000,
+    );
+    expect(container.scrollTop).toBe(700);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(700);
+    expect(selectedRowOffset(result.current.snapshot, "row-9", container)).toBe(
+      200,
+    );
 
     act(() => {
       document.getSelection()?.removeAllRanges();
@@ -1882,6 +3002,8 @@ describe("useTranscriptVirtualTimeline", () => {
     expect(result.current.snapshot.controllerState.virtualScrollHeight).toBe(
       1000,
     );
+    expect(container.scrollTop).toBe(500);
+    expect(result.current.snapshot.controllerState.scrollTop).toBe(500);
 
     act(() => {
       document.getSelection()?.removeAllRanges();
@@ -2034,6 +3156,41 @@ function createContainer(): HTMLDivElement {
   return container;
 }
 
+function createClampedContainer({ scrollHeight }: { scrollHeight: number }): {
+  container: HTMLDivElement;
+  setScrollHeight: (nextScrollHeight: number) => void;
+} {
+  const container = document.createElement("div");
+  let currentScrollHeight = scrollHeight;
+  let currentScrollTop = 0;
+  Object.defineProperties(container, {
+    clientHeight: { configurable: true, value: 300 },
+    clientWidth: { configurable: true, value: 720 },
+    scrollHeight: {
+      configurable: true,
+      get: () => currentScrollHeight,
+    },
+    scrollTop: {
+      configurable: true,
+      get: () => currentScrollTop,
+      set: (nextScrollTop: number) => {
+        currentScrollTop = Math.min(
+          Math.max(0, nextScrollTop),
+          Math.max(0, currentScrollHeight - container.clientHeight),
+        );
+      },
+    },
+  });
+  document.body.appendChild(container);
+  return {
+    container,
+    setScrollHeight: (nextScrollHeight: number) => {
+      currentScrollHeight = nextScrollHeight;
+      container.scrollTop = currentScrollTop;
+    },
+  };
+}
+
 function createMeasuredElement(height: number): HTMLElement {
   return createMeasuredElementFromRef({ current: height });
 }
@@ -2100,6 +3257,17 @@ function appendRowElement(
   const element = document.createElement("div");
   element.setAttribute("data-virtual-row-state-row-id", rowId);
   element.textContent = text;
+  container.appendChild(element);
+  return element;
+}
+
+function appendTimelineGutter(container: HTMLElement): HTMLElement {
+  const element = document.createElement("div");
+  for (const [attribute, value] of Object.entries(
+    TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTES,
+  )) {
+    element.setAttribute(attribute, value);
+  }
   container.appendChild(element);
   return element;
 }

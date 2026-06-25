@@ -39,19 +39,18 @@ export function getVirtualTranscriptRowSpacingBlockSize({
 }
 
 export function getVirtualTranscriptRowSpacingClassName({
-  layoutMode,
   ...input
 }: VirtualTranscriptRowSpacingInput & {
   layoutMode: "flow" | "virtual";
 }): string {
   const spacingBlockSize = getVirtualTranscriptRowSpacingBlockSize(input);
   if (spacingBlockSize === 0) {
-    return layoutMode === "virtual" ? "pt-0" : "mt-0";
+    return "pt-0";
   }
   if (spacingBlockSize === TRANSCRIPT_HEADING_ROW_TOP_SPACING_PX) {
-    return layoutMode === "virtual" ? "pt-6" : "mt-6";
+    return "pt-6";
   }
-  return layoutMode === "virtual" ? "pt-4" : "mt-4";
+  return "pt-4";
 }
 
 function isFragmentContinuation(

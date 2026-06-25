@@ -346,6 +346,21 @@ function scrollByPixels(direction: "up" | "down", pixels: number) {
   scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
 }
 
+function dispatchScrollIntent(direction: "up" | "down") {
+  const scroller = getScroller();
+  if (!scroller) {
+    return;
+  }
+
+  scroller.dispatchEvent(
+    new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: direction === "up" ? -100 : 100,
+    }),
+  );
+}
+
 function getMessageRow(messageId: string): HTMLElement | null {
   const escapedMessageId = CSS.escape(messageId);
   const selector = [
@@ -401,9 +416,19 @@ function scrollToMessageOffset(messageId: string, offsetPx: number) {
   const scroller = getScroller();
 
   if (row instanceof HTMLElement && scroller) {
+    const virtualRow = row.closest("[data-virtual-row-id]");
+    const scrollRow =
+      virtualRow instanceof HTMLElement && virtualRow.contains(row)
+        ? virtualRow
+        : row;
     const rowTop =
-      row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-    scroller.scrollTop = Math.max(0, scroller.scrollTop + rowTop + offsetPx);
+      scrollRow.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top;
+    const virtualStart = Number(scrollRow.dataset.virtualRowVirtualStart);
+    const targetScrollTop = Number.isFinite(virtualStart)
+      ? virtualStart + offsetPx
+      : scroller.scrollTop + rowTop + offsetPx;
+    scroller.scrollTop = Math.max(0, targetScrollTop);
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
   }
 }
@@ -666,6 +691,22 @@ function RealRendererBridgeApp() {
     [],
   );
 
+  const waitForScrollTargetHandled = useCallback(async (messageId: string) => {
+    const startedAt = performance.now();
+
+    while (performance.now() - startedAt < SCROLL_TARGET_VISIBLE_TIMEOUT_MS) {
+      if (stateRef.current.scrollTargetMessageId !== messageId) {
+        return;
+      }
+
+      await nextFrame();
+    }
+
+    throw new Error(
+      `timed out waiting for controlled scroll target ${messageId} to settle`,
+    );
+  }, []);
+
   const loadFixture = useCallback(
     async (
       fixture: TranscriptFixture,
@@ -770,6 +811,13 @@ function RealRendererBridgeApp() {
           }
           break;
         case "scrollToRowOffset":
+          await commitState((previous) => ({
+            ...previous,
+            scrollTargetMessageId: operation.messageId,
+          }));
+          await waitForMessageVisible(operation.messageId);
+          await waitForScrollTargetHandled(operation.messageId);
+          dispatchScrollIntent("up");
           scrollToMessageOffset(operation.messageId, operation.offsetPx);
           await nextFrame();
           break;
@@ -1141,7 +1189,7 @@ function RealRendererBridgeApp() {
       );
       await nextFrame();
     },
-    [commitState],
+    [commitState, waitForScrollTargetHandled],
   );
 
   const collectDiagnostics = useCallback(() => {

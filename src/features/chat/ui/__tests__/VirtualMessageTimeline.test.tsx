@@ -10,11 +10,18 @@ import {
 } from "../../transcript/diagnostics";
 import type { TranscriptRowDescriptor } from "../../transcript/projection";
 import {
+  TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
+  TRANSCRIPT_SELECTION_SURFACE_VALUE,
+} from "../../transcript/virtual";
+import {
   VIRTUAL_MESSAGE_TIMELINE_DIAGNOSTICS_EVENT,
   VirtualMessageTimeline,
   type VirtualMessageTimelineDiagnostics,
 } from "../VirtualMessageTimeline";
-import { getVirtualTranscriptRowSpacingBlockSize } from "../virtualTranscriptRowSpacing";
+import {
+  getVirtualTranscriptRowSpacingBlockSize,
+  getVirtualTranscriptRowSpacingClassName,
+} from "../virtualTranscriptRowSpacing";
 
 const resizeObserverCallbacks: ResizeObserverCallback[] = [];
 
@@ -603,6 +610,14 @@ describe("VirtualMessageTimeline", () => {
         previousRowKind: "message",
       }),
     ).toBe(16);
+    expect(
+      getVirtualTranscriptRowSpacingClassName({
+        row: normalRow,
+        index: 3,
+        previousRowKind: "message",
+        layoutMode: "flow",
+      }),
+    ).toBe("pt-4");
   });
 
   it("includes row spacing in offscreen real measurement rows", async () => {
@@ -661,6 +676,14 @@ describe("VirtualMessageTimeline", () => {
     const list = screen.getByTestId("virtual-message-timeline-list");
     const history = screen.getByTestId("virtual-message-timeline-history");
     await waitFor(() => expect(history).toHaveStyle({ height: "198px" }));
+    expect(list).toHaveAttribute(
+      TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
+      TRANSCRIPT_SELECTION_SURFACE_VALUE,
+    );
+    expect(history).toHaveAttribute(
+      TRANSCRIPT_SELECTION_SURFACE_ATTRIBUTE,
+      TRANSCRIPT_SELECTION_SURFACE_VALUE,
+    );
     expect(list).toHaveStyle({ paddingBottom: "0px" });
   });
 
@@ -1259,6 +1282,36 @@ describe("VirtualMessageTimeline", () => {
     );
 
     await waitFor(() => expect(scroller.scrollTop).toBe(detachedScrollTop));
+  });
+
+  it("keeps following latest after an intent-less upward scroll correction", async () => {
+    const messages = [
+      textMessage("user-1", "user", "Question"),
+      textMessage("assistant-1", "assistant", "Answer"),
+    ];
+    renderWithProviders(
+      <VirtualMessageTimeline sessionId="session-1" messages={messages} />,
+    );
+    const scroller = screen.getByTestId("message-timeline-scroll");
+    attachScrollTo(scroller);
+    setScrollMetrics(scroller, {
+      scrollTop: 500,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    setScrollMetrics(scroller, {
+      scrollTop: 300,
+      scrollHeight: 1000,
+      clientHeight: 500,
+    });
+    fireEvent.scroll(scroller);
+
+    expect(
+      screen.queryByRole("button", { name: "Jump to latest" }),
+    ).not.toBeInTheDocument();
+    expect(scroller.scrollTop).toBe(500);
   });
 
   it("keeps pinned users attached across virtual timeline resizes", async () => {

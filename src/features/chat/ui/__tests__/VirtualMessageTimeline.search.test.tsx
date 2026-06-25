@@ -71,6 +71,7 @@ vi.mock("../../transcript/virtual/react/useTranscriptVirtualTimeline", () => ({
     })),
     scrollToRow: mockState.scrollToRow ?? vi.fn(() => true),
     scrollToBottom: vi.fn(() => true),
+    isSelectionViewportFrozen: vi.fn(() => false),
     setRowFocused: vi.fn(),
     markRowInteracted: vi.fn(),
   }),

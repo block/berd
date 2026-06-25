@@ -48,10 +48,7 @@ function ChangedFileRow({
       disabled={isDeleted}
       className={cn(
         "group flex w-full select-none items-center gap-3 rounded-sm bg-muted/60 px-3.5 py-2.5 text-left",
-        "transition-colors duration-100",
-        isDeleted
-          ? "cursor-not-allowed opacity-60"
-          : "cursor-pointer hover:bg-muted",
+        isDeleted ? "cursor-not-allowed opacity-60" : "cursor-pointer",
       )}
       onClick={isDeleted ? undefined : () => onOpen(file.path)}
     >
