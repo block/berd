@@ -13,8 +13,8 @@ import {
   MailOpen,
   MoreHorizontal,
   Pencil,
-  PinIcon,
 } from "lucide-react";
+import { IconPin } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import {
   getDisplaySessionTitle,
@@ -86,6 +86,7 @@ interface SidebarChatRowProps {
   isActive: boolean;
   isRunning?: boolean;
   hasUnread?: boolean;
+  isPinned?: boolean;
   selected?: boolean;
   selectionEnabled?: boolean;
   selectionActionsDisabled?: boolean;
@@ -121,6 +122,7 @@ export function SidebarChatRow({
   isActive,
   isRunning = false,
   hasUnread = false,
+  isPinned = false,
   selected = false,
   selectionEnabled = false,
   selectionActionsDisabled = false,
@@ -220,6 +222,14 @@ export function SidebarChatRow({
       aria-label={t("status.unreadMessages")}
     >
       <SidebarUnreadDot />
+    </span>
+  ) : isPinned ? (
+    <span
+      className="flex size-4 shrink-0 items-center justify-center"
+      role="img"
+      aria-label={t("status.pinnedChat")}
+    >
+      <IconPin className="size-4" />
     </span>
   ) : null;
   const hasClickableFlatProject =
@@ -622,6 +632,14 @@ export function SidebarChatRow({
             >
               <SidebarUnreadDot />
             </span>
+          ) : isPinned ? (
+            <span
+              className={leadingIconSlotClass}
+              role="img"
+              aria-label={t("status.pinnedChat")}
+            >
+              <IconPin className="size-4" />
+            </span>
           ) : (
             <span className={leadingIconSlotClass} aria-hidden="true">
               <SidebarChatMenuIcon />
@@ -736,23 +754,16 @@ export function SidebarChatRow({
               shouldApplyToSelection ? isPinningSelectedToHome : isPinningToHome
             }
           >
-            <PinIcon
-              className="size-3.5"
-              fill={
-                !shouldApplyToSelection && isPinnedToHome
-                  ? "currentColor"
-                  : "none"
-              }
-            />
+            <IconPin className="size-3.5" />
             {shouldApplyToSelection
               ? isPinningSelectedToHome
-                ? t("common:actions.pinningToHome")
-                : t("common:actions.pinToHome")
+                ? t("common:actions.pinningChat")
+                : t("common:actions.pinChat")
               : isPinnedToHome
-                ? t("common:actions.unpinFromHome")
+                ? t("common:actions.unpinChat")
                 : isPinningToHome
-                  ? t("common:actions.pinningToHome")
-                  : t("common:actions.pinToHome")}
+                  ? t("common:actions.pinningChat")
+                  : t("common:actions.pinChat")}
           </DropdownMenuItem>
           {hasUnread ? (
             <DropdownMenuItem

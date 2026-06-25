@@ -33,6 +33,7 @@ function renderFlatChatsSection(
   return render(
     <SidebarFlatChatsSection
       groups={flatChatGroups}
+      pinnedHomeChatSessionIds={new Set()}
       collapsed={false}
       labelTransition=""
       labelVisible

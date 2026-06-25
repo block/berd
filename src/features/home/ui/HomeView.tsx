@@ -6,6 +6,7 @@ import { useSetTopBarActions } from "@/app/contexts/TopBarActionsContext";
 import type { SkillInfo } from "@/features/skills/api/skills";
 import { Button } from "@/shared/ui/button";
 import { clampLayoutCamera } from "../lib/layoutCamera";
+import { getPinnedHomeChatSessionIds } from "../lib/pinnedHomeChats";
 import { useHomeWidgetStore } from "../stores/homeWidgetStore";
 import {
   HOME_WIDGET_CATALOG_BY_ID,
@@ -66,16 +67,7 @@ export function HomeView({
     [instances],
   );
   const pinnedChatSessionIdKey = useMemo(() => {
-    const ids = [
-      ...new Set(
-        instances.flatMap((instance) => {
-          const sessionId = instance.state?.sessionId;
-          return instance.type === "chatPin" && typeof sessionId === "string"
-            ? [sessionId]
-            : [];
-        }),
-      ),
-    ].sort();
+    const ids = [...getPinnedHomeChatSessionIds(instances)].sort();
 
     return ids.join("\u001f");
   }, [instances]);

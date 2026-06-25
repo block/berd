@@ -38,6 +38,7 @@ function renderProjectList(
       expandedProjects={{}}
       toggleProject={vi.fn()}
       collapsed={false}
+      pinnedHomeChatSessionIds={new Set()}
       onReorderProject={onReorderProject}
     />,
   );

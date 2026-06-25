@@ -29,7 +29,9 @@ import {
   compareSessionsByActivityDesc,
   isSessionRunning,
 } from "@/features/chat/lib/sessionActivity";
+import { getPinnedHomeChatSessionIds } from "@/features/home/lib/pinnedHomeChats";
 import { usePinBatchToHome } from "@/features/home/hooks/usePinToHomeWidget";
+import { useHomeWidgetStore } from "@/features/home/stores/homeWidgetStore";
 import type { ProjectInfo } from "@/features/projects/api/projects";
 import { useBulkSessionActions } from "@/features/sessions/hooks/useBulkSessionActions";
 import {
@@ -151,6 +153,20 @@ function toSessionListItem(
   };
 }
 
+function compareSessionsByPinnedThenActivityDesc(
+  a: SidebarSessionItem,
+  b: SidebarSessionItem,
+  pinnedSessionIds: ReadonlySet<string>,
+): number {
+  const aIsPinned = pinnedSessionIds.has(a.id);
+  const bIsPinned = pinnedSessionIds.has(b.id);
+  if (aIsPinned !== bIsPinned) {
+    return aIsPinned ? -1 : 1;
+  }
+
+  return compareSessionsByActivityDesc(a, b);
+}
+
 function getFlatSessionListItems(
   visibleSessions: ChatSession[],
   projectsById: ReadonlyMap<string, ProjectInfo>,
@@ -181,12 +197,35 @@ function getFlatSessionListItems(
   return sessions;
 }
 
+function orderFlatSessionListItems(
+  sessions: SidebarSessionItem[],
+  placeholderSessionIds: ReadonlySet<string>,
+  pinnedSessionIds: ReadonlySet<string>,
+): SidebarSessionItem[] {
+  const pinnedSessions = sessions.filter((session) =>
+    pinnedSessionIds.has(session.id),
+  );
+  const unpinnedSessions = sessions.filter(
+    (session) => !pinnedSessionIds.has(session.id),
+  );
+
+  pinnedSessions.sort((a, b) =>
+    compareSessionListItems(a, b, placeholderSessionIds),
+  );
+
+  return [
+    ...pinnedSessions,
+    ...limitFlatSidebarSessions(unpinnedSessions),
+  ].slice(0, MAX_FLAT_SIDEBAR_CHATS);
+}
+
 function getSessionListGroups(
   visibleSessions: ChatSession[],
   projectIds: ReadonlySet<string>,
   sessionStateById: Record<string, SessionChatRuntime>,
   placeholderSessionIds: ReadonlySet<string>,
   branchNameBySessionId: ReadonlyMap<string, string>,
+  pinnedSessionIds: ReadonlySet<string>,
 ): SessionListGroups {
   const byProject: Record<string, SidebarSessionItem[]> = {};
   const standalone: SidebarSessionItem[] = [];
@@ -207,11 +246,13 @@ function getSessionListGroups(
   }
 
   for (const chats of Object.values(byProject)) {
-    chats.sort((a, b) => compareSessionListItems(a, b, placeholderSessionIds));
+    chats.sort((a, b) =>
+      compareSessionListItems(a, b, placeholderSessionIds, pinnedSessionIds),
+    );
   }
 
   const sortedStandalone = standalone.sort((a, b) =>
-    compareSessionListItems(a, b, placeholderSessionIds),
+    compareSessionListItems(a, b, placeholderSessionIds, pinnedSessionIds),
   );
   const standalonePlaceholders = sortedStandalone.filter((session) =>
     placeholderSessionIds.has(session.id),
@@ -230,6 +271,7 @@ function compareSessionListItems(
   a: SidebarSessionItem,
   b: SidebarSessionItem,
   placeholderSessionIds: ReadonlySet<string>,
+  pinnedSessionIds?: ReadonlySet<string>,
 ): number {
   const aIsPlaceholder = placeholderSessionIds.has(a.id);
   const bIsPlaceholder = placeholderSessionIds.has(b.id);
@@ -237,7 +279,9 @@ function compareSessionListItems(
     return aIsPlaceholder ? -1 : 1;
   }
 
-  return compareSessionsByActivityDesc(a, b);
+  return pinnedSessionIds
+    ? compareSessionsByPinnedThenActivityDesc(a, b, pinnedSessionIds)
+    : compareSessionsByActivityDesc(a, b);
 }
 
 function includeSessionListPlaceholderSessions(
@@ -400,6 +444,11 @@ export function SessionListCapability({
     activeWorkspaceBySession,
     enabled: gitBranchSubtitlePreference.enabled && groupChatsByProject,
   });
+  const homeWidgetInstances = useHomeWidgetStore((state) => state.instances);
+  const pinnedHomeChatSessionIds = useMemo(
+    () => getPinnedHomeChatSessionIds(homeWidgetInstances),
+    [homeWidgetInstances],
+  );
   const selectedCount = selectedSessionIds.size;
   const clearSelection = () => setSelectedSessionIds(new Set());
 
@@ -495,11 +544,13 @@ export function SessionListCapability({
             sessionStateById,
             visibleSessions.placeholderSessionIds,
             branchNameBySessionId,
+            pinnedHomeChatSessionIds,
           )
         : EMPTY_SESSION_LIST_GROUPS,
     [
       branchNameBySessionId,
       groupChatsByProject,
+      pinnedHomeChatSessionIds,
       projectIds,
       sessionStateById,
       visibleSessions,
@@ -522,15 +573,33 @@ export function SessionListCapability({
     visibleSessions,
   ]);
   const flatSessions = useMemo(
-    () => limitFlatSidebarSessions(flatSessionCandidates),
-    [flatSessionCandidates],
+    () =>
+      orderFlatSessionListItems(
+        flatSessionCandidates,
+        visibleSessions.placeholderSessionIds,
+        pinnedHomeChatSessionIds,
+      ),
+    [
+      flatSessionCandidates,
+      pinnedHomeChatSessionIds,
+      visibleSessions.placeholderSessionIds,
+    ],
   );
   const flatChatGroups = useMemo(
     () =>
       groupChatsByProject
         ? []
-        : groupFlatChatsByActivityAge(flatSessions, flatChatGroupNowMs),
-    [flatChatGroupNowMs, flatSessions, groupChatsByProject],
+        : groupFlatChatsByActivityAge(
+            flatSessions,
+            flatChatGroupNowMs,
+            pinnedHomeChatSessionIds,
+          ),
+    [
+      flatChatGroupNowMs,
+      flatSessions,
+      groupChatsByProject,
+      pinnedHomeChatSessionIds,
+    ],
   );
   const hasFlatChatOverflow =
     flatSessionCandidates.length > MAX_FLAT_SIDEBAR_CHATS ||
@@ -631,6 +700,7 @@ export function SessionListCapability({
     flatChatGroups,
     hasFlatChatOverflow,
     groupChatsByProject,
+    pinnedHomeChatSessionIds,
     expandedProjects,
     toggleProject,
     collapsed,

@@ -453,7 +453,7 @@ describe("SidebarChatRow", () => {
     expect(onFork).toHaveBeenCalledWith("session-1");
   });
 
-  it("shows pin-to-home in the chat options menu", async () => {
+  it("shows pin chat in the chat options menu", async () => {
     const user = userEvent.setup();
 
     render(
@@ -465,7 +465,7 @@ describe("SidebarChatRow", () => {
     );
 
     expect(
-      screen.getByRole("menuitem", { name: /pin to home/i }),
+      screen.getByRole("menuitem", { name: /pin chat/i }),
     ).toBeInTheDocument();
   });
 
@@ -490,7 +490,7 @@ describe("SidebarChatRow", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows the unpin-from-home option for an already pinned chat", async () => {
+  it("shows the unpin-chat option for an already pinned chat", async () => {
     const user = userEvent.setup();
     useHomeWidgetStore.setState({
       instances: [
@@ -514,7 +514,7 @@ describe("SidebarChatRow", () => {
     );
 
     expect(
-      screen.getByRole("menuitem", { name: /unpin from home/i }),
+      screen.getByRole("menuitem", { name: /unpin chat/i }),
     ).not.toHaveAttribute("aria-disabled", "true");
   });
 

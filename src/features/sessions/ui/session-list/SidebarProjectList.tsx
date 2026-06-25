@@ -66,6 +66,7 @@ export function SidebarProjectList({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  pinnedHomeChatSessionIds,
   onReorderProject,
   hasMoreSessions = false,
 }: {
@@ -96,6 +97,7 @@ export function SidebarProjectList({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  pinnedHomeChatSessionIds: ReadonlySet<string>;
   onReorderProject?: (
     fromId: string,
     toId: string,
@@ -349,6 +351,7 @@ export function SidebarProjectList({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
+            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             hasMoreSessions={hasMoreSessions}
           />
         </div>

@@ -247,10 +247,10 @@
     "renameError": "Failed to rename chat"
   },
   "pinToHome": {
-    "action": "Pin to home",
-    "pinned": "Pinned to home",
+    "action": "Pin chat",
+    "pinned": "Pinned chat",
     "pinning": "Pinning...",
-    "unpin": "Unpin from home"
+    "unpin": "Unpin chat"
   },
   "message": {
     "copied": "Copied",

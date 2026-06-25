@@ -51,6 +51,7 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  pinnedHomeChatSessionIds,
   showViewAllInHistory = false,
   showTopDivider = true,
 }: {
@@ -79,6 +80,7 @@ export function SidebarFlatChatsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  pinnedHomeChatSessionIds: ReadonlySet<string>;
   showViewAllInHistory?: boolean;
   showTopDivider?: boolean;
 }) {
@@ -314,6 +316,7 @@ export function SidebarFlatChatsSection({
                       isActive={isActive}
                       isRunning={session.isRunning ?? false}
                       hasUnread={session.hasUnread ?? false}
+                      isPinned={pinnedHomeChatSessionIds.has(session.id)}
                       selected={selectedSessionIds?.has(session.id) ?? false}
                       selectionEnabled={selectionEnabled}
                       selectionActionsDisabled={selectionActionsDisabled}

@@ -403,13 +403,13 @@ export function SessionCard({
                 />
                 {shouldApplyToSelection
                   ? isPinningSelectedToHome
-                    ? t("common:actions.pinningToHome")
-                    : t("common:actions.pinToHome")
+                    ? t("common:actions.pinningChat")
+                    : t("common:actions.pinChat")
                   : isPinnedToHome
-                    ? t("common:actions.unpinFromHome")
+                    ? t("common:actions.unpinChat")
                     : isPinningToHome
-                      ? t("common:actions.pinningToHome")
-                      : t("common:actions.pinToHome")}
+                      ? t("common:actions.pinningChat")
+                      : t("common:actions.pinChat")}
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {

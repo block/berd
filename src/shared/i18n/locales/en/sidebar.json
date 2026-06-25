@@ -73,6 +73,7 @@
   },
   "status": {
     "chatActive": "Chat active",
+    "pinnedChat": "Pinned chat",
     "unreadMessages": "Unread messages"
   },
   "showLess": "Show less",

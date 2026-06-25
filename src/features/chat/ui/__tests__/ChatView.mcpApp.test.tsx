@@ -677,7 +677,7 @@ describe("ChatView MCP app messaging", () => {
     expect(timelineProps.showPlaceholder).toBe(false);
   });
 
-  it("surfaces pin-to-home as a chat top-bar action", async () => {
+  it("surfaces pin chat as a chat top-bar action", async () => {
     const user = userEvent.setup();
 
     render(
@@ -876,7 +876,7 @@ describe("ChatView MCP app messaging", () => {
     ).toBe("draft stays put");
   });
 
-  it("surfaces unpin-from-home as a chat top-bar action", async () => {
+  it("surfaces unpin chat as a chat top-bar action", async () => {
     const user = userEvent.setup();
     mocks.usePinToHomeWidget.mockReturnValue({
       isPinned: true,

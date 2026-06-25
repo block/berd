@@ -35,6 +35,7 @@ export interface SidebarProjectsSectionProps {
   flatChatGroups: FlatChatGroup[];
   hasFlatChatOverflow: boolean;
   groupChatsByProject: boolean;
+  pinnedHomeChatSessionIds: ReadonlySet<string>;
   expandedProjects: Record<string, boolean>;
   toggleProject: (projectId: string) => void;
   collapsed: boolean;
@@ -89,6 +90,7 @@ export function SidebarProjectsSection({
   flatChatGroups,
   hasFlatChatOverflow,
   groupChatsByProject,
+  pinnedHomeChatSessionIds,
   expandedProjects,
   toggleProject,
   collapsed,
@@ -161,6 +163,7 @@ export function SidebarProjectsSection({
         isPinningSelectedToHome={isPinningSelectedToHome}
         onMarkSelectedRead={onMarkSelectedRead}
         onMarkSelectedUnread={onMarkSelectedUnread}
+        pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
         showViewAllInHistory={hasFlatChatOverflow}
         showTopDivider={showTopDivider}
       />
@@ -273,6 +276,7 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
+            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             onReorderProject={onReorderProject}
             hasMoreSessions={hasMoreSessions}
           />
@@ -398,6 +402,7 @@ export function SidebarProjectsSection({
             isPinningSelectedToHome={isPinningSelectedToHome}
             onMarkSelectedRead={onMarkSelectedRead}
             onMarkSelectedUnread={onMarkSelectedUnread}
+            pinnedHomeChatSessionIds={pinnedHomeChatSessionIds}
             isOpen={recentsSectionOpen}
             onToggleOpen={onToggleRecentsSection}
             sectionHeaderTextClass={SECTION_HEADER_TEXT_CLASS}

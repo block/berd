@@ -29,6 +29,10 @@ import { SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY } from "@/features/sidebar/lib/
 import { useRuntimeConfigStore } from "@/shared/runtime-config/runtimeConfigStore";
 import type { RuntimeConfig } from "@/shared/runtime-config/schema";
 import { MAX_FLAT_SIDEBAR_CHATS } from "@/features/sidebar/lib/sidebarFlatChats";
+import {
+  resetHomeWidgetStoreForTests,
+  useHomeWidgetStore,
+} from "@/features/home/stores/homeWidgetStore";
 import { NavigationPanesView } from "../NavigationPanesView";
 
 const designSystemExplorer = vi.hoisted(() => ({
@@ -226,6 +230,19 @@ function renderedSessionIds() {
   );
 }
 
+function seedPinnedHomeChats(...sessionIds: string[]) {
+  useHomeWidgetStore.setState({
+    instances: sessionIds.map((sessionId, index) => ({
+      id: `chat-pin-${sessionId}`,
+      type: "chatPin",
+      x: 0,
+      y: index * 80,
+      z: index + 1,
+      state: { sessionId },
+    })),
+  });
+}
+
 function disableProjectGrouping() {
   setExperimentEnabled(SIDEBAR_FLAT_CHAT_LIST_EXPERIMENT_ID, true);
   setExperimentConfigValue(
@@ -327,6 +344,7 @@ describe("NavigationPanesView", () => {
       mainWorktreePath: null,
       localBranches: [],
     });
+    resetHomeWidgetStoreForTests();
     window.localStorage.clear();
     designSystemExplorer.isEnabled.mockReturnValue(false);
     setReadyRuntimeConfig();
@@ -824,6 +842,44 @@ describe("NavigationPanesView", () => {
     expect(within(rows[1]).queryByRole("button", { name: /edit/i })).toBeNull();
   });
 
+  it("keeps pinned flat chats above recent flat chats", () => {
+    disableProjectGrouping();
+    seedPinnedHomeChats("old-pinned-chat");
+    seedSessions(
+      {
+        id: "new-unpinned-chat",
+        title: "New Unpinned Chat",
+        updatedAt: new Date().toISOString(),
+        messageCount: 3,
+      },
+      {
+        id: "old-pinned-chat",
+        title: "Old Pinned Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+      },
+    );
+
+    const { container } = renderSidebar();
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows.map((row) => row.dataset.sessionId)).toEqual([
+      "old-pinned-chat",
+      "new-unpinned-chat",
+    ]);
+    expect(screen.getByLabelText("Pinned chat")).toBeInTheDocument();
+
+    const groups = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-flat-chat-group]"),
+    );
+    expect(groups.map((group) => group.dataset.sidebarFlatChatGroup)).toEqual([
+      "pinned",
+      "last-hour",
+    ]);
+  });
+
   it("skips Git branch subtitle lookups in flat chat mode", async () => {
     disableProjectGrouping();
     localStorage.setItem(SIDEBAR_GIT_BRANCH_SUBTITLE_STORAGE_KEY, "true");
@@ -967,6 +1023,42 @@ describe("NavigationPanesView", () => {
     rerender(<NavigationPanesView {...props} />);
 
     await waitFor(() => expect(mockLoadMoreSessions).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps pinned project chats at the top of their project", async () => {
+    const user = userEvent.setup();
+    seedPinnedHomeChats("old-pinned-project-chat");
+    seedSessions(
+      {
+        id: "new-project-chat",
+        title: "New Project Chat",
+        updatedAt: "2026-04-09T12:04:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+      {
+        id: "old-pinned-project-chat",
+        title: "Old Pinned Project Chat",
+        updatedAt: "2026-04-09T12:00:00.000Z",
+        messageCount: 3,
+        projectId: "project-1",
+      },
+    );
+
+    const { container } = renderSidebar({
+      projects: [mockProject()],
+    });
+
+    await user.click(screen.getByRole("button", { name: "Project One" }));
+
+    const rows = Array.from(
+      container.querySelectorAll<HTMLElement>("[data-sidebar-chat-row]"),
+    );
+    expect(rows.map((row) => row.dataset.sessionId)).toEqual([
+      "old-pinned-project-chat",
+      "new-project-chat",
+    ]);
+    expect(screen.getByLabelText("Pinned chat")).toBeInTheDocument();
   });
 
   it("keeps project grouping when the flat chat list experiment is disabled", async () => {

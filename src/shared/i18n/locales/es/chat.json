@@ -246,10 +246,10 @@
     "renameError": "No se pudo cambiar el nombre del chat"
   },
   "pinToHome": {
-    "action": "Fijar en inicio",
-    "pinned": "Fijado en inicio",
+    "action": "Fijar chat",
+    "pinned": "Chat fijado",
     "pinning": "Fijando...",
-    "unpin": "Desfijar de inicio"
+    "unpin": "Desfijar chat"
   },
   "message": {
     "copied": "Copiado",

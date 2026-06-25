@@ -66,6 +66,7 @@ export function SidebarProjectSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  pinnedHomeChatSessionIds,
   onNavigate,
   hasMoreSessions = false,
 }: {
@@ -94,6 +95,7 @@ export function SidebarProjectSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  pinnedHomeChatSessionIds: ReadonlySet<string>;
   onNavigate?: (view: AppView) => void;
   hasMoreSessions?: boolean;
 }) {
@@ -295,6 +297,7 @@ export function SidebarProjectSection({
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
+                isPinned={pinnedHomeChatSessionIds.has(session.id)}
                 selected={selectedSessionIds?.has(session.id) ?? false}
                 selectionEnabled={selectionEnabled}
                 selectionActionsDisabled={selectionActionsDisabled}

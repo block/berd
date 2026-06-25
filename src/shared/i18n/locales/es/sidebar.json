@@ -73,6 +73,7 @@
   },
   "status": {
     "chatActive": "Chat activo",
+    "pinnedChat": "Chat fijado",
     "unreadMessages": "Mensajes no leídos"
   },
   "showLess": "Mostrar menos",

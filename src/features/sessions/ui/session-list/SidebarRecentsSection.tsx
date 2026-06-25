@@ -46,6 +46,7 @@ export function SidebarRecentsSection({
   isPinningSelectedToHome = false,
   onMarkSelectedRead,
   onMarkSelectedUnread,
+  pinnedHomeChatSessionIds,
   isOpen,
   onToggleOpen,
   sectionHeaderTextClass,
@@ -75,6 +76,7 @@ export function SidebarRecentsSection({
   isPinningSelectedToHome?: boolean;
   onMarkSelectedRead?: () => void;
   onMarkSelectedUnread?: () => void;
+  pinnedHomeChatSessionIds: ReadonlySet<string>;
   isOpen: boolean;
   onToggleOpen: () => void;
   sectionHeaderTextClass: string;
@@ -248,6 +250,7 @@ export function SidebarRecentsSection({
                 isActive={isActive}
                 isRunning={session.isRunning ?? false}
                 hasUnread={session.hasUnread ?? false}
+                isPinned={pinnedHomeChatSessionIds.has(session.id)}
                 selected={selectedSessionIds?.has(session.id) ?? false}
                 selectionEnabled={selectionEnabled}
                 selectionActionsDisabled={selectionActionsDisabled}
